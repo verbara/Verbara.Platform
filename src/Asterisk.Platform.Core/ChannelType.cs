@@ -7,4 +7,7 @@ public enum ChannelType
     Sms = 2,
     WebChat = 3,
     Email = 4,
+    Messenger = 5,
+    Instagram = 6,
+    Telegram = 7,
 }
