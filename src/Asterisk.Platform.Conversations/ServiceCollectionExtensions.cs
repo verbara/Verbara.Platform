@@ -1,3 +1,4 @@
+using Asterisk.Platform.Conversations.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Conversations;
@@ -18,6 +19,9 @@ public static class ServiceCollectionExtensions
             services.Configure(configure);
         else
             services.AddOptions<ConversationOptions>();
+
+        services.AddSingleton<IContactIdentityResolver, DefaultContactIdentityResolver>();
+        services.AddSingleton<IConversationLifecycleService, DefaultConversationLifecycleService>();
 
         return services;
     }

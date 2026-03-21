@@ -1,3 +1,4 @@
+using Asterisk.Platform.Queues.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Queues;
@@ -18,6 +19,9 @@ public static class ServiceCollectionExtensions
             services.Configure(configure);
         else
             services.AddOptions<QueueOptions>();
+
+        services.AddSingleton<IAgentCapacityService, InMemoryAgentCapacityService>();
+        services.AddSingleton<IAgentPresenceService, InMemoryAgentPresenceService>();
 
         return services;
     }
