@@ -10,6 +10,10 @@
     <Project Path="src/Asterisk.Platform.Channels.Sms/Asterisk.Platform.Channels.Sms.csproj" />
     <Project Path="src/Asterisk.Platform.Channels.WebChat/Asterisk.Platform.Channels.WebChat.csproj" />
     <Project Path="src/Asterisk.Platform.Channels.WhatsApp/Asterisk.Platform.Channels.WhatsApp.csproj" />
+    <Project Path="src/Asterisk.Platform.Channels.Messenger/Asterisk.Platform.Channels.Messenger.csproj" />
+    <Project Path="src/Asterisk.Platform.Channels.Instagram/Asterisk.Platform.Channels.Instagram.csproj" />
+    <Project Path="src/Asterisk.Platform.Channels.Telegram/Asterisk.Platform.Channels.Telegram.csproj" />
+    <Project Path="src/Asterisk.Platform.Channels.Email/Asterisk.Platform.Channels.Email.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Asterisk.Platform.Core.Tests/Asterisk.Platform.Core.Tests.csproj" />
@@ -22,5 +26,9 @@
     <Project Path="tests/Asterisk.Platform.Channels.Sms.Tests/Asterisk.Platform.Channels.Sms.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Channels.WebChat.Tests/Asterisk.Platform.Channels.WebChat.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Channels.WhatsApp.Tests/Asterisk.Platform.Channels.WhatsApp.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Channels.Messenger.Tests/Asterisk.Platform.Channels.Messenger.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Channels.Instagram.Tests/Asterisk.Platform.Channels.Instagram.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Channels.Telegram.Tests/Asterisk.Platform.Channels.Telegram.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Channels.Email.Tests/Asterisk.Platform.Channels.Email.Tests.csproj" />
   </Folder>
 </Solution>
