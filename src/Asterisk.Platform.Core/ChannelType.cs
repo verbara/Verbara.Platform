@@ -10,4 +10,7 @@ public enum ChannelType
     Messenger = 5,
     Instagram = 6,
     Telegram = 7,
+    Twitter = 8,
+    Video = 9,
+    Rcs = 10,
 }

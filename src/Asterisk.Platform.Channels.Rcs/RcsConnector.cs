@@ -1,0 +1,104 @@
+using Asterisk.Platform.Channels.Core;
+using Asterisk.Platform.Conversations;
+using Asterisk.Platform.Core;
+
+namespace Asterisk.Platform.Channels.Rcs;
+
+/// <summary>
+/// Sends outbound messages over the RCS Business Messaging channel.
+/// Performs a capability check before attempting delivery; returns a
+/// non-success result (rather than throwing) when the recipient's device
+/// does not support RCS, allowing the caller to fall back to SMS.
+/// </summary>
+public sealed class RcsConnector : IChannelConnector
+{
+    private readonly IRcsProvider _provider;
+
+    public ChannelType Channel => ChannelType.Rcs;
+
+    public RcsConnector(IRcsProvider provider)
+    {
+        _provider = provider;
+    }
+
+    public async Task<SendResult> SendAsync(OutboundMessage message, CancellationToken ct)
+    {
+        var recipient = message.To.Address;
+
+        var capability = await _provider.CheckCapabilityAsync(recipient, ct).ConfigureAwait(false);
+        if (!capability.IsRcsEnabled)
+            return new SendResult(false, null, "recipient_not_rcs_enabled", "Recipient device does not support RCS.");
+
+        var rcsMessage = BuildRcsMessage(message.Content);
+        if (rcsMessage is null)
+            return new SendResult(false, null, "UNSUPPORTED_CONTENT", "Message content could not be mapped to an RCS message type.");
+
+        var result = await _provider.SendMessageAsync(recipient, rcsMessage, ct).ConfigureAwait(false);
+        return new SendResult(result.Success, result.MessageId, result.ErrorCode, null);
+    }
+
+    public async Task<MessageDeliveryStatus?> GetStatusAsync(string externalMessageId, CancellationToken ct)
+    {
+        var status = await _provider.GetStatusAsync(externalMessageId, ct).ConfigureAwait(false);
+        return MapStatus(status);
+    }
+
+    internal static RcsMessage? BuildRcsMessage(MessageEnvelope envelope)
+    {
+        if (envelope.Blocks.Count == 0)
+            return null;
+
+        // Multiple blocks → carousel of rich cards (one card per image/interactive block).
+        // If only a single block, pick the most appropriate RCS message type directly.
+        var richCards = new List<RcsRichCardMessage>();
+
+        foreach (var block in envelope.Blocks)
+        {
+            switch (block)
+            {
+                case TextBlock text when envelope.Blocks.Count == 1:
+                    return new RcsTextMessage(text.Text);
+
+                case ImageBlock image:
+                    richCards.Add(new RcsRichCardMessage(
+                        image.Caption ?? string.Empty,
+                        string.Empty,
+                        image.Url,
+                        []));
+                    break;
+
+                case InteractiveBlock interactive:
+                    var suggestions = interactive.Replies
+                        .Select(r => (RcsSuggestion)new RcsReplySuggestion(r.Title, r.Id))
+                        .ToList();
+                    richCards.Add(new RcsRichCardMessage(
+                        interactive.Body,
+                        string.Empty,
+                        null,
+                        suggestions));
+                    break;
+
+                case TextBlock text:
+                    // In multi-block envelopes, wrap text as a minimal rich card.
+                    richCards.Add(new RcsRichCardMessage(text.Text, string.Empty, null, []));
+                    break;
+            }
+        }
+
+        if (richCards.Count == 0)
+            return null;
+
+        return richCards.Count == 1 ? richCards[0] : new RcsCarouselMessage(richCards);
+    }
+
+    private static MessageDeliveryStatus? MapStatus(RcsDeliveryStatus status) =>
+        status switch
+        {
+            RcsDeliveryStatus.Queued => MessageDeliveryStatus.Pending,
+            RcsDeliveryStatus.Sent => MessageDeliveryStatus.Sent,
+            RcsDeliveryStatus.Delivered => MessageDeliveryStatus.Delivered,
+            RcsDeliveryStatus.Read => MessageDeliveryStatus.Delivered,
+            RcsDeliveryStatus.Failed => MessageDeliveryStatus.Failed,
+            _ => null,
+        };
+}
