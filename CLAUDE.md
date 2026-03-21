@@ -4,14 +4,14 @@
 
 Asterisk.Platform is an omnichannel contact center framework. .NET 10 Native AOT.
 
-**4 packages (Sprint S1 Foundation):**
+**4 packages, 113 tests, 0 warnings, AOT-compatible:**
 
-| Package | Purpose |
-|---------|---------|
-| Platform.Core | Abstractions, value objects, base interfaces |
-| Platform.Identity | Users, RBAC, API keys, service accounts |
-| Platform.Conversations | Conversation lifecycle (14 states), Contact CRM-lite, Cases, Tags |
-| Platform.Queues | Queue config, SLA, Agent with per-channel capacity, Teams |
+| Package | Purpose | Tests |
+|---------|---------|-------|
+| Platform.Core | Abstractions, value objects, base interfaces, DI | 24 |
+| Platform.Identity | Users, RBAC, API keys, service accounts, DI | 10 |
+| Platform.Conversations | Conversation lifecycle (14 states), Contact CRM-lite, Cases, Tags, DI | 50 |
+| Platform.Queues | Queue config, SLA, Agent with per-channel capacity, Teams, DI | 29 |
 
 ## Build & Test
 
