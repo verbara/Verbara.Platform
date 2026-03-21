@@ -7,6 +7,9 @@
     <Project Path="src/Asterisk.Platform.Channels.Core/Asterisk.Platform.Channels.Core.csproj" />
     <Project Path="src/Asterisk.Platform.Routing.Inbound/Asterisk.Platform.Routing.Inbound.csproj" />
     <Project Path="src/Asterisk.Platform.Switchboard/Asterisk.Platform.Switchboard.csproj" />
+    <Project Path="src/Asterisk.Platform.Channels.Sms/Asterisk.Platform.Channels.Sms.csproj" />
+    <Project Path="src/Asterisk.Platform.Channels.WebChat/Asterisk.Platform.Channels.WebChat.csproj" />
+    <Project Path="src/Asterisk.Platform.Channels.WhatsApp/Asterisk.Platform.Channels.WhatsApp.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Asterisk.Platform.Core.Tests/Asterisk.Platform.Core.Tests.csproj" />
@@ -16,5 +19,8 @@
     <Project Path="tests/Asterisk.Platform.Channels.Core.Tests/Asterisk.Platform.Channels.Core.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Routing.Inbound.Tests/Asterisk.Platform.Routing.Inbound.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Switchboard.Tests/Asterisk.Platform.Switchboard.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Channels.Sms.Tests/Asterisk.Platform.Channels.Sms.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Channels.WebChat.Tests/Asterisk.Platform.Channels.WebChat.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Channels.WhatsApp.Tests/Asterisk.Platform.Channels.WhatsApp.Tests.csproj" />
   </Folder>
 </Solution>
