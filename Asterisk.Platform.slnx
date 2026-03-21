@@ -4,11 +4,13 @@
     <Project Path="src/Asterisk.Platform.Identity/Asterisk.Platform.Identity.csproj" />
     <Project Path="src/Asterisk.Platform.Conversations/Asterisk.Platform.Conversations.csproj" />
     <Project Path="src/Asterisk.Platform.Queues/Asterisk.Platform.Queues.csproj" />
+    <Project Path="src/Asterisk.Platform.Channels.Core/Asterisk.Platform.Channels.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Asterisk.Platform.Core.Tests/Asterisk.Platform.Core.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Identity.Tests/Asterisk.Platform.Identity.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Conversations.Tests/Asterisk.Platform.Conversations.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Queues.Tests/Asterisk.Platform.Queues.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Channels.Core.Tests/Asterisk.Platform.Channels.Core.Tests.csproj" />
   </Folder>
 </Solution>
