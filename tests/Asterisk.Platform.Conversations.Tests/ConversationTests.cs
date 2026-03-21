@@ -12,6 +12,7 @@ public class ConversationTests
             ConversationId = EntityId.From("conv-001"),
             TenantId = new TenantId("t1"),
             ContactId = EntityId.From("c-001"),
+            Channel = ChannelType.WhatsApp,
             State = ConversationState.Queued,
             CreatedAt = DateTimeOffset.UtcNow,
         };
@@ -29,6 +30,7 @@ public class ConversationTests
             ConversationId = EntityId.From("conv-001"),
             TenantId = new TenantId("t1"),
             ContactId = EntityId.From("c-001"),
+            Channel = ChannelType.WebChat,
             State = ConversationState.Queued,
             CreatedAt = DateTimeOffset.UtcNow,
         };
@@ -46,6 +48,7 @@ public class ConversationTests
             ConversationId = EntityId.From("conv-001"),
             TenantId = new TenantId("t1"),
             ContactId = EntityId.From("c-001"),
+            Channel = ChannelType.Voice,
             State = ConversationState.Closed,
             CreatedAt = DateTimeOffset.UtcNow,
         };
@@ -63,6 +66,7 @@ public class ConversationTests
             ConversationId = EntityId.From("conv-001"),
             TenantId = new TenantId("t1"),
             ContactId = EntityId.From("c-001"),
+            Channel = ChannelType.Email,
             State = ConversationState.WrapUp,
             CreatedAt = DateTimeOffset.UtcNow,
         };
@@ -80,6 +84,7 @@ public class ConversationTests
             ConversationId = EntityId.From("conv-001"),
             TenantId = new TenantId("t1"),
             ContactId = EntityId.From("c-001"),
+            Channel = ChannelType.Sms,
             State = ConversationState.Active,
             CreatedAt = DateTimeOffset.UtcNow,
         };

@@ -7,6 +7,7 @@ public sealed class Conversation : ITenantScoped, IAuditable
     public required EntityId ConversationId { get; init; }
     public required TenantId TenantId { get; init; }
     public required EntityId ContactId { get; init; }
+    public required ChannelType Channel { get; init; }
     public ConversationOwner? Owner { get; set; }
     public required ConversationState State { get; set; }
     public EntityId? CaseId { get; set; }
