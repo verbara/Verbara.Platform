@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddPlatformCore(this IServiceCollection services)
     {
         services.AddSingleton<IClock, SystemClock>();
+        services.AddSingleton<PlatformEventBus>();
         return services;
     }
 }
