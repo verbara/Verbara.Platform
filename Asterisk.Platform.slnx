@@ -22,6 +22,7 @@
     <Project Path="src/Asterisk.Platform.Bot/Asterisk.Platform.Bot.csproj" />
     <Project Path="src/Asterisk.Platform.Surveys/Asterisk.Platform.Surveys.csproj" />
     <Project Path="src/Asterisk.Platform.Automation/Asterisk.Platform.Automation.csproj" />
+    <Project Path="src/Asterisk.Platform.Storage.InMemory/Asterisk.Platform.Storage.InMemory.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Asterisk.Platform.Core.Tests/Asterisk.Platform.Core.Tests.csproj" />
@@ -46,5 +47,6 @@
     <Project Path="tests/Asterisk.Platform.Bot.Tests/Asterisk.Platform.Bot.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Surveys.Tests/Asterisk.Platform.Surveys.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Automation.Tests/Asterisk.Platform.Automation.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Storage.InMemory.Tests/Asterisk.Platform.Storage.InMemory.Tests.csproj" />
   </Folder>
 </Solution>
