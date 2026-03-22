@@ -55,6 +55,9 @@ app.MapWebhookEndpoints();
 app.MapConversationEndpoints();
 app.MapAgentEndpoints();
 app.MapAdminEndpoints();
+app.MapChannelConfigEndpoints();
+app.MapContactEndpoints();
+app.MapSystemEndpoints();
 app.MapSseEndpoints();
 
 app.Run();
