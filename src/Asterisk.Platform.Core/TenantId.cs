@@ -2,11 +2,11 @@ using System.Text.Json.Serialization;
 
 namespace Asterisk.Platform.Core;
 
+[JsonConverter(typeof(Serialization.TenantIdJsonConverter))]
 public readonly record struct TenantId
 {
     public string Value { get; }
 
-    [JsonConstructor]
     public TenantId(string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
