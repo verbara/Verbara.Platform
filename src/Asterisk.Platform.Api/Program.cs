@@ -36,6 +36,7 @@ builder.Services.AddAuthorization();
 // ─── HTTP / Minimal API ───────────────────────────────────────────────────────
 
 builder.Services.AddProblemDetails();
+builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
@@ -45,6 +46,8 @@ app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapOpenApi();
 
 // ─── Endpoint mapping ────────────────────────────────────────────────────────
 
