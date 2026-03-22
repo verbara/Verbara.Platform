@@ -1,0 +1,60 @@
+using Asterisk.Platform.Api.Auth;
+using Asterisk.Platform.Api.Endpoints;
+using Asterisk.Platform.Api.Middleware;
+using Asterisk.Platform.Bot;
+using Asterisk.Platform.Channels.Core;
+using Asterisk.Platform.Conversations;
+using Asterisk.Platform.Core;
+using Asterisk.Platform.Routing.Inbound;
+using Asterisk.Platform.Storage.InMemory;
+using Asterisk.Platform.Switchboard;
+using Microsoft.AspNetCore.Authentication;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// ─── Core Platform Services ──────────────────────────────────────────────────
+
+builder.Services.AddPlatformCore();
+builder.Services.AddPlatformConversations();
+builder.Services.AddPlatformChannels();
+builder.Services.AddInboundRouting();
+builder.Services.AddSwitchboard();
+builder.Services.AddPlatformBot();
+
+// ─── In-Memory Storage (zero-infrastructure default) ─────────────────────────
+
+builder.Services.AddInMemoryStorage();
+
+// ─── Authentication (API key) ─────────────────────────────────────────────────
+
+builder.Services
+    .AddAuthentication("ApiKey")
+    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>("ApiKey", _ => { });
+
+builder.Services.AddAuthorization();
+
+// ─── HTTP / Minimal API ───────────────────────────────────────────────────────
+
+builder.Services.AddProblemDetails();
+
+var app = builder.Build();
+
+// ─── Middleware pipeline ──────────────────────────────────────────────────────
+
+app.UseMiddleware<ErrorHandlingMiddleware>();
+app.UseMiddleware<TenantResolutionMiddleware>();
+app.UseAuthentication();
+app.UseAuthorization();
+
+// ─── Endpoint mapping ────────────────────────────────────────────────────────
+
+app.MapWebhookEndpoints();
+app.MapConversationEndpoints();
+app.MapAgentEndpoints();
+app.MapAdminEndpoints();
+app.MapSseEndpoints();
+
+app.Run();
+
+// Expose Program for WebApplicationFactory in tests
+public partial class Program { }

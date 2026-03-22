@@ -1,0 +1,360 @@
+using Asterisk.Platform.Core;
+using Asterisk.Platform.Identity;
+using Asterisk.Platform.Queues;
+
+namespace Asterisk.Platform.Api.Endpoints;
+
+internal static class AdminEndpoints
+{
+    public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/admin").RequireAuthorization();
+
+        // Users
+        group.MapGet("/users", ListUsers);
+        group.MapGet("/users/{id}", GetUser);
+        group.MapPost("/users", CreateUser);
+        group.MapPut("/users/{id}", UpdateUser);
+        group.MapDelete("/users/{id}", DeleteUser);
+
+        // Queues
+        group.MapGet("/queues", ListQueues);
+        group.MapGet("/queues/{id}", GetQueue);
+        group.MapPost("/queues", CreateQueue);
+        group.MapPut("/queues/{id}", UpdateQueue);
+        group.MapDelete("/queues/{id}", DeleteQueue);
+
+        // Agents
+        group.MapGet("/agents", ListAgents);
+        group.MapGet("/agents/{id}", GetAgent);
+        group.MapPost("/agents", CreateAgent);
+        group.MapPut("/agents/{id}", UpdateAgent);
+
+        // Teams
+        group.MapGet("/teams", ListTeams);
+        group.MapGet("/teams/{id}", GetTeam);
+        group.MapPost("/teams", CreateTeam);
+        group.MapPut("/teams/{id}", UpdateTeam);
+        group.MapDelete("/teams/{id}", DeleteTeam);
+    }
+
+    // ─── Users ────────────────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListUsers(
+        HttpContext context,
+        IUserStore store,
+        int page = 1,
+        int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> GetUser(
+        string id,
+        HttpContext context,
+        IUserStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var user = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        return user is null ? Results.NotFound() : Results.Ok(user);
+    }
+
+    private static async Task<IResult> CreateUser(
+        HttpContext context,
+        CreateUserRequest body,
+        IUserStore store,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var user = new User
+        {
+            UserId = EntityId.New(),
+            TenantId = tenantId,
+            Email = body.Email,
+            DisplayName = body.DisplayName,
+            Role = body.Role,
+            Status = UserStatus.Active,
+            CreatedAt = clock.UtcNow,
+        };
+        await store.SaveAsync(user, ct);
+        return Results.Created($"/api/admin/users/{user.UserId}", user);
+    }
+
+    private static async Task<IResult> UpdateUser(
+        string id,
+        HttpContext context,
+        UpdateUserRequest body,
+        IUserStore store,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var user = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (user is null)
+            return Results.NotFound();
+
+        user.DisplayName = body.DisplayName ?? user.DisplayName;
+        if (body.Role.HasValue) user.Role = body.Role.Value;
+        if (body.Status.HasValue) user.Status = body.Status.Value;
+        user.UpdatedAt = clock.UtcNow;
+        await store.SaveAsync(user, ct);
+        return Results.Ok(user);
+    }
+
+    private static async Task<IResult> DeleteUser(
+        string id,
+        HttpContext context,
+        IUserStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        return Results.NoContent();
+    }
+
+    // ─── Queues ───────────────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListQueues(
+        HttpContext context,
+        IQueueStore store,
+        int page = 1,
+        int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> GetQueue(
+        string id,
+        HttpContext context,
+        IQueueStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var queue = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        return queue is null ? Results.NotFound() : Results.Ok(queue);
+    }
+
+    private static async Task<IResult> CreateQueue(
+        HttpContext context,
+        CreateQueueRequest body,
+        IQueueStore store,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var queue = new Queue
+        {
+            QueueId = EntityId.New(),
+            TenantId = tenantId,
+            Name = body.Name,
+            IsActive = true,
+            CreatedAt = clock.UtcNow,
+        };
+        await store.SaveAsync(queue, ct);
+        return Results.Created($"/api/admin/queues/{queue.QueueId}", queue);
+    }
+
+    private static async Task<IResult> UpdateQueue(
+        string id,
+        HttpContext context,
+        UpdateQueueRequest body,
+        IQueueStore store,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var queue = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (queue is null)
+            return Results.NotFound();
+
+        if (body.Name is not null) queue.Name = body.Name;
+        if (body.IsActive.HasValue) queue.IsActive = body.IsActive.Value;
+        queue.UpdatedAt = clock.UtcNow;
+        await store.SaveAsync(queue, ct);
+        return Results.Ok(queue);
+    }
+
+    private static async Task<IResult> DeleteQueue(
+        string id,
+        HttpContext context,
+        IQueueStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        return Results.NoContent();
+    }
+
+    // ─── Agents ───────────────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListAgents(
+        HttpContext context,
+        IAgentStore store,
+        int page = 1,
+        int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var result = await store.ListAsync(tenantId, new AgentQuery { Page = page, PageSize = pageSize }, ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> GetAgent(
+        string id,
+        HttpContext context,
+        IAgentStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agent = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        return agent is null ? Results.NotFound() : Results.Ok(agent);
+    }
+
+    private static async Task<IResult> CreateAgent(
+        HttpContext context,
+        CreateAgentRequest body,
+        IAgentStore store,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agent = new Agent
+        {
+            AgentId = EntityId.New(),
+            TenantId = tenantId,
+            UserId = EntityId.From(body.UserId),
+            DisplayName = body.DisplayName,
+            State = AgentState.Offline,
+            CreatedAt = clock.UtcNow,
+        };
+        await store.SaveAsync(agent, ct);
+        return Results.Created($"/api/admin/agents/{agent.AgentId}", agent);
+    }
+
+    private static async Task<IResult> UpdateAgent(
+        string id,
+        HttpContext context,
+        UpdateAgentRequest body,
+        IAgentStore store,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agent = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (agent is null)
+            return Results.NotFound();
+
+        if (body.DisplayName is not null) agent.DisplayName = body.DisplayName;
+        if (body.TeamId is not null) agent.TeamId = EntityId.From(body.TeamId);
+        if (body.Skills is not null) agent.Skills = body.Skills;
+        agent.UpdatedAt = clock.UtcNow;
+        await store.SaveAsync(agent, ct);
+        return Results.Ok(agent);
+    }
+
+    // ─── Teams ────────────────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListTeams(
+        HttpContext context,
+        ITeamStore store,
+        int page = 1,
+        int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> GetTeam(
+        string id,
+        HttpContext context,
+        ITeamStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var team = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        return team is null ? Results.NotFound() : Results.Ok(team);
+    }
+
+    private static async Task<IResult> CreateTeam(
+        HttpContext context,
+        CreateTeamRequest body,
+        ITeamStore store,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var team = new Team
+        {
+            TeamId = EntityId.New(),
+            TenantId = tenantId,
+            Name = body.Name,
+            CreatedAt = clock.UtcNow,
+        };
+        await store.SaveAsync(team, ct);
+        return Results.Created($"/api/admin/teams/{team.TeamId}", team);
+    }
+
+    private static async Task<IResult> UpdateTeam(
+        string id,
+        HttpContext context,
+        UpdateTeamRequest body,
+        ITeamStore store,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var team = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (team is null)
+            return Results.NotFound();
+
+        if (body.Name is not null) team.Name = body.Name;
+        team.UpdatedAt = clock.UtcNow;
+        await store.SaveAsync(team, ct);
+        return Results.Ok(team);
+    }
+
+    private static async Task<IResult> DeleteTeam(
+        string id,
+        HttpContext context,
+        ITeamStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        return Results.NoContent();
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private static TenantId GetTenantId(HttpContext context)
+    {
+        if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
+            return tid;
+
+        throw new InvalidOperationException("Tenant ID not resolved");
+    }
+}
+
+// ─── Request DTOs ─────────────────────────────────────────────────────────────
+
+internal sealed record CreateUserRequest(string Email, string DisplayName, UserRole Role);
+internal sealed record UpdateUserRequest(string? DisplayName, UserRole? Role, UserStatus? Status);
+
+internal sealed record CreateQueueRequest(string Name);
+internal sealed record UpdateQueueRequest(string? Name, bool? IsActive);
+
+internal sealed record CreateAgentRequest(string UserId, string DisplayName);
+internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills);
+
+internal sealed record CreateTeamRequest(string Name);
+internal sealed record UpdateTeamRequest(string? Name);

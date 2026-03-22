@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <Description>ASP.NET Core Minimal API layer for Asterisk.Platform — webhook ingestion, agent desktop, admin CRUD, SSE events</Description>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Asterisk.Platform.Core\Asterisk.Platform.Core.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Identity\Asterisk.Platform.Identity.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Conversations\Asterisk.Platform.Conversations.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Queues\Asterisk.Platform.Queues.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Core\Asterisk.Platform.Channels.Core.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.WhatsApp\Asterisk.Platform.Channels.WhatsApp.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Sms\Asterisk.Platform.Channels.Sms.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.WebChat\Asterisk.Platform.Channels.WebChat.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Email\Asterisk.Platform.Channels.Email.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Messenger\Asterisk.Platform.Channels.Messenger.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Instagram\Asterisk.Platform.Channels.Instagram.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Telegram\Asterisk.Platform.Channels.Telegram.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Twitter\Asterisk.Platform.Channels.Twitter.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Video\Asterisk.Platform.Channels.Video.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Rcs\Asterisk.Platform.Channels.Rcs.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Routing.Inbound\Asterisk.Platform.Routing.Inbound.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Switchboard\Asterisk.Platform.Switchboard.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Flows\Asterisk.Platform.Flows.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Bot\Asterisk.Platform.Bot.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.KnowledgeBase\Asterisk.Platform.KnowledgeBase.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Automation\Asterisk.Platform.Automation.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Surveys\Asterisk.Platform.Surveys.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Storage.InMemory\Asterisk.Platform.Storage.InMemory.csproj" />
+  </ItemGroup>
+
+
+</Project>
