@@ -1,5 +1,8 @@
+using System.Text.Json.Serialization;
+
 namespace Asterisk.Platform.Core;
 
+[JsonConverter(typeof(Serialization.EntityIdJsonConverter))]
 public readonly record struct EntityId
 {
     public string Value { get; }
