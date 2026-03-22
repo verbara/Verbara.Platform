@@ -7,6 +7,7 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Routing.Inbound;
 using Asterisk.Platform.Storage.InMemory;
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Switchboard;
 using Microsoft.AspNetCore.Authentication;
 
@@ -20,6 +21,7 @@ builder.Services.AddPlatformChannels();
 builder.Services.AddInboundRouting();
 builder.Services.AddSwitchboard();
 builder.Services.AddPlatformBot();
+builder.Services.AddPlatformAudit();
 
 // ─── In-Memory Storage (zero-infrastructure default) ─────────────────────────
 
