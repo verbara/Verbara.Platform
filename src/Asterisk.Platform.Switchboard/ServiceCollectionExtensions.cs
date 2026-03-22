@@ -1,3 +1,4 @@
+using Asterisk.Platform.Conversations.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Switchboard;
@@ -8,11 +9,12 @@ namespace Asterisk.Platform.Switchboard;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the conversation switchboard.
+    /// Registers the conversation switchboard and conversation service.
     /// </summary>
     public static IServiceCollection AddSwitchboard(this IServiceCollection services)
     {
         services.AddSingleton<IConversationSwitchboard, ConversationSwitchboard>();
+        services.AddSingleton<IConversationService, DefaultConversationService>();
         return services;
     }
 }
