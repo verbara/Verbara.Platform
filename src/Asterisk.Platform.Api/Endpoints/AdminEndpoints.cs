@@ -156,6 +156,24 @@ internal static class AdminEndpoints
             TenantId = tenantId,
             Name = body.Name,
             IsActive = true,
+            MaxWaiting = body.MaxWaiting,
+            RequiredSkills = body.RequiredSkills ?? [],
+            SlaTargets = body.SlaTargets is { } sla ? new SlaPolicyTarget
+            {
+                AnswerWithinSeconds = sla.AnswerWithinSeconds,
+                FirstResponseWithinSeconds = sla.FirstResponseWithinSeconds,
+                ResolutionWithinSeconds = sla.ResolutionWithinSeconds
+            } : null,
+            OverflowRule = body.OverflowRule is { } ovf ? new QueueOverflowRule
+            {
+                OverflowQueueId = EntityId.From(ovf.OverflowQueueId),
+                OverflowAfterSeconds = ovf.OverflowAfterSeconds
+            } : null,
+            WrapUp = body.WrapUp is { } wu ? new WrapUpConfig
+            {
+                DefaultWrapUpSeconds = wu.DefaultWrapUpSeconds,
+                ForceWrapUp = wu.ForceWrapUp
+            } : new WrapUpConfig(),
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(queue, ct);
@@ -177,6 +195,27 @@ internal static class AdminEndpoints
 
         if (body.Name is not null) queue.Name = body.Name;
         if (body.IsActive.HasValue) queue.IsActive = body.IsActive.Value;
+        if (body.MaxWaiting.HasValue) queue.MaxWaiting = body.MaxWaiting;
+        if (body.RequiredSkills is not null) queue.RequiredSkills = body.RequiredSkills;
+        if (body.SlaTargets is { } sla)
+            queue.SlaTargets = new SlaPolicyTarget
+            {
+                AnswerWithinSeconds = sla.AnswerWithinSeconds,
+                FirstResponseWithinSeconds = sla.FirstResponseWithinSeconds,
+                ResolutionWithinSeconds = sla.ResolutionWithinSeconds
+            };
+        if (body.OverflowRule is { } ovf)
+            queue.OverflowRule = new QueueOverflowRule
+            {
+                OverflowQueueId = EntityId.From(ovf.OverflowQueueId),
+                OverflowAfterSeconds = ovf.OverflowAfterSeconds
+            };
+        if (body.WrapUp is { } wu)
+            queue.WrapUp = new WrapUpConfig
+            {
+                DefaultWrapUpSeconds = wu.DefaultWrapUpSeconds,
+                ForceWrapUp = wu.ForceWrapUp
+            };
         queue.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(queue, ct);
         return Results.Ok(queue);
@@ -350,8 +389,37 @@ internal static class AdminEndpoints
 internal sealed record CreateUserRequest(string Email, string DisplayName, UserRole Role);
 internal sealed record UpdateUserRequest(string? DisplayName, UserRole? Role, UserStatus? Status);
 
-internal sealed record CreateQueueRequest(string Name);
-internal sealed record UpdateQueueRequest(string? Name, bool? IsActive);
+internal sealed record CreateQueueRequest(
+    string Name,
+    SlaPolicyTargetDto? SlaTargets = null,
+    QueueOverflowRuleDto? OverflowRule = null,
+    WrapUpConfigDto? WrapUp = null,
+    int? MaxWaiting = null,
+    IReadOnlyList<string>? RequiredSkills = null,
+    string? Timezone = null);
+
+internal sealed record UpdateQueueRequest(
+    string? Name = null,
+    bool? IsActive = null,
+    SlaPolicyTargetDto? SlaTargets = null,
+    QueueOverflowRuleDto? OverflowRule = null,
+    WrapUpConfigDto? WrapUp = null,
+    int? MaxWaiting = null,
+    IReadOnlyList<string>? RequiredSkills = null,
+    string? Timezone = null);
+
+internal sealed record SlaPolicyTargetDto(
+    int? AnswerWithinSeconds = null,
+    int? FirstResponseWithinSeconds = null,
+    int? ResolutionWithinSeconds = null);
+
+internal sealed record QueueOverflowRuleDto(
+    string OverflowQueueId,
+    int OverflowAfterSeconds);
+
+internal sealed record WrapUpConfigDto(
+    int DefaultWrapUpSeconds = 30,
+    bool ForceWrapUp = false);
 
 internal sealed record CreateAgentRequest(string UserId, string DisplayName);
 internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills);
