@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Automation;
 using Asterisk.Platform.Bot;
 using Asterisk.Platform.Channels.Core;
@@ -6,6 +7,7 @@ using Asterisk.Platform.Conversations.Stores;
 using Asterisk.Platform.Flows;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.KnowledgeBase;
+using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Storage.InMemory;
 using Asterisk.Platform.Surveys;
@@ -60,6 +62,12 @@ public sealed class ServiceCollectionExtensionsTests
         provider.GetService<ITimerStore>().Should().NotBeNull();
         provider.GetService<IAutomationRuleStore>().Should().NotBeNull();
         provider.GetService<IAutomationExecutionLogStore>().Should().NotBeNull();
+
+        // Audit
+        provider.GetService<IAuditStore>().Should().NotBeNull();
+
+        // Media
+        provider.GetService<IMediaStore>().Should().NotBeNull();
     }
 
     [Fact]
