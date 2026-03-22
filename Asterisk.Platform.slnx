@@ -18,6 +18,7 @@
     <Project Path="src/Asterisk.Platform.Channels.Twitter/Asterisk.Platform.Channels.Twitter.csproj" />
     <Project Path="src/Asterisk.Platform.Channels.Rcs/Asterisk.Platform.Channels.Rcs.csproj" />
     <Project Path="src/Asterisk.Platform.KnowledgeBase/Asterisk.Platform.KnowledgeBase.csproj" />
+    <Project Path="src/Asterisk.Platform.Flows/Asterisk.Platform.Flows.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Asterisk.Platform.Core.Tests/Asterisk.Platform.Core.Tests.csproj" />
@@ -38,5 +39,6 @@
     <Project Path="tests/Asterisk.Platform.Channels.Twitter.Tests/Asterisk.Platform.Channels.Twitter.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Channels.Rcs.Tests/Asterisk.Platform.Channels.Rcs.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.KnowledgeBase.Tests/Asterisk.Platform.KnowledgeBase.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Flows.Tests/Asterisk.Platform.Flows.Tests.csproj" />
   </Folder>
 </Solution>
