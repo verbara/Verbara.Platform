@@ -4,7 +4,7 @@
 
 Asterisk.Platform is an omnichannel contact center framework. .NET 10 Native AOT.
 
-**10 packages, 326 tests, 0 warnings, AOT-compatible:**
+**20 packages, 616 tests, 0 warnings, AOT-compatible:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -16,8 +16,18 @@ Asterisk.Platform is an omnichannel contact center framework. .NET 10 Native AOT
 | Platform.Channels.WhatsApp | Meta Business API connector, HMAC webhook, 24h session window, DI | 29 |
 | Platform.Channels.Sms | Provider-agnostic SMS connector, segment calculator, DI | 28 |
 | Platform.Channels.WebChat | WebChat connector, session manager, transport abstraction, DI | 25 |
+| Platform.Channels.Messenger | Messenger connector, DI | 22 |
+| Platform.Channels.Instagram | Instagram connector, DI | 16 |
+| Platform.Channels.Telegram | Telegram connector, DI | 24 |
+| Platform.Channels.Email | Email connector, DI | 41 |
+| Platform.Channels.Video | Video connector, DI | — |
+| Platform.Channels.Twitter | Twitter connector, DI | 27 |
+| Platform.Channels.Rcs | RCS connector, DI | 33 |
 | Platform.Routing.Inbound | Inbound routing pipeline — channel mapping, last-agent, priority, overflow, business hours, DI | 32 |
 | Platform.Switchboard | Conversation ownership lifecycle — assign, offer, accept, reject, transfer, DI | 23 |
+| Platform.KnowledgeBase | Knowledge search abstraction, DI | — |
+| Platform.Flows | DAG workflow engine — 11 node types, persistent execution, template rendering, LLM abstraction, DI | 52 |
+| Platform.Bot | Virtual agent orchestration — IVirtualAgent, BotOrchestrator, flow-driven turn management, analytics, DI | 30 |
 
 ## Build & Test
 
@@ -73,6 +83,8 @@ services.AddSms(o => { o.DefaultFromNumber = "+15550000000"; });
 services.AddWebChat();
 services.AddInboundRouting();
 services.AddSwitchboard();
+services.AddPlatformFlows();   // + register IFlowStore, IFlowExecutionStore, ILlmProvider
+services.AddPlatformBot();     // + register IBotConfigStore
 ```
 
 ## Code Conventions
