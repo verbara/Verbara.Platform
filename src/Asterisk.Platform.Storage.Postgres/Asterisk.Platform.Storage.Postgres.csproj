@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Dapper/Npgsql implementations of all critical store interfaces for Asterisk.Platform — 13 stores, 15-table schema with JSONB for complex types</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Asterisk.Platform.Storage.Postgres.Tests" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Asterisk.Platform.Core\Asterisk.Platform.Core.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Identity\Asterisk.Platform.Identity.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Conversations\Asterisk.Platform.Conversations.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Queues\Asterisk.Platform.Queues.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Channels.Core\Asterisk.Platform.Channels.Core.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Flows\Asterisk.Platform.Flows.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Bot\Asterisk.Platform.Bot.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Automation\Asterisk.Platform.Automation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+</Project>
