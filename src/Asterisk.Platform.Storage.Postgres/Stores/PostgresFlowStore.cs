@@ -12,6 +12,17 @@ internal sealed class PostgresFlowStore : IFlowStore
 
     public PostgresFlowStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
+    public async Task<IReadOnlyList<FlowDefinition>> ListAsync(TenantId tenantId, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<FlowRow>(
+            "SELECT DISTINCT ON (flow_id) flow_id, tenant_id, name, version, is_published, entry_node_id, nodes, created_at " +
+            "FROM flow_definitions WHERE tenant_id = @TenantId " +
+            "ORDER BY flow_id, version DESC",
+            new { TenantId = tenantId.Value });
+        return rows.Select(r => r.ToFlowDefinition()).ToList();
+    }
+
     public async Task<FlowDefinition?> GetByIdAsync(TenantId tenantId, EntityId flowId, CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);

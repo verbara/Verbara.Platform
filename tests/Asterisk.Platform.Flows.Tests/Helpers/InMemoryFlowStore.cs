@@ -9,6 +9,9 @@ internal sealed class InMemoryFlowStore : IFlowStore
 
     public void Add(FlowDefinition flow) => _flows.Add(flow);
 
+    public Task<IReadOnlyList<FlowDefinition>> ListAsync(TenantId tenantId, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<FlowDefinition>>(_flows.Where(f => f.TenantId == tenantId).ToList());
+
     public Task<FlowDefinition?> GetByIdAsync(TenantId tenantId, EntityId flowId, CancellationToken ct) =>
         Task.FromResult(_flows.Find(f => f.TenantId == tenantId && f.FlowId == flowId));
 

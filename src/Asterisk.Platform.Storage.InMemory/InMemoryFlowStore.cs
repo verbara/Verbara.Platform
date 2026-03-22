@@ -8,6 +8,12 @@ internal sealed class InMemoryFlowStore : IFlowStore
 {
     private readonly ConcurrentDictionary<(TenantId, EntityId), FlowDefinition> _items = new();
 
+    public Task<IReadOnlyList<FlowDefinition>> ListAsync(TenantId tenantId, CancellationToken ct)
+    {
+        var result = _items.Values.Where(f => f.TenantId == tenantId).ToList();
+        return Task.FromResult<IReadOnlyList<FlowDefinition>>(result);
+    }
+
     public Task<FlowDefinition?> GetByIdAsync(TenantId tenantId, EntityId flowId, CancellationToken ct)
     {
         _items.TryGetValue((tenantId, flowId), out var item);
