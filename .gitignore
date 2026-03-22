@@ -8,3 +8,4 @@ obj/
 TestResults/
 .worktrees/
 .claude/
+.superpowers/
