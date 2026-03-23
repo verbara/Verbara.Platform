@@ -9,6 +9,7 @@ public class WrapUpRecordTests
     {
         var record = new WrapUpRecord
         {
+            TenantId = new TenantId("tenant-001"),
             ConversationId = EntityId.From("conv-001"),
             AgentId = EntityId.From("agent-001"),
             DispositionId = EntityId.From("disp-001"),

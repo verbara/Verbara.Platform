@@ -20,6 +20,7 @@ internal static class ConversationEndpoints
         group.MapPost("/{id}/reject", RejectConversation);
         group.MapPost("/{id}/transfer", TransferConversation);
         group.MapPost("/{id}/close", CloseConversation);
+        group.MapPost("/{id}/wrapup", WrapUpConversation);
     }
 
     private static async Task<IResult> ListConversations(
@@ -155,6 +156,49 @@ internal static class ConversationEndpoints
         return Results.Ok(conversation);
     }
 
+    private static async Task<IResult> WrapUpConversation(
+        string id,
+        HttpContext context,
+        IConversationStore conversationStore,
+        IWrapUpStore wrapUpStore,
+        WrapUpRequest? body,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+        var conversationId = EntityId.From(id);
+
+        var conversation = await conversationStore.GetByIdAsync(tenantId, conversationId, ct);
+        if (conversation is null)
+            return Results.NotFound();
+
+        try
+        {
+            conversation.TransitionTo(ConversationState.WrapUp);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+
+        await conversationStore.SaveAsync(conversation, ct);
+
+        var record = new WrapUpRecord
+        {
+            TenantId = tenantId,
+            ConversationId = conversationId,
+            AgentId = agentId,
+            DispositionId = body?.DispositionId is not null ? EntityId.From(body.DispositionId) : EntityId.New(),
+            Notes = body?.Notes,
+            Duration = TimeSpan.Zero,
+            CompletedAt = DateTimeOffset.UtcNow,
+        };
+
+        await wrapUpStore.SaveAsync(record, ct);
+
+        return Results.Ok(record);
+    }
+
     private static TenantId GetTenantId(HttpContext context)
     {
         if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
@@ -172,3 +216,4 @@ internal static class ConversationEndpoints
 
 internal sealed record SendMessageRequest(string Text);
 internal sealed record TransferRequest(string? TargetQueueId, string? TargetAgentId);
+internal sealed record WrapUpRequest(string? DispositionId = null, string? Notes = null);

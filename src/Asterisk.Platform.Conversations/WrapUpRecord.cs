@@ -4,6 +4,7 @@ namespace Asterisk.Platform.Conversations;
 
 public sealed class WrapUpRecord
 {
+    public required TenantId TenantId { get; init; }
     public required EntityId ConversationId { get; init; }
     public required EntityId AgentId { get; init; }
     public required EntityId DispositionId { get; init; }
