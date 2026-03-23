@@ -10,7 +10,12 @@ using Asterisk.Platform.Storage.InMemory;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Switchboard;
+using Asterisk.Platform.Identity;
+using Asterisk.Platform.Queues;
 using Microsoft.AspNetCore.Authentication;
+using Asterisk.Sdk.Pro.Dialer.DependencyInjection;
+using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +33,17 @@ builder.Services.AddPlatformMedia();
 // ─── In-Memory Storage (zero-infrastructure default) ─────────────────────────
 
 builder.Services.AddInMemoryStorage();
+
+// ─── Pro.Licensing ───────────────────────────────────────────────────────────
+builder.Services.AddProLicensing();
+
+// ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
+var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";
+if (!string.IsNullOrEmpty(dialerConnectionString))
+{
+    builder.Services.UsePostgresDialerStorage(dialerConnectionString);
+    builder.Services.AddProDialer(o => { });
+}
 
 // ─── Authentication (API key) ─────────────────────────────────────────────────
 
@@ -72,6 +88,56 @@ app.MapDispositionEndpoints();
 app.MapSystemEndpoints();
 app.MapSseEndpoints();
 app.MapMediaEndpoints();
+app.MapCampaignEndpoints();
+
+// ─── Dev seed: create a demo API key for local testing ───────────────────────
+{
+    using var scope = app.Services.CreateScope();
+    var apiKeyStore = scope.ServiceProvider.GetRequiredService<IApiKeyStore>();
+    var userStore = scope.ServiceProvider.GetRequiredService<IUserStore>();
+    var agentStore = scope.ServiceProvider.GetRequiredService<IAgentStore>();
+    var clock = scope.ServiceProvider.GetRequiredService<IClock>();
+
+    var tenantId = new TenantId("demo");
+    var rawKey = "demo-key-2026";
+    var hashedKey = Convert.ToHexStringLower(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawKey)));
+
+    await apiKeyStore.SaveAsync(new ApiKey
+    {
+        KeyId = EntityId.From("demo-key"),
+        TenantId = tenantId,
+        Name = "Demo Key",
+        HashedKey = hashedKey,
+        Scopes = ["*"],
+        CreatedAt = clock.UtcNow,
+    }, CancellationToken.None);
+
+    var userId = EntityId.From("demo-user");
+    await userStore.SaveAsync(new User
+    {
+        UserId = userId,
+        TenantId = tenantId,
+        Email = "admin@demo.local",
+        DisplayName = "Demo Admin",
+        Role = UserRole.Admin,
+        Status = UserStatus.Active,
+        CreatedAt = clock.UtcNow,
+    }, CancellationToken.None);
+
+    await agentStore.SaveAsync(new Agent
+    {
+        AgentId = EntityId.From("demo-agent"),
+        TenantId = tenantId,
+        UserId = userId,
+        DisplayName = "Demo Admin",
+        State = AgentState.Available,
+        Skills = ["support"],
+        CreatedAt = clock.UtcNow,
+    }, CancellationToken.None);
+
+    Console.WriteLine("🔑 Demo API key: demo-key-2026");
+}
 
 app.Run();
 

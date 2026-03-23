@@ -23,6 +23,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.0.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.0.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Licensing" Version="1.0.0-pro" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />

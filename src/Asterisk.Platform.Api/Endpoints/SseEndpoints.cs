@@ -2,6 +2,7 @@ using System.Reactive.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Core;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -81,7 +82,7 @@ internal static class SseEndpoints
 
     internal static async Task WriteEventAsync(HttpResponse response, string eventType, object data, CancellationToken ct)
     {
-        var json = JsonSerializer.Serialize(data);
+        var json = JsonSerializer.Serialize(data, data.GetType(), ApiJsonContext.Default);
         var payload = $"event: {eventType}\ndata: {json}\n\n";
         var bytes = Encoding.UTF8.GetBytes(payload);
         await response.Body.WriteAsync(bytes, ct);

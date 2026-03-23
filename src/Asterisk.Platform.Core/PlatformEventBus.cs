@@ -63,3 +63,22 @@ public sealed record AgentStateChangedEvent(
     string OldState,
     string NewState)
     : PlatformEvent(TenantId, "agent.state_changed", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when an outbound campaign changes status (e.g. running → paused).</summary>
+public sealed record CampaignStatusChangedEvent(
+    string TenantId, long CampaignId, string CampaignName,
+    string OldStatus, string NewStatus)
+    : PlatformEvent(TenantId, "campaign.status_changed", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when campaign dialing metrics are updated.</summary>
+public sealed record CampaignMetricsUpdatedEvent(
+    string TenantId, long CampaignId,
+    int ContactsDialed, int ContactsRemaining,
+    double ConnectRate, double AbandonRate, int ActiveCalls)
+    : PlatformEvent(TenantId, "campaign.metrics_updated", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when an agent submits a disposition for a campaign call.</summary>
+public sealed record CampaignDispositionSubmittedEvent(
+    string TenantId, long CampaignId,
+    string DispositionCode, string AgentId)
+    : PlatformEvent(TenantId, "campaign.disposition_submitted", DateTimeOffset.UtcNow);
