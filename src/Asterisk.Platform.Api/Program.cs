@@ -66,6 +66,7 @@ app.MapAdminEndpoints();
 app.MapFlowEndpoints();
 app.MapChannelConfigEndpoints();
 app.MapContactEndpoints();
+app.MapDispositionEndpoints();
 app.MapSystemEndpoints();
 app.MapSseEndpoints();
 
