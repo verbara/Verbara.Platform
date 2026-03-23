@@ -8,6 +8,7 @@ using Asterisk.Platform.Core;
 using Asterisk.Platform.Routing.Inbound;
 using Asterisk.Platform.Storage.InMemory;
 using Asterisk.Platform.Audit;
+using Asterisk.Platform.Media;
 using Asterisk.Platform.Switchboard;
 using Microsoft.AspNetCore.Authentication;
 
@@ -22,6 +23,7 @@ builder.Services.AddInboundRouting();
 builder.Services.AddSwitchboard();
 builder.Services.AddPlatformBot();
 builder.Services.AddPlatformAudit();
+builder.Services.AddPlatformMedia();
 
 // ─── In-Memory Storage (zero-infrastructure default) ─────────────────────────
 
@@ -69,6 +71,7 @@ app.MapContactEndpoints();
 app.MapDispositionEndpoints();
 app.MapSystemEndpoints();
 app.MapSseEndpoints();
+app.MapMediaEndpoints();
 
 app.Run();
 
