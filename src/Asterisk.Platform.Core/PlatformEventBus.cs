@@ -54,3 +54,12 @@ public sealed record ConversationStateChangedEvent(
     string OldState,
     string NewState)
     : PlatformEvent(TenantId, "conversation.state_changed", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when an agent's presence state changes.</summary>
+public sealed record AgentStateChangedEvent(
+    string TenantId,
+    string AgentId,
+    string AgentName,
+    string OldState,
+    string NewState)
+    : PlatformEvent(TenantId, "agent.state_changed", DateTimeOffset.UtcNow);

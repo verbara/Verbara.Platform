@@ -28,6 +28,7 @@ internal static class AgentEndpoints
     private static async Task<IResult> UpdateAgentState(
         HttpContext context,
         IAgentStore agentStore,
+        PlatformEventBus eventBus,
         UpdateAgentStateRequest body,
         CancellationToken ct)
     {
@@ -38,8 +39,17 @@ internal static class AgentEndpoints
         if (agent is null)
             return Results.NotFound();
 
+        var oldState = agent.State;
         agent.TransitionTo(body.State);
         await agentStore.SaveAsync(agent, ct);
+
+        eventBus.Publish(new AgentStateChangedEvent(
+            tenantId.ToString(),
+            agent.AgentId.Value,
+            agent.DisplayName,
+            oldState.ToString(),
+            body.State.ToString()));
+
         return Results.Ok(agent);
     }
 
