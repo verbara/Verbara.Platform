@@ -35,6 +35,7 @@
     <ProjectReference Include="..\Asterisk.Platform.Surveys\Asterisk.Platform.Surveys.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Storage.InMemory\Asterisk.Platform.Storage.InMemory.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Audit\Asterisk.Platform.Audit.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Media\Asterisk.Platform.Media.csproj" />
   </ItemGroup>
 
   <ItemGroup>

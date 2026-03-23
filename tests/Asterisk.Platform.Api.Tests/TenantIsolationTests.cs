@@ -39,7 +39,7 @@ public sealed class TenantIsolationTests : IDisposable
         createResp.StatusCode.Should().Be(HttpStatusCode.Created);
 
         var created = JsonNode.Parse(await createResp.Content.ReadAsStringAsync());
-        var queueId = created!["queueId"]!["value"]!.GetValue<string>();
+        var queueId = created!["queueId"]!.GetValue<string>();
 
         // Tenant A can retrieve it
         var getA = await _tenantAClient.GetAsync($"/api/admin/queues/{queueId}");

@@ -8,6 +8,7 @@ using Asterisk.Platform.Core;
 using Asterisk.Platform.Routing.Inbound;
 using Asterisk.Platform.Storage.InMemory;
 using Asterisk.Platform.Audit;
+using Asterisk.Platform.Media;
 using Asterisk.Platform.Switchboard;
 using Microsoft.AspNetCore.Authentication;
 
@@ -22,6 +23,7 @@ builder.Services.AddInboundRouting();
 builder.Services.AddSwitchboard();
 builder.Services.AddPlatformBot();
 builder.Services.AddPlatformAudit();
+builder.Services.AddPlatformMedia();
 
 // ─── In-Memory Storage (zero-infrastructure default) ─────────────────────────
 
@@ -38,6 +40,12 @@ builder.Services.AddAuthorization();
 // ─── HTTP / Minimal API ───────────────────────────────────────────────────────
 
 builder.Services.AddProblemDetails();
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    options.SerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+});
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -60,8 +68,10 @@ app.MapAdminEndpoints();
 app.MapFlowEndpoints();
 app.MapChannelConfigEndpoints();
 app.MapContactEndpoints();
+app.MapDispositionEndpoints();
 app.MapSystemEndpoints();
 app.MapSseEndpoints();
+app.MapMediaEndpoints();
 
 app.Run();
 

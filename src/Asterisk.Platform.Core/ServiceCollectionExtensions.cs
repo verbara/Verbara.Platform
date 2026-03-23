@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Asterisk.Platform.Core;
 
@@ -14,6 +15,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<PlatformEventBus>();
+        services.TryAddSingleton<IFeatureRegistry, DefaultFeatureRegistry>();
         return services;
     }
 }

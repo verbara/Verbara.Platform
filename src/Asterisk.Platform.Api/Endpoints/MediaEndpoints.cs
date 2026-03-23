@@ -1,0 +1,76 @@
+using Asterisk.Platform.Core;
+using Asterisk.Platform.Media;
+
+namespace Asterisk.Platform.Api.Endpoints;
+
+internal static class MediaEndpoints
+{
+    public static void MapMediaEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/media").RequireAuthorization();
+
+        group.MapPost("/upload", UploadFile)
+             .DisableAntiforgery();
+        group.MapGet("/{id}/download", DownloadFile);
+    }
+
+    private static async Task<IResult> UploadFile(
+        HttpContext context,
+        IMediaService mediaService,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+
+        if (!context.Request.HasFormContentType)
+            return Results.BadRequest(new { error = "Request must be multipart/form-data" });
+
+        var form = await context.Request.ReadFormAsync(ct);
+        var file = form.Files.GetFile("file");
+
+        if (file is null || file.Length == 0)
+            return Results.BadRequest(new { error = "No file provided or file is empty" });
+
+        var uploadedBy = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var mediaFile = await mediaService.UploadAsync(
+                tenantId,
+                file.FileName,
+                file.ContentType,
+                stream,
+                uploadedBy: uploadedBy,
+                ct: ct);
+
+            return Results.Created($"/api/media/{mediaFile.FileId}/download", mediaFile);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+    }
+
+    private static async Task<IResult> DownloadFile(
+        string id,
+        HttpContext context,
+        IMediaService mediaService,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var stream = await mediaService.DownloadAsync(tenantId, EntityId.From(id), ct);
+
+        if (stream is null)
+            return Results.NotFound();
+
+        return Results.File(stream, "application/octet-stream");
+    }
+
+    private static TenantId GetTenantId(HttpContext context)
+    {
+        if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
+            return tid;
+
+        throw new InvalidOperationException("Tenant ID not resolved");
+    }
+}

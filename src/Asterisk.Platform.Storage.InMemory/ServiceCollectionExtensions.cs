@@ -30,6 +30,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMessageStore, InMemoryMessageStore>();
         services.AddSingleton<IContactStore, InMemoryContactStore>();
         services.AddSingleton<ICaseStore, InMemoryCaseStore>();
+        services.AddSingleton<IDispositionStore, InMemoryDispositionStore>();
+        services.AddSingleton<IWrapUpStore, InMemoryWrapUpStore>();
 
         // Identity
         services.AddSingleton<IUserStore, InMemoryUserStore>();
