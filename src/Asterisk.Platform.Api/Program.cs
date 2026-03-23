@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Authentication;
 using Asterisk.Sdk.Pro.Dialer.DependencyInjection;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
+using Asterisk.Platform.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,6 +44,7 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
 {
     builder.Services.UsePostgresDialerStorage(dialerConnectionString);
     builder.Services.AddProDialer(o => { });
+    builder.Services.AddHostedService<CampaignMetricsPoller>();
 }
 
 // ─── Authentication (API key) ─────────────────────────────────────────────────
