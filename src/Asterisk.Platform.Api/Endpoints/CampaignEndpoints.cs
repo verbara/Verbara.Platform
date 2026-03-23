@@ -1,5 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
+using Asterisk.Sdk.Pro.Dialer.Contacts;
+using Asterisk.Sdk.Pro.Dialer.Dispositions;
 using Asterisk.Sdk.Pro.Dialer.Models;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -22,6 +24,26 @@ internal static class CampaignEndpoints
         campaigns.MapPost("/{id:long}/pause", PauseCampaign);
         campaigns.MapPost("/{id:long}/resume", ResumeCampaign);
         campaigns.MapPost("/{id:long}/stop", StopCampaign);
+
+        // Contact Lists
+        campaigns.MapGet("/{id:long}/contact-lists", ListContactLists);
+        campaigns.MapPost("/{id:long}/contact-lists", CreateContactList);
+        campaigns.MapDelete("/{id:long}/contact-lists/{listId:long}", DeleteContactList);
+        campaigns.MapPost("/{id:long}/contact-lists/{listId:long}/import", ImportContacts);
+        campaigns.MapGet("/{id:long}/contact-lists/{listId:long}/contacts", ListContacts);
+
+        // Dispositions
+        campaigns.MapGet("/{id:long}/dispositions", ListDispositions);
+        campaigns.MapPost("/{id:long}/dispositions", CreateDisposition);
+        campaigns.MapPut("/{id:long}/dispositions/{codeId:long}", UpdateDisposition);
+        campaigns.MapDelete("/{id:long}/dispositions/{codeId:long}", DeleteDisposition);
+
+        // Metrics
+        campaigns.MapGet("/{id:long}/metrics", GetCampaignMetrics);
+
+        // Operations
+        var operations = app.MapGroup("/api/operations").RequireAuthorization();
+        operations.MapGet("/campaigns/metrics", ListActiveCampaignMetrics);
     }
 
     // ─── CRUD Handlers ────────────────────────────────────────────────────────
@@ -198,6 +220,186 @@ internal static class CampaignEndpoints
         return Results.Ok();
     }
 
+    // ─── Contact List Handlers ────────────────────────────────────────────────
+
+    private static async Task<IResult> ListContactLists(
+        long id,
+        HttpContext context,
+        ContactListStoreBase contactListStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var lists = await contactListStore.ListContactListsAsync(tenantId, id, ct);
+        return Results.Ok(lists.Select(MapToContactListDto).ToList());
+    }
+
+    private static async Task<IResult> CreateContactList(
+        long id,
+        HttpContext context,
+        CreateContactListRequest body,
+        ContactListStoreBase contactListStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var list = new ContactList
+        {
+            TenantId = tenantId,
+            CampaignId = id,
+            Name = body.Name,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var created = await contactListStore.CreateContactListAsync(tenantId, id, list, ct);
+        return Results.Created($"/api/admin/campaigns/{id}/contact-lists/{created.Id}", MapToContactListDto(created));
+    }
+
+    private static async Task<IResult> DeleteContactList(
+        long id,
+        long listId,
+        HttpContext context,
+        ContactListStoreBase contactListStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        await contactListStore.DeleteContactListAsync(tenantId, listId, ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ImportContacts(
+        long id,
+        long listId,
+        HttpContext context,
+        ImportContactsRequest body,
+        ContactListStoreBase contactListStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var rows = body.Contacts.Select(c => new ContactImportRow(
+            c.FirstName, c.LastName, c.Phone, c.PhoneType, c.Metadata)).ToList();
+        var imported = await contactListStore.ImportContactsAsync(tenantId, listId, rows, ct);
+        return Results.Ok(new ImportResultDto(imported, 0, 0));
+    }
+
+    private static async Task<IResult> ListContacts(
+        long id,
+        long listId,
+        HttpContext context,
+        ContactListStoreBase contactListStore,
+        int page = 1,
+        int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var (items, total) = await contactListStore.ListContactsAsync(tenantId, listId, page, pageSize, ct);
+        return Results.Ok(new PagedResult<Contact>(items, total, page, pageSize));
+    }
+
+    // ─── Disposition Handlers ─────────────────────────────────────────────────
+
+    private static async Task<IResult> ListDispositions(
+        long id,
+        HttpContext context,
+        DispositionCodeStoreBase dispositionStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var codes = await dispositionStore.ListByCampaignAsync(tenantId, id, ct);
+        return Results.Ok(codes.Select(MapToDispositionDto).ToList());
+    }
+
+    private static async Task<IResult> CreateDisposition(
+        long id,
+        HttpContext context,
+        CreateDispositionCodeRequest body,
+        DispositionCodeStoreBase dispositionStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var code = new DispositionCode
+        {
+            TenantId = tenantId,
+            CampaignId = id,
+            Code = body.Code,
+            Label = body.Label,
+            Category = ParseDispositionCategory(body.Category),
+            IsSuccess = body.IsSuccess,
+            TriggerRetry = body.TriggerRetry,
+            RetryDelayMinutes = body.RetryDelayMinutes,
+            TriggerCallback = body.TriggerCallback,
+            IsActive = true,
+        };
+        var created = await dispositionStore.CreateAsync(tenantId, code, ct);
+        return Results.Created($"/api/admin/campaigns/{id}/dispositions/{created.Id}", MapToDispositionDto(created));
+    }
+
+    private static async Task<IResult> UpdateDisposition(
+        long id,
+        long codeId,
+        HttpContext context,
+        UpdateDispositionCodeRequest body,
+        DispositionCodeStoreBase dispositionStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var existing = (await dispositionStore.ListByCampaignAsync(tenantId, id, ct))
+            .FirstOrDefault(d => d.Id == codeId);
+        if (existing is null) return Results.NotFound();
+
+        if (body.Label is not null) existing.Label = body.Label;
+        if (body.Category is not null) existing.Category = ParseDispositionCategory(body.Category);
+        if (body.IsSuccess.HasValue) existing.IsSuccess = body.IsSuccess.Value;
+        if (body.TriggerRetry.HasValue) existing.TriggerRetry = body.TriggerRetry.Value;
+        if (body.RetryDelayMinutes.HasValue) existing.RetryDelayMinutes = body.RetryDelayMinutes.Value;
+        if (body.TriggerCallback.HasValue) existing.TriggerCallback = body.TriggerCallback.Value;
+        if (body.IsActive.HasValue) existing.IsActive = body.IsActive.Value;
+        if (body.SortOrder.HasValue) existing.SortOrder = body.SortOrder.Value;
+
+        await dispositionStore.UpdateAsync(tenantId, existing, ct);
+        return Results.Ok(MapToDispositionDto(existing));
+    }
+
+    private static async Task<IResult> DeleteDisposition(
+        long id,
+        long codeId,
+        HttpContext context,
+        DispositionCodeStoreBase dispositionStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        await dispositionStore.DeleteAsync(tenantId, codeId, ct);
+        return Results.NoContent();
+    }
+
+    // ─── Metrics Handlers ─────────────────────────────────────────────────────
+
+    private static async Task<IResult> GetCampaignMetrics(
+        long id,
+        HttpContext context,
+        CampaignStoreBase campaignStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var campaign = await campaignStore.GetCampaignAsync(tenantId, id, ct);
+        if (campaign is null) return Results.NotFound();
+        var snapshot = await campaignStore.GetCampaignMetricsAsync(tenantId, id, ct);
+        return Results.Ok(MapToMetricsDto(snapshot, campaign));
+    }
+
+    private static async Task<IResult> ListActiveCampaignMetrics(
+        HttpContext context,
+        CampaignStoreBase campaignStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var snapshots = await campaignStore.GetActiveCampaignMetricsAsync(tenantId, ct);
+        var campaigns = await campaignStore.GetActiveCampaignsAsync(tenantId, ct);
+        var campaignMap = campaigns.ToDictionary(c => c.Id);
+        return Results.Ok(snapshots.Select(s =>
+        {
+            campaignMap.TryGetValue(s.CampaignId, out var c);
+            return MapToMetricsDto(s, c);
+        }).ToList());
+    }
+
     // ─── Mapping Helpers ──────────────────────────────────────────────────────
 
     private static CampaignSummaryDto MapToSummary(Campaign c) =>
@@ -299,6 +501,34 @@ internal static class CampaignEndpoints
             EndTime = TimeOnly.TryParse(dto.End, out var et) ? et : TimeOnly.MaxValue,
         };
 
+    private static ContactListDto MapToContactListDto(ContactList l) =>
+        new(l.Id, l.Name, l.TotalContacts, l.PendingContacts, l.CompletedContacts, l.SourceFileName, l.CreatedAt);
+
+    private static DispositionCodeDto MapToDispositionDto(DispositionCode d) =>
+        new(d.Id, d.Code, d.Label, d.Category.ToString(), d.IsSuccess, d.TriggerRetry,
+            d.RetryDelayMinutes, d.TriggerCallback, d.IsActive, d.SortOrder);
+
+    private static DispositionCategory ParseDispositionCategory(string category) =>
+        category.ToLowerInvariant() switch
+        {
+            "success" => DispositionCategory.Success,
+            "failure" => DispositionCategory.Failure,
+            "retry" => DispositionCategory.Retry,
+            _ => DispositionCategory.SystemResult,
+        };
+
+    private static CampaignMetricsDto MapToMetricsDto(CampaignMetricsSnapshot s, Campaign? campaign) =>
+        new(
+            CampaignId: s.CampaignId,
+            CampaignName: s.CampaignName,
+            Status: s.Status.ToString(),
+            ContactsDialed: s.ContactsDialed,
+            ContactsRemaining: s.ContactsRemaining,
+            ConnectRate: s.ConnectRate,
+            AbandonRate: s.AbandonRate,
+            ActiveCalls: 0,
+            PacingRate: campaign?.PowerRatio ?? 1.0);
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private static string GetTenantId(HttpContext context)
@@ -347,3 +577,21 @@ internal sealed record CampaignDetailDto(
     int RetryIntervalMinutes, int TimeBetweenAttemptsMinutes,
     string? ComplianceNotes,
     int TotalContacts, int ContactsDialed, DateTimeOffset CreatedAt);
+
+// ─── Contact List DTOs ─────────────────────────────────────────────────────────
+
+internal sealed record CreateContactListRequest(string Name);
+internal sealed record ContactListDto(long Id, string Name, int TotalContacts, int PendingContacts, int CompletedContacts, string? SourceFileName, DateTimeOffset CreatedAt);
+internal sealed record ImportContactsRequest(ContactImportRowDto[] Contacts);
+internal sealed record ContactImportRowDto(string FirstName, string? LastName, string Phone, string? PhoneType, Dictionary<string, string>? Metadata);
+internal sealed record ImportResultDto(int Imported, int Skipped, int Duplicates);
+
+// ─── Disposition DTOs ──────────────────────────────────────────────────────────
+
+internal sealed record CreateDispositionCodeRequest(string Code, string Label, string Category, bool IsSuccess, bool TriggerRetry, int? RetryDelayMinutes, bool TriggerCallback);
+internal sealed record UpdateDispositionCodeRequest(string? Label, string? Category, bool? IsSuccess, bool? TriggerRetry, int? RetryDelayMinutes, bool? TriggerCallback, bool? IsActive, int? SortOrder);
+internal sealed record DispositionCodeDto(long Id, string Code, string Label, string Category, bool IsSuccess, bool TriggerRetry, int? RetryDelayMinutes, bool TriggerCallback, bool IsActive, int SortOrder);
+
+// ─── Metrics DTOs ──────────────────────────────────────────────────────────────
+
+internal sealed record CampaignMetricsDto(long CampaignId, string CampaignName, string Status, int ContactsDialed, int ContactsRemaining, double ConnectRate, double AbandonRate, int ActiveCalls, double PacingRate);
