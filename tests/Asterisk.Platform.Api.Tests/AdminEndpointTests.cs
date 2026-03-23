@@ -51,7 +51,7 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
         createResponse.StatusCode.Should().Be(HttpStatusCode.Created);
 
         var created = JsonNode.Parse(await createResponse.Content.ReadAsStringAsync());
-        var queueId = created!["queueId"]!["value"]!.GetValue<string>();
+        var queueId = created!["queueId"]!.GetValue<string>();
 
         var getResponse = await _client.GetAsync($"/api/admin/queues/{queueId}");
         getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -75,7 +75,7 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
         var createBody = JsonContent.Create(new { name = "Queue To Delete" });
         var createResp = await _client.PostAsync("/api/admin/queues", createBody);
         var created = JsonNode.Parse(await createResp.Content.ReadAsStringAsync());
-        var queueId = created!["queueId"]!["value"]!.GetValue<string>();
+        var queueId = created!["queueId"]!.GetValue<string>();
 
         var response = await _client.DeleteAsync($"/api/admin/queues/{queueId}");
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
@@ -116,7 +116,7 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
         var createBody = JsonContent.Create(new { email = "delete-me@example.com", displayName = "To Delete", role = 0 });
         var createResp = await _client.PostAsync("/api/admin/users", createBody);
         var created = JsonNode.Parse(await createResp.Content.ReadAsStringAsync());
-        var userId = created!["userId"]!["value"]!.GetValue<string>();
+        var userId = created!["userId"]!.GetValue<string>();
 
         var response = await _client.DeleteAsync($"/api/admin/users/{userId}");
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
@@ -178,7 +178,7 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
         var createBody = JsonContent.Create(new { name = "Temp Team" });
         var createResp = await _client.PostAsync("/api/admin/teams", createBody);
         var created = JsonNode.Parse(await createResp.Content.ReadAsStringAsync());
-        var teamId = created!["teamId"]!["value"]!.GetValue<string>();
+        var teamId = created!["teamId"]!.GetValue<string>();
 
         var response = await _client.DeleteAsync($"/api/admin/teams/{teamId}");
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
