@@ -13,14 +13,14 @@ internal static class SystemEndpoints
         group.MapGet("/cluster", GetClusterStatus);
     }
 
-    private static IResult GetSystemInfo(HttpContext context)
+    private static IResult GetSystemInfo(HttpContext context, IFeatureRegistry features)
     {
         var tenantId = GetTenantId(context);
         return Results.Ok(new
         {
             version = "1.0.0",
             tenantId = tenantId.ToString(),
-            features = new { },
+            features = features.GetFeatures(),
         });
     }
 
