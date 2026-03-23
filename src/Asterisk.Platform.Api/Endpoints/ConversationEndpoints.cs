@@ -3,6 +3,8 @@ using Asterisk.Platform.Conversations.Services;
 using Asterisk.Platform.Conversations.Stores;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Switchboard;
+using Asterisk.Sdk.Pro.Dialer.Campaign;
+using Asterisk.Sdk.Pro.Dialer.Dispositions;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -161,6 +163,9 @@ internal static class ConversationEndpoints
         HttpContext context,
         IConversationStore conversationStore,
         IWrapUpStore wrapUpStore,
+        CampaignStoreBase campaignStore,
+        DispositionCodeStoreBase dispositionCodeStore,
+        PlatformEventBus eventBus,
         WrapUpRequest? body,
         CancellationToken ct)
     {
@@ -196,6 +201,46 @@ internal static class ConversationEndpoints
 
         await wrapUpStore.SaveAsync(record, ct);
 
+        // ─── Campaign Disposition Bridge ─────────────────────────────────
+        // If this is a campaign call, update the SDK call attempt + schedule callback
+        if (body?.CampaignDispositionId is { } campaignDispoId)
+        {
+            var meta = conversation.Metadata;
+            if (meta.TryGetValue("callAttemptId", out var attemptIdStr) &&
+                long.TryParse(attemptIdStr, out var callAttemptId))
+            {
+                var tenantStr = tenantId.Value;
+
+                // Update call attempt with disposition
+                await campaignStore.UpdateCallAttemptDispositionAsync(
+                    tenantStr, callAttemptId, campaignDispoId, body.Notes, ct);
+
+                // Check if callback needs scheduling
+                if (meta.TryGetValue("campaignId", out var campIdStr) &&
+                    long.TryParse(campIdStr, out var campaignId) &&
+                    meta.TryGetValue("contactId", out var contactIdStr) &&
+                    long.TryParse(contactIdStr, out var contactId))
+                {
+                    // Fetch disposition to check TriggerCallback flag
+                    var dispositions = await dispositionCodeStore.ListByCampaignAsync(tenantStr, campaignId, ct);
+                    var dispo = dispositions.FirstOrDefault(d => d.Id == campaignDispoId);
+
+                    if (dispo?.TriggerCallback == true && body.CallbackDate is { } cbDate &&
+                        DateTimeOffset.TryParse(cbDate, out var scheduledAt))
+                    {
+                        var agentSubId = context.User.FindFirst("sub")?.Value ?? "";
+                        await campaignStore.SaveCallbackAsync(
+                            tenantStr, campaignId, contactId, scheduledAt, agentSubId, ct);
+                    }
+
+                    // Publish SSE event
+                    eventBus.Publish(new CampaignDispositionSubmittedEvent(
+                        tenantStr, campaignId, dispo?.Code ?? "",
+                        context.User.FindFirst("sub")?.Value ?? ""));
+                }
+            }
+        }
+
         return Results.Ok(record);
     }
 
@@ -216,4 +261,9 @@ internal static class ConversationEndpoints
 
 internal sealed record SendMessageRequest(string Text);
 internal sealed record TransferRequest(string? TargetQueueId, string? TargetAgentId);
-internal sealed record WrapUpRequest(string? DispositionId = null, string? Notes = null);
+internal sealed record WrapUpRequest(
+    string? DispositionId = null,
+    string? Notes = null,
+    long? CampaignDispositionId = null,
+    string? CallbackDate = null,
+    string? CallbackPhone = null);
