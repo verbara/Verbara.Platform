@@ -2,9 +2,11 @@ using System.Security.Cryptography;
 using System.Text;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 
 namespace Asterisk.Platform.Api.Tests;
@@ -46,6 +48,11 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
                  .Returns(Task.FromResult<ApiKey?>(apiKey));
 
             services.AddSingleton(store);
+
+            // Disable license enforcement in tests and provide dummy public key byte[]
+            services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Disabled);
+            if (!services.Any(d => d.ServiceType == typeof(byte[])))
+                services.AddSingleton<byte[]>([]);
         });
 
         return base.CreateHost(builder);
