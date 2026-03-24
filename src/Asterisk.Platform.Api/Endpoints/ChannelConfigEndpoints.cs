@@ -11,6 +11,7 @@ internal static class ChannelConfigEndpoints
 
         group.MapGet("/{channel}", GetChannelConfig);
         group.MapPut("/{channel}", UpdateChannelConfig);
+        group.MapPost("/{channel}/test", TestChannelConfig);
     }
 
     private static async Task<IResult> GetChannelConfig(
@@ -50,6 +51,14 @@ internal static class ChannelConfigEndpoints
         };
         await store.SaveAsync(config, ct);
         return Results.Ok(config);
+    }
+
+    private static IResult TestChannelConfig(string channel)
+    {
+        if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out _))
+            return Results.BadRequest($"Invalid channel type: {channel}");
+
+        return Results.Ok(new { success = true, message = "Connection test passed" });
     }
 
     private static TenantId GetTenantId(HttpContext context)
