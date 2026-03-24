@@ -7,6 +7,7 @@ using Asterisk.Platform.Conversations.Serialization;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Flows;
 using Asterisk.Platform.Queues;
+using Asterisk.Platform.Surveys;
 
 namespace Asterisk.Platform.Storage.Postgres;
 
@@ -33,6 +34,12 @@ namespace Asterisk.Platform.Storage.Postgres;
 [JsonSerializable(typeof(HoursOfOperation))]
 [JsonSerializable(typeof(WrapUpConfig))]
 [JsonSerializable(typeof(ChannelCapacity))]
+[JsonSerializable(typeof(List<int>))]
+[JsonSerializable(typeof(IReadOnlyList<int>))]
+[JsonSerializable(typeof(List<SurveyQuestion>))]
+[JsonSerializable(typeof(IReadOnlyList<SurveyQuestion>))]
+[JsonSerializable(typeof(List<SurveyAnswer>))]
+[JsonSerializable(typeof(IReadOnlyList<SurveyAnswer>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

@@ -8,8 +8,11 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Conversations.Stores;
 using Asterisk.Platform.Flows;
 using Asterisk.Platform.Identity;
+using Asterisk.Platform.Audit;
+using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Storage.Postgres.Stores;
+using Asterisk.Platform.Surveys;
 
 namespace Asterisk.Platform.Storage.Postgres;
 
@@ -38,6 +41,7 @@ public static class ServiceCollectionExtensions
         // Queues
         services.AddSingleton<IQueueStore, PostgresQueueStore>();
         services.AddSingleton<IAgentStore, PostgresAgentStore>();
+        services.AddSingleton<ITeamStore, PostgresTeamStore>();
 
         // Channels
         services.AddSingleton<ITenantChannelConfigStore, PostgresTenantChannelConfigStore>();
@@ -51,10 +55,29 @@ public static class ServiceCollectionExtensions
 
         // Automation
         services.AddSingleton<IAutomationRuleStore, PostgresAutomationRuleStore>();
+        services.AddSingleton<IAutomationExecutionLogStore, PostgresAutomationLogStore>();
         services.AddSingleton<ITimerStore, PostgresTimerStore>();
 
         // KnowledgeBase
         services.AddSingleton<IArticleStore, PostgresArticleStore>();
+
+        // Conversations — wrap-up + dispositions + cases
+        services.AddSingleton<IWrapUpStore, PostgresWrapUpStore>();
+        services.AddSingleton<IDispositionStore, PostgresDispositionStore>();
+        services.AddSingleton<ICaseStore, PostgresCaseStore>();
+
+        // Identity — service accounts
+        services.AddSingleton<IServiceAccountStore, PostgresServiceAccountStore>();
+
+        // Media
+        services.AddSingleton<IMediaStore, PostgresMediaStore>();
+
+        // Surveys
+        services.AddSingleton<ISurveyStore, PostgresSurveyStore>();
+        services.AddSingleton<ISurveyResponseStore, PostgresSurveyResponseStore>();
+
+        // Audit
+        services.AddSingleton<IAuditStore, PostgresAuditStore>();
 
         return services;
     }
