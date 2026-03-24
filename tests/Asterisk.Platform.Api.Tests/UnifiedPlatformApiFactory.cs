@@ -5,9 +5,12 @@ using Asterisk.Sdk.Pro.Analytics;
 using Asterisk.Sdk.Pro.CallAnalytics.Domain;
 using Asterisk.Sdk.Pro.CallAnalytics.Store;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
+using Asterisk.Sdk.Pro.Dialer.Compliance;
 using Asterisk.Sdk.Pro.Dialer.Contacts;
 using Asterisk.Sdk.Pro.Dialer.Dispositions;
 using Asterisk.Sdk.Pro.Dialer.Models;
+using Asterisk.Sdk.Pro.Dialer.Routing;
+using Asterisk.Sdk.Pro.Dialer.Scheduling;
 using Asterisk.Sdk.Pro.EventStore;
 using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -67,30 +70,10 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
             if (!services.Any(d => d.ServiceType == typeof(byte[])))
                 services.AddSingleton<byte[]>([]);
 
-            // ── Campaign stores ───────────────────────────────────────────────
-            if (!services.Any(d => d.ServiceType == typeof(CampaignStoreBase)))
-            {
-                services.AddSingleton<InMemoryCampaignStore>();
-                services.AddSingleton<CampaignStoreBase>(sp => sp.GetRequiredService<InMemoryCampaignStore>());
-                services.AddSingleton<CampaignLifecycleManager>(sp =>
-                    new CampaignLifecycleManager(
-                        sp.GetRequiredService<CampaignStoreBase>(),
-                        sp.GetRequiredService<ILogger<CampaignLifecycleManager>>()));
-            }
+            // ── Campaign + Dialer config stores ─────────────────────────────────
+            AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
 
-            if (!services.Any(d => d.ServiceType == typeof(ContactListStoreBase)))
-            {
-                services.AddSingleton<InMemoryContactListStore>();
-                services.AddSingleton<ContactListStoreBase>(sp => sp.GetRequiredService<InMemoryContactListStore>());
-            }
-
-            if (!services.Any(d => d.ServiceType == typeof(DispositionCodeStoreBase)))
-            {
-                services.AddSingleton<InMemoryDispositionCodeStore>();
-                services.AddSingleton<DispositionCodeStoreBase>(sp => sp.GetRequiredService<InMemoryDispositionCodeStore>());
-            }
-
-            // ── Analytics stores ──────────────────────────────────────────────
+            // ── Analytics stores (override with test-accessible instances) ────
             UpsertStore<ICompletedSessionStore>(services, CdrStore);
             UpsertStore<ICallAnalyticsStore>(services, QaStore);
             UpsertStore<IIntervalSnapshotStore>(services, SnapshotStore);
@@ -154,6 +137,9 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
 
     public override ValueTask<DialerSettings> GetDialerSettingsAsync(string tenantId, CancellationToken ct)
         => new ValueTask<DialerSettings>(new DialerSettings());
+
+    public override ValueTask UpsertDialerSettingsAsync(DialerSettings settings, string tenantId, CancellationToken ct = default)
+        => ValueTask.CompletedTask;
 
     public override ValueTask SaveCallbackAsync(string tenantId, long campaignId, long contactId, DateTimeOffset scheduledAt, string? agentId, CancellationToken ct)
     {
@@ -488,5 +474,295 @@ public sealed class InMemoryIntervalSnapshotStore : IIntervalSnapshotStore
         string? agentId = null, CancellationToken ct = default)
     {
         return new ValueTask<IReadOnlyList<AgentSnapshot>>(Array.Empty<AgentSnapshot>());
+    }
+}
+
+// ─── v0.5.0 Dialer Config In-Memory Store Implementations ─────────────────────
+
+internal sealed class InMemoryTrunkStore : TrunkStoreBase
+{
+    private long _nextId = 1;
+    private readonly ConcurrentDictionary<long, Trunk> _trunks = new();
+
+    public override ValueTask<IReadOnlyList<Trunk>> ListAsync(string tenantId, CancellationToken ct = default)
+    {
+        IReadOnlyList<Trunk> result = [.. _trunks.Values];
+        return new ValueTask<IReadOnlyList<Trunk>>(result);
+    }
+
+    public override ValueTask<Trunk?> GetAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _trunks.TryGetValue(id, out var trunk);
+        return new ValueTask<Trunk?>(trunk);
+    }
+
+    public override ValueTask<long> CreateAsync(Trunk trunk, string tenantId, CancellationToken ct = default)
+    {
+        var id = Interlocked.Increment(ref _nextId);
+        trunk.Id = id;
+        _trunks[id] = trunk;
+        return new ValueTask<long>(id);
+    }
+
+    public override ValueTask UpdateAsync(Trunk trunk, string tenantId, CancellationToken ct = default)
+    {
+        _trunks[trunk.Id] = trunk;
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _trunks.TryRemove(id, out _);
+        return ValueTask.CompletedTask;
+    }
+}
+
+internal sealed class InMemoryOutboundRouteStore : OutboundRouteStoreBase
+{
+    private long _nextId = 1;
+    private readonly ConcurrentDictionary<long, OutboundRoute> _routes = new();
+
+    public override ValueTask<IReadOnlyList<OutboundRoute>> ListByPriorityAsync(string tenantId, CancellationToken ct = default)
+    {
+        IReadOnlyList<OutboundRoute> result = [.. _routes.Values.OrderBy(r => r.Priority)];
+        return new ValueTask<IReadOnlyList<OutboundRoute>>(result);
+    }
+
+    public override ValueTask<OutboundRoute?> GetAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _routes.TryGetValue(id, out var route);
+        return new ValueTask<OutboundRoute?>(route);
+    }
+
+    public override ValueTask<long> CreateAsync(OutboundRoute route, string tenantId, CancellationToken ct = default)
+    {
+        var id = Interlocked.Increment(ref _nextId);
+        route.Id = id;
+        _routes[id] = route;
+        return new ValueTask<long>(id);
+    }
+
+    public override ValueTask UpdateAsync(OutboundRoute route, string tenantId, CancellationToken ct = default)
+    {
+        _routes[route.Id] = route;
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _routes.TryRemove(id, out _);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask ReorderAsync(IReadOnlyList<long> orderedIds, string tenantId, CancellationToken ct = default)
+    {
+        for (var i = 0; i < orderedIds.Count; i++)
+        {
+            if (_routes.TryGetValue(orderedIds[i], out var route))
+                route.Priority = i;
+        }
+        return ValueTask.CompletedTask;
+    }
+}
+
+internal sealed class InMemoryDncListStore : DncListStoreBase
+{
+    private long _nextId = 1;
+    private readonly ConcurrentDictionary<long, DncList> _lists = new();
+    private readonly ConcurrentDictionary<long, List<DncEntry>> _entries = new();
+
+    public override ValueTask<IReadOnlyList<DncList>> ListAsync(string tenantId, CancellationToken ct = default)
+    {
+        IReadOnlyList<DncList> result = [.. _lists.Values];
+        return new ValueTask<IReadOnlyList<DncList>>(result);
+    }
+
+    public override ValueTask<DncList?> GetAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _lists.TryGetValue(id, out var list);
+        return new ValueTask<DncList?>(list);
+    }
+
+    public override ValueTask<long> CreateAsync(DncList list, string tenantId, CancellationToken ct = default)
+    {
+        var id = Interlocked.Increment(ref _nextId);
+        list.Id = id;
+        _lists[id] = list;
+        _entries[id] = [];
+        return new ValueTask<long>(id);
+    }
+
+    public override ValueTask UpdateAsync(DncList list, string tenantId, CancellationToken ct = default)
+    {
+        _lists[list.Id] = list;
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _lists.TryRemove(id, out _);
+        _entries.TryRemove(id, out _);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask AddEntryAsync(long listId, string tenantId, DncEntry entry, CancellationToken ct = default)
+    {
+        var entries = _entries.GetOrAdd(listId, _ => []);
+        entries.Add(entry);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask RemoveEntryAsync(long listId, string phoneNumber, string tenantId, CancellationToken ct = default)
+    {
+        if (_entries.TryGetValue(listId, out var entries))
+            entries.RemoveAll(e => e.PhoneNumber == phoneNumber);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask<int> BulkImportAsync(long listId, string tenantId, IReadOnlyList<DncEntry> entries, CancellationToken ct = default)
+    {
+        var list = _entries.GetOrAdd(listId, _ => []);
+        list.AddRange(entries);
+        return new ValueTask<int>(entries.Count);
+    }
+
+    public override ValueTask<bool> CheckNumberAsync(long listId, string phoneNumber, string tenantId, CancellationToken ct = default)
+    {
+        var exists = _entries.TryGetValue(listId, out var entries) && entries.Any(e => e.PhoneNumber == phoneNumber);
+        return new ValueTask<bool>(exists);
+    }
+
+    public override ValueTask<IReadOnlyList<DncEntry>> ListEntriesAsync(long listId, string tenantId, int offset, int limit, CancellationToken ct = default)
+    {
+        if (!_entries.TryGetValue(listId, out var entries))
+            return new ValueTask<IReadOnlyList<DncEntry>>(Array.Empty<DncEntry>());
+        IReadOnlyList<DncEntry> result = entries.Skip(offset).Take(limit).ToList();
+        return new ValueTask<IReadOnlyList<DncEntry>>(result);
+    }
+}
+
+internal sealed class InMemoryCallerIdPoolStore : CallerIdPoolStoreBase
+{
+    private long _nextId = 1;
+    private readonly ConcurrentDictionary<long, CallerIdPool> _pools = new();
+    private readonly ConcurrentDictionary<long, List<CallerIdEntry>> _entries = new();
+
+    public override ValueTask<IReadOnlyList<CallerIdPool>> ListAsync(string tenantId, CancellationToken ct = default)
+    {
+        IReadOnlyList<CallerIdPool> result = [.. _pools.Values];
+        return new ValueTask<IReadOnlyList<CallerIdPool>>(result);
+    }
+
+    public override ValueTask<CallerIdPool?> GetAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _pools.TryGetValue(id, out var pool);
+        return new ValueTask<CallerIdPool?>(pool);
+    }
+
+    public override ValueTask<long> CreateAsync(CallerIdPool pool, string tenantId, CancellationToken ct = default)
+    {
+        var id = Interlocked.Increment(ref _nextId);
+        pool.Id = id;
+        _pools[id] = pool;
+        _entries[id] = [];
+        return new ValueTask<long>(id);
+    }
+
+    public override ValueTask UpdateAsync(CallerIdPool pool, string tenantId, CancellationToken ct = default)
+    {
+        _pools[pool.Id] = pool;
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _pools.TryRemove(id, out _);
+        _entries.TryRemove(id, out _);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask AddEntryAsync(long poolId, string tenantId, CallerIdEntry entry, CancellationToken ct = default)
+    {
+        var entries = _entries.GetOrAdd(poolId, _ => []);
+        entries.Add(entry);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask RemoveEntryAsync(long poolId, long entryId, string tenantId, CancellationToken ct = default)
+    {
+        if (_entries.TryGetValue(poolId, out var entries))
+            entries.RemoveAll(e => e.Id == entryId);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask<IReadOnlyList<CallerIdEntry>> ListEntriesAsync(long poolId, string tenantId, CancellationToken ct = default)
+    {
+        if (!_entries.TryGetValue(poolId, out var entries))
+            return new ValueTask<IReadOnlyList<CallerIdEntry>>(Array.Empty<CallerIdEntry>());
+        IReadOnlyList<CallerIdEntry> result = [.. entries];
+        return new ValueTask<IReadOnlyList<CallerIdEntry>>(result);
+    }
+}
+
+internal sealed class InMemoryHolidayCalendarStore : HolidayCalendarStoreBase
+{
+    private long _nextId = 1;
+    private readonly ConcurrentDictionary<long, HolidayCalendar> _calendars = new();
+    private readonly ConcurrentDictionary<long, List<Holiday>> _holidays = new();
+
+    public override ValueTask<IReadOnlyList<HolidayCalendar>> ListAsync(string tenantId, CancellationToken ct = default)
+    {
+        IReadOnlyList<HolidayCalendar> result = [.. _calendars.Values];
+        return new ValueTask<IReadOnlyList<HolidayCalendar>>(result);
+    }
+
+    public override ValueTask<HolidayCalendar?> GetAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _calendars.TryGetValue(id, out var cal);
+        return new ValueTask<HolidayCalendar?>(cal);
+    }
+
+    public override ValueTask<long> CreateAsync(HolidayCalendar calendar, string tenantId, CancellationToken ct = default)
+    {
+        var id = Interlocked.Increment(ref _nextId);
+        calendar.Id = id;
+        _calendars[id] = calendar;
+        _holidays[id] = [];
+        return new ValueTask<long>(id);
+    }
+
+    public override ValueTask UpdateAsync(HolidayCalendar calendar, string tenantId, CancellationToken ct = default)
+    {
+        _calendars[calendar.Id] = calendar;
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
+    {
+        _calendars.TryRemove(id, out _);
+        _holidays.TryRemove(id, out _);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask AddHolidayAsync(long calendarId, string tenantId, Holiday holiday, CancellationToken ct = default)
+    {
+        var holidays = _holidays.GetOrAdd(calendarId, _ => []);
+        holidays.Add(holiday);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask RemoveHolidayAsync(long calendarId, long holidayId, string tenantId, CancellationToken ct = default)
+    {
+        if (_holidays.TryGetValue(calendarId, out var holidays))
+            holidays.RemoveAll(h => h.Id == holidayId);
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask<IReadOnlyList<Holiday>> ListHolidaysAsync(long calendarId, string tenantId, CancellationToken ct = default)
+    {
+        if (!_holidays.TryGetValue(calendarId, out var holidays))
+            return new ValueTask<IReadOnlyList<Holiday>>(Array.Empty<Holiday>());
+        IReadOnlyList<Holiday> result = [.. holidays];
+        return new ValueTask<IReadOnlyList<Holiday>>(result);
     }
 }

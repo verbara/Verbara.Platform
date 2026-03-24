@@ -5,8 +5,11 @@ using Asterisk.Platform.Identity;
 using Asterisk.Sdk.Pro.Analytics;
 using Asterisk.Sdk.Pro.CallAnalytics.Store;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
+using Asterisk.Sdk.Pro.Dialer.Compliance;
 using Asterisk.Sdk.Pro.Dialer.Contacts;
 using Asterisk.Sdk.Pro.Dialer.Dispositions;
+using Asterisk.Sdk.Pro.Dialer.Routing;
+using Asterisk.Sdk.Pro.Dialer.Scheduling;
 using Asterisk.Sdk.Pro.EventStore;
 using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -62,36 +65,8 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
             if (!services.Any(d => d.ServiceType == typeof(byte[])))
                 services.AddSingleton<byte[]>([]);
 
-            // ── Campaign stores (conditional on Postgres in Program.cs) ───────
-            if (!services.Any(d => d.ServiceType == typeof(CampaignStoreBase)))
-            {
-                services.AddSingleton<InMemoryCampaignStore>();
-                services.AddSingleton<CampaignStoreBase>(sp => sp.GetRequiredService<InMemoryCampaignStore>());
-                services.AddSingleton<CampaignLifecycleManager>(sp =>
-                    new CampaignLifecycleManager(
-                        sp.GetRequiredService<CampaignStoreBase>(),
-                        sp.GetRequiredService<ILogger<CampaignLifecycleManager>>()));
-            }
-
-            if (!services.Any(d => d.ServiceType == typeof(ContactListStoreBase)))
-            {
-                services.AddSingleton<InMemoryContactListStore>();
-                services.AddSingleton<ContactListStoreBase>(sp => sp.GetRequiredService<InMemoryContactListStore>());
-            }
-
-            if (!services.Any(d => d.ServiceType == typeof(DispositionCodeStoreBase)))
-            {
-                services.AddSingleton<InMemoryDispositionCodeStore>();
-                services.AddSingleton<DispositionCodeStoreBase>(sp => sp.GetRequiredService<InMemoryDispositionCodeStore>());
-            }
-
-            // ── Analytics stores (conditional on Postgres in Program.cs) ──────
-            if (!services.Any(d => d.ServiceType == typeof(ICompletedSessionStore)))
-                services.AddSingleton<ICompletedSessionStore, InMemoryCompletedSessionStore>();
-            if (!services.Any(d => d.ServiceType == typeof(ICallAnalyticsStore)))
-                services.AddSingleton<ICallAnalyticsStore, InMemoryCallAnalyticsStore>();
-            if (!services.Any(d => d.ServiceType == typeof(IIntervalSnapshotStore)))
-                services.AddSingleton<IIntervalSnapshotStore, InMemoryIntervalSnapshotStore>();
+            // ── Dialer + Analytics stores ────────────────────────────────────
+            RegisterInMemoryStores(services);
         });
 
         return base.CreateHost(builder);
@@ -103,6 +78,52 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {TestApiKey}");
         client.DefaultRequestHeaders.Add("X-Tenant-Id", TestTenantId);
         return client;
+    }
+
+    internal static void RegisterInMemoryStores(IServiceCollection services)
+    {
+        // Campaign stores
+        if (!services.Any(d => d.ServiceType == typeof(CampaignStoreBase)))
+        {
+            services.AddSingleton<InMemoryCampaignStore>();
+            services.AddSingleton<CampaignStoreBase>(sp => sp.GetRequiredService<InMemoryCampaignStore>());
+            services.AddSingleton<CampaignLifecycleManager>(sp =>
+                new CampaignLifecycleManager(
+                    sp.GetRequiredService<CampaignStoreBase>(),
+                    sp.GetRequiredService<ILogger<CampaignLifecycleManager>>()));
+        }
+
+        if (!services.Any(d => d.ServiceType == typeof(ContactListStoreBase)))
+        {
+            services.AddSingleton<InMemoryContactListStore>();
+            services.AddSingleton<ContactListStoreBase>(sp => sp.GetRequiredService<InMemoryContactListStore>());
+        }
+
+        if (!services.Any(d => d.ServiceType == typeof(DispositionCodeStoreBase)))
+        {
+            services.AddSingleton<InMemoryDispositionCodeStore>();
+            services.AddSingleton<DispositionCodeStoreBase>(sp => sp.GetRequiredService<InMemoryDispositionCodeStore>());
+        }
+
+        // v0.5.0 Dialer config stores
+        if (!services.Any(d => d.ServiceType == typeof(TrunkStoreBase)))
+            services.AddSingleton<TrunkStoreBase, InMemoryTrunkStore>();
+        if (!services.Any(d => d.ServiceType == typeof(OutboundRouteStoreBase)))
+            services.AddSingleton<OutboundRouteStoreBase, InMemoryOutboundRouteStore>();
+        if (!services.Any(d => d.ServiceType == typeof(DncListStoreBase)))
+            services.AddSingleton<DncListStoreBase, InMemoryDncListStore>();
+        if (!services.Any(d => d.ServiceType == typeof(CallerIdPoolStoreBase)))
+            services.AddSingleton<CallerIdPoolStoreBase, InMemoryCallerIdPoolStore>();
+        if (!services.Any(d => d.ServiceType == typeof(HolidayCalendarStoreBase)))
+            services.AddSingleton<HolidayCalendarStoreBase, InMemoryHolidayCalendarStore>();
+
+        // Analytics stores
+        if (!services.Any(d => d.ServiceType == typeof(ICompletedSessionStore)))
+            services.AddSingleton<ICompletedSessionStore, InMemoryCompletedSessionStore>();
+        if (!services.Any(d => d.ServiceType == typeof(ICallAnalyticsStore)))
+            services.AddSingleton<ICallAnalyticsStore, InMemoryCallAnalyticsStore>();
+        if (!services.Any(d => d.ServiceType == typeof(IIntervalSnapshotStore)))
+            services.AddSingleton<IIntervalSnapshotStore, InMemoryIntervalSnapshotStore>();
     }
 
     private static string HashKey(string rawKey)
