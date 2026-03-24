@@ -45,6 +45,9 @@ builder.Services.AddProLicensing();
 // ─── Agent Assist Config Store (singleton for mutable admin config) ───────────
 builder.Services.AddSingleton<AgentAssistConfigStore>();
 
+// ─── System Settings Store (singleton for mutable system settings) ────────────
+builder.Services.AddSingleton<SystemSettingsStore>();
+
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
 var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";
 if (!string.IsNullOrEmpty(dialerConnectionString))

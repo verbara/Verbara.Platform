@@ -1,6 +1,24 @@
+using System.Collections.Concurrent;
 using Asterisk.Platform.Core;
 
 namespace Asterisk.Platform.Api.Endpoints;
+
+// ─── In-memory singleton store for system settings ────────────────────────────
+
+internal sealed class SystemSettingsStore
+{
+    private readonly ConcurrentDictionary<string, SystemSettingsRecord> _settings = new();
+
+    public SystemSettingsRecord Get(string tenantId) =>
+        _settings.GetOrAdd(tenantId, _ => new SystemSettingsRecord("Asterisk Platform", "UTC", "en-US"));
+
+    public void Save(string tenantId, SystemSettingsRecord record) =>
+        _settings[tenantId] = record;
+}
+
+internal sealed record SystemSettingsRecord(string PlatformName, string DefaultTimezone, string DefaultLanguage);
+
+// ─── Endpoint registration ────────────────────────────────────────────────────
 
 internal static class SystemEndpoints
 {
@@ -11,6 +29,8 @@ internal static class SystemEndpoints
         group.MapGet("/info", GetSystemInfo);
         group.MapGet("/license", GetLicenseInfo);
         group.MapGet("/cluster", GetClusterStatus);
+        group.MapGet("/settings", GetSettings);
+        group.MapPost("/settings", SaveSettings);
     }
 
     private static IResult GetSystemInfo(HttpContext context, IFeatureRegistry features)
@@ -47,6 +67,34 @@ internal static class SystemEndpoints
         });
     }
 
+    private static IResult GetSettings(HttpContext context, SystemSettingsStore store)
+    {
+        var tenantId = GetTenantId(context).ToString();
+        var record = store.Get(tenantId);
+        return Results.Ok(new
+        {
+            platformName = record.PlatformName,
+            defaultTimezone = record.DefaultTimezone,
+            defaultLanguage = record.DefaultLanguage,
+        });
+    }
+
+    private static IResult SaveSettings(
+        HttpContext context,
+        SystemSettingsRequest body,
+        SystemSettingsStore store)
+    {
+        var tenantId = GetTenantId(context).ToString();
+        var record = new SystemSettingsRecord(body.PlatformName, body.DefaultTimezone, body.DefaultLanguage);
+        store.Save(tenantId, record);
+        return Results.Ok(new
+        {
+            platformName = record.PlatformName,
+            defaultTimezone = record.DefaultTimezone,
+            defaultLanguage = record.DefaultLanguage,
+        });
+    }
+
     private static TenantId GetTenantId(HttpContext context)
     {
         if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
@@ -55,3 +103,7 @@ internal static class SystemEndpoints
         throw new InvalidOperationException("Tenant ID not resolved");
     }
 }
+
+// ─── Request DTO ──────────────────────────────────────────────────────────────
+
+internal sealed record SystemSettingsRequest(string PlatformName, string DefaultTimezone, string DefaultLanguage);
