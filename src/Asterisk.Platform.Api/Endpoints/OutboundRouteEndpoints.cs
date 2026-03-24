@@ -1,0 +1,150 @@
+using Asterisk.Platform.Core;
+using Asterisk.Sdk.Pro.Dialer.Models;
+using Asterisk.Sdk.Pro.Dialer.Routing;
+
+namespace Asterisk.Platform.Api.Endpoints;
+
+internal static class OutboundRouteEndpoints
+{
+    public static void MapOutboundRouteEndpoints(this IEndpointRouteBuilder app)
+    {
+        var routes = app.MapGroup("/api/admin/routes").RequireAuthorization();
+
+        routes.MapGet("/", ListRoutes);
+        routes.MapGet("/{id:long}", GetRoute);
+        routes.MapPost("/", CreateRoute);
+        routes.MapPut("/{id:long}", UpdateRoute);
+        routes.MapDelete("/{id:long}", DeleteRoute);
+        routes.MapPut("/reorder", ReorderRoutes);
+    }
+
+    // ─── Handlers ────────────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListRoutes(
+        HttpContext context,
+        OutboundRouteStoreBase routeStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var items = await routeStore.ListByPriorityAsync(tenantId, ct);
+        return Results.Ok(items.Select(MapToDto).ToList());
+    }
+
+    private static async Task<IResult> GetRoute(
+        long id,
+        HttpContext context,
+        OutboundRouteStoreBase routeStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var route = await routeStore.GetAsync(id, tenantId, ct);
+        return route is null ? Results.NotFound() : Results.Ok(MapToDto(route));
+    }
+
+    private static async Task<IResult> CreateRoute(
+        HttpContext context,
+        CreateOutboundRouteRequest body,
+        OutboundRouteStoreBase routeStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var route = new OutboundRoute
+        {
+            CampaignId = body.CampaignId,
+            Pattern = body.Pattern,
+            PatternType = ParsePatternType(body.PatternType),
+            TrunkId = body.TrunkId,
+            OverflowTrunkId = body.OverflowTrunkId,
+            DialPrefix = body.DialPrefix,
+            Priority = body.Priority,
+        };
+        var id = await routeStore.CreateAsync(route, tenantId, ct);
+        route.Id = id;
+        return Results.Created($"/api/admin/routes/{id}", MapToDto(route));
+    }
+
+    private static async Task<IResult> UpdateRoute(
+        long id,
+        HttpContext context,
+        UpdateOutboundRouteRequest body,
+        OutboundRouteStoreBase routeStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var route = await routeStore.GetAsync(id, tenantId, ct);
+        if (route is null)
+            return Results.NotFound();
+
+        if (body.CampaignId.HasValue) route.CampaignId = body.CampaignId;
+        if (body.Pattern is not null) route.Pattern = body.Pattern;
+        if (body.PatternType is not null) route.PatternType = ParsePatternType(body.PatternType);
+        if (body.TrunkId.HasValue) route.TrunkId = body.TrunkId.Value;
+        if (body.OverflowTrunkId.HasValue) route.OverflowTrunkId = body.OverflowTrunkId;
+        if (body.DialPrefix is not null) route.DialPrefix = body.DialPrefix;
+        if (body.Priority.HasValue) route.Priority = body.Priority.Value;
+
+        await routeStore.UpdateAsync(route, tenantId, ct);
+        return Results.Ok(MapToDto(route));
+    }
+
+    private static async Task<IResult> DeleteRoute(
+        long id,
+        HttpContext context,
+        OutboundRouteStoreBase routeStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        await routeStore.DeleteAsync(id, tenantId, ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ReorderRoutes(
+        HttpContext context,
+        long[] orderedIds,
+        OutboundRouteStoreBase routeStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        await routeStore.ReorderAsync(orderedIds, tenantId, ct);
+        return Results.Ok();
+    }
+
+    // ─── Mapping Helpers ──────────────────────────────────────────────────────
+
+    private static OutboundRouteDto MapToDto(OutboundRoute r) =>
+        new(r.Id, r.CampaignId, r.Pattern, r.PatternType.ToString(), r.TrunkId,
+            r.OverflowTrunkId, r.DialPrefix, r.Priority);
+
+    private static PatternType ParsePatternType(string patternType) =>
+        patternType.ToLowerInvariant() switch
+        {
+            "digitmask" or "digit_mask" => PatternType.DigitMask,
+            "regex" => PatternType.Regex,
+            "prefix" => PatternType.Prefix,
+            _ => PatternType.Prefix,
+        };
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private static string GetTenantId(HttpContext context)
+    {
+        if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
+            return tid.Value;
+
+        throw new InvalidOperationException("Tenant ID not resolved");
+    }
+}
+
+// ─── Request/Response DTOs ─────────────────────────────────────────────────────
+
+internal sealed record CreateOutboundRouteRequest(
+    long? CampaignId, string Pattern, string PatternType, long TrunkId,
+    long? OverflowTrunkId, string? DialPrefix, int Priority);
+
+internal sealed record UpdateOutboundRouteRequest(
+    long? CampaignId, string? Pattern, string? PatternType, long? TrunkId,
+    long? OverflowTrunkId, string? DialPrefix, int? Priority);
+
+internal sealed record OutboundRouteDto(
+    long Id, long? CampaignId, string Pattern, string PatternType, long TrunkId,
+    long? OverflowTrunkId, string? DialPrefix, int Priority);

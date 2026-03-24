@@ -103,6 +103,12 @@ app.MapSystemEndpoints();
 app.MapSseEndpoints();
 app.MapMediaEndpoints();
 app.MapCampaignEndpoints();
+app.MapDncListEndpoints();
+app.MapCallerIdPoolEndpoints();
+app.MapHolidayCalendarEndpoints();
+app.MapDialerSettingsEndpoints();
+app.MapTrunkEndpoints();
+app.MapOutboundRouteEndpoints();
 app.MapAnalyticsEndpoints();
 
 // ─── Dev seed: create a demo API key for local testing ───────────────────────
