@@ -73,7 +73,12 @@ builder.Services
     .AddAuthentication("ApiKey")
     .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>("ApiKey", _ => { });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("AdminOnly", p => p.RequireRole("Admin"));
+    options.AddPolicy("SupervisorPlus", p => p.RequireRole("Admin", "Supervisor"));
+    options.AddPolicy("Authenticated", p => p.RequireAuthenticatedUser());
+});
 
 // ─── HTTP / Minimal API ───────────────────────────────────────────────────────
 
@@ -120,8 +125,10 @@ app.MapOutboundRouteEndpoints();
 app.MapRecordingEndpoints();
 app.MapAnalyticsEndpoints();
 app.MapQueueMetricsEndpoints();
+app.MapBotEndpoints();
+app.MapKnowledgeBaseEndpoints();
 
-// ─── Dev seed: create a demo API key for local testing ───────────────────────
+// ─── Dev seed: create demo users + API keys for local testing ────────────────
 {
     using var scope = app.Services.CreateScope();
     var apiKeyStore = scope.ServiceProvider.GetRequiredService<IApiKeyStore>();
@@ -130,24 +137,15 @@ app.MapQueueMetricsEndpoints();
     var clock = scope.ServiceProvider.GetRequiredService<IClock>();
 
     var tenantId = new TenantId("demo");
-    var rawKey = "demo-key-2026";
-    var hashedKey = Convert.ToHexStringLower(
-        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawKey)));
 
-    await apiKeyStore.SaveAsync(new ApiKey
-    {
-        KeyId = EntityId.From("demo-key"),
-        TenantId = tenantId,
-        Name = "Demo Key",
-        HashedKey = hashedKey,
-        Scopes = ["*"],
-        CreatedAt = clock.UtcNow,
-    }, CancellationToken.None);
+    static string HashKey(string raw) => Convert.ToHexStringLower(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw)));
 
-    var userId = EntityId.From("demo-user");
+    // ── Admin ──────────────────────────────────────────────────────────────────
+    var adminUserId = EntityId.From("demo-user-admin");
     await userStore.SaveAsync(new User
     {
-        UserId = userId,
+        UserId = adminUserId,
         TenantId = tenantId,
         Email = "admin@demo.local",
         DisplayName = "Demo Admin",
@@ -156,18 +154,78 @@ app.MapQueueMetricsEndpoints();
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
+    await apiKeyStore.SaveAsync(new ApiKey
+    {
+        KeyId = EntityId.From("demo-key-admin"),
+        TenantId = tenantId,
+        Name = "Demo Admin Key",
+        HashedKey = HashKey("demo-key-admin"),
+        Scopes = ["*"],
+        UserId = adminUserId,
+        CreatedAt = clock.UtcNow,
+    }, CancellationToken.None);
+
+    // ── Supervisor ─────────────────────────────────────────────────────────────
+    var supervisorUserId = EntityId.From("demo-user-supervisor");
+    await userStore.SaveAsync(new User
+    {
+        UserId = supervisorUserId,
+        TenantId = tenantId,
+        Email = "supervisor@demo.local",
+        DisplayName = "Demo Supervisor",
+        Role = UserRole.Supervisor,
+        Status = UserStatus.Active,
+        CreatedAt = clock.UtcNow,
+    }, CancellationToken.None);
+
+    await apiKeyStore.SaveAsync(new ApiKey
+    {
+        KeyId = EntityId.From("demo-key-supervisor"),
+        TenantId = tenantId,
+        Name = "Demo Supervisor Key",
+        HashedKey = HashKey("demo-key-supervisor"),
+        Scopes = ["*"],
+        UserId = supervisorUserId,
+        CreatedAt = clock.UtcNow,
+    }, CancellationToken.None);
+
+    // ── Agent ──────────────────────────────────────────────────────────────────
+    var agentUserId = EntityId.From("demo-user-agent");
+    await userStore.SaveAsync(new User
+    {
+        UserId = agentUserId,
+        TenantId = tenantId,
+        Email = "agent@demo.local",
+        DisplayName = "Demo Agent",
+        Role = UserRole.Agent,
+        Status = UserStatus.Active,
+        CreatedAt = clock.UtcNow,
+    }, CancellationToken.None);
+
+    await apiKeyStore.SaveAsync(new ApiKey
+    {
+        KeyId = EntityId.From("demo-key-agent"),
+        TenantId = tenantId,
+        Name = "Demo Agent Key",
+        HashedKey = HashKey("demo-key-agent"),
+        Scopes = ["*"],
+        UserId = agentUserId,
+        CreatedAt = clock.UtcNow,
+    }, CancellationToken.None);
+
+    // ── Demo agent record (for /api/agents/me compatibility) ──────────────────
     await agentStore.SaveAsync(new Agent
     {
         AgentId = EntityId.From("demo-agent"),
         TenantId = tenantId,
-        UserId = userId,
-        DisplayName = "Demo Admin",
+        UserId = agentUserId,
+        DisplayName = "Demo Agent",
         State = AgentState.Available,
         Skills = ["support"],
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
-    Console.WriteLine("🔑 Demo API key: demo-key-2026");
+    Console.WriteLine("Demo API keys seeded: demo-key-admin | demo-key-supervisor | demo-key-agent");
 }
 
 app.Run();
