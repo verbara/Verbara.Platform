@@ -23,9 +23,24 @@ internal sealed class InMemorySurveyStore : ISurveyStore
         return Task.FromResult(result);
     }
 
+    public Task<IReadOnlyList<Survey>> GetAllAsync(TenantId tenantId, CancellationToken ct)
+    {
+        IReadOnlyList<Survey> result = _items.Values
+            .Where(s => s.TenantId == tenantId)
+            .ToList();
+
+        return Task.FromResult(result);
+    }
+
     public Task SaveAsync(Survey survey, CancellationToken ct)
     {
         _items[(survey.TenantId, survey.SurveyId)] = survey;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(TenantId tenantId, EntityId surveyId, CancellationToken ct)
+    {
+        _items.TryRemove((tenantId, surveyId), out _);
         return Task.CompletedTask;
     }
 }
