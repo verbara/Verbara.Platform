@@ -8,7 +8,7 @@ internal static class DispositionEndpoints
 {
     public static void MapDispositionEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/dispositions").RequireAuthorization();
+        var group = app.MapGroup("/api/admin/dispositions").RequireAuthorization("AdminOnly");
 
         group.MapGet("/", ListDispositions);
         group.MapGet("/{id}", GetDisposition);

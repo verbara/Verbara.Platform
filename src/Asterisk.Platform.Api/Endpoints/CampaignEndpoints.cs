@@ -10,7 +10,7 @@ internal static class CampaignEndpoints
 {
     public static void MapCampaignEndpoints(this IEndpointRouteBuilder app)
     {
-        var campaigns = app.MapGroup("/api/admin/campaigns").RequireAuthorization();
+        var campaigns = app.MapGroup("/api/admin/campaigns").RequireAuthorization("AdminOnly");
 
         // CRUD
         campaigns.MapPost("/", CreateCampaign);
@@ -42,7 +42,7 @@ internal static class CampaignEndpoints
         campaigns.MapGet("/{id:long}/metrics", GetCampaignMetrics);
 
         // Operations
-        var operations = app.MapGroup("/api/operations").RequireAuthorization();
+        var operations = app.MapGroup("/api/operations").RequireAuthorization("SupervisorPlus");
         operations.MapGet("/campaigns/metrics", ListActiveCampaignMetrics);
     }
 

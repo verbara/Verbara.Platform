@@ -8,7 +8,7 @@ internal static class CallerIdPoolEndpoints
 {
     public static void MapCallerIdPoolEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/caller-id-pools").RequireAuthorization();
+        var group = app.MapGroup("/api/admin/caller-id-pools").RequireAuthorization("AdminOnly");
 
         // CRUD
         group.MapGet("/", ListPools);

@@ -8,7 +8,7 @@ internal static class DncListEndpoints
 {
     public static void MapDncListEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/dnc-lists").RequireAuthorization();
+        var group = app.MapGroup("/api/admin/dnc-lists").RequireAuthorization("AdminOnly");
 
         // CRUD
         group.MapGet("/", ListDncLists);

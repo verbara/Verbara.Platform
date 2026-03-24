@@ -8,7 +8,7 @@ internal static class HolidayCalendarEndpoints
 {
     public static void MapHolidayCalendarEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/holiday-calendars").RequireAuthorization();
+        var group = app.MapGroup("/api/admin/holiday-calendars").RequireAuthorization("AdminOnly");
 
         // CRUD
         group.MapGet("/", ListCalendars);

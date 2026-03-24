@@ -7,7 +7,7 @@ internal static class FlowEndpoints
 {
     public static void MapFlowEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/flows").RequireAuthorization();
+        var group = app.MapGroup("/api/admin/flows").RequireAuthorization("AdminOnly");
 
         group.MapGet("/", ListFlows);
         group.MapGet("/{id}", GetFlow);

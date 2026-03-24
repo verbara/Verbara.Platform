@@ -11,6 +11,7 @@ public sealed class ApiKey : ITenantScoped, IAuditable
     public required IReadOnlyList<string> Scopes { get; set; }
     public int? RateLimitPerMinute { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
+    public EntityId? UserId { get; set; }
     public bool IsRevoked { get; set; }
     public required DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? UpdatedAt { get; set; }

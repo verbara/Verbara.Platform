@@ -11,7 +11,7 @@ internal static class SseEndpoints
 {
     public static void MapSseEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/events/stream", StreamEvents).RequireAuthorization();
+        app.MapGet("/api/events/stream", StreamEvents).RequireAuthorization("Authenticated");
     }
 
     private static async Task StreamEvents(

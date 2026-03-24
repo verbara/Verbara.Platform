@@ -6,7 +6,7 @@ internal static class SystemEndpoints
 {
     public static void MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/system").RequireAuthorization();
+        var group = app.MapGroup("/api/admin/system").RequireAuthorization("AdminOnly");
 
         group.MapGet("/info", GetSystemInfo);
         group.MapGet("/license", GetLicenseInfo);

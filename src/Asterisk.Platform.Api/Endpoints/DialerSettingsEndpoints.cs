@@ -8,7 +8,7 @@ internal static class DialerSettingsEndpoints
 {
     public static void MapDialerSettingsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/dialer/settings").RequireAuthorization();
+        var group = app.MapGroup("/api/admin/dialer/settings").RequireAuthorization("AdminOnly");
 
         group.MapGet("/", GetSettings);
         group.MapPut("/", UpdateSettings);

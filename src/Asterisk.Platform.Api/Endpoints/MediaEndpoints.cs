@@ -7,7 +7,7 @@ internal static class MediaEndpoints
 {
     public static void MapMediaEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/media").RequireAuthorization();
+        var group = app.MapGroup("/api/media").RequireAuthorization("SupervisorPlus");
 
         group.MapPost("/upload", UploadFile)
              .DisableAntiforgery();

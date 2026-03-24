@@ -7,7 +7,7 @@ internal static class QueueMetricsEndpoints
 {
     public static void MapQueueMetricsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/operations").RequireAuthorization();
+        var group = app.MapGroup("/api/operations").RequireAuthorization("SupervisorPlus");
         group.MapGet("/queue-metrics", GetQueueMetrics);
     }
 
