@@ -15,7 +15,9 @@ internal static class AnalyticsEndpoints
         analytics.MapGet("/dashboard", GetDashboard);
         analytics.MapGet("/cdr", ListCdr);
         analytics.MapGet("/cdr/{sessionId}", GetCdrDetail);
-        // QA endpoints will be added by Task 4
+        analytics.MapGet("/qa", ListQa);
+        analytics.MapGet("/qa/{sessionId}", GetQaDetail);
+        analytics.MapGet("/intervals", ListIntervals);
     }
 
     // ─── Dashboard Handler ─────────────────────────────────────────────────────
@@ -245,6 +247,187 @@ internal static class AnalyticsEndpoints
         return Results.Ok(new CdrDetailDto(cdrRow, [.. timeline], qaSummary));
     }
 
+    // ─── QA List Handler ──────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListQa(
+        HttpContext context,
+        ICallAnalyticsStore qaStore,
+        ICompletedSessionStore cdrStore,
+        IAgentStore agentStore,
+        string? from,
+        string? to,
+        double? minScore,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var tenantIdObj = new TenantId(tenantId);
+
+        var toDate = to is not null ? DateTimeOffset.Parse(to) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from) : toDate.AddDays(-7);
+
+        // minScore arrives as 0-100; QaResult scores are stored as 0-1 fractions
+        var query = new CallAnalyticsQuery
+        {
+            TenantId = tenantId,
+            From = fromDate,
+            To = toDate,
+            MinQaScore = minScore.HasValue ? minScore.Value / 100.0 : null,
+            Limit = pageSize + 1,
+            Offset = (page - 1) * pageSize,
+        };
+
+        var results = await qaStore.QueryAsync(query, ct);
+        var hasMore = results.Count > pageSize;
+        var pageResults = hasMore ? results.Take(pageSize).ToList() : results.ToList();
+
+        // Batch lookup CDR for AgentId / QueueName
+        var cdrMap = new Dictionary<string, CompletedSessionRow?>();
+        foreach (var r in pageResults)
+        {
+            var cdr = await cdrStore.GetAsync(tenantId, r.SessionId, ct);
+            cdrMap[r.SessionId] = cdr;
+        }
+
+        // Batch enrich agent names
+        var agentIds = cdrMap.Values
+            .Where(c => c is not null)
+            .Select(c => c!.AgentId)
+            .Distinct();
+        var agentNames = await BuildAgentNameMapAsync(agentIds, tenantIdObj, agentStore, ct);
+
+        var dtos = pageResults.Select(r =>
+        {
+            cdrMap.TryGetValue(r.SessionId, out var cdr);
+            agentNames.TryGetValue(cdr?.AgentId ?? "", out var agentName);
+
+            var qaScore = r.QualityScore is not null ? NormalizeQaScore(r.QualityScore) : 0.0;
+            var sentimentLabel = MapSentimentLabel(r.Sentiment?.OverallLabel);
+            var narrative = r.Summary?.Narrative is { } n && n.Length > 150
+                ? n[..150]
+                : r.Summary?.Narrative;
+            var topics = r.Topics?.AllTopics.Select(t => t.TopicName).ToArray() ?? [];
+
+            return new QaRowDto(
+                SessionId: r.SessionId,
+                AnalyzedAt: r.AnalyzedAt,
+                AgentName: agentName,
+                QueueName: cdr?.QueueName,
+                QaScore: qaScore,
+                SummaryNarrative: narrative,
+                HasComplianceViolations: r.ComplianceViolations.Count > 0,
+                ViolationCount: r.ComplianceViolations.Count,
+                SentimentLabel: sentimentLabel,
+                Topics: topics);
+        }).ToArray();
+
+        return Results.Ok(new { Data = dtos, HasMore = hasMore, Page = page, PageSize = pageSize });
+    }
+
+    // ─── QA Detail Handler ─────────────────────────────────────────────────────
+
+    private static async Task<IResult> GetQaDetail(
+        string sessionId,
+        HttpContext context,
+        ICallAnalyticsStore qaStore,
+        ICompletedSessionStore cdrStore,
+        IAgentStore agentStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var tenantIdObj = new TenantId(tenantId);
+
+        var result = await qaStore.GetAsync(sessionId, tenantId, ct);
+        if (result is null)
+            return Results.NotFound();
+
+        var cdr = await cdrStore.GetAsync(tenantId, sessionId, ct);
+        var agentNames = await BuildAgentNameMapAsync([cdr?.AgentId], tenantIdObj, agentStore, ct);
+        agentNames.TryGetValue(cdr?.AgentId ?? "", out var agentName);
+
+        var qaScore = result.QualityScore is not null ? NormalizeQaScore(result.QualityScore) : 0.0;
+        var maxPossibleScore = result.QualityScore?.MaxPossibleScore ?? 0.0;
+
+        var criteria = result.QualityScore?.Items.Select(item =>
+        {
+            var itemScore = item.Weight <= 0 ? 0.0 : item.Score * 100.0 / item.Weight;
+            return new QaCriterionDto(
+                Category: item.Category,
+                Score: itemScore,
+                Weight: item.Weight,
+                Passed: item.Passed,
+                Feedback: item.Feedback);
+        }).ToArray() ?? [];
+
+        var violations = result.ComplianceViolations.Select(v =>
+            new ComplianceViolationDto(
+                RuleName: v.RuleName,
+                Severity: v.Severity.ToString(),
+                Description: v.Description,
+                Evidence: v.Evidence)).ToArray();
+
+        var allTopics = result.Topics?.AllTopics.Select(t =>
+            new TopicDto(t.TopicName, t.Confidence)).ToArray() ?? [];
+
+        var dto = new QaDetailDto(
+            SessionId: result.SessionId,
+            AnalyzedAt: result.AnalyzedAt,
+            AgentName: agentName,
+            QueueName: cdr?.QueueName,
+            Reason: result.Summary?.Reason,
+            Outcome: result.Summary?.Outcome,
+            Narrative: result.Summary?.Narrative,
+            ActionItems: result.Summary?.ActionItems.ToArray() ?? [],
+            QaScore: qaScore,
+            MaxPossibleScore: maxPossibleScore,
+            Criteria: criteria,
+            Violations: violations,
+            SentimentLabel: MapSentimentLabel(result.Sentiment?.OverallLabel),
+            SentimentTrend: result.Sentiment?.Trend.ToString(),
+            SentimentScore: result.Sentiment?.OverallScore,
+            PrimaryTopic: result.Topics?.PrimaryTopic,
+            AllTopics: allTopics,
+            AgentTalkRatio: result.Metrics.AgentTalkRatio,
+            SilenceCount: result.Metrics.SilenceCount,
+            InterruptionCount: result.Metrics.InterruptionCount);
+
+        return Results.Ok(dto);
+    }
+
+    // ─── Intervals Handler ─────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListIntervals(
+        HttpContext context,
+        IIntervalSnapshotStore snapshotStore,
+        string? from,
+        string? to,
+        string? queue,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+
+        var toDate = to is not null ? DateTimeOffset.Parse(to) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from) : toDate.AddDays(-7);
+
+        var snapshots = await snapshotStore.QueryAsync(tenantId, fromDate, toDate, queue, null, ct);
+
+        var dtos = snapshots.Select(s => new IntervalDto(
+            QueueName: s.QueueName,
+            IntervalStart: s.IntervalStart,
+            IntervalSeconds: s.IntervalSeconds,
+            CallsOffered: s.CallsOffered,
+            CallsAnswered: s.CallsAnswered,
+            CallsAbandoned: s.CallsAbandoned,
+            SlaPercent: s.SlaPercent,
+            AsaMs: s.AsaMs,
+            AhtMs: s.AhtMs,
+            AbandonRatePercent: s.AbandonRatePercent,
+            SlaMetCount: s.SlaMetCount)).ToArray();
+
+        return Results.Ok(dtos);
+    }
+
     // ─── CDR Helpers ──────────────────────────────────────────────────────────
 
     private static string MapDisposition(int? hangupCause, int finalState)
@@ -264,6 +447,15 @@ internal static class AnalyticsEndpoints
 
     private static double NormalizeQaScore(QaResult qa)
         => qa.MaxPossibleScore <= 0 ? 0.0 : qa.TotalScore * 100.0 / qa.MaxPossibleScore;
+
+    private static string? MapSentimentLabel(SentimentLabel? label)
+        => label switch
+        {
+            SentimentLabel.VeryNegative or SentimentLabel.Negative => "Negative",
+            SentimentLabel.Neutral => "Neutral",
+            SentimentLabel.Positive or SentimentLabel.VeryPositive => "Positive",
+            _ => null,
+        };
 
     private static async Task<Dictionary<string, string>> BuildAgentNameMapAsync(
         IEnumerable<string?> agentIds,
