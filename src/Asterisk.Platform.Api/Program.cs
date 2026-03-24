@@ -141,6 +141,8 @@ app.MapKnowledgeBaseEndpoints();
 app.MapAgentAssistEndpoints();
 app.MapSupervisorEndpoints();
 app.MapSkillEndpoints();
+app.MapAuditEndpoints();
+app.MapSurveyEndpoints();
 
 // ─── Dev seed: create demo users + API keys for local testing ────────────────
 {
