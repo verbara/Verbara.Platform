@@ -1,4 +1,5 @@
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Analytics;
 using Asterisk.Sdk.Pro.CallAnalytics.Domain;
 using Asterisk.Sdk.Pro.CallAnalytics.Store;
@@ -12,7 +13,9 @@ internal static class AnalyticsEndpoints
     {
         var analytics = app.MapGroup("/api/analytics").RequireAuthorization();
         analytics.MapGet("/dashboard", GetDashboard);
-        // CDR and QA endpoints will be added by Tasks 3 and 4
+        analytics.MapGet("/cdr", ListCdr);
+        analytics.MapGet("/cdr/{sessionId}", GetCdrDetail);
+        // QA endpoints will be added by Task 4
     }
 
     // ─── Dashboard Handler ─────────────────────────────────────────────────────
@@ -85,6 +88,225 @@ internal static class AnalyticsEndpoints
             ChannelDistribution: channelDistribution);
 
         return Results.Ok(dashboard);
+    }
+
+    // ─── CDR List Handler ──────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListCdr(
+        HttpContext context,
+        ICompletedSessionStore cdrStore,
+        ICallAnalyticsStore qaStore,
+        IAgentStore agentStore,
+        IQueueStore queueStore,
+        string? from,
+        string? to,
+        string? queue,
+        string? agent,
+        string? channel,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var tenantIdObj = new TenantId(tenantId);
+
+        var toDate = to is not null ? DateTimeOffset.Parse(to) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from) : toDate.AddDays(-7);
+
+        var query = new CompletedSessionQuery
+        {
+            TenantId = tenantId,
+            From = fromDate,
+            To = toDate,
+            QueueName = queue,
+            AgentId = agent,
+            Limit = pageSize + 1,
+            Offset = (page - 1) * pageSize,
+        };
+
+        var rows = await cdrStore.QueryAsync(tenantId, query, ct);
+        var hasMore = rows.Count > pageSize;
+        var pageRows = hasMore ? rows.Take(pageSize).ToList() : rows.ToList();
+
+        // Batch enrich agent names
+        var agentNames = await BuildAgentNameMapAsync(pageRows.Select(r => r.AgentId).Distinct(), tenantIdObj, agentStore, ct);
+
+        // Batch lookup QA scores
+        var qaResults = new Dictionary<string, CallAnalysisResult?>();
+        foreach (var row in pageRows)
+        {
+            var qa = await qaStore.GetAsync(row.SessionId, tenantId, ct);
+            qaResults[row.SessionId] = qa;
+        }
+
+        // Batch lookup queue SLA targets (by name)
+        var queueSlaMap = await BuildQueueSlaMapAsync(pageRows.Select(r => r.QueueName).Distinct(), tenantIdObj, queueStore, ct);
+
+        var dtos = pageRows.Select(row =>
+        {
+            agentNames.TryGetValue(row.AgentId ?? "", out var agentName);
+            qaResults.TryGetValue(row.SessionId, out var qa);
+            queueSlaMap.TryGetValue(row.QueueName ?? "", out var slaThresholdMsNullable);
+            var slaMet = ComputeSlaMet(row.WaitTimeMs, slaThresholdMsNullable ?? 20000L);
+            var (hasScore, score) = qa is not null && qa.QualityScore is not null
+                ? (true, (double?)NormalizeQaScore(qa.QualityScore))
+                : (false, (double?)null);
+
+            return new CdrRowDto(
+                SessionId: row.SessionId,
+                StartTime: row.StartedAt,
+                AnswerTime: row.ConnectedAt,
+                EndTime: row.CompletedAt,
+                Contact: row.CallerIdNum ?? row.CallerIdName,
+                Channel: "voice",
+                QueueName: row.QueueName,
+                AgentName: agentName,
+                DurationMs: row.DurationMs,
+                TalkTimeMs: row.TalkTimeMs,
+                WaitTimeMs: row.WaitTimeMs,
+                Disposition: MapDisposition(row.HangupCause, row.FinalState),
+                SlaMet: slaMet,
+                HasQaScore: hasScore,
+                QaScore: score);
+        }).ToArray();
+
+        return Results.Ok(new { Data = dtos, HasMore = hasMore, Page = page, PageSize = pageSize });
+    }
+
+    // ─── CDR Detail Handler ────────────────────────────────────────────────────
+
+    private static async Task<IResult> GetCdrDetail(
+        string sessionId,
+        HttpContext context,
+        ICompletedSessionStore cdrStore,
+        ICallAnalyticsStore qaStore,
+        IAgentStore agentStore,
+        IQueueStore queueStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var tenantIdObj = new TenantId(tenantId);
+
+        var row = await cdrStore.GetAsync(tenantId, sessionId, ct);
+        if (row is null)
+            return Results.NotFound();
+
+        var agentNames = await BuildAgentNameMapAsync([row.AgentId], tenantIdObj, agentStore, ct);
+        agentNames.TryGetValue(row.AgentId ?? "", out var agentName);
+
+        var queueSlaMap = await BuildQueueSlaMapAsync([row.QueueName], tenantIdObj, queueStore, ct);
+        queueSlaMap.TryGetValue(row.QueueName ?? "", out var slaThresholdMsNullable);
+        var slaMet = ComputeSlaMet(row.WaitTimeMs, slaThresholdMsNullable ?? 20000L);
+
+        // Build timeline
+        var timeline = new List<CdrTimelineEventDto>
+        {
+            new("started", row.StartedAt, null),
+        };
+        if (row.ConnectedAt is not null)
+            timeline.Add(new("answered", row.ConnectedAt.Value, null));
+        timeline.Add(new("ended", row.CompletedAt, MapDisposition(row.HangupCause, row.FinalState)));
+
+        // QA lookup
+        var qa = await qaStore.GetAsync(sessionId, tenantId, ct);
+        CdrQaSummaryDto? qaSummary = null;
+        if (qa is not null)
+        {
+            var normalizedScore = qa.QualityScore is not null ? (double?)NormalizeQaScore(qa.QualityScore) : null;
+            qaSummary = new CdrQaSummaryDto(
+                Reason: qa.Summary?.Reason,
+                Outcome: qa.Summary?.Outcome,
+                Narrative: qa.Summary?.Narrative,
+                QaScore: normalizedScore,
+                SentimentLabel: qa.Sentiment?.OverallLabel.ToString());
+        }
+
+        var (hasScore, score) = qa is not null && qa.QualityScore is not null
+            ? (true, (double?)NormalizeQaScore(qa.QualityScore))
+            : (false, (double?)null);
+
+        var cdrRow = new CdrRowDto(
+            SessionId: row.SessionId,
+            StartTime: row.StartedAt,
+            AnswerTime: row.ConnectedAt,
+            EndTime: row.CompletedAt,
+            Contact: row.CallerIdNum ?? row.CallerIdName,
+            Channel: "voice",
+            QueueName: row.QueueName,
+            AgentName: agentName,
+            DurationMs: row.DurationMs,
+            TalkTimeMs: row.TalkTimeMs,
+            WaitTimeMs: row.WaitTimeMs,
+            Disposition: MapDisposition(row.HangupCause, row.FinalState),
+            SlaMet: slaMet,
+            HasQaScore: hasScore,
+            QaScore: score);
+
+        return Results.Ok(new CdrDetailDto(cdrRow, [.. timeline], qaSummary));
+    }
+
+    // ─── CDR Helpers ──────────────────────────────────────────────────────────
+
+    private static string MapDisposition(int? hangupCause, int finalState)
+    {
+        // FinalState values: Connected=4, Completed=8, Failed=9
+        if (finalState == 9) return "FAILED";
+        if (hangupCause == 17) return "BUSY";
+        if (hangupCause is 18 or 19) return "NO ANSWER";
+        if (hangupCause == 16 && finalState == 8) return "ANSWERED";
+        if (hangupCause is null && finalState == 8) return "ANSWERED";
+        if (finalState == 8) return "ANSWERED";
+        return "OTHER";
+    }
+
+    private static bool ComputeSlaMet(long? waitTimeMs, long thresholdMs)
+        => waitTimeMs is null || waitTimeMs <= thresholdMs;
+
+    private static double NormalizeQaScore(QaResult qa)
+        => qa.MaxPossibleScore <= 0 ? 0.0 : qa.TotalScore * 100.0 / qa.MaxPossibleScore;
+
+    private static async Task<Dictionary<string, string>> BuildAgentNameMapAsync(
+        IEnumerable<string?> agentIds,
+        TenantId tenantId,
+        IAgentStore agentStore,
+        CancellationToken ct)
+    {
+        var map = new Dictionary<string, string>();
+        foreach (var id in agentIds)
+        {
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            if (map.ContainsKey(id)) continue;
+            try
+            {
+                var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(id), ct);
+                map[id] = agent?.DisplayName ?? id;
+            }
+            catch
+            {
+                map[id] = id;
+            }
+        }
+        return map;
+    }
+
+    private static async Task<Dictionary<string, long?>> BuildQueueSlaMapAsync(
+        IEnumerable<string?> queueNames,
+        TenantId tenantId,
+        IQueueStore queueStore,
+        CancellationToken ct)
+    {
+        // IQueueStore.ListAsync returns paged queues; we scan the first page and match by name
+        var map = new Dictionary<string, long?>();
+        var names = queueNames.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().ToList();
+        if (names.Count == 0) return map;
+
+        var pagedQueues = await queueStore.ListAsync(tenantId, new PagedQuery { Page = 1, PageSize = 200 }, ct);
+        foreach (var q in pagedQueues.Items)
+        {
+            if (q.SlaTargets?.AnswerWithinSeconds is int seconds && names.Contains(q.Name))
+                map[q.Name] = seconds * 1000L;
+        }
+        return map;
     }
 
     // ─── KPI Computation ───────────────────────────────────────────────────────
