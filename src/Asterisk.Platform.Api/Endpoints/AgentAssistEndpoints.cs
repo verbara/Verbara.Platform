@@ -21,6 +21,8 @@ internal static class AgentAssistEndpoints
         admin.MapPut("/config", UpdateConfig);
         admin.MapGet("/keyword-rules", GetKeywordRules);
         admin.MapPut("/keyword-rules", UpdateKeywordRules);
+        admin.MapGet("/compliance-rules", GetComplianceRules);
+        admin.MapPut("/compliance-rules", UpdateComplianceRules);
     }
 
     // ─── Session Handlers ─────────────────────────────────────────────────────
@@ -113,6 +115,19 @@ internal static class AgentAssistEndpoints
         return Results.Ok(rules);
     }
 
+    private static IResult GetComplianceRules(AgentAssistConfigStore configStore)
+    {
+        return Results.Ok(configStore.GetComplianceRules());
+    }
+
+    private static IResult UpdateComplianceRules(
+        ComplianceRuleDto[] rules,
+        AgentAssistConfigStore configStore)
+    {
+        configStore.UpdateComplianceRules(rules);
+        return Results.Ok(rules);
+    }
+
     // ─── Mapping Helpers ──────────────────────────────────────────────────────
 
     private static AgentAssistSessionDto MapSessionToDto(AgentAssistSessionRow row) =>
@@ -158,6 +173,7 @@ internal sealed class AgentAssistConfigStore
 {
     private AgentAssistConfigSnapshot? _snapshot;
     private KeywordRuleDto[] _keywordRules = [];
+    private ComplianceRuleDto[] _complianceRules = [];
 
     public AgentAssistConfigSnapshot? GetSnapshot() => _snapshot;
 
@@ -166,6 +182,10 @@ internal sealed class AgentAssistConfigStore
     public KeywordRuleDto[] GetKeywordRules() => _keywordRules;
 
     public void UpdateKeywordRules(KeywordRuleDto[] rules) => _keywordRules = rules;
+
+    public ComplianceRuleDto[] GetComplianceRules() => _complianceRules;
+
+    public void UpdateComplianceRules(ComplianceRuleDto[] rules) => _complianceRules = rules;
 }
 
 // ─── Session DTOs ─────────────────────────────────────────────────────────────
@@ -220,3 +240,10 @@ internal sealed record KeywordRuleDto(
     string Keyword,
     string Priority,
     string? SuggestionText);
+
+internal sealed record ComplianceRuleDto(
+    string RuleId,
+    string Pattern,
+    string Severity,
+    string Action,
+    string? Description);

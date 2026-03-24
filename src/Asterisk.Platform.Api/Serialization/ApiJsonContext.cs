@@ -113,6 +113,17 @@ namespace Asterisk.Platform.Api.Serialization;
 // Dialer Settings
 [JsonSerializable(typeof(DialerSettingsDto))]
 [JsonSerializable(typeof(UpdateDialerSettingsRequest))]
+// Agent Assist
+[JsonSerializable(typeof(KeywordRuleDto))]
+[JsonSerializable(typeof(KeywordRuleDto[]))]
+[JsonSerializable(typeof(ComplianceRuleDto))]
+[JsonSerializable(typeof(ComplianceRuleDto[]))]
+[JsonSerializable(typeof(AgentAssistConfigSnapshot))]
+[JsonSerializable(typeof(AgentAssistSessionDto))]
+[JsonSerializable(typeof(SuggestionLogRowDto))]
+[JsonSerializable(typeof(SuggestionLogRowDto[]))]
+[JsonSerializable(typeof(ComplianceAlertRowDto))]
+[JsonSerializable(typeof(ComplianceAlertRowDto[]))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

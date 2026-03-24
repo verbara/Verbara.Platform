@@ -21,6 +21,7 @@ using Asterisk.Sdk.Pro.Analytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Sdk.Pro.AgentAssist.Engine;
+using Asterisk.Sdk.Pro.Routing.Skills;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -41,6 +42,9 @@ builder.Services.AddInMemoryStorage();
 
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 builder.Services.AddProLicensing();
+
+// ─── Pro.Routing — Skill Catalog (in-memory, singleton) ─────────────────────
+builder.Services.AddSingleton<SkillCatalogBase>(new InMemorySkillCatalog());
 
 // ─── Agent Assist Config Store (singleton for mutable admin config) ───────────
 builder.Services.AddSingleton<AgentAssistConfigStore>();
@@ -135,6 +139,8 @@ app.MapQueueMetricsEndpoints();
 app.MapBotEndpoints();
 app.MapKnowledgeBaseEndpoints();
 app.MapAgentAssistEndpoints();
+app.MapSupervisorEndpoints();
+app.MapSkillEndpoints();
 
 // ─── Dev seed: create demo users + API keys for local testing ────────────────
 {
