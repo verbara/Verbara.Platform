@@ -20,6 +20,7 @@ using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Analytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
 using Asterisk.Platform.Api.Services;
+using Asterisk.Sdk.Pro.AgentAssist.Engine;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,6 +41,9 @@ builder.Services.AddInMemoryStorage();
 
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 builder.Services.AddProLicensing();
+
+// ─── Agent Assist Config Store (singleton for mutable admin config) ───────────
+builder.Services.AddSingleton<AgentAssistConfigStore>();
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
 var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";
@@ -127,6 +131,7 @@ app.MapAnalyticsEndpoints();
 app.MapQueueMetricsEndpoints();
 app.MapBotEndpoints();
 app.MapKnowledgeBaseEndpoints();
+app.MapAgentAssistEndpoints();
 
 // ─── Dev seed: create demo users + API keys for local testing ────────────────
 {

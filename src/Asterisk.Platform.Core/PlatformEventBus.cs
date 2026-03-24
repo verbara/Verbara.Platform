@@ -82,3 +82,48 @@ public sealed record CampaignDispositionSubmittedEvent(
     string TenantId, long CampaignId,
     string DispositionCode, string AgentId)
     : PlatformEvent(TenantId, "campaign.disposition_submitted", DateTimeOffset.UtcNow);
+
+// ─── Agent Assist Events ──────────────────────────────────────────────────────
+
+/// <summary>Raised when an agent assist suggestion is generated for a live call.</summary>
+public sealed record AgentAssistSuggestionEvent(
+    string TenantId,
+    string SessionId,
+    string AgentId,
+    string SuggestionId,
+    string Text,
+    string Priority,
+    string Source,
+    string? TriggerPhrase)
+    : PlatformEvent(TenantId, "agentassist.suggestion", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when a sentiment reading is produced for a live call segment.</summary>
+public sealed record AgentAssistSentimentEvent(
+    string TenantId,
+    string SessionId,
+    string AgentId,
+    string Speaker,
+    float Score,
+    string Label,
+    IReadOnlyList<string> TriggerWords)
+    : PlatformEvent(TenantId, "agentassist.sentiment", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when a compliance rule violation is detected during a live call.</summary>
+public sealed record AgentAssistComplianceAlertEvent(
+    string TenantId,
+    string SessionId,
+    string AgentId,
+    string RuleId,
+    string? Phrase,
+    string Severity)
+    : PlatformEvent(TenantId, "agentassist.compliance_alert", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when a transcript segment is produced during a live call.</summary>
+public sealed record AgentAssistTranscriptEvent(
+    string TenantId,
+    string SessionId,
+    string AgentId,
+    string Speaker,
+    string Text,
+    bool IsFinal)
+    : PlatformEvent(TenantId, "agentassist.transcript", DateTimeOffset.UtcNow);
