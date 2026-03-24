@@ -48,6 +48,7 @@
     <PackageReference Include="Asterisk.Sdk.Pro.Licensing" />
     <PackageReference Include="Asterisk.Sdk.Pro.AgentAssist" />
     <PackageReference Include="Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres" />
+    <PackageReference Include="Asterisk.Sdk.Pro.Routing" />
   </ItemGroup>
 
 </Project>
