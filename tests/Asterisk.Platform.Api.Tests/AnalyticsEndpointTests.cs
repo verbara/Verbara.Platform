@@ -6,25 +6,18 @@ using Asterisk.Sdk.Pro.EventStore;
 
 namespace Asterisk.Platform.Api.Tests;
 
-public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
+public sealed class AnalyticsEndpointTests : IClassFixture<UnifiedPlatformApiFactory>
 {
-    private readonly HttpClient _client;
-    private readonly AnalyticsApiFactory _factory;
-    private readonly string _tenantId;
-
-    public AnalyticsEndpointTests(AnalyticsApiFactory factory)
-    {
-        _factory = factory;
-        _client = factory.CreateAuthenticatedClient();
-        _tenantId = AnalyticsApiFactory.TestTenantId;
-    }
+    // All test methods spin up their own isolated UnifiedPlatformApiFactory instances
+    // so the class fixture is kept only to satisfy xUnit's IClassFixture contract.
+    public AnalyticsEndpointTests(UnifiedPlatformApiFactory factory) { _ = factory; }
 
     // ─── Dashboard ─────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task GetDashboard_ShouldReturnKpis_WhenSnapshotsExist()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
         var now = DateTimeOffset.UtcNow;
 
@@ -41,7 +34,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetDashboard_ShouldReturnZeros_WhenNoData()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync("/api/analytics/dashboard");
@@ -55,7 +48,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetDashboard_ShouldComputeWeightedSla_WhenMultipleIntervals()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
         var now = DateTimeOffset.UtcNow;
 
@@ -78,7 +71,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetDashboard_ShouldReturnPreviousPeriodKpis_ForDeltas()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
         var now = DateTimeOffset.UtcNow;
 
@@ -98,7 +91,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetDashboard_ShouldReturnVolumeTrend_GroupedByHour()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
         var now = DateTimeOffset.UtcNow;
 
@@ -125,7 +118,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetDashboard_ShouldFilterByQueue_WhenSpecified()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
         var now = DateTimeOffset.UtcNow;
 
@@ -146,7 +139,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListCdr_ShouldReturnRows_WhenCdrExists()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         await factory.CdrStore.UpsertAsync(MakeCdr(factory, "session-001", "support", "agent-1"));
@@ -163,7 +156,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     {
         // When no agent record exists, agentId is used as fallback name.
         // With no real agent store seeded, agent name will be null or the raw id.
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         await factory.CdrStore.UpsertAsync(MakeCdr(factory, "session-enrich", "support", agentId: null));
@@ -181,7 +174,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListCdr_ShouldDefaultChannelToVoice_WhenNoConversation()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         await factory.CdrStore.UpsertAsync(MakeCdr(factory, "session-voice", "support"));
@@ -197,7 +190,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListCdr_ShouldComputeSlaMet_WhenWaitUnderThreshold()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         var cdr = MakeCdr(factory, "session-sla-met", "support");
@@ -215,7 +208,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListCdr_ShouldPaginate_WithHasMoreFlag()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
         var now = DateTimeOffset.UtcNow;
 
@@ -239,7 +232,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListCdr_ShouldFilterByDateRange_WhenSpecified()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
         var now = DateTimeOffset.UtcNow;
 
@@ -267,7 +260,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetCdrDetail_ShouldReturnDetail_WhenExists()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         await factory.CdrStore.UpsertAsync(MakeCdr(factory, "session-detail", "support"));
@@ -283,7 +276,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetCdrDetail_ShouldReturn404_WhenNotFound()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync("/api/analytics/cdr/nonexistent-session");
@@ -296,7 +289,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListQa_ShouldReturnNormalizedScores_WhenResultsExist()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         await factory.QaStore.SaveAsync(MakeQaResult(factory, "qa-session-1",
@@ -314,7 +307,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListQa_ShouldEnrichFromCdr_WhenLinkedSessionExists()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         // Seed matching CDR row
@@ -332,7 +325,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListQa_ShouldMapSentimentLabel_WhenSentimentExists()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         await factory.QaStore.SaveAsync(MakeQaResult(factory, "qa-sentiment",
@@ -349,7 +342,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListQa_ShouldReturnTopics_WhenClassified()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         await factory.QaStore.SaveAsync(MakeQaResult(factory, "qa-topics",
@@ -368,7 +361,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetQaDetail_ShouldReturnFullDetail_WhenExists()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         await factory.QaStore.SaveAsync(MakeQaResult(factory, "qa-detail-session"));
@@ -383,7 +376,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetQaDetail_ShouldIncludeComplianceViolations_WhenPresent()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         var result = MakeQaResult(factory, "qa-violations") with
@@ -415,7 +408,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetQaDetail_ShouldIncludeCriteria_WhenScored()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         await factory.QaStore.SaveAsync(MakeQaResult(factory, "qa-criteria",
@@ -433,7 +426,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task GetQaDetail_ShouldReturn404_WhenNotFound()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync("/api/analytics/qa/nonexistent-qa");
@@ -446,7 +439,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListIntervals_ShouldReturnSnapshots_WhenExist()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
         var now = DateTimeOffset.UtcNow;
 
@@ -466,7 +459,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     [Fact]
     public async Task ListIntervals_ShouldFilterByQueue_WhenSpecified()
     {
-        await using var factory = new AnalyticsApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
         var now = DateTimeOffset.UtcNow;
 
@@ -487,7 +480,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private static IntervalSnapshot MakeSnapshot(
-        AnalyticsApiFactory factory,
+        UnifiedPlatformApiFactory factory,
         string queueName,
         DateTimeOffset intervalStart,
         int callsOffered = 10,
@@ -497,9 +490,10 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
         long totalWaitMs = 16_000,
         string serverId = "server-1")
     {
+        _ = factory; // factory parameter kept for call-site consistency
         return new IntervalSnapshot
         {
-            TenantId = factory.QaStore == factory.QaStore ? AnalyticsApiFactory.TestTenantId : "",
+            TenantId = UnifiedPlatformApiFactory.TestTenantId,
             QueueName = queueName,
             ServerId = serverId,
             IntervalStart = intervalStart,
@@ -513,15 +507,16 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     }
 
     private static CompletedSessionRow MakeCdr(
-        AnalyticsApiFactory factory,
+        UnifiedPlatformApiFactory factory,
         string sessionId,
         string queueName = "support",
         string? agentId = "agent-1")
     {
+        _ = factory; // factory parameter kept for call-site consistency
         var now = DateTimeOffset.UtcNow;
         return new CompletedSessionRow
         {
-            TenantId = AnalyticsApiFactory.TestTenantId,
+            TenantId = UnifiedPlatformApiFactory.TestTenantId,
             SessionId = sessionId,
             ServerId = "server-1",
             Direction = 0,
@@ -542,7 +537,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
     }
 
     private static CallAnalysisResult MakeQaResult(
-        AnalyticsApiFactory factory,
+        UnifiedPlatformApiFactory factory,
         string sessionId,
         double qaScore = 0.85,
         double maxScore = 1.0,
@@ -551,6 +546,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
         string[]? topicNames = null,
         bool includeItems = false)
     {
+        _ = factory; // factory parameter kept for call-site consistency
         var items = includeItems
             ? (IReadOnlyList<QaItemResult>)
             [
@@ -589,7 +585,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<AnalyticsApiFactory>
         return new CallAnalysisResult
         {
             SessionId = sessionId,
-            TenantId = AnalyticsApiFactory.TestTenantId,
+            TenantId = UnifiedPlatformApiFactory.TestTenantId,
             AnalyzedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
             ProcessingTime = TimeSpan.FromSeconds(2),
             QualityScore = new QaResult

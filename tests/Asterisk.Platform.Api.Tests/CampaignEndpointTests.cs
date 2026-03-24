@@ -4,11 +4,11 @@ using System.Text.Json.Nodes;
 
 namespace Asterisk.Platform.Api.Tests;
 
-public sealed class CampaignEndpointTests : IClassFixture<CampaignApiFactory>
+public sealed class CampaignEndpointTests : IClassFixture<UnifiedPlatformApiFactory>
 {
     private readonly HttpClient _client;
 
-    public CampaignEndpointTests(CampaignApiFactory factory)
+    public CampaignEndpointTests(UnifiedPlatformApiFactory factory)
     {
         _client = factory.CreateAuthenticatedClient();
     }
@@ -103,7 +103,7 @@ public sealed class CampaignEndpointTests : IClassFixture<CampaignApiFactory>
     public async Task ListCampaigns_ShouldReturnEmpty_WhenNoCampaigns()
     {
         // Use a dedicated factory instance scoped to this test so state is clean
-        await using var factory = new CampaignApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync("/api/admin/campaigns");
@@ -649,7 +649,7 @@ public sealed class CampaignEndpointTests : IClassFixture<CampaignApiFactory>
     [Fact]
     public async Task ListActiveCampaignMetrics_ShouldReturnEmpty_WhenNoneActive()
     {
-        await using var factory = new CampaignApiFactory();
+        await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync("/api/operations/campaigns/metrics");

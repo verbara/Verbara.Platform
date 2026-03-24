@@ -1,10 +1,14 @@
 using System.Collections.Concurrent;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Asterisk.Sdk.Pro.Analytics;
+using Asterisk.Sdk.Pro.CallAnalytics.Domain;
+using Asterisk.Sdk.Pro.CallAnalytics.Store;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Contacts;
 using Asterisk.Sdk.Pro.Dialer.Dispositions;
 using Asterisk.Sdk.Pro.Dialer.Models;
+using Asterisk.Sdk.Pro.EventStore;
 using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,16 +21,21 @@ using System.Text;
 namespace Asterisk.Platform.Api.Tests;
 
 /// <summary>
-/// WebApplicationFactory with in-memory campaign stores and auth support.
-/// Registers InMemoryCampaignStore, InMemoryContactListStore, InMemoryDispositionCodeStore
-/// so campaign endpoints can be exercised without Postgres.
+/// Single WebApplicationFactory that registers all in-memory stores (campaign + analytics)
+/// and provides authenticated HTTP client support. Replaces CampaignApiFactory and
+/// AnalyticsApiFactory so both test classes share one consistent factory implementation.
 /// </summary>
-public sealed class CampaignApiFactory : WebApplicationFactory<Program>
+public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
 {
-    public const string TestApiKey = "campaign-test-key-99999";
-    public const string TestTenantId = "tenant-campaign-001";
+    public const string TestApiKey = "unified-test-key-77777";
+    public const string TestTenantId = "tenant-unified-001";
 
     private static readonly string s_hashedKey = HashKey(TestApiKey);
+
+    // Analytics store instances exposed for direct seeding in tests
+    public InMemoryCompletedSessionStore CdrStore { get; } = new();
+    public InMemoryCallAnalyticsStore QaStore { get; } = new();
+    public InMemoryIntervalSnapshotStore SnapshotStore { get; } = new();
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -34,16 +43,16 @@ public sealed class CampaignApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
-            // Replace IApiKeyStore with test key
+            // ── Auth ──────────────────────────────────────────────────────────
             var akDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IApiKeyStore));
             if (akDescriptor is not null) services.Remove(akDescriptor);
 
             var apiKeyStore = Substitute.For<IApiKeyStore>();
             var apiKey = new ApiKey
             {
-                KeyId = EntityId.From("campaign-test-key-id"),
+                KeyId = EntityId.From("unified-test-key-id"),
                 TenantId = new TenantId(TestTenantId),
-                Name = "Campaign Test Key",
+                Name = "Unified Test Key",
                 HashedKey = s_hashedKey,
                 Scopes = ["*"],
                 IsRevoked = false,
@@ -53,12 +62,12 @@ public sealed class CampaignApiFactory : WebApplicationFactory<Program>
                        .Returns(Task.FromResult<ApiKey?>(apiKey));
             services.AddSingleton(apiKeyStore);
 
-            // Disable license enforcement in tests and provide dummy public key byte[]
+            // ── Licensing ─────────────────────────────────────────────────────
             services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Disabled);
             if (!services.Any(d => d.ServiceType == typeof(byte[])))
                 services.AddSingleton<byte[]>([]);
 
-            // Register in-memory campaign stores (only if not already registered)
+            // ── Campaign stores ───────────────────────────────────────────────
             if (!services.Any(d => d.ServiceType == typeof(CampaignStoreBase)))
             {
                 services.AddSingleton<InMemoryCampaignStore>();
@@ -80,6 +89,11 @@ public sealed class CampaignApiFactory : WebApplicationFactory<Program>
                 services.AddSingleton<InMemoryDispositionCodeStore>();
                 services.AddSingleton<DispositionCodeStoreBase>(sp => sp.GetRequiredService<InMemoryDispositionCodeStore>());
             }
+
+            // ── Analytics stores ──────────────────────────────────────────────
+            UpsertStore<ICompletedSessionStore>(services, CdrStore);
+            UpsertStore<ICallAnalyticsStore>(services, QaStore);
+            UpsertStore<IIntervalSnapshotStore>(services, SnapshotStore);
         });
 
         return base.CreateHost(builder);
@@ -93,6 +107,14 @@ public sealed class CampaignApiFactory : WebApplicationFactory<Program>
         return client;
     }
 
+    private static void UpsertStore<TService>(IServiceCollection services, TService instance)
+        where TService : class
+    {
+        var descriptors = services.Where(d => d.ServiceType == typeof(TService)).ToList();
+        foreach (var d in descriptors) services.Remove(d);
+        services.AddSingleton<TService>(instance);
+    }
+
     private static string HashKey(string rawKey)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawKey));
@@ -100,7 +122,7 @@ public sealed class CampaignApiFactory : WebApplicationFactory<Program>
     }
 }
 
-// ─── In-Memory Store Implementations ─────────────────────────────────────────
+// ─── Campaign In-Memory Store Implementations ─────────────────────────────────
 
 internal sealed class InMemoryCampaignStore : CampaignStoreBase
 {
@@ -204,8 +226,6 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
             .ToList();
         return new ValueTask<IReadOnlyList<CampaignMetricsSnapshot>>(result);
     }
-
-    public int CallbackCount => _callbacks.Count;
 }
 
 internal sealed class InMemoryContactListStore : ContactListStoreBase
@@ -304,5 +324,169 @@ internal sealed class InMemoryDispositionCodeStore : DispositionCodeStoreBase
     {
         _codes.TryRemove(dispositionCodeId, out _);
         return ValueTask.CompletedTask;
+    }
+}
+
+// ─── Analytics In-Memory Store Implementations ────────────────────────────────
+
+public sealed class InMemoryCompletedSessionStore : ICompletedSessionStore
+{
+    private readonly ConcurrentDictionary<string, CompletedSessionRow> _rows = new();
+
+    public ValueTask UpsertAsync(CompletedSessionRow row, CancellationToken ct = default)
+    {
+        _rows[$"{row.TenantId}:{row.SessionId}"] = row;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<CompletedSessionRow?> GetAsync(string tenantId, string sessionId, CancellationToken ct = default)
+    {
+        _rows.TryGetValue($"{tenantId}:{sessionId}", out var row);
+        return new ValueTask<CompletedSessionRow?>(row);
+    }
+
+    public ValueTask<IReadOnlyList<CompletedSessionRow>> QueryAsync(
+        string tenantId, CompletedSessionQuery query, CancellationToken ct = default)
+    {
+        var rows = _rows.Values
+            .Where(r => r.TenantId == tenantId)
+            .AsEnumerable();
+
+        if (query.From is not null)
+            rows = rows.Where(r => r.StartedAt >= query.From.Value);
+        if (query.To is not null)
+            rows = rows.Where(r => r.StartedAt <= query.To.Value);
+        if (query.QueueName is not null)
+            rows = rows.Where(r => r.QueueName == query.QueueName);
+        if (query.AgentId is not null)
+            rows = rows.Where(r => r.AgentId == query.AgentId);
+        if (query.Direction is not null)
+            rows = rows.Where(r => r.Direction == query.Direction.Value);
+
+        IReadOnlyList<CompletedSessionRow> result = rows
+            .OrderByDescending(r => r.StartedAt)
+            .Skip(query.Offset)
+            .Take(query.Limit)
+            .ToList();
+
+        return new ValueTask<IReadOnlyList<CompletedSessionRow>>(result);
+    }
+
+    public ValueTask<CompletedSessionStats> GetStatsAsync(
+        string tenantId, DateTimeOffset from, DateTimeOffset until, string? serverId = null, CancellationToken ct = default)
+    {
+        var rows = _rows.Values
+            .Where(r => r.TenantId == tenantId && r.StartedAt >= from && r.StartedAt <= until)
+            .ToList();
+        if (serverId is not null)
+            rows = rows.Where(r => r.ServerId == serverId).ToList();
+
+        var total = rows.Count;
+        var answered = rows.Count(r => r.ConnectedAt is not null);
+        var failed = rows.Count(r => r.FinalState == 9);
+        var stats = new CompletedSessionStats(
+            total, answered, failed,
+            total > 0 ? rows.Average(r => r.DurationMs) : 0,
+            answered > 0 ? rows.Where(r => r.TalkTimeMs.HasValue).Average(r => r.TalkTimeMs!.Value) : 0,
+            answered > 0 ? rows.Where(r => r.WaitTimeMs.HasValue).Average(r => r.WaitTimeMs!.Value) : 0,
+            total > 0 ? rows.Average(r => r.HoldTimeMs) : 0);
+        return new ValueTask<CompletedSessionStats>(stats);
+    }
+}
+
+public sealed class InMemoryCallAnalyticsStore : ICallAnalyticsStore
+{
+    private readonly ConcurrentDictionary<string, CallAnalysisResult> _results = new();
+
+    public ValueTask SaveAsync(CallAnalysisResult result, CancellationToken ct = default)
+    {
+        _results[$"{result.TenantId}:{result.SessionId}"] = result;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<CallAnalysisResult?> GetAsync(string sessionId, string tenantId, CancellationToken ct = default)
+    {
+        _results.TryGetValue($"{tenantId}:{sessionId}", out var result);
+        return new ValueTask<CallAnalysisResult?>(result);
+    }
+
+    public ValueTask<IReadOnlyList<CallAnalysisResult>> QueryAsync(CallAnalyticsQuery query, CancellationToken ct = default)
+    {
+        var results = _results.Values
+            .Where(r => r.TenantId == query.TenantId)
+            .AsEnumerable();
+
+        if (query.From is not null)
+            results = results.Where(r => r.AnalyzedAt >= query.From.Value);
+        if (query.To is not null)
+            results = results.Where(r => r.AnalyzedAt <= query.To.Value);
+        if (query.MinQaScore is not null)
+            results = results.Where(r => r.QualityScore is not null &&
+                r.QualityScore.MaxPossibleScore > 0 &&
+                r.QualityScore.TotalScore / r.QualityScore.MaxPossibleScore >= query.MinQaScore.Value);
+        if (query.HasComplianceViolations is not null)
+            results = results.Where(r => (r.ComplianceViolations.Count > 0) == query.HasComplianceViolations.Value);
+
+        IReadOnlyList<CallAnalysisResult> result = results
+            .OrderByDescending(r => r.AnalyzedAt)
+            .Skip(query.Offset)
+            .Take(query.Limit)
+            .ToList();
+
+        return new ValueTask<IReadOnlyList<CallAnalysisResult>>(result);
+    }
+}
+
+public sealed class InMemoryIntervalSnapshotStore : IIntervalSnapshotStore
+{
+    private readonly List<IntervalSnapshot> _snapshots = [];
+
+    public ValueTask UpsertAsync(IntervalSnapshot snapshot, CancellationToken ct = default)
+    {
+        lock (_snapshots)
+        {
+            var existing = _snapshots.FindIndex(s =>
+                s.TenantId == snapshot.TenantId &&
+                s.QueueName == snapshot.QueueName &&
+                s.ServerId == snapshot.ServerId &&
+                s.IntervalStart == snapshot.IntervalStart);
+            if (existing >= 0)
+                _snapshots[existing] = snapshot;
+            else
+                _snapshots.Add(snapshot);
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask UpsertAgentAsync(AgentSnapshot snapshot, CancellationToken ct = default)
+        => ValueTask.CompletedTask;
+
+    public ValueTask UpsertCampaignAsync(CampaignSnapshot snapshot, CancellationToken ct = default)
+        => ValueTask.CompletedTask;
+
+    public ValueTask<IReadOnlyList<IntervalSnapshot>> QueryAsync(
+        string tenantId, DateTimeOffset from, DateTimeOffset until,
+        string? queueName = null, string? serverId = null,
+        CancellationToken ct = default)
+    {
+        lock (_snapshots)
+        {
+            IReadOnlyList<IntervalSnapshot> result = _snapshots
+                .Where(s => s.TenantId == tenantId &&
+                            s.IntervalStart >= from &&
+                            s.IntervalStart <= until)
+                .Where(s => queueName is null || s.QueueName == queueName)
+                .Where(s => serverId is null || s.ServerId == serverId)
+                .OrderBy(s => s.IntervalStart)
+                .ToList();
+            return new ValueTask<IReadOnlyList<IntervalSnapshot>>(result);
+        }
+    }
+
+    public ValueTask<IReadOnlyList<AgentSnapshot>> QueryAgentAsync(
+        string tenantId, DateTimeOffset from, DateTimeOffset until,
+        string? agentId = null, CancellationToken ct = default)
+    {
+        return new ValueTask<IReadOnlyList<AgentSnapshot>>(Array.Empty<AgentSnapshot>());
     }
 }
