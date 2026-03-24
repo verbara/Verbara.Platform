@@ -78,6 +78,21 @@ builder.Services.Configure<RecordingOptions>(o =>
         o.BasePath = path;
 });
 
+// ─── S3 Media Storage (overrides FileSystem default when S3_BUCKET is set) ──
+var s3Bucket = builder.Configuration["S3_BUCKET"];
+if (!string.IsNullOrEmpty(s3Bucket))
+{
+    var s3Endpoint = builder.Configuration["S3_ENDPOINT"] ?? "https://s3.amazonaws.com";
+    var s3Region   = builder.Configuration["S3_REGION"];
+    var s3ForcePathStyle = !string.Equals(
+        builder.Configuration["S3_FORCE_PATH_STYLE"], "false",
+        StringComparison.OrdinalIgnoreCase);
+
+    // Replace the FileSystemMediaStorage registered by AddPlatformMedia()
+    builder.Services.AddSingleton<IMediaStorage>(
+        new S3MediaStorage(s3Bucket, s3Endpoint, s3Region, s3ForcePathStyle));
+}
+
 // ─── Authentication (API key) ─────────────────────────────────────────────────
 
 builder.Services

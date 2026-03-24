@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageVersion Include="AWSSDK.S3" Version="3.7.414.3" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.0.0-pro" />
     <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.0.0-pro" />
     <PackageVersion Include="Asterisk.Sdk.Pro.EventStore.Postgres" Version="1.0.0-pro" />
