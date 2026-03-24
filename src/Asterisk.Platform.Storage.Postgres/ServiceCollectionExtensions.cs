@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Asterisk.Platform.Automation;
 using Asterisk.Platform.Bot;
+using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Conversations.Stores;
@@ -51,6 +52,9 @@ public static class ServiceCollectionExtensions
         // Automation
         services.AddSingleton<IAutomationRuleStore, PostgresAutomationRuleStore>();
         services.AddSingleton<ITimerStore, PostgresTimerStore>();
+
+        // KnowledgeBase
+        services.AddSingleton<IArticleStore, PostgresArticleStore>();
 
         return services;
     }

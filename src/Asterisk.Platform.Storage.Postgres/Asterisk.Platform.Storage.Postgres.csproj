@@ -18,6 +18,7 @@
     <ProjectReference Include="..\Asterisk.Platform.Flows\Asterisk.Platform.Flows.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Bot\Asterisk.Platform.Bot.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Automation\Asterisk.Platform.Automation.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.KnowledgeBase\Asterisk.Platform.KnowledgeBase.csproj" />
   </ItemGroup>
 
   <ItemGroup>
