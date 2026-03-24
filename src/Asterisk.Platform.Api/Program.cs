@@ -59,6 +59,14 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     builder.Services.UsePostgresAnalyticsStore(analyticsConnectionString);
 }
 
+// ─── Recordings ─────────────────────────────────────────────────────────────
+builder.Services.Configure<RecordingOptions>(o =>
+{
+    var path = builder.Configuration["Recordings:BasePath"];
+    if (!string.IsNullOrEmpty(path))
+        o.BasePath = path;
+});
+
 // ─── Authentication (API key) ─────────────────────────────────────────────────
 
 builder.Services
@@ -109,6 +117,7 @@ app.MapHolidayCalendarEndpoints();
 app.MapDialerSettingsEndpoints();
 app.MapTrunkEndpoints();
 app.MapOutboundRouteEndpoints();
+app.MapRecordingEndpoints();
 app.MapAnalyticsEndpoints();
 
 // ─── Dev seed: create a demo API key for local testing ───────────────────────

@@ -108,6 +108,8 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(AddHolidayRequest))]
 [JsonSerializable(typeof(HolidayDto))]
 [JsonSerializable(typeof(List<HolidayDto>))]
+// Recordings
+[JsonSerializable(typeof(RecordingMetadataDto))]
 // Dialer Settings
 [JsonSerializable(typeof(DialerSettingsDto))]
 [JsonSerializable(typeof(UpdateDialerSettingsRequest))]
