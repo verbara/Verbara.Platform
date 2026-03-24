@@ -160,7 +160,7 @@ internal static class AnalyticsEndpoints
                 AnswerTime: row.ConnectedAt,
                 EndTime: row.CompletedAt,
                 Contact: row.CallerIdNum ?? row.CallerIdName,
-                Channel: "voice",
+                Channel: DeriveChannelType(row.Direction),
                 QueueName: row.QueueName,
                 AgentName: agentName,
                 DurationMs: row.DurationMs,
@@ -169,7 +169,16 @@ internal static class AnalyticsEndpoints
                 Disposition: MapDisposition(row.HangupCause, row.FinalState),
                 SlaMet: slaMet,
                 HasQaScore: hasScore,
-                QaScore: score);
+                QaScore: score,
+                HasRecording: !string.IsNullOrEmpty(row.RecordingName),
+                TransferredTo: row.TransferredTo,
+                TransferType: row.TransferType,
+                HangupSource: row.HangupSource,
+                WrapUpDurationMs: row.WrapUpDurationMs,
+                HoldCount: row.HoldCount,
+                RingDurationMs: ComputeRingDurationMs(row),
+                CampaignName: null,
+                DispositionName: null);
         }).ToArray();
 
         return Results.Ok(new { Data = dtos, HasMore = hasMore, Page = page, PageSize = pageSize });
@@ -207,6 +216,8 @@ internal static class AnalyticsEndpoints
         };
         if (row.ConnectedAt is not null)
             timeline.Add(new("answered", row.ConnectedAt.Value, null));
+        if (row.TransferredTo is not null)
+            timeline.Add(new("transferred", row.CompletedAt, $"{MapTransferType(row.TransferType)} to {row.TransferredTo}"));
         timeline.Add(new("ended", row.CompletedAt, MapDisposition(row.HangupCause, row.FinalState)));
 
         // QA lookup
@@ -233,7 +244,7 @@ internal static class AnalyticsEndpoints
             AnswerTime: row.ConnectedAt,
             EndTime: row.CompletedAt,
             Contact: row.CallerIdNum ?? row.CallerIdName,
-            Channel: "voice",
+            Channel: DeriveChannelType(row.Direction),
             QueueName: row.QueueName,
             AgentName: agentName,
             DurationMs: row.DurationMs,
@@ -242,9 +253,32 @@ internal static class AnalyticsEndpoints
             Disposition: MapDisposition(row.HangupCause, row.FinalState),
             SlaMet: slaMet,
             HasQaScore: hasScore,
-            QaScore: score);
+            QaScore: score,
+            HasRecording: !string.IsNullOrEmpty(row.RecordingName),
+            TransferredTo: row.TransferredTo,
+            TransferType: row.TransferType,
+            HangupSource: row.HangupSource,
+            WrapUpDurationMs: row.WrapUpDurationMs,
+            HoldCount: row.HoldCount,
+            RingDurationMs: ComputeRingDurationMs(row),
+            CampaignName: null,
+            DispositionName: null);
 
-        return Results.Ok(new CdrDetailDto(cdrRow, [.. timeline], qaSummary));
+        var hasTranscript = qa is not null && qa.Summary is not null;
+        var recordingStreamUrl = !string.IsNullOrEmpty(row.RecordingName)
+            ? $"/api/recordings/{row.SessionId}/stream"
+            : null;
+
+        return Results.Ok(new CdrDetailDto(
+            cdrRow,
+            [.. timeline],
+            qaSummary,
+            CalledNumber: row.Extension,
+            LinkedSessionId: row.LinkedSessionId,
+            TransferCount: row.TransferCount,
+            RecordingName: row.RecordingName,
+            RecordingStreamUrl: recordingStreamUrl,
+            HasTranscript: hasTranscript));
     }
 
     // ─── QA List Handler ──────────────────────────────────────────────────────
@@ -445,6 +479,27 @@ internal static class AnalyticsEndpoints
     private static bool ComputeSlaMet(long? waitTimeMs, long thresholdMs)
         => waitTimeMs is null || waitTimeMs <= thresholdMs;
 
+    private static string DeriveChannelType(int direction)
+        => direction == 1 ? "sip" : "voice";
+
+    private static string MapTransferType(short? transferType)
+        => transferType switch
+        {
+            1 => "Blind transfer",
+            2 => "Attended transfer",
+            _ => "Transfer",
+        };
+
+    private static long? ComputeRingDurationMs(CompletedSessionRow row)
+    {
+        if (row.ConnectedAt is not { } connected)
+            return null;
+
+        var totalBeforeAnswer = (long)(connected - row.StartedAt).TotalMilliseconds;
+        var ring = totalBeforeAnswer - (row.WaitTimeMs ?? 0);
+        return ring > 0 ? ring : 0;
+    }
+
     private static double NormalizeQaScore(QaResult qa)
         => qa.MaxPossibleScore <= 0 ? 0.0 : qa.TotalScore * 100.0 / qa.MaxPossibleScore;
 
@@ -567,12 +622,27 @@ internal sealed record CdrRowDto(
     string Disposition,
     bool SlaMet,
     bool HasQaScore,
-    double? QaScore);
+    double? QaScore,
+    bool HasRecording,
+    string? TransferredTo,
+    short? TransferType,
+    short? HangupSource,
+    long? WrapUpDurationMs,
+    short HoldCount,
+    long? RingDurationMs,
+    string? CampaignName,
+    string? DispositionName);
 
 internal sealed record CdrDetailDto(
     CdrRowDto Cdr,
     CdrTimelineEventDto[] Timeline,
-    CdrQaSummaryDto? QaSummary);
+    CdrQaSummaryDto? QaSummary,
+    string? CalledNumber,
+    string? LinkedSessionId,
+    short TransferCount,
+    string? RecordingName,
+    string? RecordingStreamUrl,
+    bool HasTranscript);
 
 internal sealed record CdrTimelineEventDto(
     string Event,
