@@ -119,6 +119,7 @@ app.MapTrunkEndpoints();
 app.MapOutboundRouteEndpoints();
 app.MapRecordingEndpoints();
 app.MapAnalyticsEndpoints();
+app.MapQueueMetricsEndpoints();
 
 // ─── Dev seed: create a demo API key for local testing ───────────────────────
 {
