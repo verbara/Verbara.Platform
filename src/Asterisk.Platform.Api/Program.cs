@@ -15,6 +15,9 @@ using Asterisk.Platform.Queues;
 using Microsoft.AspNetCore.Authentication;
 using Asterisk.Sdk.Pro.Dialer.DependencyInjection;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.EventStore.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.Analytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
 using Asterisk.Platform.Api.Services;
 
@@ -45,6 +48,15 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
     builder.Services.UsePostgresDialerStorage(dialerConnectionString);
     builder.Services.AddProDialer(o => { });
     builder.Services.AddHostedService<CampaignMetricsPoller>();
+}
+
+// ─── Pro Analytics Stores (query only — no engine) ──────────────────────────
+var analyticsConnectionString = builder.Configuration.GetConnectionString("Analytics") ?? dialerConnectionString;
+if (!string.IsNullOrEmpty(analyticsConnectionString))
+{
+    builder.Services.UsePostgresEventStore(analyticsConnectionString);
+    builder.Services.AddProCallAnalyticsPostgres(analyticsConnectionString);
+    builder.Services.UsePostgresAnalyticsStore(analyticsConnectionString);
 }
 
 // ─── Authentication (API key) ─────────────────────────────────────────────────
@@ -91,6 +103,7 @@ app.MapSystemEndpoints();
 app.MapSseEndpoints();
 app.MapMediaEndpoints();
 app.MapCampaignEndpoints();
+app.MapAnalyticsEndpoints();
 
 // ─── Dev seed: create a demo API key for local testing ───────────────────────
 {
