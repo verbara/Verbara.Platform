@@ -1,0 +1,102 @@
+services:
+  asterisk:
+    image: andrius/asterisk:22
+    volumes:
+      - ./asterisk-config:/etc/asterisk
+      - recordings:/var/spool/asterisk/recording
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "8088:8088"
+      - "5038:5038"
+      - "9092:9092"
+      - "10000-10200:10000-10200/udp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show version"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  platform-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Postgres: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret}
+      Asterisk__Ami__Hostname: asterisk
+      Asterisk__Ami__Port: "5038"
+      Asterisk__Ami__Username: platform
+      Asterisk__Ami__Password: ${AMI_PASSWORD:-platform_secret}
+      Asterisk__Ari__BaseUrl: http://asterisk:8088
+      Asterisk__Ari__Username: asterisk-platform
+      Asterisk__Ari__Password: ${ARI_PASSWORD:-asterisk_ari_secret}
+      Recordings__BasePath: /recordings
+      CORS_ORIGINS: http://localhost
+    volumes:
+      - recordings:/recordings
+    depends_on:
+      asterisk:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../../Asterisk.Platform.Web
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../src/Asterisk.Platform.Storage.Postgres/Migrations:/docker-entrypoint-initdb.d:ro
+    environment:
+      POSTGRES_DB: platform
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_secret}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    profiles: [cluster]
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    volumes: [miniodata:/data]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports: ["9000:9000", "9001:9001"]
+    restart: unless-stopped
+    profiles: [s3]
+
+volumes:
+  pgdata:
+  recordings:
+  miniodata:
