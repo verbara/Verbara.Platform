@@ -40,6 +40,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Npgsql" />
     <PackageReference Include="Asterisk.Sdk.Pro.Dialer" />
     <PackageReference Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" />
     <PackageReference Include="Asterisk.Sdk.Pro.EventStore.Postgres" />
