@@ -1,6 +1,7 @@
 using Asterisk.Platform.Api.Auth;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Middleware;
+using Microsoft.AspNetCore.RateLimiting;
 using Asterisk.Platform.Bot;
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Conversations;
@@ -51,6 +52,9 @@ builder.Services.AddSingleton<AgentAssistConfigStore>();
 
 // ─── System Settings Store (singleton for mutable system settings) ────────────
 builder.Services.AddSingleton<SystemSettingsStore>();
+
+// ─── Scheduled Report Store (singleton for mutable report definitions) ────────
+builder.Services.AddSingleton<ScheduledReportStore>();
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
 var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";
@@ -106,6 +110,32 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("Authenticated", p => p.RequireAuthenticatedUser());
 });
 
+// ─── Health Checks ───────────────────────────────────────────────────────────
+
+builder.Services.AddHealthChecks();
+
+// ─── Rate Limiting ────────────────────────────────────────────────────────────
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = 429;
+    options.AddSlidingWindowLimiter("api", o =>
+    {
+        o.Window = TimeSpan.FromMinutes(1);
+        o.SegmentsPerWindow = 6;
+        o.PermitLimit = 600;
+    });
+});
+
+// ─── CORS ─────────────────────────────────────────────────────────────────────
+
+var corsOrigins = builder.Configuration["CORS_ORIGINS"]?.Split(',') ?? new[] { "*" };
+builder.Services.AddCors(options =>
+    options.AddDefaultPolicy(p => p
+        .WithOrigins(corsOrigins)
+        .AllowAnyMethod()
+        .AllowAnyHeader()));
+
 // ─── HTTP / Minimal API ───────────────────────────────────────────────────────
 
 builder.Services.AddProblemDetails();
@@ -122,11 +152,20 @@ var app = builder.Build();
 // ─── Middleware pipeline ──────────────────────────────────────────────────────
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
+app.UseCors();
+app.UseRateLimiter();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapOpenApi();
+app.MapHealthChecks("/health");
+app.MapGet("/metrics", () => Results.Ok(new
+{
+    status = "ok",
+    timestamp = DateTimeOffset.UtcNow,
+    uptime_seconds = (long)(DateTimeOffset.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()).TotalSeconds,
+})).ExcludeFromDescription();
 
 // ─── Endpoint mapping ────────────────────────────────────────────────────────
 
@@ -158,6 +197,7 @@ app.MapSupervisorEndpoints();
 app.MapSkillEndpoints();
 app.MapAuditEndpoints();
 app.MapSurveyEndpoints();
+app.MapScheduledReportEndpoints();
 
 // ─── Dev seed: create demo users + API keys for local testing ────────────────
 {
