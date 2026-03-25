@@ -12,6 +12,8 @@ public sealed class Agent : ITenantScoped, IAuditable
     public ChannelCapacity Capacity { get; set; } = new();
     public EntityId? TeamId { get; set; }
     public IReadOnlyList<string> Skills { get; set; } = [];
+    public string? Extension { get; set; }
+    public string? SipPassword { get; set; }
     public required DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? UpdatedAt { get; set; }
     public string? CreatedBy { get; init; }

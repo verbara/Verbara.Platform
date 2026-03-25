@@ -17,7 +17,7 @@ internal sealed class PostgresAgentStore : IAgentStore
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<AgentRow>(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "created_at, updated_at, created_by, updated_by " +
+            "extension, sip_password, created_at, updated_at, created_by, updated_by " +
             "FROM agents WHERE tenant_id = @TenantId AND agent_id = @AgentId",
             new { TenantId = tenantId.Value, AgentId = agentId.Value });
         return row?.ToAgent();
@@ -64,7 +64,7 @@ internal sealed class PostgresAgentStore : IAgentStore
 
         var rows = await conn.QueryAsync<AgentRow>(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            $"created_at, updated_at, created_by, updated_by " +
+            $"extension, sip_password, created_at, updated_at, created_by, updated_by " +
             $"FROM agents WHERE {where} ORDER BY display_name LIMIT @Limit OFFSET @Offset",
             parameters);
 
@@ -80,12 +80,13 @@ internal sealed class PostgresAgentStore : IAgentStore
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(
             "INSERT INTO agents (agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "created_at, updated_at, created_by, updated_by) " +
+            "extension, sip_password, created_at, updated_at, created_by, updated_by) " +
             "VALUES (@AgentId, @TenantId, @UserId, @DisplayName, @State, @Capacity::jsonb, @TeamId, @Skills::jsonb, " +
-            "@CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
+            "@Extension, @SipPassword, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
             "ON CONFLICT (tenant_id, agent_id) DO UPDATE SET " +
             "  display_name = EXCLUDED.display_name, state = EXCLUDED.state, capacity = EXCLUDED.capacity, " +
             "  team_id = EXCLUDED.team_id, skills = EXCLUDED.skills, " +
+            "  extension = EXCLUDED.extension, sip_password = EXCLUDED.sip_password, " +
             "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
             new
             {
@@ -97,6 +98,8 @@ internal sealed class PostgresAgentStore : IAgentStore
                 Capacity = capacityJson,
                 TeamId = agent.TeamId?.Value,
                 Skills = skillsJson,
+                agent.Extension,
+                agent.SipPassword,
                 agent.CreatedAt,
                 agent.UpdatedAt,
                 agent.CreatedBy,
@@ -113,6 +116,8 @@ internal sealed class PostgresAgentStore : IAgentStore
         string capacity,
         string? team_id,
         string skills,
+        string? extension,
+        string? sip_password,
         DateTimeOffset created_at,
         DateTimeOffset? updated_at,
         string? created_by,
@@ -128,6 +133,8 @@ internal sealed class PostgresAgentStore : IAgentStore
             Capacity = JsonSerializer.Deserialize(capacity, PostgresJson.Ctx.ChannelCapacity) ?? new ChannelCapacity(),
             TeamId = team_id != null ? EntityId.From(team_id) : null,
             Skills = JsonSerializer.Deserialize(skills, PostgresJson.Ctx.IReadOnlyListString) ?? (IReadOnlyList<string>)[],
+            Extension = extension,
+            SipPassword = sip_password,
             CreatedAt = created_at,
             UpdatedAt = updated_at,
             CreatedBy = created_by,
