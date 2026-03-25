@@ -14,17 +14,31 @@ using Asterisk.Platform.Switchboard;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
 using Microsoft.AspNetCore.Authentication;
+using Asterisk.Sdk.Hosting;
 using Asterisk.Sdk.Pro.Dialer.DependencyInjection;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.EventStore.DependencyInjection;
 using Asterisk.Sdk.Pro.EventStore.Postgres.DependencyInjection;
-using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.Analytics.DependencyInjection;
 using Asterisk.Sdk.Pro.Analytics.Storage.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.CallAnalytics.DependencyInjection;
+using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.AgentAssist.DependencyInjection;
 using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Sdk.Pro.AgentAssist.Engine;
 using Asterisk.Sdk.Pro.Routing.Skills;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ─── Asterisk SDK Connection (AMI + ARI + Sessions) ──────────────────────────
+
+builder.Services.AddAsterisk(builder.Configuration);
+builder.Services.AddAsteriskSessions();
+
+// ─── Asterisk Realtime Sync (writes agents/queues to Asterisk DB tables) ─────
+
+builder.Services.AddSingleton<AsteriskRealtimeSyncService>();
 
 // ─── Core Platform Services ──────────────────────────────────────────────────
 
@@ -65,13 +79,19 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
     builder.Services.AddHostedService<CampaignMetricsPoller>();
 }
 
-// ─── Pro Analytics Stores (query only — no engine) ──────────────────────────
+// ─── Pro EventStore + Analytics + CallAnalytics (engines + Postgres stores) ──
 var analyticsConnectionString = builder.Configuration.GetConnectionString("Analytics") ?? dialerConnectionString;
 if (!string.IsNullOrEmpty(analyticsConnectionString))
 {
     builder.Services.UsePostgresEventStore(analyticsConnectionString);
     builder.Services.AddProCallAnalyticsPostgres(analyticsConnectionString);
     builder.Services.UsePostgresAnalyticsStore(analyticsConnectionString);
+
+    // Pro engine registrations — require ICallSessionManager (wired by AddAsteriskSessions)
+    builder.Services.AddAsteriskEventStore();
+    builder.Services.AddAsteriskAnalytics();
+    builder.Services.AddProCallAnalytics();
+    // TODO: AddProAgentAssist() requires a SpeechRecognizer implementation — skipped until STT provider is configured
 }
 
 // ─── Recordings ─────────────────────────────────────────────────────────────
@@ -295,6 +315,23 @@ app.MapScheduledReportEndpoints();
         Skills = ["support"],
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
+
+    // ── Sync demo agent + queue to Asterisk Realtime tables (best-effort) ─────
+    var syncService = app.Services.GetService<AsteriskRealtimeSyncService>();
+    if (syncService is not null)
+    {
+        try
+        {
+            await syncService.SyncAgentAsync("demo", "demo-agent", "Demo Agent", "2001", "2001");
+            await syncService.SyncQueueAsync("demo", "support", timeout: 30, wrapuptime: 15, servicelevel: 20);
+            await syncService.AddQueueMemberAsync("demo", "support", "demo-agent", "Demo Agent");
+            Console.WriteLine("Asterisk Realtime: demo agent + support queue synced.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Asterisk Realtime sync skipped (no DB yet): {ex.Message}");
+        }
+    }
 
     Console.WriteLine("Demo API keys seeded: demo-key-admin | demo-key-supervisor | demo-key-agent");
 }

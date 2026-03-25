@@ -27,6 +27,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore" Version="1.0.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics" Version="1.0.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics" Version="1.0.0-pro" />
     <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.0.0-pro" />
     <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.0.0-pro" />
     <PackageVersion Include="Asterisk.Sdk.Pro.EventStore.Postgres" Version="1.0.0-pro" />

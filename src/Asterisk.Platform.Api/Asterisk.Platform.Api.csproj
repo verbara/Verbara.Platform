@@ -42,6 +42,10 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Dapper" />
     <PackageReference Include="Npgsql" />
+    <PackageReference Include="Asterisk.Sdk.Hosting" />
+    <PackageReference Include="Asterisk.Sdk.Pro.EventStore" />
+    <PackageReference Include="Asterisk.Sdk.Pro.Analytics" />
+    <PackageReference Include="Asterisk.Sdk.Pro.CallAnalytics" />
     <PackageReference Include="Asterisk.Sdk.Pro.Dialer" />
     <PackageReference Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" />
     <PackageReference Include="Asterisk.Sdk.Pro.EventStore.Postgres" />
