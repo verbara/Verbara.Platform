@@ -123,6 +123,8 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(CreateSkillRequest))]
 [JsonSerializable(typeof(UpsertSkillRequest))]
 [JsonSerializable(typeof(AssignSkillRequest))]
+// Call Attempts
+[JsonSerializable(typeof(UpdateCallAttemptDispositionRequest))]
 // Callbacks
 [JsonSerializable(typeof(CallbackDto))]
 [JsonSerializable(typeof(List<CallbackDto>))]

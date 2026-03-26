@@ -234,6 +234,7 @@ app.MapSystemEndpoints();
 app.MapSseEndpoints();
 app.MapMediaEndpoints();
 app.MapCampaignEndpoints();
+app.MapCallAttemptEndpoints();
 app.MapDncListEndpoints();
 app.MapCallerIdPoolEndpoints();
 app.MapHolidayCalendarEndpoints();
