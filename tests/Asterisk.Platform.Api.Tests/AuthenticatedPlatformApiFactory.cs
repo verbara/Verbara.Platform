@@ -11,7 +11,10 @@ using Asterisk.Sdk.Pro.Dialer.Dispositions;
 using Asterisk.Sdk.Pro.Dialer.Routing;
 using Asterisk.Sdk.Pro.Dialer.Scheduling;
 using Asterisk.Sdk.Pro.EventStore;
+using Asterisk.Sdk;
+using Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres.Stores;
 using Asterisk.Sdk.Pro.Licensing;
+using Npgsql;
 using Asterisk.Platform.Queues;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,6 +33,7 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
 {
     public const string TestApiKey = "test-api-key-12345";
     public const string TestTenantId = "tenant-test-001";
+    private const string TestUserId = "test-admin-user";
 
     private static readonly string s_hashedKey = HashKey(TestApiKey);
 
@@ -39,27 +43,11 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
 
         builder.ConfigureServices(services =>
         {
-            // ── Auth ──────────────────────────────────────────────────────────
-            var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IApiKeyStore));
-            if (descriptor is not null)
-                services.Remove(descriptor);
+            // ── Auth (API key + admin user) ──────────────────────────────────
+            SetupTestAuth(services, s_hashedKey, TestTenantId, TestUserId);
 
-            var store = Substitute.For<IApiKeyStore>();
-            var apiKey = new ApiKey
-            {
-                KeyId = EntityId.From("test-key-id"),
-                TenantId = new TenantId(TestTenantId),
-                Name = "Test Key",
-                HashedKey = s_hashedKey,
-                Scopes = ["*"],
-                IsRevoked = false,
-                CreatedAt = DateTimeOffset.UtcNow,
-            };
-
-            store.GetByHashAsync(s_hashedKey, Arg.Any<CancellationToken>())
-                 .Returns(Task.FromResult<ApiKey?>(apiKey));
-
-            services.AddSingleton(store);
+            // ── Asterisk SDK stubs (no real AMI/ARI connections in tests) ────
+            StubAsteriskHostedServices(services);
 
             // ── Licensing ─────────────────────────────────────────────────────
             services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Disabled);
@@ -81,54 +69,151 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
         return client;
     }
 
+    /// <summary>
+    /// Replaces the real IApiKeyStore and IUserStore with substitutes that return a pre-seeded
+    /// Admin test key and user so protected endpoints (AdminOnly, SupervisorPlus) can be called
+    /// without a real database.
+    /// </summary>
+    internal static void SetupTestAuth(
+        IServiceCollection services,
+        string hashedKey,
+        string tenantId,
+        string userId)
+    {
+        var userEntityId = EntityId.From(userId);
+        var tenantId_ = new TenantId(tenantId);
+
+        // ── IApiKeyStore ─────────────────────────────────────────────────────
+        var akDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IApiKeyStore));
+        if (akDescriptor is not null) services.Remove(akDescriptor);
+
+        var apiKeyStore = Substitute.For<IApiKeyStore>();
+        var apiKey = new ApiKey
+        {
+            KeyId = EntityId.From("test-key-id"),
+            TenantId = tenantId_,
+            Name = "Test Key",
+            HashedKey = hashedKey,
+            Scopes = ["*"],
+            UserId = userEntityId,
+            IsRevoked = false,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        apiKeyStore.GetByHashAsync(hashedKey, Arg.Any<CancellationToken>())
+                   .Returns(Task.FromResult<ApiKey?>(apiKey));
+        services.AddSingleton(apiKeyStore);
+
+        // ── IUserStore ───────────────────────────────────────────────────────
+        // Return an Admin user so AdminOnly and SupervisorPlus policies pass.
+        var userStoreDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IUserStore));
+        if (userStoreDescriptor is not null) services.Remove(userStoreDescriptor);
+
+        var userStore = Substitute.For<IUserStore>();
+        var testUser = new User
+        {
+            UserId = userEntityId,
+            TenantId = tenantId_,
+            Email = "test-admin@test.internal",
+            DisplayName = "Test Admin",
+            Role = UserRole.Admin,
+            Status = UserStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        userStore.GetByIdAsync(tenantId_, userEntityId, Arg.Any<CancellationToken>())
+                 .Returns(Task.FromResult<User?>(testUser));
+        services.AddSingleton(userStore);
+    }
+
+    /// <summary>
+    /// Replaces the real AMI connection and AsteriskServer with NSubstitute mocks and
+    /// removes Asterisk-specific IHostedService registrations so the test host can start
+    /// without connecting to a real Asterisk instance.
+    /// </summary>
+    internal static void StubAsteriskHostedServices(IServiceCollection services)
+    {
+        // Remove Asterisk-specific hosted services that try to connect to a real server.
+        // We identify them by their implementation type to avoid removing framework-level services.
+        var hostedServices = services
+            .Where(d => d.ServiceType == typeof(IHostedService) &&
+                        (d.ImplementationType?.FullName?.Contains("Asterisk") == true ||
+                         d.ImplementationFactory is not null))
+            .ToList();
+        foreach (var d in hostedServices)
+            services.Remove(d);
+
+        // Replace IAmiConnection with a mock so any code that resolves it gets a no-op stub
+        var amiDescriptors = services.Where(d => d.ServiceType == typeof(IAmiConnection)).ToList();
+        foreach (var d in amiDescriptors) services.Remove(d);
+        services.AddSingleton(Substitute.For<IAmiConnection>());
+
+        // Replace IAsteriskServer with a mock
+        var serverDescriptors = services.Where(d => d.ServiceType == typeof(IAsteriskServer)).ToList();
+        foreach (var d in serverDescriptors) services.Remove(d);
+        services.AddSingleton(Substitute.For<IAsteriskServer>());
+    }
+
     internal static void RegisterInMemoryStores(IServiceCollection services)
     {
-        // Campaign stores
-        if (!services.Any(d => d.ServiceType == typeof(CampaignStoreBase)))
-        {
-            services.AddSingleton<InMemoryCampaignStore>();
-            services.AddSingleton<CampaignStoreBase>(sp => sp.GetRequiredService<InMemoryCampaignStore>());
-            services.AddSingleton<CampaignLifecycleManager>(sp =>
-                new CampaignLifecycleManager(
-                    sp.GetRequiredService<CampaignStoreBase>(),
-                    sp.GetRequiredService<ILogger<CampaignLifecycleManager>>()));
-        }
+        // Campaign stores — always replace so Postgres stores (registered when connection string
+        // is present in appsettings.json) do not attempt real DB connections in tests.
+        RemoveAll<CampaignStoreBase>(services);
+        RemoveAll<CampaignLifecycleManager>(services);
+        services.AddSingleton<InMemoryCampaignStore>();
+        services.AddSingleton<CampaignStoreBase>(sp => sp.GetRequiredService<InMemoryCampaignStore>());
+        services.AddSingleton<CampaignLifecycleManager>(sp =>
+            new CampaignLifecycleManager(
+                sp.GetRequiredService<CampaignStoreBase>(),
+                sp.GetRequiredService<ILogger<CampaignLifecycleManager>>()));
 
-        if (!services.Any(d => d.ServiceType == typeof(ContactListStoreBase)))
-        {
-            services.AddSingleton<InMemoryContactListStore>();
-            services.AddSingleton<ContactListStoreBase>(sp => sp.GetRequiredService<InMemoryContactListStore>());
-        }
+        RemoveAll<ContactListStoreBase>(services);
+        services.AddSingleton<InMemoryContactListStore>();
+        services.AddSingleton<ContactListStoreBase>(sp => sp.GetRequiredService<InMemoryContactListStore>());
 
-        if (!services.Any(d => d.ServiceType == typeof(DispositionCodeStoreBase)))
-        {
-            services.AddSingleton<InMemoryDispositionCodeStore>();
-            services.AddSingleton<DispositionCodeStoreBase>(sp => sp.GetRequiredService<InMemoryDispositionCodeStore>());
-        }
+        RemoveAll<DispositionCodeStoreBase>(services);
+        services.AddSingleton<InMemoryDispositionCodeStore>();
+        services.AddSingleton<DispositionCodeStoreBase>(sp => sp.GetRequiredService<InMemoryDispositionCodeStore>());
 
-        // v0.5.0 Dialer config stores
-        if (!services.Any(d => d.ServiceType == typeof(TrunkStoreBase)))
-            services.AddSingleton<TrunkStoreBase, InMemoryTrunkStore>();
-        if (!services.Any(d => d.ServiceType == typeof(OutboundRouteStoreBase)))
-            services.AddSingleton<OutboundRouteStoreBase, InMemoryOutboundRouteStore>();
-        if (!services.Any(d => d.ServiceType == typeof(DncListStoreBase)))
-            services.AddSingleton<DncListStoreBase, InMemoryDncListStore>();
-        if (!services.Any(d => d.ServiceType == typeof(CallerIdPoolStoreBase)))
-            services.AddSingleton<CallerIdPoolStoreBase, InMemoryCallerIdPoolStore>();
-        if (!services.Any(d => d.ServiceType == typeof(HolidayCalendarStoreBase)))
-            services.AddSingleton<HolidayCalendarStoreBase, InMemoryHolidayCalendarStore>();
+        // v0.5.0 Dialer config stores — always replace
+        RemoveAll<TrunkStoreBase>(services);
+        services.AddSingleton<TrunkStoreBase, InMemoryTrunkStore>();
+        RemoveAll<OutboundRouteStoreBase>(services);
+        services.AddSingleton<OutboundRouteStoreBase, InMemoryOutboundRouteStore>();
+        RemoveAll<DncListStoreBase>(services);
+        services.AddSingleton<DncListStoreBase, InMemoryDncListStore>();
+        RemoveAll<CallerIdPoolStoreBase>(services);
+        services.AddSingleton<CallerIdPoolStoreBase, InMemoryCallerIdPoolStore>();
+        RemoveAll<HolidayCalendarStoreBase>(services);
+        services.AddSingleton<HolidayCalendarStoreBase, InMemoryHolidayCalendarStore>();
 
-        // Queue membership
-        if (!services.Any(d => d.ServiceType == typeof(IQueueMembershipStore)))
-            services.AddSingleton<IQueueMembershipStore, InMemoryQueueMembershipStore>();
+        // Queue membership — always replace
+        RemoveAll<IQueueMembershipStore>(services);
+        services.AddSingleton<IQueueMembershipStore, InMemoryQueueMembershipStore>();
 
-        // Analytics stores
-        if (!services.Any(d => d.ServiceType == typeof(ICompletedSessionStore)))
-            services.AddSingleton<ICompletedSessionStore, InMemoryCompletedSessionStore>();
-        if (!services.Any(d => d.ServiceType == typeof(ICallAnalyticsStore)))
-            services.AddSingleton<ICallAnalyticsStore, InMemoryCallAnalyticsStore>();
-        if (!services.Any(d => d.ServiceType == typeof(IIntervalSnapshotStore)))
-            services.AddSingleton<IIntervalSnapshotStore, InMemoryIntervalSnapshotStore>();
+        // Analytics stores — always replace
+        RemoveAll<ICompletedSessionStore>(services);
+        services.AddSingleton<ICompletedSessionStore, InMemoryCompletedSessionStore>();
+        RemoveAll<ICallAnalyticsStore>(services);
+        services.AddSingleton<ICallAnalyticsStore, InMemoryCallAnalyticsStore>();
+        RemoveAll<IIntervalSnapshotStore>(services);
+        services.AddSingleton<IIntervalSnapshotStore, InMemoryIntervalSnapshotStore>();
+
+        // AgentAssist Postgres stores (concrete sealed types used by endpoints).
+        // Provide a dummy NpgsqlDataSource so stores can be constructed for DI resolution.
+        // Actual DB calls will fail, but these endpoints are not exercised in unit tests.
+        if (!services.Any(d => d.ServiceType == typeof(NpgsqlDataSource)))
+            services.AddSingleton(NpgsqlDataSource.Create("Host=localhost;Database=test_unused"));
+        if (!services.Any(d => d.ServiceType == typeof(AgentAssistSessionStore)))
+            services.AddSingleton<AgentAssistSessionStore>();
+        if (!services.Any(d => d.ServiceType == typeof(SuggestionLogStore)))
+            services.AddSingleton<SuggestionLogStore>();
+        if (!services.Any(d => d.ServiceType == typeof(ComplianceAlertStore)))
+            services.AddSingleton<ComplianceAlertStore>();
+    }
+
+    private static void RemoveAll<T>(IServiceCollection services)
+    {
+        var descriptors = services.Where(d => d.ServiceType == typeof(T)).ToList();
+        foreach (var d in descriptors) services.Remove(d);
     }
 
     private static string HashKey(string rawKey)

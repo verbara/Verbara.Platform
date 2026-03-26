@@ -34,6 +34,7 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
 {
     public const string TestApiKey = "unified-test-key-77777";
     public const string TestTenantId = "tenant-unified-001";
+    private const string TestUserId = "unified-test-admin-user";
 
     private static readonly string s_hashedKey = HashKey(TestApiKey);
 
@@ -48,24 +49,11 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
-            // ── Auth ──────────────────────────────────────────────────────────
-            var akDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IApiKeyStore));
-            if (akDescriptor is not null) services.Remove(akDescriptor);
+            // ── Auth (API key + Admin user) ───────────────────────────────────
+            AuthenticatedPlatformApiFactory.SetupTestAuth(services, s_hashedKey, TestTenantId, TestUserId);
 
-            var apiKeyStore = Substitute.For<IApiKeyStore>();
-            var apiKey = new ApiKey
-            {
-                KeyId = EntityId.From("unified-test-key-id"),
-                TenantId = new TenantId(TestTenantId),
-                Name = "Unified Test Key",
-                HashedKey = s_hashedKey,
-                Scopes = ["*"],
-                IsRevoked = false,
-                CreatedAt = DateTimeOffset.UtcNow,
-            };
-            apiKeyStore.GetByHashAsync(s_hashedKey, Arg.Any<CancellationToken>())
-                       .Returns(Task.FromResult<ApiKey?>(apiKey));
-            services.AddSingleton(apiKeyStore);
+            // ── Asterisk SDK stubs (no real AMI/ARI connections in tests) ────
+            AuthenticatedPlatformApiFactory.StubAsteriskHostedServices(services);
 
             // ── Licensing ─────────────────────────────────────────────────────
             services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Disabled);

@@ -15,6 +15,8 @@ using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
 using Microsoft.AspNetCore.Authentication;
 using Asterisk.Sdk.Hosting;
+using Asterisk.Platform.KnowledgeBase;
+using Asterisk.Platform.Surveys;
 using Asterisk.Sdk.Pro.Dialer.DependencyInjection;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.EventStore.DependencyInjection;
@@ -24,6 +26,7 @@ using Asterisk.Sdk.Pro.Analytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.CallAnalytics.DependencyInjection;
 using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.AgentAssist.DependencyInjection;
+using Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Sdk.Pro.AgentAssist.Engine;
@@ -54,6 +57,8 @@ builder.Services.AddSwitchboard();
 builder.Services.AddPlatformBot();
 builder.Services.AddPlatformAudit();
 builder.Services.AddPlatformMedia();
+builder.Services.AddPlatformKnowledgeBase();
+builder.Services.AddPlatformSurveys();
 
 // ─── In-Memory Storage (zero-infrastructure default) ─────────────────────────
 
@@ -117,6 +122,9 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     builder.Services.AddAsteriskAnalytics();
     builder.Services.AddProCallAnalytics();
     // TODO: AddProAgentAssist() requires a SpeechRecognizer implementation — skipped until STT provider is configured
+
+    // AgentAssist Postgres query stores (read-only endpoints for supervisor dashboard)
+    builder.Services.AddProAgentAssistPostgres(analyticsConnectionString);
 }
 
 // ─── Recordings ─────────────────────────────────────────────────────────────

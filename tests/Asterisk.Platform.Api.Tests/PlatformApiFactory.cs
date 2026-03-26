@@ -13,6 +13,9 @@ public sealed class PlatformApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
+            // ── Asterisk SDK stubs (no real AMI/ARI connections in tests) ────
+            AuthenticatedPlatformApiFactory.StubAsteriskHostedServices(services);
+
             // Disable license enforcement and provide dummy public key so
             // LicenseValidationHostedService starts without a real license file.
             services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Disabled);
