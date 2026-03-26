@@ -8,6 +8,7 @@ public interface IAgentStore
     Task<Agent?> GetByUserIdAsync(TenantId tenantId, EntityId userId, CancellationToken ct);
     Task<PagedResult<Agent>> ListAsync(TenantId tenantId, AgentQuery query, CancellationToken ct);
     Task SaveAsync(Agent agent, CancellationToken ct);
+    Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
 }
 
 public sealed record AgentQuery

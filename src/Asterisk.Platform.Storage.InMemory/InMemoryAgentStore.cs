@@ -43,4 +43,10 @@ internal sealed class InMemoryAgentStore : IAgentStore
         _items[(agent.TenantId, agent.AgentId)] = agent;
         return Task.CompletedTask;
     }
+
+    public Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        _items.TryRemove((tenantId, agentId), out _);
+        return Task.CompletedTask;
+    }
 }

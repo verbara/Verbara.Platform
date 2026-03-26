@@ -107,6 +107,14 @@ internal sealed class PostgresAgentStore : IAgentStore
             });
     }
 
+    public async Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(
+            "DELETE FROM agents WHERE tenant_id = @TenantId AND agent_id = @AgentId",
+            new { TenantId = tenantId.Value, AgentId = agentId.Value });
+    }
+
     private sealed record AgentRow(
         string agent_id,
         string tenant_id,

@@ -1,6 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
+using Asterisk.Sdk.Pro.Realtime;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -29,6 +30,7 @@ internal static class AdminEndpoints
         group.MapGet("/agents/{id}", GetAgent);
         group.MapPost("/agents", CreateAgent);
         group.MapPut("/agents/{id}", UpdateAgent);
+        group.MapDelete("/agents/{id}", DeleteAgent);
 
         // Teams
         group.MapGet("/teams", ListTeams);
@@ -274,7 +276,20 @@ internal static class AdminEndpoints
             State = AgentState.Offline,
             CreatedAt = clock.UtcNow,
         };
+        if (body.Extension is not null) agent.Extension = body.Extension;
+        if (body.SipPassword is not null) agent.SipPassword = body.SipPassword;
         await store.SaveAsync(agent, ct);
+
+        if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword))
+        {
+            var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+            if (syncService is not null)
+            {
+                try { await syncService.SyncAgentAsync(tenantId, agent.AgentId.Value, agent.DisplayName, agent.Extension, agent.SipPassword, ct: ct); }
+                catch { }
+            }
+        }
+
         return Results.Created($"/api/admin/agents/{agent.AgentId}", agent);
     }
 
@@ -294,9 +309,43 @@ internal static class AdminEndpoints
         if (body.DisplayName is not null) agent.DisplayName = body.DisplayName;
         if (body.TeamId is not null) agent.TeamId = EntityId.From(body.TeamId);
         if (body.Skills is not null) agent.Skills = body.Skills;
+        if (body.Extension is not null) agent.Extension = body.Extension;
+        if (body.SipPassword is not null) agent.SipPassword = body.SipPassword;
         agent.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(agent, ct);
+
+        if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword))
+        {
+            var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+            if (syncService is not null)
+            {
+                try { await syncService.SyncAgentAsync(tenantId, agent.AgentId.Value, agent.DisplayName, agent.Extension, agent.SipPassword, ct: ct); }
+                catch { }
+            }
+        }
+
         return Results.Ok(agent);
+    }
+
+    private static async Task<IResult> DeleteAgent(
+        string id,
+        HttpContext context,
+        IAgentStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agent = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (agent is null) return Results.NotFound();
+
+        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+        if (syncService is not null)
+        {
+            try { await syncService.RemoveAgentAsync(tenantId, agent.AgentId.Value, ct); }
+            catch { }
+        }
+
+        await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        return Results.NoContent();
     }
 
     // ─── Teams ────────────────────────────────────────────────────────────────
@@ -421,8 +470,8 @@ internal sealed record WrapUpConfigDto(
     int DefaultWrapUpSeconds = 30,
     bool ForceWrapUp = false);
 
-internal sealed record CreateAgentRequest(string UserId, string DisplayName);
-internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills);
+internal sealed record CreateAgentRequest(string UserId, string DisplayName, string? Extension = null, string? SipPassword = null);
+internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills, string? Extension = null, string? SipPassword = null);
 
 internal sealed record CreateTeamRequest(string Name);
 internal sealed record UpdateTeamRequest(string? Name);
