@@ -2,6 +2,7 @@ using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Realtime;
+using Asterisk.Sdk.Pro.Realtime.Models;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -179,6 +180,24 @@ internal static class AdminEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(queue, ct);
+
+        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+        if (syncService is not null)
+        {
+            try
+            {
+                var opts = new RealtimeQueueOptions
+                {
+                    Timeout = 30,
+                    Wrapuptime = queue.WrapUp?.DefaultWrapUpSeconds ?? 15,
+                    Servicelevel = queue.SlaTargets?.AnswerWithinSeconds ?? 20,
+                    Maxlen = queue.MaxWaiting ?? 0,
+                };
+                await syncService.SyncQueueAsync(tenantId, queue.Name, opts, ct);
+            }
+            catch { }
+        }
+
         return Results.Created($"/api/admin/queues/{queue.QueueId}", queue);
     }
 
@@ -220,6 +239,24 @@ internal static class AdminEndpoints
             };
         queue.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(queue, ct);
+
+        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+        if (syncService is not null)
+        {
+            try
+            {
+                var opts = new RealtimeQueueOptions
+                {
+                    Timeout = 30,
+                    Wrapuptime = queue.WrapUp?.DefaultWrapUpSeconds ?? 15,
+                    Servicelevel = queue.SlaTargets?.AnswerWithinSeconds ?? 20,
+                    Maxlen = queue.MaxWaiting ?? 0,
+                };
+                await syncService.SyncQueueAsync(tenantId, queue.Name, opts, ct);
+            }
+            catch { }
+        }
+
         return Results.Ok(queue);
     }
 
@@ -230,6 +267,17 @@ internal static class AdminEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var queue = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (queue is not null)
+        {
+            var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+            if (syncService is not null)
+            {
+                try { await syncService.RemoveQueueAsync(tenantId, queue.Name, ct); }
+                catch { }
+            }
+        }
+
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
         return Results.NoContent();
     }
