@@ -243,6 +243,7 @@ app.MapTrunkEndpoints();
 app.MapOutboundRouteEndpoints();
 app.MapRecordingEndpoints();
 app.MapAnalyticsEndpoints();
+app.MapAnalyticsLiveEndpoints();
 app.MapQueueMetricsEndpoints();
 app.MapBotEndpoints();
 app.MapKnowledgeBaseEndpoints();
