@@ -11,6 +11,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Asterisk.Platform.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Asterisk.Platform.Core\Asterisk.Platform.Core.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Identity\Asterisk.Platform.Identity.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Conversations\Asterisk.Platform.Conversations.csproj" />
