@@ -66,8 +66,8 @@ internal static class SkillEndpoints
     private static async Task<IResult> DeleteSkill(
         string name,
         SkillCatalogBase catalog,
-        bool force,
-        CancellationToken ct)
+        bool force = false,
+        CancellationToken ct = default)
     {
         if (!force)
         {
