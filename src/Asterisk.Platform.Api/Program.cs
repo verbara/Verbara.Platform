@@ -33,6 +33,7 @@ using Asterisk.Sdk.Pro.Realtime.DependencyInjection;
 using Asterisk.Sdk.Pro.Realtime.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Realtime.Models;
 using Asterisk.Sdk.Pro.Realtime.Decorators;
+using Asterisk.Sdk.Pro.Realtime.Engine;
 using Asterisk.Sdk.Pro.Dialer.Routing;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres;
 
@@ -91,6 +92,11 @@ builder.Services.AddAsteriskRealtime(o =>
 var realtimeConn = dialerConnectionString;
 if (!string.IsNullOrEmpty(realtimeConn))
     builder.Services.UsePostgresRealtimeStorage(realtimeConn);
+builder.Services.AddHostedService<RealtimeStateBridge>();
+
+// Queue membership service + desired state provider for reconciler
+builder.Services.AddSingleton<QueueMembershipService>();
+builder.Services.AddSingleton<IDesiredStateProvider, PlatformDesiredStateProvider>();
 
 // Trunk decorator — wraps PostgresTrunkStore with Realtime sync
 builder.Services.AddSingleton<TrunkStoreBase>(sp =>

@@ -12,6 +12,7 @@ using Asterisk.Sdk.Pro.Dialer.Routing;
 using Asterisk.Sdk.Pro.Dialer.Scheduling;
 using Asterisk.Sdk.Pro.EventStore;
 using Asterisk.Sdk.Pro.Licensing;
+using Asterisk.Platform.Queues;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -116,6 +117,10 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
             services.AddSingleton<CallerIdPoolStoreBase, InMemoryCallerIdPoolStore>();
         if (!services.Any(d => d.ServiceType == typeof(HolidayCalendarStoreBase)))
             services.AddSingleton<HolidayCalendarStoreBase, InMemoryHolidayCalendarStore>();
+
+        // Queue membership
+        if (!services.Any(d => d.ServiceType == typeof(IQueueMembershipStore)))
+            services.AddSingleton<IQueueMembershipStore, InMemoryQueueMembershipStore>();
 
         // Analytics stores
         if (!services.Any(d => d.ServiceType == typeof(ICompletedSessionStore)))

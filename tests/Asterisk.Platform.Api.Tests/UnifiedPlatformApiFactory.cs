@@ -13,6 +13,8 @@ using Asterisk.Sdk.Pro.Dialer.Routing;
 using Asterisk.Sdk.Pro.Dialer.Scheduling;
 using Asterisk.Sdk.Pro.EventStore;
 using Asterisk.Sdk.Pro.Licensing;
+using Asterisk.Sdk.Pro.Realtime.Engine;
+using Asterisk.Platform.Queues;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -72,6 +74,9 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
 
             // ── Campaign + Dialer config stores ─────────────────────────────────
             AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
+
+            // ── Queue membership store ────────────────────────────────────────
+            UpsertStore<IQueueMembershipStore>(services, new InMemoryQueueMembershipStore());
 
             // ── Analytics stores (override with test-accessible instances) ────
             UpsertStore<ICompletedSessionStore>(services, CdrStore);

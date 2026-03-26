@@ -268,6 +268,7 @@ internal static class AdminEndpoints
         string id,
         HttpContext context,
         IQueueStore store,
+        IQueueMembershipStore membershipStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -282,6 +283,7 @@ internal static class AdminEndpoints
             }
         }
 
+        await membershipStore.DeleteAllForQueueAsync(tenantId, EntityId.From(id), ct);
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
         return Results.NoContent();
     }
@@ -290,12 +292,24 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> AddQueueMember(
         HttpContext context, AddQueueMemberRequest body,
-        IQueueStore queueStore, IAgentStore agentStore, CancellationToken ct)
+        IQueueStore queueStore, IAgentStore agentStore,
+        IQueueMembershipStore membershipStore, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(body.QueueId), ct);
         var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(body.AgentId), ct);
         if (queue is null || agent is null) return Results.NotFound();
+
+        await membershipStore.SaveAsync(new QueueMembership
+        {
+            TenantId = tenantId,
+            QueueId = EntityId.From(body.QueueId),
+            AgentId = EntityId.From(body.AgentId),
+            Penalty = body.Penalty ?? 0,
+            Source = MembershipSource.Manual,
+            IsExcluded = false,
+            CreatedAt = DateTimeOffset.UtcNow,
+        }, ct);
 
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
         if (syncService is not null)
@@ -307,12 +321,15 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> RemoveQueueMember(
         string queueId, string agentId, HttpContext context,
-        IQueueStore queueStore, IAgentStore agentStore, CancellationToken ct)
+        IQueueStore queueStore, IAgentStore agentStore,
+        IQueueMembershipStore membershipStore, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(queueId), ct);
         var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(agentId), ct);
         if (queue is null || agent is null) return Results.NotFound();
+
+        await membershipStore.DeleteAsync(tenantId, EntityId.From(queueId), EntityId.From(agentId), ct);
 
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
         if (syncService is not null)
@@ -419,6 +436,7 @@ internal static class AdminEndpoints
         string id,
         HttpContext context,
         IAgentStore store,
+        IQueueMembershipStore membershipStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -432,6 +450,7 @@ internal static class AdminEndpoints
             catch { }
         }
 
+        await membershipStore.DeleteAllForAgentAsync(tenantId, EntityId.From(id), ct);
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
         return Results.NoContent();
     }
