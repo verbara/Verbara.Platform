@@ -8,7 +8,7 @@ namespace Asterisk.Platform.Api.Services;
 /// Bridges <see cref="AgentAssistSupervisor"/> observable streams into
 /// <see cref="PlatformEventBus"/> so agent assist events flow out via SSE.
 /// </summary>
-public sealed class AgentAssistBridge : IHostedService, IDisposable
+public sealed partial class AgentAssistBridge : IHostedService, IDisposable
 {
     private readonly AgentAssistSupervisor _supervisor;
     private readonly PlatformEventBus _eventBus;
@@ -65,7 +65,7 @@ public sealed class AgentAssistBridge : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[AgentAssistBridge] Error publishing suggestion for session {SessionId}", sessionId);
+                Log.PublishSuggestionFailed(_logger, sessionId, ex);
             }
         });
 
@@ -84,7 +84,7 @@ public sealed class AgentAssistBridge : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[AgentAssistBridge] Error publishing sentiment for session {SessionId}", sessionId);
+                Log.PublishSentimentFailed(_logger, sessionId, ex);
             }
         });
 
@@ -102,7 +102,7 @@ public sealed class AgentAssistBridge : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[AgentAssistBridge] Error publishing compliance alert for session {SessionId}", sessionId);
+                Log.PublishComplianceAlertFailed(_logger, sessionId, ex);
             }
         });
 
@@ -120,7 +120,7 @@ public sealed class AgentAssistBridge : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[AgentAssistBridge] Error publishing transcript for session {SessionId}", sessionId);
+                Log.PublishTranscriptFailed(_logger, sessionId, ex);
             }
         });
 
@@ -144,6 +144,21 @@ public sealed class AgentAssistBridge : IHostedService, IDisposable
             subs.Dispose();
 
         _sessionSubs.Clear();
+    }
+
+    private static partial class Log
+    {
+        [LoggerMessage(Level = LogLevel.Warning, Message = "[AgentAssistBridge] Error publishing suggestion for session {SessionId}")]
+        public static partial void PublishSuggestionFailed(ILogger logger, string sessionId, Exception exception);
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "[AgentAssistBridge] Error publishing sentiment for session {SessionId}")]
+        public static partial void PublishSentimentFailed(ILogger logger, string sessionId, Exception exception);
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "[AgentAssistBridge] Error publishing compliance alert for session {SessionId}")]
+        public static partial void PublishComplianceAlertFailed(ILogger logger, string sessionId, Exception exception);
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "[AgentAssistBridge] Error publishing transcript for session {SessionId}")]
+        public static partial void PublishTranscriptFailed(ILogger logger, string sessionId, Exception exception);
     }
 
     /// <summary>Composes multiple <see cref="IDisposable"/> instances into one.</summary>

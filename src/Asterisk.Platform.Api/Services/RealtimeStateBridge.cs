@@ -16,7 +16,7 @@ namespace Asterisk.Platform.Api.Services;
 /// </list>
 /// Both operations are best-effort; failures are logged without interrupting the event stream.
 /// </summary>
-internal sealed class RealtimeStateBridge : IHostedService, IDisposable
+internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
 {
     private readonly PlatformEventBus _eventBus;
     private readonly IRealtimeSyncService _syncService;
@@ -62,7 +62,7 @@ internal sealed class RealtimeStateBridge : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to sync paused state to DB for {AgentId}", e.AgentId);
+                Log.SyncPausedDbFailed(_logger, e.AgentId, ex);
             }
 
             // 2. AMI QueuePause (best-effort)
@@ -79,7 +79,7 @@ internal sealed class RealtimeStateBridge : IHostedService, IDisposable
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to send QueuePause for {AgentId}", e.AgentId);
+                    Log.QueuePauseFailed(_logger, e.AgentId, ex);
                 }
             }
         }
@@ -96,4 +96,13 @@ internal sealed class RealtimeStateBridge : IHostedService, IDisposable
     }
 
     public void Dispose() => _subscription?.Dispose();
+
+    private static partial class Log
+    {
+        [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to sync paused state to DB for {AgentId}")]
+        public static partial void SyncPausedDbFailed(ILogger logger, string agentId, Exception exception);
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to send QueuePause for {AgentId}")]
+        public static partial void QueuePauseFailed(ILogger logger, string agentId, Exception exception);
+    }
 }

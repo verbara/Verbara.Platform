@@ -36,10 +36,12 @@ internal sealed class ErrorHandlingMiddleware
             _ => (StatusCodes.Status500InternalServerError, "Internal Server Error"),
         };
 
+#pragma warning disable CA1848 // Use LoggerMessage delegates
         if (status == StatusCodes.Status500InternalServerError)
             _logger.LogError(exception, "Unhandled exception");
         else
             _logger.LogWarning(exception, "Request error: {Title}", title);
+#pragma warning restore CA1848
 
         var problem = new ProblemDetails
         {

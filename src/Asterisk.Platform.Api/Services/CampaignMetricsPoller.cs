@@ -33,7 +33,9 @@ public sealed class CampaignMetricsPoller : BackgroundService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+#pragma warning disable CA1848 // Use LoggerMessage delegates
                 _logger.LogError(ex, "Error polling campaign metrics");
+#pragma warning restore CA1848
             }
         }
     }
