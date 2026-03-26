@@ -139,6 +139,18 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(List<EndpointProfileDto>))]
 [JsonSerializable(typeof(CreateEndpointProfileRequest))]
 [JsonSerializable(typeof(UpdateEndpointProfileRequest))]
+// Cluster
+[JsonSerializable(typeof(ClusterStatusDto))]
+[JsonSerializable(typeof(ClusterNodeDto))]
+[JsonSerializable(typeof(List<ClusterNodeDto>))]
+[JsonSerializable(typeof(DrainNodeRequest))]
+[JsonSerializable(typeof(DrainStatusDto))]
+// Tenants
+[JsonSerializable(typeof(TenantDto))]
+[JsonSerializable(typeof(List<TenantDto>))]
+[JsonSerializable(typeof(CreateTenantRequest))]
+[JsonSerializable(typeof(UpdateTenantRequest))]
+[JsonSerializable(typeof(TenantStatsDto))]
 // Agent Assist
 [JsonSerializable(typeof(KeywordRuleDto))]
 [JsonSerializable(typeof(KeywordRuleDto[]))]
