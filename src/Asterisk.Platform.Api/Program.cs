@@ -253,6 +253,7 @@ app.MapSkillEndpoints();
 app.MapAuditEndpoints();
 app.MapSurveyEndpoints();
 app.MapScheduledReportEndpoints();
+app.MapRealtimeEndpoints();
 
 // ─── Dev seed: create demo users + API keys for local testing ────────────────
 {

@@ -134,6 +134,11 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(CallbackDto))]
 [JsonSerializable(typeof(List<CallbackDto>))]
 [JsonSerializable(typeof(CreateCallbackRequest))]
+// Realtime Endpoint Profiles
+[JsonSerializable(typeof(EndpointProfileDto))]
+[JsonSerializable(typeof(List<EndpointProfileDto>))]
+[JsonSerializable(typeof(CreateEndpointProfileRequest))]
+[JsonSerializable(typeof(UpdateEndpointProfileRequest))]
 // Agent Assist
 [JsonSerializable(typeof(KeywordRuleDto))]
 [JsonSerializable(typeof(KeywordRuleDto[]))]
