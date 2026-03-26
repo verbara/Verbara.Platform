@@ -13,6 +13,7 @@ internal static class SkillEndpoints
         skills.MapPost("/", CreateSkill);
         skills.MapPut("/{name}", UpsertSkill);
         skills.MapDelete("/{name}", DeleteSkill);
+        skills.MapGet("/{name}/agents", ListAgentsWithSkill);
 
         var agentSkills = app.MapGroup("/api/admin/agents").RequireAuthorization("AdminOnly");
 
@@ -62,16 +63,26 @@ internal static class SkillEndpoints
         return Results.Ok(MapToDto(skill));
     }
 
-    private static Task<IResult> DeleteSkill(
+    private static async Task<IResult> DeleteSkill(
         string name,
         SkillCatalogBase catalog,
+        bool force,
         CancellationToken ct)
     {
-        // Skill definition removal is not supported in the current catalog version.
-        return Task.FromResult(Results.Problem(
-            title: "Not Supported",
-            detail: "Skill definition deletion is not supported by the active catalog provider.",
-            statusCode: 501));
+        if (!force)
+        {
+            var agents = await catalog.GetAgentsWithSkillAsync(name, ct);
+            if (agents.Count > 0)
+            {
+                return Results.Problem(
+                    title: "Skill In Use",
+                    detail: $"Skill '{name}' is assigned to {agents.Count} agent(s). Use ?force=true to delete anyway.",
+                    statusCode: 409);
+            }
+        }
+
+        var removed = await catalog.RemoveSkillDefinitionAsync(name, ct);
+        return removed ? Results.NoContent() : Results.NotFound();
     }
 
     // ─── Agent Skill Handlers ─────────────────────────────────────────────────
@@ -109,6 +120,15 @@ internal static class SkillEndpoints
     {
         await catalog.RemoveSkillAsync(agentId, skillName, ct);
         return Results.NoContent();
+    }
+
+    private static async Task<IResult> ListAgentsWithSkill(
+        string name,
+        SkillCatalogBase catalog,
+        CancellationToken ct)
+    {
+        var agentSkills = await catalog.GetAgentsWithSkillAsync(name, ct);
+        return Results.Ok(agentSkills.Select(MapAgentSkillToDto).ToList());
     }
 
     // ─── Mapping Helpers ─────────────────────────────────────────────────────

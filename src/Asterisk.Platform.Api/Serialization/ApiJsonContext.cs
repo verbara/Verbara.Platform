@@ -115,6 +115,14 @@ namespace Asterisk.Platform.Api.Serialization;
 // Dialer Settings
 [JsonSerializable(typeof(DialerSettingsDto))]
 [JsonSerializable(typeof(UpdateDialerSettingsRequest))]
+// Skills
+[JsonSerializable(typeof(SkillDto))]
+[JsonSerializable(typeof(List<SkillDto>))]
+[JsonSerializable(typeof(AgentSkillDto))]
+[JsonSerializable(typeof(List<AgentSkillDto>))]
+[JsonSerializable(typeof(CreateSkillRequest))]
+[JsonSerializable(typeof(UpsertSkillRequest))]
+[JsonSerializable(typeof(AssignSkillRequest))]
 // Agent Assist
 [JsonSerializable(typeof(KeywordRuleDto))]
 [JsonSerializable(typeof(KeywordRuleDto[]))]
