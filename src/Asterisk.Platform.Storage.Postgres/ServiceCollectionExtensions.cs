@@ -42,6 +42,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IQueueStore, PostgresQueueStore>();
         services.AddSingleton<IAgentStore, PostgresAgentStore>();
         services.AddSingleton<ITeamStore, PostgresTeamStore>();
+        services.AddSingleton<IQueueMembershipStore, PostgresQueueMembershipStore>();
 
         // Channels
         services.AddSingleton<ITenantChannelConfigStore, PostgresTenantChannelConfigStore>();
