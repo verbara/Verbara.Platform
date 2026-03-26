@@ -26,6 +26,10 @@ internal static class AdminEndpoints
         group.MapPut("/queues/{id}", UpdateQueue);
         group.MapDelete("/queues/{id}", DeleteQueue);
 
+        // Queue Members
+        group.MapPost("/queue-members", AddQueueMember);
+        group.MapDelete("/queue-members/{queueId}/{agentId}", RemoveQueueMember);
+
         // Agents
         group.MapGet("/agents", ListAgents);
         group.MapGet("/agents/{id}", GetAgent);
@@ -282,6 +286,42 @@ internal static class AdminEndpoints
         return Results.NoContent();
     }
 
+    // ─── Queue Members ────────────────────────────────────────────────────────
+
+    private static async Task<IResult> AddQueueMember(
+        HttpContext context, AddQueueMemberRequest body,
+        IQueueStore queueStore, IAgentStore agentStore, CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(body.QueueId), ct);
+        var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(body.AgentId), ct);
+        if (queue is null || agent is null) return Results.NotFound();
+
+        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+        if (syncService is not null)
+        {
+            await syncService.AddQueueMemberAsync(tenantId, queue.Name, agent.AgentId.Value, agent.DisplayName, body.Penalty ?? 0, ct);
+        }
+        return Results.Created($"/api/admin/queue-members/{body.QueueId}/{body.AgentId}", null);
+    }
+
+    private static async Task<IResult> RemoveQueueMember(
+        string queueId, string agentId, HttpContext context,
+        IQueueStore queueStore, IAgentStore agentStore, CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(queueId), ct);
+        var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(agentId), ct);
+        if (queue is null || agent is null) return Results.NotFound();
+
+        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+        if (syncService is not null)
+        {
+            await syncService.RemoveQueueMemberAsync(tenantId, queue.Name, agent.AgentId.Value, ct);
+        }
+        return Results.NoContent();
+    }
+
     // ─── Agents ───────────────────────────────────────────────────────────────
 
     private static async Task<IResult> ListAgents(
@@ -517,6 +557,8 @@ internal sealed record QueueOverflowRuleDto(
 internal sealed record WrapUpConfigDto(
     int DefaultWrapUpSeconds = 30,
     bool ForceWrapUp = false);
+
+internal sealed record AddQueueMemberRequest(string QueueId, string AgentId, int? Penalty = null);
 
 internal sealed record CreateAgentRequest(string UserId, string DisplayName, string? Extension = null, string? SipPassword = null);
 internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills, string? Extension = null, string? SipPassword = null);
