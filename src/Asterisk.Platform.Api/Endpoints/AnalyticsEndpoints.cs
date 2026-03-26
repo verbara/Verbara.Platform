@@ -17,6 +17,7 @@ internal static class AnalyticsEndpoints
         analytics.MapGet("/cdr/{sessionId}", GetCdrDetail);
         analytics.MapGet("/qa", ListQa);
         analytics.MapGet("/qa/{sessionId}", GetQaDetail);
+        analytics.MapGet("/intervals/agents", ListAgentIntervals);
         analytics.MapGet("/intervals", ListIntervals);
     }
 
@@ -431,6 +432,35 @@ internal static class AnalyticsEndpoints
         return Results.Ok(dto);
     }
 
+    // ─── Agent Intervals Handler ───────────────────────────────────────────────
+
+    private static async Task<IResult> ListAgentIntervals(
+        HttpContext context,
+        AnalyticsQueryService svc,
+        string? from,
+        string? to,
+        string? agentId,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var fromDt = DateTimeOffset.TryParse(from, out var f) ? f : DateTimeOffset.UtcNow.AddDays(-1);
+        var toDt = DateTimeOffset.TryParse(to, out var t) ? t : DateTimeOffset.UtcNow;
+
+        var snapshots = await svc.GetAgentIntervalsAsync(tenantId, fromDt, toDt, agentId, ct);
+        var dtos = snapshots.Select(s => new AgentIntervalDto(
+            s.AgentId,
+            s.IntervalStart,
+            s.IntervalSeconds,
+            s.CallsHandled,
+            s.AhtMs,
+            s.OccupancyPercent,
+            s.RnaCount,
+            s.Transfers,
+            s.TotalPauseMs,
+            s.LoginDurationMs)).ToList();
+        return Results.Ok(dtos);
+    }
+
     // ─── Intervals Handler ─────────────────────────────────────────────────────
 
     private static async Task<IResult> ListIntervals(
@@ -724,3 +754,15 @@ internal sealed record IntervalDto(
     double AhtMs,
     double AbandonRatePercent,
     int SlaMetCount);
+
+internal sealed record AgentIntervalDto(
+    string AgentId,
+    DateTimeOffset IntervalStart,
+    int IntervalSeconds,
+    int CallsHandled,
+    double AhtMs,
+    double OccupancyPercent,
+    int RnaCount,
+    int Transfers,
+    long TotalPauseMs,
+    long LoginDurationMs);

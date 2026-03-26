@@ -73,6 +73,8 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(TopicDto[]))]
 [JsonSerializable(typeof(IntervalDto))]
 [JsonSerializable(typeof(List<IntervalDto>))]
+[JsonSerializable(typeof(AgentIntervalDto))]
+[JsonSerializable(typeof(List<AgentIntervalDto>))]
 [JsonSerializable(typeof(LiveStateDto))]
 [JsonSerializable(typeof(List<LiveStateDto>))]
 [JsonSerializable(typeof(CurrentIntervalDto))]
