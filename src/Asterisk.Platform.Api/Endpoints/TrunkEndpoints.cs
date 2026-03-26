@@ -11,6 +11,8 @@ internal static class TrunkEndpoints
         var trunks = app.MapGroup("/api/admin/trunks").RequireAuthorization("AdminOnly");
 
         trunks.MapGet("/", ListTrunks);
+        trunks.MapGet("/active", ListActiveTrunks);
+        trunks.MapGet("/by-name/{name}", GetTrunkByName);
         trunks.MapGet("/{id:long}", GetTrunk);
         trunks.MapPost("/", CreateTrunk);
         trunks.MapPut("/{id:long}", UpdateTrunk);
@@ -105,6 +107,27 @@ internal static class TrunkEndpoints
         var tenantId = GetTenantId(context);
         await trunkStore.DeleteAsync(id, tenantId, ct);
         return Results.NoContent();
+    }
+
+    private static async Task<IResult> ListActiveTrunks(
+        HttpContext context,
+        TrunkStoreBase trunkStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var trunks = await trunkStore.ListActiveAsync(tenantId, ct);
+        return Results.Ok(trunks.Select(MapToDto).ToList());
+    }
+
+    private static async Task<IResult> GetTrunkByName(
+        string name,
+        HttpContext context,
+        TrunkStoreBase trunkStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var trunk = await trunkStore.GetByNameAsync(name, tenantId, ct);
+        return trunk is null ? Results.NotFound() : Results.Ok(MapToDto(trunk));
     }
 
     // ─── Mapping Helpers ──────────────────────────────────────────────────────
