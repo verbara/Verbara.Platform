@@ -335,20 +335,24 @@ app.MapScheduledReportEndpoints();
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
-    // ── Sync demo agent + queue to Asterisk Realtime tables (best-effort) ─────
-    var syncService = app.Services.GetService<AsteriskRealtimeSyncService>();
+    // ── Sync demo tenant/agent/queue to Asterisk Realtime tables (best-effort) ─
+    var syncService = app.Services.GetService<IRealtimeSyncService>();
     if (syncService is not null)
     {
         try
         {
+            await syncService.ProvisionTenantAsync("demo");
             await syncService.SyncAgentAsync("demo", "demo-agent", "Demo Agent", "2001", "2001");
-            await syncService.SyncQueueAsync("demo", "support", timeout: 30, wrapuptime: 15, servicelevel: 20);
+            await syncService.SyncQueueAsync("demo", "support", new RealtimeQueueOptions
+            {
+                Timeout = 30, Wrapuptime = 15, Servicelevel = 20
+            });
             await syncService.AddQueueMemberAsync("demo", "support", "demo-agent", "Demo Agent");
-            Console.WriteLine("Asterisk Realtime: demo agent + support queue synced.");
+            Console.WriteLine("Asterisk Realtime: demo tenant provisioned.");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Asterisk Realtime sync skipped (no DB yet): {ex.Message}");
+            Console.WriteLine($"Asterisk Realtime sync skipped: {ex.Message}");
         }
     }
 
