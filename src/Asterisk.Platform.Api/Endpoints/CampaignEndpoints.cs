@@ -38,6 +38,10 @@ internal static class CampaignEndpoints
         campaigns.MapPut("/{id:long}/dispositions/{codeId:long}", UpdateDisposition);
         campaigns.MapDelete("/{id:long}/dispositions/{codeId:long}", DeleteDisposition);
 
+        // Callbacks
+        campaigns.MapGet("/{id:long}/callbacks", ListCallbacks);
+        campaigns.MapPost("/{id:long}/callbacks", CreateCallback);
+
         // Metrics
         campaigns.MapGet("/{id:long}/metrics", GetCampaignMetrics);
 
@@ -369,6 +373,31 @@ internal static class CampaignEndpoints
         return Results.NoContent();
     }
 
+    // ─── Callback Handlers ────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListCallbacks(
+        long id, HttpContext context, CampaignStoreBase store, CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var callbacks = await store.GetPendingCallbacksAsync(tenantId, DateTimeOffset.UtcNow.AddDays(30), ct);
+        var filtered = callbacks
+            .Where(c => c.CampaignId == id)
+            .Select(c => new CallbackDto(c.CampaignId, c.ContactId, c.ScheduledAt, c.AgentId))
+            .ToList();
+        return Results.Ok(filtered);
+    }
+
+    private static async Task<IResult> CreateCallback(
+        long id, CreateCallbackRequest request, HttpContext context,
+        CampaignStoreBase store, CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        if (!DateTimeOffset.TryParse(request.ScheduledAt, out var scheduledAt))
+            return Results.BadRequest("Invalid date format");
+        await store.SaveCallbackAsync(tenantId, id, request.ContactId, scheduledAt, request.AgentId, ct);
+        return Results.Created($"/api/admin/campaigns/{id}/callbacks", null);
+    }
+
     // ─── Metrics Handlers ─────────────────────────────────────────────────────
 
     private static async Task<IResult> GetCampaignMetrics(
@@ -595,3 +624,8 @@ internal sealed record DispositionCodeDto(long Id, string Code, string Label, st
 // ─── Metrics DTOs ──────────────────────────────────────────────────────────────
 
 internal sealed record CampaignMetricsDto(long CampaignId, string CampaignName, string Status, int ContactsDialed, int ContactsRemaining, double ConnectRate, double AbandonRate, int ActiveCalls, double PacingRate);
+
+// ─── Callback DTOs ─────────────────────────────────────────────────────────────
+
+internal sealed record CallbackDto(long CampaignId, long ContactId, DateTimeOffset ScheduledAt, string? AgentId);
+internal sealed record CreateCallbackRequest(long ContactId, string Phone, string? AgentId, string ScheduledAt);
