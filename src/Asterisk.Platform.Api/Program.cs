@@ -28,6 +28,13 @@ using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Sdk.Pro.AgentAssist.Engine;
 using Asterisk.Sdk.Pro.Routing.Skills;
+using Asterisk.Sdk.Pro.Realtime;
+using Asterisk.Sdk.Pro.Realtime.DependencyInjection;
+using Asterisk.Sdk.Pro.Realtime.Storage.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.Realtime.Models;
+using Asterisk.Sdk.Pro.Realtime.Decorators;
+using Asterisk.Sdk.Pro.Dialer.Routing;
+using Asterisk.Sdk.Pro.Dialer.Storage.Postgres;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -35,10 +42,6 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAsterisk(builder.Configuration);
 builder.Services.AddAsteriskSessions();
-
-// ─── Asterisk Realtime Sync (writes agents/queues to Asterisk DB tables) ─────
-
-builder.Services.AddSingleton<AsteriskRealtimeSyncService>();
 
 // ─── Core Platform Services ──────────────────────────────────────────────────
 
@@ -78,6 +81,22 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
     builder.Services.AddProDialer(o => { });
     builder.Services.AddHostedService<CampaignMetricsPoller>();
 }
+
+// ─── Pro.Realtime (replaces AsteriskRealtimeSyncService) ─────────────────────
+builder.Services.AddAsteriskRealtime(o =>
+{
+    o.ReconcilerIntervalSeconds = 60;
+    o.EnableAgentPresenceTracking = false;
+});
+var realtimeConn = dialerConnectionString;
+if (!string.IsNullOrEmpty(realtimeConn))
+    builder.Services.UsePostgresRealtimeStorage(realtimeConn);
+
+// Trunk decorator — wraps PostgresTrunkStore with Realtime sync
+builder.Services.AddSingleton<TrunkStoreBase>(sp =>
+    new RealtimeSyncingTrunkStore(
+        new PostgresTrunkStore(sp.GetRequiredService<DialerDbContext>()),
+        sp.GetRequiredService<IRealtimeSyncService>()));
 
 // ─── Pro EventStore + Analytics + CallAnalytics (engines + Postgres stores) ──
 var analyticsConnectionString = builder.Configuration.GetConnectionString("Analytics") ?? dialerConnectionString;
