@@ -42,6 +42,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IQueueStore, InMemoryQueueStore>();
         services.AddSingleton<IAgentStore, InMemoryAgentStore>();
         services.AddSingleton<ITeamStore, InMemoryTeamStore>();
+        services.AddSingleton<IQueueMembershipStore, InMemoryQueueMembershipStore>();
 
         // Channels
         services.AddSingleton<ITenantChannelConfigStore, InMemoryTenantChannelConfigStore>();
