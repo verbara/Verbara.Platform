@@ -45,6 +45,8 @@
     <PackageVersion Include="Asterisk.Sdk.Pro.Routing" Version="1.0.0-pro" />
     <PackageVersion Include="Asterisk.Sdk.Pro.Realtime" Version="1.0.0-pro" />
     <PackageVersion Include="Asterisk.Sdk.Pro.Realtime.Storage.Postgres" Version="1.0.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster" Version="1.0.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.MultiTenant" Version="1.0.0-pro" />
   </ItemGroup>
 
   <ItemGroup>

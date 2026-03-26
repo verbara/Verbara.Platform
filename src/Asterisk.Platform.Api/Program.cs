@@ -39,6 +39,8 @@ using Asterisk.Sdk.Pro.Realtime.Decorators;
 using Asterisk.Sdk.Pro.Realtime.Engine;
 using Asterisk.Sdk.Pro.Dialer.Routing;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres;
+using Asterisk.Sdk.Pro.Cluster.DependencyInjection;
+using Asterisk.Sdk.Pro.MultiTenant.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -87,6 +89,15 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
     builder.Services.AddProDialer(o => { });
     builder.Services.AddHostedService<CampaignMetricsPoller>();
 }
+
+// ─── Pro.Cluster ─────────────────────────────────────────────────────────────
+builder.Services.AddAsteriskCluster(c =>
+{
+    c.InstanceId = Environment.MachineName;
+});
+
+// ─── Pro.MultiTenant ─────────────────────────────────────────────────────────
+builder.Services.AddAsteriskMultiTenant();
 
 // ─── Pro.Realtime (replaces AsteriskRealtimeSyncService) ─────────────────────
 builder.Services.AddAsteriskRealtime(o =>

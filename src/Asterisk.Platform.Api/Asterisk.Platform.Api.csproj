@@ -61,6 +61,8 @@
     <PackageReference Include="Asterisk.Sdk.Pro.Routing" />
     <PackageReference Include="Asterisk.Sdk.Pro.Realtime" />
     <PackageReference Include="Asterisk.Sdk.Pro.Realtime.Storage.Postgres" />
+    <PackageReference Include="Asterisk.Sdk.Pro.Cluster" />
+    <PackageReference Include="Asterisk.Sdk.Pro.MultiTenant" />
   </ItemGroup>
 
 </Project>
