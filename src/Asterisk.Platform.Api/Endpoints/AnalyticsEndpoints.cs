@@ -1,3 +1,4 @@
+using System.Globalization;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Analytics;
@@ -34,8 +35,8 @@ internal static class AnalyticsEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
         var period = toDate - fromDate;
 
         // Current period snapshots
@@ -51,14 +52,14 @@ internal static class AnalyticsEndpoints
 
         // Volume trend: group by hour
         var volumeTrend = snapshots
-            .GroupBy(s => s.IntervalStart.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:00"))
+            .GroupBy(s => s.IntervalStart.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:00", CultureInfo.InvariantCulture))
             .Select(g => new TrendPointDto(g.Key, g.Sum(s => s.CallsAnswered)))
             .OrderBy(p => p.Label)
             .ToArray();
 
         // SLA trend: group by date
         var slaTrend = snapshots
-            .GroupBy(s => s.IntervalStart.ToUniversalTime().ToString("yyyy-MM-dd"))
+            .GroupBy(s => s.IntervalStart.ToUniversalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
             .Select(g =>
             {
                 var offered = g.Sum(s => s.CallsOffered - s.ShortAbandons);
@@ -113,8 +114,8 @@ internal static class AnalyticsEndpoints
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
 
         var query = new CompletedSessionQuery
         {
@@ -301,8 +302,8 @@ internal static class AnalyticsEndpoints
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
 
         // minScore arrives as 0-100; QaResult scores are stored as 0-1 fractions
         var query = new CallAnalyticsQuery
@@ -473,8 +474,8 @@ internal static class AnalyticsEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
 
         var snapshots = await snapshotStore.QueryAsync(tenantId, fromDate, toDate, queue, null, ct);
 

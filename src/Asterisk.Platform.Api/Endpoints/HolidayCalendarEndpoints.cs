@@ -1,3 +1,4 @@
+using System.Globalization;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Scheduling;
@@ -111,10 +112,10 @@ internal static class HolidayCalendarEndpoints
         var holiday = new Holiday
         {
             CalendarId = id,
-            Date = DateOnly.Parse(body.Date),
+            Date = DateOnly.Parse(body.Date, CultureInfo.InvariantCulture),
             Name = body.Name,
-            AllowedStartTime = body.AllowedStart is not null ? TimeOnly.Parse(body.AllowedStart) : null,
-            AllowedEndTime = body.AllowedEnd is not null ? TimeOnly.Parse(body.AllowedEnd) : null,
+            AllowedStartTime = body.AllowedStart is not null ? TimeOnly.Parse(body.AllowedStart, CultureInfo.InvariantCulture) : null,
+            AllowedEndTime = body.AllowedEnd is not null ? TimeOnly.Parse(body.AllowedEnd, CultureInfo.InvariantCulture) : null,
         };
         await store.AddHolidayAsync(id, tenantId, holiday, ct);
         return Results.Created($"/api/admin/holiday-calendars/{id}/holidays/{holiday.Id}", MapHolidayToDto(holiday));
@@ -138,8 +139,8 @@ internal static class HolidayCalendarEndpoints
         new(c.Id, c.Name);
 
     private static HolidayDto MapHolidayToDto(Holiday h) =>
-        new(h.Id, h.Date.ToString("yyyy-MM-dd"), h.Name,
-            h.AllowedStartTime?.ToString("HH:mm"), h.AllowedEndTime?.ToString("HH:mm"));
+        new(h.Id, h.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), h.Name,
+            h.AllowedStartTime?.ToString("HH:mm", CultureInfo.InvariantCulture), h.AllowedEndTime?.ToString("HH:mm", CultureInfo.InvariantCulture));
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 

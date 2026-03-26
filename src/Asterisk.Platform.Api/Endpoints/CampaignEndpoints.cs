@@ -1,3 +1,4 @@
+using System.Globalization;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Contacts;
@@ -112,8 +113,8 @@ internal static class CampaignEndpoints
         if (body.PowerRatio.HasValue) campaign.PowerRatio = body.PowerRatio.Value;
         if (body.TargetAbandonRate.HasValue) campaign.TargetAbandonRate = body.TargetAbandonRate.Value;
         if (body.Timezone is not null) campaign.ContactTimezone = body.Timezone;
-        if (body.CampaignStart is not null) campaign.StartsAt = DateTimeOffset.Parse(body.CampaignStart);
-        if (body.CampaignEnd is not null) campaign.EndsAt = DateTimeOffset.Parse(body.CampaignEnd);
+        if (body.CampaignStart is not null) campaign.StartsAt = DateTimeOffset.Parse(body.CampaignStart, CultureInfo.InvariantCulture);
+        if (body.CampaignEnd is not null) campaign.EndsAt = DateTimeOffset.Parse(body.CampaignEnd, CultureInfo.InvariantCulture);
         if (body.DncEnabled.HasValue) campaign.CheckGlobalDnc = body.DncEnabled.Value;
         if (body.MaxAttemptsPerContact.HasValue) campaign.MaxAttemptsPerContact = body.MaxAttemptsPerContact.Value;
         if (body.RetryIntervalMinutes.HasValue) campaign.DefaultRetryDelayMinutes = body.RetryIntervalMinutes.Value;
@@ -454,13 +455,13 @@ internal static class CampaignEndpoints
             PowerRatio: c.PowerRatio,
             TargetAbandonRate: c.TargetAbandonRate,
             Timezone: c.ContactTimezone ?? "UTC",
-            CampaignStart: c.StartsAt?.ToString("O"),
-            CampaignEnd: c.EndsAt?.ToString("O"),
+            CampaignStart: c.StartsAt?.ToString("O", CultureInfo.InvariantCulture),
+            CampaignEnd: c.EndsAt?.ToString("O", CultureInfo.InvariantCulture),
             Schedule: c.ScheduleDays.Select(d => new ScheduleDayDto(
                 Day: d.DayOfWeek.ToString(),
                 Enabled: d.Enabled,
-                Start: d.StartTime.ToString("HH:mm"),
-                End: d.EndTime.ToString("HH:mm"))).ToArray(),
+                Start: d.StartTime.ToString("HH:mm", CultureInfo.InvariantCulture),
+                End: d.EndTime.ToString("HH:mm", CultureInfo.InvariantCulture))).ToArray(),
             Holidays: c.Metadata is not null && c.Metadata.TryGetValue("holidays", out var h)
                 ? h.Split(',', StringSplitOptions.RemoveEmptyEntries)
                 : [],
@@ -501,8 +502,8 @@ internal static class CampaignEndpoints
             PowerRatio = req.PowerRatio ?? 1.0,
             TargetAbandonRate = req.TargetAbandonRate ?? 0.03,
             ContactTimezone = req.Timezone,
-            StartsAt = req.CampaignStart is not null ? DateTimeOffset.Parse(req.CampaignStart) : null,
-            EndsAt = req.CampaignEnd is not null ? DateTimeOffset.Parse(req.CampaignEnd) : null,
+            StartsAt = req.CampaignStart is not null ? DateTimeOffset.Parse(req.CampaignStart, CultureInfo.InvariantCulture) : null,
+            EndsAt = req.CampaignEnd is not null ? DateTimeOffset.Parse(req.CampaignEnd, CultureInfo.InvariantCulture) : null,
             CheckGlobalDnc = req.DncEnabled,
             MaxAttemptsPerContact = req.MaxAttemptsPerContact,
             DefaultRetryDelayMinutes = req.RetryIntervalMinutes,

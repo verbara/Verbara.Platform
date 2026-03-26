@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
 using Asterisk.Sdk.Pro.Analytics;
@@ -110,7 +111,7 @@ public sealed class AnalyticsEndpointTests : IClassFixture<UnifiedPlatformApiFac
         trend.Count.Should().BeGreaterThan(0);
         // The hour bucket should sum both snapshots
         var hourBucket = trend.FirstOrDefault(t =>
-            t!["label"]!.GetValue<string>().StartsWith(hourBase.ToString("yyyy-MM-dd'T'HH")));
+            t!["label"]!.GetValue<string>().StartsWith(hourBase.ToString("yyyy-MM-dd'T'HH", CultureInfo.InvariantCulture), StringComparison.Ordinal));
         hourBucket.Should().NotBeNull();
         hourBucket!["value"]!.GetValue<double>().Should().Be(25);
     }
