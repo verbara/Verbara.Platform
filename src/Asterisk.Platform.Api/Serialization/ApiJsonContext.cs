@@ -58,6 +58,7 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(ChannelDistributionDto[]))]
 [JsonSerializable(typeof(CdrRowDto))]
 [JsonSerializable(typeof(List<CdrRowDto>))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(CdrDetailDto))]
 [JsonSerializable(typeof(CdrTimelineEventDto))]
 [JsonSerializable(typeof(CdrTimelineEventDto[]))]

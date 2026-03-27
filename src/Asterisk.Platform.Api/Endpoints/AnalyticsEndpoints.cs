@@ -181,7 +181,8 @@ internal static class AnalyticsEndpoints
                 HoldCount: row.HoldCount,
                 RingDurationMs: ComputeRingDurationMs(row),
                 CampaignName: null,
-                DispositionName: null);
+                DispositionName: null,
+                Metadata: row.Metadata);
         }).ToArray();
 
         return Results.Ok(new { Data = dtos, HasMore = hasMore, Page = page, PageSize = pageSize });
@@ -266,7 +267,8 @@ internal static class AnalyticsEndpoints
             HoldCount: row.HoldCount,
             RingDurationMs: ComputeRingDurationMs(row),
             CampaignName: null,
-            DispositionName: null);
+            DispositionName: null,
+            Metadata: row.Metadata);
 
         var hasTranscript = qa is not null && qa.Summary is not null;
         var recordingStreamUrl = !string.IsNullOrEmpty(row.RecordingName)
@@ -665,7 +667,8 @@ internal sealed record CdrRowDto(
     short HoldCount,
     long? RingDurationMs,
     string? CampaignName,
-    string? DispositionName);
+    string? DispositionName,
+    Dictionary<string, string>? Metadata);
 
 internal sealed record CdrDetailDto(
     CdrRowDto Cdr,
