@@ -197,6 +197,16 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
         RemoveAll<IIntervalSnapshotStore>(services);
         services.AddSingleton<IIntervalSnapshotStore, InMemoryIntervalSnapshotStore>();
 
+        // RBAC stores — always replace with in-memory implementations
+        RemoveAll<IPermissionStore>(services);
+        services.AddSingleton<IPermissionStore, InMemoryPermissionStore>();
+        RemoveAll<IRoleTemplateStore>(services);
+        services.AddSingleton<IRoleTemplateStore, InMemoryRoleTemplateStore>();
+        RemoveAll<ITenantRoleStore>(services);
+        services.AddSingleton<ITenantRoleStore, InMemoryTenantRoleStore>();
+        RemoveAll<IUserRoleStore>(services);
+        services.AddSingleton<IUserRoleStore, InMemoryUserRoleStore>();
+
         // AgentAssist Postgres stores (concrete sealed types used by endpoints).
         // Provide a dummy NpgsqlDataSource so stores can be constructed for DI resolution.
         // Actual DB calls will fail, but these endpoints are not exercised in unit tests.
