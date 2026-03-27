@@ -1,6 +1,7 @@
 using Asterisk.Platform.Api.Auth;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Middleware;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Asterisk.Platform.Bot;
 using Asterisk.Platform.Channels.Core;
@@ -183,6 +184,11 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("SupervisorPlus", p => p.RequireRole("Admin", "Supervisor"));
     options.AddPolicy("Authenticated", p => p.RequireAuthenticatedUser());
 });
+
+// RBAC permission-based authorization
+builder.Services.AddSingleton<PermissionResolver>();
+builder.Services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 
 // ─── Health Checks ───────────────────────────────────────────────────────────
 
