@@ -88,6 +88,10 @@ var jwtKeyDirectory = builder.Configuration["Auth:KeyDirectory"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data");
 builder.Services.AddSingleton(new JwtTokenService(jwtKeyDirectory));
 builder.Services.AddSingleton<RefreshTokenService>();
+builder.Services.AddSingleton<AuthEventService>();
+builder.Services.AddSingleton<AccountLockoutService>();
+builder.Services.AddSingleton<MfaService>();
+builder.Services.AddSingleton<SessionService>();
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
 var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";
@@ -241,6 +245,7 @@ app.MapGet("/metrics", () => Results.Ok(new
 
 // ─── Endpoint mapping ────────────────────────────────────────────────────────
 
+app.MapAuthEndpoints();
 app.MapWebhookEndpoints();
 app.MapConversationEndpoints();
 app.MapAgentEndpoints();
@@ -275,6 +280,7 @@ app.MapScheduledReportEndpoints();
 app.MapRealtimeEndpoints();
 app.MapClusterEndpoints();
 app.MapTenantEndpoints();
+app.MapAuthAdminEndpoints();
 
 // ─── Dev seed: create demo users + API keys for local testing ────────────────
 {
