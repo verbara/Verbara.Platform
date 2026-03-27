@@ -1,0 +1,153 @@
+{
+  "id": null,
+  "uid": "contact-center",
+  "title": "Contact Center — Overview",
+  "tags": ["demo"],
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total Llamadas (24h)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT COUNT(*) AS \"Total\" FROM completed_sessions WHERE completed_at >= NOW() - INTERVAL '24 hours'",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "steps": [{"color": "blue", "value": null}] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Contestadas",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT COUNT(*) AS \"Contestadas\" FROM completed_sessions WHERE final_state = 1 AND completed_at >= NOW() - INTERVAL '24 hours'",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "steps": [{"color": "green", "value": null}] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Tiempo Promedio (seg)",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ROUND(AVG(talk_time_ms) / 1000.0, 0) AS \"Promedio\" FROM completed_sessions WHERE talk_time_ms > 0 AND completed_at >= NOW() - INTERVAL '24 hours'",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "steps": [{"color": "purple", "value": null}] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "SLA %",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ROUND(100.0 * SUM(sla_met_count) / NULLIF(SUM(calls_offered), 0), 1) AS \"SLA\" FROM interval_snapshots WHERE interval_start >= NOW() - INTERVAL '24 hours'",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0, "max": 100,
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "green", "value": 85}
+            ]
+          }
+        }
+      },
+      "options": { "showThresholdLabels": false, "showThresholdMarkers": true }
+    },
+    {
+      "id": 5,
+      "type": "barchart",
+      "title": "Llamadas por Hora",
+      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT date_trunc('hour', completed_at) AS \"time\", queue_name AS \"Cola\", COUNT(*) AS \"Llamadas\" FROM completed_sessions WHERE completed_at >= NOW() - INTERVAL '24 hours' GROUP BY 1, 2 ORDER BY 1",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": { "stacking": "normal", "barWidth": 0.8 }
+    },
+    {
+      "id": 6,
+      "type": "piechart",
+      "title": "Distribucion por Resultado",
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT CASE final_state WHEN 1 THEN 'Contestada' WHEN 2 THEN 'Sin respuesta' WHEN 3 THEN 'Ocupado' WHEN 5 THEN 'Abandonada' ELSE 'Otro' END AS \"Estado\", COUNT(*) AS \"Total\" FROM completed_sessions WHERE completed_at >= NOW() - INTERVAL '24 hours' GROUP BY final_state ORDER BY 2 DESC",
+        "format": "table",
+        "refId": "A"
+      }],
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "pieType": "donut" }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Metricas por Cola",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT queue_name AS \"Cola\", SUM(calls_offered) AS \"Ofrecidas\", SUM(calls_answered) AS \"Contestadas\", SUM(calls_abandoned) AS \"Abandonadas\", ROUND(100.0 * SUM(sla_met_count) / NULLIF(SUM(calls_offered), 0), 1) AS \"SLA %\", ROUND(SUM(total_wait_ms)::numeric / NULLIF(SUM(calls_offered), 0) / 1000, 1) AS \"Espera Prom (s)\" FROM interval_snapshots WHERE interval_start >= NOW() - INTERVAL '24 hours' GROUP BY queue_name ORDER BY queue_name",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": {} },
+      "options": { "showHeader": true, "footer": { "show": true, "reducer": ["sum"] } }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Llamadas Recientes",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT to_char(completed_at, 'HH24:MI') AS \"Hora\", caller_id_num AS \"Origen\", COALESCE(queue_name, '-') AS \"Cola\", COALESCE(agent_id, '-') AS \"Agente\", ROUND(talk_time_ms / 1000.0, 0) AS \"Duracion (s)\", CASE final_state WHEN 1 THEN 'Contestada' WHEN 5 THEN 'Abandonada' WHEN 3 THEN 'Ocupado' ELSE 'Sin rta' END AS \"Estado\" FROM completed_sessions ORDER BY completed_at DESC LIMIT 20",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": {} },
+      "options": { "showHeader": true }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}
