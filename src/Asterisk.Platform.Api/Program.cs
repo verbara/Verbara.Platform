@@ -87,6 +87,7 @@ builder.Services.AddSingleton<PasswordService>();
 var jwtKeyDirectory = builder.Configuration["Auth:KeyDirectory"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data");
 builder.Services.AddSingleton(new JwtTokenService(jwtKeyDirectory));
+builder.Services.AddSingleton<RefreshTokenService>();
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
 var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";
