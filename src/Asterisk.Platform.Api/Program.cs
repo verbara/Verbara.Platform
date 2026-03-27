@@ -13,7 +13,6 @@ using Asterisk.Platform.Media;
 using Asterisk.Platform.Switchboard;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
-using Microsoft.AspNetCore.Authentication;
 using Asterisk.Sdk.Hosting;
 using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Surveys;
@@ -86,7 +85,8 @@ builder.Services.AddSingleton<PasswordService>();
 
 var jwtKeyDirectory = builder.Configuration["Auth:KeyDirectory"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data");
-builder.Services.AddSingleton(new JwtTokenService(jwtKeyDirectory));
+var jwtTokenService = new JwtTokenService(jwtKeyDirectory);
+builder.Services.AddSingleton(jwtTokenService);
 builder.Services.AddSingleton<RefreshTokenService>();
 builder.Services.AddSingleton<AuthEventService>();
 builder.Services.AddSingleton<AccountLockoutService>();
@@ -173,11 +173,9 @@ if (!string.IsNullOrEmpty(s3Bucket))
         new S3MediaStorage(s3Bucket, s3Endpoint, s3Region, s3ForcePathStyle));
 }
 
-// ─── Authentication (API key) ─────────────────────────────────────────────────
+// ─── Authentication (JWT + API key dual-scheme) ──────────────────────────────
 
-builder.Services
-    .AddAuthentication("ApiKey")
-    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>("ApiKey", _ => { });
+builder.Services.AddDynamicAuth(jwtTokenService);
 
 builder.Services.AddAuthorization(options =>
 {

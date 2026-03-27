@@ -1,0 +1,60 @@
+using Asterisk.Platform.Api.Services;
+using Asterisk.Platform.Core;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+
+namespace Asterisk.Platform.Api.Auth;
+
+internal static class AuthSchemeConfiguration
+{
+    public const string DynamicSelector = "DynamicSelector";
+    public const string JwtScheme = "JwtScheme";
+    public const string ApiKeyScheme = "ApiKey";
+
+    public static AuthenticationBuilder AddDynamicAuth(
+        this IServiceCollection services,
+        JwtTokenService jwtTokenService)
+    {
+        return services
+            .AddAuthentication(options =>
+            {
+                options.DefaultScheme = DynamicSelector;
+                options.DefaultChallengeScheme = DynamicSelector;
+            })
+            .AddPolicyScheme(DynamicSelector, DynamicSelector, options =>
+            {
+                options.ForwardDefaultSelector = context =>
+                {
+                    var authHeader = context.Request.Headers.Authorization.FirstOrDefault();
+                    if (authHeader is not null)
+                    {
+                        var token = authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                            ? authHeader["Bearer ".Length..].Trim()
+                            : authHeader.Trim();
+
+                        if (token.StartsWith("eyJ", StringComparison.Ordinal))
+                            return JwtScheme;
+                    }
+
+                    return ApiKeyScheme;
+                };
+            })
+            .AddJwtBearer(JwtScheme, options =>
+            {
+                options.TokenValidationParameters = jwtTokenService.ValidationParameters;
+
+                options.Events = new JwtBearerEvents
+                {
+                    OnTokenValidated = context =>
+                    {
+                        var tenantClaim = context.Principal?.FindFirst("tid")?.Value;
+                        if (tenantClaim is not null)
+                            context.HttpContext.Items["TenantId"] = new TenantId(tenantClaim);
+
+                        return Task.CompletedTask;
+                    },
+                };
+            })
+            .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyScheme, _ => { });
+    }
+}
