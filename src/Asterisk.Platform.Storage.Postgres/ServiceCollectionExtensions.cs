@@ -22,7 +22,7 @@ namespace Asterisk.Platform.Storage.Postgres;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers Dapper/Npgsql implementations for all 13 store interfaces backed by PostgreSQL.
+    /// Registers Dapper/Npgsql implementations for all 17 store interfaces backed by PostgreSQL.
     /// Creates a singleton <see cref="NpgsqlDataSource"/> from the supplied connection string.
     /// </summary>
     public static IServiceCollection AddPostgresStorage(this IServiceCollection services, string connectionString)
@@ -82,6 +82,12 @@ public static class ServiceCollectionExtensions
 
         // Audit
         services.AddSingleton<IAuditStore, PostgresAuditStore>();
+
+        // RBAC
+        services.AddSingleton<IPermissionStore, PostgresPermissionStore>();
+        services.AddSingleton<IRoleTemplateStore, PostgresRoleTemplateStore>();
+        services.AddSingleton<ITenantRoleStore, PostgresTenantRoleStore>();
+        services.AddSingleton<IUserRoleStore, PostgresUserRoleStore>();
 
         return services;
     }
