@@ -48,6 +48,9 @@ internal sealed class JwtTokenService
     public TokenValidationParameters ValidationParameters => _validationParameters;
 
     public (string Token, DateTimeOffset ExpiresAt) GenerateAccessToken(User user)
+        => GenerateAccessToken(user, null);
+
+    public (string Token, DateTimeOffset ExpiresAt) GenerateAccessToken(User user, IReadOnlySet<string>? permissions)
     {
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.Add(AccessTokenLifetime);
@@ -60,6 +63,15 @@ internal sealed class JwtTokenService
             new("name", user.DisplayName),
             new(ClaimTypes.Role, user.Role.ToString()),
         };
+
+        // Include granular permissions in the JWT when available
+        if (permissions is { Count: > 0 })
+        {
+            foreach (var permission in permissions)
+            {
+                claims.Add(new Claim("permissions", permission));
+            }
+        }
 
         var descriptor = new SecurityTokenDescriptor
         {

@@ -2,6 +2,7 @@ using Asterisk.Platform.Api.Auth;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Middleware;
 using Microsoft.AspNetCore.Authorization;
+using Npgsql;
 using Microsoft.AspNetCore.RateLimiting;
 using Asterisk.Platform.Bot;
 using Asterisk.Platform.Channels.Core;
@@ -428,6 +429,22 @@ app.MapRbacEndpoints();
     }
 
     Console.WriteLine("Demo API keys seeded: demo-key-admin | demo-key-supervisor | demo-key-agent");
+
+    // ── RBAC seed: permissions, role templates, and enum migration ──────────
+    var npgsqlDs = app.Services.GetService<NpgsqlDataSource>();
+    if (npgsqlDs is not null)
+    {
+        try
+        {
+            await Asterisk.Platform.Storage.Postgres.Seeds.RbacSeederOrchestrator
+                .SeedRbacAsync(npgsqlDs, CancellationToken.None);
+            Console.WriteLine("RBAC seeder: permissions, templates, and role migration complete.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"RBAC seeder skipped: {ex.Message}");
+        }
+    }
 }
 
 app.Run();
