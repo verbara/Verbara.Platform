@@ -279,6 +279,7 @@ app.MapRealtimeEndpoints();
 app.MapClusterEndpoints();
 app.MapTenantEndpoints();
 app.MapAuthAdminEndpoints();
+app.MapOidcEndpoints();
 
 // ─── Dev seed: create demo users + API keys for local testing ────────────────
 {
