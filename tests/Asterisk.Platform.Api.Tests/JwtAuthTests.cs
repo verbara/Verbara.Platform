@@ -37,10 +37,8 @@ public sealed class JwtAuthTests : IClassFixture<AuthenticatedPlatformApiFactory
     [Fact]
     public async Task NoAuthHeader_ShouldReturn401()
     {
-        using var factory = new PlatformApiFactory();
-        var client = factory.CreateClient();
-
-        var response = await client.GetAsync("/api/conversations");
+        // Use the shared factory's anonymous client (no auth headers)
+        var response = await _anonClient.GetAsync("/api/conversations");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
