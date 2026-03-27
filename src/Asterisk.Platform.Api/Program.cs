@@ -287,6 +287,8 @@ app.MapOidcEndpoints();
     var apiKeyStore = scope.ServiceProvider.GetRequiredService<IApiKeyStore>();
     var userStore = scope.ServiceProvider.GetRequiredService<IUserStore>();
     var agentStore = scope.ServiceProvider.GetRequiredService<IAgentStore>();
+    var configStore = scope.ServiceProvider.GetRequiredService<ITenantAuthConfigStore>();
+    var passwordService = scope.ServiceProvider.GetRequiredService<PasswordService>();
     var clock = scope.ServiceProvider.GetRequiredService<IClock>();
 
     var tenantId = new TenantId("demo");
@@ -304,6 +306,7 @@ app.MapOidcEndpoints();
         DisplayName = "Demo Admin",
         Role = UserRole.Admin,
         Status = UserStatus.Active,
+        PasswordHash = passwordService.HashPassword("Admin123!"),
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
@@ -328,6 +331,7 @@ app.MapOidcEndpoints();
         DisplayName = "Demo Supervisor",
         Role = UserRole.Supervisor,
         Status = UserStatus.Active,
+        PasswordHash = passwordService.HashPassword("Supervisor123!"),
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
@@ -352,6 +356,7 @@ app.MapOidcEndpoints();
         DisplayName = "Demo Agent",
         Role = UserRole.Agent,
         Status = UserStatus.Active,
+        PasswordHash = passwordService.HashPassword("Agent123!"),
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
@@ -376,6 +381,22 @@ app.MapOidcEndpoints();
         State = AgentState.Available,
         Skills = ["support"],
         CreatedAt = clock.UtcNow,
+    }, CancellationToken.None);
+
+    // ── Default tenant auth config ──────────────────────────────────────────────
+    await configStore.SaveAsync(new TenantAuthConfig
+    {
+        TenantId = "demo",
+        MfaPolicy = "optional",
+        PasswordMinLength = 12,
+        PasswordRequireUppercase = true,
+        PasswordRequireNumber = true,
+        PasswordRequireSpecial = false,
+        LockoutThreshold = 5,
+        LockoutDurationMinutes = 15,
+        SessionIdleTimeoutMinutes = 30,
+        SessionAbsoluteTimeoutHours = 12,
+        UpdatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
     // ── Sync demo tenant/agent/queue to Asterisk Realtime tables (best-effort) ─
