@@ -32,6 +32,9 @@ public static class ServiceCollectionExtensions
         // Identity
         services.AddSingleton<IUserStore, PostgresUserStore>();
         services.AddSingleton<IApiKeyStore, PostgresApiKeyStore>();
+        services.AddSingleton<IRefreshTokenStore, PostgresRefreshTokenStore>();
+        services.AddSingleton<IAuthEventStore, PostgresAuthEventStore>();
+        services.AddSingleton<ITenantAuthConfigStore, PostgresTenantAuthConfigStore>();
 
         // Conversations
         services.AddSingleton<IConversationStore, PostgresConversationStore>();

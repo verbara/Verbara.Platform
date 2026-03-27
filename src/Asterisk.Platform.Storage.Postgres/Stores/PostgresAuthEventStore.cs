@@ -1,0 +1,99 @@
+using System.Text.Json;
+using Dapper;
+using Npgsql;
+using Asterisk.Platform.Core;
+using Asterisk.Platform.Identity;
+
+namespace Asterisk.Platform.Storage.Postgres.Stores;
+
+internal sealed class PostgresAuthEventStore : IAuthEventStore
+{
+    private readonly NpgsqlDataSource _dataSource;
+
+    public PostgresAuthEventStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
+
+    public async Task SaveAsync(AuthEvent authEvent, CancellationToken ct)
+    {
+        var detailsJson = authEvent.Details?.RootElement.GetRawText();
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(
+            "INSERT INTO auth_events (event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at) " +
+            "VALUES (@EventId, @TenantId, @UserId, @EventType, @IpAddress, @UserAgent, @Details::jsonb, @CreatedAt)",
+            new
+            {
+                authEvent.EventId,
+                authEvent.TenantId,
+                authEvent.UserId,
+                authEvent.EventType,
+                authEvent.IpAddress,
+                authEvent.UserAgent,
+                Details = detailsJson,
+                authEvent.CreatedAt,
+            });
+    }
+
+    public async Task<PagedResult<AuthEvent>> ListByTenantAsync(string tenantId, int page, int pageSize, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var total = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM auth_events WHERE tenant_id = @TenantId",
+            new { TenantId = tenantId });
+
+        var offset = (page - 1) * pageSize;
+        var rows = await conn.QueryAsync<AuthEventRow>(
+            "SELECT event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at " +
+            "FROM auth_events WHERE tenant_id = @TenantId ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
+            new { TenantId = tenantId, Limit = pageSize, Offset = offset });
+
+        var items = rows.Select(r => r.ToAuthEvent()).ToList();
+        return new PagedResult<AuthEvent>(items, total, page, pageSize);
+    }
+
+    public async Task<PagedResult<AuthEvent>> ListByUserAsync(string tenantId, string userId, int page, int pageSize, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var total = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM auth_events WHERE tenant_id = @TenantId AND user_id = @UserId",
+            new { TenantId = tenantId, UserId = userId });
+
+        var offset = (page - 1) * pageSize;
+        var rows = await conn.QueryAsync<AuthEventRow>(
+            "SELECT event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at " +
+            "FROM auth_events WHERE tenant_id = @TenantId AND user_id = @UserId ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
+            new { TenantId = tenantId, UserId = userId, Limit = pageSize, Offset = offset });
+
+        var items = rows.Select(r => r.ToAuthEvent()).ToList();
+        return new PagedResult<AuthEvent>(items, total, page, pageSize);
+    }
+
+    private sealed record AuthEventRow(
+        string event_id,
+        string tenant_id,
+        string? user_id,
+        string event_type,
+        string? ip_address,
+        string? user_agent,
+        string? details,
+        DateTimeOffset created_at)
+    {
+        public AuthEvent ToAuthEvent()
+        {
+            JsonDocument? detailsDoc = null;
+            if (!string.IsNullOrEmpty(details))
+                detailsDoc = JsonDocument.Parse(details);
+
+            return new AuthEvent
+            {
+                EventId = event_id,
+                TenantId = tenant_id,
+                UserId = user_id,
+                EventType = event_type,
+                IpAddress = ip_address,
+                UserAgent = user_agent,
+                Details = detailsDoc,
+                CreatedAt = created_at,
+            };
+        }
+    }
+}

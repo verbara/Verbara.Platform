@@ -15,6 +15,23 @@ public sealed class User : ITenantScoped, IAuditable
     public string? CreatedBy { get; init; }
     public string? UpdatedBy { get; set; }
 
+    // Auth Enterprise fields
+    public string? PasswordHash { get; set; }
+    public bool MfaEnabled { get; set; }
+    public string? MfaSecret { get; set; }
+    public IReadOnlyList<string>? MfaRecoveryCodes { get; set; }
+    public DateTimeOffset? MfaConfirmedAt { get; set; }
+    public bool EmailVerified { get; set; }
+    public int FailedLoginAttempts { get; set; }
+    public DateTimeOffset? LockedUntil { get; set; }
+    public DateTimeOffset? PasswordChangedAt { get; set; }
+    public DateTimeOffset? LastLoginAt { get; set; }
+    public string AuthProvider { get; set; } = "local";
+    public string? ExternalId { get; set; }
+
+    public bool IsLockedOut(DateTimeOffset now) =>
+        LockedUntil.HasValue && now < LockedUntil.Value;
+
     private static readonly Dictionary<UserRole, Permission> s_rolePermissions =
         new Dictionary<UserRole, Permission>
         {

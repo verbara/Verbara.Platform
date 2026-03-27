@@ -37,6 +37,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IUserStore, InMemoryUserStore>();
         services.AddSingleton<IApiKeyStore, InMemoryApiKeyStore>();
         services.AddSingleton<IServiceAccountStore, InMemoryServiceAccountStore>();
+        services.AddSingleton<IRefreshTokenStore, InMemoryRefreshTokenStore>();
+        services.AddSingleton<IAuthEventStore, InMemoryAuthEventStore>();
+        services.AddSingleton<ITenantAuthConfigStore, InMemoryTenantAuthConfigStore>();
 
         // Queues
         services.AddSingleton<IQueueStore, InMemoryQueueStore>();

@@ -11,12 +11,14 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
 
     public PostgresApiKeyStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
+    private const string SelectColumns =
+        "key_id, tenant_id, key_hash, name, scopes, rate_limit_per_minute, is_revoked, created_at, updated_at, expires_at, created_by, updated_by, user_id";
+
     public async Task<ApiKey?> GetByIdAsync(TenantId tenantId, EntityId keyId, CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<ApiKeyRow>(
-            "SELECT key_id, tenant_id, key_hash, name, scopes, rate_limit_per_minute, is_revoked, created_at, updated_at, expires_at, created_by, updated_by " +
-            "FROM api_keys WHERE tenant_id = @TenantId AND key_id = @KeyId",
+            $"SELECT {SelectColumns} FROM api_keys WHERE tenant_id = @TenantId AND key_id = @KeyId",
             new { TenantId = tenantId.Value, KeyId = keyId.Value });
         return row?.ToApiKey();
     }
@@ -25,8 +27,7 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<ApiKeyRow>(
-            "SELECT key_id, tenant_id, key_hash, name, scopes, rate_limit_per_minute, is_revoked, created_at, updated_at, expires_at, created_by, updated_by " +
-            "FROM api_keys WHERE key_hash = @KeyHash",
+            $"SELECT {SelectColumns} FROM api_keys WHERE key_hash = @KeyHash",
             new { KeyHash = hashedKey });
         return row?.ToApiKey();
     }
@@ -38,8 +39,7 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
             "SELECT COUNT(*) FROM api_keys WHERE tenant_id = @TenantId",
             new { TenantId = tenantId.Value });
         var rows = await conn.QueryAsync<ApiKeyRow>(
-            "SELECT key_id, tenant_id, key_hash, name, scopes, rate_limit_per_minute, is_revoked, created_at, updated_at, expires_at, created_by, updated_by " +
-            "FROM api_keys WHERE tenant_id = @TenantId ORDER BY created_at LIMIT @Limit OFFSET @Offset",
+            $"SELECT {SelectColumns} FROM api_keys WHERE tenant_id = @TenantId ORDER BY created_at LIMIT @Limit OFFSET @Offset",
             new { TenantId = tenantId.Value, Limit = query.PageSize, Offset = query.Offset });
         var items = rows.Select(r => r.ToApiKey()).ToList();
         return new PagedResult<ApiKey>(items, total, query.Page, query.PageSize);
@@ -50,11 +50,12 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
         var scopesCsv = string.Join(",", apiKey.Scopes);
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(
-            "INSERT INTO api_keys (key_id, tenant_id, key_hash, name, scopes, rate_limit_per_minute, is_revoked, created_at, updated_at, expires_at, created_by, updated_by) " +
-            "VALUES (@KeyId, @TenantId, @KeyHash, @Name, @Scopes, @RateLimitPerMinute, @IsRevoked, @CreatedAt, @UpdatedAt, @ExpiresAt, @CreatedBy, @UpdatedBy) " +
+            "INSERT INTO api_keys (key_id, tenant_id, key_hash, name, scopes, rate_limit_per_minute, is_revoked, created_at, updated_at, expires_at, created_by, updated_by, user_id) " +
+            "VALUES (@KeyId, @TenantId, @KeyHash, @Name, @Scopes, @RateLimitPerMinute, @IsRevoked, @CreatedAt, @UpdatedAt, @ExpiresAt, @CreatedBy, @UpdatedBy, @UserId) " +
             "ON CONFLICT (tenant_id, key_id) DO UPDATE SET " +
             "  name = EXCLUDED.name, scopes = EXCLUDED.scopes, rate_limit_per_minute = EXCLUDED.rate_limit_per_minute, " +
-            "  is_revoked = EXCLUDED.is_revoked, updated_at = EXCLUDED.updated_at, expires_at = EXCLUDED.expires_at, updated_by = EXCLUDED.updated_by",
+            "  is_revoked = EXCLUDED.is_revoked, updated_at = EXCLUDED.updated_at, expires_at = EXCLUDED.expires_at, " +
+            "  updated_by = EXCLUDED.updated_by, user_id = EXCLUDED.user_id",
             new
             {
                 KeyId = apiKey.KeyId.Value,
@@ -69,6 +70,7 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
                 apiKey.ExpiresAt,
                 apiKey.CreatedBy,
                 apiKey.UpdatedBy,
+                UserId = apiKey.UserId?.Value,
             });
     }
 
@@ -92,7 +94,8 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
         DateTimeOffset? updated_at,
         DateTimeOffset? expires_at,
         string? created_by,
-        string? updated_by)
+        string? updated_by,
+        string? user_id)
     {
         public ApiKey ToApiKey()
         {
@@ -107,6 +110,7 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
                 Name = name,
                 Scopes = scopeList,
                 RateLimitPerMinute = rate_limit_per_minute,
+                UserId = user_id is not null ? EntityId.From(user_id) : null,
                 IsRevoked = is_revoked,
                 CreatedAt = created_at,
                 UpdatedAt = updated_at,
