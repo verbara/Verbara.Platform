@@ -106,6 +106,7 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
 }
 
 // ─── Pro.Cluster ─────────────────────────────────────────────────────────────
+builder.Services.AddAsteriskMultiServer();
 builder.Services.AddAsteriskCluster(c =>
 {
     c.InstanceId = Environment.MachineName;
