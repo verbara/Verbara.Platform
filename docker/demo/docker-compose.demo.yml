@@ -94,6 +94,8 @@ services:
       - "5000:5000"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE: "false"
+      HostOptions__BackgroundServiceExceptionBehavior: Ignore
       ConnectionStrings__Postgres: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       ConnectionStrings__Analytics: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       Asterisk__Ami__Hostname: asterisk
