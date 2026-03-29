@@ -47,10 +47,12 @@ until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform 
 done
 echo " OK"
 
-# 4. Run Asterisk seed SQL (extensions, queues, trunks, IVR)
-echo "[5/10] Cargando datos Asterisk..."
+# 5. Create Pro package tables + seed Asterisk data
+echo "[5/10] Cargando tablas Pro y datos Asterisk..."
 # Wait for migrations to complete (docker-entrypoint-initdb.d runs on first start)
 sleep 3
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    psql -U platform -d platform -f /demo-sql/008_pro_tables.sql -q
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/010_demo_asterisk_seed.sql -q
 echo "  OK"
