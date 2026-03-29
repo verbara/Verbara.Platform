@@ -1,7 +1,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
+ARG CACHEBUST=1
 COPY . .
 RUN NUGET_FILE=$(find . -maxdepth 1 -iname "nuget.config" | head -1) \
+    && dotnet nuget locals all --clear \
     && if [ -d local-nuget-feed ] && [ -n "$NUGET_FILE" ]; then \
         sed -i "s|/media/Data/Source/IPcom/local-nuget-feed/|/src/local-nuget-feed/|" "$NUGET_FILE"; \
     else \

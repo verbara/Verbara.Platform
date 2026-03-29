@@ -47,13 +47,22 @@ until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform 
 done
 echo " OK"
 
-# 5. Start all services (API creates Asterisk Realtime tables on startup via EnsureSchema)
-echo "[5/10] Iniciando todos los servicios..."
+# 5. Load Phase-2 Pro tables (Dialer, EventStore, Analytics, etc.)
+# These must exist BEFORE API starts because the Reconciler reads trunks/campaigns at startup.
+# Pro.Realtime tables (ps_endpoints, queues, etc.) are auto-created by API via EnsureSchema.
+echo "[5/10] Cargando tablas Pro (Phase 2)..."
+sleep 3  # Wait for Platform migrations (docker-entrypoint-initdb.d)
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    psql -U platform -d platform -f /demo-sql/008_pro_tables.sql -q
+echo "  OK"
+
+# 6. Start all services (API creates Asterisk Realtime tables on startup via EnsureSchema)
+echo "[6/10] Iniciando todos los servicios..."
 docker compose -f "$COMPOSE_FILE" up -d
 echo "  OK"
 
-# 6. Wait for all services healthy
-echo "[6/10] Esperando servicios..."
+# 7. Wait for all services healthy
+echo "[7/10] Esperando servicios..."
 for svc in asterisk pstn-emulator platform-api web grafana; do
     echo -n "  $svc..."
     timeout=120
@@ -73,29 +82,23 @@ for svc in asterisk pstn-emulator platform-api web grafana; do
     done
 done
 
-# 7. Load remaining Pro tables + seed data (after API has created Realtime tables)
-echo "[7/10] Cargando tablas Pro restantes + datos seed..."
-docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    psql -U platform -d platform -f /demo-sql/008_pro_tables.sql -q
+# 8. Load seed data (after API has created Realtime tables via EnsureSchema)
+echo "[8/10] Cargando datos seed..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/010_demo_asterisk_seed.sql -q
 echo "  OK"
 
-# 8. Insert historical demo data
-echo "[8/10] Cargando datos historicos..."
+# 9. Insert historical demo data
+echo "[9/10] Cargando datos historicos..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/020_demo_historical_data.sql -q
 echo "  OK"
 
-# 9. Warmup API
-echo "[9/10] Pre-calentando API..."
+# 10. Warmup API + Summary
+echo "[10/10] Verificando..."
 curl -sf -X POST http://localhost:5000/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"email":"admin@demo.local","password":"Admin123!"}' > /dev/null 2>&1 || true
-echo "  OK"
-
-# 10. Summary
-echo "[10/10] Verificando..."
 API_STATUS=$(curl -sf http://localhost:5000/health 2>/dev/null | head -c 50 || echo "unreachable")
 echo "  API: $API_STATUS"
 echo ""
