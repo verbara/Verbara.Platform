@@ -49,12 +49,10 @@ services:
       - ./asterisk-config/modules.conf:/etc/asterisk/modules.conf:ro
       - ./asterisk-config/extconfig.conf:/etc/asterisk/extconfig.conf:ro
       - ./asterisk-config/sorcery.conf:/etc/asterisk/sorcery.conf:ro
-      - ./asterisk-config/res_odbc.conf:/etc/asterisk/res_odbc.conf:ro
+      - ./asterisk-config/res_config_pgsql.conf:/etc/asterisk/res_config_pgsql.conf:ro
       - ./asterisk-config/rtp.conf:/etc/asterisk/rtp.conf
       - ./asterisk-config/musiconhold.conf:/etc/asterisk/musiconhold.conf:ro
       - ./asterisk-config/logger.conf:/etc/asterisk/logger.conf:ro
-      - ./asterisk-config/odbc.ini:/etc/odbc.ini:ro
-      - ./asterisk-config/odbcinst.ini:/etc/odbcinst.ini:ro
       - ./certs/asterisk.pem:/etc/asterisk/keys/asterisk.pem:ro
       - ./certs/asterisk.key:/etc/asterisk/keys/asterisk.key:ro
       - ./moh:/var/lib/asterisk/moh:ro
