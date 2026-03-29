@@ -41,18 +41,7 @@ services:
       - "20000-20050:20000-20050/udp"
     volumes:
       - ./entrypoint-asterisk.sh:/entrypoint-asterisk.sh:ro
-      - ./asterisk-config/pjsip.conf:/etc/asterisk/pjsip.conf
-      - ./asterisk-config/extensions.conf:/etc/asterisk/extensions.conf
-      - ./asterisk-config/manager.conf:/etc/asterisk/manager.conf
-      - ./asterisk-config/ari.conf:/etc/asterisk/ari.conf:ro
-      - ./asterisk-config/http.conf:/etc/asterisk/http.conf:ro
-      - ./asterisk-config/modules.conf:/etc/asterisk/modules.conf:ro
-      - ./asterisk-config/extconfig.conf:/etc/asterisk/extconfig.conf:ro
-      - ./asterisk-config/sorcery.conf:/etc/asterisk/sorcery.conf:ro
-      - ./asterisk-config/res_config_pgsql.conf:/etc/asterisk/res_config_pgsql.conf:ro
-      - ./asterisk-config/rtp.conf:/etc/asterisk/rtp.conf
-      - ./asterisk-config/musiconhold.conf:/etc/asterisk/musiconhold.conf:ro
-      - ./asterisk-config/logger.conf:/etc/asterisk/logger.conf:ro
+      - ./asterisk-config:/etc/asterisk
       - ./certs/asterisk.pem:/etc/asterisk/keys/asterisk.pem:ro
       - ./certs/asterisk.key:/etc/asterisk/keys/asterisk.key:ro
       - ./moh:/var/lib/asterisk/moh:ro
