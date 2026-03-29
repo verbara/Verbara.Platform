@@ -38,6 +38,7 @@ using Asterisk.Sdk.Pro.Realtime.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Realtime.Models;
 using Asterisk.Sdk.Pro.Realtime.Decorators;
 using Asterisk.Sdk.Pro.Realtime.Engine;
+using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres;
 using Asterisk.Sdk.Pro.Cluster.DependencyInjection;
@@ -140,6 +141,11 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
         new RealtimeSyncingTrunkStore(
             new PostgresTrunkStore(sp.GetRequiredService<DialerDbContext>()),
             sp.GetRequiredService<IRealtimeSyncService>()));
+}
+else
+{
+    builder.Services.AddSingleton<TrunkStoreBase>(sp =>
+        new InMemoryTrunkStore());
 }
 
 // ─── Pro EventStore + Analytics + CallAnalytics (engines + Postgres stores) ──
@@ -456,6 +462,16 @@ app.MapRbacEndpoints();
 }
 
 app.Run();
+
+/// <summary>No-op trunk store used when Dialer is not configured.</summary>
+file sealed class InMemoryTrunkStore : TrunkStoreBase
+{
+    public override ValueTask<IReadOnlyList<Trunk>> ListAsync(string tenantId, CancellationToken ct = default)
+        => new(Array.Empty<Trunk>());
+
+    public override ValueTask<IReadOnlyList<Trunk>> ListActiveAsync(string tenantId, CancellationToken ct = default)
+        => new(Array.Empty<Trunk>());
+}
 
 // Expose Program for WebApplicationFactory in tests
 public partial class Program { }
