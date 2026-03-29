@@ -349,35 +349,6 @@ ALTER TABLE trunks ADD COLUMN IF NOT EXISTS context          VARCHAR(40);
 
 
 -- =============================================================================
--- Pro.Realtime — RealtimeSchema
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS endpoint_profiles (
-    id                      BIGSERIAL PRIMARY KEY,
-    tenant_id               TEXT NOT NULL,
-    name                    TEXT NOT NULL,
-    type                    INT NOT NULL DEFAULT 0,
-    is_default              BOOLEAN NOT NULL DEFAULT FALSE,
-    transport               VARCHAR(40) NOT NULL DEFAULT 'transport-udp',
-    codecs                  VARCHAR(200) NOT NULL DEFAULT 'ulaw,alaw,g722',
-    webrtc                  BOOLEAN NOT NULL DEFAULT FALSE,
-    max_contacts            INT NOT NULL DEFAULT 1,
-    dtls_auto_generate_cert BOOLEAN NOT NULL DEFAULT FALSE,
-    direct_media            BOOLEAN NOT NULL DEFAULT FALSE,
-    context                 VARCHAR(80) NOT NULL DEFAULT 'from-internal',
-    qualify_frequency       INT NOT NULL DEFAULT 30
-);
-
-CREATE INDEX IF NOT EXISTS idx_endpoint_profiles_tenant ON endpoint_profiles (tenant_id);
-
--- Extend PJSIP tables (columns already in authoritative schema 000,
--- but kept as fallback for standalone deployments without 000)
-ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS tenantid               VARCHAR(40);
-ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS webrtc                 VARCHAR(3);
-ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS dtls_auto_generate_cert VARCHAR(3);
-
-
--- =============================================================================
 -- Pro.EventStore — EventStoreSchema (partitioned)
 -- =============================================================================
 

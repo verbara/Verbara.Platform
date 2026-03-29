@@ -16,7 +16,7 @@ echo "============================================"
 echo ""
 
 # 1. Clean up
-echo "[1/9] Limpiando entorno anterior..."
+echo "[1/10] Limpiando entorno anterior..."
 docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
 echo "  OK"
 
@@ -47,29 +47,13 @@ until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform 
 done
 echo " OK"
 
-# 5. Load authoritative Asterisk schema + Pro tables + seed data
-echo "[5/10] Cargando schema Asterisk + tablas Pro + datos seed..."
-# Wait for migrations to complete (docker-entrypoint-initdb.d runs on first start)
-sleep 3
-# Authoritative Asterisk 22 Realtime schema (drops minimal tables from migration
-# 004 and recreates with full ~150 column schema for ps_endpoints)
-docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    psql -U platform -d platform -f /demo-sql/000_asterisk_realtime.sql -q
-# Pro package tables (Dialer, Realtime, EventStore, Analytics, etc.)
-docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    psql -U platform -d platform -f /demo-sql/008_pro_tables.sql -q
-# Demo seed data (endpoints, queues, queue members)
-docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    psql -U platform -d platform -f /demo-sql/010_demo_asterisk_seed.sql -q
-echo "  OK"
-
-# 5. Start all services
-echo "[6/10] Iniciando todos los servicios..."
+# 5. Start all services (API creates Asterisk Realtime tables on startup via EnsureSchema)
+echo "[5/10] Iniciando todos los servicios..."
 docker compose -f "$COMPOSE_FILE" up -d
 echo "  OK"
 
 # 6. Wait for all services healthy
-echo "[7/10] Esperando servicios..."
+echo "[6/10] Esperando servicios..."
 for svc in asterisk pstn-emulator platform-api web grafana; do
     echo -n "  $svc..."
     timeout=120
@@ -89,21 +73,28 @@ for svc in asterisk pstn-emulator platform-api web grafana; do
     done
 done
 
-# 7. Insert historical demo data (requires Pro tables from API startup)
+# 7. Load remaining Pro tables + seed data (after API has created Realtime tables)
+echo "[7/10] Cargando tablas Pro restantes + datos seed..."
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    psql -U platform -d platform -f /demo-sql/008_pro_tables.sql -q
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    psql -U platform -d platform -f /demo-sql/010_demo_asterisk_seed.sql -q
+echo "  OK"
+
+# 8. Insert historical demo data
 echo "[8/10] Cargando datos historicos..."
-sleep 5  # Give API time to create Pro tables
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/020_demo_historical_data.sql -q
 echo "  OK"
 
-# 8. Warmup API
+# 9. Warmup API
 echo "[9/10] Pre-calentando API..."
 curl -sf -X POST http://localhost:5000/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"email":"admin@demo.local","password":"Admin123!"}' > /dev/null 2>&1 || true
 echo "  OK"
 
-# 9. Summary
+# 10. Summary
 echo "[10/10] Verificando..."
 API_STATUS=$(curl -sf http://localhost:5000/health 2>/dev/null | head -c 50 || echo "unreachable")
 echo "  API: $API_STATUS"
