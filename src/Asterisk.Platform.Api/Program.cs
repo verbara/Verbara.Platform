@@ -68,6 +68,7 @@ builder.Services.AddPlatformSurveys();
 builder.Services.AddInMemoryStorage();
 
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
+builder.Services.AddSingleton<byte[]>(Array.Empty<byte>());
 builder.Services.AddProLicensing();
 
 // ─── Pro.Routing — Skill Catalog (in-memory, singleton) ─────────────────────
