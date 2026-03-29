@@ -4,6 +4,7 @@ using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Contacts;
 using Asterisk.Sdk.Pro.Dialer.Dispositions;
 using Asterisk.Sdk.Pro.Dialer.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -55,7 +56,7 @@ internal static class CampaignEndpoints
 
     private static async Task<IResult> CreateCampaign(
         HttpContext context,
-        CreateCampaignRequest body,
+        [FromBody] CreateCampaignRequest body,
         CampaignStoreBase campaignStore,
         PlatformEventBus eventBus,
         CancellationToken ct)
@@ -97,7 +98,7 @@ internal static class CampaignEndpoints
     private static async Task<IResult> UpdateCampaign(
         long id,
         HttpContext context,
-        UpdateCampaignRequest body,
+        [FromBody] UpdateCampaignRequest body,
         CampaignStoreBase campaignStore,
         CancellationToken ct)
     {
@@ -241,7 +242,7 @@ internal static class CampaignEndpoints
     private static async Task<IResult> CreateContactList(
         long id,
         HttpContext context,
-        CreateContactListRequest body,
+        [FromBody] CreateContactListRequest body,
         ContactListStoreBase contactListStore,
         CancellationToken ct)
     {
@@ -273,7 +274,7 @@ internal static class CampaignEndpoints
         long id,
         long listId,
         HttpContext context,
-        ImportContactsRequest body,
+        [FromBody] ImportContactsRequest body,
         ContactListStoreBase contactListStore,
         CancellationToken ct)
     {
@@ -314,7 +315,7 @@ internal static class CampaignEndpoints
     private static async Task<IResult> CreateDisposition(
         long id,
         HttpContext context,
-        CreateDispositionCodeRequest body,
+        [FromBody] CreateDispositionCodeRequest body,
         DispositionCodeStoreBase dispositionStore,
         CancellationToken ct)
     {
@@ -340,7 +341,7 @@ internal static class CampaignEndpoints
         long id,
         long codeId,
         HttpContext context,
-        UpdateDispositionCodeRequest body,
+        [FromBody] UpdateDispositionCodeRequest body,
         DispositionCodeStoreBase dispositionStore,
         CancellationToken ct)
     {

@@ -1,5 +1,6 @@
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Surveys;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -36,7 +37,7 @@ internal static class SurveyEndpoints
 
     private static async Task<IResult> CreateSurvey(
         HttpContext context,
-        CreateSurveyRequest body,
+        [FromBody] CreateSurveyRequest body,
         ISurveyStore store,
         CancellationToken ct)
     {
@@ -69,7 +70,7 @@ internal static class SurveyEndpoints
     private static async Task<IResult> UpdateSurvey(
         string id,
         HttpContext context,
-        UpdateSurveyRequest body,
+        [FromBody] UpdateSurveyRequest body,
         ISurveyStore store,
         CancellationToken ct)
     {
@@ -105,7 +106,7 @@ internal static class SurveyEndpoints
     private static async Task<IResult> ActivateSurvey(
         string id,
         HttpContext context,
-        ActivateSurveyRequest body,
+        [FromBody] ActivateSurveyRequest body,
         ISurveyStore store,
         CancellationToken ct)
     {

@@ -1,6 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -28,7 +29,7 @@ internal static class DialerSettingsEndpoints
 
     private static async Task<IResult> UpdateSettings(
         HttpContext context,
-        UpdateDialerSettingsRequest body,
+        [FromBody] UpdateDialerSettingsRequest body,
         CampaignStoreBase store,
         CancellationToken ct)
     {

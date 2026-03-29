@@ -1,6 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Realtime;
 using Asterisk.Sdk.Pro.Realtime.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -58,7 +59,7 @@ internal static class RealtimeEndpoints
 
     private static async Task<IResult> CreateProfile(
         HttpContext context,
-        CreateEndpointProfileRequest body,
+        [FromBody] CreateEndpointProfileRequest body,
         EndpointProfileStoreBase store,
         CancellationToken ct)
     {
@@ -83,7 +84,7 @@ internal static class RealtimeEndpoints
     private static async Task<IResult> UpdateProfile(
         long id,
         HttpContext context,
-        UpdateEndpointProfileRequest body,
+        [FromBody] UpdateEndpointProfileRequest body,
         EndpointProfileStoreBase store,
         CancellationToken ct)
     {

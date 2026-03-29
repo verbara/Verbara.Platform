@@ -1,6 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Compliance;
 using Asterisk.Sdk.Pro.Dialer.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -54,7 +55,7 @@ internal static class DncListEndpoints
 
     private static async Task<IResult> CreateDncList(
         HttpContext context,
-        CreateDncListRequest body,
+        [FromBody] CreateDncListRequest body,
         DncListStoreBase store,
         CancellationToken ct)
     {
@@ -74,7 +75,7 @@ internal static class DncListEndpoints
     private static async Task<IResult> UpdateDncList(
         long id,
         HttpContext context,
-        UpdateDncListRequest body,
+        [FromBody] UpdateDncListRequest body,
         DncListStoreBase store,
         CancellationToken ct)
     {
@@ -119,7 +120,7 @@ internal static class DncListEndpoints
     private static async Task<IResult> AddEntry(
         long id,
         HttpContext context,
-        AddDncEntryRequest body,
+        [FromBody] AddDncEntryRequest body,
         DncListStoreBase store,
         CancellationToken ct)
     {

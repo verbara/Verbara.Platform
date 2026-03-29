@@ -1,5 +1,6 @@
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Core;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -34,7 +35,7 @@ internal static class ChannelConfigEndpoints
     private static async Task<IResult> UpdateChannelConfig(
         string channel,
         HttpContext context,
-        UpdateChannelConfigRequest body,
+        [FromBody] UpdateChannelConfigRequest body,
         ITenantChannelConfigStore store,
         CancellationToken ct)
     {

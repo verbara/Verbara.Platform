@@ -1,5 +1,6 @@
 using Asterisk.Sdk.Pro.Routing.Models;
 using Asterisk.Sdk.Pro.Routing.Skills;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -33,7 +34,7 @@ internal static class SkillEndpoints
     }
 
     private static async Task<IResult> CreateSkill(
-        CreateSkillRequest body,
+        [FromBody] CreateSkillRequest body,
         SkillCatalogBase catalog,
         CancellationToken ct)
     {
@@ -49,7 +50,7 @@ internal static class SkillEndpoints
 
     private static async Task<IResult> UpsertSkill(
         string name,
-        UpsertSkillRequest body,
+        [FromBody] UpsertSkillRequest body,
         SkillCatalogBase catalog,
         CancellationToken ct)
     {
@@ -98,7 +99,7 @@ internal static class SkillEndpoints
 
     private static async Task<IResult> AssignSkill(
         string agentId,
-        AssignSkillRequest body,
+        [FromBody] AssignSkillRequest body,
         SkillCatalogBase catalog,
         CancellationToken ct)
     {

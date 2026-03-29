@@ -2,6 +2,7 @@ using System.Globalization;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Scheduling;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -49,7 +50,7 @@ internal static class HolidayCalendarEndpoints
 
     private static async Task<IResult> CreateCalendar(
         HttpContext context,
-        CreateHolidayCalendarRequest body,
+        [FromBody] CreateHolidayCalendarRequest body,
         HolidayCalendarStoreBase store,
         CancellationToken ct)
     {
@@ -63,7 +64,7 @@ internal static class HolidayCalendarEndpoints
     private static async Task<IResult> UpdateCalendar(
         long id,
         HttpContext context,
-        UpdateHolidayCalendarRequest body,
+        [FromBody] UpdateHolidayCalendarRequest body,
         HolidayCalendarStoreBase store,
         CancellationToken ct)
     {
@@ -104,7 +105,7 @@ internal static class HolidayCalendarEndpoints
     private static async Task<IResult> AddHoliday(
         long id,
         HttpContext context,
-        AddHolidayRequest body,
+        [FromBody] AddHolidayRequest body,
         HolidayCalendarStoreBase store,
         CancellationToken ct)
     {

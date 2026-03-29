@@ -1,5 +1,6 @@
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -62,7 +63,7 @@ internal static class ContactEndpoints
 
     private static async Task<IResult> CreateContact(
         HttpContext context,
-        CreateContactRequest body,
+        [FromBody] CreateContactRequest body,
         IContactStore store,
         IClock clock,
         CancellationToken ct)
@@ -101,7 +102,7 @@ internal static class ContactEndpoints
     private static async Task<IResult> UpdateContact(
         string id,
         HttpContext context,
-        UpdateContactRequest body,
+        [FromBody] UpdateContactRequest body,
         IContactStore store,
         IClock clock,
         CancellationToken ct)

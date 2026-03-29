@@ -1,5 +1,6 @@
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -29,7 +30,7 @@ internal static class AgentEndpoints
         HttpContext context,
         IAgentStore agentStore,
         PlatformEventBus eventBus,
-        UpdateAgentStateRequest body,
+        [FromBody] UpdateAgentStateRequest body,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

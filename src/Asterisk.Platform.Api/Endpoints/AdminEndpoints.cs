@@ -3,6 +3,7 @@ using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Realtime;
 using Asterisk.Sdk.Pro.Realtime.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -72,7 +73,7 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> CreateUser(
         HttpContext context,
-        CreateUserRequest body,
+        [FromBody] CreateUserRequest body,
         IUserStore store,
         IClock clock,
         CancellationToken ct)
@@ -95,7 +96,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> UpdateUser(
         string id,
         HttpContext context,
-        UpdateUserRequest body,
+        [FromBody] UpdateUserRequest body,
         IUserStore store,
         IClock clock,
         CancellationToken ct)
@@ -151,7 +152,7 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> CreateQueue(
         HttpContext context,
-        CreateQueueRequest body,
+        [FromBody] CreateQueueRequest body,
         IQueueStore store,
         IClock clock,
         CancellationToken ct)
@@ -208,7 +209,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> UpdateQueue(
         string id,
         HttpContext context,
-        UpdateQueueRequest body,
+        [FromBody] UpdateQueueRequest body,
         IQueueStore store,
         IClock clock,
         CancellationToken ct)
@@ -291,7 +292,7 @@ internal static class AdminEndpoints
     // ─── Queue Members ────────────────────────────────────────────────────────
 
     private static async Task<IResult> AddQueueMember(
-        HttpContext context, AddQueueMemberRequest body,
+        HttpContext context, [FromBody] AddQueueMemberRequest body,
         IQueueStore queueStore, IAgentStore agentStore,
         IQueueMembershipStore membershipStore, CancellationToken ct)
     {
@@ -366,7 +367,7 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> CreateAgent(
         HttpContext context,
-        CreateAgentRequest body,
+        [FromBody] CreateAgentRequest body,
         IAgentStore store,
         IClock clock,
         CancellationToken ct)
@@ -401,7 +402,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> UpdateAgent(
         string id,
         HttpContext context,
-        UpdateAgentRequest body,
+        [FromBody] UpdateAgentRequest body,
         IAgentStore store,
         IClock clock,
         CancellationToken ct)
@@ -482,7 +483,7 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> CreateTeam(
         HttpContext context,
-        CreateTeamRequest body,
+        [FromBody] CreateTeamRequest body,
         ITeamStore store,
         IClock clock,
         CancellationToken ct)
@@ -502,7 +503,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> UpdateTeam(
         string id,
         HttpContext context,
-        UpdateTeamRequest body,
+        [FromBody] UpdateTeamRequest body,
         ITeamStore store,
         IClock clock,
         CancellationToken ct)

@@ -1,6 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -44,7 +45,7 @@ internal static class TrunkEndpoints
 
     private static async Task<IResult> CreateTrunk(
         HttpContext context,
-        CreateTrunkRequest body,
+        [FromBody] CreateTrunkRequest body,
         TrunkStoreBase trunkStore,
         CancellationToken ct)
     {
@@ -72,7 +73,7 @@ internal static class TrunkEndpoints
     private static async Task<IResult> UpdateTrunk(
         long id,
         HttpContext context,
-        UpdateTrunkRequest body,
+        [FromBody] UpdateTrunkRequest body,
         TrunkStoreBase trunkStore,
         CancellationToken ct)
     {

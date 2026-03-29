@@ -1,5 +1,6 @@
 using Asterisk.Platform.Bot;
 using Asterisk.Platform.Core;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -32,7 +33,7 @@ internal static class BotEndpoints
 
     private static async Task<IResult> CreateBot(
         HttpContext context,
-        CreateBotRequest body,
+        [FromBody] CreateBotRequest body,
         IBotConfigStore store,
         CancellationToken ct)
     {
@@ -66,7 +67,7 @@ internal static class BotEndpoints
     private static async Task<IResult> UpdateBot(
         string id,
         HttpContext context,
-        UpdateBotRequest body,
+        [FromBody] UpdateBotRequest body,
         IBotConfigStore store,
         CancellationToken ct)
     {

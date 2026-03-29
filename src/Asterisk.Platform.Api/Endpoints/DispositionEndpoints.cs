@@ -1,6 +1,7 @@
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Conversations.Stores;
 using Asterisk.Platform.Core;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -39,7 +40,7 @@ internal static class DispositionEndpoints
 
     private static async Task<IResult> CreateDisposition(
         HttpContext context,
-        CreateDispositionRequest body,
+        [FromBody] CreateDispositionRequest body,
         IDispositionStore store,
         IClock clock,
         CancellationToken ct)

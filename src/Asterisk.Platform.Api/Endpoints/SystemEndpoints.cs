@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Asterisk.Platform.Core;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -81,7 +82,7 @@ internal static class SystemEndpoints
 
     private static IResult SaveSettings(
         HttpContext context,
-        SystemSettingsRequest body,
+        [FromBody] SystemSettingsRequest body,
         SystemSettingsStore store)
     {
         var tenantId = GetTenantId(context).ToString();

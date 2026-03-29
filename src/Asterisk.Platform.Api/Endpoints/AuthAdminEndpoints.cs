@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Identity;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -34,7 +35,7 @@ internal static class AuthAdminEndpoints
     }
 
     private static async Task<IResult> UpdateConfig(
-        UpdateTenantAuthConfigRequest body,
+        [FromBody] UpdateTenantAuthConfigRequest body,
         HttpContext context,
         ITenantAuthConfigStore configStore,
         CancellationToken ct)

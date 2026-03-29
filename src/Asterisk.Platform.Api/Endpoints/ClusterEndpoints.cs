@@ -2,6 +2,7 @@ using Asterisk.Sdk.Pro.Cluster;
 using Asterisk.Sdk.Pro.Cluster.Drain;
 using Asterisk.Sdk.Pro.Cluster.Registry;
 using Asterisk.Sdk.Pro.Cluster.Transport;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -57,7 +58,7 @@ internal static class ClusterEndpoints
 
     private static async Task<IResult> DrainNode(
         string nodeId,
-        DrainNodeRequest body,
+        [FromBody] DrainNodeRequest body,
         IServiceProvider services,
         CancellationToken ct)
     {

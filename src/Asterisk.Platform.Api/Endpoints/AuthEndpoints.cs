@@ -5,6 +5,7 @@ using System.Text;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -47,7 +48,7 @@ internal static class AuthEndpoints
     // ─── Login ──────────────────────────────────────────────────────────────────
 
     private static async Task<IResult> Login(
-        LoginRequest body,
+        [FromBody] LoginRequest body,
         HttpContext context,
         IUserStore userStore,
         PasswordService passwordService,
@@ -105,7 +106,7 @@ internal static class AuthEndpoints
     // ─── MFA Verify ──────────────────────────────────────────────────────────────
 
     private static async Task<IResult> MfaVerify(
-        MfaVerifyRequest body,
+        [FromBody] MfaVerifyRequest body,
         HttpContext context,
         IUserStore userStore,
         MfaService mfaService,
@@ -227,7 +228,7 @@ internal static class AuthEndpoints
     // ─── API Key Login ──────────────────────────────────────────────────────────
 
     private static async Task<IResult> ApiKeyLogin(
-        ApiKeyLoginRequest body,
+        [FromBody] ApiKeyLoginRequest body,
         HttpContext context,
         IApiKeyStore apiKeyStore,
         IUserStore userStore,
@@ -266,7 +267,7 @@ internal static class AuthEndpoints
     // ─── Change Password ────────────────────────────────────────────────────────
 
     private static async Task<IResult> ChangePassword(
-        ChangePasswordRequest body,
+        [FromBody] ChangePasswordRequest body,
         HttpContext context,
         IUserStore userStore,
         PasswordService passwordService,
@@ -303,7 +304,7 @@ internal static class AuthEndpoints
     // ─── Forgot Password ────────────────────────────────────────────────────────
 
     private static async Task<IResult> ForgotPassword(
-        ForgotPasswordRequest body,
+        [FromBody] ForgotPasswordRequest body,
         IUserStore userStore,
         CancellationToken ct)
     {
@@ -332,7 +333,7 @@ internal static class AuthEndpoints
     // ─── Reset Password ─────────────────────────────────────────────────────────
 
     private static async Task<IResult> ResetPassword(
-        ResetPasswordRequest body,
+        [FromBody] ResetPasswordRequest body,
         IUserStore userStore,
         PasswordService passwordService,
         ITenantAuthConfigStore configStore,
@@ -396,7 +397,7 @@ internal static class AuthEndpoints
     // ─── MFA Confirm ────────────────────────────────────────────────────────────
 
     private static async Task<IResult> MfaConfirm(
-        MfaConfirmRequest body,
+        [FromBody] MfaConfirmRequest body,
         HttpContext context,
         IUserStore userStore,
         MfaService mfaService,
@@ -427,7 +428,7 @@ internal static class AuthEndpoints
     // ─── MFA Disable ────────────────────────────────────────────────────────────
 
     private static async Task<IResult> MfaDisable(
-        [Microsoft.AspNetCore.Mvc.FromBody] MfaDisableRequest body,
+        [FromBody] MfaDisableRequest body,
         HttpContext context,
         IUserStore userStore,
         PasswordService passwordService,

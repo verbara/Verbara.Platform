@@ -1,5 +1,6 @@
 using Asterisk.Platform.Core;
 using Asterisk.Platform.KnowledgeBase;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -35,7 +36,7 @@ internal static class KnowledgeBaseEndpoints
 
     private static async Task<IResult> CreateArticle(
         HttpContext context,
-        CreateArticleRequest body,
+        [FromBody] CreateArticleRequest body,
         IArticleStore store,
         IClock clock,
         CancellationToken ct)
@@ -59,7 +60,7 @@ internal static class KnowledgeBaseEndpoints
     private static async Task<IResult> UpdateArticle(
         string id,
         HttpContext context,
-        UpdateArticleRequest body,
+        [FromBody] UpdateArticleRequest body,
         IArticleStore store,
         IClock clock,
         CancellationToken ct)

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Asterisk.Sdk.Pro.AgentAssist.Engine;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -40,7 +41,7 @@ internal static class SupervisorEndpoints
 
     private static IResult PostWhisper(
         string sessionId,
-        WhisperRequest body,
+        [FromBody] WhisperRequest body,
         IServiceProvider services)
     {
         var supervisor = services.GetService<AgentAssistSupervisor>();
@@ -56,7 +57,7 @@ internal static class SupervisorEndpoints
 
     private static IResult PostListen(
         string sessionId,
-        ListenRequest body,
+        [FromBody] ListenRequest body,
         IServiceProvider services)
     {
         var supervisor = services.GetService<AgentAssistSupervisor>();

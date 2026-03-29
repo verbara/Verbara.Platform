@@ -1,4 +1,5 @@
 using Asterisk.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -39,7 +40,7 @@ internal static class TenantEndpoints
     }
 
     private static async Task<IResult> CreateTenant(
-        CreateTenantRequest body,
+        [FromBody] CreateTenantRequest body,
         IServiceProvider services,
         CancellationToken ct)
     {
@@ -68,7 +69,7 @@ internal static class TenantEndpoints
 
     private static async Task<IResult> UpdateTenant(
         string id,
-        UpdateTenantRequest body,
+        [FromBody] UpdateTenantRequest body,
         IServiceProvider services,
         CancellationToken ct)
     {

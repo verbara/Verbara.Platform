@@ -1,5 +1,6 @@
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Flows;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -41,7 +42,7 @@ internal static class FlowEndpoints
 
     private static async Task<IResult> CreateFlow(
         HttpContext context,
-        CreateFlowRequest body,
+        [FromBody] CreateFlowRequest body,
         IFlowStore store,
         IClock clock,
         CancellationToken ct)
@@ -66,7 +67,7 @@ internal static class FlowEndpoints
     private static async Task<IResult> UpdateFlow(
         string id,
         HttpContext context,
-        UpdateFlowRequest body,
+        [FromBody] UpdateFlowRequest body,
         IFlowStore store,
         CancellationToken ct)
     {

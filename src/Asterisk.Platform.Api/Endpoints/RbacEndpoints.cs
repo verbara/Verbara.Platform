@@ -1,6 +1,7 @@
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -83,7 +84,7 @@ internal static class RbacEndpoints
     }
 
     private static async Task<IResult> CreateTenantRole(
-        HttpContext context, CreateTenantRoleRequest body,
+        HttpContext context, [FromBody] CreateTenantRoleRequest body,
         ITenantRoleStore store, IRoleTemplateStore templateStore,
         IClock clock, CancellationToken ct)
     {
@@ -128,7 +129,7 @@ internal static class RbacEndpoints
     }
 
     private static async Task<IResult> UpdateTenantRole(
-        string id, HttpContext context, UpdateTenantRoleRequest body,
+        string id, HttpContext context, [FromBody] UpdateTenantRoleRequest body,
         ITenantRoleStore store, PermissionResolver resolver,
         IClock clock, CancellationToken ct)
     {
@@ -173,7 +174,7 @@ internal static class RbacEndpoints
     }
 
     private static async Task<IResult> CloneTenantRole(
-        string id, HttpContext context, CloneTenantRoleRequest body,
+        string id, HttpContext context, [FromBody] CloneTenantRoleRequest body,
         ITenantRoleStore store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -212,7 +213,7 @@ internal static class RbacEndpoints
     }
 
     private static async Task<IResult> ReplaceUserRoles(
-        string id, HttpContext context, ReplaceUserRolesRequest body,
+        string id, HttpContext context, [FromBody] ReplaceUserRolesRequest body,
         IUserRoleStore store, PermissionResolver resolver, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

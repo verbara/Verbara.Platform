@@ -5,6 +5,7 @@ using Asterisk.Platform.Core;
 using Asterisk.Platform.Switchboard;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Dispositions;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -75,7 +76,7 @@ internal static class ConversationEndpoints
     private static async Task<IResult> SendMessage(
         string id,
         HttpContext context,
-        SendMessageRequest body,
+        [FromBody] SendMessageRequest body,
         IConversationService conversationService,
         CancellationToken ct)
     {
@@ -126,7 +127,7 @@ internal static class ConversationEndpoints
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
-        TransferRequest body,
+        [FromBody] TransferRequest body,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -166,7 +167,7 @@ internal static class ConversationEndpoints
         CampaignStoreBase campaignStore,
         DispositionCodeStoreBase dispositionCodeStore,
         PlatformEventBus eventBus,
-        WrapUpRequest? body,
+        [FromBody] WrapUpRequest? body,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

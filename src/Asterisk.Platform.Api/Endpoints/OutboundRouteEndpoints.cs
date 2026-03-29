@@ -1,6 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -43,7 +44,7 @@ internal static class OutboundRouteEndpoints
 
     private static async Task<IResult> CreateRoute(
         HttpContext context,
-        CreateOutboundRouteRequest body,
+        [FromBody] CreateOutboundRouteRequest body,
         OutboundRouteStoreBase routeStore,
         CancellationToken ct)
     {
@@ -66,7 +67,7 @@ internal static class OutboundRouteEndpoints
     private static async Task<IResult> UpdateRoute(
         long id,
         HttpContext context,
-        UpdateOutboundRouteRequest body,
+        [FromBody] UpdateOutboundRouteRequest body,
         OutboundRouteStoreBase routeStore,
         CancellationToken ct)
     {

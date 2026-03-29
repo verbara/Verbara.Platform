@@ -1,6 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -48,7 +49,7 @@ internal static class CallerIdPoolEndpoints
 
     private static async Task<IResult> CreatePool(
         HttpContext context,
-        CreateCallerIdPoolRequest body,
+        [FromBody] CreateCallerIdPoolRequest body,
         CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
@@ -62,7 +63,7 @@ internal static class CallerIdPoolEndpoints
     private static async Task<IResult> UpdatePool(
         long id,
         HttpContext context,
-        UpdateCallerIdPoolRequest body,
+        [FromBody] UpdateCallerIdPoolRequest body,
         CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
@@ -103,7 +104,7 @@ internal static class CallerIdPoolEndpoints
     private static async Task<IResult> AddEntry(
         long id,
         HttpContext context,
-        AddCallerIdEntryRequest body,
+        [FromBody] AddCallerIdEntryRequest body,
         CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
