@@ -69,7 +69,7 @@ builder.Services.AddInMemoryStorage();
 
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 builder.Services.AddSingleton<byte[]>(Array.Empty<byte>());
-builder.Services.AddProLicensing();
+builder.Services.AddProLicensing(o => o.EnforcementMode = Asterisk.Sdk.Pro.Licensing.EnforcementMode.Disabled);
 
 // ─── Pro.Routing — Skill Catalog (in-memory, singleton) ─────────────────────
 builder.Services.AddSingleton<SkillCatalogBase>(new InMemorySkillCatalog());
