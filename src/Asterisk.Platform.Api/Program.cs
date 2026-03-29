@@ -98,7 +98,7 @@ builder.Services.AddSingleton<MfaService>();
 builder.Services.AddSingleton<SessionService>();
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
-var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? "";
+var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";
 if (!string.IsNullOrEmpty(dialerConnectionString))
 {
     builder.Services.UsePostgresDialerStorage(dialerConnectionString);
