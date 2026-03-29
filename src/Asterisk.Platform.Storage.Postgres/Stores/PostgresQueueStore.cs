@@ -20,7 +20,7 @@ internal sealed class PostgresQueueStore : IQueueStore
         var row = await conn.QuerySingleOrDefaultAsync<QueueRow>(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
             "required_skills, created_at, updated_at, created_by, updated_by " +
-            "FROM queues WHERE tenant_id = @TenantId AND queue_id = @QueueId",
+            "FROM queue_configs WHERE tenant_id = @TenantId AND queue_id = @QueueId",
             new { TenantId = tenantId.Value, QueueId = queueId.Value });
         return row?.ToQueue();
     }
@@ -29,12 +29,12 @@ internal sealed class PostgresQueueStore : IQueueStore
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var total = await conn.ExecuteScalarAsync<int>(
-            "SELECT COUNT(*) FROM queues WHERE tenant_id = @TenantId",
+            "SELECT COUNT(*) FROM queue_configs WHERE tenant_id = @TenantId",
             new { TenantId = tenantId.Value });
         var rows = await conn.QueryAsync<QueueRow>(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
             "required_skills, created_at, updated_at, created_by, updated_by " +
-            "FROM queues WHERE tenant_id = @TenantId ORDER BY name LIMIT @Limit OFFSET @Offset",
+            "FROM queue_configs WHERE tenant_id = @TenantId ORDER BY name LIMIT @Limit OFFSET @Offset",
             new { TenantId = tenantId.Value, Limit = query.PageSize, Offset = query.Offset });
         var items = rows.Select(r => r.ToQueue()).ToList();
         return new PagedResult<Queue>(items, total, query.Page, query.PageSize);
@@ -56,7 +56,7 @@ internal sealed class PostgresQueueStore : IQueueStore
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(
-            "INSERT INTO queues (queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
+            "INSERT INTO queue_configs (queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
             "required_skills, created_at, updated_at, created_by, updated_by) " +
             "VALUES (@QueueId, @TenantId, @Name, @IsActive, @MaxWaiting, @SlaTargets::jsonb, @OverflowRule::jsonb, " +
             "@Hours::jsonb, @WrapUp::jsonb, @RequiredSkills::jsonb, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
@@ -88,7 +88,7 @@ internal sealed class PostgresQueueStore : IQueueStore
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(
-            "DELETE FROM queues WHERE tenant_id = @TenantId AND queue_id = @QueueId",
+            "DELETE FROM queue_configs WHERE tenant_id = @TenantId AND queue_id = @QueueId",
             new { TenantId = tenantId.Value, QueueId = queueId.Value });
     }
 
