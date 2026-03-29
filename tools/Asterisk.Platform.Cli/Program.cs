@@ -110,7 +110,7 @@ static async Task<int> RunDoctorAsync(string connectionString)
         "conversations",
         "messages",
         "contacts",
-        "queues",
+        "queue_configs",
         "agents",
         "tenant_channel_configs",
         "flow_definitions",
