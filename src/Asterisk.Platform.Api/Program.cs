@@ -121,7 +121,10 @@ builder.Services.AddAsteriskRealtime(o =>
     o.ReconcilerIntervalSeconds = 60;
     o.EnableAgentPresenceTracking = false;
 });
-var realtimeConn = dialerConnectionString;
+var realtimeConn = builder.Configuration.GetConnectionString("Realtime")
+    ?? builder.Configuration.GetConnectionString("Analytics")
+    ?? builder.Configuration.GetConnectionString("Postgres")
+    ?? "";
 if (!string.IsNullOrEmpty(realtimeConn))
     builder.Services.UsePostgresRealtimeStorage(realtimeConn);
 builder.Services.AddHostedService<RealtimeStateBridge>();
@@ -130,11 +133,14 @@ builder.Services.AddHostedService<RealtimeStateBridge>();
 builder.Services.AddSingleton<QueueMembershipService>();
 builder.Services.AddSingleton<IDesiredStateProvider, PlatformDesiredStateProvider>();
 
-// Trunk decorator — wraps PostgresTrunkStore with Realtime sync
-builder.Services.AddSingleton<TrunkStoreBase>(sp =>
-    new RealtimeSyncingTrunkStore(
-        new PostgresTrunkStore(sp.GetRequiredService<DialerDbContext>()),
-        sp.GetRequiredService<IRealtimeSyncService>()));
+// Trunk decorator — wraps PostgresTrunkStore with Realtime sync (only when Dialer is configured)
+if (!string.IsNullOrEmpty(dialerConnectionString))
+{
+    builder.Services.AddSingleton<TrunkStoreBase>(sp =>
+        new RealtimeSyncingTrunkStore(
+            new PostgresTrunkStore(sp.GetRequiredService<DialerDbContext>()),
+            sp.GetRequiredService<IRealtimeSyncService>()));
+}
 
 // ─── Pro EventStore + Analytics + CallAnalytics (engines + Postgres stores) ──
 var analyticsConnectionString = builder.Configuration.GetConnectionString("Analytics") ?? dialerConnectionString;
