@@ -2,7 +2,7 @@
 -- 008_pro_tables.sql — Pro Package Tables for Demo Environment
 -- =============================================================================
 -- Runs during Postgres init (docker-entrypoint-initdb.d) AFTER Platform
--- migrations (001-006) and BEFORE demo seed data (010).
+-- migration (001) and BEFORE demo seed data (010).
 --
 -- Sources (applied in order, fully idempotent):
 --   Pro.Dialer.Storage.Postgres  — InitialSchema + V2–V6 migrations
