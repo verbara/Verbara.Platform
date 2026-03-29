@@ -1,8 +1,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY . .
-RUN if [ -d local-nuget-feed ]; then \
-        sed -i "s|/media/Data/Source/IPcom/local-nuget-feed/|/src/local-nuget-feed/|" nuget.config; \
+RUN NUGET_FILE=$(find . -maxdepth 1 -iname "nuget.config" | head -1) \
+    && if [ -d local-nuget-feed ] && [ -n "$NUGET_FILE" ]; then \
+        sed -i "s|/media/Data/Source/IPcom/local-nuget-feed/|/src/local-nuget-feed/|" "$NUGET_FILE"; \
     else \
         dotnet nuget remove source local 2>/dev/null || true; \
     fi \
