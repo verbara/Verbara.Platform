@@ -9,3 +9,5 @@ TestResults/
 .worktrees/
 .claude/
 .superpowers/
+**/data/jwt-signing-key.xml
+local-nuget-feed/

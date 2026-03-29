@@ -20,13 +20,25 @@ echo "[1/9] Limpiando entorno anterior..."
 docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
 echo "  OK"
 
-# 2. Build images (if needed)
-echo "[2/9] Construyendo imagenes..."
+# 2. Copy local NuGet feed for Docker build (Pro packages)
+echo "[2/10] Copiando NuGet feed local..."
+PLATFORM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+NUGET_FEED="/media/Data/Source/IPcom/local-nuget-feed"
+if [ -d "$NUGET_FEED" ]; then
+    mkdir -p "$PLATFORM_ROOT/local-nuget-feed"
+    cp -r "$NUGET_FEED/"*.nupkg "$PLATFORM_ROOT/local-nuget-feed/" 2>/dev/null || true
+    echo "  OK ($(ls "$PLATFORM_ROOT/local-nuget-feed/"*.nupkg 2>/dev/null | wc -l) packages)"
+else
+    echo "  SKIP (no local feed found at $NUGET_FEED)"
+fi
+
+# 3. Build images (if needed)
+echo "[3/10] Construyendo imagenes..."
 docker compose -f "$COMPOSE_FILE" build --quiet
 echo "  OK"
 
-# 3. Start Postgres
-echo "[3/9] Iniciando Postgres..."
+# 4. Start Postgres
+echo "[4/10] Iniciando Postgres..."
 docker compose -f "$COMPOSE_FILE" up -d postgres
 echo -n "  Esperando..."
 until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform -q 2>/dev/null; do
@@ -36,7 +48,7 @@ done
 echo " OK"
 
 # 4. Run Asterisk seed SQL (extensions, queues, trunks, IVR)
-echo "[4/9] Cargando datos Asterisk..."
+echo "[5/10] Cargando datos Asterisk..."
 # Wait for migrations to complete (docker-entrypoint-initdb.d runs on first start)
 sleep 3
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
@@ -44,12 +56,12 @@ docker compose -f "$COMPOSE_FILE" exec -T postgres \
 echo "  OK"
 
 # 5. Start all services
-echo "[5/9] Iniciando todos los servicios..."
+echo "[6/10] Iniciando todos los servicios..."
 docker compose -f "$COMPOSE_FILE" up -d
 echo "  OK"
 
 # 6. Wait for all services healthy
-echo "[6/9] Esperando servicios..."
+echo "[7/10] Esperando servicios..."
 for svc in asterisk pstn-emulator platform-api web grafana; do
     echo -n "  $svc..."
     timeout=120
@@ -70,21 +82,21 @@ for svc in asterisk pstn-emulator platform-api web grafana; do
 done
 
 # 7. Insert historical demo data (requires Pro tables from API startup)
-echo "[7/9] Cargando datos historicos..."
+echo "[8/10] Cargando datos historicos..."
 sleep 5  # Give API time to create Pro tables
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/020_demo_historical_data.sql -q
 echo "  OK"
 
 # 8. Warmup API
-echo "[8/9] Pre-calentando API..."
+echo "[9/10] Pre-calentando API..."
 curl -sf -X POST http://localhost:5000/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"email":"admin@demo.local","password":"Admin123!"}' > /dev/null 2>&1 || true
 echo "  OK"
 
 # 9. Summary
-echo "[9/9] Verificando..."
+echo "[10/10] Verificando..."
 API_STATUS=$(curl -sf http://localhost:5000/health 2>/dev/null | head -c 50 || echo "unreachable")
 echo "  API: $API_STATUS"
 echo ""
