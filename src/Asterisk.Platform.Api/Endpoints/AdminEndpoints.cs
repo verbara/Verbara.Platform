@@ -50,7 +50,7 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> ListUsers(
         HttpContext context,
-        IUserStore store,
+        [FromServices] IUserStore store,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
@@ -63,7 +63,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> GetUser(
         string id,
         HttpContext context,
-        IUserStore store,
+        [FromServices] IUserStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -74,7 +74,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> CreateUser(
         HttpContext context,
         [FromBody] CreateUserRequest body,
-        IUserStore store,
+        [FromServices] IUserStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -97,7 +97,7 @@ internal static class AdminEndpoints
         string id,
         HttpContext context,
         [FromBody] UpdateUserRequest body,
-        IUserStore store,
+        [FromServices] IUserStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -117,7 +117,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> DeleteUser(
         string id,
         HttpContext context,
-        IUserStore store,
+        [FromServices] IUserStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -129,7 +129,7 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> ListQueues(
         HttpContext context,
-        IQueueStore store,
+        [FromServices] IQueueStore store,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
@@ -142,7 +142,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> GetQueue(
         string id,
         HttpContext context,
-        IQueueStore store,
+        [FromServices] IQueueStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -153,7 +153,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> CreateQueue(
         HttpContext context,
         [FromBody] CreateQueueRequest body,
-        IQueueStore store,
+        [FromServices] IQueueStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -210,7 +210,7 @@ internal static class AdminEndpoints
         string id,
         HttpContext context,
         [FromBody] UpdateQueueRequest body,
-        IQueueStore store,
+        [FromServices] IQueueStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -268,8 +268,8 @@ internal static class AdminEndpoints
     private static async Task<IResult> DeleteQueue(
         string id,
         HttpContext context,
-        IQueueStore store,
-        IQueueMembershipStore membershipStore,
+        [FromServices] IQueueStore store,
+        [FromServices] IQueueMembershipStore membershipStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -293,8 +293,8 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> AddQueueMember(
         HttpContext context, [FromBody] AddQueueMemberRequest body,
-        IQueueStore queueStore, IAgentStore agentStore,
-        IQueueMembershipStore membershipStore, CancellationToken ct)
+        [FromServices] IQueueStore queueStore, [FromServices] IAgentStore agentStore,
+        [FromServices] IQueueMembershipStore membershipStore, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(body.QueueId), ct);
@@ -322,8 +322,8 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> RemoveQueueMember(
         string queueId, string agentId, HttpContext context,
-        IQueueStore queueStore, IAgentStore agentStore,
-        IQueueMembershipStore membershipStore, CancellationToken ct)
+        [FromServices] IQueueStore queueStore, [FromServices] IAgentStore agentStore,
+        [FromServices] IQueueMembershipStore membershipStore, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(queueId), ct);
@@ -344,7 +344,7 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> ListAgents(
         HttpContext context,
-        IAgentStore store,
+        [FromServices] IAgentStore store,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
@@ -357,7 +357,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> GetAgent(
         string id,
         HttpContext context,
-        IAgentStore store,
+        [FromServices] IAgentStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -368,7 +368,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> CreateAgent(
         HttpContext context,
         [FromBody] CreateAgentRequest body,
-        IAgentStore store,
+        [FromServices] IAgentStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -403,7 +403,7 @@ internal static class AdminEndpoints
         string id,
         HttpContext context,
         [FromBody] UpdateAgentRequest body,
-        IAgentStore store,
+        [FromServices] IAgentStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -436,8 +436,8 @@ internal static class AdminEndpoints
     private static async Task<IResult> DeleteAgent(
         string id,
         HttpContext context,
-        IAgentStore store,
-        IQueueMembershipStore membershipStore,
+        [FromServices] IAgentStore store,
+        [FromServices] IQueueMembershipStore membershipStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -460,7 +460,7 @@ internal static class AdminEndpoints
 
     private static async Task<IResult> ListTeams(
         HttpContext context,
-        ITeamStore store,
+        [FromServices] ITeamStore store,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
@@ -473,7 +473,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> GetTeam(
         string id,
         HttpContext context,
-        ITeamStore store,
+        [FromServices] ITeamStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -484,7 +484,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> CreateTeam(
         HttpContext context,
         [FromBody] CreateTeamRequest body,
-        ITeamStore store,
+        [FromServices] ITeamStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -504,7 +504,7 @@ internal static class AdminEndpoints
         string id,
         HttpContext context,
         [FromBody] UpdateTeamRequest body,
-        ITeamStore store,
+        [FromServices] ITeamStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -522,7 +522,7 @@ internal static class AdminEndpoints
     private static async Task<IResult> DeleteTeam(
         string id,
         HttpContext context,
-        ITeamStore store,
+        [FromServices] ITeamStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

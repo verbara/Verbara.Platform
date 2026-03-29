@@ -1,5 +1,6 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.EventStore;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -19,7 +20,7 @@ internal static class RecordingEndpoints
     private static async Task<IResult> GetRecordingMetadata(
         string sessionId,
         HttpContext context,
-        ICompletedSessionStore cdrStore,
+        [FromServices] ICompletedSessionStore cdrStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -38,7 +39,7 @@ internal static class RecordingEndpoints
     private static async Task<IResult> StreamRecording(
         string sessionId,
         HttpContext context,
-        ICompletedSessionStore cdrStore,
+        [FromServices] ICompletedSessionStore cdrStore,
         IOptions<RecordingOptions> options,
         CancellationToken ct)
     {

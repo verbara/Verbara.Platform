@@ -21,7 +21,7 @@ internal static class AuthAdminEndpoints
 
     private static async Task<IResult> GetConfig(
         HttpContext context,
-        ITenantAuthConfigStore configStore,
+        [FromServices] ITenantAuthConfigStore configStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -37,7 +37,7 @@ internal static class AuthAdminEndpoints
     private static async Task<IResult> UpdateConfig(
         [FromBody] UpdateTenantAuthConfigRequest body,
         HttpContext context,
-        ITenantAuthConfigStore configStore,
+        [FromServices] ITenantAuthConfigStore configStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

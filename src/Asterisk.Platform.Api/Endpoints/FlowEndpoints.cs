@@ -21,7 +21,7 @@ internal static class FlowEndpoints
 
     private static async Task<IResult> ListFlows(
         HttpContext context,
-        IFlowStore store,
+        [FromServices] IFlowStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -32,7 +32,7 @@ internal static class FlowEndpoints
     private static async Task<IResult> GetFlow(
         string id,
         HttpContext context,
-        IFlowStore store,
+        [FromServices] IFlowStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -43,7 +43,7 @@ internal static class FlowEndpoints
     private static async Task<IResult> CreateFlow(
         HttpContext context,
         [FromBody] CreateFlowRequest body,
-        IFlowStore store,
+        [FromServices] IFlowStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -68,7 +68,7 @@ internal static class FlowEndpoints
         string id,
         HttpContext context,
         [FromBody] UpdateFlowRequest body,
-        IFlowStore store,
+        [FromServices] IFlowStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -97,7 +97,7 @@ internal static class FlowEndpoints
     private static async Task<IResult> PublishFlow(
         string id,
         HttpContext context,
-        IFlowStore store,
+        [FromServices] IFlowStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

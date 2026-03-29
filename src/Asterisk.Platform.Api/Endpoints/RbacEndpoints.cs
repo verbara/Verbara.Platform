@@ -40,14 +40,14 @@ internal static class RbacEndpoints
     // --- Permission Catalog ---
 
     private static async Task<IResult> ListPermissions(
-        IPermissionStore store, CancellationToken ct)
+        [FromServices] IPermissionStore store, CancellationToken ct)
     {
         var permissions = await store.GetAllAsync(ct);
         return Results.Ok(permissions);
     }
 
     private static async Task<IResult> ListPermissionsByCategory(
-        IPermissionStore store, CancellationToken ct)
+        [FromServices] IPermissionStore store, CancellationToken ct)
     {
         var all = await store.GetAllAsync(ct);
         var grouped = all.GroupBy(p => p.Category)
@@ -60,14 +60,14 @@ internal static class RbacEndpoints
     // --- Role Templates ---
 
     private static async Task<IResult> ListRoleTemplates(
-        IRoleTemplateStore store, CancellationToken ct)
+        [FromServices] IRoleTemplateStore store, CancellationToken ct)
     {
         var templates = await store.GetAllAsync(ct);
         return Results.Ok(templates);
     }
 
     private static async Task<IResult> GetRoleTemplate(
-        string id, IRoleTemplateStore store, CancellationToken ct)
+        string id, [FromServices] IRoleTemplateStore store, CancellationToken ct)
     {
         var template = await store.GetByIdAsync(id, ct);
         return template is null ? Results.NotFound() : Results.Ok(template);
@@ -76,7 +76,7 @@ internal static class RbacEndpoints
     // --- Tenant Roles ---
 
     private static async Task<IResult> ListTenantRoles(
-        HttpContext context, ITenantRoleStore store, CancellationToken ct)
+        HttpContext context, [FromServices] ITenantRoleStore store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var roles = await store.ListAsync(tenantId, ct);
@@ -85,7 +85,7 @@ internal static class RbacEndpoints
 
     private static async Task<IResult> CreateTenantRole(
         HttpContext context, [FromBody] CreateTenantRoleRequest body,
-        ITenantRoleStore store, IRoleTemplateStore templateStore,
+        [FromServices] ITenantRoleStore store, [FromServices] IRoleTemplateStore templateStore,
         IClock clock, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -121,7 +121,7 @@ internal static class RbacEndpoints
     }
 
     private static async Task<IResult> GetTenantRole(
-        string id, HttpContext context, ITenantRoleStore store, CancellationToken ct)
+        string id, HttpContext context, [FromServices] ITenantRoleStore store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var role = await store.GetByIdAsync(tenantId, id, ct);
@@ -130,7 +130,7 @@ internal static class RbacEndpoints
 
     private static async Task<IResult> UpdateTenantRole(
         string id, HttpContext context, [FromBody] UpdateTenantRoleRequest body,
-        ITenantRoleStore store, PermissionResolver resolver,
+        [FromServices] ITenantRoleStore store, [FromServices] PermissionResolver resolver,
         IClock clock, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -153,8 +153,8 @@ internal static class RbacEndpoints
     }
 
     private static async Task<IResult> DeleteTenantRole(
-        string id, HttpContext context, ITenantRoleStore store,
-        PermissionResolver resolver, CancellationToken ct)
+        string id, HttpContext context, [FromServices] ITenantRoleStore store,
+        [FromServices] PermissionResolver resolver, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var role = await store.GetByIdAsync(tenantId, id, ct);
@@ -175,7 +175,7 @@ internal static class RbacEndpoints
 
     private static async Task<IResult> CloneTenantRole(
         string id, HttpContext context, [FromBody] CloneTenantRoleRequest body,
-        ITenantRoleStore store, CancellationToken ct)
+        [FromServices] ITenantRoleStore store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var source = await store.GetByIdAsync(tenantId, id, ct);
@@ -205,7 +205,7 @@ internal static class RbacEndpoints
     // --- User Role Assignments ---
 
     private static async Task<IResult> GetUserRoles(
-        string id, HttpContext context, IUserRoleStore store, CancellationToken ct)
+        string id, HttpContext context, [FromServices] IUserRoleStore store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var roles = await store.GetRolesForUserAsync(tenantId, EntityId.From(id), ct);
@@ -214,7 +214,7 @@ internal static class RbacEndpoints
 
     private static async Task<IResult> ReplaceUserRoles(
         string id, HttpContext context, [FromBody] ReplaceUserRolesRequest body,
-        IUserRoleStore store, PermissionResolver resolver, CancellationToken ct)
+        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
@@ -229,7 +229,7 @@ internal static class RbacEndpoints
 
     private static async Task<IResult> AddUserRole(
         string id, string roleId, HttpContext context,
-        IUserRoleStore store, PermissionResolver resolver, CancellationToken ct)
+        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
@@ -243,7 +243,7 @@ internal static class RbacEndpoints
 
     private static async Task<IResult> RemoveUserRole(
         string id, string roleId, HttpContext context,
-        IUserRoleStore store, PermissionResolver resolver, CancellationToken ct)
+        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
@@ -256,7 +256,7 @@ internal static class RbacEndpoints
 
     private static async Task<IResult> GetUserEffectivePermissions(
         string id, HttpContext context,
-        PermissionResolver resolver, CancellationToken ct)
+        [FromServices] PermissionResolver resolver, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);

@@ -43,28 +43,28 @@ INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency) VALUE
     ('3003', 1, 'yes', 60)
 ON CONFLICT (id) DO NOTHING;
 
--- Queues: sales + support (using Platform's rt_queues table)
-INSERT INTO rt_queues (name, strategy, timeout, ringinuse, wrapuptime, servicelevel, maxlen) VALUES
+-- Queues: sales + support
+INSERT INTO queues (name, strategy, timeout, ringinuse, wrapuptime, servicelevel, maxlen) VALUES
     ('sales', 'ringall', 15, 'no', 10, 20, 0),
     ('support', 'leastrecent', 20, 'no', 15, 20, 0)
 ON CONFLICT (name) DO NOTHING;
 
--- Queue members: sales (using Platform's rt_queue_members table)
-INSERT INTO rt_queue_members (queue_name, interface, membername, penalty) VALUES
+-- Queue members: sales
+INSERT INTO queue_members (queue_name, interface, membername, penalty) VALUES
     ('sales', 'PJSIP/2001', 'Maria Garcia', 0),
     ('sales', 'PJSIP/2002', 'Carlos Lopez', 0),
     ('sales', 'PJSIP/2003', 'Ana Martinez', 1)
 ON CONFLICT DO NOTHING;
 
 -- Queue members: support
-INSERT INTO rt_queue_members (queue_name, interface, membername, penalty) VALUES
+INSERT INTO queue_members (queue_name, interface, membername, penalty) VALUES
     ('support', 'PJSIP/3001', 'Pedro Ruiz', 0),
     ('support', 'PJSIP/3002', 'Lucia Fernandez', 0),
     ('support', 'PJSIP/3003', 'Demo Agent', 1)
 ON CONFLICT DO NOTHING;
 
 -- IVR queues
-INSERT INTO rt_queues (name, strategy, timeout, ringinuse, wrapuptime, servicelevel, maxlen, musiconhold) VALUES
+INSERT INTO queues (name, strategy, timeout, ringinuse, wrapuptime, servicelevel, maxlen, musiconhold) VALUES
     ('ventas-nuevos', 'ringall', 15, 'no', 2, 30, 10, 'default'),
     ('ventas-existentes', 'leastrecent', 15, 'no', 2, 30, 10, 'default'),
     ('soporte-urgente', 'ringall', 15, 'no', 2, 30, 10, 'default'),
@@ -74,7 +74,7 @@ INSERT INTO rt_queues (name, strategy, timeout, ringinuse, wrapuptime, servicele
 ON CONFLICT (name) DO NOTHING;
 
 -- IVR queue members (virtual agents)
-INSERT INTO rt_queue_members (queue_name, interface, membername, penalty) VALUES
+INSERT INTO queue_members (queue_name, interface, membername, penalty) VALUES
     ('ventas-nuevos', 'Local/maria@virtual-agent', 'Maria', 0),
     ('ventas-nuevos', 'Local/carlos@virtual-agent', 'Carlos', 0),
     ('ventas-existentes', 'Local/ana@virtual-agent', 'Ana', 0),
@@ -89,7 +89,7 @@ INSERT INTO rt_queue_members (queue_name, interface, membername, penalty) VALUES
     ('rrhh', 'Local/carlos@virtual-agent', 'Carlos', 0)
 ON CONFLICT DO NOTHING;
 
--- PSTN trunk endpoint (no IP identification table in Platform)
+-- PSTN trunk endpoint
 -- Trunk uses AOR-based contact for outbound dialing
 INSERT INTO ps_endpoints (id, transport, aors, context, disallow, allow, direct_media, rtp_symmetric, force_rport, callerid)
 VALUES ('pstn-trunk', 'transport-udp', 'pstn-trunk', 'from-pstn', 'all', 'ulaw,alaw', 'no', 'yes', 'yes', '"Demo PBX" <8888>')

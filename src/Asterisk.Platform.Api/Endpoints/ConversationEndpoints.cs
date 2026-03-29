@@ -28,7 +28,7 @@ internal static class ConversationEndpoints
 
     private static async Task<IResult> ListConversations(
         HttpContext context,
-        IConversationStore store,
+        [FromServices] IConversationStore store,
         ConversationState? state,
         string? queueId,
         string? agentId,
@@ -52,7 +52,7 @@ internal static class ConversationEndpoints
     private static async Task<IResult> GetConversation(
         string id,
         HttpContext context,
-        IConversationStore store,
+        [FromServices] IConversationStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -63,7 +63,7 @@ internal static class ConversationEndpoints
     private static async Task<IResult> GetMessages(
         string id,
         HttpContext context,
-        IMessageStore store,
+        [FromServices] IMessageStore store,
         int limit = 50,
         int offset = 0,
         CancellationToken ct = default)
@@ -146,7 +146,7 @@ internal static class ConversationEndpoints
     private static async Task<IResult> CloseConversation(
         string id,
         HttpContext context,
-        IConversationStore store,
+        [FromServices] IConversationStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -162,8 +162,8 @@ internal static class ConversationEndpoints
     private static async Task<IResult> WrapUpConversation(
         string id,
         HttpContext context,
-        IConversationStore conversationStore,
-        IWrapUpStore wrapUpStore,
+        [FromServices] IConversationStore conversationStore,
+        [FromServices] IWrapUpStore wrapUpStore,
         CampaignStoreBase campaignStore,
         DispositionCodeStoreBase dispositionCodeStore,
         PlatformEventBus eventBus,

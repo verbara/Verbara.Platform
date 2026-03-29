@@ -1,6 +1,7 @@
 using System.Globalization;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
+using Microsoft.AspNetCore.Mvc;
 using Asterisk.Sdk.Pro.Analytics;
 using Asterisk.Sdk.Pro.CallAnalytics.Domain;
 using Asterisk.Sdk.Pro.CallAnalytics.Store;
@@ -26,8 +27,8 @@ internal static class AnalyticsEndpoints
 
     private static async Task<IResult> GetDashboard(
         HttpContext context,
-        IIntervalSnapshotStore snapshotStore,
-        ICompletedSessionStore cdrStore,
+        [FromServices] IIntervalSnapshotStore snapshotStore,
+        [FromServices] ICompletedSessionStore cdrStore,
         string? from,
         string? to,
         string? queue,
@@ -98,10 +99,10 @@ internal static class AnalyticsEndpoints
 
     private static async Task<IResult> ListCdr(
         HttpContext context,
-        ICompletedSessionStore cdrStore,
-        ICallAnalyticsStore qaStore,
-        IAgentStore agentStore,
-        IQueueStore queueStore,
+        [FromServices] ICompletedSessionStore cdrStore,
+        [FromServices] ICallAnalyticsStore qaStore,
+        [FromServices] IAgentStore agentStore,
+        [FromServices] IQueueStore queueStore,
         string? from,
         string? to,
         string? queue,
@@ -193,10 +194,10 @@ internal static class AnalyticsEndpoints
     private static async Task<IResult> GetCdrDetail(
         string sessionId,
         HttpContext context,
-        ICompletedSessionStore cdrStore,
-        ICallAnalyticsStore qaStore,
-        IAgentStore agentStore,
-        IQueueStore queueStore,
+        [FromServices] ICompletedSessionStore cdrStore,
+        [FromServices] ICallAnalyticsStore qaStore,
+        [FromServices] IAgentStore agentStore,
+        [FromServices] IQueueStore queueStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -291,9 +292,9 @@ internal static class AnalyticsEndpoints
 
     private static async Task<IResult> ListQa(
         HttpContext context,
-        ICallAnalyticsStore qaStore,
-        ICompletedSessionStore cdrStore,
-        IAgentStore agentStore,
+        [FromServices] ICallAnalyticsStore qaStore,
+        [FromServices] ICompletedSessionStore cdrStore,
+        [FromServices] IAgentStore agentStore,
         string? from,
         string? to,
         double? minScore,
@@ -370,9 +371,9 @@ internal static class AnalyticsEndpoints
     private static async Task<IResult> GetQaDetail(
         string sessionId,
         HttpContext context,
-        ICallAnalyticsStore qaStore,
-        ICompletedSessionStore cdrStore,
-        IAgentStore agentStore,
+        [FromServices] ICallAnalyticsStore qaStore,
+        [FromServices] ICompletedSessionStore cdrStore,
+        [FromServices] IAgentStore agentStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -468,7 +469,7 @@ internal static class AnalyticsEndpoints
 
     private static async Task<IResult> ListIntervals(
         HttpContext context,
-        IIntervalSnapshotStore snapshotStore,
+        [FromServices] IIntervalSnapshotStore snapshotStore,
         string? from,
         string? to,
         string? queue,
@@ -550,7 +551,7 @@ internal static class AnalyticsEndpoints
     private static async Task<Dictionary<string, string>> BuildAgentNameMapAsync(
         IEnumerable<string?> agentIds,
         TenantId tenantId,
-        IAgentStore agentStore,
+        [FromServices] IAgentStore agentStore,
         CancellationToken ct)
     {
         var map = new Dictionary<string, string>();
@@ -574,7 +575,7 @@ internal static class AnalyticsEndpoints
     private static async Task<Dictionary<string, long?>> BuildQueueSlaMapAsync(
         IEnumerable<string?> queueNames,
         TenantId tenantId,
-        IQueueStore queueStore,
+        [FromServices] IQueueStore queueStore,
         CancellationToken ct)
     {
         // IQueueStore.ListAsync returns paged queues; we scan the first page and match by name

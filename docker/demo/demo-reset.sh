@@ -47,12 +47,18 @@ until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform 
 done
 echo " OK"
 
-# 5. Create Pro package tables + seed Asterisk data
-echo "[5/10] Cargando tablas Pro y datos Asterisk..."
+# 5. Load authoritative Asterisk schema + Pro tables + seed data
+echo "[5/10] Cargando schema Asterisk + tablas Pro + datos seed..."
 # Wait for migrations to complete (docker-entrypoint-initdb.d runs on first start)
 sleep 3
+# Authoritative Asterisk 22 Realtime schema (drops minimal tables from migration
+# 004 and recreates with full ~150 column schema for ps_endpoints)
+docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    psql -U platform -d platform -f /demo-sql/000_asterisk_realtime.sql -q
+# Pro package tables (Dialer, Realtime, EventStore, Analytics, etc.)
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/008_pro_tables.sql -q
+# Demo seed data (endpoints, queues, queue members)
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/010_demo_asterisk_seed.sql -q
 echo "  OK"

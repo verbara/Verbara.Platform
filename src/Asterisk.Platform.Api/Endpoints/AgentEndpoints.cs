@@ -16,7 +16,7 @@ internal static class AgentEndpoints
 
     private static async Task<IResult> GetCurrentAgent(
         HttpContext context,
-        IAgentStore agentStore,
+        [FromServices] IAgentStore agentStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -28,7 +28,7 @@ internal static class AgentEndpoints
 
     private static async Task<IResult> UpdateAgentState(
         HttpContext context,
-        IAgentStore agentStore,
+        [FromServices] IAgentStore agentStore,
         PlatformEventBus eventBus,
         [FromBody] UpdateAgentStateRequest body,
         CancellationToken ct)

@@ -19,7 +19,7 @@ internal static class DispositionEndpoints
 
     private static async Task<IResult> ListDispositions(
         HttpContext context,
-        IDispositionStore store,
+        [FromServices] IDispositionStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -30,7 +30,7 @@ internal static class DispositionEndpoints
     private static async Task<IResult> GetDisposition(
         string id,
         HttpContext context,
-        IDispositionStore store,
+        [FromServices] IDispositionStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -41,7 +41,7 @@ internal static class DispositionEndpoints
     private static async Task<IResult> CreateDisposition(
         HttpContext context,
         [FromBody] CreateDispositionRequest body,
-        IDispositionStore store,
+        [FromServices] IDispositionStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -62,7 +62,7 @@ internal static class DispositionEndpoints
     private static async Task<IResult> DeleteDisposition(
         string id,
         HttpContext context,
-        IDispositionStore store,
+        [FromServices] IDispositionStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

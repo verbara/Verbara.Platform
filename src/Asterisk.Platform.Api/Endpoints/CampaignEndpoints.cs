@@ -154,7 +154,7 @@ internal static class CampaignEndpoints
         long id,
         HttpContext context,
         CampaignStoreBase campaignStore,
-        CampaignLifecycleManager lifecycleManager,
+        [FromServices] CampaignLifecycleManager lifecycleManager,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
@@ -173,7 +173,7 @@ internal static class CampaignEndpoints
         long id,
         HttpContext context,
         CampaignStoreBase campaignStore,
-        CampaignLifecycleManager lifecycleManager,
+        [FromServices] CampaignLifecycleManager lifecycleManager,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
@@ -192,7 +192,7 @@ internal static class CampaignEndpoints
         long id,
         HttpContext context,
         CampaignStoreBase campaignStore,
-        CampaignLifecycleManager lifecycleManager,
+        [FromServices] CampaignLifecycleManager lifecycleManager,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
@@ -211,7 +211,7 @@ internal static class CampaignEndpoints
         long id,
         HttpContext context,
         CampaignStoreBase campaignStore,
-        CampaignLifecycleManager lifecycleManager,
+        [FromServices] CampaignLifecycleManager lifecycleManager,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {

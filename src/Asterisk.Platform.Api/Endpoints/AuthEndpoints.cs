@@ -50,13 +50,13 @@ internal static class AuthEndpoints
     private static async Task<IResult> Login(
         [FromBody] LoginRequest body,
         HttpContext context,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         PasswordService passwordService,
         AccountLockoutService lockoutService,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
-        ITenantAuthConfigStore configStore,
+        [FromServices] ITenantAuthConfigStore configStore,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.TenantId))
@@ -108,7 +108,7 @@ internal static class AuthEndpoints
     private static async Task<IResult> MfaVerify(
         [FromBody] MfaVerifyRequest body,
         HttpContext context,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         MfaService mfaService,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
@@ -158,7 +158,7 @@ internal static class AuthEndpoints
 
     private static async Task<IResult> Refresh(
         HttpContext context,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
         CancellationToken ct)
@@ -230,8 +230,8 @@ internal static class AuthEndpoints
     private static async Task<IResult> ApiKeyLogin(
         [FromBody] ApiKeyLoginRequest body,
         HttpContext context,
-        IApiKeyStore apiKeyStore,
-        IUserStore userStore,
+        [FromServices] IApiKeyStore apiKeyStore,
+        [FromServices] IUserStore userStore,
         JwtTokenService jwtService,
         CancellationToken ct)
     {
@@ -269,9 +269,9 @@ internal static class AuthEndpoints
     private static async Task<IResult> ChangePassword(
         [FromBody] ChangePasswordRequest body,
         HttpContext context,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         PasswordService passwordService,
-        ITenantAuthConfigStore configStore,
+        [FromServices] ITenantAuthConfigStore configStore,
         AuthEventService authEvents,
         CancellationToken ct)
     {
@@ -305,7 +305,7 @@ internal static class AuthEndpoints
 
     private static async Task<IResult> ForgotPassword(
         [FromBody] ForgotPasswordRequest body,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         CancellationToken ct)
     {
         // Always return 200 to prevent email enumeration
@@ -334,9 +334,9 @@ internal static class AuthEndpoints
 
     private static async Task<IResult> ResetPassword(
         [FromBody] ResetPasswordRequest body,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         PasswordService passwordService,
-        ITenantAuthConfigStore configStore,
+        [FromServices] ITenantAuthConfigStore configStore,
         AuthEventService authEvents,
         CancellationToken ct)
     {
@@ -371,7 +371,7 @@ internal static class AuthEndpoints
 
     private static async Task<IResult> MfaSetup(
         HttpContext context,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         MfaService mfaService,
         CancellationToken ct)
     {
@@ -386,7 +386,7 @@ internal static class AuthEndpoints
         var (secret, qrUri) = mfaService.GenerateSetup(user.Email);
         var recoveryCodes = mfaService.GenerateRecoveryCodes();
 
-        // Store secret temporarily — will be confirmed by /mfa/confirm
+        // [FromServices] Store secret temporarily — will be confirmed by /mfa/confirm
         user.MfaSecret = secret;
         user.MfaRecoveryCodes = mfaService.HashRecoveryCodes(recoveryCodes).ToList();
         await userStore.SaveAsync(user, ct);
@@ -399,7 +399,7 @@ internal static class AuthEndpoints
     private static async Task<IResult> MfaConfirm(
         [FromBody] MfaConfirmRequest body,
         HttpContext context,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         MfaService mfaService,
         AuthEventService authEvents,
         CancellationToken ct)
@@ -430,7 +430,7 @@ internal static class AuthEndpoints
     private static async Task<IResult> MfaDisable(
         [FromBody] MfaDisableRequest body,
         HttpContext context,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         PasswordService passwordService,
         AuthEventService authEvents,
         CancellationToken ct)

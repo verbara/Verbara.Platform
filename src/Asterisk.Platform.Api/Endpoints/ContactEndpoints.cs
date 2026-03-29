@@ -21,7 +21,7 @@ internal static class ContactEndpoints
     private static async Task<IResult> GetContact(
         string id,
         HttpContext context,
-        IContactStore store,
+        [FromServices] IContactStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -32,7 +32,7 @@ internal static class ContactEndpoints
     private static async Task<IResult> GetContactConversations(
         string id,
         HttpContext context,
-        IConversationStore store,
+        [FromServices] IConversationStore store,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
@@ -50,7 +50,7 @@ internal static class ContactEndpoints
 
     private static async Task<IResult> SearchContacts(
         HttpContext context,
-        IContactStore store,
+        [FromServices] IContactStore store,
         string? search = null,
         int page = 1,
         int pageSize = 25,
@@ -64,7 +64,7 @@ internal static class ContactEndpoints
     private static async Task<IResult> CreateContact(
         HttpContext context,
         [FromBody] CreateContactRequest body,
-        IContactStore store,
+        [FromServices] IContactStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -103,7 +103,7 @@ internal static class ContactEndpoints
         string id,
         HttpContext context,
         [FromBody] UpdateContactRequest body,
-        IContactStore store,
+        [FromServices] IContactStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -141,7 +141,7 @@ internal static class ContactEndpoints
     private static async Task<IResult> DeleteContact(
         string id,
         HttpContext context,
-        IContactStore store,
+        [FromServices] IContactStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

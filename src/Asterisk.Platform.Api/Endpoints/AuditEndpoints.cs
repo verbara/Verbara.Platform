@@ -1,5 +1,6 @@
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -17,7 +18,7 @@ internal static class AuditEndpoints
 
     private static async Task<IResult> SearchAuditLog(
         HttpContext context,
-        IAuditStore store,
+        [FromServices] IAuditStore store,
         string? action = null,
         string? entityType = null,
         string? performedBy = null,
@@ -45,7 +46,7 @@ internal static class AuditEndpoints
         string entityType,
         string entityId,
         HttpContext context,
-        IAuditStore store,
+        [FromServices] IAuditStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

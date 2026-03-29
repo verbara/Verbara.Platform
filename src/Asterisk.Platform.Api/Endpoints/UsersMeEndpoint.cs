@@ -1,5 +1,6 @@
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -12,7 +13,7 @@ internal static class UsersMeEndpoint
 
     private static async Task<IResult> GetCurrentUser(
         HttpContext context,
-        IUserStore userStore,
+        [FromServices] IUserStore userStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

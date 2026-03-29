@@ -1,6 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.AgentAssist.Options;
 using Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres.Stores;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -30,7 +31,7 @@ internal static class AgentAssistEndpoints
     private static async Task<IResult> GetSession(
         string sessionId,
         HttpContext context,
-        AgentAssistSessionStore store,
+        [FromServices] AgentAssistSessionStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -48,7 +49,7 @@ internal static class AgentAssistEndpoints
 
     private static async Task<IResult> GetSessionSuggestions(
         string sessionId,
-        SuggestionLogStore store,
+        [FromServices] SuggestionLogStore store,
         CancellationToken ct)
     {
         var rows = await store.QueryBySessionAsync(sessionId, ct);
@@ -68,7 +69,7 @@ internal static class AgentAssistEndpoints
 
     private static async Task<IResult> GetSessionCompliance(
         string sessionId,
-        ComplianceAlertStore store,
+        [FromServices] ComplianceAlertStore store,
         CancellationToken ct)
     {
         var rows = await store.QueryBySessionAsync(sessionId, ct);
@@ -88,7 +89,7 @@ internal static class AgentAssistEndpoints
 
     private static IResult GetConfig(
         IOptions<AgentAssistOptions> options,
-        AgentAssistConfigStore configStore)
+        [FromServices] AgentAssistConfigStore configStore)
     {
         var snapshot = configStore.GetSnapshot() ?? BuildSnapshot(options.Value);
         return Results.Ok(snapshot);
@@ -96,33 +97,33 @@ internal static class AgentAssistEndpoints
 
     private static IResult UpdateConfig(
         AgentAssistConfigSnapshot body,
-        AgentAssistConfigStore configStore)
+        [FromServices] AgentAssistConfigStore configStore)
     {
         configStore.Update(body);
         return Results.Ok(body);
     }
 
-    private static IResult GetKeywordRules(AgentAssistConfigStore configStore)
+    private static IResult GetKeywordRules([FromServices] AgentAssistConfigStore configStore)
     {
         return Results.Ok(configStore.GetKeywordRules());
     }
 
     private static IResult UpdateKeywordRules(
         KeywordRuleDto[] rules,
-        AgentAssistConfigStore configStore)
+        [FromServices] AgentAssistConfigStore configStore)
     {
         configStore.UpdateKeywordRules(rules);
         return Results.Ok(rules);
     }
 
-    private static IResult GetComplianceRules(AgentAssistConfigStore configStore)
+    private static IResult GetComplianceRules([FromServices] AgentAssistConfigStore configStore)
     {
         return Results.Ok(configStore.GetComplianceRules());
     }
 
     private static IResult UpdateComplianceRules(
         ComplianceRuleDto[] rules,
-        AgentAssistConfigStore configStore)
+        [FromServices] AgentAssistConfigStore configStore)
     {
         configStore.UpdateComplianceRules(rules);
         return Results.Ok(rules);

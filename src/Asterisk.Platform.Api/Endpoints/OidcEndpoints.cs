@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Identity;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -17,7 +18,7 @@ internal static class OidcEndpoints
 
     private static async Task<IResult> OidcLogin(
         HttpContext context,
-        ITenantAuthConfigStore configStore,
+        [FromServices] ITenantAuthConfigStore configStore,
         string? tenant_id,
         CancellationToken ct)
     {
@@ -42,8 +43,8 @@ internal static class OidcEndpoints
 
     private static async Task<IResult> OidcCallback(
         HttpContext context,
-        ITenantAuthConfigStore configStore,
-        IUserStore userStore,
+        [FromServices] ITenantAuthConfigStore configStore,
+        [FromServices] IUserStore userStore,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
         AuthEventService authEvents,

@@ -18,7 +18,7 @@ internal static class ChannelConfigEndpoints
     private static async Task<IResult> GetChannelConfig(
         string channel,
         HttpContext context,
-        ITenantChannelConfigStore store,
+        [FromServices] ITenantChannelConfigStore store,
         CancellationToken ct)
     {
         if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out var channelType))
@@ -36,7 +36,7 @@ internal static class ChannelConfigEndpoints
         string channel,
         HttpContext context,
         [FromBody] UpdateChannelConfigRequest body,
-        ITenantChannelConfigStore store,
+        [FromServices] ITenantChannelConfigStore store,
         CancellationToken ct)
     {
         if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out var channelType))

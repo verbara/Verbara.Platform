@@ -27,7 +27,7 @@ internal static class SurveyEndpoints
 
     private static async Task<IResult> ListSurveys(
         HttpContext context,
-        ISurveyStore store,
+        [FromServices] ISurveyStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -38,7 +38,7 @@ internal static class SurveyEndpoints
     private static async Task<IResult> CreateSurvey(
         HttpContext context,
         [FromBody] CreateSurveyRequest body,
-        ISurveyStore store,
+        [FromServices] ISurveyStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -59,7 +59,7 @@ internal static class SurveyEndpoints
     private static async Task<IResult> GetSurvey(
         string id,
         HttpContext context,
-        ISurveyStore store,
+        [FromServices] ISurveyStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -71,7 +71,7 @@ internal static class SurveyEndpoints
         string id,
         HttpContext context,
         [FromBody] UpdateSurveyRequest body,
-        ISurveyStore store,
+        [FromServices] ISurveyStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -95,7 +95,7 @@ internal static class SurveyEndpoints
     private static async Task<IResult> DeleteSurvey(
         string id,
         HttpContext context,
-        ISurveyStore store,
+        [FromServices] ISurveyStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -107,7 +107,7 @@ internal static class SurveyEndpoints
         string id,
         HttpContext context,
         [FromBody] ActivateSurveyRequest body,
-        ISurveyStore store,
+        [FromServices] ISurveyStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -136,7 +136,7 @@ internal static class SurveyEndpoints
     private static async Task<IResult> GetSurveyResponses(
         string id,
         HttpContext context,
-        ISurveyResponseStore responseStore,
+        [FromServices] ISurveyResponseStore responseStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS contact_lists (
 
 CREATE INDEX IF NOT EXISTS ix_contact_lists_campaign ON contact_lists (campaign_id);
 
-CREATE TABLE IF NOT EXISTS contacts (
+CREATE TABLE IF NOT EXISTS dialer_contacts (
     id                       BIGSERIAL PRIMARY KEY,
     contact_list_id          BIGINT NOT NULL REFERENCES contact_lists (id),
     external_id              TEXT,
@@ -123,11 +123,11 @@ CREATE TABLE IF NOT EXISTS contacts (
 );
 
 CREATE INDEX IF NOT EXISTS ix_contacts_list_status_priority
-    ON contacts (contact_list_id, status, priority DESC, id);
+    ON dialer_contacts (contact_list_id, status, priority DESC, id);
 
 CREATE TABLE IF NOT EXISTS contact_phones (
     id           BIGSERIAL PRIMARY KEY,
-    contact_id   BIGINT NOT NULL REFERENCES contacts (id),
+    contact_id   BIGINT NOT NULL REFERENCES dialer_contacts (id),
     phone_number TEXT NOT NULL,
     phone_type   INT NOT NULL DEFAULT 0,
     status       INT NOT NULL DEFAULT 0,
@@ -139,7 +139,7 @@ CREATE INDEX IF NOT EXISTS ix_contact_phones_contact ON contact_phones (contact_
 CREATE TABLE IF NOT EXISTS call_attempts (
     id                  BIGSERIAL PRIMARY KEY,
     campaign_id         BIGINT NOT NULL,
-    contact_id          BIGINT NOT NULL REFERENCES contacts (id),
+    contact_id          BIGINT NOT NULL REFERENCES dialer_contacts (id),
     contact_list_id     BIGINT NOT NULL,
     contact_phone_id    BIGINT NOT NULL REFERENCES contact_phones (id),
     phone_number        TEXT NOT NULL,
@@ -258,7 +258,7 @@ CREATE INDEX IF NOT EXISTS ix_caller_id_entries_pool ON caller_id_entries (pool_
 ALTER TABLE dialer_settings    ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE campaigns          ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE contact_lists      ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
-ALTER TABLE contacts           ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE dialer_contacts    ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE call_attempts      ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE dnc_lists          ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE scheduled_callbacks ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
@@ -267,7 +267,7 @@ ALTER TABLE trunks             ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL 
 ALTER TABLE caller_id_pools    ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS ix_campaigns_tenant_status  ON campaigns    (tenant_id, status);
-CREATE INDEX IF NOT EXISTS ix_contacts_tenant          ON contacts     (tenant_id);
+CREATE INDEX IF NOT EXISTS ix_contacts_tenant          ON dialer_contacts (tenant_id);
 CREATE INDEX IF NOT EXISTS ix_call_attempts_tenant     ON call_attempts (tenant_id, campaign_id);
 
 
@@ -320,7 +320,7 @@ CREATE INDEX IF NOT EXISTS ix_retry_rules_campaign ON retry_rules (campaign_id);
 -- Pro.Dialer — V4: contacts.metadata JSONB
 -- =============================================================================
 
-ALTER TABLE contacts ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
+ALTER TABLE dialer_contacts ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
 
 
 -- =============================================================================
@@ -370,10 +370,11 @@ CREATE TABLE IF NOT EXISTS endpoint_profiles (
 
 CREATE INDEX IF NOT EXISTS idx_endpoint_profiles_tenant ON endpoint_profiles (tenant_id);
 
--- Extend PJSIP tables (created by Platform migrations 001-006)
+-- Extend PJSIP tables (columns already in authoritative schema 000,
+-- but kept as fallback for standalone deployments without 000)
 ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS tenantid               VARCHAR(40);
-ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS webrtc                 VARCHAR(5);
-ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS dtls_auto_generate_cert VARCHAR(5);
+ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS webrtc                 VARCHAR(3);
+ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS dtls_auto_generate_cert VARCHAR(3);
 
 
 -- =============================================================================

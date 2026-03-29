@@ -21,11 +21,11 @@ internal static class BotEndpoints
 
     private static async Task<IResult> ListBots(
         HttpContext context,
-        IBotConfigStore store,
+        [FromServices] IBotConfigStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        // IBotConfigStore does not expose a ListAsync method.
+        // [FromServices] IBotConfigStore does not expose a ListAsync method.
         // Return the default active bot configuration for the tenant.
         var bot = await store.GetDefaultAsync(tenantId, ct);
         return Results.Ok(bot is null ? [] : new[] { bot });
@@ -34,7 +34,7 @@ internal static class BotEndpoints
     private static async Task<IResult> CreateBot(
         HttpContext context,
         [FromBody] CreateBotRequest body,
-        IBotConfigStore store,
+        [FromServices] IBotConfigStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -56,7 +56,7 @@ internal static class BotEndpoints
     private static async Task<IResult> GetBot(
         string id,
         HttpContext context,
-        IBotConfigStore store,
+        [FromServices] IBotConfigStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -68,7 +68,7 @@ internal static class BotEndpoints
         string id,
         HttpContext context,
         [FromBody] UpdateBotRequest body,
-        IBotConfigStore store,
+        [FromServices] IBotConfigStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -89,10 +89,10 @@ internal static class BotEndpoints
     private static async Task<IResult> DeleteBot(
         string id,
         HttpContext context,
-        IBotConfigStore store,
+        [FromServices] IBotConfigStore store,
         CancellationToken ct)
     {
-        // IBotConfigStore does not expose a DeleteAsync method.
+        // [FromServices] IBotConfigStore does not expose a DeleteAsync method.
         // Soft-delete by deactivating the bot configuration.
         var tenantId = GetTenantId(context);
         var config = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);

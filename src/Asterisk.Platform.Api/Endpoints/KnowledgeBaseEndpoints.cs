@@ -24,7 +24,7 @@ internal static class KnowledgeBaseEndpoints
 
     private static async Task<IResult> ListArticles(
         HttpContext context,
-        IArticleStore store,
+        [FromServices] IArticleStore store,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
@@ -37,7 +37,7 @@ internal static class KnowledgeBaseEndpoints
     private static async Task<IResult> CreateArticle(
         HttpContext context,
         [FromBody] CreateArticleRequest body,
-        IArticleStore store,
+        [FromServices] IArticleStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -61,7 +61,7 @@ internal static class KnowledgeBaseEndpoints
         string id,
         HttpContext context,
         [FromBody] UpdateArticleRequest body,
-        IArticleStore store,
+        [FromServices] IArticleStore store,
         IClock clock,
         CancellationToken ct)
     {
@@ -83,7 +83,7 @@ internal static class KnowledgeBaseEndpoints
     private static async Task<IResult> DeleteArticle(
         string id,
         HttpContext context,
-        IArticleStore store,
+        [FromServices] IArticleStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

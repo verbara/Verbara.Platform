@@ -68,7 +68,7 @@ internal static class SystemEndpoints
         });
     }
 
-    private static IResult GetSettings(HttpContext context, SystemSettingsStore store)
+    private static IResult GetSettings(HttpContext context, [FromServices] SystemSettingsStore store)
     {
         var tenantId = GetTenantId(context).ToString();
         var record = store.Get(tenantId);
@@ -83,7 +83,7 @@ internal static class SystemEndpoints
     private static IResult SaveSettings(
         HttpContext context,
         [FromBody] SystemSettingsRequest body,
-        SystemSettingsStore store)
+        [FromServices] SystemSettingsStore store)
     {
         var tenantId = GetTenantId(context).ToString();
         var record = new SystemSettingsRecord(body.PlatformName, body.DefaultTimezone, body.DefaultLanguage);

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -33,25 +34,25 @@ internal static class ScheduledReportEndpoints
         group.MapDelete("/{id}", DeleteReport);
     }
 
-    private static IResult ListReports(ScheduledReportStore store)
+    private static IResult ListReports([FromServices] ScheduledReportStore store)
     {
         return Results.Ok(store.List());
     }
 
-    private static IResult CreateReport(ScheduledReportDto body, ScheduledReportStore store)
+    private static IResult CreateReport([FromBody] ScheduledReportDto body, [FromServices] ScheduledReportStore store)
     {
         var report = body with { ReportId = Guid.NewGuid().ToString() };
         store.Save(report);
         return Results.Created($"/api/admin/reports/{report.ReportId}", report);
     }
 
-    private static IResult GetReport(string id, ScheduledReportStore store)
+    private static IResult GetReport(string id, [FromServices] ScheduledReportStore store)
     {
         var report = store.Get(id);
         return report is null ? Results.NotFound() : Results.Ok(report);
     }
 
-    private static IResult UpdateReport(string id, ScheduledReportDto body, ScheduledReportStore store)
+    private static IResult UpdateReport(string id, [FromBody] ScheduledReportDto body, [FromServices] ScheduledReportStore store)
     {
         if (store.Get(id) is null) return Results.NotFound();
 
@@ -60,7 +61,7 @@ internal static class ScheduledReportEndpoints
         return Results.Ok(updated);
     }
 
-    private static IResult DeleteReport(string id, ScheduledReportStore store)
+    private static IResult DeleteReport(string id, [FromServices] ScheduledReportStore store)
     {
         return store.Delete(id) ? Results.NoContent() : Results.NotFound();
     }

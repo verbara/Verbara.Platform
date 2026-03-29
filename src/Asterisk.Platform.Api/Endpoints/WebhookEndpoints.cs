@@ -30,10 +30,10 @@ internal static class WebhookEndpoints
         IInboundRouter router,
         IConversationSwitchboard switchboard,
         IConversationService conversationService,
-        IConversationStore conversationStore,
-        IContactStore contactStore,
+        [FromServices] IConversationStore conversationStore,
+        [FromServices] IContactStore contactStore,
         IVirtualAgent virtualAgent,
-        DeliveryStatusHandler deliveryStatusHandler,
+        [FromServices] DeliveryStatusHandler deliveryStatusHandler,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {

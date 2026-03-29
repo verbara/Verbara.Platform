@@ -1,6 +1,7 @@
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Analytics;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -14,9 +15,9 @@ internal static class QueueMetricsEndpoints
 
     private static async Task<IResult> GetQueueMetrics(
         HttpContext context,
-        IQueueStore queueStore,
-        IAgentStore agentStore,
-        IIntervalSnapshotStore snapshotStore,
+        [FromServices] IQueueStore queueStore,
+        [FromServices] IAgentStore agentStore,
+        [FromServices] IIntervalSnapshotStore snapshotStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
