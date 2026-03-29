@@ -4,6 +4,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../../src/Asterisk.Platform.Storage.Postgres/Migrations:/docker-entrypoint-initdb.d:ro
+      - ./sql/008_pro_tables.sql:/docker-entrypoint-initdb.d/008_pro_tables.sql:ro
       - ./sql:/demo-sql:ro
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-platform}
