@@ -6,11 +6,11 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
-internal static class ClusterEndpoints
+internal static class ManagementClusterEndpoints
 {
-    public static void MapClusterEndpoints(this IEndpointRouteBuilder app)
+    public static void MapManagementClusterEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/cluster").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/api/management/cluster").RequireAuthorization("PlatformAdminOnly");
 
         group.MapGet("/status", GetStatus);
         group.MapGet("/nodes", ListNodes);
@@ -18,16 +18,14 @@ internal static class ClusterEndpoints
         group.MapPost("/nodes/{nodeId}/drain", DrainNode);
     }
 
-    // ─── Handlers ────────────────────────────────────────────────────────────
-
     private static IResult GetStatus(IServiceProvider services)
     {
         var manager = services.GetService<ClusterManager>();
         if (manager is null)
-            return Results.Ok(new ClusterStatusDto("local", [], 0, 0, []));
+            return Results.Ok(new MgmtClusterStatusDto("local", [], 0, 0, []));
 
         var status = manager.GetStatus();
-        return Results.Ok(new ClusterStatusDto(
+        return Results.Ok(new MgmtClusterStatusDto(
             status.InstanceId,
             status.Nodes.Select(MapNodeToDto).ToList(),
             status.TotalChannels,
@@ -39,7 +37,7 @@ internal static class ClusterEndpoints
     {
         var transport = services.GetService<ClusterTransportBase>();
         if (transport is null)
-            return Results.Ok(Array.Empty<ClusterNodeDto>());
+            return Results.Ok(Array.Empty<MgmtClusterNodeDto>());
 
         var nodes = await transport.GetNodesAsync(ct);
         return Results.Ok(nodes.Select(MapNodeToDto).ToList());
@@ -58,7 +56,7 @@ internal static class ClusterEndpoints
 
     private static async Task<IResult> DrainNode(
         string nodeId,
-        [FromBody] DrainNodeRequest body,
+        [FromBody] MgmtDrainNodeRequest body,
         IServiceProvider services,
         CancellationToken ct)
     {
@@ -74,17 +72,15 @@ internal static class ClusterEndpoints
         };
 
         var status = await manager.Drain.StartDrainAsync(nodeId, options, ct);
-        return Results.Accepted($"/api/admin/cluster/nodes/{nodeId}", MapDrainToDto(status));
+        return Results.Accepted($"/api/management/cluster/nodes/{nodeId}", MapDrainToDto(status));
     }
 
-    // ─── Mapping ─────────────────────────────────────────────────────────────
-
-    private static ClusterNodeDto MapNodeToDto(ClusterNode n) =>
+    private static MgmtClusterNodeDto MapNodeToDto(ClusterNode n) =>
         new(n.NodeId, n.State.ToString().ToLowerInvariant(), n.Weight,
             n.PriorityTier, n.MaxCapacity, n.AsteriskVersion,
             n.StartupTime?.ToString("O"));
 
-    private static DrainStatusDto MapDrainToDto(DrainStatus d) =>
+    private static MgmtDrainStatusDto MapDrainToDto(DrainStatus d) =>
         new(d.NodeId, d.State.ToString().ToLowerInvariant(),
             d.StartedAt, d.Deadline, d.InitialCallCount,
             d.RemainingCallCount, d.NaturallyCompleted, d.ForceDisconnected);
@@ -92,14 +88,14 @@ internal static class ClusterEndpoints
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
-internal sealed record ClusterStatusDto(
+internal sealed record MgmtClusterStatusDto(
     string InstanceId,
-    IReadOnlyList<ClusterNodeDto> Nodes,
+    IReadOnlyList<MgmtClusterNodeDto> Nodes,
     int TotalChannels,
     int TotalAgents,
-    IReadOnlyList<DrainStatusDto> ActiveDrains);
+    IReadOnlyList<MgmtDrainStatusDto> ActiveDrains);
 
-internal sealed record ClusterNodeDto(
+internal sealed record MgmtClusterNodeDto(
     string NodeId,
     string State,
     double Weight,
@@ -108,9 +104,9 @@ internal sealed record ClusterNodeDto(
     string? AsteriskVersion,
     string? StartupTime);
 
-internal sealed record DrainNodeRequest(int? GracePeriodSeconds);
+internal sealed record MgmtDrainNodeRequest(int? GracePeriodSeconds);
 
-internal sealed record DrainStatusDto(
+internal sealed record MgmtDrainStatusDto(
     string NodeId,
     string State,
     DateTimeOffset StartedAt,
