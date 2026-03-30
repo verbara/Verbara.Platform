@@ -11,6 +11,7 @@ using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Surveys;
+using Asterisk.Sdk.Pro.MultiTenant;
 
 namespace Asterisk.Platform.Storage.InMemory;
 
@@ -75,6 +76,10 @@ public static class ServiceCollectionExtensions
 
         // Audit
         services.AddSingleton<IAuditStore, InMemoryAuditStore>();
+
+        // MultiTenant
+        if (!services.Any(d => d.ServiceType == typeof(ITenantStore)))
+            services.AddSingleton<ITenantStore, InMemoryTenantStore>();
 
         // Media
         services.AddSingleton<IMediaStore, InMemoryMediaStore>();
