@@ -51,7 +51,6 @@ internal static class AuthEndpoints
         [FromBody] LoginRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
-        PasswordService passwordService,
         AccountLockoutService lockoutService,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
@@ -77,7 +76,7 @@ internal static class AuthEndpoints
         if (user.IsLockedOut(DateTimeOffset.UtcNow))
             return Results.Json(new { error = "Account is locked" }, statusCode: 423);
 
-        if (!passwordService.VerifyPassword(body.Password, user.PasswordHash))
+        if (!PasswordService.VerifyPassword(body.Password, user.PasswordHash))
         {
             await lockoutService.RecordFailedAttemptAsync(user, ip, ua, ct);
             await authEvents.LogAsync(body.TenantId, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
@@ -109,7 +108,6 @@ internal static class AuthEndpoints
         [FromBody] MfaVerifyRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
-        MfaService mfaService,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
         AccountLockoutService lockoutService,
@@ -131,12 +129,12 @@ internal static class AuthEndpoints
         var verified = false;
         if (!string.IsNullOrEmpty(body.Code) && !string.IsNullOrEmpty(user.MfaSecret))
         {
-            verified = mfaService.VerifyCode(user.MfaSecret, body.Code);
+            verified = MfaService.VerifyCode(user.MfaSecret, body.Code);
         }
 
         if (!verified && !string.IsNullOrEmpty(body.RecoveryCode) && user.MfaRecoveryCodes is { Count: > 0 })
         {
-            var (isValid, index) = mfaService.ValidateRecoveryCode(body.RecoveryCode, user.MfaRecoveryCodes);
+            var (isValid, index) = MfaService.ValidateRecoveryCode(body.RecoveryCode, user.MfaRecoveryCodes);
             if (isValid)
             {
                 // Remove used recovery code
@@ -270,7 +268,6 @@ internal static class AuthEndpoints
         [FromBody] ChangePasswordRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
-        PasswordService passwordService,
         [FromServices] ITenantAuthConfigStore configStore,
         AuthEventService authEvents,
         CancellationToken ct)
@@ -283,15 +280,15 @@ internal static class AuthEndpoints
         if (user is null)
             return Results.Unauthorized();
 
-        if (string.IsNullOrEmpty(user.PasswordHash) || !passwordService.VerifyPassword(body.OldPassword, user.PasswordHash))
+        if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(body.OldPassword, user.PasswordHash))
             return Results.BadRequest(new { error = "Current password is incorrect" });
 
         var config = await configStore.GetAsync(tenantId, ct) ?? new TenantAuthConfig { TenantId = tenantId };
-        var validation = passwordService.ValidatePolicy(body.NewPassword, config);
+        var validation = PasswordService.ValidatePolicy(body.NewPassword, config);
         if (!validation.IsValid)
             return Results.BadRequest(new { error = "Password does not meet policy", details = validation.Errors });
 
-        user.PasswordHash = passwordService.HashPassword(body.NewPassword);
+        user.PasswordHash = PasswordService.HashPassword(body.NewPassword);
         user.PasswordChangedAt = DateTimeOffset.UtcNow;
         await userStore.SaveAsync(user, ct);
 
@@ -335,7 +332,6 @@ internal static class AuthEndpoints
     private static async Task<IResult> ResetPassword(
         [FromBody] ResetPasswordRequest body,
         [FromServices] IUserStore userStore,
-        PasswordService passwordService,
         [FromServices] ITenantAuthConfigStore configStore,
         AuthEventService authEvents,
         CancellationToken ct)
@@ -351,11 +347,11 @@ internal static class AuthEndpoints
             return Results.BadRequest(new { error = "Invalid reset token" });
 
         var config = await configStore.GetAsync(entry.TenantId, ct) ?? new TenantAuthConfig { TenantId = entry.TenantId };
-        var validation = passwordService.ValidatePolicy(body.NewPassword, config);
+        var validation = PasswordService.ValidatePolicy(body.NewPassword, config);
         if (!validation.IsValid)
             return Results.BadRequest(new { error = "Password does not meet policy", details = validation.Errors });
 
-        user.PasswordHash = passwordService.HashPassword(body.NewPassword);
+        user.PasswordHash = PasswordService.HashPassword(body.NewPassword);
         user.PasswordChangedAt = DateTimeOffset.UtcNow;
         user.FailedLoginAttempts = 0;
         user.LockedUntil = null;
@@ -372,7 +368,6 @@ internal static class AuthEndpoints
     private static async Task<IResult> MfaSetup(
         HttpContext context,
         [FromServices] IUserStore userStore,
-        MfaService mfaService,
         CancellationToken ct)
     {
         var (tenantId, userId) = GetAuthClaims(context);
@@ -383,12 +378,12 @@ internal static class AuthEndpoints
         if (user is null)
             return Results.Unauthorized();
 
-        var (secret, qrUri) = mfaService.GenerateSetup(user.Email);
-        var recoveryCodes = mfaService.GenerateRecoveryCodes();
+        var (secret, qrUri) = MfaService.GenerateSetup(user.Email);
+        var recoveryCodes = MfaService.GenerateRecoveryCodes();
 
-        // [FromServices] Store secret temporarily — will be confirmed by /mfa/confirm
+        // Store secret temporarily — will be confirmed by /mfa/confirm
         user.MfaSecret = secret;
-        user.MfaRecoveryCodes = mfaService.HashRecoveryCodes(recoveryCodes).ToList();
+        user.MfaRecoveryCodes = MfaService.HashRecoveryCodes(recoveryCodes).ToList();
         await userStore.SaveAsync(user, ct);
 
         return Results.Ok(new MfaSetupResponse(secret, qrUri, recoveryCodes));
@@ -400,7 +395,6 @@ internal static class AuthEndpoints
         [FromBody] MfaConfirmRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
-        MfaService mfaService,
         AuthEventService authEvents,
         CancellationToken ct)
     {
@@ -412,7 +406,7 @@ internal static class AuthEndpoints
         if (user is null || string.IsNullOrEmpty(user.MfaSecret))
             return Results.BadRequest(new { error = "MFA setup not initiated" });
 
-        if (!mfaService.VerifyCode(user.MfaSecret, body.Code))
+        if (!MfaService.VerifyCode(user.MfaSecret, body.Code))
             return Results.BadRequest(new { error = "Invalid verification code" });
 
         user.MfaEnabled = true;
@@ -431,7 +425,6 @@ internal static class AuthEndpoints
         [FromBody] MfaDisableRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
-        PasswordService passwordService,
         AuthEventService authEvents,
         CancellationToken ct)
     {
@@ -443,7 +436,7 @@ internal static class AuthEndpoints
         if (user is null)
             return Results.Unauthorized();
 
-        if (string.IsNullOrEmpty(user.PasswordHash) || !passwordService.VerifyPassword(body.Password, user.PasswordHash))
+        if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(body.Password, user.PasswordHash))
             return Results.BadRequest(new { error = "Invalid password" });
 
         user.MfaEnabled = false;

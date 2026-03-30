@@ -46,7 +46,7 @@ internal sealed class PermissionAuthorizationHandler : AuthorizationHandler<Perm
         var userId = EntityId.From(userIdClaim);
 
         var permissions = await _resolver.ResolveAsync(tenantId, userId, CancellationToken.None);
-        if (_resolver.HasPermission(permissions, requirement.Permission))
+        if (PermissionResolver.HasPermission(permissions, requirement.Permission))
         {
             context.Succeed(requirement);
         }

@@ -85,7 +85,7 @@ builder.Services.AddSingleton<SystemSettingsStore>();
 builder.Services.AddSingleton<ScheduledReportStore>();
 
 // ─── Auth Services ──────────────────────────────────────────────────────────
-builder.Services.AddSingleton<PasswordService>();
+// PasswordService and MfaService are static — no DI registration needed
 
 var jwtKeyDirectory = builder.Configuration["Auth:KeyDirectory"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data");
@@ -94,7 +94,6 @@ builder.Services.AddSingleton(jwtTokenService);
 builder.Services.AddSingleton<RefreshTokenService>();
 builder.Services.AddSingleton<AuthEventService>();
 builder.Services.AddSingleton<AccountLockoutService>();
-builder.Services.AddSingleton<MfaService>();
 builder.Services.AddSingleton<SessionService>();
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
@@ -311,7 +310,6 @@ app.MapUsersMeEndpoint();
     var userStore = scope.ServiceProvider.GetRequiredService<IUserStore>();
     var agentStore = scope.ServiceProvider.GetRequiredService<IAgentStore>();
     var configStore = scope.ServiceProvider.GetRequiredService<ITenantAuthConfigStore>();
-    var passwordService = scope.ServiceProvider.GetRequiredService<PasswordService>();
     var clock = scope.ServiceProvider.GetRequiredService<IClock>();
 
     var tenantId = new TenantId("demo");
@@ -329,7 +327,7 @@ app.MapUsersMeEndpoint();
         DisplayName = "Demo Admin",
         Role = UserRole.Admin,
         Status = UserStatus.Active,
-        PasswordHash = passwordService.HashPassword("DemoAdmin2026!"),
+        PasswordHash = PasswordService.HashPassword("DemoAdmin2026!"),
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
@@ -354,7 +352,7 @@ app.MapUsersMeEndpoint();
         DisplayName = "Demo Supervisor",
         Role = UserRole.Supervisor,
         Status = UserStatus.Active,
-        PasswordHash = passwordService.HashPassword("DemoSupervisor2026!"),
+        PasswordHash = PasswordService.HashPassword("DemoSupervisor2026!"),
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
@@ -391,7 +389,7 @@ app.MapUsersMeEndpoint();
             DisplayName = a.name,
             Role = UserRole.Agent,
             Status = UserStatus.Active,
-            PasswordHash = passwordService.HashPassword("DemoAgent2026!"),
+            PasswordHash = PasswordService.HashPassword("DemoAgent2026!"),
             CreatedAt = clock.UtcNow,
         }, CancellationToken.None);
 

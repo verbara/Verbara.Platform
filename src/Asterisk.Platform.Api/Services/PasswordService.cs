@@ -6,13 +6,13 @@ internal sealed class PasswordService
 {
     private const int WorkFactor = 12;
 
-    public string HashPassword(string password) =>
+    public static string HashPassword(string password) =>
         BCrypt.Net.BCrypt.HashPassword(password, workFactor: WorkFactor);
 
-    public bool VerifyPassword(string password, string hash) =>
+    public static bool VerifyPassword(string password, string hash) =>
         BCrypt.Net.BCrypt.Verify(password, hash);
 
-    public PasswordValidationResult ValidatePolicy(string password, TenantAuthConfig config)
+    public static PasswordValidationResult ValidatePolicy(string password, TenantAuthConfig config)
     {
         var errors = new List<string>();
 

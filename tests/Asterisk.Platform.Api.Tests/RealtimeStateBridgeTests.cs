@@ -110,8 +110,10 @@ public sealed class RealtimeStateBridgeTests : IDisposable
     [Fact]
     public async Task OnAgentStateChanged_DbFailure_ShouldStillCallAmi()
     {
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
         _syncService.SyncAgentPausedAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>())
             .Returns(callInfo => new ValueTask(Task.FromException(new InvalidOperationException("DB unavailable"))));
+#pragma warning restore CA2012
 
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);

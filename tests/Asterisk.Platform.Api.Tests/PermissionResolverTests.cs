@@ -65,7 +65,7 @@ public sealed class PermissionResolverTests
     {
         var permissions = new HashSet<string> { "contacts:conversation:handle", "contacts:contact:view" };
 
-        _sut.HasPermission(permissions, "contacts:contact:view").Should().BeTrue();
+        PermissionResolver.HasPermission(permissions, "contacts:contact:view").Should().BeTrue();
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public sealed class PermissionResolverTests
     {
         var permissions = new HashSet<string> { "contacts:conversation:handle" };
 
-        _sut.HasPermission(permissions, "queues:queue:delete").Should().BeFalse();
+        PermissionResolver.HasPermission(permissions, "queues:queue:delete").Should().BeFalse();
     }
 
     [Fact]

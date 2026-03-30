@@ -9,7 +9,7 @@ internal sealed class MfaService
     private const int RecoveryCodeCount = 10;
     private const int RecoveryCodeBytes = 8;
 
-    public (string Secret, string QrUri) GenerateSetup(string email, string issuer = "AsteriskPlatform")
+    public static (string Secret, string QrUri) GenerateSetup(string email, string issuer = "AsteriskPlatform")
     {
         var secretBytes = KeyGeneration.GenerateRandomKey(SecretSize);
         var secret = Base32Encoding.ToString(secretBytes);
@@ -18,14 +18,14 @@ internal sealed class MfaService
         return (secret, qrUri);
     }
 
-    public bool VerifyCode(string secret, string code)
+    public static bool VerifyCode(string secret, string code)
     {
         var secretBytes = Base32Encoding.ToBytes(secret);
         var totp = new Totp(secretBytes);
         return totp.VerifyTotp(code, out _, new VerificationWindow(previous: 1, future: 1));
     }
 
-    public IReadOnlyList<string> GenerateRecoveryCodes()
+    public static IReadOnlyList<string> GenerateRecoveryCodes()
     {
         var codes = new List<string>(RecoveryCodeCount);
         for (var i = 0; i < RecoveryCodeCount; i++)
@@ -36,10 +36,10 @@ internal sealed class MfaService
         return codes;
     }
 
-    public IReadOnlyList<string> HashRecoveryCodes(IReadOnlyList<string> codes) =>
+    public static IReadOnlyList<string> HashRecoveryCodes(IReadOnlyList<string> codes) =>
         codes.Select(c => BCrypt.Net.BCrypt.HashPassword(c, workFactor: 10)).ToList();
 
-    public (bool IsValid, int Index) ValidateRecoveryCode(string code, IReadOnlyList<string> hashedCodes)
+    public static (bool IsValid, int Index) ValidateRecoveryCode(string code, IReadOnlyList<string> hashedCodes)
     {
         for (var i = 0; i < hashedCodes.Count; i++)
         {

@@ -5,8 +5,6 @@ namespace Asterisk.Platform.Api.Tests.Services;
 
 public sealed class PasswordServiceTests
 {
-    private readonly PasswordService _sut = new();
-
     private static TenantAuthConfig DefaultConfig() => new()
     {
         TenantId = "t1",
@@ -19,7 +17,7 @@ public sealed class PasswordServiceTests
     [Fact]
     public void HashPassword_ShouldReturnBCryptHash()
     {
-        var hash = _sut.HashPassword("SuperSecret1!");
+        var hash = PasswordService.HashPassword("SuperSecret1!");
 
         hash.Should().StartWith("$2");
         hash.Length.Should().BeGreaterThan(50);
@@ -29,23 +27,23 @@ public sealed class PasswordServiceTests
     public void VerifyPassword_ShouldReturnTrue_WhenPasswordMatches()
     {
         var password = "SuperSecret1!";
-        var hash = _sut.HashPassword(password);
+        var hash = PasswordService.HashPassword(password);
 
-        _sut.VerifyPassword(password, hash).Should().BeTrue();
+        PasswordService.VerifyPassword(password, hash).Should().BeTrue();
     }
 
     [Fact]
     public void VerifyPassword_ShouldReturnFalse_WhenPasswordDoesNotMatch()
     {
-        var hash = _sut.HashPassword("SuperSecret1!");
+        var hash = PasswordService.HashPassword("SuperSecret1!");
 
-        _sut.VerifyPassword("WrongPassword1!", hash).Should().BeFalse();
+        PasswordService.VerifyPassword("WrongPassword1!", hash).Should().BeFalse();
     }
 
     [Fact]
     public void ValidatePolicy_ShouldPass_WhenPasswordMeetsAllRequirements()
     {
-        var result = _sut.ValidatePolicy("SuperSecret1!@", DefaultConfig());
+        var result = PasswordService.ValidatePolicy("SuperSecret1!@", DefaultConfig());
 
         result.IsValid.Should().BeTrue();
         result.Errors.Should().BeEmpty();
@@ -54,7 +52,7 @@ public sealed class PasswordServiceTests
     [Fact]
     public void ValidatePolicy_ShouldFail_WhenPasswordTooShort()
     {
-        var result = _sut.ValidatePolicy("Short1!", DefaultConfig());
+        var result = PasswordService.ValidatePolicy("Short1!", DefaultConfig());
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.Contains("at least 12 characters"));
@@ -63,7 +61,7 @@ public sealed class PasswordServiceTests
     [Fact]
     public void ValidatePolicy_ShouldFail_WhenMissingUppercase()
     {
-        var result = _sut.ValidatePolicy("supersecret1!@", DefaultConfig());
+        var result = PasswordService.ValidatePolicy("supersecret1!@", DefaultConfig());
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.Contains("uppercase"));
@@ -72,7 +70,7 @@ public sealed class PasswordServiceTests
     [Fact]
     public void ValidatePolicy_ShouldFail_WhenMissingNumber()
     {
-        var result = _sut.ValidatePolicy("SuperSecretAB!", DefaultConfig());
+        var result = PasswordService.ValidatePolicy("SuperSecretAB!", DefaultConfig());
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.Contains("number"));
@@ -81,7 +79,7 @@ public sealed class PasswordServiceTests
     [Fact]
     public void ValidatePolicy_ShouldFail_WhenMissingSpecialCharacter()
     {
-        var result = _sut.ValidatePolicy("SuperSecret12A", DefaultConfig());
+        var result = PasswordService.ValidatePolicy("SuperSecret12A", DefaultConfig());
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.Contains("special character"));

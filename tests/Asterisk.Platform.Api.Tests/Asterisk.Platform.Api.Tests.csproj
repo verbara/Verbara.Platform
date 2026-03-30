@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <Description>Integration tests for Asterisk.Platform.Api using WebApplicationFactory</Description>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
     <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
     <EnableAotAnalyzer>false</EnableAotAnalyzer>

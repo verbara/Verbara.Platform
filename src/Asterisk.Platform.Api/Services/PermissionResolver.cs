@@ -31,7 +31,7 @@ internal sealed class PermissionResolver
         return permissions;
     }
 
-    public bool HasPermission(IReadOnlySet<string> effectivePermissions, string requiredPermission)
+    public static bool HasPermission(IReadOnlySet<string> effectivePermissions, string requiredPermission)
     {
         return effectivePermissions.Contains(requiredPermission);
     }
