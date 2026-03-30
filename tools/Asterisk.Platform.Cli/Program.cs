@@ -105,19 +105,55 @@ static async Task<int> RunDoctorAsync(string connectionString)
 
     var expectedTables = new[]
     {
+        // Identity
         "users",
         "api_keys",
+        // Auth
+        "refresh_tokens",
+        "auth_events",
+        "tenant_auth_config",
+        // RBAC
+        "permissions",
+        "role_templates",
+        "role_template_permissions",
+        "tenant_roles",
+        "tenant_role_permissions",
+        "user_roles",
+        // Conversations
         "conversations",
         "messages",
         "contacts",
+        // Queues
         "queue_configs",
         "agents",
+        "queue_memberships",
+        // Channels
         "tenant_channel_configs",
+        // Flows
         "flow_definitions",
         "flow_executions",
+        // Bot
         "bot_configurations",
+        // Automation
         "automation_rules",
         "scheduled_timers",
+        "automation_execution_logs",
+        // KnowledgeBase
+        "articles",
+        // Teams & Cases
+        "teams",
+        "cases",
+        "dispositions",
+        "wrap_up_records",
+        "service_accounts",
+        // Surveys
+        "surveys",
+        "survey_responses",
+        // Audit
+        "audit_entries",
+        // Media
+        "media_files",
+        // Migrations tracking
         "_migrations",
     };
 
