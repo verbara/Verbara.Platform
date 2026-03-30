@@ -47,13 +47,10 @@ until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform 
 done
 echo " OK"
 
-# 5. Load Phase-2 Pro tables (Dialer, EventStore, Analytics, etc.)
-# These must exist BEFORE API starts because the Reconciler reads trunks/campaigns at startup.
-# Pro.Realtime tables (ps_endpoints, queues, etc.) are auto-created by API via EnsureSchema.
-echo "[5/10] Cargando tablas Pro (Phase 2)..."
-sleep 3  # Wait for Platform migrations (docker-entrypoint-initdb.d)
-docker compose -f "$COMPOSE_FILE" exec -T postgres \
-    psql -U platform -d platform -f /demo-sql/008_pro_tables.sql -q
+# 5. All Pro tables are now auto-created by each Pro.*.Storage.Postgres package
+# via SchemaMigrator.EnsureSchemaAsync() during DI registration when API starts.
+# No manual SQL loading needed.
+echo "[5/10] Pro tables: auto-created by API on startup (SchemaMigrator)"
 echo "  OK"
 
 # 6. Start all services (API creates Asterisk Realtime tables on startup via EnsureSchema)
