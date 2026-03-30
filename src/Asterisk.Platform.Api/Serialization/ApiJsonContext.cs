@@ -140,18 +140,27 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(List<EndpointProfileDto>))]
 [JsonSerializable(typeof(CreateEndpointProfileRequest))]
 [JsonSerializable(typeof(UpdateEndpointProfileRequest))]
-// Cluster
-[JsonSerializable(typeof(ClusterStatusDto))]
-[JsonSerializable(typeof(ClusterNodeDto))]
-[JsonSerializable(typeof(List<ClusterNodeDto>))]
-[JsonSerializable(typeof(DrainNodeRequest))]
-[JsonSerializable(typeof(DrainStatusDto))]
-// Tenants
-[JsonSerializable(typeof(TenantDto))]
-[JsonSerializable(typeof(List<TenantDto>))]
-[JsonSerializable(typeof(CreateTenantRequest))]
-[JsonSerializable(typeof(UpdateTenantRequest))]
-[JsonSerializable(typeof(TenantStatsDto))]
+// Management Cluster
+[JsonSerializable(typeof(MgmtClusterStatusDto))]
+[JsonSerializable(typeof(MgmtClusterNodeDto))]
+[JsonSerializable(typeof(List<MgmtClusterNodeDto>))]
+[JsonSerializable(typeof(MgmtDrainNodeRequest))]
+[JsonSerializable(typeof(MgmtDrainStatusDto))]
+// Management Tenants
+[JsonSerializable(typeof(MgmtTenantDto))]
+[JsonSerializable(typeof(List<MgmtTenantDto>))]
+[JsonSerializable(typeof(CreateMgmtTenantRequest))]
+[JsonSerializable(typeof(UpdateMgmtTenantRequest))]
+// Management API Keys
+[JsonSerializable(typeof(MgmtApiKeyDto))]
+[JsonSerializable(typeof(List<MgmtApiKeyDto>))]
+[JsonSerializable(typeof(CreateMgmtApiKeyRequest))]
+[JsonSerializable(typeof(CreateMgmtApiKeyResponse))]
+// Setup
+[JsonSerializable(typeof(SetupRequest))]
+[JsonSerializable(typeof(SetupResponse))]
+// System Settings
+[JsonSerializable(typeof(SystemSettingsRequest))]
 // Agent Assist
 [JsonSerializable(typeof(KeywordRuleDto))]
 [JsonSerializable(typeof(KeywordRuleDto[]))]

@@ -197,12 +197,15 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("AdminOnly", p => p.RequireRole("Admin"));
     options.AddPolicy("SupervisorPlus", p => p.RequireRole("Admin", "Supervisor"));
     options.AddPolicy("Authenticated", p => p.RequireAuthenticatedUser());
+    options.AddPolicy("PlatformAdminOnly", p =>
+        p.AddRequirements(new PlatformAdminRequirement()));
 });
 
 // RBAC permission-based authorization
 builder.Services.AddSingleton<PermissionResolver>();
 builder.Services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
+builder.Services.AddSingleton<IAuthorizationHandler, PlatformAdminAuthorizationHandler>();
 
 // ─── Health Checks ───────────────────────────────────────────────────────────
 
@@ -272,7 +275,11 @@ app.MapFlowEndpoints();
 app.MapChannelConfigEndpoints();
 app.MapContactEndpoints();
 app.MapDispositionEndpoints();
-app.MapSystemEndpoints();
+app.MapSetupEndpoints();
+app.MapManagementTenantEndpoints();
+app.MapManagementSystemEndpoints();
+app.MapManagementClusterEndpoints();
+app.MapManagementApiKeyEndpoints();
 app.MapSseEndpoints();
 app.MapMediaEndpoints();
 app.MapCampaignEndpoints();
@@ -296,8 +303,6 @@ app.MapAuditEndpoints();
 app.MapSurveyEndpoints();
 app.MapScheduledReportEndpoints();
 app.MapRealtimeEndpoints();
-app.MapClusterEndpoints();
-app.MapTenantEndpoints();
 app.MapAuthAdminEndpoints();
 app.MapOidcEndpoints();
 app.MapRbacEndpoints();
