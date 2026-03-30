@@ -329,7 +329,7 @@ app.MapUsersMeEndpoint();
         DisplayName = "Demo Admin",
         Role = UserRole.Admin,
         Status = UserStatus.Active,
-        PasswordHash = passwordService.HashPassword("Admin123!"),
+        PasswordHash = passwordService.HashPassword("DemoAdmin2026!"),
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
@@ -354,7 +354,7 @@ app.MapUsersMeEndpoint();
         DisplayName = "Demo Supervisor",
         Role = UserRole.Supervisor,
         Status = UserStatus.Active,
-        PasswordHash = passwordService.HashPassword("Supervisor123!"),
+        PasswordHash = passwordService.HashPassword("DemoSupervisor2026!"),
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
@@ -369,42 +369,56 @@ app.MapUsersMeEndpoint();
         CreatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
-    // ── Agent ──────────────────────────────────────────────────────────────────
-    var agentUserId = EntityId.From("demo-user-agent");
-    await userStore.SaveAsync(new User
+    // ── Agents (6 agents mapped to SIP extensions) ────────────────────────────
+    var agentDefs = new[]
     {
-        UserId = agentUserId,
-        TenantId = tenantId,
-        Email = "agent@demo.local",
-        DisplayName = "Demo Agent",
-        Role = UserRole.Agent,
-        Status = UserStatus.Active,
-        PasswordHash = passwordService.HashPassword("Agent123!"),
-        CreatedAt = clock.UtcNow,
-    }, CancellationToken.None);
+        (userId: "demo-user-maria", email: "maria.garcia@demo.local", name: "Maria Garcia", agentId: "demo-agent-maria", ext: "2001", sipPwd: "demo2001", skill: "sales", keyId: "demo-key-maria", keyName: "Demo Maria Key"),
+        (userId: "demo-user-carlos", email: "carlos.lopez@demo.local", name: "Carlos Lopez", agentId: "demo-agent-carlos", ext: "2002", sipPwd: "demo2002", skill: "sales", keyId: "demo-key-carlos", keyName: "Demo Carlos Key"),
+        (userId: "demo-user-ana", email: "ana.martinez@demo.local", name: "Ana Martinez", agentId: "demo-agent-ana", ext: "2003", sipPwd: "demo2003", skill: "sales", keyId: "demo-key-ana", keyName: "Demo Ana Key"),
+        (userId: "demo-user-pedro", email: "pedro.ruiz@demo.local", name: "Pedro Ruiz", agentId: "demo-agent-pedro", ext: "3001", sipPwd: "demo3001", skill: "support", keyId: "demo-key-pedro", keyName: "Demo Pedro Key"),
+        (userId: "demo-user-lucia", email: "lucia.fernandez@demo.local", name: "Lucia Fernandez", agentId: "demo-agent-lucia", ext: "3002", sipPwd: "demo3002", skill: "support", keyId: "demo-key-lucia", keyName: "Demo Lucia Key"),
+        (userId: "demo-user-demo", email: "demo.agent@demo.local", name: "Demo Agent", agentId: "demo-agent-demo", ext: "3003", sipPwd: "demo3003", skill: "support", keyId: "demo-key-demo", keyName: "Demo Agent Key"),
+    };
 
-    await apiKeyStore.SaveAsync(new ApiKey
+    foreach (var a in agentDefs)
     {
-        KeyId = EntityId.From("demo-key-agent"),
-        TenantId = tenantId,
-        Name = "Demo Agent Key",
-        HashedKey = HashKey("demo-key-agent"),
-        Scopes = ["*"],
-        UserId = agentUserId,
-        CreatedAt = clock.UtcNow,
-    }, CancellationToken.None);
+        var uid = EntityId.From(a.userId);
+        await userStore.SaveAsync(new User
+        {
+            UserId = uid,
+            TenantId = tenantId,
+            Email = a.email,
+            DisplayName = a.name,
+            Role = UserRole.Agent,
+            Status = UserStatus.Active,
+            PasswordHash = passwordService.HashPassword("DemoAgent2026!"),
+            CreatedAt = clock.UtcNow,
+        }, CancellationToken.None);
 
-    // ── Demo agent record (for /api/agents/me compatibility) ──────────────────
-    await agentStore.SaveAsync(new Agent
-    {
-        AgentId = EntityId.From("demo-agent"),
-        TenantId = tenantId,
-        UserId = agentUserId,
-        DisplayName = "Demo Agent",
-        State = AgentState.Available,
-        Skills = ["support"],
-        CreatedAt = clock.UtcNow,
-    }, CancellationToken.None);
+        await apiKeyStore.SaveAsync(new ApiKey
+        {
+            KeyId = EntityId.From(a.keyId),
+            TenantId = tenantId,
+            Name = a.keyName,
+            HashedKey = HashKey(a.keyId),
+            Scopes = ["*"],
+            UserId = uid,
+            CreatedAt = clock.UtcNow,
+        }, CancellationToken.None);
+
+        await agentStore.SaveAsync(new Agent
+        {
+            AgentId = EntityId.From(a.agentId),
+            TenantId = tenantId,
+            UserId = uid,
+            DisplayName = a.name,
+            State = AgentState.Available,
+            Skills = [a.skill],
+            Extension = a.ext,
+            SipPassword = a.sipPwd,
+            CreatedAt = clock.UtcNow,
+        }, CancellationToken.None);
+    }
 
     // ── Default tenant auth config ──────────────────────────────────────────────
     await configStore.SaveAsync(new TenantAuthConfig
@@ -422,19 +436,34 @@ app.MapUsersMeEndpoint();
         UpdatedAt = clock.UtcNow,
     }, CancellationToken.None);
 
-    // ── Sync demo tenant/agent/queue to Asterisk Realtime tables (best-effort) ─
+    // ── Sync demo tenant/agents/queues to Asterisk Realtime tables (best-effort)
     var syncService = app.Services.GetService<IRealtimeSyncService>();
     if (syncService is not null)
     {
         try
         {
             await syncService.ProvisionTenantAsync("demo");
-            await syncService.SyncAgentAsync("demo", "demo-agent", "Demo Agent", "2001", "2001");
+
+            // Sync all agents
+            foreach (var a in agentDefs)
+                await syncService.SyncAgentAsync("demo", a.agentId, a.name, a.ext, a.ext);
+
+            // Sync both queues
+            await syncService.SyncQueueAsync("demo", "sales", new RealtimeQueueOptions
+            {
+                Timeout = 15, Wrapuptime = 10, Servicelevel = 20
+            });
             await syncService.SyncQueueAsync("demo", "support", new RealtimeQueueOptions
             {
-                Timeout = 30, Wrapuptime = 15, Servicelevel = 20
+                Timeout = 20, Wrapuptime = 15, Servicelevel = 20
             });
-            await syncService.AddQueueMemberAsync("demo", "support", "demo-agent", "Demo Agent");
+
+            // Add members to queues
+            foreach (var a in agentDefs.Where(x => x.skill == "sales"))
+                await syncService.AddQueueMemberAsync("demo", "sales", a.agentId, a.name);
+            foreach (var a in agentDefs.Where(x => x.skill == "support"))
+                await syncService.AddQueueMemberAsync("demo", "support", a.agentId, a.name);
+
             Console.WriteLine("Asterisk Realtime: demo tenant provisioned.");
         }
         catch (Exception ex)
@@ -443,7 +472,7 @@ app.MapUsersMeEndpoint();
         }
     }
 
-    Console.WriteLine("Demo API keys seeded: demo-key-admin | demo-key-supervisor | demo-key-agent");
+    Console.WriteLine("Demo API keys seeded: demo-key-admin | demo-key-supervisor | demo-key-maria | demo-key-carlos | demo-key-ana | demo-key-pedro | demo-key-lucia | demo-key-demo");
 
     // ── RBAC seed: permissions, role templates, and enum migration ──────────
     var npgsqlDs = app.Services.GetService<NpgsqlDataSource>();

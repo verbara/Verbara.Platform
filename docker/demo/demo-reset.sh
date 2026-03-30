@@ -95,7 +95,7 @@ echo "  OK"
 echo "[10/10] Verificando..."
 curl -sf -X POST http://localhost:5000/api/auth/login \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@demo.local","password":"Admin123!"}' > /dev/null 2>&1 || true
+    -d '{"email":"admin@demo.local","password":"DemoAdmin2026!"}' > /dev/null 2>&1 || true
 API_STATUS=$(curl -sf http://localhost:5000/health 2>/dev/null | head -c 50 || echo "unreachable")
 echo "  API: $API_STATUS"
 echo ""
@@ -109,9 +109,14 @@ echo "  Grafana:       http://localhost:3000"
 echo "  Prometheus:    http://localhost:9090"
 echo ""
 echo "  Usuarios:"
-echo "    admin@demo.local      / Admin123!      (System Admin + MFA)"
-echo "    supervisor@demo.local / Supervisor123!  (Supervisor)"
-echo "    agent@demo.local      / Agent123!       (Agent + Softphone)"
+echo "    admin@demo.local             / DemoAdmin2026!      (System Admin)"
+echo "    supervisor@demo.local        / DemoSupervisor2026! (Supervisor)"
+echo "    maria.garcia@demo.local      / DemoAgent2026!      (Agent — ext 2001, sales)"
+echo "    carlos.lopez@demo.local      / DemoAgent2026!      (Agent — ext 2002, sales)"
+echo "    ana.martinez@demo.local      / DemoAgent2026!      (Agent — ext 2003, sales)"
+echo "    pedro.ruiz@demo.local        / DemoAgent2026!      (Agent — ext 3001, support)"
+echo "    lucia.fernandez@demo.local   / DemoAgent2026!      (Agent — ext 3002, support)"
+echo "    demo.agent@demo.local        / DemoAgent2026!      (Agent — ext 3003, support)"
 echo ""
 echo "  IVR Espanol: marcar 200 desde softphone"
 echo "  PSTN Test:   marcar 1001-1010"
