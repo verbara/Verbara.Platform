@@ -127,7 +127,7 @@ public sealed class ServiceCollectionExtensionsTests
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS conversations", because: "conversations table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS messages", because: "messages table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS contacts", because: "contacts table must be defined");
-        sql.Should().Contain("CREATE TABLE IF NOT EXISTS queues", because: "queues table must be defined");
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS queue_configs", because: "queue_configs table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS agents", because: "agents table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS tenant_channel_configs", because: "tenant_channel_configs table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS flow_definitions", because: "flow_definitions table must be defined");
