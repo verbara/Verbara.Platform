@@ -189,6 +189,27 @@ internal static class PermissionSeeder
         yield return P("callanalytics:config:manage", "callanalytics", "config", "manage",
             "Configure call analytics settings",
             ["callanalytics:analysis:view"]);
+
+        // ── platform (8) ──
+        yield return P("platform:tenant:create", "platform", "tenant", "create",
+            "Create new tenants (Customer or Partner)");
+        yield return P("platform:tenant:manage", "platform", "tenant", "manage",
+            "Edit tenant configuration, limits, and metadata");
+        yield return P("platform:tenant:suspend", "platform", "tenant", "suspend",
+            "Suspend or reactivate tenants",
+            ["platform:tenant:manage"]);
+        yield return P("platform:tenant:delete", "platform", "tenant", "delete",
+            "Soft-delete tenants",
+            ["platform:tenant:manage"]);
+        yield return P("platform:tenant:impersonate", "platform", "tenant", "impersonate",
+            "Operate in the context of a child tenant");
+        yield return P("platform:server:manage", "platform", "server", "manage",
+            "Manage Asterisk servers and monitor health");
+        yield return P("platform:license:manage", "platform", "license", "manage",
+            "View and activate platform licenses");
+        yield return P("platform:cluster:manage", "platform", "cluster", "manage",
+            "Manage cluster nodes, drain, and failover",
+            ["system:cluster:manage"]);
     }
 
     private static object P(string id, string category, string resource, string action,

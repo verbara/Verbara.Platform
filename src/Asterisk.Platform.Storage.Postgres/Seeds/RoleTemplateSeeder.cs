@@ -129,7 +129,12 @@ internal static class RoleTemplateSeeder
         // ── System Admin ──
         yield return (
             new TemplateRow("system_admin", "System Admin", "Full system access including cluster and auth configuration"),
-            AllPermissions());
+            AllPermissionsExcept([
+                "platform:tenant:create", "platform:tenant:manage",
+                "platform:tenant:suspend", "platform:tenant:delete",
+                "platform:tenant:impersonate", "platform:server:manage",
+                "platform:license:manage", "platform:cluster:manage",
+            ]));
 
         // ── Api ──
         yield return (
@@ -141,6 +146,11 @@ internal static class RoleTemplateSeeder
                 "analytics:cdr:export",
                 "contacts:contact:view",
             ]);
+
+        // ── Platform Admin ──
+        yield return (
+            new TemplateRow("platform_admin", "Platform Admin", "Full platform administration including cross-tenant operations"),
+            AllPermissions());
     }
 
     private static string[] AllPermissions()
@@ -178,6 +188,10 @@ internal static class RoleTemplateSeeder
             "system:auth:configure",
             "agentassist:session:view", "agentassist:config:manage",
             "callanalytics:analysis:view", "callanalytics:config:manage",
+            "platform:tenant:create", "platform:tenant:manage",
+            "platform:tenant:suspend", "platform:tenant:delete",
+            "platform:tenant:impersonate", "platform:server:manage",
+            "platform:license:manage", "platform:cluster:manage",
         ];
     }
 
