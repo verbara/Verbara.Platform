@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.1.0) and Pro packages (v1.0.0-pro).
+Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.2) and Pro packages (v1.0.0-pro).
 
-**27 packages, 1063 tests, 0 warnings, AOT-compatible:**
+**27 packages, 1023 tests, 0 warnings, AOT-compatible:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -229,6 +229,16 @@ Three pillars delivered:
 1. **Auth Enterprise** -- Email/Password + JWT(RS256) + MFA(TOTP) + OIDC SSO + API Keys(M2M) + Auth Audit + Sessions + Lockout + Password Policies
 2. **RBAC Granular** -- 52 permissions (`domain:resource:action`), 7 templates, custom roles per-tenant, permission cascading, PermissionGuard
 3. **UI Completion** -- 29 hooks wired, delete confirmations (3s delay), route drag-and-drop, bulk import, diagnostics, audit trail
+
+## Plan 24: Bug Fixes & Warnings -- COMPLETE (2026-03-30)
+
+**Spec:** `docs/superpowers/specs/2026-03-30-plan24-bugfixes-design.md`
+**Plan:** `docs/superpowers/plans/2026-03-30-plan24-bugfixes.md`
+
+Three fixes:
+1. **InMemory RBAC Stores** -- Added 4 missing RBAC stores to AddInMemoryStorage() (IUserRoleStore, IPermissionStore, IRoleTemplateStore, ITenantRoleStore)
+2. **SDK AGI/ARI Hosted Services** -- Registered AgiHostedService, created+registered AriConnectionHostedService (SDK v1.5.2)
+3. **Zero Warnings** -- 9 CA1822 fixes (static methods), 1 CA2012 suppression, TreatWarningsAsErrors=true restored
 
 **Next:** v1.1.1 (SAML, IP allowlisting, multi-language) -> v1.2.0 (SCIM, LDAP, WebAuthn, stereo, SignalR)
 
