@@ -34,7 +34,7 @@ internal static class DncListEndpoints
 
     private static async Task<IResult> ListDncLists(
         HttpContext context,
-        DncListStoreBase store,
+        [FromServices] DncListStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -45,7 +45,7 @@ internal static class DncListEndpoints
     private static async Task<IResult> GetDncList(
         long id,
         HttpContext context,
-        DncListStoreBase store,
+        [FromServices] DncListStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -94,7 +94,7 @@ internal static class DncListEndpoints
     private static async Task<IResult> DeleteDncList(
         long id,
         HttpContext context,
-        DncListStoreBase store,
+        [FromServices] DncListStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -107,7 +107,7 @@ internal static class DncListEndpoints
     private static async Task<IResult> ListEntries(
         long id,
         HttpContext context,
-        DncListStoreBase store,
+        [FromServices] DncListStoreBase store,
         int offset = 0,
         int limit = 50,
         CancellationToken ct = default)
@@ -141,7 +141,7 @@ internal static class DncListEndpoints
         long id,
         string phone,
         HttpContext context,
-        DncListStoreBase store,
+        [FromServices] DncListStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -198,7 +198,7 @@ internal static class DncListEndpoints
         long id,
         string phone,
         HttpContext context,
-        DncListStoreBase store,
+        [FromServices] DncListStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

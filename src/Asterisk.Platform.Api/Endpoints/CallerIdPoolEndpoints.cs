@@ -28,7 +28,7 @@ internal static class CallerIdPoolEndpoints
 
     private static async Task<IResult> ListPools(
         HttpContext context,
-        CallerIdPoolStoreBase store,
+        [FromServices] CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -39,7 +39,7 @@ internal static class CallerIdPoolEndpoints
     private static async Task<IResult> GetPool(
         long id,
         HttpContext context,
-        CallerIdPoolStoreBase store,
+        [FromServices] CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -80,7 +80,7 @@ internal static class CallerIdPoolEndpoints
     private static async Task<IResult> DeletePool(
         long id,
         HttpContext context,
-        CallerIdPoolStoreBase store,
+        [FromServices] CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -93,7 +93,7 @@ internal static class CallerIdPoolEndpoints
     private static async Task<IResult> ListEntries(
         long id,
         HttpContext context,
-        CallerIdPoolStoreBase store,
+        [FromServices] CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -124,7 +124,7 @@ internal static class CallerIdPoolEndpoints
         long id,
         long entryId,
         HttpContext context,
-        CallerIdPoolStoreBase store,
+        [FromServices] CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

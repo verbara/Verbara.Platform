@@ -29,7 +29,7 @@ internal static class HolidayCalendarEndpoints
 
     private static async Task<IResult> ListCalendars(
         HttpContext context,
-        HolidayCalendarStoreBase store,
+        [FromServices] HolidayCalendarStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -40,7 +40,7 @@ internal static class HolidayCalendarEndpoints
     private static async Task<IResult> GetCalendar(
         long id,
         HttpContext context,
-        HolidayCalendarStoreBase store,
+        [FromServices] HolidayCalendarStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -81,7 +81,7 @@ internal static class HolidayCalendarEndpoints
     private static async Task<IResult> DeleteCalendar(
         long id,
         HttpContext context,
-        HolidayCalendarStoreBase store,
+        [FromServices] HolidayCalendarStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -94,7 +94,7 @@ internal static class HolidayCalendarEndpoints
     private static async Task<IResult> ListHolidays(
         long id,
         HttpContext context,
-        HolidayCalendarStoreBase store,
+        [FromServices] HolidayCalendarStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -126,7 +126,7 @@ internal static class HolidayCalendarEndpoints
         long id,
         long holidayId,
         HttpContext context,
-        HolidayCalendarStoreBase store,
+        [FromServices] HolidayCalendarStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

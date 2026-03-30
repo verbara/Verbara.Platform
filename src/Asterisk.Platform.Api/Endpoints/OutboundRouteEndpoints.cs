@@ -23,7 +23,7 @@ internal static class OutboundRouteEndpoints
 
     private static async Task<IResult> ListRoutes(
         HttpContext context,
-        OutboundRouteStoreBase routeStore,
+        [FromServices] OutboundRouteStoreBase routeStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -34,7 +34,7 @@ internal static class OutboundRouteEndpoints
     private static async Task<IResult> GetRoute(
         long id,
         HttpContext context,
-        OutboundRouteStoreBase routeStore,
+        [FromServices] OutboundRouteStoreBase routeStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -91,7 +91,7 @@ internal static class OutboundRouteEndpoints
     private static async Task<IResult> DeleteRoute(
         long id,
         HttpContext context,
-        OutboundRouteStoreBase routeStore,
+        [FromServices] OutboundRouteStoreBase routeStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

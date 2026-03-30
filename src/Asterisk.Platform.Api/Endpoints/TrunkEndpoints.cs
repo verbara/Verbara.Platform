@@ -24,7 +24,7 @@ internal static class TrunkEndpoints
 
     private static async Task<IResult> ListTrunks(
         HttpContext context,
-        TrunkStoreBase trunkStore,
+        [FromServices] TrunkStoreBase trunkStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -35,7 +35,7 @@ internal static class TrunkEndpoints
     private static async Task<IResult> GetTrunk(
         long id,
         HttpContext context,
-        TrunkStoreBase trunkStore,
+        [FromServices] TrunkStoreBase trunkStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -102,7 +102,7 @@ internal static class TrunkEndpoints
     private static async Task<IResult> DeleteTrunk(
         long id,
         HttpContext context,
-        TrunkStoreBase trunkStore,
+        [FromServices] TrunkStoreBase trunkStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -112,7 +112,7 @@ internal static class TrunkEndpoints
 
     private static async Task<IResult> ListActiveTrunks(
         HttpContext context,
-        TrunkStoreBase trunkStore,
+        [FromServices] TrunkStoreBase trunkStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -123,7 +123,7 @@ internal static class TrunkEndpoints
     private static async Task<IResult> GetTrunkByName(
         string name,
         HttpContext context,
-        TrunkStoreBase trunkStore,
+        [FromServices] TrunkStoreBase trunkStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

@@ -26,7 +26,7 @@ internal static class RealtimeEndpoints
 
     private static async Task<IResult> ListProfiles(
         HttpContext context,
-        EndpointProfileStoreBase store,
+        [FromServices] EndpointProfileStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -37,7 +37,7 @@ internal static class RealtimeEndpoints
     private static async Task<IResult> GetProfile(
         long id,
         HttpContext context,
-        EndpointProfileStoreBase store,
+        [FromServices] EndpointProfileStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -48,7 +48,7 @@ internal static class RealtimeEndpoints
     private static async Task<IResult> GetDefaultProfile(
         string type,
         HttpContext context,
-        EndpointProfileStoreBase store,
+        [FromServices] EndpointProfileStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -110,7 +110,7 @@ internal static class RealtimeEndpoints
     private static async Task<IResult> DeleteProfile(
         long id,
         HttpContext context,
-        EndpointProfileStoreBase store,
+        [FromServices] EndpointProfileStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

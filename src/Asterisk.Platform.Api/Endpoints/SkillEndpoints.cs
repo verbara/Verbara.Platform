@@ -26,7 +26,7 @@ internal static class SkillEndpoints
     // ─── Skill Definition Handlers ────────────────────────────────────────────
 
     private static async Task<IResult> ListSkills(
-        SkillCatalogBase catalog,
+        [FromServices] SkillCatalogBase catalog,
         CancellationToken ct)
     {
         var skills = await catalog.GetSkillsAsync(ct);
@@ -66,7 +66,7 @@ internal static class SkillEndpoints
 
     private static async Task<IResult> DeleteSkill(
         string name,
-        SkillCatalogBase catalog,
+        [FromServices] SkillCatalogBase catalog,
         bool force = false,
         CancellationToken ct = default)
     {
@@ -90,7 +90,7 @@ internal static class SkillEndpoints
 
     private static async Task<IResult> GetAgentSkills(
         string agentId,
-        SkillCatalogBase catalog,
+        [FromServices] SkillCatalogBase catalog,
         CancellationToken ct)
     {
         var agentSkills = await catalog.GetAgentSkillsAsync(agentId, ct);
@@ -116,7 +116,7 @@ internal static class SkillEndpoints
     private static async Task<IResult> RemoveAgentSkill(
         string agentId,
         string skillName,
-        SkillCatalogBase catalog,
+        [FromServices] SkillCatalogBase catalog,
         CancellationToken ct)
     {
         await catalog.RemoveSkillAsync(agentId, skillName, ct);
@@ -125,7 +125,7 @@ internal static class SkillEndpoints
 
     private static async Task<IResult> ListAgentsWithSkill(
         string name,
-        SkillCatalogBase catalog,
+        [FromServices] SkillCatalogBase catalog,
         CancellationToken ct)
     {
         var agentSkills = await catalog.GetAgentsWithSkillAsync(name, ct);

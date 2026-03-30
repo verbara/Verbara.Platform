@@ -88,7 +88,7 @@ internal static class AgentAssistEndpoints
     // ─── Admin Config Handlers ────────────────────────────────────────────────
 
     private static IResult GetConfig(
-        IOptions<AgentAssistOptions> options,
+        [FromServices] IOptions<AgentAssistOptions> options,
         [FromServices] AgentAssistConfigStore configStore)
     {
         var snapshot = configStore.GetSnapshot() ?? BuildSnapshot(options.Value);

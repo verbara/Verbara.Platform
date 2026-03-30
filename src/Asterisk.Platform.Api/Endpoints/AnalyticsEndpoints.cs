@@ -440,7 +440,7 @@ internal static class AnalyticsEndpoints
 
     private static async Task<IResult> ListAgentIntervals(
         HttpContext context,
-        AnalyticsQueryService svc,
+        [FromServices] AnalyticsQueryService svc,
         string? from,
         string? to,
         string? agentId,

@@ -1,5 +1,6 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Analytics;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -15,7 +16,7 @@ internal static class AnalyticsLiveEndpoints
 
     // ─── All Live States ───────────────────────────────────────────────────────
 
-    private static IResult GetAllLiveStates(AnalyticsQueryService svc)
+    private static IResult GetAllLiveStates([FromServices] AnalyticsQueryService svc)
     {
         var states = svc.GetAllLiveStates();
         var dtos = states.Select(s => new LiveStateDto(
@@ -31,7 +32,7 @@ internal static class AnalyticsLiveEndpoints
 
     // ─── Live State by Queue ───────────────────────────────────────────────────
 
-    private static IResult GetLiveState(string queueName, AnalyticsQueryService svc)
+    private static IResult GetLiveState(string queueName, [FromServices] AnalyticsQueryService svc)
     {
         var state = svc.GetLiveState(queueName);
         if (state is null)
@@ -50,7 +51,7 @@ internal static class AnalyticsLiveEndpoints
 
     // ─── Current Interval ─────────────────────────────────────────────────────
 
-    private static IResult GetCurrentInterval(AnalyticsQueryService svc, string? queueName)
+    private static IResult GetCurrentInterval([FromServices] AnalyticsQueryService svc, string? queueName)
     {
         if (string.IsNullOrWhiteSpace(queueName))
             return Results.NotFound();

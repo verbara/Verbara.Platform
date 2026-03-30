@@ -19,7 +19,7 @@ internal static class DialerSettingsEndpoints
 
     private static async Task<IResult> GetSettings(
         HttpContext context,
-        CampaignStoreBase store,
+        [FromServices] CampaignStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);

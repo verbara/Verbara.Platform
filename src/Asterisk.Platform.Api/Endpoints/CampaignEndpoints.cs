@@ -72,7 +72,7 @@ internal static class CampaignEndpoints
 
     private static async Task<IResult> ListCampaigns(
         HttpContext context,
-        CampaignStoreBase campaignStore,
+        [FromServices] CampaignStoreBase campaignStore,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
@@ -87,7 +87,7 @@ internal static class CampaignEndpoints
     private static async Task<IResult> GetCampaign(
         long id,
         HttpContext context,
-        CampaignStoreBase campaignStore,
+        [FromServices] CampaignStoreBase campaignStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -140,7 +140,7 @@ internal static class CampaignEndpoints
     private static async Task<IResult> DeleteCampaign(
         long id,
         HttpContext context,
-        CampaignStoreBase campaignStore,
+        [FromServices] CampaignStoreBase campaignStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -231,7 +231,7 @@ internal static class CampaignEndpoints
     private static async Task<IResult> ListContactLists(
         long id,
         HttpContext context,
-        ContactListStoreBase contactListStore,
+        [FromServices] ContactListStoreBase contactListStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -262,7 +262,7 @@ internal static class CampaignEndpoints
         long id,
         long listId,
         HttpContext context,
-        ContactListStoreBase contactListStore,
+        [FromServices] ContactListStoreBase contactListStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -289,7 +289,7 @@ internal static class CampaignEndpoints
         long id,
         long listId,
         HttpContext context,
-        ContactListStoreBase contactListStore,
+        [FromServices] ContactListStoreBase contactListStore,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
@@ -304,7 +304,7 @@ internal static class CampaignEndpoints
     private static async Task<IResult> ListDispositions(
         long id,
         HttpContext context,
-        DispositionCodeStoreBase dispositionStore,
+        [FromServices] DispositionCodeStoreBase dispositionStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -367,7 +367,7 @@ internal static class CampaignEndpoints
         long id,
         long codeId,
         HttpContext context,
-        DispositionCodeStoreBase dispositionStore,
+        [FromServices] DispositionCodeStoreBase dispositionStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -378,7 +378,7 @@ internal static class CampaignEndpoints
     // ─── Callback Handlers ────────────────────────────────────────────────────
 
     private static async Task<IResult> ListCallbacks(
-        long id, HttpContext context, CampaignStoreBase store, CancellationToken ct)
+        long id, HttpContext context, [FromServices] CampaignStoreBase store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var callbacks = await store.GetPendingCallbacksAsync(tenantId, DateTimeOffset.UtcNow.AddDays(30), ct);
@@ -405,7 +405,7 @@ internal static class CampaignEndpoints
     private static async Task<IResult> GetCampaignMetrics(
         long id,
         HttpContext context,
-        CampaignStoreBase campaignStore,
+        [FromServices] CampaignStoreBase campaignStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -417,7 +417,7 @@ internal static class CampaignEndpoints
 
     private static async Task<IResult> ListActiveCampaignMetrics(
         HttpContext context,
-        CampaignStoreBase campaignStore,
+        [FromServices] CampaignStoreBase campaignStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
