@@ -47,11 +47,18 @@ until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform 
 done
 echo " OK"
 
-# 5. All Pro tables are now auto-created by each Pro.*.Storage.Postgres package
-# via SchemaMigrator.EnsureSchemaAsync() during DI registration when API starts.
-# No manual SQL loading needed.
-echo "[5/10] Pro tables: auto-created by API on startup (SchemaMigrator)"
-echo "  OK"
+# 5. Load Pro tables BEFORE API starts (DialerEngine needs them immediately)
+# Postgres may restart after running docker-entrypoint-initdb.d scripts, so retry.
+echo -n "[5/10] Cargando tablas Pro..."
+for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if docker compose -f "$COMPOSE_FILE" exec -T postgres \
+        psql -U platform -d platform -f /demo-sql/008_pro_tables.sql -q 2>/dev/null; then
+        break
+    fi
+    echo -n "."
+    sleep 2
+done
+echo " OK"
 
 # 6. Start all services (API creates Asterisk Realtime tables on startup via EnsureSchema)
 echo "[6/10] Iniciando todos los servicios..."
