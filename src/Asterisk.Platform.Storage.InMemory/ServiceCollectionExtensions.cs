@@ -40,6 +40,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRefreshTokenStore, InMemoryRefreshTokenStore>();
         services.AddSingleton<IAuthEventStore, InMemoryAuthEventStore>();
         services.AddSingleton<ITenantAuthConfigStore, InMemoryTenantAuthConfigStore>();
+        services.AddSingleton<IPermissionStore, InMemoryPermissionStore>();
+        services.AddSingleton<IRoleTemplateStore, InMemoryRoleTemplateStore>();
+        services.AddSingleton<ITenantRoleStore, InMemoryTenantRoleStore>();
+        services.AddSingleton<IUserRoleStore, InMemoryUserRoleStore>();
 
         // Queues
         services.AddSingleton<IQueueStore, InMemoryQueueStore>();
