@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-Asterisk.Platform is an omnichannel contact center framework. .NET 10 Native AOT.
+Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.1.0) and Pro packages (v1.0.0-pro).
 
-**24 packages, 781 tests, 0 warnings, AOT-compatible:**
+**27 packages, 1063 tests, 0 warnings, AOT-compatible:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
-| Platform.Core | Abstractions, value objects, base interfaces, DI | 24 |
+| Platform.Core | Abstractions, value objects, base interfaces, IClock, DI | 29 |
 | Platform.Identity | Users, RBAC, API keys, service accounts, DI | 10 |
 | Platform.Conversations | Conversation lifecycle (14 states), Contact CRM-lite, Cases, Tags, DI | 73 |
 | Platform.Queues | Queue config, SLA, Agent with per-channel capacity, Teams, DI | 44 |
@@ -23,15 +23,18 @@ Asterisk.Platform is an omnichannel contact center framework. .NET 10 Native AOT
 | Platform.Channels.Video | Video connector, DI | 26 |
 | Platform.Channels.Twitter | Twitter connector, DI | 27 |
 | Platform.Channels.Rcs | RCS connector, DI | 33 |
-| Platform.Routing.Inbound | Inbound routing pipeline — channel mapping, last-agent, priority, overflow, business hours, DI | 32 |
-| Platform.Switchboard | Conversation ownership lifecycle — assign, offer, accept, reject, transfer, DI | 38 |
+| Platform.Routing.Inbound | Inbound routing pipeline -- channel mapping, last-agent, priority, overflow, business hours, DI | 32 |
+| Platform.Switchboard | Conversation ownership lifecycle -- assign, offer, accept, reject, transfer, DI | 38 |
 | Platform.KnowledgeBase | Knowledge search abstraction, DI | 19 |
-| Platform.Flows | DAG workflow engine — 11 node types, persistent execution, template rendering, LLM abstraction, DI | 52 |
-| Platform.Bot | Virtual agent orchestration — IVirtualAgent, BotOrchestrator, flow-driven turn management, analytics, DI | 30 |
-| Platform.Automation | Automation rules — event triggers, condition evaluator, action executor, DI | 45 |
-| Platform.Surveys | Post-conversation surveys — survey store, response collection, DI | 30 |
-| Platform.Storage.InMemory | In-memory implementations of all 20 stores — dev/test, DI | 27 |
-| Platform.Api | HTTP host — webhook endpoints, agent desktop, admin CRUD, SSE, API-key auth | 48 |
+| Platform.Flows | DAG workflow engine -- 11 node types, persistent execution, template rendering, LLM abstraction, DI | 52 |
+| Platform.Bot | Virtual agent orchestration -- IVirtualAgent, BotOrchestrator, flow-driven turn management, analytics, DI | 30 |
+| Platform.Automation | Automation rules -- event triggers, condition evaluator, action executor, DI | 45 |
+| Platform.Surveys | Post-conversation surveys -- survey store, response collection, DI | 30 |
+| Platform.Audit | Audit trail -- event logging, query, retention, DI | 9 |
+| Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
+| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 40 |
+| Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
+| Platform.Api | HTTP host -- 39 endpoint groups, auth, middleware, SSE, OpenAPI | 248 |
 
 ## Build & Test
 
@@ -44,107 +47,194 @@ dotnet test Asterisk.Platform.slnx
 
 # Quiet output
 dotnet test Asterisk.Platform.slnx -v q
+
+# Run a single test project
+dotnet test tests/Asterisk.Platform.Api.Tests/
 ```
 
 ## Running the Platform
 
-Platform.Api is the composition root and executable host. It wires all packages together via DI and exposes the HTTP surface.
+Platform.Api is the composition root and executable host. It wires all packages plus Pro NuGet packages via DI and exposes the HTTP surface.
 
 ```sh
 cd src/Asterisk.Platform.Api
 dotnet run
 ```
 
-## API Endpoints (34 total)
-
-| Group | Method | Path | Description |
-|-------|--------|------|-------------|
-| Webhooks | POST | `/api/webhooks/{tenantId}/{channel}` | Inbound channel webhook |
-| Webhooks | GET | `/api/webhooks/{tenantId}/whatsapp` | WhatsApp hub verification |
-| Webhooks | GET | `/api/webhooks/{tenantId}/messenger` | Messenger hub verification |
-| Webhooks | GET | `/api/webhooks/{tenantId}/instagram` | Instagram hub verification |
-| Conversations | GET | `/api/conversations` | List conversations |
-| Conversations | GET | `/api/conversations/{id}` | Get conversation |
-| Conversations | GET | `/api/conversations/{id}/messages` | Get messages |
-| Conversations | POST | `/api/conversations/{id}/messages` | Send message |
-| Conversations | POST | `/api/conversations/{id}/accept` | Accept conversation |
-| Conversations | POST | `/api/conversations/{id}/reject` | Reject conversation |
-| Conversations | POST | `/api/conversations/{id}/transfer` | Transfer conversation |
-| Conversations | POST | `/api/conversations/{id}/close` | Close conversation |
-| Agent Desktop | GET | `/api/agents/me` | Get current agent profile |
-| Agent Desktop | PUT | `/api/agents/me/state` | Update agent presence state |
-| Admin | GET/POST | `/api/admin/users` | List / create users |
-| Admin | GET/PUT/DELETE | `/api/admin/users/{id}` | Get / update / delete user |
-| Admin | GET/POST | `/api/admin/queues` | List / create queues |
-| Admin | GET/PUT/DELETE | `/api/admin/queues/{id}` | Get / update / delete queue |
-| Admin | GET/POST | `/api/admin/agents` | List / create agents |
-| Admin | GET/PUT | `/api/admin/agents/{id}` | Get / update agent |
-| Admin | GET/POST | `/api/admin/teams` | List / create teams |
-| Admin | GET/PUT/DELETE | `/api/admin/teams/{id}` | Get / update / delete team |
-| SSE | GET | `/api/events/stream` | Server-Sent Events stream (real-time push) |
-
-Auth: API-key header (`X-Api-Key`) via `ApiKeyAuthenticationHandler`. All non-webhook endpoints require authorization.
-
 ## Architecture
 
-### Platform.Api — Composition Root
+### Platform.Api -- Composition Root
 
-Platform.Api (`Program.cs`) is the executable host. It registers all packages via DI and maps all HTTP endpoints. Storage.InMemory provides drop-in in-memory implementations of every store for development and testing.
+`Program.cs` registers all platform packages, all Pro packages (Dialer, EventStore, Analytics, CallAnalytics, AgentAssist, Realtime, Cluster, MultiTenant, Licensing), configures auth (JWT + API key dual-scheme), RBAC, rate limiting, CORS, health checks, and maps 39 endpoint groups.
+
+Storage.InMemory provides drop-in in-memory implementations for development. PostgreSQL storage is activated via connection strings (`Dialer`, `Analytics`, `Realtime`, or fallback `Postgres`).
 
 ### Inbound Message Flow
 
 ```
-Webhook (WhatsApp/SMS/WebChat)
-  → IWebhookHandler.HandleAsync
-      → WebhookResult: NewMessage | StatusUpdate | Ignored
-  → NewMessage path:
-      → IInboundMessagePipeline.ProcessAsync
-          → DeduplicateStep (IMessageStore.FindByExternalIdAsync)
-          → ContactResolutionStep (IContactIdentityResolver.ResolveAsync)
-          → ConversationResolutionStep (IConversationStore + IConversationLifecycleService)
-          → MessagePersistenceStep (IMessageStore.SaveAsync)
-          → PipelineResult (ConversationId, ContactId, MessageId, IsNewConversation)
-      → IInboundRouter.RouteAsync (optional)
-          → ChannelQueueMappingMiddleware
-          → LastAgentMiddleware
-          → PriorityEscalationMiddleware
-          → OverflowMiddleware
-          → BusinessHoursMiddleware
-          → RouteResult (QueueId, AgentId, Priority)
-      → IConversationSwitchboard.AssignToQueueAsync / OfferToAgentAsync
-  → StatusUpdate path:
-      → DeliveryStatusHandler.HandleAsync
-          → IMessageStore.FindByExternalIdAsync
-          → IMessageStore.UpdateDeliveryStatusAsync
+Webhook (WhatsApp/SMS/WebChat/Email/Telegram/etc.)
+  -> IWebhookHandler.HandleAsync
+      -> WebhookResult: NewMessage | StatusUpdate | Ignored
+  -> NewMessage path:
+      -> IInboundMessagePipeline.ProcessAsync
+          -> DeduplicateStep (IMessageStore.FindByExternalIdAsync)
+          -> ContactResolutionStep (IContactIdentityResolver.ResolveAsync)
+          -> ConversationResolutionStep (IConversationStore + IConversationLifecycleService)
+          -> MessagePersistenceStep (IMessageStore.SaveAsync)
+          -> PipelineResult (ConversationId, ContactId, MessageId, IsNewConversation)
+      -> IInboundRouter.RouteAsync (optional)
+          -> ChannelQueueMappingMiddleware
+          -> LastAgentMiddleware
+          -> PriorityEscalationMiddleware
+          -> OverflowMiddleware
+          -> BusinessHoursMiddleware
+          -> RouteResult (QueueId, AgentId, Priority)
+      -> IConversationSwitchboard.AssignToQueueAsync / OfferToAgentAsync
+  -> StatusUpdate path:
+      -> DeliveryStatusHandler.HandleAsync
+          -> IMessageStore.FindByExternalIdAsync
+          -> IMessageStore.UpdateDeliveryStatusAsync
 ```
 
-### DI Composition Example
+### Middleware Pipeline
+
+```
+ErrorHandlingMiddleware -> CORS -> RateLimiter -> TenantResolutionMiddleware -> Authentication -> Authorization
+```
+
+### Auth & RBAC
+
+- **Dual-scheme auth:** JWT (RS256) + API key (`X-Api-Key` header)
+- **JWT flow:** Email/Password login -> JWT access token + refresh token
+- **MFA:** TOTP (optional or required per tenant policy)
+- **OIDC SSO:** OpenID Connect provider integration per tenant
+- **API Keys:** Machine-to-machine, scoped, SHA-256 hashed
+- **Sessions:** Idle + absolute timeout, revocation
+- **Lockout:** Configurable threshold + duration per tenant
+- **Password policies:** Min length, uppercase, number, special per tenant
+- **RBAC:** 52 permissions (`domain:resource:action`), 7 role templates, custom roles per-tenant, permission cascading via `PermissionResolver` + `PermissionAuthorizationHandler`
+- **Authorization policies:** `AdminOnly`, `SupervisorPlus`, `Authenticated`
+
+### Endpoint Inventory (39 groups, 39 files)
+
+All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. Key groups:
+
+| Category | Endpoint Files |
+|----------|---------------|
+| Auth | AuthEndpoints, AuthAdminEndpoints, OidcEndpoints, RbacEndpoints |
+| Omnichannel | WebhookEndpoints, ConversationEndpoints, ChannelConfigEndpoints, ContactEndpoints, SseEndpoints |
+| Agent | AgentEndpoints, SupervisorEndpoints, SkillEndpoints, UsersMeEndpoint |
+| Admin | AdminEndpoints, SystemEndpoints, AuditEndpoints, TenantEndpoints, ScheduledReportEndpoints |
+| Dialer | CampaignEndpoints, CallAttemptEndpoints, DncListEndpoints, CallerIdPoolEndpoints, HolidayCalendarEndpoints, DialerSettingsEndpoints, TrunkEndpoints, OutboundRouteEndpoints |
+| Analytics | AnalyticsEndpoints, AnalyticsLiveEndpoints, QueueMetricsEndpoints |
+| AI/Bot | BotEndpoints, KnowledgeBaseEndpoints, AgentAssistEndpoints, FlowEndpoints |
+| Media | MediaEndpoints, RecordingEndpoints |
+| Realtime | RealtimeEndpoints, ClusterEndpoints |
+| Other | DispositionEndpoints, SurveyEndpoints |
+
+### Pro Package Integration
+
+Platform.Api consumes 16 Pro NuGet packages:
+
+```
+Pro.Dialer + Pro.Dialer.Storage.Postgres    -- Outbound campaigns
+Pro.EventStore + Pro.EventStore.Postgres     -- Event sourcing, CDR
+Pro.Analytics + Pro.Analytics.Storage.Postgres -- Real-time metrics
+Pro.CallAnalytics + Pro.CallAnalytics.Storage.Postgres -- Post-call AI
+Pro.AgentAssist + Pro.AgentAssist.Storage.Postgres -- Live agent assist
+Pro.Realtime + Pro.Realtime.Storage.Postgres -- Asterisk Realtime DB
+Pro.Cluster                                  -- Multi-server clustering
+Pro.MultiTenant                              -- Tenant isolation
+Pro.Routing                                  -- Skill-based routing
+Pro.Licensing                                -- License enforcement
+```
+
+## Docker Deployment
+
+```sh
+# Full stack: Asterisk 22 + Platform API + Web + Postgres + Redis + MinIO
+docker compose -f docker/docker-compose.full.yml up
+
+# Production (no dev seeds, external DB)
+docker compose -f docker/docker-compose.production.yml up
+
+# Demo environment (pre-seeded, simulated PSTN)
+docker compose -f docker/demo/docker-compose.demo.yml up
+
+# Dev (root-level, API only)
+docker compose up
+```
+
+## DI Registration (Composition Root Pattern)
 
 ```csharp
-services.AddPlatformCore();
-services.AddPlatformConversations();
-services.AddPlatformQueues();
-services.AddPlatformChannels();
-services.AddWhatsApp(o => { o.PhoneNumberId = "..."; o.AccessToken = "..."; });
-services.AddSms(o => { o.DefaultFromNumber = "+15550000000"; });
-services.AddWebChat();
-services.AddInboundRouting();
-services.AddSwitchboard();
-services.AddPlatformFlows();   // + register IFlowStore, IFlowExecutionStore, ILlmProvider
-services.AddPlatformBot();     // + register IBotConfigStore
-services.AddPlatformAutomation();
-services.AddPlatformSurveys();
-services.AddPlatformStorageInMemory(); // dev/test: all 20 stores in-memory
+// ── Core Platform ──
+builder.Services.AddAsterisk(builder.Configuration);  // AMI + ARI
+builder.Services.AddAsteriskSessions();                // Call session manager
+builder.Services.AddPlatformCore();
+builder.Services.AddPlatformConversations();
+builder.Services.AddPlatformChannels();
+builder.Services.AddInboundRouting();
+builder.Services.AddSwitchboard();
+builder.Services.AddPlatformBot();
+builder.Services.AddPlatformAudit();
+builder.Services.AddPlatformMedia();
+builder.Services.AddPlatformKnowledgeBase();
+builder.Services.AddPlatformSurveys();
+
+// ── Storage ──
+builder.Services.AddInMemoryStorage();  // zero-infrastructure default
+
+// ── Pro packages (conditional on connection strings) ──
+builder.Services.UsePostgresDialerStorage(connectionString);
+builder.Services.AddProDialer(o => { });
+builder.Services.AddAsteriskRealtime(o => { o.ReconcilerIntervalSeconds = 60; });
+builder.Services.UsePostgresRealtimeStorage(realtimeConn);
+builder.Services.UsePostgresEventStore(analyticsConn);
+builder.Services.AddAsteriskEventStore();
+builder.Services.AddAsteriskAnalytics();
+builder.Services.AddProCallAnalytics();
+builder.Services.AddProAgentAssistPostgres(analyticsConn);
+builder.Services.AddAsteriskCluster(c => { c.InstanceId = Environment.MachineName; });
+builder.Services.AddAsteriskMultiTenant();
+builder.Services.AddProLicensing(o => o.EnforcementMode = EnforcementMode.Disabled);
+
+// ── Auth (JWT RS256 + API key dual-scheme) ──
+builder.Services.AddDynamicAuth(jwtTokenService);
+builder.Services.AddSingleton<PermissionResolver>();
+builder.Services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 ```
 
 ## Code Conventions
 
-- No `Co-Authored-By` in commits
+- **No `Co-Authored-By` in commits**
 - AOT: No reflection. `[JsonSerializable]`, `[LoggerMessage]`, static dispatch.
 - Async-first with CancellationToken
 - Private fields: `_camelCase`
-- File-scoped namespaces
+- File-scoped namespaces (warning-level enforcement)
 - Test naming: `Method_ShouldExpected_WhenCondition`
 - Test stack: xunit 2.9.3, FluentAssertions 7.1.0, NSubstitute 5.3.0
 - TreatWarningsAsErrors ON, WarningLevel 9999
 - Central package management in Directory.Packages.props
+- Key NuGet versions: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0
+
+## v1.1.0 "Enterprise Ready" -- COMPLETE (2026-03-26)
+
+**Spec:** `docs/specs/2026-03-26-v110-enterprise-ready-design.md`
+**Plans:** `docs/superpowers/plans/2026-03-26-plan20{a,b,c,d}-*.md`
+**Result:** 78 tasks, 45 commits (20 Platform + 25 Platform.Web), 72 new backend tests, ~10 new frontend pages
+
+Three pillars delivered:
+1. **Auth Enterprise** -- Email/Password + JWT(RS256) + MFA(TOTP) + OIDC SSO + API Keys(M2M) + Auth Audit + Sessions + Lockout + Password Policies
+2. **RBAC Granular** -- 52 permissions (`domain:resource:action`), 7 templates, custom roles per-tenant, permission cascading, PermissionGuard
+3. **UI Completion** -- 29 hooks wired, delete confirmations (3s delay), route drag-and-drop, bulk import, diagnostics, audit trail
+
+**Next:** v1.1.1 (SAML, IP allowlisting, multi-language) -> v1.2.0 (SCIM, LDAP, WebAuthn, stereo, SignalR)
+
+## Plan Execution
+
+**Always use Subagent-Driven Development** with risk-weighted batching (FCM pattern):
+- Phase A: Foundation (scaffolding, models) -- batch
+- Phase B: Critical components (serializers, calculators) -- individual focused subagents
+- Phase C: Integration (DI, storage, wiring) -- batch
