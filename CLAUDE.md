@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.0.0-pro).
 
-**27 packages, 1036 tests, 0 warnings, AOT-compatible:**
+**27 packages, 1057 tests, 0 warnings, AOT-compatible:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -34,7 +34,7 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
 | Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 40 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
-| Platform.Api | HTTP host -- 39 endpoint groups, auth, middleware, SSE, OpenAPI | 261 |
+| Platform.Api | HTTP host -- 41 endpoint groups, auth, middleware, SSE, OpenAPI | 282 |
 
 ## Build & Test
 
@@ -115,7 +115,7 @@ ErrorHandlingMiddleware -> CORS -> RateLimiter -> TenantResolutionMiddleware -> 
 - **RBAC:** 52 permissions (`domain:resource:action`), 7 role templates, custom roles per-tenant, permission cascading via `PermissionResolver` + `PermissionAuthorizationHandler`
 - **Authorization policies:** `AdminOnly`, `SupervisorPlus`, `Authenticated`
 
-### Endpoint Inventory (39 groups, 39 files)
+### Endpoint Inventory (41 groups, 41 files)
 
 All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. Key groups:
 
@@ -124,7 +124,8 @@ All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. Key groups:
 | Auth | AuthEndpoints, AuthAdminEndpoints, OidcEndpoints, RbacEndpoints |
 | Omnichannel | WebhookEndpoints, ConversationEndpoints, ChannelConfigEndpoints, ContactEndpoints, SseEndpoints |
 | Agent | AgentEndpoints, SupervisorEndpoints, SkillEndpoints, UsersMeEndpoint |
-| Admin | AdminEndpoints, SystemEndpoints, AuditEndpoints, TenantEndpoints, ScheduledReportEndpoints |
+| Admin | AdminEndpoints, AuditEndpoints, ScheduledReportEndpoints |
+| Management | ManagementTenantEndpoints, ManagementSystemEndpoints, ManagementClusterEndpoints, ManagementApiKeyEndpoints, SetupEndpoints |
 | Dialer | CampaignEndpoints, CallAttemptEndpoints, DncListEndpoints, CallerIdPoolEndpoints, HolidayCalendarEndpoints, DialerSettingsEndpoints, TrunkEndpoints, OutboundRouteEndpoints |
 | Analytics | AnalyticsEndpoints, AnalyticsLiveEndpoints, QueueMetricsEndpoints |
 | AI/Bot | BotEndpoints, KnowledgeBaseEndpoints, AgentAssistEndpoints, FlowEndpoints |
@@ -252,6 +253,19 @@ Progressive tenant resolution chain:
 4. **Test infrastructure** -- removed Postgres connection strings from appsettings.json (Docker env vars only), fixed 51 missing [FromServices] on GET/DELETE endpoints
 
 **Next:** v1.1.1 (SAML, IP allowlisting, subdomain routing, multi-language) -> v1.2.0 (SCIM, LDAP, WebAuthn, stereo, SignalR)
+
+## Plan 26: Platform Administration — Sub-project A -- COMPLETE (2026-03-30)
+
+**Spec:** `docs/superpowers/specs/2026-03-30-platform-admin-design.md`
+**Plan:** `docs/superpowers/plans/2026-03-30-plan26-platform-admin.md`
+
+Host tenant identity + Management API:
+1. **TenantType + Hierarchy** -- TenantType enum (Platform/Partner/Customer), ParentTenantId, max depth 3
+2. **Platform Permissions** -- 8 `platform:*` permissions, `platform_admin` role template (60 total permissions)
+3. **PlatformAdminOnly auth** -- New authorization handler + policy for `/api/management/` endpoints
+4. **Management API** -- Tenant CRUD, System info/license/settings, Cluster status/nodes, API key management
+5. **Setup Wizard** -- `POST /api/setup` for first-boot platform initialization
+6. **Management API Keys** -- `ApiKeyType.Management` for platform-scoped machine-to-machine access
 
 ## Plan Execution
 
