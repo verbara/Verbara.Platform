@@ -97,6 +97,7 @@ services:
       Asterisk__Ari__BaseUrl: http://asterisk:8088
       Asterisk__Ari__Username: asterisk-platform
       Asterisk__Ari__Password: ${ARI_PASSWORD:-platform_demo}
+      Asterisk__Ari__Application: asterisk-platform
       Redis__ConnectionString: redis:6379
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
     depends_on:
@@ -118,6 +119,8 @@ services:
     build:
       context: ../../../Asterisk.Platform.Web
       dockerfile: Dockerfile
+      args:
+        VITE_DEFAULT_TENANT_ID: demo
     ports:
       - "80:80"
     depends_on:

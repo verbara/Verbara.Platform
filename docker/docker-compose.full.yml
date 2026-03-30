@@ -43,6 +43,7 @@ services:
       Asterisk__Ari__BaseUrl: http://asterisk:8088
       Asterisk__Ari__Username: asterisk-platform
       Asterisk__Ari__Password: ${ARI_PASSWORD:-asterisk_ari_secret}
+      Asterisk__Ari__Application: asterisk-platform
       Recordings__BasePath: /recordings
       CORS_ORIGINS: http://localhost
     volumes:
