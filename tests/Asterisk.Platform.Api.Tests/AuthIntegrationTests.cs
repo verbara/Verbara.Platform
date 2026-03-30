@@ -94,6 +94,78 @@ public sealed class AuthIntegrationTests : IClassFixture<AuthenticatedPlatformAp
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    // ─── Tenant resolution fallback ─────────────────────────────────────────
+
+    [Fact]
+    public async Task Login_ShouldAcceptTenantFromHeader_WhenBodyOmitsTenantId()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
+        {
+            Content = JsonContent.Create(new
+            {
+                email = "nonexistent@test.com",
+                password = "wrong"
+            })
+        };
+        request.Headers.Add("X-Tenant-Id", "demo");
+
+        var response = await _anonClient.SendAsync(request);
+
+        // 401 = tenant resolved, user not found (not 400 = tenant missing)
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Login_ShouldReturn400_WhenNoTenantProvided()
+    {
+        var response = await _anonClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            email = "test@test.com",
+            password = "wrong"
+        });
+
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("Tenant identification required");
+    }
+
+    [Fact]
+    public async Task Login_ShouldPreferBodyTenant_OverHeader()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
+        {
+            Content = JsonContent.Create(new
+            {
+                tenantId = "demo",
+                email = "nonexistent@test.com",
+                password = "wrong"
+            })
+        };
+        request.Headers.Add("X-Tenant-Id", "other-tenant");
+
+        var response = await _anonClient.SendAsync(request);
+
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Login_ShouldAcceptTenantFromSubdomain()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
+        {
+            Content = JsonContent.Create(new
+            {
+                email = "nonexistent@test.com",
+                password = "wrong"
+            })
+        };
+        request.Headers.Host = "demo.platform.com";
+
+        var response = await _anonClient.SendAsync(request);
+
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+    }
+
     // ─── Full login flow ────────────────────────────────────────────────────
 
     [Fact]

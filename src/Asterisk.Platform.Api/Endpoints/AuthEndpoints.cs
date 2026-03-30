@@ -58,17 +58,22 @@ internal static class AuthEndpoints
         [FromServices] ITenantAuthConfigStore configStore,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(body.TenantId))
-            return Results.BadRequest(new { error = "Tenant ID is required" });
+        // Resolve tenant: body > middleware context (header/subdomain)
+        var rawTenantId = body.TenantId;
+        if (string.IsNullOrWhiteSpace(rawTenantId) && context.Items.TryGetValue("TenantId", out var ctxTenant))
+            rawTenantId = ctxTenant?.ToString();
 
-        var tenantId = new TenantId(body.TenantId);
+        if (string.IsNullOrWhiteSpace(rawTenantId))
+            return Results.BadRequest(new { error = "Tenant identification required. Provide tenantId in body or X-Tenant-Id header." });
+
+        var tenantId = new TenantId(rawTenantId);
         var ip = GetIpAddress(context);
         var ua = GetUserAgent(context);
 
         var user = await userStore.GetByEmailAsync(tenantId, body.Email, ct);
         if (user is null || string.IsNullOrEmpty(user.PasswordHash))
         {
-            await authEvents.LogAsync(body.TenantId, null, AuthEventTypes.LoginFailure, ip, ua,
+            await authEvents.LogAsync(rawTenantId!, null, AuthEventTypes.LoginFailure, ip, ua,
                 new { email = body.Email, reason = "invalid_credentials" }, ct);
             return Results.Unauthorized();
         }
@@ -79,7 +84,7 @@ internal static class AuthEndpoints
         if (!PasswordService.VerifyPassword(body.Password, user.PasswordHash))
         {
             await lockoutService.RecordFailedAttemptAsync(user, ip, ua, ct);
-            await authEvents.LogAsync(body.TenantId, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
+            await authEvents.LogAsync(rawTenantId!, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
                 new { reason = "invalid_password" }, ct);
             return Results.Unauthorized();
         }
@@ -91,7 +96,7 @@ internal static class AuthEndpoints
             MfaPendingCache[challengeToken] = new MfaPendingEntry
             {
                 UserId = user.UserId.Value,
-                TenantId = body.TenantId,
+                TenantId = rawTenantId!,
                 ExpiresAt = DateTimeOffset.UtcNow.Add(MfaPendingTtl),
             };
 
@@ -302,20 +307,25 @@ internal static class AuthEndpoints
 
     private static async Task<IResult> ForgotPassword(
         [FromBody] ForgotPasswordRequest body,
+        HttpContext context,
         [FromServices] IUserStore userStore,
         CancellationToken ct)
     {
+        var forgotTenantId = body.TenantId;
+        if (string.IsNullOrWhiteSpace(forgotTenantId) && context.Items.TryGetValue("TenantId", out var ctxForgotTenant))
+            forgotTenantId = ctxForgotTenant?.ToString();
+
         // Always return 200 to prevent email enumeration
-        if (!string.IsNullOrWhiteSpace(body.TenantId) && !string.IsNullOrWhiteSpace(body.Email))
+        if (!string.IsNullOrWhiteSpace(forgotTenantId) && !string.IsNullOrWhiteSpace(body.Email))
         {
-            var user = await userStore.GetByEmailAsync(new TenantId(body.TenantId), body.Email, ct);
+            var user = await userStore.GetByEmailAsync(new TenantId(forgotTenantId!), body.Email, ct);
             if (user is not null)
             {
                 var resetToken = GenerateToken();
                 PasswordResetCache[resetToken] = new PasswordResetEntry
                 {
                     UserId = user.UserId.Value,
-                    TenantId = body.TenantId,
+                    TenantId = forgotTenantId!,
                     ExpiresAt = DateTimeOffset.UtcNow.Add(PasswordResetTtl),
                 };
 
@@ -532,7 +542,7 @@ internal static class AuthEndpoints
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
-internal sealed record LoginRequest(string TenantId, string Email, string Password);
+internal sealed record LoginRequest(string? TenantId, string Email, string Password);
 internal sealed record ApiKeyLoginRequest(string ApiKey);
 internal sealed record ChangePasswordRequest(string OldPassword, string NewPassword);
 internal sealed record ForgotPasswordRequest(string TenantId, string Email);
