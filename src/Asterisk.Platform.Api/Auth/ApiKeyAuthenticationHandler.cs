@@ -62,6 +62,12 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
             new Claim("key_name", apiKey.Name),
         };
 
+        if (apiKey.KeyType == ApiKeyType.Management)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "Admin"));
+            claims.Add(new Claim("key_type", "management"));
+        }
+
         if (apiKey.UserId is { } userId)
         {
             var user = await _userStore.GetByIdAsync(apiKey.TenantId, userId, Context.RequestAborted);
