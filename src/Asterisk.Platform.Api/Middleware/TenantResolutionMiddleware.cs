@@ -23,6 +23,19 @@ internal sealed class TenantResolutionMiddleware
                 tenantId = new TenantId(segments[0]);
         }
 
+        // Subdomain: acme.platform.com → "acme"
+        if (tenantId is null)
+        {
+            var host = context.Request.Host.Host;
+            var dotIndex = host.IndexOf('.');
+            if (dotIndex > 0)
+            {
+                var subdomain = host[..dotIndex];
+                if (subdomain is not ("www" or "api" or "localhost"))
+                    tenantId = new TenantId(subdomain);
+            }
+        }
+
         // API routes: X-Tenant-Id header
         if (tenantId is null &&
             context.Request.Headers.TryGetValue("X-Tenant-Id", out var headerValue) &&
