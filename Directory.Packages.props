@@ -27,7 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.5.2" />
+    <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.5.3" />
   </ItemGroup>
 
   <ItemGroup>
