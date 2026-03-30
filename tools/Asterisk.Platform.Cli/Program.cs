@@ -155,6 +155,13 @@ static async Task<int> RunDoctorAsync(string connectionString)
         "media_files",
         // Migrations tracking
         "_migrations",
+        // Pro package schema tracking (created by EnsureSchemaAsync)
+        "_schema_dialer",
+        "_schema_realtime",
+        "_schema_eventstore",
+        "_schema_analytics",
+        "_schema_callanalytics",
+        "_schema_agentassist",
     };
 
     bool allOk = true;

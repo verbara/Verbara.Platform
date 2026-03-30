@@ -16,12 +16,12 @@ echo "============================================"
 echo ""
 
 # 1. Clean up
-echo "[1/10] Limpiando entorno anterior..."
+echo "[1/9] Limpiando entorno anterior..."
 docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
 echo "  OK"
 
 # 2. Copy local NuGet feed for Docker build (Pro packages)
-echo "[2/10] Copiando NuGet feed local..."
+echo "[2/9] Copiando NuGet feed local..."
 PLATFORM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 NUGET_FEED="/media/Data/Source/IPcom/local-nuget-feed"
 if [ -d "$NUGET_FEED" ]; then
@@ -33,12 +33,12 @@ else
 fi
 
 # 3. Build images (if needed)
-echo "[3/10] Construyendo imagenes..."
+echo "[3/9] Construyendo imagenes..."
 docker compose -f "$COMPOSE_FILE" build --quiet
 echo "  OK"
 
 # 4. Start Postgres
-echo "[4/10] Iniciando Postgres..."
+echo "[4/9] Iniciando Postgres..."
 docker compose -f "$COMPOSE_FILE" up -d postgres
 echo -n "  Esperando..."
 until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform -q 2>/dev/null; do
@@ -47,26 +47,13 @@ until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform 
 done
 echo " OK"
 
-# 5. Load Pro tables BEFORE API starts (DialerEngine needs them immediately)
-# Postgres may restart after running docker-entrypoint-initdb.d scripts, so retry.
-echo -n "[5/10] Cargando tablas Pro..."
-for _attempt in 1 2 3 4 5 6 7 8 9 10; do
-    if docker compose -f "$COMPOSE_FILE" exec -T postgres \
-        psql -U platform -d platform -f /demo-sql/008_pro_tables.sql -q 2>/dev/null; then
-        break
-    fi
-    echo -n "."
-    sleep 2
-done
-echo " OK"
-
-# 6. Start all services (API creates Asterisk Realtime tables on startup via EnsureSchema)
-echo "[6/10] Iniciando todos los servicios..."
+# 5. Start all services (Pro tables created by EnsureSchemaAsync during API DI registration)
+echo "[5/9] Iniciando todos los servicios..."
 docker compose -f "$COMPOSE_FILE" up -d
 echo "  OK"
 
-# 7. Wait for all services healthy
-echo "[7/10] Esperando servicios..."
+# 6. Wait for all services healthy
+echo "[6/9] Esperando servicios..."
 for svc in asterisk pstn-emulator platform-api web grafana; do
     echo -n "  $svc..."
     timeout=120
@@ -86,20 +73,20 @@ for svc in asterisk pstn-emulator platform-api web grafana; do
     done
 done
 
-# 8. Load seed data (after API has created Realtime tables via EnsureSchema)
-echo "[8/10] Cargando datos seed..."
+# 7. Load seed data (after API has created Realtime tables via EnsureSchema)
+echo "[7/9] Cargando datos seed..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/010_demo_asterisk_seed.sql -q
 echo "  OK"
 
-# 9. Insert historical demo data
-echo "[9/10] Cargando datos historicos..."
+# 8. Insert historical demo data
+echo "[8/9] Cargando datos historicos..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/020_demo_historical_data.sql -q
 echo "  OK"
 
-# 10. Warmup API + Summary
-echo "[10/10] Verificando..."
+# 9. Warmup API + Summary
+echo "[9/9] Verificando..."
 curl -sf -X POST http://localhost:5000/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"email":"admin@demo.local","password":"DemoAdmin2026!"}' > /dev/null 2>&1 || true
