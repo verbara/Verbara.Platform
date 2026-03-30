@@ -17,6 +17,7 @@ public sealed class ApiKey : ITenantScoped, IAuditable
     public DateTimeOffset? UpdatedAt { get; set; }
     public string? CreatedBy { get; init; }
     public string? UpdatedBy { get; set; }
+    public ApiKeyType KeyType { get; init; } = ApiKeyType.Standard;
 
     public bool IsExpired(DateTimeOffset now) =>
         ExpiresAt.HasValue && now >= ExpiresAt.Value;
