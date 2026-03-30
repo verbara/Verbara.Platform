@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.0.0-pro).
 
-**27 packages, 1023 tests, 0 warnings, AOT-compatible:**
+**27 packages, 1036 tests, 0 warnings, AOT-compatible:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -34,7 +34,7 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
 | Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 40 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
-| Platform.Api | HTTP host -- 39 endpoint groups, auth, middleware, SSE, OpenAPI | 248 |
+| Platform.Api | HTTP host -- 39 endpoint groups, auth, middleware, SSE, OpenAPI | 261 |
 
 ## Build & Test
 
@@ -240,7 +240,18 @@ Three fixes:
 2. **SDK AGI/ARI Hosted Services** -- Registered AgiHostedService, created+registered AriConnectionHostedService (SDK v1.5.2)
 3. **Zero Warnings** -- 9 CA1822 fixes (static methods), 1 CA2012 suppression, TreatWarningsAsErrors=true restored
 
-**Next:** v1.1.1 (SAML, IP allowlisting, multi-language) -> v1.2.0 (SCIM, LDAP, WebAuthn, stereo, SignalR)
+## Plan 25: Tenant Login Resolution -- COMPLETE (2026-03-30)
+
+**Spec:** `docs/superpowers/specs/2026-03-30-tenant-login-resolution-design.md`
+**Plan:** `docs/superpowers/plans/2026-03-30-plan25-tenant-login.md`
+
+Progressive tenant resolution chain:
+1. **Login fallback** -- accepts tenant from body OR middleware context (X-Tenant-Id header, subdomain)
+2. **Subdomain prep** -- TenantResolutionMiddleware extracts subdomain (no-op on localhost, activates on wildcard DNS)
+3. **Frontend env** -- VITE_DEFAULT_TENANT_ID for demo/single-tenant, subdomain extraction for SaaS
+4. **Test infrastructure** -- removed Postgres connection strings from appsettings.json (Docker env vars only), fixed 51 missing [FromServices] on GET/DELETE endpoints
+
+**Next:** v1.1.1 (SAML, IP allowlisting, subdomain routing, multi-language) -> v1.2.0 (SCIM, LDAP, WebAuthn, stereo, SignalR)
 
 ## Plan Execution
 
