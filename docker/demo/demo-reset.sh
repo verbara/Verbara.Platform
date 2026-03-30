@@ -89,7 +89,7 @@ echo "  OK"
 echo "[9/9] Verificando..."
 curl -sf -X POST http://localhost:5000/api/auth/login \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@demo.local","password":"DemoAdmin2026!"}' > /dev/null 2>&1 || true
+    -d '{"tenantId":"demo","email":"admin@demo.local","password":"DemoAdmin2026!"}' > /dev/null 2>&1 || true
 API_STATUS=$(curl -sf http://localhost:5000/health 2>/dev/null | head -c 50 || echo "unreachable")
 echo "  API: $API_STATUS"
 echo ""
