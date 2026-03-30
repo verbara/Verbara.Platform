@@ -302,6 +302,7 @@ app.MapTenantEndpoints();
 app.MapAuthAdminEndpoints();
 app.MapOidcEndpoints();
 app.MapRbacEndpoints();
+app.MapUsersMeEndpoint();
 
 // ─── Dev seed: create demo users + API keys for local testing ────────────────
 {
