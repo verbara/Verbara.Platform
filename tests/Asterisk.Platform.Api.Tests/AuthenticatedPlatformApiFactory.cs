@@ -11,6 +11,7 @@ using Asterisk.Sdk.Pro.Dialer.Dispositions;
 using Asterisk.Sdk.Pro.Dialer.Routing;
 using Asterisk.Sdk.Pro.Dialer.Scheduling;
 using Asterisk.Sdk.Pro.EventStore;
+using Asterisk.Sdk.Pro.Realtime;
 using Asterisk.Sdk;
 using Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres.Stores;
 using Asterisk.Sdk.Pro.Licensing;
@@ -196,6 +197,25 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
         services.AddSingleton<ICallAnalyticsStore, InMemoryCallAnalyticsStore>();
         RemoveAll<IIntervalSnapshotStore>(services);
         services.AddSingleton<IIntervalSnapshotStore, InMemoryIntervalSnapshotStore>();
+
+        // Realtime — EndpointProfileStoreBase and IRealtimeSyncService are only wired up by
+        // UsePostgresRealtimeStorage. Replace both with no-op substitutes so
+        // DefaultEndpointProfileProvider and RealtimeSyncEngine can be activated without a DB.
+        RemoveAll<EndpointProfileStoreBase>(services);
+        services.AddSingleton<EndpointProfileStoreBase>(Substitute.For<EndpointProfileStoreBase>());
+
+        // RealtimeSyncEngine (internal sealed) is registered as its own concrete type and as
+        // IRealtimeSyncService. Remove both and replace IRealtimeSyncService with a mock so the
+        // engine never attempts to resolve the internal IRealtimeStore.
+        var syncEngineDescriptors = services
+            .Where(d => d.ServiceType.FullName?.Contains("RealtimeSyncEngine") == true ||
+                        d.ImplementationType?.FullName?.Contains("RealtimeSyncEngine") == true ||
+                        (d.ImplementationFactory is not null &&
+                         d.ServiceType == typeof(Asterisk.Sdk.Pro.Realtime.IRealtimeSyncService)))
+            .ToList();
+        foreach (var d in syncEngineDescriptors) services.Remove(d);
+        RemoveAll<Asterisk.Sdk.Pro.Realtime.IRealtimeSyncService>(services);
+        services.AddSingleton(Substitute.For<Asterisk.Sdk.Pro.Realtime.IRealtimeSyncService>());
 
         // AgentAssist Postgres stores (concrete sealed types used by endpoints).
         // Provide a dummy NpgsqlDataSource so stores can be constructed for DI resolution.
