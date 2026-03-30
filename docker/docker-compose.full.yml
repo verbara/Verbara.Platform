@@ -1,6 +1,10 @@
 services:
   asterisk:
-    image: andrius/asterisk:22
+    build:
+      context: .
+      dockerfile: Dockerfile.asterisk
+    environment:
+      EXTERNAL_IP: ${EXTERNAL_IP:-}
     volumes:
       - ./asterisk-config:/etc/asterisk
       - recordings:/var/spool/asterisk/recording
@@ -8,9 +12,11 @@ services:
       - "5060:5060/udp"
       - "5060:5060/tcp"
       - "8088:8088"
+      - "8089:8089"
+      - "8180:8180"
       - "5038:5038"
       - "9092:9092"
-      - "10000-10200:10000-10200/udp"
+      - "20000-20200:20000-20200/udp"
     depends_on:
       postgres:
         condition: service_healthy

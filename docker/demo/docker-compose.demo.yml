@@ -27,9 +27,8 @@ services:
 
   asterisk:
     build:
-      context: .
-      dockerfile: Dockerfile.demo-asterisk
-    entrypoint: ["/entrypoint-asterisk.sh"]
+      context: ..
+      dockerfile: Dockerfile.asterisk
     environment:
       - EXTERNAL_IP=${EXTERNAL_IP:-}
     ports:
@@ -40,8 +39,11 @@ services:
       - "8180:8180"
       - "20000-20050:20000-20050/udp"
     volumes:
-      - ./entrypoint-asterisk.sh:/entrypoint-asterisk.sh:ro
-      - ./asterisk-config:/etc/asterisk
+      - ../asterisk-config:/etc/asterisk
+      - ./demo-overrides/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./demo-overrides/res_config_pgsql.conf:/etc/asterisk/res_config_pgsql.conf:ro
+      - ./demo-overrides/ari.conf:/etc/asterisk/ari.conf:ro
+      - ./demo-overrides/manager.conf:/etc/asterisk/manager.conf:ro
       - ./certs/asterisk.pem:/etc/asterisk/keys/asterisk.pem:ro
       - ./certs/asterisk.key:/etc/asterisk/keys/asterisk.key:ro
       - ./moh:/var/lib/asterisk/moh:ro
