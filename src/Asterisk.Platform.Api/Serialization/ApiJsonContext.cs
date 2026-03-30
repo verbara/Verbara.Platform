@@ -161,6 +161,9 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(SetupResponse))]
 // System Settings
 [JsonSerializable(typeof(SystemSettingsRequest))]
+// Auth
+[JsonSerializable(typeof(TokenResponse))]
+[JsonSerializable(typeof(TokenUserDto))]
 // Agent Assist
 [JsonSerializable(typeof(KeywordRuleDto))]
 [JsonSerializable(typeof(KeywordRuleDto[]))]

@@ -198,7 +198,16 @@ internal static class AuthEndpoints
         var (accessToken, expiresAt) = jwtService.GenerateAccessToken(user, permissions);
         SetRefreshCookie(context, newRawToken);
 
-        return Results.Ok(new TokenResponse(accessToken, expiresAt));
+        var featureRegistry = context.RequestServices.GetService<IFeatureRegistry>();
+        var features = new Dictionary<string, bool>(featureRegistry?.GetFeatures() ?? new Dictionary<string, bool>());
+
+        return Results.Ok(new TokenResponse(
+            accessToken,
+            expiresAt,
+            new TokenUserDto(user.UserId.Value, user.Email, user.DisplayName, user.Role.ToString().ToLowerInvariant()),
+            user.TenantId.Value,
+            permissions?.ToArray() ?? [],
+            features));
     }
 
     // ─── Logout ─────────────────────────────────────────────────────────────────
@@ -485,6 +494,20 @@ internal static class AuthEndpoints
             catch { /* permissions will be resolved at authorization time instead */ }
         }
 
+        // Fallback: if RBAC store returned empty and user has a privileged role,
+        // grant role-based default permissions so the frontend can render correctly.
+        var effectivePermissions = permissions?.ToArray() ?? [];
+        if (effectivePermissions.Length == 0)
+        {
+            effectivePermissions = user.Role switch
+            {
+                UserRole.Admin => RoleDefaultPermissions.Admin,
+                UserRole.Supervisor => RoleDefaultPermissions.Supervisor,
+                UserRole.Agent => RoleDefaultPermissions.Agent,
+                _ => [],
+            };
+        }
+
         var (accessToken, expiresAt) = jwtService.GenerateAccessToken(user, permissions);
 
         var ip = GetIpAddress(context);
@@ -498,7 +521,17 @@ internal static class AuthEndpoints
         await authEvents.LogAsync(user.TenantId.Value, user.UserId.Value,
             AuthEventTypes.LoginSuccess, ip, ua, null, ct);
 
-        return Results.Ok(new TokenResponse(accessToken, expiresAt));
+        // Resolve features for the response
+        var featureRegistry = context.RequestServices.GetService<IFeatureRegistry>();
+        var features = new Dictionary<string, bool>(featureRegistry?.GetFeatures() ?? new Dictionary<string, bool>());
+
+        return Results.Ok(new TokenResponse(
+            accessToken,
+            expiresAt,
+            new TokenUserDto(user.UserId.Value, user.Email, user.DisplayName, user.Role.ToString().ToLowerInvariant()),
+            user.TenantId.Value,
+            effectivePermissions,
+            features));
     }
 
     private static void SetRefreshCookie(HttpContext context, string rawToken)
@@ -551,7 +584,64 @@ internal sealed record MfaVerifyRequest(string ChallengeToken, string? Code, str
 internal sealed record MfaConfirmRequest(string Code);
 internal sealed record MfaDisableRequest(string Password);
 internal sealed record MfaSetupResponse(string Secret, string QrUri, IReadOnlyList<string> RecoveryCodes);
-internal sealed record TokenResponse(string AccessToken, DateTimeOffset ExpiresAt);
+internal sealed record TokenResponse(
+    string AccessToken,
+    DateTimeOffset ExpiresAt,
+    TokenUserDto? User = null,
+    string? TenantId = null,
+    string[]? Permissions = null,
+    Dictionary<string, bool>? Features = null);
+
+internal sealed record TokenUserDto(string Id, string Email, string DisplayName, string Role);
+
+/// <summary>
+/// Default permissions per role when RBAC store has no data (InMemory / no Postgres).
+/// Mirrors the role templates defined in RoleTemplateSeeder.
+/// </summary>
+internal static class RoleDefaultPermissions
+{
+    public static readonly string[] Admin =
+    [
+        "contacts:conversation:handle", "contacts:conversation:transfer", "contacts:conversation:monitor",
+        "contacts:conversation:barge", "contacts:conversation:whisper", "contacts:contact:view",
+        "contacts:contact:edit", "contacts:contact:create",
+        "queues:queue:view", "queues:queue:create", "queues:queue:edit", "queues:queue:delete",
+        "queues:member:assign",
+        "users:user:view", "users:user:create", "users:user:edit", "users:user:deactivate",
+        "users:role:assign",
+        "campaigns:campaign:view", "campaigns:campaign:create", "campaigns:campaign:edit",
+        "campaigns:campaign:delete", "campaigns:campaign:execute",
+        "campaigns:dnc:manage", "campaigns:callerid:manage", "campaigns:calendar:manage",
+        "campaigns:route:manage", "campaigns:trunk:manage", "campaigns:dialer:configure",
+        "reporting:realtime:view", "reporting:historical:view", "reporting:historical:export",
+        "reporting:dashboard:edit",
+        "quality:evaluation:view", "quality:evaluation:score", "quality:scorecard:manage",
+        "recording:recording:play", "recording:recording:delete", "recording:recording:export",
+        "routing:skill:view", "routing:skill:manage", "routing:flow:view", "routing:flow:edit",
+        "analytics:cdr:view", "analytics:cdr:export", "analytics:interval:view", "analytics:alert:manage",
+        "system:tenant:configure", "system:integration:manage", "system:audit:view",
+        "agentassist:session:view", "agentassist:config:manage",
+        "callanalytics:analysis:view", "callanalytics:config:manage",
+    ];
+
+    public static readonly string[] Supervisor =
+    [
+        "contacts:conversation:handle", "contacts:conversation:transfer", "contacts:conversation:monitor",
+        "contacts:conversation:barge", "contacts:conversation:whisper", "contacts:contact:view",
+        "queues:queue:view", "queues:queue:edit", "queues:member:assign",
+        "users:user:view",
+        "reporting:realtime:view", "reporting:historical:view",
+        "quality:evaluation:view", "quality:evaluation:score",
+        "recording:recording:play",
+        "analytics:cdr:view", "analytics:interval:view",
+    ];
+
+    public static readonly string[] Agent =
+    [
+        "contacts:conversation:handle", "contacts:conversation:transfer", "contacts:contact:view",
+        "reporting:realtime:view",
+    ];
+}
 
 internal sealed class MfaPendingEntry
 {

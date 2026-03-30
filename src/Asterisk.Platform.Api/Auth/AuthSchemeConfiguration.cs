@@ -36,6 +36,11 @@ internal static class AuthSchemeConfiguration
                             return JwtScheme;
                     }
 
+                    // Check for JWT in query string (SSE — EventSource can't set headers)
+                    var queryToken = context.Request.Query["token"].FirstOrDefault();
+                    if (queryToken is not null && queryToken.StartsWith("eyJ", StringComparison.Ordinal))
+                        return JwtScheme;
+
                     return ApiKeyScheme;
                 };
             })
@@ -45,6 +50,13 @@ internal static class AuthSchemeConfiguration
 
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        var token = context.Request.Query["token"].FirstOrDefault();
+                        if (token is not null && token.StartsWith("eyJ", StringComparison.Ordinal))
+                            context.Token = token;
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = context =>
                     {
                         var tenantClaim = context.Principal?.FindFirst("tid")?.Value;

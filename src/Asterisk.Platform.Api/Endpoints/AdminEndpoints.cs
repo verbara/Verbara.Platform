@@ -3,6 +3,7 @@ using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Realtime;
 using Asterisk.Sdk.Pro.Realtime.Models;
+using Asterisk.Platform.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -87,6 +88,7 @@ internal static class AdminEndpoints
             DisplayName = body.DisplayName,
             Role = body.Role,
             Status = UserStatus.Active,
+            PasswordHash = body.Password is not null ? PasswordService.HashPassword(body.Password) : null,
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(user, ct);
@@ -543,7 +545,7 @@ internal static class AdminEndpoints
 
 // ─── Request DTOs ─────────────────────────────────────────────────────────────
 
-internal sealed record CreateUserRequest(string Email, string DisplayName, UserRole Role);
+internal sealed record CreateUserRequest(string Email, string DisplayName, UserRole Role, string? Password = null);
 internal sealed record UpdateUserRequest(string? DisplayName, UserRole? Role, UserStatus? Status);
 
 internal sealed record CreateQueueRequest(

@@ -10,9 +10,29 @@ internal static class ChannelConfigEndpoints
     {
         var group = app.MapGroup("/api/admin/channels").RequireAuthorization("AdminOnly");
 
+        group.MapGet("/", ListChannelConfigs);
         group.MapGet("/{channel}", GetChannelConfig);
         group.MapPut("/{channel}", UpdateChannelConfig);
         group.MapPost("/{channel}/test", TestChannelConfig);
+    }
+
+    private static async Task<IResult> ListChannelConfigs(
+        HttpContext context,
+        [FromServices] ITenantChannelConfigStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var results = new List<object>();
+
+        foreach (var channelType in Enum.GetValues<ChannelType>())
+        {
+            var config = await store.GetAsync(tenantId, channelType, ct);
+            results.Add(config is not null
+                ? config
+                : new { channel = channelType.ToString(), isActive = false });
+        }
+
+        return Results.Ok(results);
     }
 
     private static async Task<IResult> GetChannelConfig(
