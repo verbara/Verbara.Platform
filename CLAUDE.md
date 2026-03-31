@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.0.0-pro).
 
-**28 packages, 1104 tests, 0 warnings, AOT-compatible:**
+**28 packages, 1140 tests, 0 warnings, AOT-compatible:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -32,8 +32,8 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Surveys | Post-conversation surveys -- survey store, response collection, DI | 30 |
 | Platform.Audit | Audit trail -- event logging, query, retention, DI | 9 |
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
-| Platform.Billing | Metering engine, quota enforcement, usage records, tenant quotas, DI | 22 |
-| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 54 |
+| Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, DI | 40 |
+| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 82 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
 | Platform.Api | HTTP host -- 41 endpoint groups, auth, middleware, SSE, OpenAPI | 283 |
 
@@ -291,7 +291,7 @@ E2E roadmap: Sprint 1 done, Sprints 2-6 pending (Tenant Admin, Operations, Agent
 
 New package `Asterisk.Platform.Billing` with 4 sub-projects:
 - **Sub-project A:** Metering Engine + Quota Enforcement -- COMPLETE (Plan 28A)
-- **Sub-project B:** Rate Cards + Invoice Generation (~10 files, ~30 tests)
+- **Sub-project B:** Rate Cards + Invoice Generation -- COMPLETE (Plan 28B)
 - **Sub-project C:** Management API + Usage Dashboard (~14 files, ~20 tests)
 - **Sub-project D:** E2E Tests for Billing (~4 files, ~25 tests)
 
@@ -311,6 +311,19 @@ Key models: UsageRecord (16 types), UsageSummary, TenantQuota (MaxConcurrentChan
 
 Key models: UsageRecord (16 types), UsageSummary, TenantQuota, RateCard, Invoice
 Key fixes: OriginateGate tenant limit (broken), campaign count enforcement (missing)
+
+## Plan 28B: Rate Cards + Invoice Generation -- COMPLETE (2026-03-31)
+
+**Spec:** `docs/superpowers/specs/2026-03-31-v120-monetization-ready-design.md` (Sub-project B)
+**Plan:** `docs/superpowers/plans/2026-03-31-plan28b-rate-cards-invoices.md`
+
+Extends Platform.Billing package with pricing and invoicing:
+1. **Domain Models** -- RateCard (with RateEntry + RateTier), Invoice (with InvoiceLineItem), InvoiceStatus enum
+2. **Store Interfaces** -- IRateCardStore (CRUD + active lookup), IInvoiceStore (CRUD + pagination + status transitions)
+3. **Invoice Generation** -- DefaultInvoiceGenerationService with flat-rate pricing (included quantities, overage) and tiered pricing
+4. **InMemory Storage** -- InMemoryRateCardStore, InMemoryInvoiceStore
+5. **Postgres Storage** -- PostgresRateCardStore (UPSERT, JSONB rates), PostgresInvoiceStore (JSONB line_items, status CASE), 003_RateCardsInvoices.sql migration
+6. **DI Wiring** -- IInvoiceGenerationService in AddPlatformBilling(), stores in both storage packages
 
 ## Plan Execution
 
