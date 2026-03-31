@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.0.0-pro).
 
-**27 packages, 1068 tests, 0 warnings, AOT-compatible:**
+**28 packages, 1104 tests, 0 warnings, AOT-compatible:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -32,9 +32,10 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Surveys | Post-conversation surveys -- survey store, response collection, DI | 30 |
 | Platform.Audit | Audit trail -- event logging, query, retention, DI | 9 |
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
-| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 40 |
+| Platform.Billing | Metering engine, quota enforcement, usage records, tenant quotas, DI | 22 |
+| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 54 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
-| Platform.Api | HTTP host -- 41 endpoint groups, auth, middleware, SSE, OpenAPI | 282 |
+| Platform.Api | HTTP host -- 41 endpoint groups, auth, middleware, SSE, OpenAPI | 283 |
 
 ## Build & Test
 
@@ -182,6 +183,7 @@ builder.Services.AddPlatformAudit();
 builder.Services.AddPlatformMedia();
 builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
+builder.Services.AddPlatformBilling();
 
 // ── Storage ──
 builder.Services.AddInMemoryStorage();  // zero-infrastructure default
@@ -283,15 +285,29 @@ Two deliverables:
 
 E2E roadmap: Sprint 1 done, Sprints 2-6 pending (Tenant Admin, Operations, Agent, Flows, Cross-Cutting -- ~330 total tests)
 
-## v1.2.0 "Monetization Ready" -- SPEC APPROVED (2026-03-31)
+## v1.2.0 "Monetization Ready" -- IN PROGRESS (2026-03-31)
 
 **Spec:** `docs/superpowers/specs/2026-03-31-v120-monetization-ready-design.md`
 
 New package `Asterisk.Platform.Billing` with 4 sub-projects:
-- **Sub-project A:** Metering Engine + Quota Enforcement (~15 files, ~40 tests)
+- **Sub-project A:** Metering Engine + Quota Enforcement -- COMPLETE (Plan 28A)
 - **Sub-project B:** Rate Cards + Invoice Generation (~10 files, ~30 tests)
 - **Sub-project C:** Management API + Usage Dashboard (~14 files, ~20 tests)
 - **Sub-project D:** E2E Tests for Billing (~4 files, ~25 tests)
+
+## Plan 28A: Metering Engine + Quota Enforcement -- COMPLETE (2026-03-31)
+
+**Spec:** `docs/superpowers/specs/2026-03-31-v120-monetization-ready-design.md` (Sub-project A)
+**Plan:** `docs/superpowers/plans/2026-03-31-plan28a-metering-engine.md`
+
+New package `Asterisk.Platform.Billing` (28th package):
+1. **Domain Models** -- UsageType (17 values), UsageUnit (6 values), UsageRecord, UsageSummary, TenantQuota, QuotaAction, QuotaCheckResult
+2. **Services** -- DefaultMeteringService (record + batch + current-period summary), DefaultQuotaEnforcementService (limit check per UsageType with Warn/SoftBlock/HardBlock)
+3. **InMemory Storage** -- InMemoryUsageRecordStore (append-only, summary aggregation), InMemoryTenantQuotaStore (CRUD)
+4. **Postgres Storage** -- PostgresUsageRecordStore (GROUP BY aggregation), PostgresTenantQuotaStore (UPSERT), 002_BillingSchema.sql migration
+5. **DI + Wiring** -- AddPlatformBilling(), stores in both AddInMemoryStorage() and AddPostgresStorage(), wired in Program.cs
+
+Key models: UsageRecord (16 types), UsageSummary, TenantQuota (MaxConcurrentChannels, MaxActiveCampaigns, MaxMonthlyVoiceMinutes, MaxMonthlyMessages, MaxStorageBytes, MaxActiveAgents)
 
 Key models: UsageRecord (16 types), UsageSummary, TenantQuota, RateCard, Invoice
 Key fixes: OriginateGate tenant limit (broken), campaign count enforcement (missing)
