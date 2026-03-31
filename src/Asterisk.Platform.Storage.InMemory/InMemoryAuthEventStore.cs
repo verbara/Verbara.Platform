@@ -41,4 +41,21 @@ internal sealed class InMemoryAuthEventStore : IAuthEventStore
 
         return Task.FromResult(new PagedResult<AuthEvent>(items, totalCount, page, pageSize));
     }
+
+    public Task<PagedResult<AuthEvent>> SearchAsync(string tenantId, AuthEventQuery query, CancellationToken ct)
+    {
+        var filtered = _items
+            .Where(e => e.TenantId == tenantId)
+            .Where(e => query.UserId == null || e.UserId == query.UserId)
+            .Where(e => query.EventType == null || e.EventType == query.EventType)
+            .Where(e => query.StartDate == null || e.CreatedAt >= query.StartDate)
+            .Where(e => query.EndDate == null || e.CreatedAt <= query.EndDate)
+            .OrderByDescending(e => e.CreatedAt)
+            .ToList();
+
+        var totalCount = filtered.Count;
+        var items = filtered.Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToList();
+
+        return Task.FromResult(new PagedResult<AuthEvent>(items, totalCount, query.Page, query.PageSize));
+    }
 }
