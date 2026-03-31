@@ -256,7 +256,7 @@ Progressive tenant resolution chain:
 3. **Frontend env** -- VITE_DEFAULT_TENANT_ID for demo/single-tenant, subdomain extraction for SaaS
 4. **Test infrastructure** -- removed Postgres connection strings from appsettings.json (Docker env vars only), fixed 51 missing [FromServices] on GET/DELETE endpoints
 
-**Next:** v1.1.1 (SAML, IP allowlisting, subdomain routing, multi-language) -> v1.2.0 (SCIM, LDAP, WebAuthn, stereo, SignalR)
+**Next:** v1.2.0 "Monetization Ready" (billing, metering, quotas, rate cards, invoices, per-tenant analytics)
 
 ## Plan 26: Platform Administration — Sub-project A -- COMPLETE (2026-03-30)
 
@@ -282,6 +282,19 @@ Two deliverables:
 2. **Auth Event Reactive Filtering** -- `AuthEventQuery` record, `SearchAsync` on `IAuthEventStore` (InMemory + Postgres), endpoint accepts `eventType`/`startDate`/`endDate`, frontend debounce 300ms + `placeholderData` + `isFetching` + page reset, 11 new backend tests (1,068 total)
 
 E2E roadmap: Sprint 1 done, Sprints 2-6 pending (Tenant Admin, Operations, Agent, Flows, Cross-Cutting -- ~330 total tests)
+
+## v1.2.0 "Monetization Ready" -- SPEC APPROVED (2026-03-31)
+
+**Spec:** `docs/superpowers/specs/2026-03-31-v120-monetization-ready-design.md`
+
+New package `Asterisk.Platform.Billing` with 4 sub-projects:
+- **Sub-project A:** Metering Engine + Quota Enforcement (~15 files, ~40 tests)
+- **Sub-project B:** Rate Cards + Invoice Generation (~10 files, ~30 tests)
+- **Sub-project C:** Management API + Usage Dashboard (~14 files, ~20 tests)
+- **Sub-project D:** E2E Tests for Billing (~4 files, ~25 tests)
+
+Key models: UsageRecord (16 types), UsageSummary, TenantQuota, RateCard, Invoice
+Key fixes: OriginateGate tenant limit (broken), campaign count enforcement (missing)
 
 ## Plan Execution
 
