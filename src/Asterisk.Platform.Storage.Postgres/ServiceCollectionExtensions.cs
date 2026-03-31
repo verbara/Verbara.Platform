@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Asterisk.Platform.Automation;
 using Asterisk.Platform.Bot;
@@ -27,7 +28,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddPostgresStorage(this IServiceCollection services, string connectionString)
     {
-        services.AddSingleton(NpgsqlDataSource.Create(connectionString));
+        services.TryAddSingleton(NpgsqlDataSource.Create(connectionString));
 
         // Identity
         services.AddSingleton<IUserStore, PostgresUserStore>();

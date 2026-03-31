@@ -10,6 +10,7 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Routing.Inbound;
 using Asterisk.Platform.Storage.InMemory;
+using Asterisk.Platform.Storage.Postgres;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Switchboard;
@@ -65,9 +66,12 @@ builder.Services.AddPlatformMedia();
 builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
 
-// ─── In-Memory Storage (zero-infrastructure default) ─────────────────────────
-
-builder.Services.AddInMemoryStorage();
+// ─── Storage ─────────────────────────────────────────────────────────────────
+var coreConnectionString = builder.Configuration.GetConnectionString("Postgres");
+if (!string.IsNullOrEmpty(coreConnectionString))
+    builder.Services.AddPostgresStorage(coreConnectionString);
+else
+    builder.Services.AddInMemoryStorage();
 
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 builder.Services.AddSingleton<byte[]>(Array.Empty<byte>());
