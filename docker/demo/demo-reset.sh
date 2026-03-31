@@ -75,7 +75,7 @@ done
 
 API_BASE="http://localhost:5000"
 
-# 7. Initialize platform via setup wizard (creates host tenant + admin + mgmt key in InMemory stores)
+# 7. Initialize platform via setup wizard (creates host tenant + admin + mgmt key)
 echo "[7/11] Inicializando plataforma..."
 SETUP_RESPONSE=$(curl -sf -X POST "$API_BASE/api/setup" \
     -H "Content-Type: application/json" \
@@ -104,7 +104,7 @@ else
     echo "  SKIP (no management key)"
 fi
 
-# 9. Seed demo data via API (InMemory stores — SQL only for Pro/RBAC tables)
+# 9. Seed demo data via API (persisted to Postgres when connection string is configured)
 echo "[9/11] Creando datos demo via API..."
 
 # Get a JWT for the platform admin to use admin endpoints
@@ -158,7 +158,7 @@ else
     echo "  OK (admin, supervisor, 6 agents, 2 queues, webchat channel)"
 fi
 
-# 10. Load Asterisk Realtime seed + historical data (these go to Postgres Pro tables)
+# 10. Load Asterisk Realtime seed + historical data (Pro-owned Postgres tables)
 echo "[10/11] Cargando datos Asterisk + historicos..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/010_demo_asterisk_seed.sql -q
