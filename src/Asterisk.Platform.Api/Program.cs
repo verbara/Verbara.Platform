@@ -19,6 +19,7 @@ using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Hosting;
 using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Surveys;
+using Asterisk.Platform.Billing;
 using Asterisk.Sdk.Pro.Dialer.DependencyInjection;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.EventStore.DependencyInjection;
@@ -65,6 +66,7 @@ builder.Services.AddPlatformAudit();
 builder.Services.AddPlatformMedia();
 builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
+builder.Services.AddPlatformBilling();
 
 // ─── Storage ─────────────────────────────────────────────────────────────────
 var coreConnectionString = builder.Configuration.GetConnectionString("Postgres");
