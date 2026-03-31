@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.0.0-pro).
 
-**27 packages, 1057 tests, 0 warnings, AOT-compatible:**
+**27 packages, 1068 tests, 0 warnings, AOT-compatible:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -207,6 +207,10 @@ builder.Services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHand
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 ```
 
+## Demo Environment
+
+Full documentation at `docs/demo-environment.md`. **This file MUST be updated whenever any file under `docker/demo/` is modified** (scripts, compose, SQL seeds, configs, audio files).
+
 ## Code Conventions
 
 - **No `Co-Authored-By` in commits**
@@ -266,6 +270,18 @@ Host tenant identity + Management API:
 4. **Management API** -- Tenant CRUD, System info/license/settings, Cluster status/nodes, API key management
 5. **Setup Wizard** -- `POST /api/setup` for first-boot platform initialization
 6. **Management API Keys** -- `ApiKeyType.Management` for platform-scoped machine-to-machine access
+
+## Plan 27: E2E Playwright Sprint 1 + Auth Event Filtering -- COMPLETE (2026-03-31)
+
+**Spec:** `docs/superpowers/specs/2026-03-31-e2e-playwright-design.md`
+**Plan:** `docs/superpowers/plans/2026-03-31-plan27-e2e-playwright.md`
+
+Two deliverables:
+
+1. **E2E Testing Infrastructure** -- Playwright in Platform.Web (`tests/e2e/`), auth fixture (storageState), API helper, ~100 data-testid attributes across 11 components, 10 spec files with 66 tests covering login + all Platform Admin pages
+2. **Auth Event Reactive Filtering** -- `AuthEventQuery` record, `SearchAsync` on `IAuthEventStore` (InMemory + Postgres), endpoint accepts `eventType`/`startDate`/`endDate`, frontend debounce 300ms + `placeholderData` + `isFetching` + page reset, 11 new backend tests (1,068 total)
+
+E2E roadmap: Sprint 1 done, Sprints 2-6 pending (Tenant Admin, Operations, Agent, Flows, Cross-Cutting -- ~330 total tests)
 
 ## Plan Execution
 
