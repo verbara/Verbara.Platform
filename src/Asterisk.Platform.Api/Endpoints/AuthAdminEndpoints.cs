@@ -73,23 +73,31 @@ internal static class AuthAdminEndpoints
 
     private static async Task<IResult> ListEvents(
         HttpContext context,
-        AuthEventService authEvents,
-        int? page,
-        int? pageSize,
-        string? userId,
-        CancellationToken ct)
+        [FromServices] AuthEventService authEvents,
+        int page = 1,
+        int pageSize = 50,
+        string? userId = null,
+        string? eventType = null,
+        DateTimeOffset? startDate = null,
+        DateTimeOffset? endDate = null,
+        CancellationToken ct = default)
     {
         var tenantId = GetTenantId(context);
         if (tenantId is null)
             return Results.Unauthorized();
 
-        var p = page ?? 1;
-        var ps = pageSize ?? 50;
+        if (endDate.HasValue && endDate.Value.TimeOfDay == TimeSpan.Zero)
+            endDate = endDate.Value.AddDays(1).AddTicks(-1);
 
-        if (userId is not null)
-            return Results.Ok(await authEvents.ListByUserAsync(tenantId, userId, p, ps, ct));
+        var query = new AuthEventQuery(
+            UserId: userId,
+            EventType: eventType,
+            StartDate: startDate,
+            EndDate: endDate,
+            Page: page,
+            PageSize: pageSize);
 
-        return Results.Ok(await authEvents.ListByTenantAsync(tenantId, p, ps, ct));
+        return Results.Ok(await authEvents.SearchAsync(tenantId, query, ct));
     }
 
     private static async Task<IResult> ListSessions(

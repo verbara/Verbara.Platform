@@ -41,4 +41,8 @@ internal sealed class AuthEventService
     public Task<PagedResult<AuthEvent>> ListByUserAsync(
         string tenantId, string userId, int page, int pageSize, CancellationToken ct) =>
         _store.ListByUserAsync(tenantId, userId, page, pageSize, ct);
+
+    public Task<PagedResult<AuthEvent>> SearchAsync(
+        string tenantId, AuthEventQuery query, CancellationToken ct) =>
+        _store.SearchAsync(tenantId, query, ct);
 }
