@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.0.0-pro).
 
-**28 packages, 1140 tests, 0 warnings, AOT-compatible:**
+**28 packages, 1162 tests, 0 warnings, AOT-compatible:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -33,9 +33,9 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Audit | Audit trail -- event logging, query, retention, DI | 9 |
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
 | Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, DI | 40 |
-| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 82 |
+| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 86 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
-| Platform.Api | HTTP host -- 41 endpoint groups, auth, middleware, SSE, OpenAPI | 283 |
+| Platform.Api | HTTP host -- 42 endpoint groups, auth, middleware, SSE, OpenAPI | 301 |
 
 ## Build & Test
 
@@ -116,7 +116,7 @@ ErrorHandlingMiddleware -> CORS -> RateLimiter -> TenantResolutionMiddleware -> 
 - **RBAC:** 52 permissions (`domain:resource:action`), 7 role templates, custom roles per-tenant, permission cascading via `PermissionResolver` + `PermissionAuthorizationHandler`
 - **Authorization policies:** `AdminOnly`, `SupervisorPlus`, `Authenticated`
 
-### Endpoint Inventory (41 groups, 41 files)
+### Endpoint Inventory (42 groups, 42 files)
 
 All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. Key groups:
 
@@ -126,7 +126,7 @@ All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. Key groups:
 | Omnichannel | WebhookEndpoints, ConversationEndpoints, ChannelConfigEndpoints, ContactEndpoints, SseEndpoints |
 | Agent | AgentEndpoints, SupervisorEndpoints, SkillEndpoints, UsersMeEndpoint |
 | Admin | AdminEndpoints, AuditEndpoints, ScheduledReportEndpoints |
-| Management | ManagementTenantEndpoints, ManagementSystemEndpoints, ManagementClusterEndpoints, ManagementApiKeyEndpoints, SetupEndpoints |
+| Management | ManagementTenantEndpoints, ManagementSystemEndpoints, ManagementClusterEndpoints, ManagementApiKeyEndpoints, ManagementBillingEndpoints, SetupEndpoints |
 | Dialer | CampaignEndpoints, CallAttemptEndpoints, DncListEndpoints, CallerIdPoolEndpoints, HolidayCalendarEndpoints, DialerSettingsEndpoints, TrunkEndpoints, OutboundRouteEndpoints |
 | Analytics | AnalyticsEndpoints, AnalyticsLiveEndpoints, QueueMetricsEndpoints |
 | AI/Bot | BotEndpoints, KnowledgeBaseEndpoints, AgentAssistEndpoints, FlowEndpoints |
@@ -292,7 +292,7 @@ E2E roadmap: Sprint 1 done, Sprints 2-6 pending (Tenant Admin, Operations, Agent
 New package `Asterisk.Platform.Billing` with 4 sub-projects:
 - **Sub-project A:** Metering Engine + Quota Enforcement -- COMPLETE (Plan 28A)
 - **Sub-project B:** Rate Cards + Invoice Generation -- COMPLETE (Plan 28B)
-- **Sub-project C:** Management API + Usage Dashboard (~14 files, ~20 tests)
+- **Sub-project C:** Management API + Usage Dashboard -- COMPLETE (Plan 28C)
 - **Sub-project D:** E2E Tests for Billing (~4 files, ~25 tests)
 
 ## Plan 28A: Metering Engine + Quota Enforcement -- COMPLETE (2026-03-31)
@@ -324,6 +324,18 @@ Extends Platform.Billing package with pricing and invoicing:
 4. **InMemory Storage** -- InMemoryRateCardStore, InMemoryInvoiceStore
 5. **Postgres Storage** -- PostgresRateCardStore (UPSERT, JSONB rates), PostgresInvoiceStore (JSONB line_items, status CASE), 003_RateCardsInvoices.sql migration
 6. **DI Wiring** -- IInvoiceGenerationService in AddPlatformBilling(), stores in both storage packages
+
+## Plan 28C: Management Billing API -- COMPLETE (2026-03-31)
+
+**Spec:** `docs/superpowers/specs/2026-03-31-v120-monetization-ready-design.md` (Sub-project C)
+**Plan:** `docs/superpowers/plans/2026-03-31-plan28c-management-billing-api.md`
+
+Management API for billing administration (PlatformAdminOnly):
+1. **Rate Card CRUD** -- List, Create, Update, Delete rate cards per tenant
+2. **Invoice Management** -- List, Generate, Get, Issue invoices per tenant
+3. **Usage Queries** -- Summary and detailed usage records with date range and type filters
+4. **Quota Management** -- View quota status with current usage, update tenant quotas
+5. **Store Extension** -- Added ListAsync to IUsageRecordStore (InMemory + Postgres) for paginated record queries
 
 ## Plan Execution
 
