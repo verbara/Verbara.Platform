@@ -23,6 +23,7 @@
     <Project Path="src/Asterisk.Platform.Surveys/Asterisk.Platform.Surveys.csproj" />
     <Project Path="src/Asterisk.Platform.Automation/Asterisk.Platform.Automation.csproj" />
     <Project Path="src/Asterisk.Platform.Audit/Asterisk.Platform.Audit.csproj" />
+    <Project Path="src/Asterisk.Platform.Billing/Asterisk.Platform.Billing.csproj" />
     <Project Path="src/Asterisk.Platform.Media/Asterisk.Platform.Media.csproj" />
     <Project Path="src/Asterisk.Platform.Storage.InMemory/Asterisk.Platform.Storage.InMemory.csproj" />
     <Project Path="src/Asterisk.Platform.Storage.Postgres/Asterisk.Platform.Storage.Postgres.csproj" />
@@ -52,6 +53,7 @@
     <Project Path="tests/Asterisk.Platform.Surveys.Tests/Asterisk.Platform.Surveys.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Automation.Tests/Asterisk.Platform.Automation.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Audit.Tests/Asterisk.Platform.Audit.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Billing.Tests/Asterisk.Platform.Billing.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Media.Tests/Asterisk.Platform.Media.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Storage.InMemory.Tests/Asterisk.Platform.Storage.InMemory.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Storage.Postgres.Tests/Asterisk.Platform.Storage.Postgres.Tests.csproj" />
