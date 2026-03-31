@@ -314,6 +314,7 @@ app.MapAuthAdminEndpoints();
 app.MapOidcEndpoints();
 app.MapRbacEndpoints();
 app.MapUsersMeEndpoint();
+app.MapManagementBillingEndpoints();
 
 // ─── RBAC seed: permissions, role templates (Postgres only) ──────────────────
 if (!app.Environment.IsEnvironment("Testing"))
