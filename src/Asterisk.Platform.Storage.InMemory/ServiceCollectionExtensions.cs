@@ -81,6 +81,8 @@ public static class ServiceCollectionExtensions
         // Billing
         services.AddSingleton<IUsageRecordStore, InMemoryUsageRecordStore>();
         services.AddSingleton<ITenantQuotaStore, InMemoryTenantQuotaStore>();
+        services.AddSingleton<IRateCardStore, InMemoryRateCardStore>();
+        services.AddSingleton<IInvoiceStore, InMemoryInvoiceStore>();
 
         // MultiTenant
         if (!services.Any(d => d.ServiceType == typeof(ITenantStore)))

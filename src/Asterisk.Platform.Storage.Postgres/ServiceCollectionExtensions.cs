@@ -88,6 +88,8 @@ public static class ServiceCollectionExtensions
         // Billing
         services.AddSingleton<IUsageRecordStore, PostgresUsageRecordStore>();
         services.AddSingleton<ITenantQuotaStore, PostgresTenantQuotaStore>();
+        services.AddSingleton<IRateCardStore, PostgresRateCardStore>();
+        services.AddSingleton<IInvoiceStore, PostgresInvoiceStore>();
 
         // RBAC
         services.AddSingleton<IPermissionStore, PostgresPermissionStore>();
