@@ -67,6 +67,53 @@ internal sealed class PostgresAuthEventStore : IAuthEventStore
         return new PagedResult<AuthEvent>(items, total, page, pageSize);
     }
 
+    public async Task<PagedResult<AuthEvent>> SearchAsync(string tenantId, AuthEventQuery query, CancellationToken ct)
+    {
+        var conditions = new List<string> { "tenant_id = @TenantId" };
+        var parameters = new DynamicParameters();
+        parameters.Add("TenantId", tenantId);
+
+        if (!string.IsNullOrEmpty(query.UserId))
+        {
+            conditions.Add("user_id = @UserId");
+            parameters.Add("UserId", query.UserId);
+        }
+        if (!string.IsNullOrEmpty(query.EventType))
+        {
+            conditions.Add("event_type = @EventType");
+            parameters.Add("EventType", query.EventType);
+        }
+        if (query.StartDate.HasValue)
+        {
+            conditions.Add("created_at >= @StartDate");
+            parameters.Add("StartDate", query.StartDate.Value);
+        }
+        if (query.EndDate.HasValue)
+        {
+            conditions.Add("created_at <= @EndDate");
+            parameters.Add("EndDate", query.EndDate.Value);
+        }
+
+        var where = string.Join(" AND ", conditions);
+        var offset = (query.Page - 1) * query.PageSize;
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        var total = await conn.ExecuteScalarAsync<int>(
+            $"SELECT COUNT(*) FROM auth_events WHERE {where}", parameters);
+
+        parameters.Add("Limit", query.PageSize);
+        parameters.Add("Offset", offset);
+
+        var rows = await conn.QueryAsync<AuthEventRow>(
+            "SELECT event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at " +
+            $"FROM auth_events WHERE {where} ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
+            parameters);
+
+        var items = rows.Select(r => r.ToAuthEvent()).ToList();
+        return new PagedResult<AuthEvent>(items, total, query.Page, query.PageSize);
+    }
+
     private sealed record AuthEventRow(
         string event_id,
         string tenant_id,
