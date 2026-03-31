@@ -58,4 +58,12 @@ public sealed class AuthEventServiceTests
 
         await _store.Received(1).ListByUserAsync("t1", "u1", 1, 25, Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task SearchAsync_ShouldDelegateToStore()
+    {
+        var query = new AuthEventQuery(EventType: "login_success");
+        await _sut.SearchAsync("t1", query, CancellationToken.None);
+        await _store.Received(1).SearchAsync("t1", query, Arg.Any<CancellationToken>());
+    }
 }
