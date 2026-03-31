@@ -192,7 +192,13 @@ internal static class ManagementBillingEndpoints
         var effectiveFrom = from ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
         var effectiveUntil = until ?? now;
 
-        UsageType? typeFilter = !string.IsNullOrEmpty(type) ? Enum.Parse<UsageType>(type) : null;
+        UsageType? typeFilter = null;
+        if (!string.IsNullOrEmpty(type))
+        {
+            if (!Enum.TryParse<UsageType>(type, out var parsed))
+                return Results.BadRequest(new { error = $"Unknown usage type: {type}" });
+            typeFilter = parsed;
+        }
 
         var records = await store.ListAsync(new TenantId(tenantId), effectiveFrom, effectiveUntil, typeFilter, page ?? 1, pageSize ?? 50, ct);
         return Results.Ok(records.Select(MapRecordToDto).ToList());
@@ -219,6 +225,9 @@ internal static class ManagementBillingEndpoints
         [FromServices] ITenantQuotaStore store,
         CancellationToken ct)
     {
+        if (body.QuotaAction is not null && !Enum.TryParse<QuotaAction>(body.QuotaAction, out _))
+            return Results.BadRequest(new { error = $"Unknown quota action: {body.QuotaAction}" });
+
         var tid = new TenantId(tenantId);
         var existing = await store.GetAsync(tid, ct);
 
