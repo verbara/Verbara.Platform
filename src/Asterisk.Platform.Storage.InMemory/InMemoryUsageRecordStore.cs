@@ -78,6 +78,23 @@ internal sealed class InMemoryUsageRecordStore : IUsageRecordStore
         return Task.FromResult<UsageSummary?>(summary);
     }
 
+    public Task<IReadOnlyList<UsageRecord>> ListAsync(TenantId tenantId, DateTimeOffset from, DateTimeOffset until, UsageType? type, int page, int pageSize, CancellationToken ct)
+    {
+        var filtered = GetTenantRecords(tenantId)
+            .Where(r => r.RecordedAt >= from && r.RecordedAt < until);
+
+        if (type is not null)
+            filtered = filtered.Where(r => r.UsageType == type.Value);
+
+        IReadOnlyList<UsageRecord> result = filtered
+            .OrderByDescending(r => r.RecordedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return Task.FromResult(result);
+    }
+
     private List<UsageRecord> GetTenantRecords(TenantId tenantId)
     {
         if (!_records.TryGetValue(tenantId, out var list))

@@ -18,4 +18,7 @@ public interface IUsageRecordStore
 
     /// <summary>Returns the aggregated summary for a specific usage type within a date range.</summary>
     Task<UsageSummary?> GetSummaryByTypeAsync(TenantId tenantId, UsageType type, DateTimeOffset from, DateTimeOffset until, CancellationToken ct);
+
+    /// <summary>Returns paginated individual usage records for a tenant within a date range, optionally filtered by type.</summary>
+    Task<IReadOnlyList<UsageRecord>> ListAsync(TenantId tenantId, DateTimeOffset from, DateTimeOffset until, UsageType? type, int page, int pageSize, CancellationToken ct);
 }

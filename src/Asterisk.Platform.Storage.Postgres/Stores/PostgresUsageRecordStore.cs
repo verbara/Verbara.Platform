@@ -114,5 +114,47 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
         };
     }
 
+    public async Task<IReadOnlyList<UsageRecord>> ListAsync(TenantId tenantId, DateTimeOffset from, DateTimeOffset until, UsageType? type, int page, int pageSize, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        var sql = "SELECT record_id, tenant_id, usage_type, quantity, unit, channel, reference_id, recorded_at, metadata " +
+                  "FROM usage_records WHERE tenant_id = @TenantId AND recorded_at >= @From AND recorded_at < @Until";
+
+        if (type is not null)
+            sql += " AND usage_type = @UsageType";
+
+        sql += " ORDER BY recorded_at DESC LIMIT @Limit OFFSET @Offset";
+
+        var rows = await conn.QueryAsync<RecordRow>(sql, new
+        {
+            TenantId = tenantId.Value,
+            From = from,
+            Until = until,
+            UsageType = type is not null ? (short)type.Value : (short)0,
+            Limit = pageSize,
+            Offset = (page - 1) * pageSize,
+        });
+
+        return rows.Select(r => new UsageRecord
+        {
+            RecordId = EntityId.From(r.record_id),
+            TenantId = new TenantId(r.tenant_id),
+            UsageType = (UsageType)r.usage_type,
+            Quantity = r.quantity,
+            Unit = (UsageUnit)r.unit,
+            Channel = r.channel,
+            ReferenceId = r.reference_id,
+            RecordedAt = r.recorded_at,
+            Metadata = r.metadata != null
+                ? JsonSerializer.Deserialize(r.metadata, PostgresJson.Ctx.DictionaryStringString)
+                : null,
+        }).ToList();
+    }
+
     private sealed record SummaryRow(short usage_type, decimal total_quantity, int record_count, DateTimeOffset last_updated_at);
+
+    private sealed record RecordRow(
+        string record_id, string tenant_id, short usage_type, decimal quantity, short unit,
+        string? channel, string? reference_id, DateTimeOffset recorded_at, string? metadata);
 }

@@ -140,4 +140,62 @@ public sealed class InMemoryUsageRecordStoreTests
         summaries[0].PeriodStart.Should().Be(from);
         summaries[0].PeriodEnd.Should().Be(to);
     }
+
+    [Fact]
+    public async Task ListAsync_ShouldReturnPaginatedRecords()
+    {
+        var store = new InMemoryUsageRecordStore();
+        for (int i = 0; i < 5; i++)
+            await store.SaveAsync(MakeRecord(quantity: i + 1, recordedAt: BaseTime.AddHours(i)), CancellationToken.None);
+
+        var page1 = await store.ListAsync(Tenant1, BaseTime, BaseTime.AddMonths(1), null, 1, 3, CancellationToken.None);
+        var page2 = await store.ListAsync(Tenant1, BaseTime, BaseTime.AddMonths(1), null, 2, 3, CancellationToken.None);
+
+        page1.Should().HaveCount(3);
+        page2.Should().HaveCount(2);
+        // Ordered by RecordedAt DESC, so first page has most recent
+        page1[0].Quantity.Should().Be(5m);
+        page1[2].Quantity.Should().Be(3m);
+    }
+
+    [Fact]
+    public async Task ListAsync_ShouldFilterByType()
+    {
+        var store = new InMemoryUsageRecordStore();
+        await store.SaveAsync(MakeRecord(type: UsageType.VoiceInbound, quantity: 10m), CancellationToken.None);
+        await store.SaveAsync(MakeRecord(type: UsageType.SmsOutbound, quantity: 3m, unit: UsageUnit.Segments), CancellationToken.None);
+        await store.SaveAsync(MakeRecord(type: UsageType.VoiceInbound, quantity: 5m, recordedAt: BaseTime.AddHours(1)), CancellationToken.None);
+
+        var result = await store.ListAsync(Tenant1, BaseTime, BaseTime.AddMonths(1), UsageType.VoiceInbound, 1, 50, CancellationToken.None);
+
+        result.Should().HaveCount(2);
+        result.Should().OnlyContain(r => r.UsageType == UsageType.VoiceInbound);
+    }
+
+    [Fact]
+    public async Task ListAsync_ShouldFilterByDateRange()
+    {
+        var store = new InMemoryUsageRecordStore();
+        await store.SaveAsync(MakeRecord(recordedAt: BaseTime.AddDays(-1)), CancellationToken.None);
+        await store.SaveAsync(MakeRecord(recordedAt: BaseTime.AddDays(5), quantity: 8m), CancellationToken.None);
+        await store.SaveAsync(MakeRecord(recordedAt: BaseTime.AddMonths(2)), CancellationToken.None);
+
+        var result = await store.ListAsync(Tenant1, BaseTime, BaseTime.AddMonths(1), null, 1, 50, CancellationToken.None);
+
+        result.Should().HaveCount(1);
+        result[0].Quantity.Should().Be(8m);
+    }
+
+    [Fact]
+    public async Task ListAsync_ShouldIsolateTenants()
+    {
+        var store = new InMemoryUsageRecordStore();
+        await store.SaveAsync(MakeRecord(tenantId: Tenant1, quantity: 10m), CancellationToken.None);
+        await store.SaveAsync(MakeRecord(tenantId: Tenant2, quantity: 20m), CancellationToken.None);
+
+        var result = await store.ListAsync(Tenant1, BaseTime, BaseTime.AddMonths(1), null, 1, 50, CancellationToken.None);
+
+        result.Should().HaveCount(1);
+        result[0].Quantity.Should().Be(10m);
+    }
 }
