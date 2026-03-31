@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Asterisk.Platform.Automation;
+using Asterisk.Platform.Billing;
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Conversations.Serialization;
@@ -40,6 +41,12 @@ namespace Asterisk.Platform.Storage.Postgres;
 [JsonSerializable(typeof(IReadOnlyList<SurveyQuestion>))]
 [JsonSerializable(typeof(List<SurveyAnswer>))]
 [JsonSerializable(typeof(IReadOnlyList<SurveyAnswer>))]
+[JsonSerializable(typeof(List<RateEntry>))]
+[JsonSerializable(typeof(IReadOnlyList<RateEntry>))]
+[JsonSerializable(typeof(List<RateTier>))]
+[JsonSerializable(typeof(IReadOnlyList<RateTier>))]
+[JsonSerializable(typeof(List<InvoiceLineItem>))]
+[JsonSerializable(typeof(IReadOnlyList<InvoiceLineItem>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
