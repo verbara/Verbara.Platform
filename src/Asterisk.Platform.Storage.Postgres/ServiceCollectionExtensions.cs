@@ -10,6 +10,7 @@ using Asterisk.Platform.Conversations.Stores;
 using Asterisk.Platform.Flows;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Audit;
+using Asterisk.Platform.Billing;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Storage.Postgres.Stores;
@@ -83,6 +84,10 @@ public static class ServiceCollectionExtensions
 
         // Audit
         services.AddSingleton<IAuditStore, PostgresAuditStore>();
+
+        // Billing
+        services.AddSingleton<IUsageRecordStore, PostgresUsageRecordStore>();
+        services.AddSingleton<ITenantQuotaStore, PostgresTenantQuotaStore>();
 
         // RBAC
         services.AddSingleton<IPermissionStore, PostgresPermissionStore>();
