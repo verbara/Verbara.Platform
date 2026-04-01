@@ -4,12 +4,12 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.0.0-pro).
 
-**28 packages, 1162 tests, 0 warnings, AOT-compatible, 43 endpoint groups:**
+**28 packages, 1259 tests, 0 warnings, AOT-compatible, 47 endpoint groups:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
-| Platform.Core | Abstractions, value objects, base interfaces, IClock, DI | 29 |
-| Platform.Identity | Users, RBAC, API keys, service accounts, DI | 10 |
+| Platform.Core | Abstractions, value objects, base interfaces, IClock, GDPR, Webhooks, DI | 42 |
+| Platform.Identity | Users, RBAC, API keys, service accounts, OIDC SSO, DI | 26 |
 | Platform.Conversations | Conversation lifecycle (14 states), Contact CRM-lite, Cases, Tags, DI | 73 |
 | Platform.Queues | Queue config, SLA, Agent with per-channel capacity, Teams, DI | 44 |
 | Platform.Channels.Core | Channel registry, inbound pipeline, delivery status, tenant config, DI | 38 |
@@ -33,9 +33,9 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Audit | Audit trail -- event logging, query, retention, DI | 9 |
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
 | Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, DI | 40 |
-| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 86 |
+| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 102 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
-| Platform.Api | HTTP host -- 43 endpoint groups, auth, middleware, SSE, OpenAPI | 301 |
+| Platform.Api | HTTP host -- 47 endpoint groups, auth, middleware, SSE, OpenAPI | 317 |
 
 ## Build & Test
 
@@ -66,7 +66,7 @@ dotnet run
 
 ### Platform.Api -- Composition Root
 
-`Program.cs` registers all platform packages, all Pro packages (Dialer, EventStore, Analytics, CallAnalytics, AgentAssist, Realtime, Cluster, MultiTenant, Licensing), configures auth (JWT + API key dual-scheme), RBAC, rate limiting, CORS, health checks, and maps 43 endpoint groups.
+`Program.cs` registers all platform packages, all Pro packages (Dialer, EventStore, Analytics, CallAnalytics, AgentAssist, Realtime, Cluster, MultiTenant, Licensing), configures auth (JWT + API key dual-scheme), RBAC, rate limiting, CORS, health checks, and maps 47 endpoint groups.
 
 Storage.InMemory provides drop-in in-memory implementations for development. PostgreSQL storage is activated via connection strings (`Dialer`, `Analytics`, `Realtime`, or fallback `Postgres`).
 
@@ -126,7 +126,9 @@ All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. Key groups:
 | Omnichannel | WebhookEndpoints, ConversationEndpoints, ChannelConfigEndpoints, ContactEndpoints, SseEndpoints |
 | Agent | AgentEndpoints, SupervisorEndpoints, SkillEndpoints, UsersMeEndpoint |
 | Admin | AdminEndpoints, AuditEndpoints, ScheduledReportEndpoints |
-| Management | ManagementTenantEndpoints, ManagementSystemEndpoints, ManagementClusterEndpoints, ManagementApiKeyEndpoints, ManagementBillingEndpoints, ManagementImpersonationEndpoints, SetupEndpoints |
+| Management | ManagementTenantEndpoints, ManagementSystemEndpoints, ManagementClusterEndpoints, ManagementApiKeyEndpoints, ManagementBillingEndpoints, ManagementImpersonationEndpoints, ManagementWebhookEndpoints, SetupEndpoints |
+| GDPR | GdprEndpoints |
+| Webhooks (outbound) | WebhookSubscriptionEndpoints, WebhookEventTypeEndpoints |
 | Dialer | CampaignEndpoints, CallAttemptEndpoints, DncListEndpoints, CallerIdPoolEndpoints, HolidayCalendarEndpoints, DialerSettingsEndpoints, TrunkEndpoints, OutboundRouteEndpoints |
 | Analytics | AnalyticsEndpoints, AnalyticsLiveEndpoints, QueueMetricsEndpoints |
 | AI/Bot | BotEndpoints, KnowledgeBaseEndpoints, AgentAssistEndpoints, FlowEndpoints |
@@ -405,6 +407,53 @@ Dedicated cluster management page in Platform.Web:
 4. **use-cluster.ts rewrite** -- Fixed path mismatch (/api/admin/ -> /api/management/)
 5. **Sidebar** -- Network icon entry for cluster page
 6. **Consolidation** -- Cluster info removed from diagnostics-page and system-page
+
+## v1.3.0 "Integration & Compliance" -- COMPLETE (2026-04-01)
+
+**Spec:** `docs/superpowers/specs/2026-04-01-v130-integration-compliance-design.md`
+
+4 sub-projects removing critical production blockers:
+- **Sub-project A:** License Enforcement -- COMPLETE (Plan 30A)
+- **Sub-project B:** OIDC SSO Completion -- COMPLETE (Plan 30B)
+- **Sub-project C:** GDPR Compliance -- COMPLETE (Plan 30C)
+- **Sub-project D:** Outbound Webhooks -- COMPLETE (Plan 30D)
+
+## Plan 30A: License Enforcement -- COMPLETE (2026-04-01)
+
+Activate existing ECDSA P-256 licensing with periodic runtime re-validation:
+1. **ILicenseStatus** -- queryable singleton interface (SDK Pro)
+2. **LicenseStatusTracker** -- thread-safe implementation updated by hosted services (SDK Pro)
+3. **LicenseRevalidationService** -- timer-based re-validation every 6h (SDK Pro)
+4. **Config-driven Program.cs** -- WarnOnly in dev, Enforce in production, community mode without license
+5. **Management API enrichment** -- GET /api/management/system/license returns full license state
+
+## Plan 30B: OIDC SSO Completion -- COMPLETE (2026-04-01)
+
+Complete the OIDC callback with Authorization Code + PKCE + nonce validation:
+1. **OidcTokenExchangeService** -- token endpoint + JWKS discovery with 24h cache, key rotation retry
+2. **OidcUserProvisioningService** -- subject lookup, email fallback linking, auto-create with default role
+3. **OidcEndpoints rewrite** -- PKCE S256, nonce, DataProtection-encrypted state cookie (5min TTL)
+4. **User.OidcSubject** -- new field + FindByOidcSubjectAsync on IUserStore (InMemory + Postgres)
+5. **Migration 004** -- oidc_subject column + partial index on users table
+
+## Plan 30C: GDPR Compliance -- COMPLETE (2026-04-01)
+
+Data export, purge with tombstone, and retention policies:
+1. **GdprExportService** -- JSON export of contact + conversations + messages + auth events + audit
+2. **GdprPurgeService** -- cascade delete (messages → conversations → auth events → contact) + tombstone
+3. **RetentionPurgeService** -- 24h background job for automatic data expiration per tenant
+4. **5 store interfaces extended** -- delete/list methods on Conversation, Message, AuthEvent, Audit, UsageRecord
+5. **5 GDPR endpoints** -- export (AdminOnly), purge (AdminOnly), purge-log, retention GET/PUT (PlatformAdminOnly)
+6. **Migration 005** -- purge_log + tenant_retention_policies tables
+
+## Plan 30D: Outbound Webhooks -- COMPLETE (2026-04-01)
+
+Tenant event subscriptions with persistent delivery and dead-letter queue:
+1. **WebhookDispatcher** -- subscribes to PlatformEventBus, routes events to tenant subscriptions
+2. **WebhookDeliveryService** -- background worker, exponential backoff (8 attempts, ~24h), HMAC-SHA256
+3. **11 event types** -- conversation.*, agent.*, campaign.*, agentassist.* (dot-separated)
+4. **13 endpoints** -- 8 tenant subscription CRUD, 2 management DLQ, 1 event types, POST test, rotate-secret
+5. **Migration 006** -- webhook_subscriptions + webhook_deliveries tables with partial indexes
 
 ## Plan Execution
 
