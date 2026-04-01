@@ -147,6 +147,10 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(List<MgmtClusterNodeDto>))]
 [JsonSerializable(typeof(MgmtDrainNodeRequest))]
 [JsonSerializable(typeof(MgmtDrainStatusDto))]
+[JsonSerializable(typeof(CreateNodeRequest))]
+[JsonSerializable(typeof(UpdateNodeRequest))]
+[JsonSerializable(typeof(MgmtInstanceDto))]
+[JsonSerializable(typeof(List<MgmtInstanceDto>))]
 // Management Tenants
 [JsonSerializable(typeof(MgmtTenantDto))]
 [JsonSerializable(typeof(List<MgmtTenantDto>))]

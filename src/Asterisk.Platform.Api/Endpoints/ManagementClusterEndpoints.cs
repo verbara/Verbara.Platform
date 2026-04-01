@@ -1,3 +1,5 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Sdk.Ami.Connection;
 using Asterisk.Sdk.Pro.Cluster;
 using Asterisk.Sdk.Pro.Cluster.Drain;
 using Asterisk.Sdk.Pro.Cluster.Registry;
@@ -8,6 +10,8 @@ namespace Asterisk.Platform.Api.Endpoints;
 
 internal static class ManagementClusterEndpoints
 {
+    private const string ClusterNotRegistered = "Cluster not registered";
+
     public static void MapManagementClusterEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/management/cluster").RequireAuthorization("PlatformAdminOnly");
@@ -16,13 +20,19 @@ internal static class ManagementClusterEndpoints
         group.MapGet("/nodes", ListNodes);
         group.MapGet("/nodes/{nodeId}", GetNode);
         group.MapPost("/nodes/{nodeId}/drain", DrainNode);
+        group.MapPost("/nodes", CreateNode);
+        group.MapPut("/nodes/{nodeId}", UpdateNode);
+        group.MapDelete("/nodes/{nodeId}", DeleteNode);
+        group.MapDelete("/nodes/{nodeId}/drain", CancelDrain);
+        group.MapPost("/nodes/{nodeId}/force-drain", ForceDrain);
+        group.MapGet("/instances", ListInstances);
     }
 
     private static IResult GetStatus(IServiceProvider services)
     {
         var manager = services.GetService<ClusterManager>();
         if (manager is null)
-            return Results.Ok(new MgmtClusterStatusDto("local", [], 0, 0, []));
+            return Results.Ok(new MgmtClusterStatusDto("local", [], 0, 0, [], []));
 
         var status = manager.GetStatus();
         return Results.Ok(new MgmtClusterStatusDto(
@@ -30,7 +40,8 @@ internal static class ManagementClusterEndpoints
             status.Nodes.Select(MapNodeToDto).ToList(),
             status.TotalChannels,
             status.TotalAgents,
-            status.ActiveDrains.Select(MapDrainToDto).ToList()));
+            status.ActiveDrains.Select(MapDrainToDto).ToList(),
+            status.LiveInstances.Select(MapInstanceToDto).ToList()));
     }
 
     private static async Task<IResult> ListNodes(IServiceProvider services, CancellationToken ct)
@@ -62,7 +73,7 @@ internal static class ManagementClusterEndpoints
     {
         var manager = services.GetService<ClusterManager>();
         if (manager is null)
-            return Results.Problem("Cluster not registered", statusCode: 503);
+            return Results.Problem(ClusterNotRegistered, statusCode: 503);
 
         var options = new DrainOptions
         {
@@ -75,6 +86,130 @@ internal static class ManagementClusterEndpoints
         return Results.Accepted($"/api/management/cluster/nodes/{nodeId}", MapDrainToDto(status));
     }
 
+    private static async Task<IResult> CreateNode(
+        [FromBody] CreateNodeRequest body,
+        [FromServices] IServiceProvider services,
+        CancellationToken ct)
+    {
+        var manager = services.GetService<ClusterManager>();
+        if (manager is null)
+            return Results.Problem(ClusterNotRegistered, statusCode: 503);
+
+        var existing = manager.GetStatus().Nodes.FirstOrDefault(n => n.NodeId == body.NodeId);
+        if (existing is not null)
+            return Results.Conflict(new ErrorResponse($"Node '{body.NodeId}' already exists"));
+
+        var amiOptions = new AmiConnectionOptions
+        {
+            Hostname = body.AmiHostname,
+            Port = body.AmiPort,
+            Username = body.AmiUsername,
+            Password = body.AmiPassword,
+        };
+
+        var tags = body.Tags is not null
+            ? (IReadOnlyDictionary<string, string>)body.Tags
+            : null;
+
+        await manager.AddNodeAsync(body.NodeId, amiOptions, body.Weight, body.PriorityTier, body.MaxCapacity, tags, ct);
+
+        var status = manager.GetStatus();
+        var node = status.Nodes.FirstOrDefault(n => n.NodeId == body.NodeId);
+        return node is not null
+            ? Results.Created($"/api/management/cluster/nodes/{body.NodeId}", MapNodeToDto(node))
+            : Results.Accepted($"/api/management/cluster/nodes/{body.NodeId}", (object?)null);
+    }
+
+    private static async Task<IResult> UpdateNode(
+        string nodeId,
+        [FromBody] UpdateNodeRequest body,
+        [FromServices] IServiceProvider services,
+        CancellationToken ct)
+    {
+        var manager = services.GetService<ClusterManager>();
+        if (manager is null)
+            return Results.Problem(ClusterNotRegistered, statusCode: 503);
+
+        var existing = manager.GetStatus().Nodes.FirstOrDefault(n => n.NodeId == nodeId);
+        if (existing is null)
+            return Results.NotFound(new ErrorResponse($"Node '{nodeId}' not found"));
+
+        var tags = body.Tags is not null
+            ? (IReadOnlyDictionary<string, string>)body.Tags
+            : null;
+
+        await manager.UpdateNodeAsync(nodeId, body.Weight, body.PriorityTier, body.MaxCapacity, tags, ct);
+
+        var updated = manager.GetStatus().Nodes.FirstOrDefault(n => n.NodeId == nodeId);
+        return updated is not null
+            ? Results.Ok(MapNodeToDto(updated))
+            : Results.Ok(new ErrorResponse("Node updated but not found in status"));
+    }
+
+    private static async Task<IResult> DeleteNode(
+        string nodeId,
+        [FromServices] IServiceProvider services,
+        CancellationToken ct)
+    {
+        var manager = services.GetService<ClusterManager>();
+        if (manager is null)
+            return Results.Problem(ClusterNotRegistered, statusCode: 503);
+
+        var existing = manager.GetStatus().Nodes.FirstOrDefault(n => n.NodeId == nodeId);
+        if (existing is null)
+            return Results.NotFound(new ErrorResponse($"Node '{nodeId}' not found"));
+
+        if (existing.State is NodeState.Healthy or NodeState.Draining)
+            return Results.BadRequest(new ErrorResponse($"Cannot delete node in '{existing.State}' state. Drain and wait for completion first."));
+
+        await manager.RemoveNodeAsync(nodeId, ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> CancelDrain(
+        string nodeId,
+        [FromServices] IServiceProvider services,
+        CancellationToken ct)
+    {
+        var manager = services.GetService<ClusterManager>();
+        if (manager is null)
+            return Results.Problem(ClusterNotRegistered, statusCode: 503);
+
+        var drainStatus = manager.Drain.GetDrainStatus(nodeId);
+        if (drainStatus is null)
+            return Results.NotFound(new ErrorResponse($"No active drain for node '{nodeId}'"));
+
+        await manager.Drain.CancelDrainAsync(nodeId, ct);
+        return Results.Ok(new StatusUpdateResponse(nodeId, "drain_cancelled"));
+    }
+
+    private static async Task<IResult> ForceDrain(
+        string nodeId,
+        [FromServices] IServiceProvider services,
+        CancellationToken ct)
+    {
+        var manager = services.GetService<ClusterManager>();
+        if (manager is null)
+            return Results.Problem(ClusterNotRegistered, statusCode: 503);
+
+        var drainStatus = manager.Drain.GetDrainStatus(nodeId);
+        if (drainStatus is null)
+            return Results.NotFound(new ErrorResponse($"No active drain for node '{nodeId}'"));
+
+        await manager.Drain.ForceDrainAsync(nodeId, ct);
+        return Results.Ok(new StatusUpdateResponse(nodeId, "force_drained"));
+    }
+
+    private static IResult ListInstances([FromServices] IServiceProvider services)
+    {
+        var manager = services.GetService<ClusterManager>();
+        if (manager is null)
+            return Results.Ok(Array.Empty<MgmtInstanceDto>());
+
+        var status = manager.GetStatus();
+        return Results.Ok(status.LiveInstances.Select(MapInstanceToDto).ToList());
+    }
+
     private static MgmtClusterNodeDto MapNodeToDto(ClusterNode n) =>
         new(n.NodeId, n.State.ToString().ToLowerInvariant(), n.Weight,
             n.PriorityTier, n.MaxCapacity, n.AsteriskVersion,
@@ -83,7 +218,11 @@ internal static class ManagementClusterEndpoints
     private static MgmtDrainStatusDto MapDrainToDto(DrainStatus d) =>
         new(d.NodeId, d.State.ToString().ToLowerInvariant(),
             d.StartedAt, d.Deadline, d.InitialCallCount,
-            d.RemainingCallCount, d.NaturallyCompleted, d.ForceDisconnected);
+            d.RemainingCallCount, d.NaturallyCompleted, d.ForceDisconnected,
+            d.EstimatedTimeToZero);
+
+    private static MgmtInstanceDto MapInstanceToDto(InstanceInfo i) =>
+        new(i.InstanceId, i.LastSeen, i.OwnedNodeIds, i.TotalChannels, i.TotalAgents);
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
@@ -93,7 +232,8 @@ internal sealed record MgmtClusterStatusDto(
     IReadOnlyList<MgmtClusterNodeDto> Nodes,
     int TotalChannels,
     int TotalAgents,
-    IReadOnlyList<MgmtDrainStatusDto> ActiveDrains);
+    IReadOnlyList<MgmtDrainStatusDto> ActiveDrains,
+    IReadOnlyList<MgmtInstanceDto> Instances);
 
 internal sealed record MgmtClusterNodeDto(
     string NodeId,
@@ -114,4 +254,21 @@ internal sealed record MgmtDrainStatusDto(
     int InitialCallCount,
     int RemainingCallCount,
     int NaturallyCompleted,
-    int ForceDisconnected);
+    int ForceDisconnected,
+    TimeSpan? EstimatedTimeToZero);
+
+internal sealed record CreateNodeRequest(
+    string NodeId, string AmiHostname, int AmiPort,
+    string AmiUsername, string AmiPassword,
+    double Weight = 1.0, int PriorityTier = 0,
+    int MaxCapacity = 500,
+    Dictionary<string, string>? Tags = null);
+
+internal sealed record UpdateNodeRequest(
+    double? Weight, int? PriorityTier,
+    int? MaxCapacity, Dictionary<string, string>? Tags);
+
+internal sealed record MgmtInstanceDto(
+    string InstanceId, DateTimeOffset LastSeen,
+    IReadOnlyList<string> OwnedNodeIds,
+    int TotalChannels, int TotalAgents);
