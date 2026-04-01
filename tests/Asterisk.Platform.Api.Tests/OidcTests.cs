@@ -34,13 +34,13 @@ public sealed class OidcTests : IClassFixture<AuthenticatedPlatformApiFactory>
     }
 
     [Fact]
-    public async Task OidcCallback_ShouldReturn400_WhenNoTenantId()
+    public async Task OidcCallback_ShouldReturn400_WhenNoStateCookie()
     {
         var response = await _anonClient.GetAsync("/api/auth/oidc/callback");
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var content = await response.Content.ReadAsStringAsync();
-        content.Should().Contain("tenant_id");
+        content.Should().Contain("OIDC state cookie");
     }
 
     [Fact]

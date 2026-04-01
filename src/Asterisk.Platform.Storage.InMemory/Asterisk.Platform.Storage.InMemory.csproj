@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Asterisk.Platform.Storage.InMemory.Tests" />
+    <InternalsVisibleTo Include="Asterisk.Platform.Identity.Tests" />
     <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 

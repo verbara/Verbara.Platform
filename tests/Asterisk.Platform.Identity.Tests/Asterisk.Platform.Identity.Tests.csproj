@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Asterisk.Platform.Identity\Asterisk.Platform.Identity.csproj" />
+    <ProjectReference Include="..\..\src\Asterisk.Platform.Storage.InMemory\Asterisk.Platform.Storage.InMemory.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -12,6 +13,8 @@
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" />
   </ItemGroup>
 
 </Project>

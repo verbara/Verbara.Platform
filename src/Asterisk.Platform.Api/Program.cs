@@ -15,6 +15,7 @@ using Asterisk.Platform.Audit;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Switchboard;
 using Asterisk.Platform.Identity;
+using Asterisk.Platform.Identity.OidcTokenExchange;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Hosting;
 using Asterisk.Platform.KnowledgeBase;
@@ -127,6 +128,12 @@ builder.Services.AddSingleton<RefreshTokenService>();
 builder.Services.AddSingleton<AuthEventService>();
 builder.Services.AddSingleton<AccountLockoutService>();
 builder.Services.AddSingleton<SessionService>();
+
+// ─── OIDC SSO Services ──────────────────────────────────────────────────────
+builder.Services.AddHttpClient("oidc");
+builder.Services.AddDataProtection();
+builder.Services.AddSingleton<IOidcTokenExchangeService, OidcTokenExchangeService>();
+builder.Services.AddSingleton<IOidcUserProvisioningService, OidcUserProvisioningService>();
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
 var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";

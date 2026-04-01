@@ -28,4 +28,6 @@ public static class AuthEventTypes
     public const string PasswordResetRequest = "password_reset_request";
     public const string ImpersonationStarted = "impersonation_started";
     public const string ImpersonationEnded = "impersonation_ended";
+    public const string OidcLoginSuccess = "oidc_login_success";
+    public const string OidcLoginFailure = "oidc_login_failure";
 }

@@ -23,6 +23,15 @@ internal sealed class InMemoryUserStore : IUserStore
         return Task.FromResult(result);
     }
 
+    public Task<User?> FindByOidcSubjectAsync(TenantId tenantId, string oidcSubject, CancellationToken ct)
+    {
+        var result = _items.Values.FirstOrDefault(u =>
+            u.TenantId == tenantId &&
+            string.Equals(u.OidcSubject, oidcSubject, StringComparison.Ordinal));
+
+        return Task.FromResult(result);
+    }
+
     public Task<PagedResult<User>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
     {
         var filtered = _items.Values

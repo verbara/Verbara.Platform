@@ -28,6 +28,7 @@ public sealed class User : ITenantScoped, IAuditable
     public DateTimeOffset? LastLoginAt { get; set; }
     public string AuthProvider { get; set; } = "local";
     public string? ExternalId { get; set; }
+    public string? OidcSubject { get; set; }
 
     public bool IsLockedOut(DateTimeOffset now) =>
         LockedUntil.HasValue && now < LockedUntil.Value;

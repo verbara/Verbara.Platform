@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_at TIMESTAMPTZ,
     auth_provider TEXT NOT NULL DEFAULT 'local',
     external_id TEXT,
+    oidc_subject TEXT,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ,
     created_by TEXT,
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (tenant_id, lower(email));
+CREATE INDEX IF NOT EXISTS ix_users_oidc_subject ON users (tenant_id, oidc_subject) WHERE oidc_subject IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS api_keys (
     key_id TEXT NOT NULL,

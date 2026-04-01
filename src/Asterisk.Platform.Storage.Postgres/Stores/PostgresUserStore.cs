@@ -14,7 +14,7 @@ internal sealed class PostgresUserStore : IUserStore
     private const string SelectColumns =
         "user_id, tenant_id, email, display_name, role, status, created_at, updated_at, created_by, updated_by, " +
         "password_hash, mfa_enabled, mfa_secret, mfa_recovery_codes, mfa_confirmed_at, email_verified, " +
-        "failed_login_attempts, locked_until, password_changed_at, last_login_at, auth_provider, external_id";
+        "failed_login_attempts, locked_until, password_changed_at, last_login_at, auth_provider, external_id, oidc_subject";
 
     public async Task<User?> GetByIdAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
     {
@@ -31,6 +31,15 @@ internal sealed class PostgresUserStore : IUserStore
         var row = await conn.QuerySingleOrDefaultAsync<UserRow>(
             $"SELECT {SelectColumns} FROM users WHERE tenant_id = @TenantId AND lower(email) = lower(@Email)",
             new { TenantId = tenantId.Value, Email = email });
+        return row?.ToUser();
+    }
+
+    public async Task<User?> FindByOidcSubjectAsync(TenantId tenantId, string oidcSubject, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<UserRow>(
+            $"SELECT {SelectColumns} FROM users WHERE tenant_id = @TenantId AND oidc_subject = @OidcSubject",
+            new { TenantId = tenantId.Value, OidcSubject = oidcSubject });
         return row?.ToUser();
     }
 
@@ -53,10 +62,10 @@ internal sealed class PostgresUserStore : IUserStore
         await conn.ExecuteAsync(
             "INSERT INTO users (user_id, tenant_id, email, display_name, role, status, created_at, updated_at, created_by, updated_by, " +
             "password_hash, mfa_enabled, mfa_secret, mfa_recovery_codes, mfa_confirmed_at, email_verified, " +
-            "failed_login_attempts, locked_until, password_changed_at, last_login_at, auth_provider, external_id) " +
+            "failed_login_attempts, locked_until, password_changed_at, last_login_at, auth_provider, external_id, oidc_subject) " +
             "VALUES (@UserId, @TenantId, @Email, @DisplayName, @Role, @Status, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy, " +
             "@PasswordHash, @MfaEnabled, @MfaSecret, @MfaRecoveryCodes, @MfaConfirmedAt, @EmailVerified, " +
-            "@FailedLoginAttempts, @LockedUntil, @PasswordChangedAt, @LastLoginAt, @AuthProvider, @ExternalId) " +
+            "@FailedLoginAttempts, @LockedUntil, @PasswordChangedAt, @LastLoginAt, @AuthProvider, @ExternalId, @OidcSubject) " +
             "ON CONFLICT (tenant_id, user_id) DO UPDATE SET " +
             "  display_name = EXCLUDED.display_name, role = EXCLUDED.role, status = EXCLUDED.status, " +
             "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by, " +
@@ -65,7 +74,8 @@ internal sealed class PostgresUserStore : IUserStore
             "  mfa_confirmed_at = EXCLUDED.mfa_confirmed_at, email_verified = EXCLUDED.email_verified, " +
             "  failed_login_attempts = EXCLUDED.failed_login_attempts, locked_until = EXCLUDED.locked_until, " +
             "  password_changed_at = EXCLUDED.password_changed_at, last_login_at = EXCLUDED.last_login_at, " +
-            "  auth_provider = EXCLUDED.auth_provider, external_id = EXCLUDED.external_id",
+            "  auth_provider = EXCLUDED.auth_provider, external_id = EXCLUDED.external_id, " +
+            "  oidc_subject = EXCLUDED.oidc_subject",
             new
             {
                 UserId = user.UserId.Value,
@@ -90,6 +100,7 @@ internal sealed class PostgresUserStore : IUserStore
                 user.LastLoginAt,
                 user.AuthProvider,
                 user.ExternalId,
+                user.OidcSubject,
             });
     }
 
@@ -123,7 +134,8 @@ internal sealed class PostgresUserStore : IUserStore
         DateTimeOffset? password_changed_at,
         DateTimeOffset? last_login_at,
         string auth_provider,
-        string? external_id)
+        string? external_id,
+        string? oidc_subject)
     {
         public User ToUser() => new()
         {
@@ -149,6 +161,7 @@ internal sealed class PostgresUserStore : IUserStore
             LastLoginAt = last_login_at,
             AuthProvider = auth_provider,
             ExternalId = external_id,
+            OidcSubject = oidc_subject,
         };
     }
 }
