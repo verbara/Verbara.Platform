@@ -13,6 +13,7 @@ using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Surveys;
+using Asterisk.Platform.Core.Webhooks;
 using Asterisk.Sdk.Pro.MultiTenant;
 
 namespace Asterisk.Platform.Storage.InMemory;
@@ -88,6 +89,10 @@ public static class ServiceCollectionExtensions
         // GDPR
         services.AddSingleton<IPurgeLogStore, InMemoryPurgeLogStore>();
         services.AddSingleton<ITenantRetentionPolicyStore, InMemoryTenantRetentionPolicyStore>();
+
+        // Webhooks
+        services.AddSingleton<IWebhookSubscriptionStore, InMemoryWebhookSubscriptionStore>();
+        services.AddSingleton<IWebhookDeliveryStore, InMemoryWebhookDeliveryStore>();
 
         // MultiTenant
         if (!services.Any(d => d.ServiceType == typeof(ITenantStore)))

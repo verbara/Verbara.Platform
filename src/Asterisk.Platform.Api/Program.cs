@@ -122,6 +122,11 @@ builder.Services.AddSingleton<SystemSettingsStore>();
 // ─── Scheduled Report Store (singleton for mutable report definitions) ────────
 builder.Services.AddSingleton<ScheduledReportStore>();
 
+// ─── Outbound Webhooks ──────────────────────────────────────────────────────
+builder.Services.AddSingleton<WebhookDispatcher>();
+builder.Services.AddHostedService<WebhookDeliveryService>();
+builder.Services.AddHttpClient("webhooks");
+
 // ─── Auth Services ──────────────────────────────────────────────────────────
 // PasswordService and MfaService are static — no DI registration needed
 
@@ -359,6 +364,9 @@ app.MapRbacEndpoints();
 app.MapUsersMeEndpoint();
 app.MapManagementBillingEndpoints();
 app.MapManagementImpersonationEndpoints();
+app.MapWebhookSubscriptionEndpoints();
+app.MapManagementWebhookEndpoints();
+app.MapWebhookEventTypeEndpoints();
 app.MapGdprEndpoints();
 
 // ─── RBAC seed: permissions, role templates (Postgres only) ──────────────────

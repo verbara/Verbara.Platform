@@ -3,6 +3,7 @@ using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Webhooks;
 using Asterisk.Platform.Flows;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
@@ -219,6 +220,18 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateRetentionPolicyRequest))]
 [JsonSerializable(typeof(TenantRetentionPolicy))]
 [JsonSerializable(typeof(Dictionary<string, int>))]
+// Webhooks
+[JsonSerializable(typeof(WebhookSubscription))]
+[JsonSerializable(typeof(List<WebhookSubscription>))]
+[JsonSerializable(typeof(WebhookDelivery))]
+[JsonSerializable(typeof(List<WebhookDelivery>))]
+[JsonSerializable(typeof(PagedResult<WebhookDelivery>))]
+[JsonSerializable(typeof(WebhookEventPayload))]
+[JsonSerializable(typeof(WebhookDeliveryStatus))]
+[JsonSerializable(typeof(CreateWebhookSubscriptionRequest))]
+[JsonSerializable(typeof(UpdateWebhookSubscriptionRequest))]
+[JsonSerializable(typeof(WebhookEventTypeDto))]
+[JsonSerializable(typeof(List<WebhookEventTypeDto>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
