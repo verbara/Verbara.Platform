@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.0.0-pro).
 
-**28 packages, 1162 tests, 0 warnings, AOT-compatible:**
+**28 packages, 1162 tests, 0 warnings, AOT-compatible, 43 endpoint groups:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -35,7 +35,7 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, DI | 40 |
 | Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 86 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
-| Platform.Api | HTTP host -- 42 endpoint groups, auth, middleware, SSE, OpenAPI | 301 |
+| Platform.Api | HTTP host -- 43 endpoint groups, auth, middleware, SSE, OpenAPI | 301 |
 
 ## Build & Test
 
@@ -66,7 +66,7 @@ dotnet run
 
 ### Platform.Api -- Composition Root
 
-`Program.cs` registers all platform packages, all Pro packages (Dialer, EventStore, Analytics, CallAnalytics, AgentAssist, Realtime, Cluster, MultiTenant, Licensing), configures auth (JWT + API key dual-scheme), RBAC, rate limiting, CORS, health checks, and maps 39 endpoint groups.
+`Program.cs` registers all platform packages, all Pro packages (Dialer, EventStore, Analytics, CallAnalytics, AgentAssist, Realtime, Cluster, MultiTenant, Licensing), configures auth (JWT + API key dual-scheme), RBAC, rate limiting, CORS, health checks, and maps 43 endpoint groups.
 
 Storage.InMemory provides drop-in in-memory implementations for development. PostgreSQL storage is activated via connection strings (`Dialer`, `Analytics`, `Realtime`, or fallback `Postgres`).
 
@@ -113,10 +113,10 @@ ErrorHandlingMiddleware -> CORS -> RateLimiter -> TenantResolutionMiddleware -> 
 - **Sessions:** Idle + absolute timeout, revocation
 - **Lockout:** Configurable threshold + duration per tenant
 - **Password policies:** Min length, uppercase, number, special per tenant
-- **RBAC:** 52 permissions (`domain:resource:action`), 7 role templates, custom roles per-tenant, permission cascading via `PermissionResolver` + `PermissionAuthorizationHandler`
+- **RBAC:** 64 permissions (`domain:resource:action`), 8 role templates (Agent, Supervisor, Quality Analyst, Manager, Admin, System Admin, API, Platform Admin), custom roles per-tenant, permission cascading via `PermissionResolver` + `PermissionAuthorizationHandler`
 - **Authorization policies:** `AdminOnly`, `SupervisorPlus`, `Authenticated`
 
-### Endpoint Inventory (42 groups, 42 files)
+### Endpoint Inventory (43 groups, 43 files)
 
 All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. Key groups:
 
@@ -126,7 +126,7 @@ All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. Key groups:
 | Omnichannel | WebhookEndpoints, ConversationEndpoints, ChannelConfigEndpoints, ContactEndpoints, SseEndpoints |
 | Agent | AgentEndpoints, SupervisorEndpoints, SkillEndpoints, UsersMeEndpoint |
 | Admin | AdminEndpoints, AuditEndpoints, ScheduledReportEndpoints |
-| Management | ManagementTenantEndpoints, ManagementSystemEndpoints, ManagementClusterEndpoints, ManagementApiKeyEndpoints, ManagementBillingEndpoints, SetupEndpoints |
+| Management | ManagementTenantEndpoints, ManagementSystemEndpoints, ManagementClusterEndpoints, ManagementApiKeyEndpoints, ManagementBillingEndpoints, ManagementImpersonationEndpoints, SetupEndpoints |
 | Dialer | CampaignEndpoints, CallAttemptEndpoints, DncListEndpoints, CallerIdPoolEndpoints, HolidayCalendarEndpoints, DialerSettingsEndpoints, TrunkEndpoints, OutboundRouteEndpoints |
 | Analytics | AnalyticsEndpoints, AnalyticsLiveEndpoints, QueueMetricsEndpoints |
 | AI/Bot | BotEndpoints, KnowledgeBaseEndpoints, AgentAssistEndpoints, FlowEndpoints |
@@ -145,7 +145,7 @@ Pro.Analytics + Pro.Analytics.Storage.Postgres -- Real-time metrics
 Pro.CallAnalytics + Pro.CallAnalytics.Storage.Postgres -- Post-call AI
 Pro.AgentAssist + Pro.AgentAssist.Storage.Postgres -- Live agent assist
 Pro.Realtime + Pro.Realtime.Storage.Postgres -- Asterisk Realtime DB
-Pro.Cluster                                  -- Multi-server clustering
+Pro.Cluster + Pro.Cluster.Storage.Postgres   -- Multi-server clustering
 Pro.MultiTenant                              -- Tenant isolation
 Pro.Routing                                  -- Skill-based routing
 Pro.Licensing                                -- License enforcement
@@ -199,6 +199,7 @@ builder.Services.AddAsteriskAnalytics();
 builder.Services.AddProCallAnalytics();
 builder.Services.AddProAgentAssistPostgres(analyticsConn);
 builder.Services.AddAsteriskCluster(c => { c.InstanceId = Environment.MachineName; });
+builder.Services.UsePostgresClusterTransport(clusterConn);  // conditional on connection string
 builder.Services.AddAsteriskMultiTenant();
 builder.Services.AddProLicensing(o => o.EnforcementMode = EnforcementMode.Disabled);
 
@@ -234,7 +235,7 @@ Full documentation at `docs/demo-environment.md`. **This file MUST be updated wh
 
 Three pillars delivered:
 1. **Auth Enterprise** -- Email/Password + JWT(RS256) + MFA(TOTP) + OIDC SSO + API Keys(M2M) + Auth Audit + Sessions + Lockout + Password Policies
-2. **RBAC Granular** -- 52 permissions (`domain:resource:action`), 7 templates, custom roles per-tenant, permission cascading, PermissionGuard
+2. **RBAC Granular** -- 64 permissions (`domain:resource:action`), 8 templates, custom roles per-tenant, permission cascading, PermissionGuard
 3. **UI Completion** -- 29 hooks wired, delete confirmations (3s delay), route drag-and-drop, bulk import, diagnostics, audit trail
 
 ## Plan 24: Bug Fixes & Warnings -- COMPLETE (2026-03-30)
@@ -345,6 +346,65 @@ Delivered in Platform.Web repo:
 - **25 E2E tests** across 4 spec files (90 total E2E tests, 14 spec files)
 - ApiHelper extended with 9 billing methods for test data seeding
 - Fix: billing pages fallback to auth tenant when no active tenant selected
+
+## v1.2.1 "Operations" -- COMPLETE (2026-03-31)
+
+5 sub-projects across 3 repos (Platform, SDK Pro, Platform.Web):
+
+- **Plan 29A:** DTO Hardening -- COMPLETE
+- **Plan 29B:** PostgresClusterTransport (SDK Pro) -- COMPLETE
+- **Plan 29C:** Server Management API -- COMPLETE
+- **Plan 29D:** Impersonation -- COMPLETE
+- **Plan 29E:** Cluster UI (Platform.Web) -- COMPLETE
+
+## Plan 29A: DTO Hardening -- COMPLETE (2026-03-31)
+
+Replaced 61 anonymous `new {}` response objects with typed sealed records:
+1. **Shared DTOs** -- ErrorResponse, MessageResponse, StatusUpdateResponse in `Endpoints/Shared/`
+2. **Per-file DTOs** -- 9 endpoint-specific DTO records (e.g., ClusterStatusDto, SystemInfoDto)
+3. **ApiJsonContext** -- All new DTOs registered for AOT serialization
+4. **14 endpoint files refactored** -- type-safe responses throughout
+
+## Plan 29B: PostgresClusterTransport (SDK Pro) -- COMPLETE (2026-03-31)
+
+New `Asterisk.Sdk.Pro.Cluster.Storage.Postgres` package:
+1. **PostgresClusterTransport** -- Implements all 19 abstract methods from ClusterTransportBase
+2. **6 PostgreSQL tables** -- cluster_nodes, cluster_instances, cluster_session_snapshots, cluster_drain_states, cluster_locks, cluster_generations
+3. **LISTEN/NOTIFY** -- PostgreSQL pub/sub for real-time cluster events
+4. **EnsureSchemaAsync** -- Auto-migration on startup
+5. **NodeUpdate** -- New record + UpdateNodeAsync on ClusterManager and all transports
+6. **DI** -- `UsePostgresClusterTransport(connectionString)`
+
+## Plan 29C: Server Management API -- COMPLETE (2026-03-31)
+
+6 new PlatformAdminOnly endpoints in ManagementClusterEndpoints:
+1. **POST /api/management/cluster/nodes** -- Add node
+2. **PUT /api/management/cluster/nodes/{nodeId}** -- Update node
+3. **DELETE /api/management/cluster/nodes/{nodeId}** -- Remove node
+4. **DELETE /api/management/cluster/drain/{nodeId}** -- Cancel drain
+5. **POST /api/management/cluster/drain/{nodeId}/force** -- Force drain
+6. **GET /api/management/cluster/instances** -- List platform instances
+7. **Updated DTOs** -- MgmtClusterStatusDto with Instances, MgmtDrainStatusDto with EstimatedTimeToZero
+8. **Conditional wiring** -- PostgresClusterTransport in Program.cs when Cluster connection string present
+
+## Plan 29D: Impersonation -- COMPLETE (2026-03-31)
+
+Shadow JWT impersonation for platform administrators:
+1. **ManagementImpersonationEndpoints** -- POST /api/management/impersonate, DELETE /api/management/impersonate (43rd endpoint group)
+2. **JwtTokenService.GenerateImpersonationToken()** -- Shadow JWT with 30-min TTL, impersonator_id, impersonator_tenant, impersonation=true claims
+3. **Middleware restrictions** -- Blocks tenant delete, recursive impersonation, system settings, setup during impersonation
+4. **Auth events** -- impersonation_started, impersonation_ended event types
+5. **Frontend** -- useImpersonate/useEndImpersonate hooks, auth store with impersonation state (save/restore original token), ImpersonationBanner with countdown timer
+
+## Plan 29E: Cluster UI (Platform.Web) -- COMPLETE (2026-03-31)
+
+Dedicated cluster management page in Platform.Web:
+1. **Cluster page** -- /admin/cluster with DataTable, summary cards, CRUD sheets (add/edit node)
+2. **Drain management** -- Drain dialog, ConfirmDeleteDialog for remove/force, active drains section (amber)
+3. **Platform instances** -- Instances section in cluster page
+4. **use-cluster.ts rewrite** -- Fixed path mismatch (/api/admin/ -> /api/management/)
+5. **Sidebar** -- Network icon entry for cluster page
+6. **Consolidation** -- Cluster info removed from diagnostics-page and system-page
 
 ## Plan Execution
 
