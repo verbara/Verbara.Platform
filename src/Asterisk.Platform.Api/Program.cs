@@ -118,6 +118,12 @@ builder.Services.AddAsteriskCluster(c =>
 {
     c.InstanceId = Environment.MachineName;
 });
+var clusterConn = builder.Configuration.GetConnectionString("Cluster")
+    ?? builder.Configuration.GetConnectionString("Postgres");
+if (!string.IsNullOrEmpty(clusterConn))
+{
+    builder.Services.UsePostgresClusterTransport(clusterConn);
+}
 
 // ─── Pro.MultiTenant ─────────────────────────────────────────────────────────
 builder.Services.AddAsteriskMultiTenant();
