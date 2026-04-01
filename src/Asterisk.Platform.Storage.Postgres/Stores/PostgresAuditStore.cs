@@ -102,6 +102,14 @@ internal sealed class PostgresAuditStore : IAuditStore
         return new PagedResult<AuditEntry>(items, total, query.Page, query.PageSize);
     }
 
+    public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteAsync(
+            "DELETE FROM audit_entries WHERE tenant_id = @TenantId AND occurred_at < @Cutoff",
+            new { TenantId = tenantId.Value, Cutoff = cutoff });
+    }
+
     private sealed record AuditRow(
         string entry_id,
         string tenant_id,

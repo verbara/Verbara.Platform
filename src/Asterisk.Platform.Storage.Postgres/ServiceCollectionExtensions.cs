@@ -11,6 +11,7 @@ using Asterisk.Platform.Flows;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Billing;
+using Asterisk.Platform.Core;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Storage.Postgres.Stores;
@@ -90,6 +91,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITenantQuotaStore, PostgresTenantQuotaStore>();
         services.AddSingleton<IRateCardStore, PostgresRateCardStore>();
         services.AddSingleton<IInvoiceStore, PostgresInvoiceStore>();
+
+        // GDPR
+        services.AddSingleton<IPurgeLogStore, PostgresPurgeLogStore>();
+        services.AddSingleton<ITenantRetentionPolicyStore, PostgresTenantRetentionPolicyStore>();
 
         // RBAC
         services.AddSingleton<IPermissionStore, PostgresPermissionStore>();

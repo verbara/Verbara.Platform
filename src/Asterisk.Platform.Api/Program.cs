@@ -69,6 +69,11 @@ builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
 builder.Services.AddPlatformBilling();
 
+// ─── GDPR Services ──────────────────────────────────────────────────────────
+builder.Services.AddSingleton<IGdprExportService, GdprExportService>();
+builder.Services.AddSingleton<IGdprPurgeService, GdprPurgeService>();
+builder.Services.AddHostedService<RetentionPurgeService>();
+
 // ─── Storage ─────────────────────────────────────────────────────────────────
 var coreConnectionString = builder.Configuration.GetConnectionString("Postgres");
 if (!string.IsNullOrEmpty(coreConnectionString))
@@ -354,6 +359,7 @@ app.MapRbacEndpoints();
 app.MapUsersMeEndpoint();
 app.MapManagementBillingEndpoints();
 app.MapManagementImpersonationEndpoints();
+app.MapGdprEndpoints();
 
 // ─── RBAC seed: permissions, role templates (Postgres only) ──────────────────
 if (!app.Environment.IsEnvironment("Testing"))

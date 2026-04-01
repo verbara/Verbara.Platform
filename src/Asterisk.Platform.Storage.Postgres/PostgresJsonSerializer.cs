@@ -47,6 +47,7 @@ namespace Asterisk.Platform.Storage.Postgres;
 [JsonSerializable(typeof(IReadOnlyList<RateTier>))]
 [JsonSerializable(typeof(List<InvoiceLineItem>))]
 [JsonSerializable(typeof(IReadOnlyList<InvoiceLineItem>))]
+[JsonSerializable(typeof(Dictionary<string, int>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

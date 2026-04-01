@@ -48,4 +48,39 @@ internal sealed class InMemoryConversationStore : IConversationStore
 
         return Task.FromResult(result);
     }
+
+    public Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
+    {
+        IReadOnlyList<Conversation> result = _items.Values
+            .Where(c => c.TenantId == tenantId && c.ContactId == contactId)
+            .OrderByDescending(c => c.CreatedAt)
+            .ToList();
+        return Task.FromResult(result);
+    }
+
+    public Task<int> DeleteByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
+    {
+        var toDelete = _items
+            .Where(kv => kv.Key.Item1 == tenantId && kv.Value.ContactId == contactId)
+            .Select(kv => kv.Key)
+            .ToList();
+
+        foreach (var key in toDelete)
+            _items.TryRemove(key, out _);
+
+        return Task.FromResult(toDelete.Count);
+    }
+
+    public Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    {
+        var toDelete = _items
+            .Where(kv => kv.Key.Item1 == tenantId && kv.Value.CreatedAt < cutoff)
+            .Select(kv => kv.Key)
+            .ToList();
+
+        foreach (var key in toDelete)
+            _items.TryRemove(key, out _);
+
+        return Task.FromResult(toDelete.Count);
+    }
 }

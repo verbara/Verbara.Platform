@@ -17,4 +17,7 @@ public interface IAuditStore
 
     /// <summary>Returns a paged set of audit entries matching the supplied query.</summary>
     Task<PagedResult<AuditEntry>> SearchAsync(TenantId tenantId, AuditQuery query, CancellationToken ct);
+
+    /// <summary>Deletes audit entries older than cutoff and returns the count deleted (retention policy).</summary>
+    Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct);
 }

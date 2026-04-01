@@ -152,6 +152,14 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
         }).ToList();
     }
 
+    public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteAsync(
+            "DELETE FROM usage_records WHERE tenant_id = @TenantId AND recorded_at < @Cutoff",
+            new { TenantId = tenantId.Value, Cutoff = cutoff });
+    }
+
     private sealed record SummaryRow(short usage_type, decimal total_quantity, int record_count, DateTimeOffset last_updated_at);
 
     private sealed record RecordRow(

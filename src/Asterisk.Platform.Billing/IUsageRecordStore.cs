@@ -21,4 +21,7 @@ public interface IUsageRecordStore
 
     /// <summary>Returns paginated individual usage records for a tenant within a date range, optionally filtered by type.</summary>
     Task<IReadOnlyList<UsageRecord>> ListAsync(TenantId tenantId, DateTimeOffset from, DateTimeOffset until, UsageType? type, int page, int pageSize, CancellationToken ct);
+
+    /// <summary>Deletes usage records older than cutoff and returns the count deleted (retention policy).</summary>
+    Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct);
 }

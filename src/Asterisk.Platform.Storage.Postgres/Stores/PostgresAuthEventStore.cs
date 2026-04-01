@@ -114,6 +114,32 @@ internal sealed class PostgresAuthEventStore : IAuthEventStore
         return new PagedResult<AuthEvent>(items, total, query.Page, query.PageSize);
     }
 
+    public async Task<IReadOnlyList<AuthEvent>> ListAllByUserAsync(string tenantId, string userId, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<AuthEventRow>(
+            "SELECT event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at " +
+            "FROM auth_events WHERE tenant_id = @TenantId AND user_id = @UserId ORDER BY created_at DESC",
+            new { TenantId = tenantId, UserId = userId });
+        return rows.Select(r => r.ToAuthEvent()).ToList();
+    }
+
+    public async Task<int> DeleteByUserAsync(string tenantId, string userId, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteAsync(
+            "DELETE FROM auth_events WHERE tenant_id = @TenantId AND user_id = @UserId",
+            new { TenantId = tenantId, UserId = userId });
+    }
+
+    public async Task<int> DeleteOlderThanAsync(string tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteAsync(
+            "DELETE FROM auth_events WHERE tenant_id = @TenantId AND created_at < @Cutoff",
+            new { TenantId = tenantId, Cutoff = cutoff });
+    }
+
     private sealed record AuthEventRow(
         string event_id,
         string tenant_id,

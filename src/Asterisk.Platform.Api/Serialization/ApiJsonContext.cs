@@ -207,6 +207,18 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(SystemInfoDto))]
 [JsonSerializable(typeof(LicenseInfoDto))]
 [JsonSerializable(typeof(SystemSettingsDto))]
+// GDPR
+[JsonSerializable(typeof(GdprExportRequest))]
+[JsonSerializable(typeof(GdprPurgeRequest))]
+[JsonSerializable(typeof(GdprExportResult))]
+[JsonSerializable(typeof(GdprSubjectInfo))]
+[JsonSerializable(typeof(PurgeResult))]
+[JsonSerializable(typeof(PagedResult<PurgeEntry>))]
+[JsonSerializable(typeof(PurgeEntry))]
+[JsonSerializable(typeof(RetentionPolicyDto))]
+[JsonSerializable(typeof(UpdateRetentionPolicyRequest))]
+[JsonSerializable(typeof(TenantRetentionPolicy))]
+[JsonSerializable(typeof(Dictionary<string, int>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

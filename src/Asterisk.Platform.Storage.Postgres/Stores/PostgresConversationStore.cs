@@ -132,6 +132,34 @@ internal sealed class PostgresConversationStore : IConversationStore
         return row?.ToConversation();
     }
 
+    public async Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<ConversationRow>(
+            "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
+            "FROM conversations WHERE tenant_id = @TenantId AND contact_id = @ContactId " +
+            "ORDER BY created_at DESC",
+            new { TenantId = tenantId.Value, ContactId = contactId.Value });
+        return rows.Select(r => r.ToConversation()).ToList();
+    }
+
+    public async Task<int> DeleteByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteAsync(
+            "DELETE FROM conversations WHERE tenant_id = @TenantId AND contact_id = @ContactId",
+            new { TenantId = tenantId.Value, ContactId = contactId.Value });
+    }
+
+    public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteAsync(
+            "DELETE FROM conversations WHERE tenant_id = @TenantId AND created_at < @Cutoff",
+            new { TenantId = tenantId.Value, Cutoff = cutoff });
+    }
+
     private static int[] GetTerminalStateInts()
     {
         var terminalStates = new List<int>();

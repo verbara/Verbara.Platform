@@ -102,6 +102,43 @@ internal sealed class PostgresMessageStore : IMessageStore
         return row?.ToMessage();
     }
 
+    public async Task<IReadOnlyList<Message>> GetByConversationIdsAsync(TenantId tenantId, IReadOnlyList<EntityId> conversationIds, CancellationToken ct)
+    {
+        if (conversationIds.Count == 0)
+            return [];
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var ids = conversationIds.Select(id => id.Value).ToArray();
+        var rows = await conn.QueryAsync<MessageRow>(
+            "SELECT message_id, conversation_id, tenant_id, direction, channel, sender_id, content, " +
+            "delivery_status, external_message_id, created_at, delivered_at, read_at, updated_at, created_by, updated_by " +
+            "FROM messages WHERE tenant_id = @TenantId AND conversation_id = ANY(@ConversationIds) " +
+            "ORDER BY created_at",
+            new { TenantId = tenantId.Value, ConversationIds = ids });
+        return rows.Select(r => r.ToMessage()).ToList();
+    }
+
+    public async Task<int> DeleteByConversationIdsAsync(TenantId tenantId, IReadOnlyList<EntityId> conversationIds, CancellationToken ct)
+    {
+        if (conversationIds.Count == 0)
+            return 0;
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var ids = conversationIds.Select(id => id.Value).ToArray();
+        return await conn.ExecuteAsync(
+            "DELETE FROM messages WHERE tenant_id = @TenantId AND conversation_id = ANY(@ConversationIds)",
+            new { TenantId = tenantId.Value, ConversationIds = ids });
+    }
+
+    public async Task<int> DeleteOrphanedAsync(TenantId tenantId, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteAsync(
+            "DELETE FROM messages m WHERE m.tenant_id = @TenantId " +
+            "AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.tenant_id = m.tenant_id AND c.conversation_id = m.conversation_id)",
+            new { TenantId = tenantId.Value });
+    }
+
     private sealed record MessageRow(
         string message_id,
         string conversation_id,

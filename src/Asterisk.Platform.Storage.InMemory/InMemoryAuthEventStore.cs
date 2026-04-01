@@ -58,4 +58,39 @@ internal sealed class InMemoryAuthEventStore : IAuthEventStore
 
         return Task.FromResult(new PagedResult<AuthEvent>(items, totalCount, query.Page, query.PageSize));
     }
+
+    public Task<IReadOnlyList<AuthEvent>> ListAllByUserAsync(string tenantId, string userId, CancellationToken ct)
+    {
+        IReadOnlyList<AuthEvent> result = _items
+            .Where(e => e.TenantId == tenantId && e.UserId == userId)
+            .OrderByDescending(e => e.CreatedAt)
+            .ToList();
+        return Task.FromResult(result);
+    }
+
+    public Task<int> DeleteByUserAsync(string tenantId, string userId, CancellationToken ct)
+    {
+        // ConcurrentBag does not support removal — rebuild
+        var toKeep = _items.Where(e => !(e.TenantId == tenantId && e.UserId == userId)).ToList();
+        var deleted = _items.Count - toKeep.Count;
+
+        // Clear and re-add (ConcurrentBag has no RemoveWhere)
+        while (_items.TryTake(out _)) { }
+        foreach (var item in toKeep)
+            _items.Add(item);
+
+        return Task.FromResult(deleted);
+    }
+
+    public Task<int> DeleteOlderThanAsync(string tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    {
+        var toKeep = _items.Where(e => !(e.TenantId == tenantId && e.CreatedAt < cutoff)).ToList();
+        var deleted = _items.Count - toKeep.Count;
+
+        while (_items.TryTake(out _)) { }
+        foreach (var item in toKeep)
+            _items.Add(item);
+
+        return Task.FromResult(deleted);
+    }
 }

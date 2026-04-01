@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Automation;
 using Asterisk.Platform.Billing;
+using Asterisk.Platform.Core;
 using Asterisk.Platform.Bot;
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Conversations;
@@ -83,6 +84,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITenantQuotaStore, InMemoryTenantQuotaStore>();
         services.AddSingleton<IRateCardStore, InMemoryRateCardStore>();
         services.AddSingleton<IInvoiceStore, InMemoryInvoiceStore>();
+
+        // GDPR
+        services.AddSingleton<IPurgeLogStore, InMemoryPurgeLogStore>();
+        services.AddSingleton<ITenantRetentionPolicyStore, InMemoryTenantRetentionPolicyStore>();
 
         // MultiTenant
         if (!services.Any(d => d.ServiceType == typeof(ITenantStore)))

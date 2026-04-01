@@ -95,6 +95,22 @@ internal sealed class InMemoryUsageRecordStore : IUsageRecordStore
         return Task.FromResult(result);
     }
 
+    public Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    {
+        if (!_records.TryGetValue(tenantId, out var list))
+            return Task.FromResult(0);
+
+        int deleted;
+        lock (list)
+        {
+            var before = list.Count;
+            list.RemoveAll(r => r.RecordedAt < cutoff);
+            deleted = before - list.Count;
+        }
+
+        return Task.FromResult(deleted);
+    }
+
     private List<UsageRecord> GetTenantRecords(TenantId tenantId)
     {
         if (!_records.TryGetValue(tenantId, out var list))
