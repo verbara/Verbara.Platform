@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Asterisk.Platform.Api.Endpoints;
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Flows;
@@ -175,6 +176,30 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(SuggestionLogRowDto[]))]
 [JsonSerializable(typeof(ComplianceAlertRowDto))]
 [JsonSerializable(typeof(ComplianceAlertRowDto[]))]
+// Shared response DTOs
+[JsonSerializable(typeof(ErrorResponse))]
+[JsonSerializable(typeof(ErrorDetailResponse))]
+[JsonSerializable(typeof(MessageResponse))]
+[JsonSerializable(typeof(StatusUpdateResponse))]
+[JsonSerializable(typeof(PagedDataResponse<CdrRowDto>))]
+[JsonSerializable(typeof(PagedDataResponse<QaRowDto>))]
+// Auth
+[JsonSerializable(typeof(MfaChallengeResponse))]
+[JsonSerializable(typeof(AuthEventDetail))]
+// RBAC
+[JsonSerializable(typeof(PermissionGroupDto))]
+[JsonSerializable(typeof(List<PermissionGroupDto>))]
+[JsonSerializable(typeof(UserPermissionsDto))]
+[JsonSerializable(typeof(PermissionDefinition))]
+[JsonSerializable(typeof(List<PermissionDefinition>))]
+// Channel Config
+[JsonSerializable(typeof(ChannelStatusDto))]
+[JsonSerializable(typeof(ChannelTestResponse))]
+[JsonSerializable(typeof(IReadOnlyDictionary<string, bool>))]
+// Management System
+[JsonSerializable(typeof(SystemInfoDto))]
+[JsonSerializable(typeof(LicenseInfoDto))]
+[JsonSerializable(typeof(SystemSettingsDto))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
