@@ -88,6 +88,44 @@ internal sealed class JwtTokenService
         return (token, expiresAt);
     }
 
+    public (string Token, DateTimeOffset ExpiresAt) GenerateImpersonationToken(
+        User admin, string targetTenantId, IReadOnlySet<string> targetPermissions)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var expiresAt = now.Add(TimeSpan.FromMinutes(30));
+
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, admin.UserId.Value),
+            new("tid", targetTenantId),
+            new(JwtRegisteredClaimNames.Email, admin.Email),
+            new("name", admin.DisplayName),
+            new(ClaimTypes.Role, "Admin"),
+            new("impersonator_id", admin.UserId.Value),
+            new("impersonator_tenant", admin.TenantId.Value),
+            new("impersonation", "true"),
+        };
+
+        foreach (var permission in targetPermissions)
+        {
+            claims.Add(new Claim("permissions", permission));
+        }
+
+        var descriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(claims),
+            Expires = expiresAt.UtcDateTime,
+            IssuedAt = now.UtcDateTime,
+            Issuer = Issuer,
+            Audience = Audience,
+            SigningCredentials = _signingCredentials,
+        };
+
+        var handler = new JwtSecurityTokenHandler();
+        var token = handler.CreateEncodedJwt(descriptor);
+        return (token, expiresAt);
+    }
+
     public ClaimsPrincipal? ValidateToken(string token)
     {
         try

@@ -26,4 +26,6 @@ public static class AuthEventTypes
     public const string SessionRevoked = "session_revoked";
     public const string PasswordReset = "password_reset";
     public const string PasswordResetRequest = "password_reset_request";
+    public const string ImpersonationStarted = "impersonation_started";
+    public const string ImpersonationEnded = "impersonation_ended";
 }
