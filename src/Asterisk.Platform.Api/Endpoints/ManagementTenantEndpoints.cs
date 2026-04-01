@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
 
@@ -60,7 +61,7 @@ internal static class ManagementTenantEndpoints
     {
         // Validate type
         if (body.Type is not (TenantType.Customer or TenantType.Partner))
-            return Results.BadRequest(new { error = "Type must be Customer or Partner." });
+            return Results.BadRequest(new ErrorResponse("Type must be Customer or Partner."));
 
         // Resolve parent
         var parentId = body.ParentTenantId;
@@ -76,14 +77,14 @@ internal static class ManagementTenantEndpoints
         // Validate parent exists
         var parent = await store.GetAsync(parentId, ct);
         if (parent is null)
-            return Results.BadRequest(new { error = $"Parent tenant '{parentId}' not found." });
+            return Results.BadRequest(new ErrorResponse($"Parent tenant '{parentId}' not found."));
 
         // Validate hierarchy: Partner can only be child of Platform, Customer can be child of Platform or Partner
         if (body.Type == TenantType.Partner && parent.Type != TenantType.Platform)
-            return Results.BadRequest(new { error = "Partner tenants must be children of the Platform tenant." });
+            return Results.BadRequest(new ErrorResponse("Partner tenants must be children of the Platform tenant."));
 
         if (body.Type == TenantType.Customer && parent.Type is not (TenantType.Platform or TenantType.Partner))
-            return Results.BadRequest(new { error = "Customer tenants must be children of Platform or a Partner." });
+            return Results.BadRequest(new ErrorResponse("Customer tenants must be children of Platform or a Partner."));
 
         var tenant = new Tenant
         {
@@ -148,10 +149,10 @@ internal static class ManagementTenantEndpoints
         var tenant = await store.GetAsync(id, ct);
         if (tenant is null) return Results.NotFound();
         if (tenant.Type == TenantType.Platform)
-            return Results.BadRequest(new { error = "Cannot suspend the Platform tenant." });
+            return Results.BadRequest(new ErrorResponse("Cannot suspend the Platform tenant."));
 
         await store.UpdateStatusAsync(id, TenantStatus.Suspended, ct);
-        return Results.Ok(new { tenantId = id, status = "Suspended" });
+        return Results.Ok(new StatusUpdateResponse(id, "Suspended"));
     }
 
     private static async Task<IResult> ActivateTenant(
@@ -163,7 +164,7 @@ internal static class ManagementTenantEndpoints
         if (tenant is null) return Results.NotFound();
 
         await store.UpdateStatusAsync(id, TenantStatus.Active, ct);
-        return Results.Ok(new { tenantId = id, status = "Active" });
+        return Results.Ok(new StatusUpdateResponse(id, "Active"));
     }
 
     private static async Task<IResult> DeleteTenant(
@@ -174,7 +175,7 @@ internal static class ManagementTenantEndpoints
         var tenant = await store.GetAsync(id, ct);
         if (tenant is null) return Results.NotFound();
         if (tenant.Type == TenantType.Platform)
-            return Results.BadRequest(new { error = "Cannot delete the Platform tenant." });
+            return Results.BadRequest(new ErrorResponse("Cannot delete the Platform tenant."));
 
         // UpdateStatusAsync throws if active children exist
         await store.UpdateStatusAsync(id, TenantStatus.Deleted, ct);

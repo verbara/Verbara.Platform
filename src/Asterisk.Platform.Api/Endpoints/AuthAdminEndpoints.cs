@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -111,7 +112,7 @@ internal static class AuthAdminEndpoints
             return Results.Unauthorized();
 
         if (string.IsNullOrWhiteSpace(userId))
-            return Results.BadRequest(new { error = "userId query parameter is required" });
+            return Results.BadRequest(new ErrorResponse("userId query parameter is required"));
 
         var sessions = await sessionService.ListActiveSessionsAsync(tenantId, userId, ct);
         return Results.Ok(sessions);

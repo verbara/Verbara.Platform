@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
@@ -27,11 +28,11 @@ internal static class SetupEndpoints
         // Guard: only works if no host tenant exists
         var existing = await tenantStore.GetHostTenantAsync(ct);
         if (existing is not null)
-            return Results.Conflict(new { error = "Platform already initialized." });
+            return Results.Conflict(new ErrorResponse("Platform already initialized."));
 
         // Validate input
         if (string.IsNullOrWhiteSpace(body.Email) || string.IsNullOrWhiteSpace(body.Password))
-            return Results.BadRequest(new { error = "Email and password are required." });
+            return Results.BadRequest(new ErrorResponse("Email and password are required."));
 
         // 1. Create host tenant
         var hostTenantId = "platform";

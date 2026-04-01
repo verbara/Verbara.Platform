@@ -1,4 +1,5 @@
 using System.Globalization;
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
 using Microsoft.AspNetCore.Mvc;
@@ -186,7 +187,7 @@ internal static class AnalyticsEndpoints
                 Metadata: row.Metadata);
         }).ToArray();
 
-        return Results.Ok(new { Data = dtos, HasMore = hasMore, Page = page, PageSize = pageSize });
+        return Results.Ok(new PagedDataResponse<CdrRowDto>(dtos, hasMore, page, pageSize));
     }
 
     // ─── CDR Detail Handler ────────────────────────────────────────────────────
@@ -363,7 +364,7 @@ internal static class AnalyticsEndpoints
                 Topics: topics);
         }).ToArray();
 
-        return Results.Ok(new { Data = dtos, HasMore = hasMore, Page = page, PageSize = pageSize });
+        return Results.Ok(new PagedDataResponse<QaRowDto>(dtos, hasMore, page, pageSize));
     }
 
     // ─── QA Detail Handler ─────────────────────────────────────────────────────

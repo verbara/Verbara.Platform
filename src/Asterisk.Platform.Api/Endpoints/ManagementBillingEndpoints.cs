@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Core;
 using Microsoft.AspNetCore.Mvc;
@@ -128,7 +129,7 @@ internal static class ManagementBillingEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new { error = ex.Message });
+            return Results.BadRequest(new ErrorResponse(ex.Message));
         }
 
         await store.SaveAsync(invoice, ct);
@@ -156,7 +157,7 @@ internal static class ManagementBillingEndpoints
             return Results.NotFound();
 
         await store.UpdateStatusAsync(new TenantId(tenantId), EntityId.From(id), InvoiceStatus.Issued, ct);
-        return Results.Ok(new { invoiceId = id, status = "Issued" });
+        return Results.Ok(new StatusUpdateResponse(id, "Issued"));
     }
 
     // ─── Usage Handlers ──────────────────────────────────────────────────────────
@@ -196,7 +197,7 @@ internal static class ManagementBillingEndpoints
         if (!string.IsNullOrEmpty(type))
         {
             if (!Enum.TryParse<UsageType>(type, out var parsed))
-                return Results.BadRequest(new { error = $"Unknown usage type: {type}" });
+                return Results.BadRequest(new ErrorResponse($"Unknown usage type: {type}"));
             typeFilter = parsed;
         }
 
@@ -226,7 +227,7 @@ internal static class ManagementBillingEndpoints
         CancellationToken ct)
     {
         if (body.QuotaAction is not null && !Enum.TryParse<QuotaAction>(body.QuotaAction, out _))
-            return Results.BadRequest(new { error = $"Unknown quota action: {body.QuotaAction}" });
+            return Results.BadRequest(new ErrorResponse($"Unknown quota action: {body.QuotaAction}"));
 
         var tid = new TenantId(tenantId);
         var existing = await store.GetAsync(tid, ct);

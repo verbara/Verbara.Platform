@@ -41,45 +41,24 @@ internal static class ManagementSystemEndpoints
         CancellationToken ct)
     {
         var hostTenant = await tenantStore.GetHostTenantAsync(ct);
-        return Results.Ok(new
-        {
-            version = "1.1.0",
-            hostTenantId = hostTenant?.TenantId,
-            platformName = hostTenant?.Name ?? "Asterisk Platform",
-            features = features.GetFeatures(),
-        });
+        return Results.Ok(new SystemInfoDto("1.1.0", hostTenant?.TenantId, hostTenant?.Name ?? "Asterisk Platform", features.GetFeatures()));
     }
 
     private static IResult GetLicenseInfo()
     {
-        return Results.Ok(new
-        {
-            tier = "community",
-            features = Array.Empty<string>(),
-            maxAgents = 10,
-        });
+        return Results.Ok(new LicenseInfoDto("community", Array.Empty<string>(), 10));
     }
 
     private static IResult UpdateLicense([FromBody] UpdateLicenseRequest body)
     {
         // License activation will be implemented when Pro.Licensing supports runtime activation
-        return Results.Ok(new
-        {
-            tier = "community",
-            features = Array.Empty<string>(),
-            message = "License activation not yet implemented.",
-        });
+        return Results.Ok(new LicenseInfoDto("community", Array.Empty<string>(), 10, "License activation not yet implemented."));
     }
 
     private static IResult GetSettings([FromServices] SystemSettingsStore store)
     {
         var record = store.Get();
-        return Results.Ok(new
-        {
-            platformName = record.PlatformName,
-            defaultTimezone = record.DefaultTimezone,
-            defaultLanguage = record.DefaultLanguage,
-        });
+        return Results.Ok(new SystemSettingsDto(record.PlatformName, record.DefaultTimezone, record.DefaultLanguage));
     }
 
     private static IResult SaveSettings(
@@ -88,12 +67,7 @@ internal static class ManagementSystemEndpoints
     {
         var record = new SystemSettingsRecord(body.PlatformName, body.DefaultTimezone, body.DefaultLanguage);
         store.Save(record);
-        return Results.Ok(new
-        {
-            platformName = record.PlatformName,
-            defaultTimezone = record.DefaultTimezone,
-            defaultLanguage = record.DefaultLanguage,
-        });
+        return Results.Ok(new SystemSettingsDto(record.PlatformName, record.DefaultTimezone, record.DefaultLanguage));
     }
 }
 
@@ -101,3 +75,7 @@ internal static class ManagementSystemEndpoints
 
 internal sealed record UpdateLicenseRequest(string LicenseKey);
 internal sealed record SystemSettingsRequest(string PlatformName, string DefaultTimezone, string DefaultLanguage);
+
+internal sealed record SystemInfoDto(string Version, string? HostTenantId, string? PlatformName, IReadOnlyDictionary<string, bool> Features);
+internal sealed record LicenseInfoDto(string Tier, IReadOnlyList<string> Features, int MaxAgents, string? Message = null);
+internal sealed record SystemSettingsDto(string PlatformName, string DefaultTimezone, string DefaultLanguage);

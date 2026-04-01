@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Bot;
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Conversations;
@@ -40,7 +41,7 @@ internal static class WebhookEndpoints
         var logger = loggerFactory.CreateLogger("WebhookEndpoints");
 
         if (!TryParseChannelType(channel, out var channelType))
-            return Results.BadRequest(new { error = $"Unknown channel: {channel}" });
+            return Results.BadRequest(new ErrorResponse($"Unknown channel: {channel}"));
 
         var tid = new TenantId(tenantId);
 
@@ -68,7 +69,7 @@ internal static class WebhookEndpoints
 #pragma warning disable CA1848 // Use LoggerMessage delegates
             logger.LogWarning(ex, "No handler registered for channel {Channel}", channel);
 #pragma warning restore CA1848
-            return Results.BadRequest(new { error = ex.Message });
+            return Results.BadRequest(new ErrorResponse(ex.Message));
         }
 
         if (result.Type == WebhookResultType.NewMessage && result.Message is not null)

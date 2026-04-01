@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
@@ -51,7 +52,7 @@ internal static class RbacEndpoints
     {
         var all = await store.GetAllAsync(ct);
         var grouped = all.GroupBy(p => p.Category)
-            .Select(g => new { Category = g.Key, Permissions = g.ToList() })
+            .Select(g => new PermissionGroupDto(g.Key, g.ToList()))
             .OrderBy(g => g.Category)
             .ToList();
         return Results.Ok(grouped);
@@ -95,7 +96,7 @@ internal static class RbacEndpoints
         {
             var template = await templateStore.GetByIdAsync(body.SourceTemplateId, ct);
             if (template is null)
-                return Results.BadRequest(new { Error = $"Template '{body.SourceTemplateId}' not found" });
+                return Results.BadRequest(new ErrorResponse($"Template '{body.SourceTemplateId}' not found"));
 
             await store.CloneFromTemplateAsync(tenantId, roleId, body.SourceTemplateId,
                 body.Name, body.Description, ct);
@@ -162,11 +163,11 @@ internal static class RbacEndpoints
 
         // Prevent deleting roles that are cloned from system templates and marked as default
         if (role.IsDefault)
-            return Results.BadRequest(new { Error = "Cannot delete a default role" });
+            return Results.BadRequest(new ErrorResponse("Cannot delete a default role"));
 
         var userCount = await store.GetUserCountAsync(tenantId, id, ct);
         if (userCount > 0)
-            return Results.BadRequest(new { Error = $"Cannot delete role with {userCount} assigned users" });
+            return Results.BadRequest(new ErrorResponse($"Cannot delete role with {userCount} assigned users"));
 
         await store.DeleteAsync(tenantId, id, ct);
         resolver.InvalidateTenant(tenantId);
@@ -261,7 +262,7 @@ internal static class RbacEndpoints
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
         var permissions = await resolver.ResolveAsync(tenantId, userId, ct);
-        return Results.Ok(new { UserId = id, Permissions = permissions.Order().ToList() });
+        return Results.Ok(new UserPermissionsDto(id, permissions.Order().ToList()));
     }
 
     // --- Helpers ---
@@ -292,3 +293,6 @@ internal sealed record CloneTenantRoleRequest(
     string? Description = null);
 
 internal sealed record ReplaceUserRolesRequest(IReadOnlyList<string> RoleIds);
+
+internal sealed record PermissionGroupDto(string Category, IReadOnlyList<PermissionDefinition> Permissions);
+internal sealed record UserPermissionsDto(string UserId, IReadOnlyList<string> Permissions);

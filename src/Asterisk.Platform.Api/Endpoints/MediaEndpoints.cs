@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Media;
 
@@ -22,13 +23,13 @@ internal static class MediaEndpoints
         var tenantId = GetTenantId(context);
 
         if (!context.Request.HasFormContentType)
-            return Results.BadRequest(new { error = "Request must be multipart/form-data" });
+            return Results.BadRequest(new ErrorResponse("Request must be multipart/form-data"));
 
         var form = await context.Request.ReadFormAsync(ct);
         var file = form.Files.GetFile("file");
 
         if (file is null || file.Length == 0)
-            return Results.BadRequest(new { error = "No file provided or file is empty" });
+            return Results.BadRequest(new ErrorResponse("No file provided or file is empty"));
 
         var uploadedBy = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
@@ -47,7 +48,7 @@ internal static class MediaEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new { error = ex.Message });
+            return Results.BadRequest(new ErrorResponse(ex.Message));
         }
     }
 

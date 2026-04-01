@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
@@ -64,7 +65,7 @@ internal static class AuthEndpoints
             rawTenantId = ctxTenant?.ToString();
 
         if (string.IsNullOrWhiteSpace(rawTenantId))
-            return Results.BadRequest(new { error = "Tenant identification required. Provide tenantId in body or X-Tenant-Id header." });
+            return Results.BadRequest(new ErrorResponse("Tenant identification required. Provide tenantId in body or X-Tenant-Id header."));
 
         var tenantId = new TenantId(rawTenantId);
         var ip = GetIpAddress(context);
@@ -74,18 +75,18 @@ internal static class AuthEndpoints
         if (user is null || string.IsNullOrEmpty(user.PasswordHash))
         {
             await authEvents.LogAsync(rawTenantId!, null, AuthEventTypes.LoginFailure, ip, ua,
-                new { email = body.Email, reason = "invalid_credentials" }, ct);
+                new AuthEventDetail(Email: body.Email, Reason: "invalid_credentials"), ct);
             return Results.Unauthorized();
         }
 
         if (user.IsLockedOut(DateTimeOffset.UtcNow))
-            return Results.Json(new { error = "Account is locked" }, statusCode: 423);
+            return Results.Json(new ErrorResponse("Account is locked"), statusCode: 423);
 
         if (!PasswordService.VerifyPassword(body.Password, user.PasswordHash))
         {
             await lockoutService.RecordFailedAttemptAsync(user, ip, ua, ct);
             await authEvents.LogAsync(rawTenantId!, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
-                new { reason = "invalid_password" }, ct);
+                new AuthEventDetail(Reason: "invalid_password"), ct);
             return Results.Unauthorized();
         }
 
@@ -100,7 +101,7 @@ internal static class AuthEndpoints
                 ExpiresAt = DateTimeOffset.UtcNow.Add(MfaPendingTtl),
             };
 
-            return Results.Ok(new { mfaRequired = true, challengeToken });
+            return Results.Ok(new MfaChallengeResponse(true, challengeToken));
         }
 
         // Issue tokens
@@ -120,10 +121,10 @@ internal static class AuthEndpoints
         CancellationToken ct)
     {
         if (!MfaPendingCache.TryRemove(body.ChallengeToken, out var pending))
-            return Results.BadRequest(new { error = "Invalid or expired challenge token" });
+            return Results.BadRequest(new ErrorResponse("Invalid or expired challenge token"));
 
         if (pending.ExpiresAt < DateTimeOffset.UtcNow)
-            return Results.BadRequest(new { error = "Challenge token expired" });
+            return Results.BadRequest(new ErrorResponse("Challenge token expired"));
 
         var tenantId = new TenantId(pending.TenantId);
         var user = await userStore.GetByIdAsync(tenantId, EntityId.From(pending.UserId), ct);
@@ -234,7 +235,7 @@ internal static class AuthEndpoints
         }
 
         context.Response.Cookies.Delete(RefreshCookieName);
-        return Results.Ok(new { message = "Logged out" });
+        return Results.Ok(new MessageResponse("Logged out"));
     }
 
     // ─── API Key Login ──────────────────────────────────────────────────────────
@@ -295,12 +296,12 @@ internal static class AuthEndpoints
             return Results.Unauthorized();
 
         if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(body.OldPassword, user.PasswordHash))
-            return Results.BadRequest(new { error = "Current password is incorrect" });
+            return Results.BadRequest(new ErrorResponse("Current password is incorrect"));
 
         var config = await configStore.GetAsync(tenantId, ct) ?? new TenantAuthConfig { TenantId = tenantId };
         var validation = PasswordService.ValidatePolicy(body.NewPassword, config);
         if (!validation.IsValid)
-            return Results.BadRequest(new { error = "Password does not meet policy", details = validation.Errors });
+            return Results.BadRequest(new ErrorDetailResponse("Password does not meet policy", validation.Errors));
 
         user.PasswordHash = PasswordService.HashPassword(body.NewPassword);
         user.PasswordChangedAt = DateTimeOffset.UtcNow;
@@ -309,7 +310,7 @@ internal static class AuthEndpoints
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.PasswordChange,
             GetIpAddress(context), GetUserAgent(context), null, ct);
 
-        return Results.Ok(new { message = "Password changed" });
+        return Results.Ok(new MessageResponse("Password changed"));
     }
 
     // ─── Forgot Password ────────────────────────────────────────────────────────
@@ -343,7 +344,7 @@ internal static class AuthEndpoints
             }
         }
 
-        return Results.Ok(new { message = "If the email exists, a reset link has been sent" });
+        return Results.Ok(new MessageResponse("If the email exists, a reset link has been sent"));
     }
 
     // ─── Reset Password ─────────────────────────────────────────────────────────
@@ -356,19 +357,19 @@ internal static class AuthEndpoints
         CancellationToken ct)
     {
         if (!PasswordResetCache.TryRemove(body.Token, out var entry))
-            return Results.BadRequest(new { error = "Invalid or expired reset token" });
+            return Results.BadRequest(new ErrorResponse("Invalid or expired reset token"));
 
         if (entry.ExpiresAt < DateTimeOffset.UtcNow)
-            return Results.BadRequest(new { error = "Reset token expired" });
+            return Results.BadRequest(new ErrorResponse("Reset token expired"));
 
         var user = await userStore.GetByIdAsync(new TenantId(entry.TenantId), EntityId.From(entry.UserId), ct);
         if (user is null)
-            return Results.BadRequest(new { error = "Invalid reset token" });
+            return Results.BadRequest(new ErrorResponse("Invalid reset token"));
 
         var config = await configStore.GetAsync(entry.TenantId, ct) ?? new TenantAuthConfig { TenantId = entry.TenantId };
         var validation = PasswordService.ValidatePolicy(body.NewPassword, config);
         if (!validation.IsValid)
-            return Results.BadRequest(new { error = "Password does not meet policy", details = validation.Errors });
+            return Results.BadRequest(new ErrorDetailResponse("Password does not meet policy", validation.Errors));
 
         user.PasswordHash = PasswordService.HashPassword(body.NewPassword);
         user.PasswordChangedAt = DateTimeOffset.UtcNow;
@@ -379,7 +380,7 @@ internal static class AuthEndpoints
         await authEvents.LogAsync(entry.TenantId, entry.UserId, AuthEventTypes.PasswordReset,
             null, null, null, ct);
 
-        return Results.Ok(new { message = "Password reset successful" });
+        return Results.Ok(new MessageResponse("Password reset successful"));
     }
 
     // ─── MFA Setup ──────────────────────────────────────────────────────────────
@@ -423,10 +424,10 @@ internal static class AuthEndpoints
 
         var user = await userStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(userId), ct);
         if (user is null || string.IsNullOrEmpty(user.MfaSecret))
-            return Results.BadRequest(new { error = "MFA setup not initiated" });
+            return Results.BadRequest(new ErrorResponse("MFA setup not initiated"));
 
         if (!MfaService.VerifyCode(user.MfaSecret, body.Code))
-            return Results.BadRequest(new { error = "Invalid verification code" });
+            return Results.BadRequest(new ErrorResponse("Invalid verification code"));
 
         user.MfaEnabled = true;
         user.MfaConfirmedAt = DateTimeOffset.UtcNow;
@@ -435,7 +436,7 @@ internal static class AuthEndpoints
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.MfaEnroll,
             GetIpAddress(context), GetUserAgent(context), null, ct);
 
-        return Results.Ok(new { message = "MFA enabled" });
+        return Results.Ok(new MessageResponse("MFA enabled"));
     }
 
     // ─── MFA Disable ────────────────────────────────────────────────────────────
@@ -456,7 +457,7 @@ internal static class AuthEndpoints
             return Results.Unauthorized();
 
         if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(body.Password, user.PasswordHash))
-            return Results.BadRequest(new { error = "Invalid password" });
+            return Results.BadRequest(new ErrorResponse("Invalid password"));
 
         user.MfaEnabled = false;
         user.MfaSecret = null;
@@ -467,7 +468,7 @@ internal static class AuthEndpoints
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.MfaDisable,
             GetIpAddress(context), GetUserAgent(context), null, ct);
 
-        return Results.Ok(new { message = "MFA disabled" });
+        return Results.Ok(new MessageResponse("MFA disabled"));
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -642,6 +643,9 @@ internal static class RoleDefaultPermissions
         "reporting:realtime:view",
     ];
 }
+
+internal sealed record MfaChallengeResponse(bool MfaRequired, string ChallengeToken);
+internal sealed record AuthEventDetail(string? Email = null, string? Reason = null);
 
 internal sealed class MfaPendingEntry
 {

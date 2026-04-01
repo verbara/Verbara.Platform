@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Conversations.Services;
 using Asterisk.Platform.Conversations.Stores;
@@ -138,7 +139,7 @@ internal static class ConversationEndpoints
         else if (body.TargetAgentId is not null)
             result = await switchboard.TransferToAgentAsync(EntityId.From(id), tenantId, EntityId.From(body.TargetAgentId), ct);
         else
-            return Results.BadRequest(new { error = "Either targetQueueId or targetAgentId must be specified" });
+            return Results.BadRequest(new ErrorResponse("Either targetQueueId or targetAgentId must be specified"));
 
         return Results.Ok(result);
     }
@@ -184,7 +185,7 @@ internal static class ConversationEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new { error = ex.Message });
+            return Results.BadRequest(new ErrorResponse(ex.Message));
         }
 
         await conversationStore.SaveAsync(conversation, ct);

@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Core;
 using Microsoft.AspNetCore.Mvc;
@@ -29,7 +30,7 @@ internal static class ChannelConfigEndpoints
             var config = await store.GetAsync(tenantId, channelType, ct);
             results.Add(config is not null
                 ? config
-                : new { channel = channelType.ToString(), isActive = false });
+                : new ChannelStatusDto(channelType.ToString(), false));
         }
 
         return Results.Ok(results);
@@ -49,7 +50,7 @@ internal static class ChannelConfigEndpoints
 
         return config is not null
             ? Results.Ok(config)
-            : Results.Ok(new { channel = channelType.ToString(), isActive = false });
+            : Results.Ok(new ChannelStatusDto(channelType.ToString(), false));
     }
 
     private static async Task<IResult> UpdateChannelConfig(
@@ -79,7 +80,7 @@ internal static class ChannelConfigEndpoints
         if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out _))
             return Results.BadRequest($"Invalid channel type: {channel}");
 
-        return Results.Ok(new { success = true, message = "Connection test passed" });
+        return Results.Ok(new ChannelTestResponse(true, "Connection test passed"));
     }
 
     private static TenantId GetTenantId(HttpContext context)
@@ -94,3 +95,6 @@ internal static class ChannelConfigEndpoints
 // ─── Request DTOs ─────────────────────────────────────────────────────────────
 
 internal sealed record UpdateChannelConfigRequest(bool IsActive, Dictionary<string, string>? Credentials);
+
+internal sealed record ChannelStatusDto(string Channel, bool IsActive);
+internal sealed record ChannelTestResponse(bool Success, string Message);

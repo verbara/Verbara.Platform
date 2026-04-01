@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -23,11 +24,11 @@ internal static class OidcEndpoints
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(tenant_id))
-            return Results.BadRequest(new { error = "tenant_id query parameter is required" });
+            return Results.BadRequest(new ErrorResponse("tenant_id query parameter is required"));
 
         var config = await configStore.GetAsync(tenant_id, ct);
         if (config is null || !config.OidcEnabled || string.IsNullOrEmpty(config.OidcAuthority))
-            return Results.BadRequest(new { error = "OIDC is not enabled for this tenant" });
+            return Results.BadRequest(new ErrorResponse("OIDC is not enabled for this tenant"));
 
         // Build the OIDC authorization URL
         var redirectUri = $"{context.Request.Scheme}://{context.Request.Host}/api/auth/oidc/callback";
@@ -55,26 +56,26 @@ internal static class OidcEndpoints
     {
         // state carries the tenant_id
         if (string.IsNullOrWhiteSpace(state))
-            return Results.BadRequest(new { error = "Missing tenant_id (state parameter)" });
+            return Results.BadRequest(new ErrorResponse("Missing tenant_id (state parameter)"));
 
         var tenantId = state;
 
         if (!string.IsNullOrEmpty(error))
-            return Results.BadRequest(new { error = $"OIDC provider error: {error}" });
+            return Results.BadRequest(new ErrorResponse($"OIDC provider error: {error}"));
 
         if (string.IsNullOrEmpty(code))
-            return Results.BadRequest(new { error = "Missing authorization code" });
+            return Results.BadRequest(new ErrorResponse("Missing authorization code"));
 
         var config = await configStore.GetAsync(tenantId, ct);
         if (config is null || !config.OidcEnabled)
-            return Results.BadRequest(new { error = "OIDC is not enabled for this tenant" });
+            return Results.BadRequest(new ErrorResponse("OIDC is not enabled for this tenant"));
 
         // In a production implementation, we would:
         // 1. Exchange the authorization code for tokens via the IdP's token endpoint
         // 2. Validate the ID token
         // 3. Extract user claims (email, name, etc.)
         // For now, return an error since we can't complete the flow without a real IdP
-        return Results.BadRequest(new { error = "OIDC token exchange not yet implemented" });
+        return Results.BadRequest(new ErrorResponse("OIDC token exchange not yet implemented"));
     }
 
     private static async Task<IResult> OidcLogout(
@@ -101,6 +102,6 @@ internal static class OidcEndpoints
         }
 
         context.Response.Cookies.Delete("refresh_token");
-        return Results.Ok(new { message = "Logged out" });
+        return Results.Ok(new MessageResponse("Logged out"));
     }
 }

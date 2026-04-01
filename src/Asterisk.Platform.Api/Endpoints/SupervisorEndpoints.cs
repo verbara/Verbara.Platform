@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Sdk.Pro.AgentAssist.Engine;
 using Microsoft.AspNetCore.Mvc;
 
@@ -50,7 +51,7 @@ internal static class SupervisorEndpoints
 
         var enqueued = session.TryEnqueueSupervisorWhisper(body.Text);
         if (!enqueued)
-            return Results.BadRequest(new { error = "Whisper delivery is not enabled for this session." });
+            return Results.BadRequest(new ErrorResponse("Whisper delivery is not enabled for this session."));
 
         return Results.Ok();
     }
