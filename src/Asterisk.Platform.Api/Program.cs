@@ -76,8 +76,33 @@ else
     builder.Services.AddInMemoryStorage();
 
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
-builder.Services.AddSingleton<byte[]>(Array.Empty<byte>());
-builder.Services.AddProLicensing(o => o.EnforcementMode = Asterisk.Sdk.Pro.Licensing.EnforcementMode.Disabled);
+var licenseConfig = builder.Configuration.GetSection("Licensing");
+var licensePath = licenseConfig["FilePath"] ?? "./license.lic";
+var publicKeyPath = licenseConfig["PublicKeyPath"];
+var licensePublicKey = !string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath)
+    ? File.ReadAllBytes(publicKeyPath)
+    : Array.Empty<byte>();
+builder.Services.AddSingleton(licensePublicKey);
+
+var enforcementMode = Enum.TryParse<Asterisk.Sdk.Pro.Licensing.EnforcementMode>(
+    licenseConfig["EnforcementMode"], ignoreCase: true, out var parsedMode)
+    ? parsedMode
+    : (builder.Environment.IsDevelopment()
+        ? Asterisk.Sdk.Pro.Licensing.EnforcementMode.WarnOnly
+        : Asterisk.Sdk.Pro.Licensing.EnforcementMode.Enforce);
+
+// If no license file exists and no explicit config, fall back to WarnOnly (community mode)
+if (!File.Exists(licensePath) && !licenseConfig.Exists())
+    enforcementMode = Asterisk.Sdk.Pro.Licensing.EnforcementMode.WarnOnly;
+
+builder.Services.AddProLicensing(o =>
+{
+    o.LicenseFilePath = licensePath;
+    o.EnforcementMode = enforcementMode;
+    o.RevalidationInterval = TimeSpan.TryParse(licenseConfig["RevalidationInterval"], out var interval)
+        ? interval
+        : TimeSpan.FromHours(6);
+});
 
 // ─── Pro.Routing — Skill Catalog (in-memory, singleton) ─────────────────────
 builder.Services.AddSingleton<SkillCatalogBase>(new InMemorySkillCatalog());

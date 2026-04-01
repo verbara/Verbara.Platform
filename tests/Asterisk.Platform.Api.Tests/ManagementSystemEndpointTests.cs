@@ -21,17 +21,19 @@ public sealed class ManagementSystemEndpointTests : IClassFixture<PlatformAdminA
 
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("platform");
-        body.Should().Contain("1.1.0");
+        body.Should().Contain("1.3.0");
     }
 
     [Fact]
-    public async Task License_ShouldReturnCommunityTier()
+    public async Task License_ShouldReturnLicenseStatus()
     {
         var response = await _client.GetAsync("/api/management/system/license");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("community");
+        body.Should().Contain("isValid");
+        body.Should().Contain("status");
+        body.Should().Contain("maxNodes");
     }
 
     [Fact]
