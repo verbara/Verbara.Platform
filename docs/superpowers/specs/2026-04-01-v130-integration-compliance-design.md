@@ -711,15 +711,17 @@ New `WebhookJsonContext` in Platform.Api serialization:
 
 ## Postgres Migration Summary
 
-Two migration files:
+Three migration files:
 
-**004_GdprCompliance.sql:**
+**004_OidcSubject.sql** (Sub-project B):
 - `ALTER TABLE users ADD COLUMN oidc_subject VARCHAR(255);`
 - `CREATE INDEX ix_users_oidc_subject ON users(tenant_id, oidc_subject);`
+
+**005_GdprCompliance.sql** (Sub-project C):
 - `CREATE TABLE purge_log (...);`
 - `CREATE TABLE tenant_retention_policies (...);`
 
-**005_OutboundWebhooks.sql:**
+**006_OutboundWebhooks.sql** (Sub-project D):
 - `CREATE TABLE webhook_subscriptions (...);`
 - `CREATE TABLE webhook_deliveries (...);`
 - Indexes for pending retries, dead-letter queries
