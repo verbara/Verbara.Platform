@@ -293,7 +293,7 @@ New package `Asterisk.Platform.Billing` with 4 sub-projects:
 - **Sub-project A:** Metering Engine + Quota Enforcement -- COMPLETE (Plan 28A)
 - **Sub-project B:** Rate Cards + Invoice Generation -- COMPLETE (Plan 28B)
 - **Sub-project C:** Management API + Usage Dashboard -- COMPLETE (Plan 28C)
-- **Sub-project D:** E2E Tests for Billing (~4 files, ~25 tests)
+- **Sub-project D:** Frontend Pages + E2E Tests -- COMPLETE (Plans 28D+28E, in Platform.Web)
 
 ## Plan 28A: Metering Engine + Quota Enforcement -- COMPLETE (2026-03-31)
 
@@ -336,6 +336,15 @@ Management API for billing administration (PlatformAdminOnly):
 3. **Usage Queries** -- Summary and detailed usage records with date range and type filters
 4. **Quota Management** -- View quota status with current usage, update tenant quotas
 5. **Store Extension** -- Added ListAsync to IUsageRecordStore (InMemory + Postgres) for paginated record queries
+
+## Plan 28D+28E: Billing Frontend + E2E Tests -- COMPLETE (2026-03-31)
+
+Delivered in Platform.Web repo:
+- **4 billing pages** (rate cards CRUD, invoices, usage dashboard, quotas) under `/admin/billing/*`
+- **1 API hooks file** (`use-billing.ts`) with 15 TanStack Query hooks
+- **25 E2E tests** across 4 spec files (90 total E2E tests, 14 spec files)
+- ApiHelper extended with 9 billing methods for test data seeding
+- Fix: billing pages fallback to auth tenant when no active tenant selected
 
 ## Plan Execution
 
