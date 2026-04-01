@@ -285,7 +285,7 @@ Two deliverables:
 
 E2E roadmap: Sprint 1 done, Sprints 2-6 pending (Tenant Admin, Operations, Agent, Flows, Cross-Cutting -- ~330 total tests)
 
-## v1.2.0 "Monetization Ready" -- IN PROGRESS (2026-03-31)
+## v1.2.0 "Monetization Ready" -- COMPLETE (2026-03-31)
 
 **Spec:** `docs/superpowers/specs/2026-03-31-v120-monetization-ready-design.md`
 
