@@ -151,6 +151,9 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateNodeRequest))]
 [JsonSerializable(typeof(MgmtInstanceDto))]
 [JsonSerializable(typeof(List<MgmtInstanceDto>))]
+// Impersonation
+[JsonSerializable(typeof(ImpersonateRequest))]
+[JsonSerializable(typeof(ImpersonateResponse))]
 // Management Tenants
 [JsonSerializable(typeof(MgmtTenantDto))]
 [JsonSerializable(typeof(List<MgmtTenantDto>))]
