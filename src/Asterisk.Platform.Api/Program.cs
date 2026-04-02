@@ -45,6 +45,7 @@ using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres;
 using Asterisk.Sdk.Pro.Cluster.DependencyInjection;
+using Asterisk.Sdk.Pro.Cluster.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Asterisk.Sdk.Pro.MultiTenant.DependencyInjection;
 
