@@ -44,6 +44,8 @@ using Asterisk.Sdk.Pro.Realtime.Engine;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres;
+using Asterisk.Sdk.Ami.Connection;
+using Asterisk.Sdk.Pro.Cluster;
 using Asterisk.Sdk.Pro.Cluster.DependencyInjection;
 using Asterisk.Sdk.Pro.Cluster.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.MultiTenant;
@@ -167,6 +169,24 @@ builder.Services.AddAsteriskMultiServer();
 builder.Services.AddAsteriskCluster(c =>
 {
     c.InstanceId = Environment.MachineName;
+
+    // Register the primary Asterisk server as initial cluster node
+    var amiSection = builder.Configuration.GetSection("Asterisk:Ami");
+    var amiHost = amiSection["Hostname"];
+    if (!string.IsNullOrEmpty(amiHost))
+    {
+        c.InitialNodes["primary"] = new ClusterNodeOptions
+        {
+            Ami = new AmiConnectionOptions
+            {
+                Hostname = amiHost,
+                Port = int.Parse(amiSection["Port"] ?? "5038", System.Globalization.CultureInfo.InvariantCulture),
+                Username = amiSection["Username"] ?? "admin",
+                Password = amiSection["Password"] ?? "",
+                UseSsl = bool.Parse(amiSection["UseSsl"] ?? "false"),
+            },
+        };
+    }
 });
 var clusterConn = builder.Configuration.GetConnectionString("Cluster")
     ?? builder.Configuration.GetConnectionString("Postgres");
