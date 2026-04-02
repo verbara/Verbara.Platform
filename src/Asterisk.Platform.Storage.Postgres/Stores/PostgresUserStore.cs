@@ -112,31 +112,31 @@ internal sealed class PostgresUserStore : IUserStore
             new { TenantId = tenantId.Value, UserId = userId.Value });
     }
 
-    private sealed record UserRow(
-        string user_id,
-        string tenant_id,
-        string email,
-        string display_name,
-        int role,
-        int status,
-        DateTime created_at,
-        DateTime? updated_at,
-        string? created_by,
-        string? updated_by,
-        string? password_hash,
-        bool mfa_enabled,
-        string? mfa_secret,
-        string[]? mfa_recovery_codes,
-        DateTime? mfa_confirmed_at,
-        bool email_verified,
-        int failed_login_attempts,
-        DateTime? locked_until,
-        DateTime? password_changed_at,
-        DateTime? last_login_at,
-        string auth_provider,
-        string? external_id,
-        string? oidc_subject)
+    private sealed class UserRow
     {
+        public string user_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string email { get; init; } = null!;
+        public string display_name { get; init; } = null!;
+        public int role { get; init; }
+        public int status { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+        public string? password_hash { get; init; }
+        public bool mfa_enabled { get; init; }
+        public string? mfa_secret { get; init; }
+        public string[]? mfa_recovery_codes { get; init; }
+        public DateTime? mfa_confirmed_at { get; init; }
+        public bool email_verified { get; init; }
+        public int failed_login_attempts { get; init; }
+        public DateTime? locked_until { get; init; }
+        public DateTime? password_changed_at { get; init; }
+        public DateTime? last_login_at { get; init; }
+        public string auth_provider { get; init; } = null!;
+        public string? external_id { get; init; }
+        public string? oidc_subject { get; init; }
         public User ToUser() => new()
         {
             UserId = EntityId.From(user_id),

@@ -50,10 +50,14 @@ internal sealed class PostgresRoleTemplateStore : IRoleTemplateStore
         return perms.ToList();
     }
 
-    private sealed record TemplateRow(
-        string template_id, string name, string description,
-        bool is_system, DateTimeOffset created_at)
+    private sealed class TemplateRow
     {
+        public string template_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public string description { get; init; } = null!;
+        public bool is_system { get; init; }
+        public DateTime created_at { get; init; }
+
         public RoleTemplate ToTemplate() => new()
         {
             TemplateId = template_id,

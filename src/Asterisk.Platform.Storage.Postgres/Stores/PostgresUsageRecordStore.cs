@@ -160,9 +160,24 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
             new { TenantId = tenantId.Value, Cutoff = cutoff });
     }
 
-    private sealed record SummaryRow(short usage_type, decimal total_quantity, int record_count, DateTimeOffset last_updated_at);
+    private sealed class SummaryRow
+    {
+        public short usage_type { get; init; }
+        public decimal total_quantity { get; init; }
+        public int record_count { get; init; }
+        public DateTime last_updated_at { get; init; }
+    }
 
-    private sealed record RecordRow(
-        string record_id, string tenant_id, short usage_type, decimal quantity, short unit,
-        string? channel, string? reference_id, DateTimeOffset recorded_at, string? metadata);
+    private sealed class RecordRow
+    {
+        public string record_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public short usage_type { get; init; }
+        public decimal quantity { get; init; }
+        public short unit { get; init; }
+        public string? channel { get; init; }
+        public string? reference_id { get; init; }
+        public DateTime recorded_at { get; init; }
+        public string? metadata { get; init; }
+    }
 }

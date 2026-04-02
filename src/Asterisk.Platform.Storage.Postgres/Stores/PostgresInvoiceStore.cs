@@ -75,21 +75,22 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
             new { TenantId = tenantId.Value, InvoiceId = invoiceId.Value, Status = (short)status });
     }
 
-    private sealed record InvoiceRow(
-        string invoice_id,
-        string tenant_id,
-        DateTimeOffset period_start,
-        DateTimeOffset period_end,
-        string currency,
-        string line_items,
-        decimal subtotal,
-        decimal tax,
-        decimal total,
-        short status,
-        DateTimeOffset generated_at,
-        DateTimeOffset? issued_at,
-        DateTimeOffset? paid_at)
+    private sealed class InvoiceRow
     {
+        public string invoice_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public DateTime period_start { get; init; }
+        public DateTime period_end { get; init; }
+        public string currency { get; init; } = null!;
+        public string line_items { get; init; } = null!;
+        public decimal subtotal { get; init; }
+        public decimal tax { get; init; }
+        public decimal total { get; init; }
+        public short status { get; init; }
+        public DateTime generated_at { get; init; }
+        public DateTime? issued_at { get; init; }
+        public DateTime? paid_at { get; init; }
+
         public Invoice ToInvoice() => new()
         {
             InvoiceId = EntityId.From(invoice_id),

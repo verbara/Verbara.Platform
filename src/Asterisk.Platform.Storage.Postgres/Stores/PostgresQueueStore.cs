@@ -92,22 +92,23 @@ internal sealed class PostgresQueueStore : IQueueStore
             new { TenantId = tenantId.Value, QueueId = queueId.Value });
     }
 
-    private sealed record QueueRow(
-        string queue_id,
-        string tenant_id,
-        string name,
-        bool is_active,
-        int? max_waiting,
-        string? sla_targets,
-        string? overflow_rule,
-        string? hours,
-        string? wrap_up,
-        string required_skills,
-        DateTimeOffset created_at,
-        DateTimeOffset? updated_at,
-        string? created_by,
-        string? updated_by)
+    private sealed class QueueRow
     {
+        public string queue_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public bool is_active { get; init; }
+        public int? max_waiting { get; init; }
+        public string? sla_targets { get; init; }
+        public string? overflow_rule { get; init; }
+        public string? hours { get; init; }
+        public string? wrap_up { get; init; }
+        public string required_skills { get; init; } = null!;
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+
         public Queue ToQueue() => new()
         {
             QueueId = EntityId.From(queue_id),

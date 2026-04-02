@@ -79,22 +79,23 @@ internal sealed class PostgresCaseStore : ICaseStore
             });
     }
 
-    private sealed record CaseRow(
-        string case_id,
-        string tenant_id,
-        string case_number,
-        string subject,
-        int priority,
-        int status,
-        string contact_id,
-        string? assigned_agent_id,
-        string? sla_policy_id,
-        string conversation_ids,
-        DateTimeOffset created_at,
-        DateTimeOffset? updated_at,
-        string? created_by,
-        string? updated_by)
+    private sealed class CaseRow
     {
+        public string case_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string case_number { get; init; } = null!;
+        public string subject { get; init; } = null!;
+        public int priority { get; init; }
+        public int status { get; init; }
+        public string contact_id { get; init; } = null!;
+        public string? assigned_agent_id { get; init; }
+        public string? sla_policy_id { get; init; }
+        public string conversation_ids { get; init; } = null!;
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+
         public Case ToCase()
         {
             var convIdStrings = JsonSerializer.Deserialize(conversation_ids, PostgresJson.Ctx.ListString)

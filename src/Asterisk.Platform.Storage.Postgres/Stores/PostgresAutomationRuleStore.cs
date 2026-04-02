@@ -67,18 +67,19 @@ internal sealed class PostgresAutomationRuleStore : IAutomationRuleStore
             });
     }
 
-    private sealed record RuleRow(
-        string rule_id,
-        string tenant_id,
-        string name,
-        int trigger,
-        string conditions,
-        string actions,
-        bool is_active,
-        int priority,
-        int max_executions_per_conversation,
-        DateTimeOffset created_at)
+    private sealed class RuleRow
     {
+        public string rule_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public int trigger { get; init; }
+        public string conditions { get; init; } = null!;
+        public string actions { get; init; } = null!;
+        public bool is_active { get; init; }
+        public int priority { get; init; }
+        public int max_executions_per_conversation { get; init; }
+        public DateTime created_at { get; init; }
+
         public AutomationRule ToRule()
         {
             var condList = JsonSerializer.Deserialize(conditions, PostgresJson.Ctx.IReadOnlyListAutomationCondition)

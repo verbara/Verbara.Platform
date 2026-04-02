@@ -82,21 +82,22 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
             new { TenantId = tenantId.Value, KeyId = keyId.Value });
     }
 
-    private sealed record ApiKeyRow(
-        string key_id,
-        string tenant_id,
-        string key_hash,
-        string name,
-        string scopes,
-        int? rate_limit_per_minute,
-        bool is_revoked,
-        DateTimeOffset created_at,
-        DateTimeOffset? updated_at,
-        DateTimeOffset? expires_at,
-        string? created_by,
-        string? updated_by,
-        string? user_id)
+    private sealed class ApiKeyRow
     {
+        public string key_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string key_hash { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public string scopes { get; init; } = null!;
+        public int? rate_limit_per_minute { get; init; }
+        public bool is_revoked { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public DateTime? expires_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+        public string? user_id { get; init; }
+
         public ApiKey ToApiKey()
         {
             var scopeList = string.IsNullOrEmpty(scopes)

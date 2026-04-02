@@ -48,15 +48,16 @@ internal sealed class PostgresTimerStore : ITimerStore
             new { TimerId = timer.TimerId.Value });
     }
 
-    private sealed record TimerRow(
-        string timer_id,
-        string tenant_id,
-        string conversation_id,
-        string callback_rule_id,
-        DateTimeOffset fire_at,
-        bool is_fired,
-        DateTimeOffset created_at)
+    private sealed class TimerRow
     {
+        public string timer_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string conversation_id { get; init; } = null!;
+        public string callback_rule_id { get; init; } = null!;
+        public DateTime fire_at { get; init; }
+        public bool is_fired { get; init; }
+        public DateTime created_at { get; init; }
+
         public ScheduledTimer ToTimer() => new()
         {
             TimerId = EntityId.From(timer_id),

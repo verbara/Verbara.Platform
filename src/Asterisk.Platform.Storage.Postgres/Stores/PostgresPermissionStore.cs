@@ -29,10 +29,15 @@ internal sealed class PostgresPermissionStore : IPermissionStore
         return rows.Select(r => r.ToDefinition()).ToList();
     }
 
-    private sealed record PermissionRow(
-        string permission_id, string category, string resource,
-        string action, string description, string[]? implies)
+    private sealed class PermissionRow
     {
+        public string permission_id { get; init; } = null!;
+        public string category { get; init; } = null!;
+        public string resource { get; init; } = null!;
+        public string action { get; init; } = null!;
+        public string description { get; init; } = null!;
+        public string[]? implies { get; init; }
+
         public PermissionDefinition ToDefinition() => new()
         {
             PermissionId = permission_id,

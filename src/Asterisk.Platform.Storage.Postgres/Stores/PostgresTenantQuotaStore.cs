@@ -60,16 +60,17 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
             new { TenantId = tenantId.Value });
     }
 
-    private sealed record QuotaRow(
-        string tenant_id,
-        int max_concurrent_channels,
-        int max_active_campaigns,
-        long? max_monthly_voice_minutes,
-        long? max_monthly_messages,
-        long? max_storage_bytes,
-        int? max_active_agents,
-        short quota_action)
+    private sealed class QuotaRow
     {
+        public string tenant_id { get; init; } = null!;
+        public int max_concurrent_channels { get; init; }
+        public int max_active_campaigns { get; init; }
+        public long? max_monthly_voice_minutes { get; init; }
+        public long? max_monthly_messages { get; init; }
+        public long? max_storage_bytes { get; init; }
+        public int? max_active_agents { get; init; }
+        public short quota_action { get; init; }
+
         public TenantQuota ToQuota() => new()
         {
             TenantId = new TenantId(tenant_id),

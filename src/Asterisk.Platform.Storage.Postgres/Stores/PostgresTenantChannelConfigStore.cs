@@ -41,12 +41,13 @@ internal sealed class PostgresTenantChannelConfigStore : ITenantChannelConfigSto
             });
     }
 
-    private sealed record ChannelConfigRow(
-        string tenant_id,
-        int channel,
-        string credentials,
-        bool is_active)
+    private sealed class ChannelConfigRow
     {
+        public string tenant_id { get; init; } = null!;
+        public int channel { get; init; }
+        public string credentials { get; init; } = null!;
+        public bool is_active { get; init; }
+
         public TenantChannelConfig ToConfig()
         {
             var creds = JsonSerializer.Deserialize(credentials, PostgresJson.Ctx.IReadOnlyDictionaryStringString)

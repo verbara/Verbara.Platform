@@ -72,14 +72,15 @@ internal sealed class PostgresSurveyStore : ISurveyStore
             new { TenantId = tenantId.Value, SurveyId = surveyId.Value });
     }
 
-    private sealed record SurveyRow(
-        string survey_id,
-        string tenant_id,
-        string name,
-        int type,
-        string questions,
-        bool is_active)
+    private sealed class SurveyRow
     {
+        public string survey_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public int type { get; init; }
+        public string questions { get; init; } = null!;
+        public bool is_active { get; init; }
+
         public Survey ToSurvey()
         {
             var questionList = JsonSerializer.Deserialize(questions, PostgresJson.Ctx.IReadOnlyListSurveyQuestion)

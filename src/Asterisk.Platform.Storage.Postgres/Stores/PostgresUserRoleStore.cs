@@ -109,10 +109,14 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
         return expanded;
     }
 
-    private sealed record UserRoleRow(
-        string tenant_id, string user_id, string role_id,
-        DateTimeOffset assigned_at, string? assigned_by)
+    private sealed class UserRoleRow
     {
+        public string tenant_id { get; init; } = null!;
+        public string user_id { get; init; } = null!;
+        public string role_id { get; init; } = null!;
+        public DateTime assigned_at { get; init; }
+        public string? assigned_by { get; init; }
+
         public UserRoleAssignment ToAssignment() => new()
         {
             TenantId = new TenantId(tenant_id),
@@ -123,5 +127,9 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
         };
     }
 
-    private sealed record ImpliesRow(string permission_id, string[]? implies);
+    private sealed class ImpliesRow
+    {
+        public string permission_id { get; init; } = null!;
+        public string[]? implies { get; init; }
+    }
 }

@@ -85,15 +85,16 @@ internal sealed class PostgresQueueMembershipStore : IQueueMembershipStore
             new { TenantId = tenantId.Value, AgentId = agentId.Value });
     }
 
-    private sealed record MembershipRow(
-        string tenant_id,
-        string queue_id,
-        string agent_id,
-        int penalty,
-        string source,
-        bool is_excluded,
-        DateTimeOffset created_at)
+    private sealed class MembershipRow
     {
+        public string tenant_id { get; init; } = null!;
+        public string queue_id { get; init; } = null!;
+        public string agent_id { get; init; } = null!;
+        public int penalty { get; init; }
+        public string source { get; init; } = null!;
+        public bool is_excluded { get; init; }
+        public DateTime created_at { get; init; }
+
         public QueueMembership ToModel() => new()
         {
             TenantId = new TenantId(tenant_id),

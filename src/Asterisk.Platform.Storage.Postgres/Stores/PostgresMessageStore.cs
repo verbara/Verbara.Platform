@@ -139,23 +139,24 @@ internal sealed class PostgresMessageStore : IMessageStore
             new { TenantId = tenantId.Value });
     }
 
-    private sealed record MessageRow(
-        string message_id,
-        string conversation_id,
-        string tenant_id,
-        int direction,
-        int channel,
-        string? sender_id,
-        string content,
-        int delivery_status,
-        string? external_message_id,
-        DateTimeOffset created_at,
-        DateTimeOffset? delivered_at,
-        DateTimeOffset? read_at,
-        DateTimeOffset? updated_at,
-        string? created_by,
-        string? updated_by)
+    private sealed class MessageRow
     {
+        public string message_id { get; init; } = null!;
+        public string conversation_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public int direction { get; init; }
+        public int channel { get; init; }
+        public string? sender_id { get; init; }
+        public string content { get; init; } = null!;
+        public int delivery_status { get; init; }
+        public string? external_message_id { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? delivered_at { get; init; }
+        public DateTime? read_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+
         public Message ToMessage()
         {
             var envelope = JsonSerializer.Deserialize(content, ConversationsJsonContext.Default.MessageEnvelope)

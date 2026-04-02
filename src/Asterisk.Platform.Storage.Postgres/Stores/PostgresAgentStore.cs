@@ -115,22 +115,23 @@ internal sealed class PostgresAgentStore : IAgentStore
             new { TenantId = tenantId.Value, AgentId = agentId.Value });
     }
 
-    private sealed record AgentRow(
-        string agent_id,
-        string tenant_id,
-        string user_id,
-        string display_name,
-        int state,
-        string capacity,
-        string? team_id,
-        string skills,
-        string? extension,
-        string? sip_password,
-        DateTimeOffset created_at,
-        DateTimeOffset? updated_at,
-        string? created_by,
-        string? updated_by)
+    private sealed class AgentRow
     {
+        public string agent_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string user_id { get; init; } = null!;
+        public string display_name { get; init; } = null!;
+        public int state { get; init; }
+        public string capacity { get; init; } = null!;
+        public string? team_id { get; init; }
+        public string skills { get; init; } = null!;
+        public string? extension { get; init; }
+        public string? sip_password { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+
         public Agent ToAgent() => new()
         {
             AgentId = EntityId.From(agent_id),

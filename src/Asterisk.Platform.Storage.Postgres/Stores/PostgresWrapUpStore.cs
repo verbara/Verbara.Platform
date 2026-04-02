@@ -43,15 +43,16 @@ internal sealed class PostgresWrapUpStore : IWrapUpStore
         return row?.ToRecord();
     }
 
-    private sealed record WrapUpRow(
-        string tenant_id,
-        string conversation_id,
-        string agent_id,
-        string disposition_id,
-        string? notes,
-        long duration_seconds,
-        DateTimeOffset completed_at)
+    private sealed class WrapUpRow
     {
+        public string tenant_id { get; init; } = null!;
+        public string conversation_id { get; init; } = null!;
+        public string agent_id { get; init; } = null!;
+        public string disposition_id { get; init; } = null!;
+        public string? notes { get; init; }
+        public long duration_seconds { get; init; }
+        public DateTime completed_at { get; init; }
+
         public WrapUpRecord ToRecord() => new()
         {
             TenantId = new TenantId(tenant_id),

@@ -68,17 +68,18 @@ internal sealed class PostgresArticleStore : IArticleStore
             new { TenantId = tenantId.Value, ArticleId = articleId.Value });
     }
 
-    private sealed record ArticleRow(
-        string article_id,
-        string tenant_id,
-        string title,
-        string content,
-        string[] tags,
-        string? language,
-        bool is_published,
-        DateTimeOffset created_at,
-        DateTimeOffset? updated_at)
+    private sealed class ArticleRow
     {
+        public string article_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string title { get; init; } = null!;
+        public string content { get; init; } = null!;
+        public string[] tags { get; init; } = null!;
+        public string? language { get; init; }
+        public bool is_published { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+
         public Article ToArticle() => new()
         {
             ArticleId = EntityId.From(article_id),

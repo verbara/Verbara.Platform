@@ -135,21 +135,22 @@ internal sealed class PostgresWebhookDeliveryStore : IWebhookDeliveryStore
             new { SubId = subscriptionId });
     }
 
-    private sealed record DeliveryRow(
-        string delivery_id,
-        string tenant_id,
-        string subscription_id,
-        string event_type,
-        string payload,
-        string status,
-        int attempts,
-        int max_attempts,
-        DateTimeOffset? next_retry_at,
-        int? last_response_code,
-        string? last_error,
-        DateTimeOffset created_at,
-        DateTimeOffset? delivered_at)
+    private sealed class DeliveryRow
     {
+        public string delivery_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string subscription_id { get; init; } = null!;
+        public string event_type { get; init; } = null!;
+        public string payload { get; init; } = null!;
+        public string status { get; init; } = null!;
+        public int attempts { get; init; }
+        public int max_attempts { get; init; }
+        public DateTime? next_retry_at { get; init; }
+        public int? last_response_code { get; init; }
+        public string? last_error { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? delivered_at { get; init; }
+
         public WebhookDelivery ToModel() => new(
             delivery_id, tenant_id, subscription_id, event_type, payload,
             Enum.Parse<WebhookDeliveryStatus>(status),

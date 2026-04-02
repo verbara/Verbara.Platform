@@ -65,16 +65,17 @@ internal sealed class PostgresTeamStore : ITeamStore
             new { TenantId = tenantId.Value, TeamId = teamId.Value });
     }
 
-    private sealed record TeamRow(
-        string team_id,
-        string tenant_id,
-        string name,
-        string? supervisor_id,
-        DateTimeOffset created_at,
-        DateTimeOffset? updated_at,
-        string? created_by,
-        string? updated_by)
+    private sealed class TeamRow
     {
+        public string team_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public string? supervisor_id { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+
         public Team ToTeam() => new()
         {
             TeamId = EntityId.From(team_id),

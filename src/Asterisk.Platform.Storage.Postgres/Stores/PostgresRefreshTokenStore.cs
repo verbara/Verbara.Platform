@@ -67,18 +67,19 @@ internal sealed class PostgresRefreshTokenStore : IRefreshTokenStore
             new { TenantId = tenantId, UserId = userId, RevokedAt = revokedAt });
     }
 
-    private sealed record RefreshTokenRow(
-        string token_id,
-        string user_id,
-        string tenant_id,
-        string token_hash,
-        DateTimeOffset expires_at,
-        DateTimeOffset created_at,
-        DateTimeOffset? revoked_at,
-        string? replaced_by,
-        string? ip_address,
-        string? user_agent)
+    private sealed class RefreshTokenRow
     {
+        public string token_id { get; init; } = null!;
+        public string user_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string token_hash { get; init; } = null!;
+        public DateTime expires_at { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? revoked_at { get; init; }
+        public string? replaced_by { get; init; }
+        public string? ip_address { get; init; }
+        public string? user_agent { get; init; }
+
         public RefreshToken ToRefreshToken() => new()
         {
             TokenId = token_id,

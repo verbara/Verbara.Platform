@@ -82,17 +82,18 @@ internal sealed class PostgresWebhookSubscriptionStore : IWebhookSubscriptionSto
             new { Id = subscriptionId });
     }
 
-    private sealed record SubscriptionRow(
-        string subscription_id,
-        string tenant_id,
-        string name,
-        string endpoint_url,
-        string secret,
-        string event_types,
-        bool is_active,
-        DateTimeOffset created_at,
-        DateTimeOffset updated_at)
+    private sealed class SubscriptionRow
     {
+        public string subscription_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public string endpoint_url { get; init; } = null!;
+        public string secret { get; init; } = null!;
+        public string event_types { get; init; } = null!;
+        public bool is_active { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime updated_at { get; init; }
+
         public WebhookSubscription ToModel()
         {
             var types = JsonSerializer.Deserialize(event_types, PostgresJson.Ctx.IReadOnlyListString)

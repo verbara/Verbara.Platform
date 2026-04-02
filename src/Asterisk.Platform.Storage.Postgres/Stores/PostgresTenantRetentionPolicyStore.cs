@@ -57,13 +57,14 @@ internal sealed class PostgresTenantRetentionPolicyStore : ITenantRetentionPolic
         return rows.Select(r => r.ToPolicy()).ToList();
     }
 
-    private sealed record RetentionRow(
-        string tenant_id,
-        int? conversation_retention_days,
-        int? auth_event_retention_days,
-        int? audit_retention_days,
-        int? usage_record_retention_days)
+    private sealed class RetentionRow
     {
+        public string tenant_id { get; init; } = null!;
+        public int? conversation_retention_days { get; init; }
+        public int? auth_event_retention_days { get; init; }
+        public int? audit_retention_days { get; init; }
+        public int? usage_record_retention_days { get; init; }
+
         public TenantRetentionPolicy ToPolicy() => new()
         {
             TenantId = tenant_id,

@@ -140,16 +140,17 @@ internal sealed class PostgresAuthEventStore : IAuthEventStore
             new { TenantId = tenantId, Cutoff = cutoff });
     }
 
-    private sealed record AuthEventRow(
-        string event_id,
-        string tenant_id,
-        string? user_id,
-        string event_type,
-        string? ip_address,
-        string? user_agent,
-        string? details,
-        DateTimeOffset created_at)
+    private sealed class AuthEventRow
     {
+        public string event_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string? user_id { get; init; }
+        public string event_type { get; init; } = null!;
+        public string? ip_address { get; init; }
+        public string? user_agent { get; init; }
+        public string? details { get; init; }
+        public DateTime created_at { get; init; }
+
         public AuthEvent ToAuthEvent()
         {
             JsonDocument? detailsDoc = null;

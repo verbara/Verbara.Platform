@@ -79,18 +79,19 @@ internal sealed class PostgresServiceAccountStore : IServiceAccountStore
             new { TenantId = tenantId.Value, AccountId = accountId.Value });
     }
 
-    private sealed record ServiceAccountRow(
-        string account_id,
-        string tenant_id,
-        string name,
-        string description,
-        string scopes,
-        bool is_active,
-        DateTimeOffset created_at,
-        DateTimeOffset? updated_at,
-        string? created_by,
-        string? updated_by)
+    private sealed class ServiceAccountRow
     {
+        public string account_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public string description { get; init; } = null!;
+        public string scopes { get; init; } = null!;
+        public bool is_active { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+
         public ServiceAccount ToServiceAccount()
         {
             var scopeList = JsonSerializer.Deserialize(scopes, PostgresJson.Ctx.IReadOnlyListString)

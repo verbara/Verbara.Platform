@@ -134,10 +134,17 @@ internal sealed class PostgresTenantRoleStore : ITenantRoleStore
             new { TenantId = tenantId.Value, RoleId = roleId });
     }
 
-    private sealed record TenantRoleRow(
-        string role_id, string tenant_id, string name, string? description,
-        string? source_template_id, bool is_default, DateTimeOffset created_at, DateTimeOffset? updated_at)
+    private sealed class TenantRoleRow
     {
+        public string role_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public string? description { get; init; }
+        public string? source_template_id { get; init; }
+        public bool is_default { get; init; }
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+
         public TenantRole ToTenantRole() => new()
         {
             RoleId = role_id,

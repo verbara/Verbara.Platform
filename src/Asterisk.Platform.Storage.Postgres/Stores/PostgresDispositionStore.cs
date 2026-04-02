@@ -59,14 +59,15 @@ internal sealed class PostgresDispositionStore : IDispositionStore
             new { TenantId = tenantId.Value, DispositionId = dispositionId.Value });
     }
 
-    private sealed record DispositionRow(
-        string disposition_id,
-        string tenant_id,
-        string name,
-        int category,
-        bool is_active,
-        DateTimeOffset created_at)
+    private sealed class DispositionRow
     {
+        public string disposition_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public int category { get; init; }
+        public bool is_active { get; init; }
+        public DateTime created_at { get; init; }
+
         public Disposition ToDisposition() => new()
         {
             DispositionId = EntityId.From(disposition_id),

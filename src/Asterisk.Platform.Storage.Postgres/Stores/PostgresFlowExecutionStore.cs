@@ -72,19 +72,20 @@ internal sealed class PostgresFlowExecutionStore : IFlowExecutionStore
         return row?.ToExecution();
     }
 
-    private sealed record ExecutionRow(
-        string execution_id,
-        string flow_id,
-        int flow_version,
-        string tenant_id,
-        string conversation_id,
-        string current_node_id,
-        int status,
-        string variables,
-        DateTimeOffset started_at,
-        DateTimeOffset? completed_at,
-        int step_count)
+    private sealed class ExecutionRow
     {
+        public string execution_id { get; init; } = null!;
+        public string flow_id { get; init; } = null!;
+        public int flow_version { get; init; }
+        public string tenant_id { get; init; } = null!;
+        public string conversation_id { get; init; } = null!;
+        public string current_node_id { get; init; } = null!;
+        public int status { get; init; }
+        public string variables { get; init; } = null!;
+        public DateTime started_at { get; init; }
+        public DateTime? completed_at { get; init; }
+        public int step_count { get; init; }
+
         public FlowExecution ToExecution()
         {
             var vars = JsonSerializer.Deserialize(variables, PostgresJson.Ctx.DictionaryStringString)

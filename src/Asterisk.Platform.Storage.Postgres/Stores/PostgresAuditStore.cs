@@ -110,16 +110,17 @@ internal sealed class PostgresAuditStore : IAuditStore
             new { TenantId = tenantId.Value, Cutoff = cutoff });
     }
 
-    private sealed record AuditRow(
-        string entry_id,
-        string tenant_id,
-        string action,
-        string entity_type,
-        string entity_id,
-        string? performed_by,
-        string? details,
-        DateTimeOffset occurred_at)
+    private sealed class AuditRow
     {
+        public string entry_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string action { get; init; } = null!;
+        public string entity_type { get; init; } = null!;
+        public string entity_id { get; init; } = null!;
+        public string? performed_by { get; init; }
+        public string? details { get; init; }
+        public DateTime occurred_at { get; init; }
+
         public AuditEntry ToEntry()
         {
             IReadOnlyDictionary<string, string>? detailsDict = null;

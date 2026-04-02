@@ -52,17 +52,18 @@ internal sealed class PostgresAutomationLogStore : IAutomationExecutionLogStore
         return rows.Select(r => r.ToLog()).ToList();
     }
 
-    private sealed record LogRow(
-        string log_id,
-        string rule_id,
-        string tenant_id,
-        string conversation_id,
-        int trigger,
-        bool conditions_matched,
-        string actions_executed,
-        string? error,
-        DateTimeOffset executed_at)
+    private sealed class LogRow
     {
+        public string log_id { get; init; } = null!;
+        public string rule_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string conversation_id { get; init; } = null!;
+        public int trigger { get; init; }
+        public bool conditions_matched { get; init; }
+        public string actions_executed { get; init; } = null!;
+        public string? error { get; init; }
+        public DateTime executed_at { get; init; }
+
         public AutomationExecutionLog ToLog()
         {
             var actionInts = JsonSerializer.Deserialize(actions_executed, PostgresJson.Ctx.ListInt32)

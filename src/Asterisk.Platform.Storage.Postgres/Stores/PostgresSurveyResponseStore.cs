@@ -60,16 +60,17 @@ internal sealed class PostgresSurveyResponseStore : ISurveyResponseStore
         return rows.Select(r => r.ToResponse()).ToList();
     }
 
-    private sealed record ResponseRow(
-        string response_id,
-        string survey_id,
-        string tenant_id,
-        string conversation_id,
-        string contact_id,
-        string? agent_id,
-        string answers,
-        DateTimeOffset submitted_at)
+    private sealed class ResponseRow
     {
+        public string response_id { get; init; } = null!;
+        public string survey_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string conversation_id { get; init; } = null!;
+        public string contact_id { get; init; } = null!;
+        public string? agent_id { get; init; }
+        public string answers { get; init; } = null!;
+        public DateTime submitted_at { get; init; }
+
         public SurveyResponse ToResponse()
         {
             var answerList = JsonSerializer.Deserialize(answers, PostgresJson.Ctx.IReadOnlyListSurveyAnswer)

@@ -58,16 +58,17 @@ internal sealed class PostgresBotConfigStore : IBotConfigStore
             });
     }
 
-    private sealed record BotRow(
-        string bot_id,
-        string tenant_id,
-        string name,
-        string default_flow_id,
-        string? fallback_queue_id,
-        double confidence_threshold,
-        int max_turns_before_handoff,
-        bool is_active)
+    private sealed class BotRow
     {
+        public string bot_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public string default_flow_id { get; init; } = null!;
+        public string? fallback_queue_id { get; init; }
+        public double confidence_threshold { get; init; }
+        public int max_turns_before_handoff { get; init; }
+        public bool is_active { get; init; }
+
         public BotConfiguration ToConfig() => new()
         {
             BotId = EntityId.From(bot_id),

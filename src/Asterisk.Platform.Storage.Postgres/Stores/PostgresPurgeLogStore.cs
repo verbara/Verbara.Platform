@@ -76,16 +76,17 @@ internal sealed class PostgresPurgeLogStore : IPurgeLogStore
         return new PagedResult<PurgeEntry>(items, total, page, pageSize);
     }
 
-    private sealed record PurgeLogRow(
-        string purge_id,
-        string tenant_id,
-        string subject_type,
-        string subject_id,
-        string performed_by,
-        string reason,
-        string entities_deleted,
-        DateTimeOffset purged_at)
+    private sealed class PurgeLogRow
     {
+        public string purge_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string subject_type { get; init; } = null!;
+        public string subject_id { get; init; } = null!;
+        public string performed_by { get; init; } = null!;
+        public string reason { get; init; } = null!;
+        public string entities_deleted { get; init; } = null!;
+        public DateTime purged_at { get; init; }
+
         public PurgeEntry ToPurgeEntry() => new()
         {
             PurgeId = purge_id,

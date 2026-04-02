@@ -68,26 +68,27 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             });
     }
 
-    private sealed record TenantAuthConfigRow(
-        string tenant_id,
-        string mfa_policy,
-        string[]? mfa_required_roles,
-        int password_min_length,
-        bool password_require_uppercase,
-        bool password_require_number,
-        bool password_require_special,
-        int lockout_threshold,
-        int lockout_duration_minutes,
-        int session_idle_timeout_minutes,
-        int session_absolute_timeout_hours,
-        bool oidc_enabled,
-        string? oidc_authority,
-        string? oidc_client_id,
-        string? oidc_client_secret,
-        bool oidc_auto_create_users,
-        string oidc_default_role,
-        DateTimeOffset? updated_at)
+    private sealed class TenantAuthConfigRow
     {
+        public string tenant_id { get; init; } = null!;
+        public string mfa_policy { get; init; } = null!;
+        public string[]? mfa_required_roles { get; init; }
+        public int password_min_length { get; init; }
+        public bool password_require_uppercase { get; init; }
+        public bool password_require_number { get; init; }
+        public bool password_require_special { get; init; }
+        public int lockout_threshold { get; init; }
+        public int lockout_duration_minutes { get; init; }
+        public int session_idle_timeout_minutes { get; init; }
+        public int session_absolute_timeout_hours { get; init; }
+        public bool oidc_enabled { get; init; }
+        public string? oidc_authority { get; init; }
+        public string? oidc_client_id { get; init; }
+        public string? oidc_client_secret { get; init; }
+        public bool oidc_auto_create_users { get; init; }
+        public string oidc_default_role { get; init; } = null!;
+        public DateTime? updated_at { get; init; }
+
         public TenantAuthConfig ToTenantAuthConfig() => new()
         {
             TenantId = tenant_id,

@@ -63,17 +63,18 @@ internal sealed class PostgresMediaStore : IMediaStore
         return rows.Select(r => r.ToMediaFile()).ToList();
     }
 
-    private sealed record MediaRow(
-        string file_id,
-        string tenant_id,
-        string file_name,
-        string content_type,
-        long size_bytes,
-        string storage_path,
-        string? conversation_id,
-        DateTimeOffset uploaded_at,
-        string? uploaded_by)
+    private sealed class MediaRow
     {
+        public string file_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string file_name { get; init; } = null!;
+        public string content_type { get; init; } = null!;
+        public long size_bytes { get; init; }
+        public string storage_path { get; init; } = null!;
+        public string? conversation_id { get; init; }
+        public DateTime uploaded_at { get; init; }
+        public string? uploaded_by { get; init; }
+
         public MediaFile ToMediaFile() => new()
         {
             FileId = EntityId.From(file_id),

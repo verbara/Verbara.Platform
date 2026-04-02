@@ -82,16 +82,17 @@ public sealed class PostgresRateCardStore : IRateCardStore
             new { TenantId = tenantId.Value, RateCardId = rateCardId.Value });
     }
 
-    private sealed record RateCardRow(
-        string rate_card_id,
-        string tenant_id,
-        string name,
-        string currency,
-        DateTimeOffset effective_from,
-        DateTimeOffset? effective_to,
-        string rates,
-        bool is_default)
+    private sealed class RateCardRow
     {
+        public string rate_card_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public string currency { get; init; } = null!;
+        public DateTime effective_from { get; init; }
+        public DateTime? effective_to { get; init; }
+        public string rates { get; init; } = null!;
+        public bool is_default { get; init; }
+
         public RateCard ToRateCard() => new()
         {
             RateCardId = EntityId.From(rate_card_id),

@@ -171,22 +171,23 @@ internal sealed class PostgresConversationStore : IConversationStore
         return [.. terminalStates];
     }
 
-    private sealed record ConversationRow(
-        string conversation_id,
-        string tenant_id,
-        string contact_id,
-        int channel,
-        int state,
-        int? owner_kind,
-        string? owner_id,
-        string? case_id,
-        string metadata,
-        DateTimeOffset created_at,
-        DateTimeOffset? closed_at,
-        DateTimeOffset? updated_at,
-        string? created_by,
-        string? updated_by)
+    private sealed class ConversationRow
     {
+        public string conversation_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string contact_id { get; init; } = null!;
+        public int channel { get; init; }
+        public int state { get; init; }
+        public int? owner_kind { get; init; }
+        public string? owner_id { get; init; }
+        public string? case_id { get; init; }
+        public string metadata { get; init; } = null!;
+        public DateTime created_at { get; init; }
+        public DateTime? closed_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+
         public Conversation ToConversation()
         {
             ConversationOwner? owner = null;

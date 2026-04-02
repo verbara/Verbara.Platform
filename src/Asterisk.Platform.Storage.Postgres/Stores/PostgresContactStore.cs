@@ -121,25 +121,26 @@ internal sealed class PostgresContactStore : IContactStore
             new { TenantId = tenantId.Value, ContactId = contactId.Value });
     }
 
-    private sealed record ContactRow(
-        string contact_id,
-        string tenant_id,
-        string? first_name,
-        string? last_name,
-        string? company,
-        string? segment,
-        int? preferred_channel,
-        string? preferred_language,
-        string? timezone,
-        bool do_not_contact,
-        string addresses,
-        string custom_fields,
-        string channel_consent,
-        DateTimeOffset created_at,
-        DateTimeOffset? updated_at,
-        string? created_by,
-        string? updated_by)
+    private sealed class ContactRow
     {
+        public string contact_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string? first_name { get; init; }
+        public string? last_name { get; init; }
+        public string? company { get; init; }
+        public string? segment { get; init; }
+        public int? preferred_channel { get; init; }
+        public string? preferred_language { get; init; }
+        public string? timezone { get; init; }
+        public bool do_not_contact { get; init; }
+        public string addresses { get; init; } = null!;
+        public string custom_fields { get; init; } = null!;
+        public string channel_consent { get; init; } = null!;
+        public DateTime created_at { get; init; }
+        public DateTime? updated_at { get; init; }
+        public string? created_by { get; init; }
+        public string? updated_by { get; init; }
+
         public Contact ToContact()
         {
             var addressList = JsonSerializer.Deserialize(addresses, PostgresJson.Ctx.IReadOnlyListChannelAddress)

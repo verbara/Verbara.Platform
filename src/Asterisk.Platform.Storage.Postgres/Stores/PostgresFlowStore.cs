@@ -69,16 +69,17 @@ internal sealed class PostgresFlowStore : IFlowStore
             });
     }
 
-    private sealed record FlowRow(
-        string flow_id,
-        string tenant_id,
-        string name,
-        int version,
-        bool is_published,
-        string entry_node_id,
-        string nodes,
-        DateTimeOffset created_at)
+    private sealed class FlowRow
     {
+        public string flow_id { get; init; } = null!;
+        public string tenant_id { get; init; } = null!;
+        public string name { get; init; } = null!;
+        public int version { get; init; }
+        public bool is_published { get; init; }
+        public string entry_node_id { get; init; } = null!;
+        public string nodes { get; init; } = null!;
+        public DateTime created_at { get; init; }
+
         public FlowDefinition ToFlowDefinition()
         {
             var nodeList = JsonSerializer.Deserialize(nodes, PostgresJson.Ctx.IReadOnlyListFlowNode)
