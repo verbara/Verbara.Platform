@@ -12,3 +12,4 @@ TestResults/
 .superpowers/
 **/data/jwt-signing-key.xml
 local-nuget-feed/
+docker/asterisk-config/keys/
