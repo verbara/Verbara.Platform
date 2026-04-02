@@ -621,6 +621,7 @@ internal static class RoleDefaultPermissions
         "routing:skill:view", "routing:skill:manage", "routing:flow:view", "routing:flow:edit",
         "analytics:cdr:view", "analytics:cdr:export", "analytics:interval:view", "analytics:alert:manage",
         "system:tenant:configure", "system:integration:manage", "system:audit:view",
+        "system:auth:configure", "system:cluster:manage",
         "agentassist:session:view", "agentassist:config:manage",
         "callanalytics:analysis:view", "callanalytics:config:manage",
     ];

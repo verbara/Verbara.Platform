@@ -77,9 +77,16 @@ builder.Services.AddHostedService<RetentionPurgeService>();
 // ─── Storage ─────────────────────────────────────────────────────────────────
 var coreConnectionString = builder.Configuration.GetConnectionString("Postgres");
 if (!string.IsNullOrEmpty(coreConnectionString))
+{
     builder.Services.AddPostgresStorage(coreConnectionString);
+    // ITenantStore has no Postgres implementation yet — use InMemory as fallback
+    builder.Services.AddSingleton<Asterisk.Sdk.Pro.MultiTenant.ITenantStore,
+        Asterisk.Platform.Storage.InMemory.InMemoryTenantStore>();
+}
 else
+{
     builder.Services.AddInMemoryStorage();
+}
 
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 var licenseConfig = builder.Configuration.GetSection("Licensing");
