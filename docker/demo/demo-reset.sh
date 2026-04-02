@@ -104,30 +104,13 @@ else
     echo "  SKIP (no management key)"
 fi
 
-# 8.5. Verify cluster status and register PSTN emulator as secondary node
-echo "[8.5/11] Verificando cluster y registrando nodos..."
+# 8.5. Verify cluster status (primary node auto-registered via InitialNodes config)
+echo "[8.5/11] Verificando cluster..."
 if [ -n "$MGMT_KEY" ]; then
-    # Primary node is auto-registered via InitialNodes config — verify it's visible
-    CLUSTER_NODES=$(curl -sf "$API_BASE/api/management/cluster/status" \
+    CLUSTER_STATUS=$(curl -sf "$API_BASE/api/management/cluster/status" \
         -H "Authorization: Bearer $MGMT_KEY" 2>/dev/null || echo "{}")
-    echo "  Cluster status: $CLUSTER_NODES" | head -c 200
+    echo "  Cluster: $CLUSTER_STATUS" | head -c 200
     echo ""
-
-    # Register PSTN emulator as secondary cluster node
-    curl -sf -X POST "$API_BASE/api/management/cluster/nodes" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $MGMT_KEY" \
-        -d '{
-            "nodeId": "pstn-emulator",
-            "amiHostname": "pstn-emulator",
-            "amiPort": 5038,
-            "amiUsername": "platform",
-            "amiPassword": "'"${AMI_PASSWORD:-platform_demo}"'",
-            "weight": 0.5,
-            "priorityTier": 1,
-            "maxCapacity": 100,
-            "tags": {"role": "pstn-gateway"}
-        }' > /dev/null 2>&1 && echo "  OK (pstn-emulator registered as cluster node)" || echo "  SKIP (pstn-emulator already registered or unavailable)"
 else
     echo "  SKIP (no management key)"
 fi
