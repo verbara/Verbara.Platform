@@ -89,6 +89,7 @@ services:
       HostOptions__BackgroundServiceExceptionBehavior: Ignore
       Licensing__EnforcementMode: Disabled
       ConnectionStrings__Postgres: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
+      ConnectionStrings__Cluster: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       ConnectionStrings__Analytics: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       ConnectionStrings__Dialer: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       Asterisk__Ami__Hostname: asterisk

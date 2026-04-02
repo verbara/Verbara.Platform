@@ -4,7 +4,10 @@ using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk;
 using Asterisk.Sdk.Ami.Actions;
+using Asterisk.Sdk.Ami.Connection;
+using Asterisk.Sdk.Live.Server;
 using Asterisk.Sdk.Pro.Realtime;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -21,24 +24,34 @@ public sealed class RealtimeStateBridgeTests : IDisposable
     private readonly PlatformEventBus _eventBus;
     private readonly IRealtimeSyncService _syncService;
     private readonly IAmiConnection _ami;
+    private readonly AsteriskServerPool _serverPool;
 
     public RealtimeStateBridgeTests()
     {
         _syncService = Substitute.For<IRealtimeSyncService>();
         _ami = Substitute.For<IAmiConnection>();
 
+        // Create a real pool backed by mock factories
+        var connectionFactory = Substitute.For<IAmiConnectionFactory>();
+        _serverPool = new AsteriskServerPool(connectionFactory, NullLoggerFactory.Instance);
+
         // Wire the real PlatformEventBus backed by our controllable subject
         _eventBus = new PlatformEventBus();
     }
 
-    private RealtimeStateBridge CreateBridge(bool includeAmi = true)
+    private RealtimeStateBridge CreateBridge()
     {
-        var ami = includeAmi ? _ami : null;
         return new RealtimeStateBridge(
             _eventBus,
             _syncService,
-            NullLogger<RealtimeStateBridge>.Instance,
-            ami);
+            _serverPool,
+            NullLogger<RealtimeStateBridge>.Instance);
+    }
+
+    private void AddPrimaryServer()
+    {
+        var server = new AsteriskServer(_ami, NullLogger<AsteriskServer>.Instance);
+        _serverPool.AddExistingServer("primary", server);
     }
 
     private async Task PublishAndWaitAsync(PlatformEvent evt, int delayMs = 50)
@@ -57,6 +70,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
     [Fact]
     public async Task OnAgentStateChanged_Available_ShouldSyncUnpausedAndSendQueuePause_Unpaused()
     {
+        AddPrimaryServer();
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
@@ -72,6 +86,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
     [Fact]
     public async Task OnAgentStateChanged_Break_ShouldSyncPausedAndSendQueuePause_Paused()
     {
+        AddPrimaryServer();
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
@@ -95,6 +110,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
     [InlineData("Offline", true)]
     public async Task OnAgentStateChanged_AllStates_ShouldSyncCorrectPausedValue(string state, bool expectedPaused)
     {
+        AddPrimaryServer();
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
@@ -115,6 +131,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
             .Returns(callInfo => new ValueTask(Task.FromException(new InvalidOperationException("DB unavailable"))));
 #pragma warning restore CA2012
 
+        AddPrimaryServer();
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
@@ -132,6 +149,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         _ami.SendActionAsync(Arg.Any<QueuePauseAction>())
             .ThrowsAsync(new TimeoutException("AMI unreachable"));
 
+        AddPrimaryServer();
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
@@ -148,6 +166,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
     [Fact]
     public async Task OnEvent_NonAgentStateChangedEvent_ShouldIgnoreAndNotCallSync()
     {
+        AddPrimaryServer();
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
@@ -158,19 +177,20 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         await _ami.DidNotReceive().SendActionAsync(Arg.Any<QueuePauseAction>());
     }
 
-    // ─── Test 7: AMI null — only DB write, no exception ──────────────────────
+    // ─── Test 7: No server in pool — only DB write, no exception ─────────────
 
     [Fact]
-    public async Task OnAgentStateChanged_AmiNull_ShouldOnlySyncDb_NoException()
+    public async Task OnAgentStateChanged_NoServerInPool_ShouldOnlySyncDb_NoException()
     {
-        var bridge = CreateBridge(includeAmi: false);
+        // Don't add any server to pool — simulates cluster not yet connected
+        var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
         var exception = await Record.ExceptionAsync(() => PublishAndWaitAsync(MakeEvent("Break")));
 
         exception.Should().BeNull();
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
-        // _ami is never called — it was not injected
+        // _ami is never called — no server in pool
         await _ami.DidNotReceive().SendActionAsync(Arg.Any<QueuePauseAction>());
     }
 

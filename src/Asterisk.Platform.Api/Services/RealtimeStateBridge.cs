@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
-using Asterisk.Sdk;
 using Asterisk.Sdk.Ami.Actions;
+using Asterisk.Sdk.Live.Server;
 using Asterisk.Sdk.Pro.Realtime;
 
 namespace Asterisk.Platform.Api.Services;
@@ -12,7 +12,7 @@ namespace Asterisk.Platform.Api.Services;
 /// and propagates the new paused/unpaused state to:
 /// <list type="number">
 ///   <item>Asterisk Realtime DB via <see cref="IRealtimeSyncService.SyncAgentPausedAsync"/>.</item>
-///   <item>Asterisk AMI via a <c>QueuePause</c> action (when an <see cref="IAmiConnection"/> is available).</item>
+///   <item>Asterisk AMI via a <c>QueuePause</c> action through the <see cref="AsteriskServerPool"/>.</item>
 /// </list>
 /// Both operations are best-effort; failures are logged without interrupting the event stream.
 /// </summary>
@@ -20,7 +20,7 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
 {
     private readonly PlatformEventBus _eventBus;
     private readonly IRealtimeSyncService _syncService;
-    private readonly IAmiConnection? _ami;
+    private readonly AsteriskServerPool _serverPool;
     private readonly ILogger<RealtimeStateBridge> _logger;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _agentLocks = new();
     private IDisposable? _subscription;
@@ -28,13 +28,13 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
     public RealtimeStateBridge(
         PlatformEventBus eventBus,
         IRealtimeSyncService syncService,
-        ILogger<RealtimeStateBridge> logger,
-        IAmiConnection? ami = null)
+        AsteriskServerPool serverPool,
+        ILogger<RealtimeStateBridge> logger)
     {
         _eventBus = eventBus;
         _syncService = syncService;
+        _serverPool = serverPool;
         _logger = logger;
-        _ami = ami;
     }
 
     public Task StartAsync(CancellationToken ct)
@@ -65,12 +65,13 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
                 Log.SyncPausedDbFailed(_logger, e.AgentId, ex);
             }
 
-            // 2. AMI QueuePause (best-effort)
-            if (_ami is not null)
+            // 2. AMI QueuePause via cluster pool (best-effort)
+            var server = _serverPool.GetServer("primary");
+            if (server is not null)
             {
                 try
                 {
-                    await _ami.SendActionAsync(new QueuePauseAction
+                    await server.Connection.SendActionAsync(new QueuePauseAction
                     {
                         Interface = iface,
                         Paused = shouldPause,

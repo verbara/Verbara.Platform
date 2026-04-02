@@ -53,10 +53,10 @@ using Asterisk.Sdk.Pro.MultiTenant.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ─── Asterisk SDK Connection (AMI + ARI + Sessions) ──────────────────────────
+// ─── Asterisk SDK Connection (Multi-Server + Sessions via Cluster) ───────────
 
-builder.Services.AddAsterisk(builder.Configuration);
-builder.Services.AddAsteriskSessions();
+builder.Services.AddAsteriskMultiServer();
+builder.Services.AddAsteriskSessionsMultiServer();
 
 // ─── Core Platform Services ──────────────────────────────────────────────────
 
@@ -165,7 +165,6 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
 }
 
 // ─── Pro.Cluster ─────────────────────────────────────────────────────────────
-builder.Services.AddAsteriskMultiServer();
 builder.Services.AddAsteriskCluster(c =>
 {
     c.InstanceId = Environment.MachineName;
@@ -238,7 +237,7 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     builder.Services.AddProCallAnalyticsPostgres(analyticsConnectionString);
     builder.Services.UsePostgresAnalyticsStore(analyticsConnectionString);
 
-    // Pro engine registrations — require ICallSessionManager (wired by AddAsteriskSessions)
+    // Pro engine registrations — require ICallSessionManager (wired by AddAsteriskSessionsMultiServer)
     builder.Services.AddAsteriskEventStore();
     builder.Services.AddAsteriskAnalytics();
     builder.Services.AddProCallAnalytics();
