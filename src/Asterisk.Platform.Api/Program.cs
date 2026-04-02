@@ -171,10 +171,11 @@ builder.Services.AddAsteriskCluster(c =>
 
     // Register the primary Asterisk server as initial cluster node
     var amiSection = builder.Configuration.GetSection("Asterisk:Ami");
+    var ariSection = builder.Configuration.GetSection("Asterisk:Ari");
     var amiHost = amiSection["Hostname"];
     if (!string.IsNullOrEmpty(amiHost))
     {
-        c.InitialNodes["primary"] = new ClusterNodeOptions
+        var nodeOptions = new ClusterNodeOptions
         {
             Ami = new AmiConnectionOptions
             {
@@ -185,6 +186,21 @@ builder.Services.AddAsteriskCluster(c =>
                 UseSsl = bool.Parse(amiSection["UseSsl"] ?? "false"),
             },
         };
+
+        // ARI is optional — only configured if section exists
+        var ariBaseUrl = ariSection["BaseUrl"];
+        if (!string.IsNullOrEmpty(ariBaseUrl))
+        {
+            nodeOptions.Ari = new Asterisk.Sdk.Ari.Client.AriClientOptions
+            {
+                BaseUrl = ariBaseUrl,
+                Username = ariSection["Username"] ?? "",
+                Password = ariSection["Password"] ?? "",
+                Application = ariSection["Application"] ?? "asterisk-platform",
+            };
+        }
+
+        c.InitialNodes["primary"] = nodeOptions;
     }
 });
 var clusterConn = builder.Configuration.GetConnectionString("Cluster")

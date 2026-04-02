@@ -99,19 +99,22 @@ internal static class ManagementClusterEndpoints
         if (existing is not null)
             return Results.Conflict(new ErrorResponse($"Node '{body.NodeId}' already exists"));
 
-        var amiOptions = new AmiConnectionOptions
+        var nodeOptions = new ClusterNodeOptions
         {
-            Hostname = body.AmiHostname,
-            Port = body.AmiPort,
-            Username = body.AmiUsername,
-            Password = body.AmiPassword,
+            Ami = new AmiConnectionOptions
+            {
+                Hostname = body.AmiHostname,
+                Port = body.AmiPort,
+                Username = body.AmiUsername,
+                Password = body.AmiPassword,
+            },
+            Weight = body.Weight,
+            PriorityTier = body.PriorityTier,
+            MaxCapacity = body.MaxCapacity,
+            Tags = body.Tags,
         };
 
-        var tags = body.Tags is not null
-            ? (IReadOnlyDictionary<string, string>)body.Tags
-            : null;
-
-        await manager.AddNodeAsync(body.NodeId, amiOptions, body.Weight, body.PriorityTier, body.MaxCapacity, tags, ct);
+        await manager.AddNodeAsync(body.NodeId, nodeOptions, ct);
 
         var status = manager.GetStatus();
         var node = status.Nodes.FirstOrDefault(n => n.NodeId == body.NodeId);
