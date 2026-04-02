@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.0.0-pro).
+Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.1.0-pro).
 
 **28 packages, 1259 tests, 0 warnings, AOT-compatible, 47 endpoint groups:**
 
@@ -228,6 +228,7 @@ Full documentation at `docs/demo-environment.md`. **This file MUST be updated wh
 - TreatWarningsAsErrors ON, WarningLevel 9999
 - Central package management in Directory.Packages.props
 - Key NuGet versions: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0
+- **Npgsql 9 + Dapper:** Postgres row types MUST be class-based with `{get; init;}`, NOT positional records. Npgsql 9 returns `DateTime` for `timestamptz`; Dapper constructor matching fails with nullable `DateTime?` params. All 40 stores already converted.
 
 ## v1.1.0 "Enterprise Ready" -- COMPLETE (2026-03-26)
 
@@ -454,6 +455,15 @@ Tenant event subscriptions with persistent delivery and dead-letter queue:
 3. **11 event types** -- conversation.*, agent.*, campaign.*, agentassist.* (dot-separated)
 4. **13 endpoints** -- 8 tenant subscription CRUD, 2 management DLQ, 1 event types, POST test, rotate-secret
 5. **Migration 006** -- webhook_subscriptions + webhook_deliveries tables with partial indexes
+
+## Docker Demo Fixes -- COMPLETE (2026-04-02)
+
+Postgres Npgsql 9 + Dapper compatibility fix for Docker demo:
+1. **40 Postgres stores** -- All row types converted from positional records to class-based `{get; init;}` for Dapper property mapping
+2. **DateTimeOffset → DateTime** -- All timestamp fields in row types (Npgsql 9 returns DateTime for timestamptz)
+3. **Demo fully operational** -- `demo-reset.sh` seeds all data, login works, API healthy
+4. **E2E: 115/202 passed** -- Remaining 87 failures are UI-level test selector issues, not API/DB problems
+5. **SDK Pro bumped** -- v1.0.0-pro → v1.1.0-pro (ILicenseStatus, LicenseRevalidation, Cluster.Storage.Postgres)
 
 ## Plan Execution
 
