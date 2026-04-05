@@ -233,6 +233,209 @@ public class AuditQueryTests
     }
 }
 
+public class AuditChangesTests
+{
+    [Fact]
+    public void AuditChanges_ShouldStoreBeforeAndAfter()
+    {
+        var before = new { Name = "old-name" };
+        var after = new { Name = "new-name" };
+
+        var changes = new AuditChanges(Before: before, After: after);
+
+        changes.Before.Should().Be(before);
+        changes.After.Should().Be(after);
+    }
+
+    [Fact]
+    public void AuditChanges_ShouldAllowNullBeforeForCreation()
+    {
+        var after = new { Status = "active" };
+
+        var changes = new AuditChanges(Before: null, After: after);
+
+        changes.Before.Should().BeNull();
+        changes.After.Should().Be(after);
+    }
+
+    [Fact]
+    public void AuditChanges_ShouldAllowNullAfterForDeletion()
+    {
+        var before = new { Status = "active" };
+
+        var changes = new AuditChanges(Before: before, After: null);
+
+        changes.Before.Should().Be(before);
+        changes.After.Should().BeNull();
+    }
+
+    [Fact]
+    public void AuditChanges_ShouldSupportValueEquality()
+    {
+        var a = new AuditChanges(Before: "x", After: "y");
+        var b = new AuditChanges(Before: "x", After: "y");
+
+        a.Should().Be(b);
+    }
+}
+
+public class AuditEntryBackwardCompatTests
+{
+    private static readonly TenantId Tenant1 = new("tenant-1");
+
+#pragma warning disable CS0618
+    [Fact]
+    public void EntityType_ShouldReturnTargetType()
+    {
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "conversation.created",
+            TargetType = "Conversation",
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.EntityType.Should().Be("Conversation");
+    }
+
+    [Fact]
+    public void EntityType_ShouldInitTargetType_WhenSet()
+    {
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "conversation.created",
+            EntityType = "Conversation",
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.TargetType.Should().Be("Conversation");
+    }
+
+    [Fact]
+    public void EntityType_ShouldReturnEmptyString_WhenTargetTypeIsNull()
+    {
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "message.sent",
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.EntityType.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void EntityId_ShouldReturnTargetId()
+    {
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "conversation.created",
+            TargetId = "conv-42",
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.EntityId.Should().Be("conv-42");
+    }
+
+    [Fact]
+    public void PerformedBy_ShouldReturnActorId_WhenNotSystem()
+    {
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "login.success",
+            ActorId = "user-99",
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.PerformedBy.Should().Be("user-99");
+    }
+
+    [Fact]
+    public void PerformedBy_ShouldReturnNull_WhenActorIsSystem()
+    {
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "system.restart",
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.PerformedBy.Should().BeNull();
+    }
+
+    [Fact]
+    public void PerformedBy_ShouldInitActorId_WhenSet()
+    {
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "role.assigned",
+            PerformedBy = "admin-1",
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.ActorId.Should().Be("admin-1");
+    }
+
+    [Fact]
+    public void PerformedBy_ShouldSetActorIdToSystem_WhenSetToNull()
+    {
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "system.restart",
+            PerformedBy = null,
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.ActorId.Should().Be("system");
+    }
+
+    [Fact]
+    public void Details_ShouldReturnMetadata()
+    {
+        var metadata = new Dictionary<string, string> { ["ip"] = "10.0.0.1" };
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "login.success",
+            Metadata = metadata,
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.Details.Should().ContainKey("ip").WhoseValue.Should().Be("10.0.0.1");
+    }
+
+    [Fact]
+    public void Details_ShouldInitMetadata_WhenSet()
+    {
+        var details = new Dictionary<string, string> { ["reason"] = "new" };
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "conversation.created",
+            Details = details,
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.Metadata.Should().ContainKey("reason").WhoseValue.Should().Be("new");
+    }
+#pragma warning restore CS0618
+}
+
 public class AuditEntryTests
 {
     private static readonly TenantId Tenant1 = new("tenant-1");
