@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
 using Asterisk.Sdk.Pro.MultiTenant;
@@ -42,10 +43,12 @@ internal static class ManagementApiKeyEndpoints
     }
 
     private static async Task<IResult> CreateKey(
+        HttpContext context,
         [FromBody] CreateMgmtApiKeyRequest body,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IApiKeyStore apiKeyStore,
         [FromServices] IClock clock,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var host = await tenantStore.GetHostTenantAsync(ct);
@@ -71,16 +74,28 @@ internal static class ManagementApiKeyEndpoints
         };
 
         await apiKeyStore.SaveAsync(apiKey, ct);
-
+        await audit.RecordAsync(
+            new TenantId(host.TenantId), category: "admin", action: "api_key.created", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: apiKey.KeyId.Value, targetType: "api_key",
+            changes: new AuditChanges(Before: null, After: new { apiKey.KeyId, apiKey.Name, apiKey.ExpiresAt }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/management/api-keys/{apiKey.KeyId.Value}",
             new CreateMgmtApiKeyResponse(apiKey.KeyId.Value, apiKey.Name, rawKey, apiKey.ExpiresAt));
     }
 
     private static async Task<IResult> RotateKey(
         string id,
+        HttpContext context,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IApiKeyStore apiKeyStore,
         [FromServices] IClock clock,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var host = await tenantStore.GetHostTenantAsync(ct);
@@ -113,14 +128,27 @@ internal static class ManagementApiKeyEndpoints
         };
 
         await apiKeyStore.SaveAsync(newKey, ct);
-
+        await audit.RecordAsync(
+            tenantId, category: "admin", action: "api_key.rotated", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: newKey.KeyId.Value, targetType: "api_key",
+            changes: new AuditChanges(Before: new { KeyId = id, existing.Name }, After: new { newKey.KeyId, newKey.Name }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+                ["previous_key_id"] = id,
+            },
+            ct: ct);
         return Results.Ok(new CreateMgmtApiKeyResponse(newKey.KeyId.Value, newKey.Name, rawKey, newKey.ExpiresAt));
     }
 
     private static async Task<IResult> RevokeKey(
         string id,
+        HttpContext context,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IApiKeyStore apiKeyStore,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var host = await tenantStore.GetHostTenantAsync(ct);
@@ -133,6 +161,17 @@ internal static class ManagementApiKeyEndpoints
             return Results.NotFound();
 
         await apiKeyStore.RevokeAsync(tenantId, existing.KeyId, ct);
+        await audit.RecordAsync(
+            tenantId, category: "admin", action: "api_key.revoked", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "api_key",
+            changes: new AuditChanges(Before: new { existing.KeyId, existing.Name, IsRevoked = false }, After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 }

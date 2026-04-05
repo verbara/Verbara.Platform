@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Licensing;
 using Asterisk.Sdk.Pro.MultiTenant;
@@ -82,12 +83,34 @@ internal static class ManagementSystemEndpoints
         return Results.Ok(new SystemSettingsDto(record.PlatformName, record.DefaultTimezone, record.DefaultLanguage));
     }
 
-    private static IResult SaveSettings(
+    private static async Task<IResult> SaveSettings(
+        HttpContext context,
         [FromBody] SystemSettingsRequest body,
-        [FromServices] SystemSettingsStore store)
+        [FromServices] SystemSettingsStore store,
+        [FromServices] ITenantStore tenantStore,
+        [FromServices] IAuditService audit,
+        CancellationToken ct)
     {
+        var before = store.Get();
         var record = new SystemSettingsRecord(body.PlatformName, body.DefaultTimezone, body.DefaultLanguage);
         store.Save(record);
+
+        var host = await tenantStore.GetHostTenantAsync(ct);
+        if (host is not null)
+        {
+            await audit.RecordAsync(
+                new TenantId(host.TenantId), category: "admin", action: "system.configured", severity: "critical",
+                actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+                targetId: host.TenantId, targetType: "system",
+                changes: new AuditChanges(Before: new { before.PlatformName, before.DefaultTimezone, before.DefaultLanguage }, After: new { record.PlatformName, record.DefaultTimezone, record.DefaultLanguage }),
+                metadata: new Dictionary<string, string>
+                {
+                    ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    ["endpoint"] = context.Request.Path.Value ?? "",
+                },
+                ct: ct);
+        }
+
         return Results.Ok(new SystemSettingsDto(record.PlatformName, record.DefaultTimezone, record.DefaultLanguage));
     }
 }

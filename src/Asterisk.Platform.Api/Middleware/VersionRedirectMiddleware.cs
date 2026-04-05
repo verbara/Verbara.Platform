@@ -21,7 +21,7 @@ internal sealed class VersionRedirectMiddleware
 
         // Rewrite /api/foo → /api/v1/foo
         var newPath = "/api/v1" + path[4..];
-        context.Request.Path = newPath;
+        context.Request.Path = new PathString(newPath);
 
         context.Response.OnStarting(() =>
         {

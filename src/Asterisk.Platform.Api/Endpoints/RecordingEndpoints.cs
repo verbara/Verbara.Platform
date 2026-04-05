@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.EventStore;
 using Microsoft.AspNetCore.Mvc;
@@ -41,6 +42,7 @@ internal static class RecordingEndpoints
         HttpContext context,
         [FromServices] ICompletedSessionStore cdrStore,
         IOptions<RecordingOptions> options,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -78,6 +80,18 @@ internal static class RecordingEndpoints
         };
 
         context.Response.Headers.CacheControl = "private, max-age=86400";
+
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "data_access", action: "recording.played", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: sessionId, targetType: "recording",
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+                ["recording_name"] = recordingName,
+            },
+            ct: ct);
 
         return Results.File(filePath, contentType: contentType, enableRangeProcessing: true);
     }

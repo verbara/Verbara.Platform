@@ -1,5 +1,6 @@
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -87,7 +88,7 @@ internal static class RbacEndpoints
     private static async Task<IResult> CreateTenantRole(
         HttpContext context, [FromBody] CreateTenantRoleRequest body,
         [FromServices] ITenantRoleStore store, [FromServices] IRoleTemplateStore templateStore,
-        IClock clock, CancellationToken ct)
+        IClock clock, [FromServices] IAuditService audit, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var roleId = Guid.NewGuid().ToString("N")[..12];
@@ -118,6 +119,17 @@ internal static class RbacEndpoints
         }
 
         var created = await store.GetByIdAsync(tenantId, roleId, ct);
+        await audit.RecordAsync(
+            tenantId, category: "rbac", action: "role.created", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: roleId, targetType: "role",
+            changes: new AuditChanges(Before: null, After: new { RoleId = roleId, body.Name }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/roles/{roleId}", created);
     }
 
@@ -132,11 +144,13 @@ internal static class RbacEndpoints
     private static async Task<IResult> UpdateTenantRole(
         string id, HttpContext context, [FromBody] UpdateTenantRoleRequest body,
         [FromServices] ITenantRoleStore store, [FromServices] PermissionResolver resolver,
-        IClock clock, CancellationToken ct)
+        IClock clock, [FromServices] IAuditService audit, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var role = await store.GetByIdAsync(tenantId, id, ct);
         if (role is null) return Results.NotFound();
+
+        var before = new { role.RoleId, role.Name, role.Description };
 
         if (body.Name is not null) role.Name = body.Name;
         if (body.Description is not null) role.Description = body.Description;
@@ -150,12 +164,23 @@ internal static class RbacEndpoints
         }
 
         var updated = await store.GetByIdAsync(tenantId, id, ct);
+        await audit.RecordAsync(
+            tenantId, category: "rbac", action: "role.updated", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "role",
+            changes: new AuditChanges(Before: before, After: new { role.RoleId, role.Name, role.Description }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(updated);
     }
 
     private static async Task<IResult> DeleteTenantRole(
         string id, HttpContext context, [FromServices] ITenantRoleStore store,
-        [FromServices] PermissionResolver resolver, CancellationToken ct)
+        [FromServices] PermissionResolver resolver, [FromServices] IAuditService audit, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var role = await store.GetByIdAsync(tenantId, id, ct);
@@ -171,6 +196,17 @@ internal static class RbacEndpoints
 
         await store.DeleteAsync(tenantId, id, ct);
         resolver.InvalidateTenant(tenantId);
+        await audit.RecordAsync(
+            tenantId, category: "rbac", action: "role.deleted", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "role",
+            changes: new AuditChanges(Before: new { role.RoleId, role.Name }, After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 
@@ -215,22 +251,36 @@ internal static class RbacEndpoints
 
     private static async Task<IResult> ReplaceUserRoles(
         string id, HttpContext context, [FromBody] ReplaceUserRolesRequest body,
-        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver, CancellationToken ct)
+        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver,
+        [FromServices] IAuditService audit, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
         var assignedBy = context.User.FindFirst("user_id")?.Value;
 
+        var before = await store.GetRolesForUserAsync(tenantId, userId, ct);
         await store.ReplaceAllAsync(tenantId, userId, body.RoleIds, assignedBy, ct);
         resolver.InvalidateUser(tenantId, userId);
 
         var roles = await store.GetRolesForUserAsync(tenantId, userId, ct);
+        await audit.RecordAsync(
+            tenantId, category: "rbac", action: "role.assigned", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "user",
+            changes: new AuditChanges(Before: before, After: roles),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(roles);
     }
 
     private static async Task<IResult> AddUserRole(
         string id, string roleId, HttpContext context,
-        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver, CancellationToken ct)
+        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver,
+        [FromServices] IAuditService audit, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
@@ -238,20 +288,43 @@ internal static class RbacEndpoints
 
         await store.AssignAsync(tenantId, userId, roleId, assignedBy, ct);
         resolver.InvalidateUser(tenantId, userId);
-
+        await audit.RecordAsync(
+            tenantId, category: "rbac", action: "role.assigned", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "user",
+            changes: new AuditChanges(Before: null, After: new { UserId = id, RoleId = roleId }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+                ["role_id"] = roleId,
+            },
+            ct: ct);
         return Results.NoContent();
     }
 
     private static async Task<IResult> RemoveUserRole(
         string id, string roleId, HttpContext context,
-        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver, CancellationToken ct)
+        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver,
+        [FromServices] IAuditService audit, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
 
         await store.RemoveAsync(tenantId, userId, roleId, ct);
         resolver.InvalidateUser(tenantId, userId);
-
+        await audit.RecordAsync(
+            tenantId, category: "rbac", action: "role.revoked", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "user",
+            changes: new AuditChanges(Before: new { UserId = id, RoleId = roleId }, After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+                ["role_id"] = roleId,
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

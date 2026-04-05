@@ -1,4 +1,6 @@
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Audit;
+using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
 
@@ -55,8 +57,10 @@ internal static class ManagementTenantEndpoints
     }
 
     private static async Task<IResult> CreateTenant(
+        HttpContext context,
         [FromBody] CreateMgmtTenantRequest body,
         [FromServices] ITenantStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         // Validate type
@@ -104,18 +108,33 @@ internal static class ManagementTenantEndpoints
         };
 
         await store.UpsertAsync(tenant, ct);
+        await audit.RecordAsync(
+            new TenantId(tenant.TenantId), category: "admin", action: "tenant.created", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: tenant.TenantId, targetType: "tenant",
+            changes: new AuditChanges(Before: null, After: new { tenant.TenantId, tenant.Name, tenant.Type }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/management/tenants/{tenant.TenantId}", MapToDto(tenant));
     }
 
     private static async Task<IResult> UpdateTenant(
         string id,
+        HttpContext context,
         [FromBody] UpdateMgmtTenantRequest body,
         [FromServices] ITenantStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var existing = await store.GetAsync(id, ct);
         if (existing is null)
             return Results.NotFound();
+
+        var before = new { existing.TenantId, existing.Name };
 
         var updated = new Tenant
         {
@@ -138,12 +157,25 @@ internal static class ManagementTenantEndpoints
         };
 
         await store.UpsertAsync(updated, ct);
+        await audit.RecordAsync(
+            new TenantId(id), category: "admin", action: "tenant.updated", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "tenant",
+            changes: new AuditChanges(Before: before, After: new { updated.TenantId, updated.Name }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(MapToDto(updated));
     }
 
     private static async Task<IResult> SuspendTenant(
         string id,
+        HttpContext context,
         [FromServices] ITenantStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenant = await store.GetAsync(id, ct);
@@ -152,24 +184,50 @@ internal static class ManagementTenantEndpoints
             return Results.BadRequest(new ErrorResponse("Cannot suspend the Platform tenant."));
 
         await store.UpdateStatusAsync(id, TenantStatus.Suspended, ct);
+        await audit.RecordAsync(
+            new TenantId(id), category: "admin", action: "tenant.suspended", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "tenant",
+            changes: new AuditChanges(Before: new { Status = "Active" }, After: new { Status = "Suspended" }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(new StatusUpdateResponse(id, "Suspended"));
     }
 
     private static async Task<IResult> ActivateTenant(
         string id,
+        HttpContext context,
         [FromServices] ITenantStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenant = await store.GetAsync(id, ct);
         if (tenant is null) return Results.NotFound();
 
         await store.UpdateStatusAsync(id, TenantStatus.Active, ct);
+        await audit.RecordAsync(
+            new TenantId(id), category: "admin", action: "tenant.activated", severity: "warning",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "tenant",
+            changes: new AuditChanges(Before: new { tenant.Status }, After: new { Status = TenantStatus.Active }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(new StatusUpdateResponse(id, "Active"));
     }
 
     private static async Task<IResult> DeleteTenant(
         string id,
+        HttpContext context,
         [FromServices] ITenantStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenant = await store.GetAsync(id, ct);
@@ -179,6 +237,17 @@ internal static class ManagementTenantEndpoints
 
         // UpdateStatusAsync throws if active children exist
         await store.UpdateStatusAsync(id, TenantStatus.Deleted, ct);
+        await audit.RecordAsync(
+            new TenantId(id), category: "admin", action: "tenant.deleted", severity: "critical",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "tenant",
+            changes: new AuditChanges(Before: new { tenant.TenantId, tenant.Name, tenant.Status }, After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 
