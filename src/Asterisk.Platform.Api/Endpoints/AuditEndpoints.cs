@@ -24,6 +24,12 @@ internal static class AuditEndpoints
         string? performedBy = null,
         DateTimeOffset? from = null,
         DateTimeOffset? to = null,
+        string? category = null,
+        string? severity = null,
+        string? actorId = null,
+        string? targetId = null,
+        string? targetType = null,
+        Guid? correlationId = null,
         int page = 1,
         int pageSize = 50,
         CancellationToken ct = default)
@@ -36,7 +42,13 @@ internal static class AuditEndpoints
             From: from,
             To: to,
             Page: page,
-            PageSize: pageSize);
+            PageSize: pageSize,
+            Category: category,
+            Severity: severity,
+            ActorId: actorId,
+            TargetId: targetId,
+            TargetType: targetType,
+            CorrelationId: correlationId);
 
         var result = await store.SearchAsync(tenantId, query, ct);
         return Results.Ok(result);
