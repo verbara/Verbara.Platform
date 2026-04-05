@@ -31,7 +31,7 @@ internal static class GdprEndpoints
     private static async Task<IResult> ExportContactData(
         HttpContext context,
         [FromBody] GdprExportRequest body,
-        [FromQuery] string format,
+        [FromQuery] string? format,
         [FromServices] IGdprExportService exportService,
         CancellationToken ct)
     {
