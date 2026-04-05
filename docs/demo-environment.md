@@ -342,7 +342,8 @@ Dial from any registered extension to test outbound call handling:
 | Grafana + Prometheus | OK | 8-panel dashboard with pre-seeded data |
 | Historical analytics | OK | 50 CDRs + 48 interval snapshots |
 | Agent state transitions | OK | Available/OnCall/OnBreak/Offline (API) |
-| SSE real-time events | OK | `/api/events/sse` (active when events occur) |
+| API versioning | OK | All endpoints under `/api/v1/`, backward-compat redirect for `/api/` |
+| SSE real-time events | OK | `/api/v1/events/sse` (active when events occur) |
 | Audit trail | OK | Login events, permission changes logged |
 | Health/Metrics endpoints | OK | `/health` + `/metrics` |
 | WebRTC endpoints | OK | 6 agents with WSS transport + Opus codec |

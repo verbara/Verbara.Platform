@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.1-pro).
 
-**28 packages, 1259+ tests, 0 warnings, AOT-compatible, 47 endpoint groups, version 1.3.1:**
+**28 packages, 1103 tests, 0 warnings, AOT-compatible, 47 endpoint groups, version 1.3.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -30,12 +30,12 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Bot | Virtual agent orchestration -- IVirtualAgent, BotOrchestrator, flow-driven turn management, analytics, DI | 30 |
 | Platform.Automation | Automation rules -- event triggers, condition evaluator, action executor, DI | 45 |
 | Platform.Surveys | Post-conversation surveys -- survey store, response collection, DI | 30 |
-| Platform.Audit | Audit trail -- event logging, query, retention, DI | 9 |
+| Platform.Audit | Audit trail -- event logging, query, retention, DI | 41 |
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
 | Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, DI | 40 |
-| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 102 |
+| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 115 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
-| Platform.Api | HTTP host -- 47 endpoint groups, auth, middleware, SSE, OpenAPI | 317 |
+| Platform.Api | HTTP host -- 47 endpoint groups, auth, middleware, SSE, OpenAPI | 410 |
 
 ## Build & Test
 
@@ -496,6 +496,12 @@ builder.Services.AddPlatformScheduledReports(o =>
 // API versioning
 builder.Services.AddPlatformApiVersioning();  // wired in Program.cs
 ```
+
+## v1.3.1 Web Sync + GDPR Fix -- COMPLETE (2026-04-05)
+
+Two stabilization commits:
+1. **API URL migration** -- Updated all 55 Platform.Web files (38 hooks, 6 auth pages, API client, SSE, vite proxy, config.json, E2E fixtures) from `/api/` to `/api/v1/`, eliminating reliance on VersionRedirectMiddleware
+2. **GDPR export fix** -- Made `[FromQuery] string format` nullable on `ExportContactData` endpoint, fixing 2 pre-existing test failures (non-nullable string treated as required by ASP.NET model binding)
 
 ## Plan Execution
 

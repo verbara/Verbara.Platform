@@ -77,7 +77,7 @@ API_BASE="http://localhost:5000"
 
 # 7. Initialize platform via setup wizard (creates host tenant + admin + mgmt key)
 echo "[7/11] Inicializando plataforma..."
-SETUP_RESPONSE=$(curl -sf -X POST "$API_BASE/api/setup" \
+SETUP_RESPONSE=$(curl -sf -X POST "$API_BASE/api/v1/setup" \
     -H "Content-Type: application/json" \
     -d '{
         "email": "platform@admin.local",
@@ -95,7 +95,7 @@ fi
 # 8. Create demo customer tenant via Management API
 echo "[8/11] Creando tenant demo..."
 if [ -n "$MGMT_KEY" ]; then
-    curl -sf -X POST "$API_BASE/api/management/tenants" \
+    curl -sf -X POST "$API_BASE/api/v1/management/tenants" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $MGMT_KEY" \
         -d '{"tenantId":"demo","name":"Demo Contact Center","type":2}' > /dev/null 2>&1 || true
@@ -107,7 +107,7 @@ fi
 # 8.5. Verify cluster status (primary node auto-registered via InitialNodes config)
 echo "[8.5/11] Verificando cluster..."
 if [ -n "$MGMT_KEY" ]; then
-    CLUSTER_STATUS=$(curl -sf "$API_BASE/api/management/cluster/status" \
+    CLUSTER_STATUS=$(curl -sf "$API_BASE/api/v1/management/cluster/status" \
         -H "Authorization: Bearer $MGMT_KEY" 2>/dev/null || echo "{}")
     echo "  Cluster: $CLUSTER_STATUS" | head -c 200
     echo ""
@@ -119,7 +119,7 @@ fi
 echo "[9/11] Creando datos demo via API..."
 
 # Get a JWT for the platform admin to use admin endpoints
-PLATFORM_JWT=$(curl -sf -X POST "$API_BASE/api/auth/login" \
+PLATFORM_JWT=$(curl -sf -X POST "$API_BASE/api/v1/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"tenantId":"platform","email":"platform@admin.local","password":"PlatformAdmin2026!"}' \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null || echo "")
@@ -132,10 +132,10 @@ else
     CT="Content-Type: application/json"
 
     # Create demo admin user
-    curl -sf -X POST "$API_BASE/api/admin/users" -H "$CT" -H "$AUTH" -H "$TENANT" \
+    curl -sf -X POST "$API_BASE/api/v1/admin/users" -H "$CT" -H "$AUTH" -H "$TENANT" \
         -d '{"userId":"demo-user-admin","email":"admin@demo.local","displayName":"Demo Admin","role":"Admin","password":"DemoAdmin2026!"}' > /dev/null 2>&1 || true
     # Create demo supervisor
-    curl -sf -X POST "$API_BASE/api/admin/users" -H "$CT" -H "$AUTH" -H "$TENANT" \
+    curl -sf -X POST "$API_BASE/api/v1/admin/users" -H "$CT" -H "$AUTH" -H "$TENANT" \
         -d '{"userId":"demo-user-supervisor","email":"supervisor@demo.local","displayName":"Demo Supervisor","role":"Supervisor","password":"DemoSupervisor2026!"}' > /dev/null 2>&1 || true
 
     # Create 6 agent users + agent records
@@ -149,21 +149,21 @@ else
     do
         IFS='|' read -r uid email name aid ext sippwd skill <<< "$agent"
         # Create user
-        curl -sf -X POST "$API_BASE/api/admin/users" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        curl -sf -X POST "$API_BASE/api/v1/admin/users" -H "$CT" -H "$AUTH" -H "$TENANT" \
             -d "{\"userId\":\"$uid\",\"email\":\"$email\",\"displayName\":\"$name\",\"role\":\"Agent\",\"password\":\"DemoAgent2026!\"}" > /dev/null 2>&1 || true
         # Create agent
-        curl -sf -X POST "$API_BASE/api/admin/agents" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        curl -sf -X POST "$API_BASE/api/v1/admin/agents" -H "$CT" -H "$AUTH" -H "$TENANT" \
             -d "{\"agentId\":\"$aid\",\"userId\":\"$uid\",\"displayName\":\"$name\",\"extension\":\"$ext\",\"sipPassword\":\"$sippwd\",\"skills\":[\"$skill\"]}" > /dev/null 2>&1 || true
     done
 
     # Create queues
-    curl -sf -X POST "$API_BASE/api/admin/queues" -H "$CT" -H "$AUTH" -H "$TENANT" \
+    curl -sf -X POST "$API_BASE/api/v1/admin/queues" -H "$CT" -H "$AUTH" -H "$TENANT" \
         -d '{"queueId":"demo-queue-sales","name":"Sales","isActive":true}' > /dev/null 2>&1 || true
-    curl -sf -X POST "$API_BASE/api/admin/queues" -H "$CT" -H "$AUTH" -H "$TENANT" \
+    curl -sf -X POST "$API_BASE/api/v1/admin/queues" -H "$CT" -H "$AUTH" -H "$TENANT" \
         -d '{"queueId":"demo-queue-support","name":"Support","isActive":true}' > /dev/null 2>&1 || true
 
     # Activate WebChat channel
-    curl -sf -X PUT "$API_BASE/api/admin/channels/webchat" -H "$CT" -H "$AUTH" -H "$TENANT" \
+    curl -sf -X PUT "$API_BASE/api/v1/admin/channels/webchat" -H "$CT" -H "$AUTH" -H "$TENANT" \
         -d '{"isActive":true,"credentials":{}}' > /dev/null 2>&1 || true
 
     echo "  OK (admin, supervisor, 6 agents, 2 queues, webchat channel)"
@@ -179,7 +179,7 @@ echo "  OK"
 
 # 11. Warmup + Summary
 echo "[11/11] Verificando..."
-LOGIN_RESULT=$(curl -sf -X POST "$API_BASE/api/auth/login" \
+LOGIN_RESULT=$(curl -sf -X POST "$API_BASE/api/v1/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"tenantId":"demo","email":"admin@demo.local","password":"DemoAdmin2026!"}' 2>/dev/null)
 if echo "$LOGIN_RESULT" | grep -q "accessToken"; then
@@ -204,7 +204,7 @@ echo "    platform@admin.local         / PlatformAdmin2026!  (Platform Admin)"
 if [ -n "$MGMT_KEY" ]; then
 echo "    Management API Key:          $MGMT_KEY"
 else
-echo "    Management API Key:          (run POST /api/setup to generate)"
+echo "    Management API Key:          (run POST /api/v1/setup to generate)"
 fi
 echo ""
 echo "  Demo Tenant (customer, child of platform):"
