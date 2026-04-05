@@ -12,6 +12,7 @@ using Asterisk.Platform.Identity;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Reports;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Storage.Postgres.Stores;
@@ -100,6 +101,9 @@ public static class ServiceCollectionExtensions
         // Webhooks
         services.AddSingleton<IWebhookSubscriptionStore, PostgresWebhookSubscriptionStore>();
         services.AddSingleton<IWebhookDeliveryStore, PostgresWebhookDeliveryStore>();
+
+        // Reports
+        services.AddSingleton<IScheduledReportStore, PostgresScheduledReportStore>();
 
         // RBAC
         services.AddSingleton<IPermissionStore, PostgresPermissionStore>();

@@ -13,6 +13,7 @@ using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Surveys;
+using Asterisk.Platform.Core.Reports;
 using Asterisk.Platform.Core.Webhooks;
 using Asterisk.Sdk.Pro.MultiTenant;
 
@@ -93,6 +94,9 @@ public static class ServiceCollectionExtensions
         // Webhooks
         services.AddSingleton<IWebhookSubscriptionStore, InMemoryWebhookSubscriptionStore>();
         services.AddSingleton<IWebhookDeliveryStore, InMemoryWebhookDeliveryStore>();
+
+        // Reports
+        services.AddSingleton<IScheduledReportStore, InMemoryScheduledReportStore>();
 
         // MultiTenant
         if (!services.Any(d => d.ServiceType == typeof(ITenantStore)))
