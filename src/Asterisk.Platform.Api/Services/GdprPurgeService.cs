@@ -30,6 +30,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         _purgeLogStore = purgeLogStore;
     }
 
+
     public async Task<PurgeResult> PurgeContactDataAsync(
         string tenantId, string contactId, string performedBy,
         string reason, CancellationToken ct)
@@ -93,5 +94,54 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         await _purgeLogStore.SaveAsync(purgeEntry, ct);
 
         return new PurgeResult(purgeId, entitiesDeleted, purgedAt);
+    }
+
+    public async Task<PurgeResult> PurgeUserDataAsync(
+        string tenantId, string userId, string performedBy,
+        string reason, CancellationToken ct)
+    {
+        var tid = new TenantId(tenantId);
+        var uid = EntityId.From(userId);
+        var entitiesDeleted = new Dictionary<string, int>();
+
+        // 1. Delete auth events for the user
+        var authEventsDeleted = await _authEventStore.DeleteByUserAsync(tenantId, userId, ct);
+        if (authEventsDeleted > 0)
+            entitiesDeleted["authEvents"] = authEventsDeleted;
+
+        // 2. Delete the user record itself
+        await _userStore.DeleteAsync(tid, uid, ct);
+        entitiesDeleted["user"] = 1;
+
+        // 3. Write tombstone (NO PII — only metadata)
+        var purgeId = Guid.NewGuid().ToString("N");
+        var purgedAt = DateTimeOffset.UtcNow;
+        var purgeEntry = new PurgeEntry
+        {
+            PurgeId = purgeId,
+            TenantId = tenantId,
+            SubjectType = "user",
+            SubjectId = userId,
+            PerformedBy = performedBy,
+            Reason = reason,
+            EntitiesDeleted = entitiesDeleted,
+            PurgedAt = purgedAt,
+        };
+        await _purgeLogStore.SaveAsync(purgeEntry, ct);
+
+        return new PurgeResult(purgeId, entitiesDeleted, purgedAt);
+    }
+
+    public async Task<UserPurgePreview> PreviewUserPurgeAsync(
+        string tenantId, string userId, CancellationToken ct)
+    {
+        var authEvents = await _authEventStore.ListAllByUserAsync(tenantId, userId, ct);
+
+        return new UserPurgePreview(
+            UserId: userId,
+            TenantId: tenantId,
+            AuthEventCount: authEvents.Count,
+            AuditTrailCount: 0,
+            PreviewedAt: DateTimeOffset.UtcNow);
     }
 }

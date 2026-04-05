@@ -76,6 +76,8 @@ builder.Services.AddPlatformBilling();
 // ─── GDPR Services ──────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IGdprExportService, GdprExportService>();
 builder.Services.AddSingleton<IGdprPurgeService, GdprPurgeService>();
+builder.Services.AddKeyedSingleton<IGdprExportFormatter, JsonGdprExportFormatter>("json");
+builder.Services.AddKeyedSingleton<IGdprExportFormatter, CsvGdprExportFormatter>("csv");
 builder.Services.AddHostedService<RetentionPurgeService>();
 
 // ─── Storage ─────────────────────────────────────────────────────────────────

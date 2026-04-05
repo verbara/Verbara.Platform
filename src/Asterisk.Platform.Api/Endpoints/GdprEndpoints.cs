@@ -1,6 +1,7 @@
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Core;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -12,6 +13,8 @@ internal static class GdprEndpoints
         var admin = app.MapGroup("/admin/gdpr").RequireAuthorization("AdminOnly");
         admin.MapPost("/export", ExportContactData);
         admin.MapPost("/purge", PurgeContactData);
+        admin.MapPost("/purge-user", PurgeUserData);
+        admin.MapGet("/purge-preview", PurgePreview);
 
         // Platform admin endpoints
         var mgmt = app.MapGroup("/management/gdpr").RequireAuthorization("PlatformAdminOnly");
@@ -28,6 +31,7 @@ internal static class GdprEndpoints
     private static async Task<IResult> ExportContactData(
         HttpContext context,
         [FromBody] GdprExportRequest body,
+        [FromQuery] string format,
         [FromServices] IGdprExportService exportService,
         CancellationToken ct)
     {
@@ -36,10 +40,24 @@ internal static class GdprEndpoints
 
         var tenantId = GetTenantId(context);
         var result = await exportService.ExportContactDataAsync(tenantId.Value, body.ContactId, ct);
-        return Results.Ok(result);
+
+        var normalizedFormat = string.IsNullOrWhiteSpace(format) ? "json" : format.ToLowerInvariant();
+
+        if (normalizedFormat == "csv")
+        {
+            var formatter = context.RequestServices.GetRequiredKeyedService<IGdprExportFormatter>("csv");
+            var exportData = BuildExportData(result, body.ContactId);
+            var bytes = await formatter.FormatAsync(exportData, ct);
+            var fileName = $"gdpr-export-{body.ContactId}-{DateTimeOffset.UtcNow:yyyyMMdd}{formatter.FileExtension}";
+            return Results.File(bytes, formatter.ContentType, fileName);
+        }
+        else
+        {
+            return Results.Ok(result);
+        }
     }
 
-    // --- Purge ----------------------------------------------------------------
+    // --- Purge (contact) ------------------------------------------------------
 
     private static async Task<IResult> PurgeContactData(
         HttpContext context,
@@ -59,6 +77,48 @@ internal static class GdprEndpoints
             tenantId.Value, body.ContactId, userId, body.Reason, ct);
 
         return Results.Ok(result);
+    }
+
+    // --- Purge (user) ---------------------------------------------------------
+
+    private static async Task<IResult> PurgeUserData(
+        HttpContext context,
+        [FromBody] GdprUserPurgeRequest body,
+        [FromServices] IGdprPurgeService purgeService,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body.UserId))
+            return Results.BadRequest(new ErrorResponse("userId is required"));
+        if (string.IsNullOrWhiteSpace(body.Reason))
+            return Results.BadRequest(new ErrorResponse("reason is required"));
+
+        var confirmHeader = context.Request.Headers["X-Confirm-Purge"].ToString();
+        if (!string.Equals(confirmHeader, "true", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new ErrorResponse("X-Confirm-Purge: true header is required to confirm destructive operation"));
+
+        var tenantId = GetTenantId(context);
+        var performedBy = context.User.FindFirst("sub")?.Value ?? "unknown";
+
+        var result = await purgeService.PurgeUserDataAsync(
+            tenantId.Value, body.UserId, performedBy, body.Reason, ct);
+
+        return Results.Ok(result);
+    }
+
+    // --- Purge Preview --------------------------------------------------------
+
+    private static async Task<IResult> PurgePreview(
+        HttpContext context,
+        [FromQuery] string userId,
+        [FromServices] IGdprPurgeService purgeService,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return Results.BadRequest(new ErrorResponse("userId query parameter is required"));
+
+        var tenantId = GetTenantId(context);
+        var preview = await purgeService.PreviewUserPurgeAsync(tenantId.Value, userId, ct);
+        return Results.Ok(preview);
     }
 
     // --- Purge Log ------------------------------------------------------------
@@ -125,12 +185,25 @@ internal static class GdprEndpoints
             return tid;
         throw new InvalidOperationException("Tenant ID not resolved");
     }
+
+    /// <summary>
+    /// Adapts a <see cref="GdprExportResult"/> (the rich service result) into the
+    /// flat <see cref="GdprExportData"/> model consumed by export formatters.
+    /// </summary>
+    private static GdprExportData BuildExportData(GdprExportResult result, string contactId) =>
+        new()
+        {
+            SubjectId = result.Subject?.ContactId ?? contactId,
+            SubjectType = "contact",
+            ExportedAt = result.ExportedAt,
+        };
 }
 
 // --- DTOs --------------------------------------------------------------------
 
 internal sealed record GdprExportRequest(string ContactId);
 internal sealed record GdprPurgeRequest(string ContactId, string Reason);
+internal sealed record GdprUserPurgeRequest(string UserId, string Reason);
 
 internal sealed record RetentionPolicyDto(
     string TenantId,
