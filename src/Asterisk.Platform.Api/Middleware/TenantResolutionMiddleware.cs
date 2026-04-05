@@ -14,6 +14,8 @@ internal sealed class TenantResolutionMiddleware
     {
         "/api/management/impersonate",
         "/api/setup",
+        "/api/v1/management/impersonate",
+        "/api/v1/setup",
     };
 
     public TenantResolutionMiddleware(RequestDelegate next)
@@ -43,8 +45,9 @@ internal sealed class TenantResolutionMiddleware
 
     private static TenantId? ResolveTenantId(HttpContext context)
     {
-        // Webhook routes: /api/webhooks/{tenantId}/{channel}
-        if (context.Request.Path.StartsWithSegments("/api/webhooks", out var remaining))
+        // Webhook routes: /api/webhooks/{tenantId}/{channel} or /api/v1/webhooks/{tenantId}/{channel}
+        if (context.Request.Path.StartsWithSegments("/api/webhooks", out var remaining)
+            || context.Request.Path.StartsWithSegments("/api/v1/webhooks", out remaining))
         {
             var segments = remaining.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
             if (segments is { Length: >= 1 } && !string.IsNullOrWhiteSpace(segments[0]))
@@ -90,16 +93,18 @@ internal sealed class TenantResolutionMiddleware
             return true;
         }
 
-        // DELETE /api/management/tenants/*
+        // DELETE /api/management/tenants/* or /api/v1/management/tenants/*
         if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase)
-            && path.StartsWith("/api/management/tenants/", StringComparison.OrdinalIgnoreCase))
+            && (path.StartsWith("/api/management/tenants/", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/api/v1/management/tenants/", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
 
-        // PUT /api/management/system/*
+        // PUT /api/management/system/* or /api/v1/management/system/*
         if (string.Equals(method, "PUT", StringComparison.OrdinalIgnoreCase)
-            && path.StartsWith("/api/management/system/", StringComparison.OrdinalIgnoreCase))
+            && (path.StartsWith("/api/management/system/", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/api/v1/management/system/", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
