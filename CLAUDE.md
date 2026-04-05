@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.3) and Pro packages (v1.1.0-pro).
+Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.1-pro).
 
-**28 packages, 1259 tests, 0 warnings, AOT-compatible, 47 endpoint groups:**
+**28 packages, 1259+ tests, 0 warnings, AOT-compatible, 47 endpoint groups, version 1.3.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -118,7 +118,7 @@ ErrorHandlingMiddleware -> CORS -> RateLimiter -> TenantResolutionMiddleware -> 
 
 ### Endpoint Inventory (43 groups, 43 files)
 
-All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. Key groups:
+All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all routes are versioned under `/api/v1/` (Asp.Versioning.Http, URL-segment strategy). Legacy `/api/` paths redirect for backward compatibility. Key groups:
 
 | Category | Endpoint Files |
 |----------|---------------|
@@ -227,7 +227,7 @@ Full documentation at `docs/demo-environment.md`. **This file MUST be updated wh
 - Test stack: xunit 2.9.3, FluentAssertions 7.1.0, NSubstitute 5.3.0
 - TreatWarningsAsErrors ON, WarningLevel 9999
 - Central package management in Directory.Packages.props
-- Key NuGet versions: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0
+- Key NuGet versions: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0, Asp.Versioning.Http, QuestPDF, ScottPlot, MailKit, NCrontab
 - **Npgsql 9 + Dapper:** Postgres row types MUST be class-based with `{get; init;}`, NOT positional records. Npgsql 9 returns `DateTime` for `timestamptz`; Dapper constructor matching fails with nullable `DateTime?` params. All 40 stores already converted.
 
 ## v1.1.0 "Enterprise Ready" -- COMPLETE (2026-03-26)
@@ -464,6 +464,38 @@ Postgres Npgsql 9 + Dapper compatibility fix for Docker demo:
 3. **Demo fully operational** -- `demo-reset.sh` seeds all data, login works, API healthy
 4. **E2E: 115/202 passed** -- Remaining 87 failures are UI-level test selector issues, not API/DB problems
 5. **SDK Pro bumped** -- v1.0.0-pro → v1.1.0-pro (ILicenseStatus, LicenseRevalidation, Cluster.Storage.Postgres)
+
+## v1.3.1 "Operational Maturity" -- COMPLETE (2026-04-04)
+
+**Spec:** `docs/superpowers/specs/2026-04-04-v131-operational-maturity-design.md`
+
+7 deliverables hardening the platform for production operations:
+
+1. **API Versioning** -- Hybrid Pragmatic strategy via `Asp.Versioning.Http`. URL segment (`/api/v1/`), additive-only policy, preview namespace for unstable endpoints. Backward-compat redirect from legacy `/api/` paths.
+2. **Per-Tenant Rate Limiting** -- 5 tiers: Free / Standard / Professional / Enterprise / Unlimited. `RateLimitTier` on `TenantSettings`, enforced in `RateLimitMiddleware` via `IRateLimitStore`.
+3. **Audit Expansion** -- Okta-inspired schema: 5 categories (auth, data, admin, billing, system), typed `ActorId`/`TargetId`, `Before`/`After` JSON diffs. Backward-compatible with existing `IAuditStore`.
+4. **License Gates** -- `RequireLicenseFeature` attribute on Pro feature endpoints. `EnforcementMode` (WarnOnly / Enforce) governs behavior; platform admin bypasses gates.
+5. **Scheduled Reports** -- `ReportSchedulerService` (`IHostedService`, NCrontab-based). Generates PDF (QuestPDF) + chart images (ScottPlot), delivers via SMTP (MailKit). Postgres-backed schedule store with `ScheduledReportEndpoints`.
+6. **Webhook Circuit Breaker** -- 3-state FSM (Closed → Open → HalfOpen) per subscription. Exponential backoff escalation, admin reset endpoint `POST /api/v1/management/webhooks/{id}/reset-circuit`.
+7. **GDPR Enhancements** -- CSV export: ZIP with 6 CSVs, bilingual headers (EN/ES), UTF-8 BOM. User purge: `purge-preview` dry-run endpoint + `X-Confirm-Purge` header guard, pseudonymization in audit log.
+
+### New DI registrations (v1.3.1)
+
+```csharp
+// Rate limiting (per-tenant tiers)
+builder.Services.AddPlatformRateLimiting();
+
+// Scheduled reports (NCrontab + QuestPDF + MailKit)
+builder.Services.AddPlatformScheduledReports(o =>
+{
+    o.SmtpHost = config["Reports:SmtpHost"];
+    o.SmtpPort = int.Parse(config["Reports:SmtpPort"]!);
+    o.FromAddress = config["Reports:FromAddress"];
+});
+
+// API versioning
+builder.Services.AddPlatformApiVersioning();  // wired in Program.cs
+```
 
 ## Plan Execution
 
