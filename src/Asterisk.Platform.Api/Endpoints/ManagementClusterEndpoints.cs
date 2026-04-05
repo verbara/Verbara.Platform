@@ -14,7 +14,7 @@ internal static class ManagementClusterEndpoints
 
     public static void MapManagementClusterEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/management/cluster").RequireAuthorization("PlatformAdminOnly");
+        var group = app.MapGroup("/management/cluster").RequireAuthorization("PlatformAdminOnly");
 
         group.MapGet("/status", GetStatus);
         group.MapGet("/nodes", ListNodes);
@@ -83,7 +83,7 @@ internal static class ManagementClusterEndpoints
         };
 
         var status = await manager.Drain.StartDrainAsync(nodeId, options, ct);
-        return Results.Accepted($"/api/management/cluster/nodes/{nodeId}", MapDrainToDto(status));
+        return Results.Accepted($"/management/cluster/nodes/{nodeId}", MapDrainToDto(status));
     }
 
     private static async Task<IResult> CreateNode(
@@ -119,8 +119,8 @@ internal static class ManagementClusterEndpoints
         var status = manager.GetStatus();
         var node = status.Nodes.FirstOrDefault(n => n.NodeId == body.NodeId);
         return node is not null
-            ? Results.Created($"/api/management/cluster/nodes/{body.NodeId}", MapNodeToDto(node))
-            : Results.Accepted($"/api/management/cluster/nodes/{body.NodeId}", (object?)null);
+            ? Results.Created($"/management/cluster/nodes/{body.NodeId}", MapNodeToDto(node))
+            : Results.Accepted($"/management/cluster/nodes/{body.NodeId}", (object?)null);
     }
 
     private static async Task<IResult> UpdateNode(

@@ -8,7 +8,7 @@ internal static class AnalyticsLiveEndpoints
 {
     public static void MapAnalyticsLiveEndpoints(this IEndpointRouteBuilder app)
     {
-        var live = app.MapGroup("/api/analytics").RequireAuthorization("SupervisorPlus");
+        var live = app.MapGroup("/analytics").RequireAuthorization("SupervisorPlus");
         live.MapGet("/live", GetAllLiveStates);
         live.MapGet("/live/{queueName}", GetLiveState);
         live.MapGet("/current-interval", GetCurrentInterval);

@@ -25,7 +25,7 @@ internal static class ScheduledReportEndpoints
 {
     public static void MapScheduledReportEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/reports").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/reports").RequireAuthorization("AdminOnly");
 
         group.MapGet("/", ListReports);
         group.MapPost("/", CreateReport);
@@ -43,7 +43,7 @@ internal static class ScheduledReportEndpoints
     {
         var report = body with { ReportId = Guid.NewGuid().ToString() };
         store.Save(report);
-        return Results.Created($"/api/admin/reports/{report.ReportId}", report);
+        return Results.Created($"/admin/reports/{report.ReportId}", report);
     }
 
     private static IResult GetReport(string id, [FromServices] ScheduledReportStore store)

@@ -9,7 +9,7 @@ internal static class CallerIdPoolEndpoints
 {
     public static void MapCallerIdPoolEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/caller-id-pools").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/caller-id-pools").RequireAuthorization("AdminOnly");
 
         // CRUD
         group.MapGet("/", ListPools);
@@ -57,7 +57,7 @@ internal static class CallerIdPoolEndpoints
         var pool = new CallerIdPool { Name = body.Name };
         var id = await store.CreateAsync(pool, tenantId, ct);
         pool.Id = id;
-        return Results.Created($"/api/admin/caller-id-pools/{id}", MapToDto(pool));
+        return Results.Created($"/admin/caller-id-pools/{id}", MapToDto(pool));
     }
 
     private static async Task<IResult> UpdatePool(
@@ -117,7 +117,7 @@ internal static class CallerIdPoolEndpoints
             IsActive = body.IsActive ?? true,
         };
         await store.AddEntryAsync(id, tenantId, entry, ct);
-        return Results.Created($"/api/admin/caller-id-pools/{id}/entries/{entry.Id}", MapEntryToDto(entry));
+        return Results.Created($"/admin/caller-id-pools/{id}/entries/{entry.Id}", MapEntryToDto(entry));
     }
 
     private static async Task<IResult> RemoveEntry(

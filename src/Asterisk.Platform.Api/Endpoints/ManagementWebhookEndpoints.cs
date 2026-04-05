@@ -9,7 +9,7 @@ internal static class ManagementWebhookEndpoints
 {
     public static void MapManagementWebhookEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/management/webhooks").RequireAuthorization("PlatformAdminOnly");
+        var group = app.MapGroup("/management/webhooks").RequireAuthorization("PlatformAdminOnly");
         group.MapGet("/dead-letter", ListDeadLetter);
         group.MapPost("/dead-letter/{id}/retry", RetryDeadLetter);
     }

@@ -12,7 +12,7 @@ internal static class CampaignEndpoints
 {
     public static void MapCampaignEndpoints(this IEndpointRouteBuilder app)
     {
-        var campaigns = app.MapGroup("/api/admin/campaigns").RequireAuthorization("AdminOnly");
+        var campaigns = app.MapGroup("/admin/campaigns").RequireAuthorization("AdminOnly");
 
         // CRUD
         campaigns.MapPost("/", CreateCampaign);
@@ -48,7 +48,7 @@ internal static class CampaignEndpoints
         campaigns.MapGet("/{id:long}/metrics", GetCampaignMetrics);
 
         // Operations
-        var operations = app.MapGroup("/api/operations").RequireAuthorization("SupervisorPlus");
+        var operations = app.MapGroup("/operations").RequireAuthorization("SupervisorPlus");
         operations.MapGet("/campaigns/metrics", ListActiveCampaignMetrics);
     }
 
@@ -67,7 +67,7 @@ internal static class CampaignEndpoints
         campaign.Id = id;
         eventBus.Publish(new CampaignStatusChangedEvent(
             tenantId, id, campaign.Name, "", campaign.Status.ToString()));
-        return Results.Created($"/api/admin/campaigns/{id}", MapToSummary(campaign));
+        return Results.Created($"/admin/campaigns/{id}", MapToSummary(campaign));
     }
 
     private static async Task<IResult> ListCampaigns(
@@ -255,7 +255,7 @@ internal static class CampaignEndpoints
             CreatedAt = DateTimeOffset.UtcNow,
         };
         var created = await contactListStore.CreateContactListAsync(tenantId, id, list, ct);
-        return Results.Created($"/api/admin/campaigns/{id}/contact-lists/{created.Id}", MapToContactListDto(created));
+        return Results.Created($"/admin/campaigns/{id}/contact-lists/{created.Id}", MapToContactListDto(created));
     }
 
     private static async Task<IResult> DeleteContactList(
@@ -334,7 +334,7 @@ internal static class CampaignEndpoints
             IsActive = true,
         };
         var created = await dispositionStore.CreateAsync(tenantId, code, ct);
-        return Results.Created($"/api/admin/campaigns/{id}/dispositions/{created.Id}", MapToDispositionDto(created));
+        return Results.Created($"/admin/campaigns/{id}/dispositions/{created.Id}", MapToDispositionDto(created));
     }
 
     private static async Task<IResult> UpdateDisposition(
@@ -397,7 +397,7 @@ internal static class CampaignEndpoints
         if (!DateTimeOffset.TryParse(request.ScheduledAt, out var scheduledAt))
             return Results.BadRequest("Invalid date format");
         await store.SaveCallbackAsync(tenantId, id, request.ContactId, scheduledAt, request.AgentId, ct);
-        return Results.Created($"/api/admin/campaigns/{id}/callbacks", null);
+        return Results.Created($"/admin/campaigns/{id}/callbacks", null);
     }
 
     // ─── Metrics Handlers ─────────────────────────────────────────────────────

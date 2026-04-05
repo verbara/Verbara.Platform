@@ -9,7 +9,7 @@ internal static class DncListEndpoints
 {
     public static void MapDncListEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/dnc-lists").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/dnc-lists").RequireAuthorization("AdminOnly");
 
         // CRUD
         group.MapGet("/", ListDncLists);
@@ -69,7 +69,7 @@ internal static class DncListEndpoints
         };
         var id = await store.CreateAsync(list, tenantId, ct);
         list.Id = id;
-        return Results.Created($"/api/admin/dnc-lists/{id}", MapToDto(list));
+        return Results.Created($"/admin/dnc-lists/{id}", MapToDto(list));
     }
 
     private static async Task<IResult> UpdateDncList(
@@ -134,7 +134,7 @@ internal static class DncListEndpoints
             ExpiresAt = body.ExpiresAt,
         };
         await store.AddEntryAsync(id, tenantId, entry, ct);
-        return Results.Created($"/api/admin/dnc-lists/{id}/entries/{body.PhoneNumber}", MapEntryToDto(entry));
+        return Results.Created($"/admin/dnc-lists/{id}/entries/{body.PhoneNumber}", MapEntryToDto(entry));
     }
 
     private static async Task<IResult> RemoveEntry(

@@ -9,16 +9,16 @@ internal static class GdprEndpoints
     public static void MapGdprEndpoints(this IEndpointRouteBuilder app)
     {
         // Tenant admin endpoints
-        var admin = app.MapGroup("/api/admin/gdpr").RequireAuthorization("AdminOnly");
+        var admin = app.MapGroup("/admin/gdpr").RequireAuthorization("AdminOnly");
         admin.MapPost("/export", ExportContactData);
         admin.MapPost("/purge", PurgeContactData);
 
         // Platform admin endpoints
-        var mgmt = app.MapGroup("/api/management/gdpr").RequireAuthorization("PlatformAdminOnly");
+        var mgmt = app.MapGroup("/management/gdpr").RequireAuthorization("PlatformAdminOnly");
         mgmt.MapGet("/purge-log", ListPurgeLog);
 
         // Retention policy endpoints (under existing management tenants path)
-        var retention = app.MapGroup("/api/management/tenants/{tenantId}").RequireAuthorization("PlatformAdminOnly");
+        var retention = app.MapGroup("/management/tenants/{tenantId}").RequireAuthorization("PlatformAdminOnly");
         retention.MapGet("/retention", GetRetentionPolicy);
         retention.MapPut("/retention", UpdateRetentionPolicy);
     }

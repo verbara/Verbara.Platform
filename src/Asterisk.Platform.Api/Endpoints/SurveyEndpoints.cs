@@ -8,7 +8,7 @@ internal static class SurveyEndpoints
 {
     public static void MapSurveyEndpoints(this IEndpointRouteBuilder app)
     {
-        var adminGroup = app.MapGroup("/api/admin/surveys").RequireAuthorization("AdminOnly");
+        var adminGroup = app.MapGroup("/admin/surveys").RequireAuthorization("AdminOnly");
 
         adminGroup.MapGet("/", ListSurveys);
         adminGroup.MapPost("/", CreateSurvey);
@@ -17,7 +17,7 @@ internal static class SurveyEndpoints
         adminGroup.MapDelete("/{id}", DeleteSurvey);
         adminGroup.MapMethods("/{id}/activate", ["PATCH"], ActivateSurvey);
 
-        var analyticsGroup = app.MapGroup("/api/analytics/surveys").RequireAuthorization("SupervisorPlus");
+        var analyticsGroup = app.MapGroup("/analytics/surveys").RequireAuthorization("SupervisorPlus");
 
         analyticsGroup.MapGet("/{id}/summary", GetSurveySummary);
         analyticsGroup.MapGet("/{id}/responses", GetSurveyResponses);
@@ -53,7 +53,7 @@ internal static class SurveyEndpoints
             IsActive = body.IsActive ?? true,
         };
         await store.SaveAsync(survey, ct);
-        return Results.Created($"/api/admin/surveys/{survey.SurveyId}", survey);
+        return Results.Created($"/admin/surveys/{survey.SurveyId}", survey);
     }
 
     private static async Task<IResult> GetSurvey(

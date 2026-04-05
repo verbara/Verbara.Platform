@@ -8,7 +8,7 @@ internal static class SkillEndpoints
 {
     public static void MapSkillEndpoints(this IEndpointRouteBuilder app)
     {
-        var skills = app.MapGroup("/api/admin/skills").RequireAuthorization("AdminOnly");
+        var skills = app.MapGroup("/admin/skills").RequireAuthorization("AdminOnly");
 
         skills.MapGet("/", ListSkills);
         skills.MapPost("/", CreateSkill);
@@ -16,7 +16,7 @@ internal static class SkillEndpoints
         skills.MapDelete("/{name}", DeleteSkill);
         skills.MapGet("/{name}/agents", ListAgentsWithSkill);
 
-        var agentSkills = app.MapGroup("/api/admin/agents").RequireAuthorization("AdminOnly");
+        var agentSkills = app.MapGroup("/admin/agents").RequireAuthorization("AdminOnly");
 
         agentSkills.MapGet("/{agentId}/skills", GetAgentSkills);
         agentSkills.MapPost("/{agentId}/skills", AssignSkill);
@@ -45,7 +45,7 @@ internal static class SkillEndpoints
             Description = body.Description,
         };
         await catalog.AddSkillAsync(skill, ct);
-        return Results.Created($"/api/admin/skills/{skill.Name}", MapToDto(skill));
+        return Results.Created($"/admin/skills/{skill.Name}", MapToDto(skill));
     }
 
     private static async Task<IResult> UpsertSkill(
@@ -110,7 +110,7 @@ internal static class SkillEndpoints
             Proficiency = body.Proficiency ?? 5,
         };
         await catalog.AssignSkillAsync(agentSkill, ct);
-        return Results.Created($"/api/admin/agents/{agentId}/skills/{agentSkill.SkillName}", MapAgentSkillToDto(agentSkill));
+        return Results.Created($"/admin/agents/{agentId}/skills/{agentSkill.SkillName}", MapAgentSkillToDto(agentSkill));
     }
 
     private static async Task<IResult> RemoveAgentSkill(

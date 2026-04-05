@@ -8,14 +8,14 @@ internal static class KnowledgeBaseEndpoints
 {
     public static void MapKnowledgeBaseEndpoints(this IEndpointRouteBuilder app)
     {
-        var adminGroup = app.MapGroup("/api/admin/articles").RequireAuthorization("AdminOnly");
+        var adminGroup = app.MapGroup("/admin/articles").RequireAuthorization("AdminOnly");
 
         adminGroup.MapGet("/", ListArticles);
         adminGroup.MapPost("/", CreateArticle);
         adminGroup.MapPut("/{id}", UpdateArticle);
         adminGroup.MapDelete("/{id}", DeleteArticle);
 
-        var searchGroup = app.MapGroup("/api/knowledge").RequireAuthorization();
+        var searchGroup = app.MapGroup("/knowledge").RequireAuthorization();
 
         searchGroup.MapGet("/search", SearchArticles);
     }
@@ -54,7 +54,7 @@ internal static class KnowledgeBaseEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(article, ct);
-        return Results.Created($"/api/admin/articles/{article.ArticleId}", article);
+        return Results.Created($"/admin/articles/{article.ArticleId}", article);
     }
 
     private static async Task<IResult> UpdateArticle(

@@ -10,21 +10,21 @@ internal static class ManagementBillingEndpoints
     public static void MapManagementBillingEndpoints(this IEndpointRouteBuilder app)
     {
         // Rate Cards
-        var rc = app.MapGroup("/api/management/rate-cards").RequireAuthorization("PlatformAdminOnly");
+        var rc = app.MapGroup("/management/rate-cards").RequireAuthorization("PlatformAdminOnly");
         rc.MapGet("/", ListRateCards);
         rc.MapPost("/", CreateRateCard);
         rc.MapPut("/{id}", UpdateRateCard);
         rc.MapDelete("/{id}", DeleteRateCard);
 
         // Invoices
-        var inv = app.MapGroup("/api/management/invoices").RequireAuthorization("PlatformAdminOnly");
+        var inv = app.MapGroup("/management/invoices").RequireAuthorization("PlatformAdminOnly");
         inv.MapGet("/", ListInvoices);
         inv.MapPost("/generate", GenerateInvoice);
         inv.MapGet("/{id}", GetInvoice);
         inv.MapPost("/{id}/issue", IssueInvoice);
 
         // Usage & Quotas (per-tenant)
-        var tb = app.MapGroup("/api/management/tenants/{tenantId}").RequireAuthorization("PlatformAdminOnly");
+        var tb = app.MapGroup("/management/tenants/{tenantId}").RequireAuthorization("PlatformAdminOnly");
         tb.MapGet("/usage", GetUsageSummary);
         tb.MapGet("/usage/details", GetUsageDetails);
         tb.MapGet("/quota", GetQuotaStatus);
@@ -61,7 +61,7 @@ internal static class ManagementBillingEndpoints
         };
 
         await store.SaveAsync(rateCard, ct);
-        return Results.Created($"/api/management/rate-cards/{rateCard.RateCardId.Value}", MapRateCardToDto(rateCard));
+        return Results.Created($"/management/rate-cards/{rateCard.RateCardId.Value}", MapRateCardToDto(rateCard));
     }
 
     private static async Task<IResult> UpdateRateCard(
@@ -133,7 +133,7 @@ internal static class ManagementBillingEndpoints
         }
 
         await store.SaveAsync(invoice, ct);
-        return Results.Created($"/api/management/invoices/{invoice.InvoiceId.Value}", MapInvoiceToDto(invoice));
+        return Results.Created($"/management/invoices/{invoice.InvoiceId.Value}", MapInvoiceToDto(invoice));
     }
 
     private static async Task<IResult> GetInvoice(

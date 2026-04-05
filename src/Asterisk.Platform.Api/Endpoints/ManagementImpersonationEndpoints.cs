@@ -12,7 +12,7 @@ internal static class ManagementImpersonationEndpoints
 {
     public static void MapManagementImpersonationEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/management").RequireAuthorization("PlatformAdminOnly");
+        var group = app.MapGroup("/management").RequireAuthorization("PlatformAdminOnly");
 
         group.MapPost("/impersonate", StartImpersonation);
         group.MapDelete("/impersonate", EndImpersonation);

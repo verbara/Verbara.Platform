@@ -8,7 +8,7 @@ internal static class UsersMeEndpoint
 {
     public static void MapUsersMeEndpoint(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/users/me", GetCurrentUser).RequireAuthorization();
+        app.MapGet("/users/me", GetCurrentUser).RequireAuthorization();
     }
 
     private static async Task<IResult> GetCurrentUser(

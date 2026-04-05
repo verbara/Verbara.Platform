@@ -9,7 +9,7 @@ internal static class OutboundRouteEndpoints
 {
     public static void MapOutboundRouteEndpoints(this IEndpointRouteBuilder app)
     {
-        var routes = app.MapGroup("/api/admin/routes").RequireAuthorization("AdminOnly");
+        var routes = app.MapGroup("/admin/routes").RequireAuthorization("AdminOnly");
 
         routes.MapGet("/", ListRoutes);
         routes.MapGet("/{id:long}", GetRoute);
@@ -61,7 +61,7 @@ internal static class OutboundRouteEndpoints
         };
         var id = await routeStore.CreateAsync(route, tenantId, ct);
         route.Id = id;
-        return Results.Created($"/api/admin/routes/{id}", MapToDto(route));
+        return Results.Created($"/admin/routes/{id}", MapToDto(route));
     }
 
     private static async Task<IResult> UpdateRoute(

@@ -6,7 +6,7 @@ internal static class WebhookEventTypeEndpoints
 {
     public static void MapWebhookEventTypeEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/webhooks/event-types").RequireAuthorization("Authenticated");
+        var group = app.MapGroup("/webhooks/event-types").RequireAuthorization("Authenticated");
         group.MapGet("/", ListEventTypes);
     }
 

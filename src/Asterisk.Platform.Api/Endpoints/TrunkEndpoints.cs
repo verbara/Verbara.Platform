@@ -9,7 +9,7 @@ internal static class TrunkEndpoints
 {
     public static void MapTrunkEndpoints(this IEndpointRouteBuilder app)
     {
-        var trunks = app.MapGroup("/api/admin/trunks").RequireAuthorization("AdminOnly");
+        var trunks = app.MapGroup("/admin/trunks").RequireAuthorization("AdminOnly");
 
         trunks.MapGet("/", ListTrunks);
         trunks.MapGet("/active", ListActiveTrunks);
@@ -67,7 +67,7 @@ internal static class TrunkEndpoints
         };
         var id = await trunkStore.CreateAsync(trunk, tenantId, ct);
         trunk.Id = id;
-        return Results.Created($"/api/admin/trunks/{id}", MapToDto(trunk));
+        return Results.Created($"/admin/trunks/{id}", MapToDto(trunk));
     }
 
     private static async Task<IResult> UpdateTrunk(

@@ -8,7 +8,7 @@ internal static class MediaEndpoints
 {
     public static void MapMediaEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/media").RequireAuthorization("SupervisorPlus");
+        var group = app.MapGroup("/media").RequireAuthorization("SupervisorPlus");
 
         group.MapPost("/upload", UploadFile)
              .DisableAntiforgery();
@@ -44,7 +44,7 @@ internal static class MediaEndpoints
                 uploadedBy: uploadedBy,
                 ct: ct);
 
-            return Results.Created($"/api/media/{mediaFile.FileId}/download", mediaFile);
+            return Results.Created($"/media/{mediaFile.FileId}/download", mediaFile);
         }
         catch (InvalidOperationException ex)
         {

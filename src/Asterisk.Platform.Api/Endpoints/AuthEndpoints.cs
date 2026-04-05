@@ -24,7 +24,7 @@ internal static class AuthEndpoints
 
     public static void MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/auth");
+        var group = app.MapGroup("/auth");
 
         // Anonymous auth endpoints
         group.MapPost("/login", Login).AllowAnonymous();

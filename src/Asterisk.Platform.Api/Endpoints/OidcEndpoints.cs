@@ -17,7 +17,7 @@ internal static class OidcEndpoints
 
     public static void MapOidcEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/auth/oidc");
+        var group = app.MapGroup("/auth/oidc");
 
         group.MapGet("/login", OidcLogin).AllowAnonymous();
         group.MapGet("/callback", OidcCallback).AllowAnonymous();

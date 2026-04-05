@@ -11,13 +11,13 @@ internal static class AgentAssistEndpoints
     public static void MapAgentAssistEndpoints(this IEndpointRouteBuilder app)
     {
         // ── Session query endpoints (SupervisorPlus) ───────────────────────────
-        var sessions = app.MapGroup("/api/agent-assist/sessions").RequireAuthorization("SupervisorPlus");
+        var sessions = app.MapGroup("/agent-assist/sessions").RequireAuthorization("SupervisorPlus");
         sessions.MapGet("/{sessionId}", GetSession);
         sessions.MapGet("/{sessionId}/suggestions", GetSessionSuggestions);
         sessions.MapGet("/{sessionId}/compliance", GetSessionCompliance);
 
         // ── Admin config endpoints (AdminOnly) ─────────────────────────────────
-        var admin = app.MapGroup("/api/admin/agent-assist").RequireAuthorization("AdminOnly");
+        var admin = app.MapGroup("/admin/agent-assist").RequireAuthorization("AdminOnly");
         admin.MapGet("/config", GetConfig);
         admin.MapPut("/config", UpdateConfig);
         admin.MapGet("/keyword-rules", GetKeywordRules);

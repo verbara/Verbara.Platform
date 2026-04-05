@@ -7,7 +7,7 @@ internal static class CallAttemptEndpoints
 {
     public static void MapCallAttemptEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/call-attempts")
+        var group = app.MapGroup("/admin/call-attempts")
             .RequireAuthorization("AdminOnly")
             .WithTags("CallAttempts");
         group.MapPut("/{id:long}/disposition", UpdateDisposition);

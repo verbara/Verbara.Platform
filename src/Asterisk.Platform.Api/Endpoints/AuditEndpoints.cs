@@ -8,7 +8,7 @@ internal static class AuditEndpoints
 {
     public static void MapAuditEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/audit").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/audit").RequireAuthorization("AdminOnly");
 
         group.MapGet("/", SearchAuditLog);
         group.MapGet("/{entityType}/{entityId}", GetEntityHistory);

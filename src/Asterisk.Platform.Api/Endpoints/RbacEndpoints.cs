@@ -11,17 +11,17 @@ internal static class RbacEndpoints
     public static void MapRbacEndpoints(this IEndpointRouteBuilder app)
     {
         // Permission catalog (read-only, requires AdminOnly)
-        var perms = app.MapGroup("/api/admin/permissions").RequireAuthorization("AdminOnly");
+        var perms = app.MapGroup("/admin/permissions").RequireAuthorization("AdminOnly");
         perms.MapGet("/", ListPermissions);
         perms.MapGet("/categories", ListPermissionsByCategory);
 
         // Role templates (read-only system defaults)
-        var templates = app.MapGroup("/api/admin/role-templates").RequireAuthorization("AdminOnly");
+        var templates = app.MapGroup("/admin/role-templates").RequireAuthorization("AdminOnly");
         templates.MapGet("/", ListRoleTemplates);
         templates.MapGet("/{id}", GetRoleTemplate);
 
         // Tenant roles (CRUD, per-tenant)
-        var roles = app.MapGroup("/api/admin/roles").RequireAuthorization("AdminOnly");
+        var roles = app.MapGroup("/admin/roles").RequireAuthorization("AdminOnly");
         roles.MapGet("/", ListTenantRoles);
         roles.MapPost("/", CreateTenantRole);
         roles.MapGet("/{id}", GetTenantRole);
@@ -30,7 +30,7 @@ internal static class RbacEndpoints
         roles.MapPost("/{id}/clone", CloneTenantRole);
 
         // User role assignments
-        var userRoles = app.MapGroup("/api/admin/users").RequireAuthorization("AdminOnly");
+        var userRoles = app.MapGroup("/admin/users").RequireAuthorization("AdminOnly");
         userRoles.MapGet("/{id}/roles", GetUserRoles);
         userRoles.MapPut("/{id}/roles", ReplaceUserRoles);
         userRoles.MapPost("/{id}/roles/{roleId}", AddUserRole);
@@ -118,7 +118,7 @@ internal static class RbacEndpoints
         }
 
         var created = await store.GetByIdAsync(tenantId, roleId, ct);
-        return Results.Created($"/api/admin/roles/{roleId}", created);
+        return Results.Created($"/admin/roles/{roleId}", created);
     }
 
     private static async Task<IResult> GetTenantRole(
@@ -200,7 +200,7 @@ internal static class RbacEndpoints
             await store.SetPermissionsAsync(tenantId, newRoleId, perms, ct);
 
         var created = await store.GetByIdAsync(tenantId, newRoleId, ct);
-        return Results.Created($"/api/admin/roles/{newRoleId}", created);
+        return Results.Created($"/admin/roles/{newRoleId}", created);
     }
 
     // --- User Role Assignments ---

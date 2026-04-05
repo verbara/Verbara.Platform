@@ -10,7 +10,7 @@ internal static class HolidayCalendarEndpoints
 {
     public static void MapHolidayCalendarEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/holiday-calendars").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/holiday-calendars").RequireAuthorization("AdminOnly");
 
         // CRUD
         group.MapGet("/", ListCalendars);
@@ -58,7 +58,7 @@ internal static class HolidayCalendarEndpoints
         var calendar = new HolidayCalendar { Name = body.Name };
         var id = await store.CreateAsync(calendar, tenantId, ct);
         calendar.Id = id;
-        return Results.Created($"/api/admin/holiday-calendars/{id}", MapToDto(calendar));
+        return Results.Created($"/admin/holiday-calendars/{id}", MapToDto(calendar));
     }
 
     private static async Task<IResult> UpdateCalendar(
@@ -119,7 +119,7 @@ internal static class HolidayCalendarEndpoints
             AllowedEndTime = body.AllowedEnd is not null ? TimeOnly.Parse(body.AllowedEnd, CultureInfo.InvariantCulture) : null,
         };
         await store.AddHolidayAsync(id, tenantId, holiday, ct);
-        return Results.Created($"/api/admin/holiday-calendars/{id}/holidays/{holiday.Id}", MapHolidayToDto(holiday));
+        return Results.Created($"/admin/holiday-calendars/{id}/holidays/{holiday.Id}", MapHolidayToDto(holiday));
     }
 
     private static async Task<IResult> RemoveHoliday(

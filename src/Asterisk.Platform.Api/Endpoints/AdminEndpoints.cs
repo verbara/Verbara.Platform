@@ -12,7 +12,7 @@ internal static class AdminEndpoints
 {
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin").RequireAuthorization("AdminOnly");
 
         // Users
         group.MapGet("/users", ListUsers);
@@ -92,7 +92,7 @@ internal static class AdminEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(user, ct);
-        return Results.Created($"/api/admin/users/{user.UserId}", user);
+        return Results.Created($"/admin/users/{user.UserId}", user);
     }
 
     private static async Task<IResult> UpdateUser(
@@ -205,7 +205,7 @@ internal static class AdminEndpoints
             catch { }
         }
 
-        return Results.Created($"/api/admin/queues/{queue.QueueId}", queue);
+        return Results.Created($"/admin/queues/{queue.QueueId}", queue);
     }
 
     private static async Task<IResult> UpdateQueue(
@@ -319,7 +319,7 @@ internal static class AdminEndpoints
         {
             await syncService.AddQueueMemberAsync(tenantId, queue.Name, agent.AgentId.Value, agent.DisplayName, body.Penalty ?? 0, ct);
         }
-        return Results.Created($"/api/admin/queue-members/{body.QueueId}/{body.AgentId}", null);
+        return Results.Created($"/admin/queue-members/{body.QueueId}/{body.AgentId}", null);
     }
 
     private static async Task<IResult> RemoveQueueMember(
@@ -398,7 +398,7 @@ internal static class AdminEndpoints
             }
         }
 
-        return Results.Created($"/api/admin/agents/{agent.AgentId}", agent);
+        return Results.Created($"/admin/agents/{agent.AgentId}", agent);
     }
 
     private static async Task<IResult> UpdateAgent(
@@ -499,7 +499,7 @@ internal static class AdminEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(team, ct);
-        return Results.Created($"/api/admin/teams/{team.TeamId}", team);
+        return Results.Created($"/admin/teams/{team.TeamId}", team);
     }
 
     private static async Task<IResult> UpdateTeam(

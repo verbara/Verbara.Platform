@@ -9,7 +9,7 @@ internal static class RealtimeEndpoints
 {
     public static void MapRealtimeEndpoints(this IEndpointRouteBuilder app)
     {
-        var profiles = app.MapGroup("/api/admin/realtime/profiles").RequireAuthorization("AdminOnly");
+        var profiles = app.MapGroup("/admin/realtime/profiles").RequireAuthorization("AdminOnly");
 
         // Static routes BEFORE parameterised routes to avoid conflicts
         profiles.MapGet("/default/{type}", GetDefaultProfile);
@@ -78,7 +78,7 @@ internal static class RealtimeEndpoints
         };
         var id = await store.CreateAsync(profile, tenantId, ct);
         profile.Id = id;
-        return Results.Created($"/api/admin/realtime/profiles/{id}", MapToDto(profile));
+        return Results.Created($"/admin/realtime/profiles/{id}", MapToDto(profile));
     }
 
     private static async Task<IResult> UpdateProfile(

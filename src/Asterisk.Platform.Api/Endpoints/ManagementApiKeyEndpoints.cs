@@ -11,7 +11,7 @@ internal static class ManagementApiKeyEndpoints
 {
     public static void MapManagementApiKeyEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/management/api-keys").RequireAuthorization("PlatformAdminOnly");
+        var group = app.MapGroup("/management/api-keys").RequireAuthorization("PlatformAdminOnly");
 
         group.MapGet("/", ListKeys);
         group.MapPost("/", CreateKey);
@@ -72,7 +72,7 @@ internal static class ManagementApiKeyEndpoints
 
         await apiKeyStore.SaveAsync(apiKey, ct);
 
-        return Results.Created($"/api/management/api-keys/{apiKey.KeyId.Value}",
+        return Results.Created($"/management/api-keys/{apiKey.KeyId.Value}",
             new CreateMgmtApiKeyResponse(apiKey.KeyId.Value, apiKey.Name, rawKey, apiKey.ExpiresAt));
     }
 

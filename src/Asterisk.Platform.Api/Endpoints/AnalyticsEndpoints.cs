@@ -14,7 +14,7 @@ internal static class AnalyticsEndpoints
 {
     public static void MapAnalyticsEndpoints(this IEndpointRouteBuilder app)
     {
-        var analytics = app.MapGroup("/api/analytics").RequireAuthorization("SupervisorPlus");
+        var analytics = app.MapGroup("/analytics").RequireAuthorization("SupervisorPlus");
         analytics.MapGet("/dashboard", GetDashboard);
         analytics.MapGet("/cdr", ListCdr);
         analytics.MapGet("/cdr/{sessionId}", GetCdrDetail);

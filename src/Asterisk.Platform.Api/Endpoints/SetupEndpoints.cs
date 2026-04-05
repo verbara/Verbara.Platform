@@ -13,7 +13,7 @@ internal static class SetupEndpoints
 {
     public static void MapSetupEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/setup", Setup).AllowAnonymous();
+        app.MapPost("/setup", Setup).AllowAnonymous();
     }
 
     private static async Task<IResult> Setup(
@@ -105,7 +105,7 @@ internal static class SetupEndpoints
         // 5. Generate JWT for the new admin
         var (accessToken, _) = jwtTokenService.GenerateAccessToken(user);
 
-        return Results.Created("/api/management/system/info", new SetupResponse(
+        return Results.Created("/management/system/info", new SetupResponse(
             hostTenantId,
             userId.Value,
             accessToken,

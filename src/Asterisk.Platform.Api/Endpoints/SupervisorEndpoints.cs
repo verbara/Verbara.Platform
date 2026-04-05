@@ -9,7 +9,7 @@ internal static class SupervisorEndpoints
 {
     public static void MapSupervisorEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/supervisor").RequireAuthorization("SupervisorPlus");
+        var group = app.MapGroup("/supervisor").RequireAuthorization("SupervisorPlus");
         group.MapGet("/sessions/active", GetActiveSessions);
         group.MapPost("/sessions/{sessionId}/whisper", PostWhisper);
         group.MapPost("/sessions/{sessionId}/listen", PostListen);

@@ -8,7 +8,7 @@ internal static class AgentEndpoints
 {
     public static void MapAgentEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/agents").RequireAuthorization("Authenticated");
+        var group = app.MapGroup("/agents").RequireAuthorization("Authenticated");
 
         group.MapGet("/me", GetCurrentAgent);
         group.MapPut("/me/state", UpdateAgentState);

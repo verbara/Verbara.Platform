@@ -28,7 +28,7 @@ internal static class ManagementSystemEndpoints
 {
     public static void MapManagementSystemEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/management/system").RequireAuthorization("PlatformAdminOnly");
+        var group = app.MapGroup("/management/system").RequireAuthorization("PlatformAdminOnly");
 
         group.MapGet("/info", GetSystemInfo);
         group.MapGet("/license", GetLicenseInfo);

@@ -8,7 +8,7 @@ internal static class FlowEndpoints
 {
     public static void MapFlowEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/flows").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/flows").RequireAuthorization("AdminOnly");
 
         group.MapGet("/", ListFlows);
         group.MapGet("/{id}", GetFlow);
@@ -61,7 +61,7 @@ internal static class FlowEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(flow, ct);
-        return Results.Created($"/api/admin/flows/{flow.FlowId}", flow);
+        return Results.Created($"/admin/flows/{flow.FlowId}", flow);
     }
 
     private static async Task<IResult> UpdateFlow(

@@ -10,7 +10,7 @@ internal static class AuthAdminEndpoints
 {
     public static void MapAuthAdminEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/auth")
+        var group = app.MapGroup("/admin/auth")
             .RequireAuthorization("AdminOnly");
 
         group.MapGet("/config", GetConfig);

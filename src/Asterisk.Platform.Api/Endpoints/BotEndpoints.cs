@@ -8,7 +8,7 @@ internal static class BotEndpoints
 {
     public static void MapBotEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/bots").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/bots").RequireAuthorization("AdminOnly");
 
         group.MapGet("/", ListBots);
         group.MapPost("/", CreateBot);
@@ -50,7 +50,7 @@ internal static class BotEndpoints
             IsActive = body.IsActive ?? true,
         };
         await store.SaveAsync(config, ct);
-        return Results.Created($"/api/admin/bots/{config.BotId}", config);
+        return Results.Created($"/admin/bots/{config.BotId}", config);
     }
 
     private static async Task<IResult> GetBot(

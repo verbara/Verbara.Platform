@@ -8,7 +8,7 @@ internal static class ContactEndpoints
 {
     public static void MapContactEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/contacts").RequireAuthorization("Authenticated");
+        var group = app.MapGroup("/contacts").RequireAuthorization("Authenticated");
 
         group.MapGet("/{id}", GetContact);
         group.MapGet("/{id}/conversations", GetContactConversations);
@@ -96,7 +96,7 @@ internal static class ContactEndpoints
         }
 
         await store.SaveAsync(contact, ct);
-        return Results.Created($"/api/contacts/{contact.ContactId}", contact);
+        return Results.Created($"/contacts/{contact.ContactId}", contact);
     }
 
     private static async Task<IResult> UpdateContact(

@@ -8,7 +8,7 @@ internal static class ManagementTenantEndpoints
 {
     public static void MapManagementTenantEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/management/tenants").RequireAuthorization("PlatformAdminOnly");
+        var group = app.MapGroup("/management/tenants").RequireAuthorization("PlatformAdminOnly");
 
         group.MapGet("/", ListTenants);
         group.MapGet("/{id}", GetTenant);
@@ -104,7 +104,7 @@ internal static class ManagementTenantEndpoints
         };
 
         await store.UpsertAsync(tenant, ct);
-        return Results.Created($"/api/management/tenants/{tenant.TenantId}", MapToDto(tenant));
+        return Results.Created($"/management/tenants/{tenant.TenantId}", MapToDto(tenant));
     }
 
     private static async Task<IResult> UpdateTenant(

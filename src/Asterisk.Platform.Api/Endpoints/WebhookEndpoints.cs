@@ -14,7 +14,7 @@ internal static class WebhookEndpoints
 {
     public static void MapWebhookEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/webhooks");
+        var group = app.MapGroup("/webhooks");
 
         group.MapPost("/{tenantId}/{channel}", HandleWebhook);
         group.MapGet("/{tenantId}/whatsapp", HandleWhatsAppVerification);

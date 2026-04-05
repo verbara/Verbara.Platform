@@ -9,7 +9,7 @@ internal static class DispositionEndpoints
 {
     public static void MapDispositionEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/dispositions").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/dispositions").RequireAuthorization("AdminOnly");
 
         group.MapGet("/", ListDispositions);
         group.MapGet("/{id}", GetDisposition);
@@ -56,7 +56,7 @@ internal static class DispositionEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(disposition, ct);
-        return Results.Created($"/api/admin/dispositions/{disposition.DispositionId}", disposition);
+        return Results.Created($"/admin/dispositions/{disposition.DispositionId}", disposition);
     }
 
     private static async Task<IResult> DeleteDisposition(

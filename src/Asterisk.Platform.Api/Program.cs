@@ -382,60 +382,58 @@ var versionSet = app.NewApiVersionSet()
     .ReportApiVersions()
     .Build();
 
-#pragma warning disable S1481 // v1 is used by endpoint mapping in a subsequent task
 var v1 = app.MapGroup("/api/v{version:apiVersion}")
     .WithApiVersionSet(versionSet);
-#pragma warning restore S1481
 
 // ─── Endpoint mapping ────────────────────────────────────────────────────────
 
-app.MapAuthEndpoints();
-app.MapWebhookEndpoints();
-app.MapConversationEndpoints();
-app.MapAgentEndpoints();
-app.MapAdminEndpoints();
-app.MapFlowEndpoints();
-app.MapChannelConfigEndpoints();
-app.MapContactEndpoints();
-app.MapDispositionEndpoints();
-app.MapSetupEndpoints();
-app.MapManagementTenantEndpoints();
-app.MapManagementSystemEndpoints();
-app.MapManagementClusterEndpoints();
-app.MapManagementApiKeyEndpoints();
-app.MapSseEndpoints();
-app.MapMediaEndpoints();
-app.MapCampaignEndpoints();
-app.MapCallAttemptEndpoints();
-app.MapDncListEndpoints();
-app.MapCallerIdPoolEndpoints();
-app.MapHolidayCalendarEndpoints();
-app.MapDialerSettingsEndpoints();
-app.MapTrunkEndpoints();
-app.MapOutboundRouteEndpoints();
-app.MapRecordingEndpoints();
-app.MapAnalyticsEndpoints();
-app.MapAnalyticsLiveEndpoints();
-app.MapQueueMetricsEndpoints();
-app.MapBotEndpoints();
-app.MapKnowledgeBaseEndpoints();
-app.MapAgentAssistEndpoints();
-app.MapSupervisorEndpoints();
-app.MapSkillEndpoints();
-app.MapAuditEndpoints();
-app.MapSurveyEndpoints();
-app.MapScheduledReportEndpoints();
-app.MapRealtimeEndpoints();
-app.MapAuthAdminEndpoints();
-app.MapOidcEndpoints();
-app.MapRbacEndpoints();
-app.MapUsersMeEndpoint();
-app.MapManagementBillingEndpoints();
-app.MapManagementImpersonationEndpoints();
-app.MapWebhookSubscriptionEndpoints();
-app.MapManagementWebhookEndpoints();
-app.MapWebhookEventTypeEndpoints();
-app.MapGdprEndpoints();
+v1.MapAuthEndpoints();
+v1.MapWebhookEndpoints();
+v1.MapConversationEndpoints();
+v1.MapAgentEndpoints();
+v1.MapAdminEndpoints();
+v1.MapFlowEndpoints();
+v1.MapChannelConfigEndpoints();
+v1.MapContactEndpoints();
+v1.MapDispositionEndpoints();
+v1.MapSetupEndpoints();
+v1.MapManagementTenantEndpoints();
+v1.MapManagementSystemEndpoints();
+v1.MapManagementClusterEndpoints();
+v1.MapManagementApiKeyEndpoints();
+v1.MapSseEndpoints();
+v1.MapMediaEndpoints();
+v1.MapCampaignEndpoints();
+v1.MapCallAttemptEndpoints();
+v1.MapDncListEndpoints();
+v1.MapCallerIdPoolEndpoints();
+v1.MapHolidayCalendarEndpoints();
+v1.MapDialerSettingsEndpoints();
+v1.MapTrunkEndpoints();
+v1.MapOutboundRouteEndpoints();
+v1.MapRecordingEndpoints();
+v1.MapAnalyticsEndpoints();
+v1.MapAnalyticsLiveEndpoints();
+v1.MapQueueMetricsEndpoints();
+v1.MapBotEndpoints();
+v1.MapKnowledgeBaseEndpoints();
+v1.MapAgentAssistEndpoints();
+v1.MapSupervisorEndpoints();
+v1.MapSkillEndpoints();
+v1.MapAuditEndpoints();
+v1.MapSurveyEndpoints();
+v1.MapScheduledReportEndpoints();
+v1.MapRealtimeEndpoints();
+v1.MapAuthAdminEndpoints();
+v1.MapOidcEndpoints();
+v1.MapRbacEndpoints();
+v1.MapUsersMeEndpoint();
+v1.MapManagementBillingEndpoints();
+v1.MapManagementImpersonationEndpoints();
+v1.MapWebhookSubscriptionEndpoints();
+v1.MapManagementWebhookEndpoints();
+v1.MapWebhookEventTypeEndpoints();
+v1.MapGdprEndpoints();
 
 // ─── RBAC seed: permissions, role templates (Postgres only) ──────────────────
 if (!app.Environment.IsEnvironment("Testing"))
