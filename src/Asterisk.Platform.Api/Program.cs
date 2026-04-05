@@ -317,16 +317,7 @@ builder.Services.AddHealthChecks();
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = 429;
-    options.AddSlidingWindowLimiter("api", o =>
-    {
-        o.Window = TimeSpan.FromMinutes(1);
-        o.SegmentsPerWindow = 6;
-        o.PermitLimit = 600;
-    });
-});
+builder.Services.AddRateLimiter(TenantRateLimitPolicy.ConfigureRateLimiting);
 
 // ─── API Versioning ───────────────────────────────────────────────────────────
 
@@ -369,6 +360,7 @@ app.UseRouting();
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
 app.UseRateLimiter();
+app.UseMiddleware<RateLimitHeadersMiddleware>();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
