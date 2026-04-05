@@ -1,5 +1,7 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Analytics;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -8,7 +10,9 @@ internal static class AnalyticsLiveEndpoints
 {
     public static void MapAnalyticsLiveEndpoints(this IEndpointRouteBuilder app)
     {
-        var live = app.MapGroup("/analytics").RequireAuthorization("SupervisorPlus");
+        var live = app.MapGroup("/analytics")
+            .RequireAuthorization("SupervisorPlus")
+            .RequireLicenseFeature(LicenseFeature.Analytics);
         live.MapGet("/live", GetAllLiveStates);
         live.MapGet("/live/{queueName}", GetLiveState);
         live.MapGet("/current-interval", GetCurrentInterval);

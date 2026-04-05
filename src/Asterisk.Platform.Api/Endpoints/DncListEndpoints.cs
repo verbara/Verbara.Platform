@@ -1,7 +1,9 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Compliance;
 using Asterisk.Sdk.Pro.Dialer.Models;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -10,7 +12,9 @@ internal static class DncListEndpoints
 {
     public static void MapDncListEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin/dnc-lists").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/dnc-lists")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Dialer);
 
         // CRUD
         group.MapGet("/", ListDncLists);

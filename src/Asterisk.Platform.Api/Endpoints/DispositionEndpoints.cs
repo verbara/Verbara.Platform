@@ -1,7 +1,9 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Conversations.Stores;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -10,7 +12,9 @@ internal static class DispositionEndpoints
 {
     public static void MapDispositionEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin/dispositions").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/dispositions")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Dialer);
 
         group.MapGet("/", ListDispositions);
         group.MapGet("/{id}", GetDisposition);

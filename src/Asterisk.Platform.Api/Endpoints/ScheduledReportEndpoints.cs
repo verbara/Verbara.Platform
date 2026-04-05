@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using Asterisk.Platform.Api.Middleware;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -25,7 +27,9 @@ internal static class ScheduledReportEndpoints
 {
     public static void MapScheduledReportEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin/reports").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/reports")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Analytics);
 
         group.MapGet("/", ListReports);
         group.MapPost("/", CreateReport);

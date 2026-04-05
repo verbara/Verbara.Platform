@@ -1,9 +1,11 @@
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Sdk.Ami.Connection;
 using Asterisk.Sdk.Pro.Cluster;
 using Asterisk.Sdk.Pro.Cluster.Drain;
 using Asterisk.Sdk.Pro.Cluster.Registry;
 using Asterisk.Sdk.Pro.Cluster.Transport;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -14,7 +16,9 @@ internal static class ManagementClusterEndpoints
 
     public static void MapManagementClusterEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/management/cluster").RequireAuthorization("PlatformAdminOnly");
+        var group = app.MapGroup("/management/cluster")
+            .RequireAuthorization("PlatformAdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Cluster);
 
         group.MapGet("/status", GetStatus);
         group.MapGet("/nodes", ListNodes);

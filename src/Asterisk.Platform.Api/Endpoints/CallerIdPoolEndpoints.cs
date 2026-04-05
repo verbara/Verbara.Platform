@@ -1,7 +1,9 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -10,7 +12,9 @@ internal static class CallerIdPoolEndpoints
 {
     public static void MapCallerIdPoolEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin/caller-id-pools").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/caller-id-pools")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Dialer);
 
         // CRUD
         group.MapGet("/", ListPools);

@@ -1,7 +1,9 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Models;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -10,7 +12,9 @@ internal static class DialerSettingsEndpoints
 {
     public static void MapDialerSettingsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin/dialer/settings").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/dialer/settings")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Dialer);
 
         group.MapGet("/", GetSettings);
         group.MapPut("/", UpdateSettings);

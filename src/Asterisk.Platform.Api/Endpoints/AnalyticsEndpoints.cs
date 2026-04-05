@@ -1,12 +1,14 @@
 using System.Globalization;
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
-using Microsoft.AspNetCore.Mvc;
 using Asterisk.Sdk.Pro.Analytics;
 using Asterisk.Sdk.Pro.CallAnalytics.Domain;
 using Asterisk.Sdk.Pro.CallAnalytics.Store;
 using Asterisk.Sdk.Pro.EventStore;
+using Asterisk.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -14,7 +16,9 @@ internal static class AnalyticsEndpoints
 {
     public static void MapAnalyticsEndpoints(this IEndpointRouteBuilder app)
     {
-        var analytics = app.MapGroup("/analytics").RequireAuthorization("SupervisorPlus");
+        var analytics = app.MapGroup("/analytics")
+            .RequireAuthorization("SupervisorPlus")
+            .RequireLicenseFeature(LicenseFeature.Analytics);
         analytics.MapGet("/dashboard", GetDashboard);
         analytics.MapGet("/cdr", ListCdr);
         analytics.MapGet("/cdr/{sessionId}", GetCdrDetail);

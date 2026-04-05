@@ -1,6 +1,8 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Analytics;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -9,7 +11,9 @@ internal static class QueueMetricsEndpoints
 {
     public static void MapQueueMetricsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/operations").RequireAuthorization("SupervisorPlus");
+        var group = app.MapGroup("/operations")
+            .RequireAuthorization("SupervisorPlus")
+            .RequireLicenseFeature(LicenseFeature.Analytics);
         group.MapGet("/queue-metrics", GetQueueMetrics);
     }
 

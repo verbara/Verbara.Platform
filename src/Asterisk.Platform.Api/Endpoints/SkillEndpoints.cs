@@ -1,5 +1,7 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Pro.Licensing;
 using Asterisk.Sdk.Pro.Routing.Models;
 using Asterisk.Sdk.Pro.Routing.Skills;
 using Microsoft.AspNetCore.Mvc;
@@ -10,7 +12,9 @@ internal static class SkillEndpoints
 {
     public static void MapSkillEndpoints(this IEndpointRouteBuilder app)
     {
-        var skills = app.MapGroup("/admin/skills").RequireAuthorization("AdminOnly");
+        var skills = app.MapGroup("/admin/skills")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Routing);
 
         skills.MapGet("/", ListSkills);
         skills.MapPost("/", CreateSkill);
@@ -18,7 +22,9 @@ internal static class SkillEndpoints
         skills.MapDelete("/{name}", DeleteSkill);
         skills.MapGet("/{name}/agents", ListAgentsWithSkill);
 
-        var agentSkills = app.MapGroup("/admin/agents").RequireAuthorization("AdminOnly");
+        var agentSkills = app.MapGroup("/admin/agents")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Routing);
 
         agentSkills.MapGet("/{agentId}/skills", GetAgentSkills);
         agentSkills.MapPost("/{agentId}/skills", AssignSkill);

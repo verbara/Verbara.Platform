@@ -1,5 +1,7 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
+using Asterisk.Sdk.Pro.Licensing;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -9,7 +11,8 @@ internal static class CallAttemptEndpoints
     {
         var group = app.MapGroup("/admin/call-attempts")
             .RequireAuthorization("AdminOnly")
-            .WithTags("CallAttempts");
+            .WithTags("CallAttempts")
+            .RequireLicenseFeature(LicenseFeature.Dialer);
         group.MapPut("/{id:long}/disposition", UpdateDisposition);
     }
 

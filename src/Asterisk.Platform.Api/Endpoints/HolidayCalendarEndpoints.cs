@@ -1,8 +1,10 @@
 using System.Globalization;
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Scheduling;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -11,7 +13,9 @@ internal static class HolidayCalendarEndpoints
 {
     public static void MapHolidayCalendarEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin/holiday-calendars").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/holiday-calendars")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Dialer);
 
         // CRUD
         group.MapGet("/", ListCalendars);

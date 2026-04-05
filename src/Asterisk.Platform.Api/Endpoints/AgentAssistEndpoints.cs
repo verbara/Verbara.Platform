@@ -1,6 +1,8 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.AgentAssist.Options;
 using Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres.Stores;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -11,13 +13,17 @@ internal static class AgentAssistEndpoints
     public static void MapAgentAssistEndpoints(this IEndpointRouteBuilder app)
     {
         // ── Session query endpoints (SupervisorPlus) ───────────────────────────
-        var sessions = app.MapGroup("/agent-assist/sessions").RequireAuthorization("SupervisorPlus");
+        var sessions = app.MapGroup("/agent-assist/sessions")
+            .RequireAuthorization("SupervisorPlus")
+            .RequireLicenseFeature(LicenseFeature.AgentAssist);
         sessions.MapGet("/{sessionId}", GetSession);
         sessions.MapGet("/{sessionId}/suggestions", GetSessionSuggestions);
         sessions.MapGet("/{sessionId}/compliance", GetSessionCompliance);
 
         // ── Admin config endpoints (AdminOnly) ─────────────────────────────────
-        var admin = app.MapGroup("/admin/agent-assist").RequireAuthorization("AdminOnly");
+        var admin = app.MapGroup("/admin/agent-assist")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.AgentAssist);
         admin.MapGet("/config", GetConfig);
         admin.MapPut("/config", UpdateConfig);
         admin.MapGet("/keyword-rules", GetKeywordRules);

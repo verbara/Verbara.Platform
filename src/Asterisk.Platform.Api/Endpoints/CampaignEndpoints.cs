@@ -1,10 +1,12 @@
 using System.Globalization;
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Contacts;
 using Asterisk.Sdk.Pro.Dialer.Dispositions;
 using Asterisk.Sdk.Pro.Dialer.Models;
+using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -13,7 +15,9 @@ internal static class CampaignEndpoints
 {
     public static void MapCampaignEndpoints(this IEndpointRouteBuilder app)
     {
-        var campaigns = app.MapGroup("/admin/campaigns").RequireAuthorization("AdminOnly");
+        var campaigns = app.MapGroup("/admin/campaigns")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Dialer);
 
         // CRUD
         campaigns.MapPost("/", CreateCampaign);

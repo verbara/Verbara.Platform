@@ -1,4 +1,6 @@
+using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Pro.Licensing;
 using Asterisk.Sdk.Pro.Realtime;
 using Asterisk.Sdk.Pro.Realtime.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -9,7 +11,9 @@ internal static class RealtimeEndpoints
 {
     public static void MapRealtimeEndpoints(this IEndpointRouteBuilder app)
     {
-        var profiles = app.MapGroup("/admin/realtime/profiles").RequireAuthorization("AdminOnly");
+        var profiles = app.MapGroup("/admin/realtime/profiles")
+            .RequireAuthorization("AdminOnly")
+            .RequireLicenseFeature(LicenseFeature.Realtime);
 
         // Static routes BEFORE parameterised routes to avoid conflicts
         profiles.MapGet("/default/{type}", GetDefaultProfile);
