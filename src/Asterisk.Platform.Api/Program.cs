@@ -360,6 +360,7 @@ var app = builder.Build();
 // ─── Middleware pipeline ──────────────────────────────────────────────────────
 
 app.UseMiddleware<VersionRedirectMiddleware>();
+app.UseRouting();
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
 app.UseRateLimiter();
