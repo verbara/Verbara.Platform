@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Surveys;
 using Microsoft.AspNetCore.Mvc;
@@ -39,6 +40,7 @@ internal static class SurveyEndpoints
         HttpContext context,
         [FromBody] CreateSurveyRequest body,
         [FromServices] ISurveyStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -53,6 +55,17 @@ internal static class SurveyEndpoints
             IsActive = body.IsActive ?? true,
         };
         await store.SaveAsync(survey, ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "survey.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: survey.SurveyId.Value, targetType: "survey",
+            changes: new AuditChanges(Before: null, After: new { survey.SurveyId, survey.Name, survey.Type }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/surveys/{survey.SurveyId}", survey);
     }
 
@@ -72,12 +85,15 @@ internal static class SurveyEndpoints
         HttpContext context,
         [FromBody] UpdateSurveyRequest body,
         [FromServices] ISurveyStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var existing = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (existing is null)
             return Results.NotFound();
+
+        var before = new { existing.SurveyId, existing.Name, existing.Type, existing.IsActive };
 
         var updated = new Survey
         {
@@ -89,6 +105,17 @@ internal static class SurveyEndpoints
             IsActive = body.IsActive ?? existing.IsActive,
         };
         await store.SaveAsync(updated, ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "survey.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "survey",
+            changes: new AuditChanges(Before: before, After: new { updated.SurveyId, updated.Name, updated.Type, updated.IsActive }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(updated);
     }
 
@@ -96,10 +123,23 @@ internal static class SurveyEndpoints
         string id,
         HttpContext context,
         [FromServices] ISurveyStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var before = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "survey.deleted", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "survey",
+            changes: new AuditChanges(Before: before is null ? null : new { before.SurveyId, before.Name }, After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

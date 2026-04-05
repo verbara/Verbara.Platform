@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Bot;
 using Asterisk.Platform.Core;
 using Microsoft.AspNetCore.Mvc;
@@ -35,6 +36,7 @@ internal static class BotEndpoints
         HttpContext context,
         [FromBody] CreateBotRequest body,
         [FromServices] IBotConfigStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -50,6 +52,17 @@ internal static class BotEndpoints
             IsActive = body.IsActive ?? true,
         };
         await store.SaveAsync(config, ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "bot.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: config.BotId.Value, targetType: "bot",
+            changes: new AuditChanges(Before: null, After: new { config.BotId, config.Name, config.IsActive }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/bots/{config.BotId}", config);
     }
 
@@ -69,12 +82,15 @@ internal static class BotEndpoints
         HttpContext context,
         [FromBody] UpdateBotRequest body,
         [FromServices] IBotConfigStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var existing = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (existing is null)
             return Results.NotFound();
+
+        var before = new { existing.BotId, existing.Name, existing.IsActive };
 
         if (body.Name is not null) existing.Name = body.Name;
         if (body.FallbackQueueId is not null) existing.FallbackQueueId = EntityId.From(body.FallbackQueueId);
@@ -83,6 +99,17 @@ internal static class BotEndpoints
         if (body.IsActive.HasValue) existing.IsActive = body.IsActive.Value;
 
         await store.SaveAsync(existing, ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "bot.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "bot",
+            changes: new AuditChanges(Before: before, After: new { existing.BotId, existing.Name, existing.IsActive }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(existing);
     }
 
@@ -90,6 +117,7 @@ internal static class BotEndpoints
         string id,
         HttpContext context,
         [FromServices] IBotConfigStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         // [FromServices] IBotConfigStore does not expose a DeleteAsync method.
@@ -101,6 +129,17 @@ internal static class BotEndpoints
 
         config.IsActive = false;
         await store.SaveAsync(config, ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "bot.deleted", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "bot",
+            changes: new AuditChanges(Before: new { config.BotId, config.Name, IsActive = true }, After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

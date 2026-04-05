@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
@@ -51,12 +52,24 @@ internal static class CallerIdPoolEndpoints
         HttpContext context,
         [FromBody] CreateCallerIdPoolRequest body,
         CallerIdPoolStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var pool = new CallerIdPool { Name = body.Name };
         var id = await store.CreateAsync(pool, tenantId, ct);
         pool.Id = id;
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "callerid_pool.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "callerid_pool",
+            changes: new AuditChanges(Before: null, After: MapToDto(pool)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/caller-id-pools/{id}", MapToDto(pool));
     }
 
@@ -65,15 +78,29 @@ internal static class CallerIdPoolEndpoints
         HttpContext context,
         [FromBody] UpdateCallerIdPoolRequest body,
         CallerIdPoolStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var existing = await store.GetAsync(id, tenantId, ct);
         if (existing is null) return Results.NotFound();
 
+        var before = MapToDto(existing);
+
         if (body.Name is not null) existing.Name = body.Name;
 
         await store.UpdateAsync(existing, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "callerid_pool.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "callerid_pool",
+            changes: new AuditChanges(Before: before, After: MapToDto(existing)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(MapToDto(existing));
     }
 
@@ -81,10 +108,23 @@ internal static class CallerIdPoolEndpoints
         long id,
         HttpContext context,
         [FromServices] CallerIdPoolStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var before = await store.GetAsync(id, tenantId, ct);
         await store.DeleteAsync(id, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "callerid_pool.deleted", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "callerid_pool",
+            changes: new AuditChanges(Before: before is null ? null : MapToDto(before), After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

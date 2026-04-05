@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Conversations.Stores;
 using Asterisk.Platform.Core;
@@ -43,6 +44,7 @@ internal static class DispositionEndpoints
         [FromBody] CreateDispositionRequest body,
         [FromServices] IDispositionStore store,
         IClock clock,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -56,6 +58,17 @@ internal static class DispositionEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(disposition, ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "disposition.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: disposition.DispositionId.Value, targetType: "disposition",
+            changes: new AuditChanges(Before: null, After: new { disposition.DispositionId, disposition.Name, disposition.Category }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/dispositions/{disposition.DispositionId}", disposition);
     }
 
@@ -63,10 +76,23 @@ internal static class DispositionEndpoints
         string id,
         HttpContext context,
         [FromServices] IDispositionStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var before = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "disposition.deleted", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id, targetType: "disposition",
+            changes: new AuditChanges(Before: before is null ? null : new { before.DispositionId, before.Name }, After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

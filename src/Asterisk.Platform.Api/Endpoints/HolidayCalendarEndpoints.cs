@@ -1,4 +1,5 @@
 using System.Globalization;
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Scheduling;
@@ -52,12 +53,24 @@ internal static class HolidayCalendarEndpoints
         HttpContext context,
         [FromBody] CreateHolidayCalendarRequest body,
         HolidayCalendarStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var calendar = new HolidayCalendar { Name = body.Name };
         var id = await store.CreateAsync(calendar, tenantId, ct);
         calendar.Id = id;
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "holiday_calendar.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(CultureInfo.InvariantCulture), targetType: "holiday_calendar",
+            changes: new AuditChanges(Before: null, After: MapToDto(calendar)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/holiday-calendars/{id}", MapToDto(calendar));
     }
 
@@ -66,15 +79,29 @@ internal static class HolidayCalendarEndpoints
         HttpContext context,
         [FromBody] UpdateHolidayCalendarRequest body,
         HolidayCalendarStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var existing = await store.GetAsync(id, tenantId, ct);
         if (existing is null) return Results.NotFound();
 
+        var before = MapToDto(existing);
+
         if (body.Name is not null) existing.Name = body.Name;
 
         await store.UpdateAsync(existing, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "holiday_calendar.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(CultureInfo.InvariantCulture), targetType: "holiday_calendar",
+            changes: new AuditChanges(Before: before, After: MapToDto(existing)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(MapToDto(existing));
     }
 
@@ -82,10 +109,23 @@ internal static class HolidayCalendarEndpoints
         long id,
         HttpContext context,
         [FromServices] HolidayCalendarStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var before = await store.GetAsync(id, tenantId, ct);
         await store.DeleteAsync(id, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "holiday_calendar.deleted", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(CultureInfo.InvariantCulture), targetType: "holiday_calendar",
+            changes: new AuditChanges(Before: before is null ? null : MapToDto(before), After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

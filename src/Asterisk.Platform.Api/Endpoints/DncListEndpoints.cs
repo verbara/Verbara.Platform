@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Compliance;
 using Asterisk.Sdk.Pro.Dialer.Models;
@@ -57,6 +58,7 @@ internal static class DncListEndpoints
         HttpContext context,
         [FromBody] CreateDncListRequest body,
         DncListStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -69,6 +71,17 @@ internal static class DncListEndpoints
         };
         var id = await store.CreateAsync(list, tenantId, ct);
         list.Id = id;
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "dnc_list.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "dnc_list",
+            changes: new AuditChanges(Before: null, After: MapToDto(list)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/dnc-lists/{id}", MapToDto(list));
     }
 
@@ -77,17 +90,31 @@ internal static class DncListEndpoints
         HttpContext context,
         [FromBody] UpdateDncListRequest body,
         DncListStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var existing = await store.GetAsync(id, tenantId, ct);
         if (existing is null) return Results.NotFound();
 
+        var before = MapToDto(existing);
+
         if (body.Name is not null) existing.Name = body.Name;
         if (body.Scope is not null && Enum.TryParse<DncListScope>(body.Scope, true, out var s))
             existing.Scope = s;
 
         await store.UpdateAsync(existing, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "dnc_list.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "dnc_list",
+            changes: new AuditChanges(Before: before, After: MapToDto(existing)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(MapToDto(existing));
     }
 
@@ -95,10 +122,23 @@ internal static class DncListEndpoints
         long id,
         HttpContext context,
         [FromServices] DncListStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var before = await store.GetAsync(id, tenantId, ct);
         await store.DeleteAsync(id, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "dnc_list.deleted", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "dnc_list",
+            changes: new AuditChanges(Before: before is null ? null : MapToDto(before), After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

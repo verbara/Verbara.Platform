@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
@@ -47,6 +48,7 @@ internal static class TrunkEndpoints
         HttpContext context,
         [FromBody] CreateTrunkRequest body,
         TrunkStoreBase trunkStore,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -67,6 +69,17 @@ internal static class TrunkEndpoints
         };
         var id = await trunkStore.CreateAsync(trunk, tenantId, ct);
         trunk.Id = id;
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "trunk.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "trunk",
+            changes: new AuditChanges(Before: null, After: MapToDto(trunk)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/trunks/{id}", MapToDto(trunk));
     }
 
@@ -75,12 +88,15 @@ internal static class TrunkEndpoints
         HttpContext context,
         [FromBody] UpdateTrunkRequest body,
         TrunkStoreBase trunkStore,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var trunk = await trunkStore.GetAsync(id, tenantId, ct);
         if (trunk is null)
             return Results.NotFound();
+
+        var before = MapToDto(trunk);
 
         if (body.Name is not null) trunk.Name = body.Name;
         if (body.DisplayName is not null) trunk.DisplayName = body.DisplayName;
@@ -96,6 +112,17 @@ internal static class TrunkEndpoints
         if (body.Context is not null) trunk.Context = body.Context;
 
         await trunkStore.UpdateAsync(trunk, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "trunk.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "trunk",
+            changes: new AuditChanges(Before: before, After: MapToDto(trunk)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(MapToDto(trunk));
     }
 
@@ -103,10 +130,23 @@ internal static class TrunkEndpoints
         long id,
         HttpContext context,
         [FromServices] TrunkStoreBase trunkStore,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var before = await trunkStore.GetAsync(id, tenantId, ct);
         await trunkStore.DeleteAsync(id, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "trunk.deleted", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "trunk",
+            changes: new AuditChanges(Before: before is null ? null : MapToDto(before), After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

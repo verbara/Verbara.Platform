@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Sdk.Pro.Dialer.Routing;
@@ -46,6 +47,7 @@ internal static class OutboundRouteEndpoints
         HttpContext context,
         [FromBody] CreateOutboundRouteRequest body,
         OutboundRouteStoreBase routeStore,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -61,6 +63,17 @@ internal static class OutboundRouteEndpoints
         };
         var id = await routeStore.CreateAsync(route, tenantId, ct);
         route.Id = id;
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "outbound_route.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "outbound_route",
+            changes: new AuditChanges(Before: null, After: MapToDto(route)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/routes/{id}", MapToDto(route));
     }
 
@@ -69,12 +82,15 @@ internal static class OutboundRouteEndpoints
         HttpContext context,
         [FromBody] UpdateOutboundRouteRequest body,
         OutboundRouteStoreBase routeStore,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var route = await routeStore.GetAsync(id, tenantId, ct);
         if (route is null)
             return Results.NotFound();
+
+        var before = MapToDto(route);
 
         if (body.CampaignId.HasValue) route.CampaignId = body.CampaignId;
         if (body.Pattern is not null) route.Pattern = body.Pattern;
@@ -85,6 +101,17 @@ internal static class OutboundRouteEndpoints
         if (body.Priority.HasValue) route.Priority = body.Priority.Value;
 
         await routeStore.UpdateAsync(route, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "outbound_route.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "outbound_route",
+            changes: new AuditChanges(Before: before, After: MapToDto(route)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(MapToDto(route));
     }
 
@@ -92,10 +119,23 @@ internal static class OutboundRouteEndpoints
         long id,
         HttpContext context,
         [FromServices] OutboundRouteStoreBase routeStore,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var before = await routeStore.GetAsync(id, tenantId, ct);
         await routeStore.DeleteAsync(id, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "outbound_route.deleted", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(System.Globalization.CultureInfo.InvariantCulture), targetType: "outbound_route",
+            changes: new AuditChanges(Before: before is null ? null : MapToDto(before), After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

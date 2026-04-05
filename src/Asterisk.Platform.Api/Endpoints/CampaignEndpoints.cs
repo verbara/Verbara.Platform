@@ -1,4 +1,5 @@
 using System.Globalization;
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Contacts;
@@ -59,6 +60,7 @@ internal static class CampaignEndpoints
         [FromBody] CreateCampaignRequest body,
         CampaignStoreBase campaignStore,
         PlatformEventBus eventBus,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -67,6 +69,17 @@ internal static class CampaignEndpoints
         campaign.Id = id;
         eventBus.Publish(new CampaignStatusChangedEvent(
             tenantId, id, campaign.Name, "", campaign.Status.ToString()));
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "campaign.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(CultureInfo.InvariantCulture), targetType: "campaign",
+            changes: new AuditChanges(Before: null, After: MapToSummary(campaign)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/campaigns/{id}", MapToSummary(campaign));
     }
 
@@ -100,12 +113,15 @@ internal static class CampaignEndpoints
         HttpContext context,
         [FromBody] UpdateCampaignRequest body,
         CampaignStoreBase campaignStore,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var campaign = await campaignStore.GetCampaignAsync(tenantId, id, ct);
         if (campaign is null)
             return Results.NotFound();
+
+        var before = MapToDetail(campaign);
 
         if (body.Name is not null) campaign.Name = body.Name;
         if (body.Description is not null) campaign.Description = body.Description;
@@ -134,6 +150,17 @@ internal static class CampaignEndpoints
         }
 
         await campaignStore.UpdateCampaignAsync(tenantId, campaign, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "campaign.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(CultureInfo.InvariantCulture), targetType: "campaign",
+            changes: new AuditChanges(Before: before, After: MapToDetail(campaign)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(MapToDetail(campaign));
     }
 
@@ -141,10 +168,23 @@ internal static class CampaignEndpoints
         long id,
         HttpContext context,
         [FromServices] CampaignStoreBase campaignStore,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var before = await campaignStore.GetCampaignAsync(tenantId, id, ct);
         await campaignStore.DeleteCampaignAsync(tenantId, id, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "campaign.deleted", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: id.ToString(CultureInfo.InvariantCulture), targetType: "campaign",
+            changes: new AuditChanges(Before: before is null ? null : MapToSummary(before), After: null),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.NoContent();
     }
 

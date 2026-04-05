@@ -1,3 +1,4 @@
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Models;
@@ -31,10 +32,13 @@ internal static class DialerSettingsEndpoints
         HttpContext context,
         [FromBody] UpdateDialerSettingsRequest body,
         CampaignStoreBase store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var settings = await store.GetDialerSettingsAsync(tenantId, ct);
+
+        var before = MapToDto(settings);
 
         if (body.MaxGlobalChannels.HasValue) settings.MaxGlobalChannels = body.MaxGlobalChannels.Value;
         if (body.DefaultRingTimeoutSeconds.HasValue) settings.DefaultRingTimeoutSeconds = body.DefaultRingTimeoutSeconds.Value;
@@ -47,6 +51,17 @@ internal static class DialerSettingsEndpoints
         if (body.ScheduledCallbackPollSeconds.HasValue) settings.ScheduledCallbackPollSeconds = body.ScheduledCallbackPollSeconds.Value;
 
         await store.UpsertDialerSettingsAsync(settings, tenantId, ct);
+        await audit.RecordAsync(
+            new TenantId(tenantId), category: "config", action: "dialer_settings.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: tenantId, targetType: "dialer_settings",
+            changes: new AuditChanges(Before: before, After: MapToDto(settings)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(MapToDto(settings));
     }
 

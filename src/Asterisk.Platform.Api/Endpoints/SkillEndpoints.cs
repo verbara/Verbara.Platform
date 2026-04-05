@@ -1,3 +1,5 @@
+using Asterisk.Platform.Audit;
+using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Routing.Models;
 using Asterisk.Sdk.Pro.Routing.Skills;
 using Microsoft.AspNetCore.Mvc;
@@ -34,10 +36,13 @@ internal static class SkillEndpoints
     }
 
     private static async Task<IResult> CreateSkill(
+        HttpContext context,
         [FromBody] CreateSkillRequest body,
         SkillCatalogBase catalog,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
+        var tenantId = GetTenantId(context);
         var skill = new Skill
         {
             Name = body.Name,
@@ -45,15 +50,29 @@ internal static class SkillEndpoints
             Description = body.Description,
         };
         await catalog.AddSkillAsync(skill, ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "skill.created", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: skill.Name, targetType: "skill",
+            changes: new AuditChanges(Before: null, After: MapToDto(skill)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Created($"/admin/skills/{skill.Name}", MapToDto(skill));
     }
 
     private static async Task<IResult> UpsertSkill(
         string name,
+        HttpContext context,
         [FromBody] UpsertSkillRequest body,
         SkillCatalogBase catalog,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
+        var tenantId = GetTenantId(context);
         var skill = new Skill
         {
             Name = name,
@@ -61,15 +80,29 @@ internal static class SkillEndpoints
             Description = body.Description,
         };
         await catalog.AddSkillAsync(skill, ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "skill.updated", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: name, targetType: "skill",
+            changes: new AuditChanges(Before: null, After: MapToDto(skill)),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(MapToDto(skill));
     }
 
     private static async Task<IResult> DeleteSkill(
         string name,
+        HttpContext context,
         [FromServices] SkillCatalogBase catalog,
+        [FromServices] IAuditService audit,
         bool force = false,
         CancellationToken ct = default)
     {
+        var tenantId = GetTenantId(context);
         if (!force)
         {
             var agents = await catalog.GetAgentsWithSkillAsync(name, ct);
@@ -83,6 +116,20 @@ internal static class SkillEndpoints
         }
 
         var removed = await catalog.RemoveSkillDefinitionAsync(name, ct);
+        if (removed)
+        {
+            await audit.RecordAsync(
+                tenantId, category: "config", action: "skill.deleted", severity: "info",
+                actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+                targetId: name, targetType: "skill",
+                changes: new AuditChanges(Before: name, After: null),
+                metadata: new Dictionary<string, string>
+                {
+                    ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    ["endpoint"] = context.Request.Path.Value ?? "",
+                },
+                ct: ct);
+        }
         return removed ? Results.NoContent() : Results.NotFound();
     }
 
@@ -139,6 +186,16 @@ internal static class SkillEndpoints
 
     private static AgentSkillDto MapAgentSkillToDto(AgentSkill a) =>
         new(a.AgentId, a.SkillName, a.Proficiency);
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private static TenantId GetTenantId(HttpContext context)
+    {
+        if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
+            return tid;
+
+        throw new InvalidOperationException("Tenant ID not resolved");
+    }
 }
 
 // ─── Request/Response DTOs ────────────────────────────────────────────────────

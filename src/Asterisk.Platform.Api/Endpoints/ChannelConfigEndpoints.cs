@@ -1,4 +1,5 @@
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Core;
 using Microsoft.AspNetCore.Mvc;
@@ -58,12 +59,14 @@ internal static class ChannelConfigEndpoints
         HttpContext context,
         [FromBody] UpdateChannelConfigRequest body,
         [FromServices] ITenantChannelConfigStore store,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out var channelType))
             return Results.BadRequest($"Invalid channel type: {channel}");
 
         var tenantId = GetTenantId(context);
+        var before = await store.GetAsync(tenantId, channelType, ct);
         var config = new TenantChannelConfig
         {
             TenantId = tenantId,
@@ -72,6 +75,17 @@ internal static class ChannelConfigEndpoints
             Credentials = body.Credentials ?? new Dictionary<string, string>(),
         };
         await store.SaveAsync(config, ct);
+        await audit.RecordAsync(
+            tenantId, category: "config", action: "channel.configured", severity: "info",
+            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            targetId: channel, targetType: "channel",
+            changes: new AuditChanges(Before: before is null ? null : new { before.Channel, before.IsActive }, After: new { config.Channel, config.IsActive }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
         return Results.Ok(config);
     }
 
