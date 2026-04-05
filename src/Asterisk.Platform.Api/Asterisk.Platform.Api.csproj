@@ -53,6 +53,10 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
     <PackageReference Include="Dapper" />
     <PackageReference Include="Npgsql" />
+    <PackageReference Include="QuestPDF" />
+    <PackageReference Include="ScottPlot" />
+    <PackageReference Include="MailKit" />
+    <PackageReference Include="NCrontab" />
     <PackageReference Include="Asterisk.Sdk.Hosting" />
     <PackageReference Include="Asterisk.Sdk.Pro.EventStore" />
     <PackageReference Include="Asterisk.Sdk.Pro.Analytics" />

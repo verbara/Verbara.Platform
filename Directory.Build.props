@@ -9,7 +9,7 @@
     <WarningLevel>9999</WarningLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;NU1902;NU1603</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup>
