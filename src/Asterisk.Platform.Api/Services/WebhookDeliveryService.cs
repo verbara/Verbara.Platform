@@ -18,6 +18,7 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
     private readonly IWebhookDeliveryStore _deliveryStore;
     private readonly IWebhookSubscriptionStore _subscriptionStore;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly CircuitBreakerPolicy _circuitBreaker;
     private readonly IClock _clock;
     private readonly ILogger<WebhookDeliveryService> _logger;
 
@@ -26,6 +27,7 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
         IWebhookDeliveryStore deliveryStore,
         IWebhookSubscriptionStore subscriptionStore,
         IHttpClientFactory httpClientFactory,
+        CircuitBreakerPolicy circuitBreaker,
         IClock clock,
         ILogger<WebhookDeliveryService> logger)
     {
@@ -33,6 +35,7 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
         _deliveryStore = deliveryStore;
         _subscriptionStore = subscriptionStore;
         _httpClientFactory = httpClientFactory;
+        _circuitBreaker = circuitBreaker;
         _clock = clock;
         _logger = logger;
     }
@@ -99,10 +102,26 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
                 return;
             }
 
+            // Transition Open→HalfOpen if cooldown has expired
+            var now = _clock.UtcNow;
+            var transitioned = CircuitBreakerPolicy.TransitionIfCooldownExpired(sub, now);
+            if (!ReferenceEquals(transitioned, sub))
+            {
+                await _subscriptionStore.SaveAsync(transitioned, ct);
+                sub = transitioned;
+            }
+
+            // Check circuit breaker — skip delivery if circuit is open
+            if (!CircuitBreakerPolicy.ShouldDeliver(sub, now))
+            {
+                LogCircuitSkipped(_logger, delivery.DeliveryId, delivery.SubscriptionId);
+                return;
+            }
+
             var client = _httpClientFactory.CreateClient("webhooks");
             client.Timeout = HttpTimeout;
 
-            var timestamp = _clock.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var timestamp = now.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
             var signature = WebhookSignatureService.ComputeSignature(timestamp, delivery.Payload, sub.Secret);
 
             using var request = new HttpRequestMessage(HttpMethod.Post, sub.EndpointUrl);
@@ -117,6 +136,13 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
 
             if (response.IsSuccessStatusCode)
             {
+                var updatedSub = CircuitBreakerPolicy.OnSuccess(sub);
+                if (updatedSub != sub)
+                {
+                    await _subscriptionStore.SaveAsync(updatedSub, ct);
+                    LogCircuitRecovered(_logger, delivery.SubscriptionId);
+                }
+
                 var delivered = delivery with
                 {
                     Status = WebhookDeliveryStatus.Delivered,
@@ -131,8 +157,9 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
             }
             else
             {
-                await HandleFailureAsync(delivery, statusCode, $"HTTP {statusCode}", ct);
+                await HandleFailureAsync(delivery, sub, statusCode, $"HTTP {statusCode}", ct);
             }
+
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -140,23 +167,44 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
         }
         catch (TaskCanceledException)
         {
-            // HTTP timeout
-            await HandleFailureAsync(delivery, null, "Request timeout", ct);
+            // HTTP timeout — need subscription for circuit breaker; re-fetch if possible
+            var sub = await TryGetSubscriptionAsync(delivery.SubscriptionId, ct);
+            await HandleFailureAsync(delivery, sub, null, "Request timeout", ct);
         }
         catch (HttpRequestException ex)
         {
-            await HandleFailureAsync(delivery, null, $"Network error: {ex.Message}", ct);
+            var sub = await TryGetSubscriptionAsync(delivery.SubscriptionId, ct);
+            await HandleFailureAsync(delivery, sub, null, $"Network error: {ex.Message}", ct);
         }
         catch (Exception ex)
         {
             LogDeliveryError(_logger, delivery.DeliveryId, ex);
-            await HandleFailureAsync(delivery, null, $"Unexpected error: {ex.Message}", ct);
+            var sub = await TryGetSubscriptionAsync(delivery.SubscriptionId, ct);
+            await HandleFailureAsync(delivery, sub, null, $"Unexpected error: {ex.Message}", ct);
         }
     }
 
-    private async Task HandleFailureAsync(
-        WebhookDelivery delivery, int? responseCode, string error, CancellationToken ct)
+    private async Task<WebhookSubscription?> TryGetSubscriptionAsync(string subscriptionId, CancellationToken ct)
     {
+        try { return await _subscriptionStore.GetByIdAsync(subscriptionId, ct); }
+        catch { return null; }
+    }
+
+    private async Task HandleFailureAsync(
+        WebhookDelivery delivery, WebhookSubscription? sub, int? responseCode, string error, CancellationToken ct)
+    {
+        // Update circuit breaker state on the subscription
+        if (sub is not null)
+        {
+            var (updatedSub, justOpened) = _circuitBreaker.OnFailure(sub, _clock.UtcNow);
+            if (updatedSub != sub)
+            {
+                await _subscriptionStore.SaveAsync(updatedSub, ct);
+                if (justOpened)
+                    LogCircuitOpened(_logger, delivery.SubscriptionId, updatedSub.CircuitFailures);
+            }
+        }
+
         var newAttempts = delivery.Attempts + 1;
 
         if (newAttempts >= delivery.MaxAttempts)
@@ -198,6 +246,15 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
         var index = Math.Min(attemptNumber, BackoffSeconds.Length - 1);
         return BackoffSeconds[index];
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Circuit breaker opened for subscription {SubscriptionId} after {Failures} consecutive failures")]
+    private static partial void LogCircuitOpened(ILogger logger, string subscriptionId, int failures);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Circuit breaker recovered for subscription {SubscriptionId}")]
+    private static partial void LogCircuitRecovered(ILogger logger, string subscriptionId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping delivery {DeliveryId} — circuit breaker open for subscription {SubscriptionId}")]
+    private static partial void LogCircuitSkipped(ILogger logger, string deliveryId, string subscriptionId);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error polling pending webhook retries")]
     private static partial void LogPollError(ILogger logger, Exception ex);

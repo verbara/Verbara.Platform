@@ -136,6 +136,9 @@ builder.Services.AddSingleton<SystemSettingsStore>();
 builder.Services.AddSingleton<ScheduledReportStore>();
 
 // ─── Outbound Webhooks ──────────────────────────────────────────────────────
+builder.Services.Configure<Asterisk.Platform.Core.Webhooks.CircuitBreakerOptions>(
+    builder.Configuration.GetSection("Webhooks:CircuitBreaker"));
+builder.Services.AddSingleton<Asterisk.Platform.Core.Webhooks.CircuitBreakerPolicy>();
 builder.Services.AddSingleton<WebhookDispatcher>();
 builder.Services.AddHostedService<WebhookDeliveryService>();
 builder.Services.AddHttpClient("webhooks");

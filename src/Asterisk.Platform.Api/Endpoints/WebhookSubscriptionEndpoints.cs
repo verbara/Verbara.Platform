@@ -20,6 +20,8 @@ internal static class WebhookSubscriptionEndpoints
         group.MapPost("/{id}/test", TestSubscription);
         group.MapGet("/{id}/deliveries", ListDeliveries);
         group.MapPost("/{id}/rotate-secret", RotateSecret);
+        group.MapPost("/{id}/reset-circuit", ResetCircuit);
+        group.MapGet("/{id}/circuit-status", GetCircuitStatus);
     }
 
     private static async Task<IResult> ListSubscriptions(
@@ -251,6 +253,56 @@ internal static class WebhookSubscriptionEndpoints
         return Results.Ok(updated);
     }
 
+    private static async Task<IResult> ResetCircuit(
+        string id,
+        HttpContext context,
+        [FromServices] IWebhookSubscriptionStore store,
+        [FromServices] IClock clock,
+        CancellationToken ct)
+    {
+        var sub = await store.GetByIdAsync(id, ct);
+        if (sub is null) return Results.NotFound();
+
+        var tenantId = GetTenantId(context);
+        if (!string.Equals(sub.TenantId, tenantId, StringComparison.Ordinal))
+            return Results.NotFound();
+
+        var reset = sub with
+        {
+            CircuitStatus = CircuitStatus.Closed,
+            CircuitFailures = 0,
+            CircuitOpenedAt = null,
+            CircuitNextProbeAt = null,
+            CircuitProbeAttempts = 0,
+            UpdatedAt = clock.UtcNow,
+        };
+
+        await store.SaveAsync(reset, ct);
+        return Results.Ok(new MessageResponse($"Circuit breaker reset for subscription {id}"));
+    }
+
+    private static async Task<IResult> GetCircuitStatus(
+        string id,
+        HttpContext context,
+        [FromServices] IWebhookSubscriptionStore store,
+        CancellationToken ct)
+    {
+        var sub = await store.GetByIdAsync(id, ct);
+        if (sub is null) return Results.NotFound();
+
+        var tenantId = GetTenantId(context);
+        if (!string.Equals(sub.TenantId, tenantId, StringComparison.Ordinal))
+            return Results.NotFound();
+
+        return Results.Ok(new CircuitStatusResponse(
+            sub.SubscriptionId,
+            sub.CircuitStatus.ToString(),
+            sub.CircuitFailures,
+            sub.CircuitOpenedAt,
+            sub.CircuitNextProbeAt,
+            sub.CircuitProbeAttempts));
+    }
+
     private static readonly JsonSerializerOptions TestSerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -280,3 +332,11 @@ internal sealed record UpdateWebhookSubscriptionRequest(
     string? EndpointUrl,
     IReadOnlyList<string>? EventTypes,
     bool? IsActive);
+
+internal sealed record CircuitStatusResponse(
+    string SubscriptionId,
+    string Status,
+    int Failures,
+    DateTimeOffset? OpenedAt,
+    DateTimeOffset? NextProbeAt,
+    int ProbeAttempts);
