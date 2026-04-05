@@ -359,6 +359,7 @@ var app = builder.Build();
 
 // ─── Middleware pipeline ──────────────────────────────────────────────────────
 
+app.UseMiddleware<VersionRedirectMiddleware>();
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
 app.UseRateLimiter();
