@@ -1,3 +1,4 @@
+using Asp.Versioning;
 using Asterisk.Platform.Api.Auth;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Middleware;
@@ -322,6 +323,18 @@ builder.Services.AddRateLimiter(options =>
     });
 });
 
+// ─── API Versioning ───────────────────────────────────────────────────────────
+
+builder.Services.AddApiVersioning(options =>
+{
+    options.DefaultApiVersion = new ApiVersion(1, 0);
+    options.AssumeDefaultVersionWhenUnspecified = true;
+    options.ReportApiVersions = true;
+    options.ApiVersionReader = ApiVersionReader.Combine(
+        new UrlSegmentApiVersionReader(),
+        new HeaderApiVersionReader("X-Api-Version"));
+});
+
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 
 var corsOrigins = builder.Configuration["CORS_ORIGINS"]?.Split(',') ?? new[] { "*" };
@@ -361,6 +374,18 @@ app.MapGet("/metrics", () => Results.Ok(new
     timestamp = DateTimeOffset.UtcNow,
     uptime_seconds = (long)(DateTimeOffset.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()).TotalSeconds,
 })).ExcludeFromDescription();
+
+// ─── Versioned route group ───────────────────────────────────────────────────
+
+var versionSet = app.NewApiVersionSet()
+    .HasApiVersion(new ApiVersion(1, 0))
+    .ReportApiVersions()
+    .Build();
+
+#pragma warning disable S1481 // v1 is used by endpoint mapping in a subsequent task
+var v1 = app.MapGroup("/api/v{version:apiVersion}")
+    .WithApiVersionSet(versionSet);
+#pragma warning restore S1481
 
 // ─── Endpoint mapping ────────────────────────────────────────────────────────
 
