@@ -133,8 +133,19 @@ builder.Services.AddSingleton<AgentAssistConfigStore>();
 // ─── System Settings Store (singleton for mutable system settings) ────────────
 builder.Services.AddSingleton<SystemSettingsStore>();
 
-// ─── Scheduled Report Store (singleton for mutable report definitions) ────────
-builder.Services.AddSingleton<ScheduledReportStore>();
+// ─── Scheduled Reports ───────────────────────────────────────────────────────
+builder.Services.Configure<Asterisk.Platform.Core.Email.SmtpOptions>(
+    builder.Configuration.GetSection("Smtp"));
+builder.Services.AddSingleton<Asterisk.Platform.Core.Email.IEmailService,
+    Asterisk.Platform.Api.Services.SmtpEmailService>();
+builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRenderer,
+    Asterisk.Platform.Api.Services.Reports.PdfReportRenderer>("pdf");
+builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRenderer,
+    Asterisk.Platform.Api.Services.Reports.CsvReportRenderer>("csv");
+// IScheduledReportStore — Postgres when available, InMemory otherwise (registered below with storage)
+builder.Services.AddSingleton<Asterisk.Platform.Api.Services.Reports.ReportSchedulerService>();
+builder.Services.AddHostedService(sp =>
+    sp.GetRequiredService<Asterisk.Platform.Api.Services.Reports.ReportSchedulerService>());
 
 // ─── Outbound Webhooks ──────────────────────────────────────────────────────
 builder.Services.Configure<Asterisk.Platform.Core.Webhooks.CircuitBreakerOptions>(
