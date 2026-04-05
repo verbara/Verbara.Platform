@@ -22,6 +22,7 @@ public class DefaultAuditServiceTests
         return (service, store);
     }
 
+#pragma warning disable CS0618
     [Fact]
     public async Task LogAsync_ShouldSaveEntry_WithAllFields()
     {
@@ -34,11 +35,11 @@ public class DefaultAuditServiceTests
             Arg.Is<AuditEntry>(e =>
                 e.TenantId == Tenant1 &&
                 e.Action == "conversation.created" &&
-                e.EntityType == "Conversation" &&
-                e.EntityId == "conv-1" &&
-                e.PerformedBy == "user-42" &&
+                e.TargetType == "Conversation" &&
+                e.TargetId == "conv-1" &&
+                e.ActorId == "user-42" &&
                 e.OccurredAt == FixedNow &&
-                e.Details != null && e.Details["reason"] == "new"),
+                e.Metadata != null && e.Metadata["reason"] == "new"),
             Arg.Any<CancellationToken>());
     }
 
@@ -55,14 +56,14 @@ public class DefaultAuditServiceTests
     }
 
     [Fact]
-    public async Task LogAsync_ShouldSetPerformedByToNull_WhenNotSupplied()
+    public async Task LogAsync_ShouldSetActorIdToSystem_WhenPerformedByNotSupplied()
     {
         var (service, store) = Build();
 
         await service.LogAsync(Tenant1, "message.sent", "Message", "msg-1", ct: CancellationToken.None);
 
         await store.Received(1).SaveAsync(
-            Arg.Is<AuditEntry>(e => e.PerformedBy == null),
+            Arg.Is<AuditEntry>(e => e.ActorId == "system"),
             Arg.Any<CancellationToken>());
     }
 
@@ -109,6 +110,68 @@ public class DefaultAuditServiceTests
         capturedIds.Should().HaveCount(2);
         capturedIds[0].Should().NotBe(capturedIds[1]);
     }
+#pragma warning restore CS0618
+
+    [Theory]
+    [InlineData("login.success", "auth")]
+    [InlineData("logout", "auth")]
+    [InlineData("mfa.enrolled", "auth")]
+    [InlineData("session.revoked", "auth")]
+    [InlineData("lockout.triggered", "auth")]
+    [InlineData("role.assigned", "rbac")]
+    [InlineData("permission.revoked", "rbac")]
+    [InlineData("recording.downloaded", "data_access")]
+    [InlineData("transcript.exported", "data_access")]
+    [InlineData("api_key.created", "admin")]
+    [InlineData("tenant.updated", "admin")]
+    [InlineData("license.applied", "admin")]
+    [InlineData("system.restart", "admin")]
+    [InlineData("conversation.created", "config")]
+    [InlineData("message.sent", "config")]
+    public async Task RecordAsync_ShouldInferCorrectCategory_WhenCalledViaLogAsync(string action, string expectedCategory)
+    {
+        var (service, store) = Build();
+
+#pragma warning disable CS0618
+        await service.LogAsync(Tenant1, action, "Entity", "id-1", ct: CancellationToken.None);
+#pragma warning restore CS0618
+
+        await store.Received(1).SaveAsync(
+            Arg.Is<AuditEntry>(e => e.Category == expectedCategory),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldSaveEntry_WithAllNewFields()
+    {
+        var (service, store) = Build();
+        var correlationId = Guid.NewGuid();
+        var changes = new AuditChanges(Before: new { Name = "old" }, After: new { Name = "new" });
+        var metadata = new Dictionary<string, string> { ["ip"] = "10.0.0.1" };
+
+        await service.RecordAsync(
+            Tenant1, "auth", "login.success", "info",
+            actorId: "user-42", actorType: "user",
+            targetId: "session-1", targetType: "Session",
+            correlationId: correlationId, changes: changes,
+            metadata: metadata, ct: CancellationToken.None);
+
+        await store.Received(1).SaveAsync(
+            Arg.Is<AuditEntry>(e =>
+                e.TenantId == Tenant1 &&
+                e.Action == "login.success" &&
+                e.Category == "auth" &&
+                e.Severity == "info" &&
+                e.ActorId == "user-42" &&
+                e.ActorType == "user" &&
+                e.TargetId == "session-1" &&
+                e.TargetType == "Session" &&
+                e.CorrelationId == correlationId &&
+                e.Changes == changes &&
+                e.Metadata != null && e.Metadata["ip"] == "10.0.0.1" &&
+                e.OccurredAt == FixedNow),
+            Arg.Any<CancellationToken>());
+    }
 }
 
 public class AuditQueryTests
@@ -125,6 +188,12 @@ public class AuditQueryTests
         query.To.Should().BeNull();
         query.Page.Should().Be(1);
         query.PageSize.Should().Be(50);
+        query.Category.Should().BeNull();
+        query.Severity.Should().BeNull();
+        query.ActorId.Should().BeNull();
+        query.TargetId.Should().BeNull();
+        query.TargetType.Should().BeNull();
+        query.CorrelationId.Should().BeNull();
     }
 
     [Fact]
@@ -142,6 +211,26 @@ public class AuditQueryTests
         query.Page.Should().Be(2);
         query.PageSize.Should().Be(25);
     }
+
+    [Fact]
+    public void AuditQuery_ShouldAcceptNewFields()
+    {
+        var correlationId = Guid.NewGuid();
+        var query = new AuditQuery(
+            Category: "auth",
+            Severity: "critical",
+            ActorId: "user-99",
+            TargetId: "session-1",
+            TargetType: "Session",
+            CorrelationId: correlationId);
+
+        query.Category.Should().Be("auth");
+        query.Severity.Should().Be("critical");
+        query.ActorId.Should().Be("user-99");
+        query.TargetId.Should().Be("session-1");
+        query.TargetType.Should().Be("Session");
+        query.CorrelationId.Should().Be(correlationId);
+    }
 }
 
 public class AuditEntryTests
@@ -149,31 +238,65 @@ public class AuditEntryTests
     private static readonly TenantId Tenant1 = new("tenant-1");
 
     [Fact]
-    public void AuditEntry_ShouldHoldAllProperties()
+    public void AuditEntry_ShouldHoldAllNewProperties()
     {
         var id = EntityId.New();
         var now = DateTimeOffset.UtcNow;
-        var details = new Dictionary<string, string> { ["k"] = "v" };
+        var metadata = new Dictionary<string, string> { ["k"] = "v" };
+        var correlationId = Guid.NewGuid();
+        var changes = new AuditChanges(Before: null, After: "x");
 
         var entry = new AuditEntry
         {
             EntryId = id,
             TenantId = Tenant1,
-            Action = "message.sent",
-            EntityType = "Message",
-            EntityId = "msg-1",
-            PerformedBy = "system",
-            Details = details,
+            Action = "role.assigned",
+            Category = "rbac",
+            Severity = "warning",
+            ActorId = "user-1",
+            ActorType = "user",
+            TargetId = "role-99",
+            TargetType = "Role",
+            CorrelationId = correlationId,
+            Changes = changes,
+            Metadata = metadata,
             OccurredAt = now,
         };
 
         entry.EntryId.Should().Be(id);
         entry.TenantId.Should().Be(Tenant1);
-        entry.Action.Should().Be("message.sent");
-        entry.EntityType.Should().Be("Message");
-        entry.EntityId.Should().Be("msg-1");
-        entry.PerformedBy.Should().Be("system");
-        entry.Details.Should().ContainKey("k").WhoseValue.Should().Be("v");
+        entry.Action.Should().Be("role.assigned");
+        entry.Category.Should().Be("rbac");
+        entry.Severity.Should().Be("warning");
+        entry.ActorId.Should().Be("user-1");
+        entry.ActorType.Should().Be("user");
+        entry.TargetId.Should().Be("role-99");
+        entry.TargetType.Should().Be("Role");
+        entry.CorrelationId.Should().Be(correlationId);
+        entry.Changes.Should().Be(changes);
+        entry.Metadata.Should().ContainKey("k").WhoseValue.Should().Be("v");
         entry.OccurredAt.Should().Be(now);
+    }
+
+    [Fact]
+    public void AuditEntry_ShouldHaveDefaults_ForOptionalNewFields()
+    {
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "message.sent",
+            OccurredAt = DateTimeOffset.UtcNow,
+        };
+
+        entry.Category.Should().Be("config");
+        entry.Severity.Should().Be("info");
+        entry.ActorId.Should().Be("system");
+        entry.ActorType.Should().Be("system");
+        entry.TargetId.Should().BeNull();
+        entry.TargetType.Should().BeNull();
+        entry.CorrelationId.Should().BeNull();
+        entry.Changes.Should().BeNull();
+        entry.Metadata.Should().BeNull();
     }
 }

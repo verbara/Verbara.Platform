@@ -14,8 +14,8 @@ internal sealed class PostgresAuditStore : IAuditStore
 
     public async Task SaveAsync(AuditEntry entry, CancellationToken ct)
     {
-        var detailsJson = entry.Details != null
-            ? JsonSerializer.Serialize(entry.Details, PostgresJson.Ctx.IReadOnlyDictionaryStringString)
+        var metadataJson = entry.Metadata != null
+            ? JsonSerializer.Serialize(entry.Metadata, PostgresJson.Ctx.IReadOnlyDictionaryStringString)
             : null;
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -29,10 +29,10 @@ internal sealed class PostgresAuditStore : IAuditStore
                 EntryId = entry.EntryId.Value,
                 TenantId = entry.TenantId.Value,
                 entry.Action,
-                entry.EntityType,
-                entry.EntityId,
-                entry.PerformedBy,
-                Details = detailsJson,
+                EntityType = entry.TargetType,
+                EntityId = entry.TargetId,
+                PerformedBy = entry.ActorId,
+                Details = metadataJson,
                 entry.OccurredAt,
             });
     }
@@ -115,18 +115,18 @@ internal sealed class PostgresAuditStore : IAuditStore
         public string entry_id { get; init; } = null!;
         public string tenant_id { get; init; } = null!;
         public string action { get; init; } = null!;
-        public string entity_type { get; init; } = null!;
-        public string entity_id { get; init; } = null!;
+        public string? entity_type { get; init; }
+        public string? entity_id { get; init; }
         public string? performed_by { get; init; }
         public string? details { get; init; }
         public DateTime occurred_at { get; init; }
 
         public AuditEntry ToEntry()
         {
-            IReadOnlyDictionary<string, string>? detailsDict = null;
+            IReadOnlyDictionary<string, string>? metadata = null;
             if (!string.IsNullOrEmpty(details))
             {
-                detailsDict = JsonSerializer.Deserialize(details, PostgresJson.Ctx.IReadOnlyDictionaryStringString);
+                metadata = JsonSerializer.Deserialize(details, PostgresJson.Ctx.IReadOnlyDictionaryStringString);
             }
 
             return new AuditEntry
@@ -134,10 +134,11 @@ internal sealed class PostgresAuditStore : IAuditStore
                 EntryId = EntityId.From(entry_id),
                 TenantId = new TenantId(tenant_id),
                 Action = action,
-                EntityType = entity_type,
-                EntityId = entity_id,
-                PerformedBy = performed_by,
-                Details = detailsDict,
+                ActorId = performed_by ?? "system",
+                ActorType = performed_by is null ? "system" : "user",
+                TargetType = entity_type,
+                TargetId = entity_id,
+                Metadata = metadata,
                 OccurredAt = occurred_at,
             };
         }

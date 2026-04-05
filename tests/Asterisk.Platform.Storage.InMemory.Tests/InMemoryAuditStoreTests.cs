@@ -13,15 +13,15 @@ public sealed class InMemoryAuditStoreTests
     private static AuditEntry MakeEntry(
         TenantId? tenantId = null,
         string action = "conversation.created",
-        string entityType = "Conversation",
-        string entityId = "conv-1",
+        string targetType = "Conversation",
+        string targetId = "conv-1",
         DateTimeOffset? occurredAt = null) => new()
     {
         EntryId = EntityId.New(),
         TenantId = tenantId ?? Tenant1,
         Action = action,
-        EntityType = entityType,
-        EntityId = entityId,
+        TargetType = targetType,
+        TargetId = targetId,
         OccurredAt = occurredAt ?? DateTimeOffset.UtcNow,
     };
 
@@ -33,7 +33,7 @@ public sealed class InMemoryAuditStoreTests
 
         await store.SaveAsync(entry, CancellationToken.None);
 
-        var result = await store.GetByEntityAsync(Tenant1, entry.EntityType, entry.EntityId, CancellationToken.None);
+        var result = await store.GetByEntityAsync(Tenant1, entry.TargetType!, entry.TargetId!, CancellationToken.None);
         result.Should().HaveCount(1);
         result[0].EntryId.Should().Be(entry.EntryId);
     }
@@ -52,15 +52,15 @@ public sealed class InMemoryAuditStoreTests
     public async Task GetByEntityAsync_ShouldReturnOnlyMatchingEntity()
     {
         var store = new InMemoryAuditStore();
-        var a = MakeEntry(entityId: "conv-A");
-        var b = MakeEntry(entityId: "conv-B");
+        var a = MakeEntry(targetId: "conv-A");
+        var b = MakeEntry(targetId: "conv-B");
         await store.SaveAsync(a, CancellationToken.None);
         await store.SaveAsync(b, CancellationToken.None);
 
         var result = await store.GetByEntityAsync(Tenant1, "Conversation", "conv-A", CancellationToken.None);
 
         result.Should().HaveCount(1);
-        result[0].EntityId.Should().Be("conv-A");
+        result[0].TargetId.Should().Be("conv-A");
     }
 
     [Fact]
@@ -68,8 +68,8 @@ public sealed class InMemoryAuditStoreTests
     {
         var store = new InMemoryAuditStore();
         var base_ = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var second = MakeEntry(entityId: "conv-1", occurredAt: base_.AddMinutes(2));
-        var first = MakeEntry(entityId: "conv-1", occurredAt: base_.AddMinutes(1));
+        var second = MakeEntry(targetId: "conv-1", occurredAt: base_.AddMinutes(2));
+        var first = MakeEntry(targetId: "conv-1", occurredAt: base_.AddMinutes(1));
 
         await store.SaveAsync(second, CancellationToken.None);
         await store.SaveAsync(first, CancellationToken.None);
@@ -85,7 +85,7 @@ public sealed class InMemoryAuditStoreTests
     {
         var store = new InMemoryAuditStore();
         await store.SaveAsync(MakeEntry(action: "conversation.created"), CancellationToken.None);
-        await store.SaveAsync(MakeEntry(action: "message.sent", entityType: "Message", entityId: "msg-1"), CancellationToken.None);
+        await store.SaveAsync(MakeEntry(action: "message.sent", targetType: "Message", targetId: "msg-1"), CancellationToken.None);
 
         var result = await store.SearchAsync(Tenant1, new AuditQuery(Action: "message.sent"), CancellationToken.None);
 
@@ -99,12 +99,12 @@ public sealed class InMemoryAuditStoreTests
         var store = new InMemoryAuditStore();
         var base_ = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         await store.SaveAsync(MakeEntry(occurredAt: base_), CancellationToken.None);
-        await store.SaveAsync(MakeEntry(entityId: "conv-2", occurredAt: base_.AddDays(10)), CancellationToken.None);
+        await store.SaveAsync(MakeEntry(targetId: "conv-2", occurredAt: base_.AddDays(10)), CancellationToken.None);
 
         var result = await store.SearchAsync(Tenant1, new AuditQuery(From: base_.AddDays(5)), CancellationToken.None);
 
         result.Items.Should().HaveCount(1);
-        result.Items[0].EntityId.Should().Be("conv-2");
+        result.Items[0].TargetId.Should().Be("conv-2");
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class InMemoryAuditStoreTests
     {
         var store = new InMemoryAuditStore();
         for (var i = 1; i <= 5; i++)
-            await store.SaveAsync(MakeEntry(entityId: $"conv-{i}"), CancellationToken.None);
+            await store.SaveAsync(MakeEntry(targetId: $"conv-{i}"), CancellationToken.None);
 
         var page1 = await store.SearchAsync(Tenant1, new AuditQuery(Page: 1, PageSize: 2), CancellationToken.None);
         var page2 = await store.SearchAsync(Tenant1, new AuditQuery(Page: 2, PageSize: 2), CancellationToken.None);

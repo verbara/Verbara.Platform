@@ -25,8 +25,8 @@ internal sealed class InMemoryAuditStore : IAuditStore
     public Task<IReadOnlyList<AuditEntry>> GetByEntityAsync(TenantId tenantId, string entityType, string entityId, CancellationToken ct)
     {
         IReadOnlyList<AuditEntry> result = GetTenantEntries(tenantId)
-            .Where(e => string.Equals(e.EntityType, entityType, StringComparison.OrdinalIgnoreCase)
-                     && string.Equals(e.EntityId, entityId, StringComparison.Ordinal))
+            .Where(e => string.Equals(e.TargetType, entityType, StringComparison.OrdinalIgnoreCase)
+                     && string.Equals(e.TargetId, entityId, StringComparison.Ordinal))
             .OrderBy(e => e.OccurredAt)
             .ToList()
             .AsReadOnly();
@@ -40,8 +40,8 @@ internal sealed class InMemoryAuditStore : IAuditStore
 
         var filtered = GetTenantEntries(tenantId)
             .Where(e => query.Action == null || string.Equals(e.Action, query.Action, StringComparison.OrdinalIgnoreCase))
-            .Where(e => query.EntityType == null || string.Equals(e.EntityType, query.EntityType, StringComparison.OrdinalIgnoreCase))
-            .Where(e => query.PerformedBy == null || string.Equals(e.PerformedBy, query.PerformedBy, StringComparison.Ordinal))
+            .Where(e => query.EntityType == null || string.Equals(e.TargetType, query.EntityType, StringComparison.OrdinalIgnoreCase))
+            .Where(e => query.PerformedBy == null || string.Equals(e.ActorId, query.PerformedBy, StringComparison.Ordinal))
             .Where(e => query.From == null || e.OccurredAt >= query.From)
             .Where(e => query.To == null || e.OccurredAt <= query.To)
             .OrderBy(e => e.OccurredAt)
