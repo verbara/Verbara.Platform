@@ -365,6 +365,7 @@ app.UseMiddleware<RateLimitHeadersMiddleware>();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<LicenseGateMiddleware>();
 
 app.MapOpenApi();
 app.MapHealthChecks("/health");

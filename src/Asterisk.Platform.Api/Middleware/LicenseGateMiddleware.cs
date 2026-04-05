@@ -1,6 +1,7 @@
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Licensing;
+using Microsoft.Extensions.Options;
 
 namespace Asterisk.Platform.Api.Middleware;
 
@@ -54,7 +55,7 @@ internal sealed partial class LicenseGateMiddleware
             if (audit is not null)
             {
                 await audit.RecordAsync(
-                    tenantId: TenantId.Empty,
+                    tenantId: new TenantId("system"),
                     category: "license",
                     action: "license.gate.warn",
                     severity: "warning",
@@ -81,7 +82,7 @@ internal sealed partial class LicenseGateMiddleware
         if (auditEnforce is not null)
         {
             await auditEnforce.RecordAsync(
-                tenantId: TenantId.Empty,
+                tenantId: new TenantId("system"),
                 category: "license",
                 action: "license.gate.blocked",
                 severity: "error",
