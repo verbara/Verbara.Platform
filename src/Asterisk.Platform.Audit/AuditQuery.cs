@@ -10,4 +10,10 @@ public sealed record AuditQuery(
     DateTimeOffset? From = null,
     DateTimeOffset? To = null,
     int Page = 1,
-    int PageSize = 50);
+    int PageSize = 50,
+    string? Category = null,
+    string? Severity = null,
+    string? ActorId = null,
+    string? TargetId = null,
+    string? TargetType = null,
+    Guid? CorrelationId = null);
