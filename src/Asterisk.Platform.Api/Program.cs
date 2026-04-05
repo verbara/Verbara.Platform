@@ -79,6 +79,7 @@ builder.Services.AddSingleton<IGdprPurgeService, GdprPurgeService>();
 builder.Services.AddKeyedSingleton<IGdprExportFormatter, JsonGdprExportFormatter>("json");
 builder.Services.AddKeyedSingleton<IGdprExportFormatter, CsvGdprExportFormatter>("csv");
 builder.Services.AddHostedService<RetentionPurgeService>();
+builder.Services.AddHostedService<AuditRetentionService>();
 
 // ─── Storage ─────────────────────────────────────────────────────────────────
 var coreConnectionString = builder.Configuration.GetConnectionString("Postgres");
