@@ -324,6 +324,8 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("Authenticated", p => p.RequireAuthenticatedUser());
     options.AddPolicy("PlatformAdminOnly", p =>
         p.AddRequirements(new PlatformAdminRequirement()));
+    options.AddPolicy("PartnerAdminOnly", p =>
+        p.AddRequirements(new PartnerAdminRequirement()));
 });
 
 // RBAC permission-based authorization
@@ -331,6 +333,7 @@ builder.Services.AddSingleton<PermissionResolver>();
 builder.Services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 builder.Services.AddSingleton<IAuthorizationHandler, PlatformAdminAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, PartnerAdminAuthorizationHandler>();
 
 // ─── Health Checks ───────────────────────────────────────────────────────────
 
