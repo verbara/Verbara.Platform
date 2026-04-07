@@ -24,6 +24,15 @@ internal sealed class PermissionPolicyProvider : IAuthorizationPolicyProvider
             return Task.FromResult<AuthorizationPolicy?>(policy);
         }
 
+        // Handle domain:resource:action permission policies (e.g. partner:customer:view)
+        if (policyName.Count(c => c == ':') >= 2)
+        {
+            var policy = new AuthorizationPolicyBuilder()
+                .AddRequirements(new PermissionRequirement(policyName))
+                .Build();
+            return Task.FromResult<AuthorizationPolicy?>(policy);
+        }
+
         return _fallback.GetPolicyAsync(policyName);
     }
 

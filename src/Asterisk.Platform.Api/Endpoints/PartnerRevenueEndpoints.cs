@@ -28,7 +28,8 @@ internal static class PartnerRevenueEndpoints
         [FromServices] IPartnerRevenueStore revenueStore,
         CancellationToken ct)
     {
-        var callerTenantId = context.User.FindFirst("tid")?.Value;
+        var callerTenantId = context.User.FindFirst("tid")?.Value
+            ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
             return Results.Forbid();
 
@@ -53,7 +54,8 @@ internal static class PartnerRevenueEndpoints
         [FromServices] IPartnerRevenueStore revenueStore,
         CancellationToken ct)
     {
-        var callerTenantId = context.User.FindFirst("tid")?.Value;
+        var callerTenantId = context.User.FindFirst("tid")?.Value
+            ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
             return Results.Forbid();
 
