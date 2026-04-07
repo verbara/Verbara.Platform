@@ -120,4 +120,22 @@ public sealed class ManagementTenantEndpointTests : IClassFixture<PlatformAdminA
         var response = await _client.DeleteAsync($"/api/management/tenants/{tenantId}");
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
+
+    [Fact]
+    public async Task SuspendTenant_ShouldPersistSuspendedStatus()
+    {
+        var tenantId = "suspend-lifecycle-" + Guid.NewGuid().ToString("N")[..8];
+        await _client.PostAsJsonAsync("/api/management/tenants", new
+        {
+            tenantId,
+            name = "Lifecycle Test",
+            type = 2,
+        });
+        await _client.PostAsync($"/api/management/tenants/{tenantId}/suspend", null);
+
+        var getResponse = await _client.GetAsync($"/api/management/tenants/{tenantId}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await getResponse.Content.ReadAsStringAsync();
+        body.Should().Contain("Suspended");
+    }
 }

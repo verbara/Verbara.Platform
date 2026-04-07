@@ -3,6 +3,7 @@ using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -61,6 +62,7 @@ internal static class ManagementTenantEndpoints
         [FromBody] CreateMgmtTenantRequest body,
         [FromServices] ITenantStore store,
         [FromServices] IAuditService audit,
+        [FromServices] IEnumerable<ITenantLifecycleHandler> lifecycleHandlers,
         CancellationToken ct)
     {
         // Validate type
@@ -125,6 +127,7 @@ internal static class ManagementTenantEndpoints
         };
 
         await store.UpsertAsync(tenant, ct);
+        await DispatchLifecycleAsync(lifecycleHandlers, h => h.OnTenantCreatedAsync(tenant, ct));
         await audit.RecordAsync(
             new TenantId(tenant.TenantId), category: "admin", action: "tenant.created", severity: "warning",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
@@ -193,6 +196,8 @@ internal static class ManagementTenantEndpoints
         HttpContext context,
         [FromServices] ITenantStore store,
         [FromServices] IAuditService audit,
+        [FromServices] IEnumerable<ITenantLifecycleHandler> lifecycleHandlers,
+        [FromServices] ILogger<Program> logger,
         CancellationToken ct)
     {
         var tenant = await store.GetAsync(id, ct);
@@ -201,6 +206,7 @@ internal static class ManagementTenantEndpoints
             return Results.BadRequest(new ErrorResponse("Cannot suspend the Platform tenant."));
 
         await store.UpdateStatusAsync(id, TenantStatus.Suspended, ct);
+        await DispatchLifecycleAsync(lifecycleHandlers, h => h.OnTenantSuspendedAsync(id, ct), logger);
         await audit.RecordAsync(
             new TenantId(id), category: "admin", action: "tenant.suspended", severity: "warning",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
@@ -245,6 +251,8 @@ internal static class ManagementTenantEndpoints
         HttpContext context,
         [FromServices] ITenantStore store,
         [FromServices] IAuditService audit,
+        [FromServices] IEnumerable<ITenantLifecycleHandler> lifecycleHandlers,
+        [FromServices] ILogger<Program> logger,
         CancellationToken ct)
     {
         var tenant = await store.GetAsync(id, ct);
@@ -254,6 +262,7 @@ internal static class ManagementTenantEndpoints
 
         // UpdateStatusAsync throws if active children exist
         await store.UpdateStatusAsync(id, TenantStatus.Deleted, ct);
+        await DispatchLifecycleAsync(lifecycleHandlers, h => h.OnTenantDeletedAsync(id, ct), logger);
         await audit.RecordAsync(
             new TenantId(id), category: "admin", action: "tenant.deleted", severity: "critical",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
@@ -272,6 +281,26 @@ internal static class ManagementTenantEndpoints
         new(t.TenantId, t.Name, t.Status.ToString(), t.Type.ToString(),
             t.ParentTenantId, t.Options.MaxConcurrentChannels,
             t.Options.MaxActiveCampaigns, t.Metadata, t.CreatedAt, t.UpdatedAt);
+
+    private static async Task DispatchLifecycleAsync(
+        IEnumerable<ITenantLifecycleHandler> handlers,
+        Func<ITenantLifecycleHandler, ValueTask> action,
+        ILogger? logger = null)
+    {
+        foreach (var handler in handlers)
+        {
+            try
+            {
+                await action(handler);
+            }
+            catch (Exception ex)
+            {
+#pragma warning disable CA1848
+                logger?.LogWarning(ex, "Lifecycle handler {Handler} failed", handler.GetType().Name);
+#pragma warning restore CA1848
+            }
+        }
+    }
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
