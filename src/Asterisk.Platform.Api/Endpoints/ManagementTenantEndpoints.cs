@@ -90,6 +90,23 @@ internal static class ManagementTenantEndpoints
         if (body.Type == TenantType.Customer && parent.Type is not (TenantType.Platform or TenantType.Partner))
             return Results.BadRequest(new ErrorResponse("Customer tenants must be children of Platform or a Partner."));
 
+        // Validate ownership: non-platform callers can only create under their own tenant
+        var callerTenantId = context.User.FindFirst("tid")?.Value;
+        if (callerTenantId is not null)
+        {
+            var hostTenantId = (await store.GetHostTenantAsync(ct))?.TenantId;
+
+            if (!string.Equals(callerTenantId, hostTenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.Equals(parentId, callerTenantId, StringComparison.OrdinalIgnoreCase))
+                    return Results.Problem("Non-platform tenants can only create children under their own tenant.", statusCode: 403);
+            }
+        }
+
+        // Parent must be active
+        if (parent.Status != TenantStatus.Active)
+            return Results.BadRequest(new ErrorResponse("Cannot create children under an inactive tenant."));
+
         var tenant = new Tenant
         {
             TenantId = body.TenantId,
