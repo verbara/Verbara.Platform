@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.1-pro).
 
-**28 packages, 1446 tests, 0 warnings, AOT-compatible, 49 endpoint groups (14 with feature gates), version 1.3.1:**
+**28 packages, 1472 tests, 0 warnings, AOT-compatible, 53 endpoint groups (14 with feature gates), version 1.3.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -116,7 +116,7 @@ ErrorHandlingMiddleware -> CORS -> RateLimiter -> TenantResolutionMiddleware -> 
 - **RBAC:** 64 permissions (`domain:resource:action`), 8 role templates (Agent, Supervisor, Quality Analyst, Manager, Admin, System Admin, API, Platform Admin), custom roles per-tenant, permission cascading via `PermissionResolver` + `PermissionAuthorizationHandler`
 - **Authorization policies:** `AdminOnly`, `SupervisorPlus`, `Authenticated`
 
-### Endpoint Inventory (49 groups, 49 files)
+### Endpoint Inventory (53 groups, 53 files)
 
 All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all routes are versioned under `/api/v1/` (Asp.Versioning.Http, URL-segment strategy). Legacy `/api/` paths redirect for backward compatibility. Key groups:
 
@@ -134,6 +134,7 @@ All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all r
 | AI/Bot | BotEndpoints, KnowledgeBaseEndpoints, AgentAssistEndpoints, FlowEndpoints |
 | Media | MediaEndpoints, RecordingEndpoints |
 | Realtime | RealtimeEndpoints, ClusterEndpoints |
+| Partner | PartnerCustomerEndpoints, PartnerBillingEndpoints, PartnerRevenueEndpoints, PartnerSettingsEndpoints |
 | Other | DispositionEndpoints, SurveyEndpoints |
 
 ### Pro Package Integration
@@ -551,6 +552,15 @@ Three deliverables (9 commits, +36 tests):
 1. **Tenant Plans + Feature Flags** -- `TenantPlan` (Starter/Pro/Enterprise) stored in `Tenant.Metadata["Plan"]`, `PlanFeature` (13 flags), `PlanDefinition` (static plan→features/limits mapping), `TenantAddOn` (on/off), `IFeatureGateService`, `FeatureGateCache` (singleton, populated by TenantStatusMiddleware), `RequirePlanFeature` endpoint filter applied to 14 endpoint groups. Hierarchical inheritance: child cannot exceed parent plan. Plan derives `RateLimitTier` automatically (manual override still possible).
 2. **Billing-Lifecycle Dunning** -- `DunningService` (`BackgroundService`, 6h interval) monitors overdue invoices via `IInvoiceStore.ListByStatusAsync`. Progressive escalation: Warning (day 0) → Degraded (day 7, forces Starter features) → Suspended (day 14, dispatches `ITenantLifecycleHandler`) → PendingDeletion (day 30). 3 new `TenantStatus` values in Sdk.Pro (Warning=3, Degraded=4, PendingDeletion=5). `PaymentStatus` enum on `Invoice`. `DunningRecord` with pause/resume. Payment resolution via `POST /management/invoices/{id}/pay` restores Active + invalidates caches.
 3. **TenantSettings Facade Expansion** -- Plan, EnabledFeatures, AddOns, Dunning sections added to GET/PUT settings. AdminOnly: read-only for plan/addons/dunning. PlatformAdminOnly: can set plan and add-ons with hierarchy validation. `DunningStatusDto` shows active dunning state.
+
+## Sprint 3: Partner Portal + Partner Billing -- COMPLETE (2026-04-07)
+
+**Spec:** `docs/superpowers/specs/2026-04-07-sprint3-partner-portal-billing-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-07-sprint3-partner-portal-billing.md`
+
+Two deliverables (10 commits, +26 tests):
+1. **Partner Portal** -- Dedicated `/partner/*` API surface with 19 endpoints across 4 files (`PartnerCustomerEndpoints`, `PartnerBillingEndpoints`, `PartnerRevenueEndpoints`, `PartnerSettingsEndpoints`). `PartnerAdminOnly` authorization handler validates `TenantType.Partner` + operational status. 8 new `partner:*` permissions, 3 role templates (`partner_admin`, `partner_billing`, `partner_viewer`). Partners operate as mini-Platform for their Customer sub-tree: CRUD, suspend/activate, settings facade, plan hierarchy ceiling enforcement.
+2. **Partner Billing** -- Markup pricing via Partner's own `RateCard`. `GenerateWithRateCardAsync` overload on `IInvoiceGenerationService` for explicit rate card injection. `PartnerRevenueRecord` model captures margin snapshots (GrossAmount - PlatformCost = PartnerMargin) at invoice generation. Revenue dashboard endpoints aggregate margins per period. Platform base RateCard (`IsDefault=true` on host tenant) used for cost calculation.
 
 ## Plan Execution
 
