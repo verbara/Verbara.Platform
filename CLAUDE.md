@@ -4,11 +4,11 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.1-pro).
 
-**28 packages, 1410 tests, 0 warnings, AOT-compatible, 49 endpoint groups, version 1.3.1:**
+**28 packages, 1446 tests, 0 warnings, AOT-compatible, 49 endpoint groups (14 with feature gates), version 1.3.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
-| Platform.Core | Abstractions, value objects, base interfaces, IClock, GDPR, Webhooks, DI | 42 |
+| Platform.Core | Abstractions, value objects, base interfaces, IClock, GDPR, Webhooks, Plans, Feature Gates, DI | 96 |
 | Platform.Identity | Users, RBAC, API keys, service accounts, OIDC SSO, DI | 26 |
 | Platform.Conversations | Conversation lifecycle (14 states), Contact CRM-lite, Cases, Tags, DI | 73 |
 | Platform.Queues | Queue config, SLA, Agent with per-channel capacity, Teams, DI | 44 |
@@ -32,10 +32,10 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Surveys | Post-conversation surveys -- survey store, response collection, DI | 30 |
 | Platform.Audit | Audit trail -- event logging, query, retention, DI | 41 |
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
-| Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, DI | 40 |
-| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 115 |
+| Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, dunning lifecycle, DI | 46 |
+| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 106 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 6 |
-| Platform.Api | HTTP host -- 47 endpoint groups, auth, middleware, SSE, OpenAPI | 410 |
+| Platform.Api | HTTP host -- 49 endpoint groups (14 feature-gated), auth, middleware, SSE, OpenAPI | 434 |
 
 ## Build & Test
 
@@ -116,7 +116,7 @@ ErrorHandlingMiddleware -> CORS -> RateLimiter -> TenantResolutionMiddleware -> 
 - **RBAC:** 64 permissions (`domain:resource:action`), 8 role templates (Agent, Supervisor, Quality Analyst, Manager, Admin, System Admin, API, Platform Admin), custom roles per-tenant, permission cascading via `PermissionResolver` + `PermissionAuthorizationHandler`
 - **Authorization policies:** `AdminOnly`, `SupervisorPlus`, `Authenticated`
 
-### Endpoint Inventory (43 groups, 43 files)
+### Endpoint Inventory (49 groups, 49 files)
 
 All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all routes are versioned under `/api/v1/` (Asp.Versioning.Http, URL-segment strategy). Legacy `/api/` paths redirect for backward compatibility. Key groups:
 
@@ -542,15 +542,15 @@ Two deliverables (5 commits, +14 tests):
 1. **Suspension enforcement** -- `TenantStatusMiddleware` blocks Suspended (403) and Deleted (404) tenants after auth. `ITenantLifecycleHandler` dispatch on Create/Suspend/Delete in `ManagementTenantEndpoints` with try/catch per handler.
 2. **TenantSettings facade** -- `GET/PUT /admin/tenant/settings` (AdminOnly, cannot write quotas/tier) + `GET/PUT /management/tenants/{id}/settings` (PlatformAdminOnly, all sections). Aggregates ITenantStore + ITenantAuthConfigStore + ITenantQuotaStore + ITenantRetentionPolicyStore. Per-tenant `RateLimitTier` stored in `Tenant.Metadata["RateLimitTier"]`, served via `TenantTierCache` singleton to rate limit middleware.
 
-## Sprint 2: Feature Flags Per-Tenant + Billing-Lifecycle Dunning -- IN PROGRESS
+## Sprint 2: Feature Flags Per-Tenant + Billing-Lifecycle Dunning -- COMPLETE (2026-04-07)
 
 **Spec:** `docs/superpowers/specs/2026-04-07-sprint2-features-dunning-design.md`
 **Plan:** `docs/superpowers/plans/2026-04-07-sprint2-features-dunning.md`
 
-Three deliverables:
-1. **Tenant Plans + Feature Flags** -- TenantPlan (Starter/Pro/Enterprise) stored in Metadata, PlanFeature (13 flags), PlanDefinition (static mapping), TenantAddOn (on/off), IFeatureGateService, FeatureGateCache, RequirePlanFeature endpoint filter on 14 endpoint groups. Hierarchical inheritance: child cannot exceed parent plan.
-2. **Billing-Lifecycle Dunning** -- DunningService (IHostedService, 6h interval) monitors overdue invoices. Progressive escalation: Warning (day 0) → Degraded (day 7, forced Starter features) → Suspended (day 14) → PendingDeletion (day 30). PaymentStatus on Invoice. Pause/resume via management API.
-3. **TenantSettings Facade Expansion** -- Plan, EnabledFeatures, AddOns, Dunning sections added to GET/PUT settings. PlatformAdminOnly can set plan and add-ons. Hierarchy validation on plan assignment.
+Three deliverables (9 commits, +36 tests):
+1. **Tenant Plans + Feature Flags** -- `TenantPlan` (Starter/Pro/Enterprise) stored in `Tenant.Metadata["Plan"]`, `PlanFeature` (13 flags), `PlanDefinition` (static plan→features/limits mapping), `TenantAddOn` (on/off), `IFeatureGateService`, `FeatureGateCache` (singleton, populated by TenantStatusMiddleware), `RequirePlanFeature` endpoint filter applied to 14 endpoint groups. Hierarchical inheritance: child cannot exceed parent plan. Plan derives `RateLimitTier` automatically (manual override still possible).
+2. **Billing-Lifecycle Dunning** -- `DunningService` (`BackgroundService`, 6h interval) monitors overdue invoices via `IInvoiceStore.ListByStatusAsync`. Progressive escalation: Warning (day 0) → Degraded (day 7, forces Starter features) → Suspended (day 14, dispatches `ITenantLifecycleHandler`) → PendingDeletion (day 30). 3 new `TenantStatus` values in Sdk.Pro (Warning=3, Degraded=4, PendingDeletion=5). `PaymentStatus` enum on `Invoice`. `DunningRecord` with pause/resume. Payment resolution via `POST /management/invoices/{id}/pay` restores Active + invalidates caches.
+3. **TenantSettings Facade Expansion** -- Plan, EnabledFeatures, AddOns, Dunning sections added to GET/PUT settings. AdminOnly: read-only for plan/addons/dunning. PlatformAdminOnly: can set plan and add-ons with hierarchy validation. `DunningStatusDto` shows active dunning state.
 
 ## Plan Execution
 
