@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
@@ -44,7 +45,9 @@ internal static class ManagementSystemEndpoints
         CancellationToken ct)
     {
         var hostTenant = await tenantStore.GetHostTenantAsync(ct);
-        return Results.Ok(new SystemInfoDto("1.3.0", hostTenant?.TenantId, hostTenant?.Name ?? "Asterisk Platform", features.GetFeatures()));
+        var version = typeof(ManagementSystemEndpoints).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
+        return Results.Ok(new SystemInfoDto(version, hostTenant?.TenantId, hostTenant?.Name ?? "Asterisk Platform", features.GetFeatures()));
     }
 
     private static IResult GetLicenseInfo([FromServices] ILicenseStatus licenseStatus)
