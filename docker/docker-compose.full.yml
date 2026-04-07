@@ -45,6 +45,7 @@ services:
       Asterisk__Ari__Password: ${ARI_PASSWORD:-asterisk_ari_secret}
       Asterisk__Ari__Application: asterisk-platform
       Recordings__BasePath: /recordings
+      Licensing__EnforcementMode: Disabled
       CORS_ORIGINS: http://localhost
     volumes:
       - recordings:/recordings
@@ -54,10 +55,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
 
   web:
