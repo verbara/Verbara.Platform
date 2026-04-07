@@ -190,6 +190,29 @@ internal static class PermissionSeeder
             "Configure call analytics settings",
             ["callanalytics:analysis:view"]);
 
+        // ── partner (8) ──
+        yield return P("partner:customer:view", "partner", "customer", "view",
+            "View partner's child customer tenants");
+        yield return P("partner:customer:create", "partner", "customer", "create",
+            "Create customer tenants under this partner",
+            ["partner:customer:view"]);
+        yield return P("partner:customer:manage", "partner", "customer", "manage",
+            "Edit settings, suspend, and activate child customers",
+            ["partner:customer:view"]);
+        yield return P("partner:customer:delete", "partner", "customer", "delete",
+            "Delete child customer tenants (soft delete)",
+            ["partner:customer:manage", "partner:customer:view"]);
+        yield return P("partner:billing:view", "partner", "billing", "view",
+            "View invoices, usage, and revenue for child customers");
+        yield return P("partner:billing:manage", "partner", "billing", "manage",
+            "Create rate cards, generate invoices, manage quotas",
+            ["partner:billing:view"]);
+        yield return P("partner:settings:view", "partner", "settings", "view",
+            "View partner's own tenant settings");
+        yield return P("partner:settings:manage", "partner", "settings", "manage",
+            "Edit partner's own operational and auth settings",
+            ["partner:settings:view"]);
+
         // ── platform (8) ──
         yield return P("platform:tenant:create", "platform", "tenant", "create",
             "Create new tenants (Customer or Partner)");

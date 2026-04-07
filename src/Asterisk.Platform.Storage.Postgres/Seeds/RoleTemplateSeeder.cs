@@ -151,6 +151,33 @@ internal static class RoleTemplateSeeder
         yield return (
             new TemplateRow("platform_admin", "Platform Admin", "Full platform administration including cross-tenant operations"),
             AllPermissions());
+
+        // ── Partner Admin ──
+        yield return (
+            new TemplateRow("partner_admin", "Partner Admin", "Full partner portal access for managing child customers and billing"),
+            [
+                "partner:customer:view", "partner:customer:create",
+                "partner:customer:manage", "partner:customer:delete",
+                "partner:billing:view", "partner:billing:manage",
+                "partner:settings:view", "partner:settings:manage",
+            ]);
+
+        // ── Partner Billing ──
+        yield return (
+            new TemplateRow("partner_billing", "Partner Billing", "Partner billing and revenue access without customer management"),
+            [
+                "partner:customer:view",
+                "partner:billing:view", "partner:billing:manage",
+            ]);
+
+        // ── Partner Viewer ──
+        yield return (
+            new TemplateRow("partner_viewer", "Partner Viewer", "Read-only access to partner portal"),
+            [
+                "partner:customer:view",
+                "partner:billing:view",
+                "partner:settings:view",
+            ]);
     }
 
     private static string[] AllPermissions()
@@ -192,6 +219,10 @@ internal static class RoleTemplateSeeder
             "platform:tenant:suspend", "platform:tenant:delete",
             "platform:tenant:impersonate", "platform:server:manage",
             "platform:license:manage", "platform:cluster:manage",
+            "partner:customer:view", "partner:customer:create",
+            "partner:customer:manage", "partner:customer:delete",
+            "partner:billing:view", "partner:billing:manage",
+            "partner:settings:view", "partner:settings:manage",
         ];
     }
 
