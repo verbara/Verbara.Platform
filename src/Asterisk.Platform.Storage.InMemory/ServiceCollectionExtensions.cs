@@ -13,6 +13,7 @@ using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Surveys;
+using Asterisk.Platform.Core.Branding;
 using Asterisk.Platform.Core.Reports;
 using Asterisk.Platform.Core.Webhooks;
 using Asterisk.Sdk.Pro.MultiTenant;
@@ -92,6 +93,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITenantAddOnStore, InMemoryTenantAddOnStore>();
         services.AddSingleton<IDunningStore, InMemoryDunningStore>();
         services.AddSingleton<IPartnerRevenueStore, InMemoryPartnerRevenueStore>();
+
+        // Branding
+        services.AddSingleton<ITenantBrandingStore, InMemoryTenantBrandingStore>();
 
         // GDPR
         services.AddSingleton<IPurgeLogStore, InMemoryPurgeLogStore>();
