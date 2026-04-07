@@ -52,19 +52,13 @@ internal static class RecordingEndpoints
             return Results.NotFound();
 
         var recordingName = row.RecordingName;
-
-        // Try common extensions
         string[] extensions = [".wav", ".gsm", ".ogg", ""];
         string? filePath = null;
 
         foreach (var ext in extensions)
         {
-            var candidate = Path.Combine(options.Value.BasePath, recordingName + ext);
-            if (File.Exists(candidate))
-            {
-                filePath = candidate;
-                break;
-            }
+            filePath = ResolveRecordingPath(options.Value.BasePath, tenantId, recordingName, ext);
+            if (filePath is not null) break;
         }
 
         if (filePath is null)
@@ -97,6 +91,26 @@ internal static class RecordingEndpoints
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private static string? ResolveRecordingPath(string basePath, string tenantId, string recordingName, string ext)
+    {
+        var safeName = Path.GetFileName(recordingName);
+        if (string.IsNullOrEmpty(safeName)) return null;
+
+        // Try tenant-isolated path first
+        var tenantDir = Path.GetFullPath(Path.Combine(basePath, tenantId));
+        var tenantPath = Path.GetFullPath(Path.Combine(tenantDir, safeName + ext));
+        if (File.Exists(tenantPath) && tenantPath.StartsWith(tenantDir, StringComparison.Ordinal))
+            return tenantPath;
+
+        // Fallback to legacy flat structure (bounds-checked)
+        var baseDir = Path.GetFullPath(basePath);
+        var legacyPath = Path.GetFullPath(Path.Combine(baseDir, safeName + ext));
+        if (File.Exists(legacyPath) && legacyPath.StartsWith(baseDir, StringComparison.Ordinal))
+            return legacyPath;
+
+        return null;
+    }
 
     private static string GetTenantId(HttpContext context)
     {
