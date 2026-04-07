@@ -24,6 +24,21 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
             ?? throw new InvalidOperationException($"No active rate card found for tenant '{tenantId.Value}'.");
 
         var summaries = await _usageStore.GetSummaryAsync(tenantId, periodStart, periodEnd, ct);
+
+        return BuildInvoice(tenantId, rateCard, summaries, periodStart, periodEnd);
+    }
+
+    public async Task<Invoice> GenerateWithRateCardAsync(TenantId tenantId, RateCard rateCard, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rateCard);
+
+        var summaries = await _usageStore.GetSummaryAsync(tenantId, periodStart, periodEnd, ct);
+
+        return BuildInvoice(tenantId, rateCard, summaries, periodStart, periodEnd);
+    }
+
+    private Invoice BuildInvoice(TenantId tenantId, RateCard rateCard, IReadOnlyList<UsageSummary> summaries, DateTimeOffset periodStart, DateTimeOffset periodEnd)
+    {
         var summaryByType = summaries.ToDictionary(s => s.UsageType);
 
         var lineItems = new List<InvoiceLineItem>();
