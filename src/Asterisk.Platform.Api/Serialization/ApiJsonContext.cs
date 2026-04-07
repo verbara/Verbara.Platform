@@ -231,6 +231,17 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateRetentionPolicyRequest))]
 [JsonSerializable(typeof(TenantRetentionPolicy))]
 [JsonSerializable(typeof(Dictionary<string, int>))]
+// TenantSettings Facade
+[JsonSerializable(typeof(TenantSettingsDto))]
+[JsonSerializable(typeof(UpdateTenantSettingsRequest))]
+[JsonSerializable(typeof(OperationalSettingsDto))]
+[JsonSerializable(typeof(AuthSettingsDto))]
+[JsonSerializable(typeof(QuotaSettingsDto))]
+[JsonSerializable(typeof(RetentionSettingsDto))]
+[JsonSerializable(typeof(UpdateOperationalSettingsDto))]
+[JsonSerializable(typeof(UpdateAuthSettingsDto))]
+[JsonSerializable(typeof(UpdateQuotaSettingsDto))]
+[JsonSerializable(typeof(UpdateRetentionSettingsDto))]
 // Webhooks
 [JsonSerializable(typeof(WebhookSubscription))]
 [JsonSerializable(typeof(List<WebhookSubscription>))]
