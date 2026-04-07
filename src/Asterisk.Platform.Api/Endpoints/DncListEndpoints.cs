@@ -14,7 +14,8 @@ internal static class DncListEndpoints
     {
         var group = app.MapGroup("/admin/dnc-lists")
             .RequireAuthorization("AdminOnly")
-            .RequireLicenseFeature(LicenseFeature.Dialer);
+            .RequireLicenseFeature(LicenseFeature.Dialer)
+            .RequirePlanFeature(PlanFeature.Dialer);
 
         // CRUD
         group.MapGet("/", ListDncLists);

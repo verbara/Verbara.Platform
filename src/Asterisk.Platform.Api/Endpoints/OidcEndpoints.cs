@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
+using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Identity.OidcTokenExchange;
 using Microsoft.AspNetCore.DataProtection;
@@ -17,7 +18,8 @@ internal static class OidcEndpoints
 
     public static void MapOidcEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/auth/oidc");
+        var group = app.MapGroup("/auth/oidc")
+            .RequirePlanFeature(PlanFeature.OidcSso);
 
         group.MapGet("/login", OidcLogin).AllowAnonymous();
         group.MapGet("/callback", OidcCallback).AllowAnonymous();

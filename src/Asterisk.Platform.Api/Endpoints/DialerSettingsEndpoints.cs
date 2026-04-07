@@ -14,7 +14,8 @@ internal static class DialerSettingsEndpoints
     {
         var group = app.MapGroup("/admin/dialer/settings")
             .RequireAuthorization("AdminOnly")
-            .RequireLicenseFeature(LicenseFeature.Dialer);
+            .RequireLicenseFeature(LicenseFeature.Dialer)
+            .RequirePlanFeature(PlanFeature.Dialer);
 
         group.MapGet("/", GetSettings);
         group.MapPut("/", UpdateSettings);

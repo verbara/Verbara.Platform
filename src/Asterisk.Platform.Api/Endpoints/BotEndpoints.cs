@@ -9,7 +9,9 @@ internal static class BotEndpoints
 {
     public static void MapBotEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin/bots").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/bots")
+            .RequireAuthorization("AdminOnly")
+            .RequirePlanFeature(PlanFeature.BotBasic);
 
         group.MapGet("/", ListBots);
         group.MapPost("/", CreateBot);

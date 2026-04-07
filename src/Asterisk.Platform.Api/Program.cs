@@ -144,6 +144,10 @@ builder.Services.AddSingleton<Asterisk.Platform.Api.Services.Reports.ReportSched
 builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<Asterisk.Platform.Api.Services.Reports.ReportSchedulerService>());
 
+// ─── Dunning ─────────────────────────────────────────────────────────────────
+builder.Services.Configure<DunningConfig>(builder.Configuration.GetSection("Dunning"));
+builder.Services.AddHostedService<DunningService>();
+
 // ─── Outbound Webhooks ──────────────────────────────────────────────────────
 builder.Services.Configure<Asterisk.Platform.Core.Webhooks.CircuitBreakerOptions>(
     builder.Configuration.GetSection("Webhooks:CircuitBreaker"));

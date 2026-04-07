@@ -11,7 +11,9 @@ internal static class WebhookSubscriptionEndpoints
 {
     public static void MapWebhookSubscriptionEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/webhooks/subscriptions").RequireAuthorization("Authenticated");
+        var group = app.MapGroup("/webhooks/subscriptions")
+            .RequireAuthorization("Authenticated")
+            .RequirePlanFeature(PlanFeature.Webhooks);
         group.MapGet("/", ListSubscriptions);
         group.MapPost("/", CreateSubscription);
         group.MapGet("/{id}", GetSubscription);

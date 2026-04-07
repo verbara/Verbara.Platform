@@ -14,7 +14,8 @@ internal static class ScheduledReportEndpoints
     {
         var group = app.MapGroup("/admin/reports")
             .RequireAuthorization("AdminOnly")
-            .RequireLicenseFeature(LicenseFeature.Analytics);
+            .RequireLicenseFeature(LicenseFeature.Analytics)
+            .RequirePlanFeature(PlanFeature.ScheduledReports);
 
         group.MapGet("/", ListReports);
         group.MapPost("/", CreateReport);

@@ -1,6 +1,8 @@
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -22,6 +24,13 @@ internal static class ManagementBillingEndpoints
         inv.MapPost("/generate", GenerateInvoice);
         inv.MapGet("/{id}", GetInvoice);
         inv.MapPost("/{id}/issue", IssueInvoice);
+        inv.MapPost("/{invoiceId}/pay", PayInvoice);
+
+        // Dunning
+        var dunning = app.MapGroup("/management/tenants/{id}")
+            .RequireAuthorization("PlatformAdminOnly");
+        dunning.MapGet("/dunning", GetDunning);
+        dunning.MapPost("/dunning/pause", PauseDunning);
 
         // Usage & Quotas (per-tenant)
         var tb = app.MapGroup("/management/tenants/{tenantId}").RequireAuthorization("PlatformAdminOnly");
@@ -250,6 +259,91 @@ internal static class ManagementBillingEndpoints
         return Results.Ok(MapQuotaToDto(quota));
     }
 
+    // ─── Dunning Handlers ────────────────────────────────────────────────────────
+
+    private static async Task<IResult> GetDunning(
+        string id,
+        [FromServices] IDunningStore dunningStore,
+        CancellationToken ct)
+    {
+        var record = await dunningStore.GetActiveAsync(id, ct);
+        return record is null
+            ? Results.NotFound()
+            : Results.Ok(new DunningRecordDto(
+                record.DunningId,
+                record.TenantId,
+                record.InvoiceId,
+                record.CurrentStage.ToString(),
+                record.StartedAt,
+                record.EscalatedAt,
+                record.ResolvedAt,
+                record.IsPaused,
+                record.IsActive));
+    }
+
+    private static async Task<IResult> PauseDunning(
+        string id,
+        [FromServices] IDunningStore dunningStore,
+        CancellationToken ct)
+    {
+        var record = await dunningStore.GetActiveAsync(id, ct);
+        if (record is null)
+            return Results.NotFound();
+
+        record.IsPaused = !record.IsPaused;
+        await dunningStore.UpsertAsync(record, ct);
+        return Results.Ok(new DunningRecordDto(
+            record.DunningId,
+            record.TenantId,
+            record.InvoiceId,
+            record.CurrentStage.ToString(),
+            record.StartedAt,
+            record.EscalatedAt,
+            record.ResolvedAt,
+            record.IsPaused,
+            record.IsActive));
+    }
+
+    private static async Task<IResult> PayInvoice(
+        string invoiceId,
+        [FromServices] IInvoiceStore invoiceStore,
+        [FromServices] IDunningStore dunningStore,
+        [FromServices] ITenantStore tenantStore,
+        [FromServices] TenantTierCache tierCache,
+        [FromServices] FeatureGateCache featureGateCache,
+        CancellationToken ct)
+    {
+        var dunningRecord = await dunningStore.GetByInvoiceAsync(invoiceId, ct);
+        if (dunningRecord is null)
+        {
+            // Try to find the invoice without a known tenantId — search by dunning first
+            return Results.NotFound();
+        }
+
+        var invoice = await invoiceStore.GetByIdAsync(
+            new TenantId(dunningRecord.TenantId),
+            EntityId.From(invoiceId),
+            ct);
+
+        if (invoice is null)
+            return Results.NotFound();
+
+        invoice.Status = InvoiceStatus.Paid;
+        invoice.PaymentStatus = PaymentStatus.Current;
+        invoice.PaidAt = DateTimeOffset.UtcNow;
+        await invoiceStore.SaveAsync(invoice, ct);
+
+        dunningRecord.IsActive = false;
+        dunningRecord.ResolvedAt = DateTimeOffset.UtcNow;
+        await dunningStore.UpsertAsync(dunningRecord, ct);
+
+        await tenantStore.UpdateStatusAsync(dunningRecord.TenantId, TenantStatus.Active, ct);
+        tierCache.Remove(dunningRecord.TenantId);
+        featureGateCache.Remove(dunningRecord.TenantId);
+
+        return Results.Ok(new MessageResponse("Invoice marked as paid"));
+    }
+
     // ─── Mapping Helpers ─────────────────────────────────────────────────────────
 
     private static RateCardDto MapRateCardToDto(RateCard rc) => new(
@@ -278,7 +372,8 @@ internal static class ManagementBillingEndpoints
         inv.InvoiceId.Value, inv.TenantId.Value, inv.PeriodStart, inv.PeriodEnd,
         inv.Currency, inv.LineItems.Select(MapLineItemToDto).ToList(),
         inv.Subtotal, inv.Tax, inv.Total, inv.Status.ToString(),
-        inv.GeneratedAt, inv.IssuedAt, inv.PaidAt);
+        inv.GeneratedAt, inv.IssuedAt, inv.PaidAt,
+        inv.PaymentStatus.ToString(), inv.DueDate);
 
     private static InvoiceLineItemDto MapLineItemToDto(InvoiceLineItem li) => new(
         li.UsageType.ToString(), li.Description, li.Quantity, li.UnitPrice,
@@ -321,7 +416,8 @@ internal sealed record InvoiceDto(
     string InvoiceId, string TenantId, DateTimeOffset PeriodStart, DateTimeOffset PeriodEnd,
     string Currency, IReadOnlyList<InvoiceLineItemDto> LineItems,
     decimal Subtotal, decimal Tax, decimal Total,
-    string Status, DateTimeOffset GeneratedAt, DateTimeOffset? IssuedAt, DateTimeOffset? PaidAt);
+    string Status, DateTimeOffset GeneratedAt, DateTimeOffset? IssuedAt, DateTimeOffset? PaidAt,
+    string PaymentStatus, DateTimeOffset? DueDate);
 
 internal sealed record InvoiceLineItemDto(
     string UsageType, string Description, decimal Quantity, decimal UnitPrice,
@@ -351,3 +447,15 @@ internal sealed record UpdateQuotaRequest(
     int? MaxConcurrentChannels = null, int? MaxActiveCampaigns = null,
     long? MaxMonthlyVoiceMinutes = null, long? MaxMonthlyMessages = null,
     long? MaxStorageBytes = null, int? MaxActiveAgents = null, string? QuotaAction = null);
+
+// Dunning
+internal sealed record DunningRecordDto(
+    string DunningId,
+    string TenantId,
+    string InvoiceId,
+    string CurrentStage,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? EscalatedAt,
+    DateTimeOffset? ResolvedAt,
+    bool IsPaused,
+    bool IsActive);

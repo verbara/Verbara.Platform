@@ -8,14 +8,18 @@ internal static class KnowledgeBaseEndpoints
 {
     public static void MapKnowledgeBaseEndpoints(this IEndpointRouteBuilder app)
     {
-        var adminGroup = app.MapGroup("/admin/articles").RequireAuthorization("AdminOnly");
+        var adminGroup = app.MapGroup("/admin/articles")
+            .RequireAuthorization("AdminOnly")
+            .RequirePlanFeature(PlanFeature.KnowledgeBase);
 
         adminGroup.MapGet("/", ListArticles);
         adminGroup.MapPost("/", CreateArticle);
         adminGroup.MapPut("/{id}", UpdateArticle);
         adminGroup.MapDelete("/{id}", DeleteArticle);
 
-        var searchGroup = app.MapGroup("/knowledge").RequireAuthorization();
+        var searchGroup = app.MapGroup("/knowledge")
+            .RequireAuthorization()
+            .RequirePlanFeature(PlanFeature.KnowledgeBase);
 
         searchGroup.MapGet("/search", SearchArticles);
     }

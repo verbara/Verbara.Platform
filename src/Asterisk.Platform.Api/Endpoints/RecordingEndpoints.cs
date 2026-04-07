@@ -10,7 +10,9 @@ internal static class RecordingEndpoints
 {
     public static void MapRecordingEndpoints(this IEndpointRouteBuilder app)
     {
-        var recordings = app.MapGroup("/recordings").RequireAuthorization("SupervisorPlus");
+        var recordings = app.MapGroup("/recordings")
+            .RequireAuthorization("SupervisorPlus")
+            .RequirePlanFeature(PlanFeature.Recordings);
 
         recordings.MapGet("/{sessionId}", GetRecordingMetadata);
         recordings.MapGet("/{sessionId}/stream", StreamRecording);

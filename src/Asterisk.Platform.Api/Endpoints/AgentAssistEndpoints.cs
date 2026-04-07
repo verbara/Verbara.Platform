@@ -15,7 +15,8 @@ internal static class AgentAssistEndpoints
         // ── Session query endpoints (SupervisorPlus) ───────────────────────────
         var sessions = app.MapGroup("/agent-assist/sessions")
             .RequireAuthorization("SupervisorPlus")
-            .RequireLicenseFeature(LicenseFeature.AgentAssist);
+            .RequireLicenseFeature(LicenseFeature.AgentAssist)
+            .RequirePlanFeature(PlanFeature.AgentAssist);
         sessions.MapGet("/{sessionId}", GetSession);
         sessions.MapGet("/{sessionId}/suggestions", GetSessionSuggestions);
         sessions.MapGet("/{sessionId}/compliance", GetSessionCompliance);
@@ -23,7 +24,8 @@ internal static class AgentAssistEndpoints
         // ── Admin config endpoints (AdminOnly) ─────────────────────────────────
         var admin = app.MapGroup("/admin/agent-assist")
             .RequireAuthorization("AdminOnly")
-            .RequireLicenseFeature(LicenseFeature.AgentAssist);
+            .RequireLicenseFeature(LicenseFeature.AgentAssist)
+            .RequirePlanFeature(PlanFeature.AgentAssist);
         admin.MapGet("/config", GetConfig);
         admin.MapPut("/config", UpdateConfig);
         admin.MapGet("/keyword-rules", GetKeywordRules);

@@ -542,6 +542,16 @@ Two deliverables (5 commits, +14 tests):
 1. **Suspension enforcement** -- `TenantStatusMiddleware` blocks Suspended (403) and Deleted (404) tenants after auth. `ITenantLifecycleHandler` dispatch on Create/Suspend/Delete in `ManagementTenantEndpoints` with try/catch per handler.
 2. **TenantSettings facade** -- `GET/PUT /admin/tenant/settings` (AdminOnly, cannot write quotas/tier) + `GET/PUT /management/tenants/{id}/settings` (PlatformAdminOnly, all sections). Aggregates ITenantStore + ITenantAuthConfigStore + ITenantQuotaStore + ITenantRetentionPolicyStore. Per-tenant `RateLimitTier` stored in `Tenant.Metadata["RateLimitTier"]`, served via `TenantTierCache` singleton to rate limit middleware.
 
+## Sprint 2: Feature Flags Per-Tenant + Billing-Lifecycle Dunning -- IN PROGRESS
+
+**Spec:** `docs/superpowers/specs/2026-04-07-sprint2-features-dunning-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-07-sprint2-features-dunning.md`
+
+Three deliverables:
+1. **Tenant Plans + Feature Flags** -- TenantPlan (Starter/Pro/Enterprise) stored in Metadata, PlanFeature (13 flags), PlanDefinition (static mapping), TenantAddOn (on/off), IFeatureGateService, FeatureGateCache, RequirePlanFeature endpoint filter on 14 endpoint groups. Hierarchical inheritance: child cannot exceed parent plan.
+2. **Billing-Lifecycle Dunning** -- DunningService (IHostedService, 6h interval) monitors overdue invoices. Progressive escalation: Warning (day 0) → Degraded (day 7, forced Starter features) → Suspended (day 14) → PendingDeletion (day 30). PaymentStatus on Invoice. Pause/resume via management API.
+3. **TenantSettings Facade Expansion** -- Plan, EnabledFeatures, AddOns, Dunning sections added to GET/PUT settings. PlatformAdminOnly can set plan and add-ons. Hierarchy validation on plan assignment.
+
 ## Plan Execution
 
 **Always use Subagent-Driven Development** with risk-weighted batching (FCM pattern):

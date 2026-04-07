@@ -59,7 +59,13 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
             RegisterInMemoryStores(services);
         });
 
-        return base.CreateHost(builder);
+        var host = base.CreateHost(builder);
+
+        // Seed the feature gate cache with Enterprise features for the test tenant
+        // so RequirePlanFeature filters pass (tests run with all features enabled).
+        SeedEnterpriseFeatureGate(host.Services, TestTenantId);
+
+        return host;
     }
 
     public HttpClient CreateAuthenticatedClient()
@@ -228,6 +234,23 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
             services.AddSingleton<SuggestionLogStore>();
         if (!services.Any(d => d.ServiceType == typeof(ComplianceAlertStore)))
             services.AddSingleton<ComplianceAlertStore>();
+    }
+
+    /// <summary>
+    /// Seeds the FeatureGateCache with Enterprise features for the given tenant so that
+    /// RequirePlanFeature endpoint filters pass in tests (all features are enabled).
+    /// </summary>
+    internal static void SeedEnterpriseFeatureGate(IServiceProvider services, string tenantId)
+    {
+        var cache = services.GetRequiredService<Asterisk.Platform.Api.Services.FeatureGateCache>();
+        var plan = TenantPlan.Enterprise;
+        cache.Set(tenantId, new Asterisk.Platform.Api.Services.ResolvedFeatures(
+            plan,
+            PlanDefinition.GetFeatures(plan),
+            PlanDefinition.GetMaxChannels(plan),
+            PlanDefinition.GetAuditRetentionDays(plan),
+            PlanDefinition.GetMaxWebhookSubscriptions(plan),
+            PlanDefinition.GetMaxScheduledReports(plan)));
     }
 
     private static void RemoveAll<T>(IServiceCollection services)

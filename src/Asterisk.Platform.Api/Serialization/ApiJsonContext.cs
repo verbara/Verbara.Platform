@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Billing;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Core.Webhooks;
@@ -234,6 +235,11 @@ namespace Asterisk.Platform.Api.Serialization;
 // TenantSettings Facade
 [JsonSerializable(typeof(TenantSettingsDto))]
 [JsonSerializable(typeof(DunningStatusDto))]
+[JsonSerializable(typeof(DunningRecordDto))]
+[JsonSerializable(typeof(TenantPlan))]
+[JsonSerializable(typeof(PlanFeature))]
+[JsonSerializable(typeof(PaymentStatus))]
+[JsonSerializable(typeof(IReadOnlyList<PlanFeature>))]
 [JsonSerializable(typeof(UpdateTenantSettingsRequest))]
 [JsonSerializable(typeof(OperationalSettingsDto))]
 [JsonSerializable(typeof(AuthSettingsDto))]

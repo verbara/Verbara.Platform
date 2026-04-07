@@ -72,7 +72,13 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
             UpsertStore<IIntervalSnapshotStore>(services, SnapshotStore);
         });
 
-        return base.CreateHost(builder);
+        var host = base.CreateHost(builder);
+
+        // Seed the feature gate cache with Enterprise features for the test tenant
+        // so RequirePlanFeature endpoint filters pass (tests run with all features enabled).
+        AuthenticatedPlatformApiFactory.SeedEnterpriseFeatureGate(host.Services, TestTenantId);
+
+        return host;
     }
 
     public HttpClient CreateAuthenticatedClient()

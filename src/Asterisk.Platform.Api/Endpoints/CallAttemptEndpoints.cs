@@ -12,7 +12,8 @@ internal static class CallAttemptEndpoints
         var group = app.MapGroup("/admin/call-attempts")
             .RequireAuthorization("AdminOnly")
             .WithTags("CallAttempts")
-            .RequireLicenseFeature(LicenseFeature.Dialer);
+            .RequireLicenseFeature(LicenseFeature.Dialer)
+            .RequirePlanFeature(PlanFeature.Dialer);
         group.MapPut("/{id:long}/disposition", UpdateDisposition);
     }
 

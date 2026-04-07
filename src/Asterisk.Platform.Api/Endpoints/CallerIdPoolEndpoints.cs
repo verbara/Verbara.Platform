@@ -14,7 +14,8 @@ internal static class CallerIdPoolEndpoints
     {
         var group = app.MapGroup("/admin/caller-id-pools")
             .RequireAuthorization("AdminOnly")
-            .RequireLicenseFeature(LicenseFeature.Dialer);
+            .RequireLicenseFeature(LicenseFeature.Dialer)
+            .RequirePlanFeature(PlanFeature.Dialer);
 
         // CRUD
         group.MapGet("/", ListPools);

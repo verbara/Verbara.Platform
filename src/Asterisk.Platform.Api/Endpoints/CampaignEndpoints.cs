@@ -17,7 +17,8 @@ internal static class CampaignEndpoints
     {
         var campaigns = app.MapGroup("/admin/campaigns")
             .RequireAuthorization("AdminOnly")
-            .RequireLicenseFeature(LicenseFeature.Dialer);
+            .RequireLicenseFeature(LicenseFeature.Dialer)
+            .RequirePlanFeature(PlanFeature.Dialer);
 
         // CRUD
         campaigns.MapPost("/", CreateCampaign);
