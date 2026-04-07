@@ -464,6 +464,10 @@ v1.MapWebhookEventTypeEndpoints();
 v1.MapGdprEndpoints();
 v1.MapTenantSettingsEndpoints();
 v1.MapManagementTenantSettingsEndpoints();
+v1.MapPartnerCustomerEndpoints();
+v1.MapPartnerBillingEndpoints();
+v1.MapPartnerRevenueEndpoints();
+v1.MapPartnerSettingsEndpoints();
 
 // ─── RBAC seed: permissions, role templates (Postgres only) ──────────────────
 if (!app.Environment.IsEnvironment("Testing"))
