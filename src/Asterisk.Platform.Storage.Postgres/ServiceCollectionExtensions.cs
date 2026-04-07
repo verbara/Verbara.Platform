@@ -12,6 +12,8 @@ using Asterisk.Platform.Identity;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Branding;
+using Asterisk.Platform.Core.Notifications;
 using Asterisk.Platform.Core.Reports;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
@@ -115,6 +117,12 @@ public static class ServiceCollectionExtensions
 
         // MultiTenant
         services.AddSingleton<ITenantStore, PostgresTenantStore>();
+
+        // Branding
+        services.AddSingleton<ITenantBrandingStore, PostgresTenantBrandingStore>();
+
+        // Notifications
+        services.AddSingleton<INotificationStore, PostgresNotificationStore>();
 
         return services;
     }
