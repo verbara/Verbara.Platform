@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.1-pro).
 
-**28 packages, 1396 tests, 0 warnings, AOT-compatible, 47 endpoint groups, version 1.3.1:**
+**28 packages, 1410 tests, 0 warnings, AOT-compatible, 49 endpoint groups, version 1.3.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -125,8 +125,8 @@ All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all r
 | Auth | AuthEndpoints, AuthAdminEndpoints, OidcEndpoints, RbacEndpoints |
 | Omnichannel | WebhookEndpoints, ConversationEndpoints, ChannelConfigEndpoints, ContactEndpoints, SseEndpoints |
 | Agent | AgentEndpoints, SupervisorEndpoints, SkillEndpoints, UsersMeEndpoint |
-| Admin | AdminEndpoints, AuditEndpoints, ScheduledReportEndpoints |
-| Management | ManagementTenantEndpoints, ManagementSystemEndpoints, ManagementClusterEndpoints, ManagementApiKeyEndpoints, ManagementBillingEndpoints, ManagementImpersonationEndpoints, ManagementWebhookEndpoints, SetupEndpoints |
+| Admin | AdminEndpoints, AuditEndpoints, ScheduledReportEndpoints, TenantSettingsEndpoints |
+| Management | ManagementTenantEndpoints, ManagementTenantSettingsEndpoints, ManagementSystemEndpoints, ManagementClusterEndpoints, ManagementApiKeyEndpoints, ManagementBillingEndpoints, ManagementImpersonationEndpoints, ManagementWebhookEndpoints, SetupEndpoints |
 | GDPR | GdprEndpoints |
 | Webhooks (outbound) | WebhookSubscriptionEndpoints, WebhookEventTypeEndpoints |
 | Dialer | CampaignEndpoints, CallAttemptEndpoints, DncListEndpoints, CallerIdPoolEndpoints, HolidayCalendarEndpoints, DialerSettingsEndpoints, TrunkEndpoints, OutboundRouteEndpoints |
@@ -532,6 +532,15 @@ Five multi-tenant security vulnerabilities fixed (7 Platform commits + 1 Sdk.Pro
 3. **Realtime context isolation** -- `ValidateContext` helper: whitelist (`from-internal`, `from-external`, `default`) + auto-prefix with `TenantOptions.DialplanContextPrefix` when configured.
 4. **Partner ownership bypass** -- Non-platform callers can only create children under their own tenant. Parent must be Active.
 5. **Webhook security** -- Layer 1: `IsActive` gate via `ITenantChannelConfigStore` in WebhookEndpoints. Layer 2: Per-tenant HMAC in 5 handlers (WhatsApp, Messenger, Instagram, Telegram, Twitter) with fallback to global `IOptions<T>` secret.
+
+## Sprint 1: Suspension Enforcement + TenantSettings Facade -- COMPLETE (2026-04-07)
+
+**Spec:** `docs/superpowers/specs/2026-04-07-sprint1-suspension-settings-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-07-sprint1-suspension-settings.md`
+
+Two deliverables (5 commits, +14 tests):
+1. **Suspension enforcement** -- `TenantStatusMiddleware` blocks Suspended (403) and Deleted (404) tenants after auth. `ITenantLifecycleHandler` dispatch on Create/Suspend/Delete in `ManagementTenantEndpoints` with try/catch per handler.
+2. **TenantSettings facade** -- `GET/PUT /admin/tenant/settings` (AdminOnly, cannot write quotas/tier) + `GET/PUT /management/tenants/{id}/settings` (PlatformAdminOnly, all sections). Aggregates ITenantStore + ITenantAuthConfigStore + ITenantQuotaStore + ITenantRetentionPolicyStore. Per-tenant `RateLimitTier` stored in `Tenant.Metadata["RateLimitTier"]`, served via `TenantTierCache` singleton to rate limit middleware.
 
 ## Plan Execution
 
