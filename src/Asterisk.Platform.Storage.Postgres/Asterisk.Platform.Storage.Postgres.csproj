@@ -29,6 +29,7 @@
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Dapper" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Asterisk.Sdk.Pro.MultiTenant" />
   </ItemGroup>
 
 </Project>

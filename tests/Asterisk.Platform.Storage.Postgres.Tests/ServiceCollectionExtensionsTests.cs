@@ -7,6 +7,7 @@ using Asterisk.Platform.Flows;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Storage.Postgres;
+using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Storage.Postgres.Tests;
@@ -48,6 +49,9 @@ public sealed class ServiceCollectionExtensionsTests
         // Automation
         provider.GetService<IAutomationRuleStore>().Should().NotBeNull();
         provider.GetService<ITimerStore>().Should().NotBeNull();
+
+        // MultiTenant
+        provider.GetService<ITenantStore>().Should().NotBeNull();
     }
 
     [Fact]
@@ -64,7 +68,7 @@ public sealed class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void AddPostgresStorage_ShouldRegister13Stores()
+    public void AddPostgresStorage_ShouldRegisterAllExpectedStores()
     {
         var services = new ServiceCollection();
         services.AddPostgresStorage(FakeConnectionString);
@@ -84,9 +88,10 @@ public sealed class ServiceCollectionExtensionsTests
             typeof(IBotConfigStore),
             typeof(IAutomationRuleStore),
             typeof(ITimerStore),
+            typeof(ITenantStore),
         };
 
-        storeInterfaces.Should().HaveCount(13);
+        storeInterfaces.Should().HaveCount(14);
 
         var provider = services.BuildServiceProvider();
         foreach (var iface in storeInterfaces)
@@ -107,10 +112,6 @@ public sealed class ServiceCollectionExtensionsTests
     [Fact]
     public void MigrationSql_ShouldExistAndContainExpectedTables()
     {
-        // Verify the migration file ships with the package and contains expected DDL
-        var assembly = typeof(ServiceCollectionExtensions).Assembly;
-        var resourceNames = assembly.GetManifestResourceNames();
-
         // The SQL is a file in the Migrations folder — verify it exists on disk
         var migrationPath = Path.Combine(
             AppContext.BaseDirectory,
@@ -135,5 +136,23 @@ public sealed class ServiceCollectionExtensionsTests
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS bot_configurations", because: "bot_configurations table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS automation_rules", because: "automation_rules table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS scheduled_timers", because: "scheduled_timers table must be defined");
+    }
+
+    [Fact]
+    public void Migration007_ShouldExistAndContainExpectedTables()
+    {
+        var migrationPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..",
+            "src", "Asterisk.Platform.Storage.Postgres", "Migrations", "007_TenantsAndScheduledReports.sql");
+
+        var normalizedPath = Path.GetFullPath(migrationPath);
+        File.Exists(normalizedPath).Should().BeTrue(
+            because: "migration file 007_TenantsAndScheduledReports.sql must exist on disk");
+
+        var sql = File.ReadAllText(normalizedPath);
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS tenants", because: "tenants table must be defined");
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS scheduled_reports", because: "scheduled_reports table must be defined");
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS report_executions", because: "report_executions table must be defined");
     }
 }

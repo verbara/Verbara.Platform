@@ -9,6 +9,7 @@ using Asterisk.Platform.Core;
 using Asterisk.Platform.Flows;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Surveys;
+using Asterisk.Sdk.Pro.MultiTenant;
 
 namespace Asterisk.Platform.Storage.Postgres;
 
@@ -48,6 +49,7 @@ namespace Asterisk.Platform.Storage.Postgres;
 [JsonSerializable(typeof(List<InvoiceLineItem>))]
 [JsonSerializable(typeof(IReadOnlyList<InvoiceLineItem>))]
 [JsonSerializable(typeof(Dictionary<string, int>))]
+[JsonSerializable(typeof(TenantOptions))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

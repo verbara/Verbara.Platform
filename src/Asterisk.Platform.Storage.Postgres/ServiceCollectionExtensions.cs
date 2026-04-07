@@ -18,6 +18,7 @@ using Asterisk.Platform.Queues;
 using Asterisk.Platform.Storage.Postgres.Stores;
 using Asterisk.Platform.Surveys;
 using Asterisk.Platform.Core.Webhooks;
+using Asterisk.Sdk.Pro.MultiTenant;
 
 namespace Asterisk.Platform.Storage.Postgres;
 
@@ -110,6 +111,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRoleTemplateStore, PostgresRoleTemplateStore>();
         services.AddSingleton<ITenantRoleStore, PostgresTenantRoleStore>();
         services.AddSingleton<IUserRoleStore, PostgresUserRoleStore>();
+
+        // MultiTenant
+        services.AddSingleton<ITenantStore, PostgresTenantStore>();
 
         return services;
     }
