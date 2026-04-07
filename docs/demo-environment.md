@@ -64,8 +64,8 @@ chmod +x demo-reset.sh
 
 | Service | Image | Ports | Purpose |
 |---------|-------|-------|---------|
-| **postgres** | postgres:16-alpine | 5432 (internal) | Single DB: Platform migrations + Realtime tables + Pro schemas + demo seed |
-| **redis** | redis:7-alpine | 6379 (internal) | Session store, cache |
+| **postgres** | postgres:18-alpine | 5432 (internal) | Single DB: Platform migrations + Realtime tables + Pro schemas + demo seed |
+| **redis** | redis:8-alpine | 6379 (internal) | Session store, cache |
 | **asterisk** | Custom (Dockerfile.asterisk) | 5038, 5060/udp, 8088, 8089, 8180, 20000-20050/udp | Main PBX — AMI, ARI, SIP, WSS, RTP |
 | **pstn-emulator** | Custom (Dockerfile.demo-pstn) | Internal only | Simulated PSTN gateway with 10 test scenarios |
 | **platform-api** | Custom (Dockerfile) | 5000 | .NET API — 27 packages + 16 Pro packages |

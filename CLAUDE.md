@@ -228,6 +228,7 @@ Full documentation at `docs/demo-environment.md`. **This file MUST be updated wh
 - TreatWarningsAsErrors ON, WarningLevel 9999
 - Central package management in Directory.Packages.props
 - Key NuGet versions: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0, Asp.Versioning.Http, QuestPDF, ScottPlot, MailKit, NCrontab
+- **PostgreSQL 18** — all Docker compose files standardized on `postgres:18-alpine`
 - **Npgsql 9 + Dapper:** Postgres row types MUST be class-based with `{get; init;}`, NOT positional records. Npgsql 9 returns `DateTime` for `timestamptz`; Dapper constructor matching fails with nullable `DateTime?` params. All 40 stores already converted.
 
 ## v1.1.0 "Enterprise Ready" -- COMPLETE (2026-03-26)
