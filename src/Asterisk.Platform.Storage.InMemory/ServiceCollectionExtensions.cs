@@ -89,6 +89,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITenantQuotaStore, InMemoryTenantQuotaStore>();
         services.AddSingleton<IRateCardStore, InMemoryRateCardStore>();
         services.AddSingleton<IInvoiceStore, InMemoryInvoiceStore>();
+        services.AddSingleton<ITenantAddOnStore, InMemoryTenantAddOnStore>();
+        services.AddSingleton<IDunningStore, InMemoryDunningStore>();
 
         // GDPR
         services.AddSingleton<IPurgeLogStore, InMemoryPurgeLogStore>();
