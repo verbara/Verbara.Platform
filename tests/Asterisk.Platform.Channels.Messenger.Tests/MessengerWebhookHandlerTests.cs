@@ -6,6 +6,7 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace Asterisk.Platform.Channels.Messenger.Tests;
 
@@ -28,7 +29,10 @@ public class MessengerWebhookHandlerTests
             WebhookVerifyToken = verifyToken ?? VerifyToken,
             AppSecret = appSecret ?? AppSecret,
         });
-        return new MessengerWebhookHandler(options, NullLogger<MessengerWebhookHandler>.Instance);
+        var configStore = Substitute.For<ITenantChannelConfigStore>();
+        configStore.GetAsync(Arg.Any<TenantId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .Returns((TenantChannelConfig?)null);
+        return new MessengerWebhookHandler(options, configStore, NullLogger<MessengerWebhookHandler>.Instance);
     }
 
     private static Dictionary<string, string> SignedHeaders(
@@ -153,11 +157,10 @@ public class MessengerWebhookHandlerTests
     [Fact]
     public void ValidateSignature_ShouldReturnTrue_WhenHmacIsCorrect()
     {
-        var handler = CreateHandler();
         var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes("{\"object\":\"page\"}"));
         var headers = SignedHeaders(body);
 
-        var valid = handler.ValidateSignature(body, headers);
+        var valid = MessengerWebhookHandler.ValidateSignature(body, headers, AppSecret);
 
         valid.Should().BeTrue();
     }
@@ -167,11 +170,10 @@ public class MessengerWebhookHandlerTests
     [Fact]
     public void ValidateSignature_ShouldReturnFalse_WhenHmacIsWrong()
     {
-        var handler = CreateHandler();
         var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes("{\"object\":\"page\"}"));
         var wrongHeaders = SignedHeaders(body, "wrong-secret");
 
-        var valid = handler.ValidateSignature(body, wrongHeaders);
+        var valid = MessengerWebhookHandler.ValidateSignature(body, wrongHeaders, AppSecret);
 
         valid.Should().BeFalse();
     }

@@ -6,6 +6,7 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace Asterisk.Platform.Channels.WhatsApp.Tests;
 
@@ -27,7 +28,10 @@ public class WhatsAppWebhookHandlerTests
             WebhookVerifyToken = verifyToken ?? VerifyToken,
             AppSecret = appSecret ?? AppSecret,
         });
-        return new WhatsAppWebhookHandler(options, NullLogger<WhatsAppWebhookHandler>.Instance);
+        var configStore = Substitute.For<ITenantChannelConfigStore>();
+        configStore.GetAsync(Arg.Any<TenantId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .Returns((TenantChannelConfig?)null);
+        return new WhatsAppWebhookHandler(options, configStore, NullLogger<WhatsAppWebhookHandler>.Instance);
     }
 
     private static Dictionary<string, string> SignedHeaders(
@@ -205,11 +209,10 @@ public class WhatsAppWebhookHandlerTests
     [Fact]
     public void ValidateSignature_ShouldReturnTrue_WhenHmacIsCorrect()
     {
-        var handler = CreateHandler();
         var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes("{\"object\":\"test\"}"));
         var headers = SignedHeaders(body);
 
-        var valid = handler.ValidateSignature(body, headers);
+        var valid = WhatsAppWebhookHandler.ValidateSignature(body, headers, AppSecret);
 
         valid.Should().BeTrue();
     }
@@ -219,12 +222,11 @@ public class WhatsAppWebhookHandlerTests
     [Fact]
     public void ValidateSignature_ShouldReturnFalse_WhenHmacIsWrong()
     {
-        var handler = CreateHandler();
         var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes("{\"object\":\"test\"}"));
         // Sign with wrong secret
         var wrongHeaders = SignedHeaders(body, "wrong-secret");
 
-        var valid = handler.ValidateSignature(body, wrongHeaders);
+        var valid = WhatsAppWebhookHandler.ValidateSignature(body, wrongHeaders, AppSecret);
 
         valid.Should().BeFalse();
     }
@@ -232,11 +234,10 @@ public class WhatsAppWebhookHandlerTests
     [Fact]
     public void ValidateSignature_ShouldReturnFalse_WhenSignatureHeaderMissing()
     {
-        var handler = CreateHandler();
         var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes("{\"object\":\"test\"}"));
         var headers = new Dictionary<string, string>();
 
-        var valid = handler.ValidateSignature(body, headers);
+        var valid = WhatsAppWebhookHandler.ValidateSignature(body, headers, AppSecret);
 
         valid.Should().BeFalse();
     }

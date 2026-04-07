@@ -18,43 +18,49 @@ namespace Asterisk.Platform.Channels.Telegram;
 public sealed class TelegramWebhookHandler : IWebhookHandler
 {
     private readonly TelegramOptions _options;
+    private readonly ITenantChannelConfigStore _configStore;
     private readonly ILogger<TelegramWebhookHandler> _logger;
 
     public ChannelType Channel => ChannelType.Telegram;
 
     public TelegramWebhookHandler(
         IOptions<TelegramOptions> options,
+        ITenantChannelConfigStore configStore,
         ILogger<TelegramWebhookHandler> logger)
     {
         _options = options.Value;
+        _configStore = configStore;
         _logger = logger;
     }
 
-    public Task<WebhookResult> HandleAsync(
+    public async Task<WebhookResult> HandleAsync(
         ReadOnlyMemory<byte> body,
         IReadOnlyDictionary<string, string> headers,
         TenantId tenantId,
         CancellationToken ct)
     {
-        if (!ValidateSecret(headers))
+        var config = await _configStore.GetAsync(tenantId, Channel, ct);
+        var secret = config?.Credentials.GetValueOrDefault("WebhookSecret") ?? _options.WebhookSecret;
+
+        if (!ValidateSecret(headers, secret))
         {
             Log.SecretValidationFailed(_logger, tenantId.Value);
-            return Task.FromResult(Ignored());
+            return Ignored();
         }
 
-        return Task.FromResult(ParsePayload(body.Span));
+        return ParsePayload(body.Span);
     }
 
-    internal bool ValidateSecret(IReadOnlyDictionary<string, string> headers)
+    internal static bool ValidateSecret(IReadOnlyDictionary<string, string> headers, string? secret)
     {
         // If no secret is configured, skip validation
-        if (_options.WebhookSecret is null)
+        if (secret is null)
             return true;
 
         if (!headers.TryGetValue("x-telegram-bot-api-secret-token", out var token))
             return false;
 
-        return string.Equals(token, _options.WebhookSecret, StringComparison.Ordinal);
+        return string.Equals(token, secret, StringComparison.Ordinal);
     }
 
     private WebhookResult ParsePayload(ReadOnlySpan<byte> body)

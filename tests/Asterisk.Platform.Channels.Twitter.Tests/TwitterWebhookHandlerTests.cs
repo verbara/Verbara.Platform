@@ -6,6 +6,7 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace Asterisk.Platform.Channels.Twitter.Tests;
 
@@ -14,8 +15,12 @@ public class TwitterWebhookHandlerTests
     private const string ApiSecret = "my-api-secret";
     private static readonly TenantId TenantA = new("tenant-a");
 
-    private static TwitterWebhookHandler CreateHandler(string? apiSecret = null) =>
-        new(
+    private static TwitterWebhookHandler CreateHandler(string? apiSecret = null)
+    {
+        var configStore = Substitute.For<ITenantChannelConfigStore>();
+        configStore.GetAsync(Arg.Any<TenantId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .Returns((TenantChannelConfig?)null);
+        return new TwitterWebhookHandler(
             Options.Create(new TwitterOptions
             {
                 ApiKey = "api-key",
@@ -24,7 +29,9 @@ public class TwitterWebhookHandlerTests
                 AccessTokenSecret = "access-token-secret",
                 BearerToken = "bearer-token",
             }),
+            configStore,
             NullLogger<TwitterWebhookHandler>.Instance);
+    }
 
     private static string ComputeSignature(string secret, string body)
     {
@@ -78,10 +85,9 @@ public class TwitterWebhookHandlerTests
     [Fact]
     public void ComputeCrcResponse_ShouldReturnSha256Prefix_WithValidHmac()
     {
-        var handler = CreateHandler();
         const string crcToken = "abc123challengetoken";
 
-        var response = handler.ComputeCrcResponse(crcToken);
+        var response = TwitterWebhookHandler.ComputeCrcResponse(crcToken, ApiSecret);
 
         response.Should().StartWith("sha256=");
         // Verify the HMAC is correct
@@ -94,11 +100,10 @@ public class TwitterWebhookHandlerTests
     [Fact]
     public void ValidateHmacSignature_ShouldReturnTrue_WhenSignatureIsValid()
     {
-        var handler = CreateHandler();
         const string body = """{"for_user_id":"123"}""";
         var sig = ComputeSignature(ApiSecret, body);
 
-        var valid = handler.ValidateHmacSignature(Encoding.UTF8.GetBytes(body), sig);
+        var valid = TwitterWebhookHandler.ValidateHmacSignature(Encoding.UTF8.GetBytes(body), sig, ApiSecret);
 
         valid.Should().BeTrue();
     }
@@ -108,11 +113,10 @@ public class TwitterWebhookHandlerTests
     [Fact]
     public void ValidateHmacSignature_ShouldReturnFalse_WhenSignatureUsesWrongSecret()
     {
-        var handler = CreateHandler();
         const string body = """{"for_user_id":"123"}""";
         var sig = ComputeSignature("wrong-secret", body);
 
-        var valid = handler.ValidateHmacSignature(Encoding.UTF8.GetBytes(body), sig);
+        var valid = TwitterWebhookHandler.ValidateHmacSignature(Encoding.UTF8.GetBytes(body), sig, ApiSecret);
 
         valid.Should().BeFalse();
     }
@@ -122,10 +126,9 @@ public class TwitterWebhookHandlerTests
     [Fact]
     public void ValidateHmacSignature_ShouldReturnFalse_WhenSignatureHasNoPrefixSha256()
     {
-        var handler = CreateHandler();
         const string body = "test";
 
-        var valid = handler.ValidateHmacSignature(Encoding.UTF8.GetBytes(body), "invalid-no-prefix");
+        var valid = TwitterWebhookHandler.ValidateHmacSignature(Encoding.UTF8.GetBytes(body), "invalid-no-prefix", ApiSecret);
 
         valid.Should().BeFalse();
     }

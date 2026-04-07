@@ -1,7 +1,9 @@
+using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Channels.Twitter;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 
 namespace Asterisk.Platform.Channels.Twitter.Tests;
 
@@ -134,6 +136,7 @@ public class TwitterMessageTransformerTests
     public void AddTwitter_ShouldRegisterServices()
     {
         var services = new ServiceCollection();
+        services.AddSingleton(Substitute.For<ITenantChannelConfigStore>());
 
         services.AddTwitter(o =>
         {

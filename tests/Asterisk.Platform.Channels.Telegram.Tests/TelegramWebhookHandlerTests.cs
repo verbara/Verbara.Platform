@@ -5,6 +5,7 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace Asterisk.Platform.Channels.Telegram.Tests;
 
@@ -13,14 +14,20 @@ public class TelegramWebhookHandlerTests
     private const string WebhookSecret = "my-webhook-secret";
     private static readonly TenantId TenantA = new("tenant-a");
 
-    private static TelegramWebhookHandler CreateHandler(string? webhookSecret = null) =>
-        new(
+    private static TelegramWebhookHandler CreateHandler(string? webhookSecret = null)
+    {
+        var configStore = Substitute.For<ITenantChannelConfigStore>();
+        configStore.GetAsync(Arg.Any<TenantId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .Returns((TenantChannelConfig?)null);
+        return new TelegramWebhookHandler(
             Options.Create(new TelegramOptions
             {
                 BotToken = "123456:ABCdef",
                 WebhookSecret = webhookSecret,
             }),
+            configStore,
             NullLogger<TelegramWebhookHandler>.Instance);
+    }
 
     private static Dictionary<string, string> SecretHeaders(string secret) =>
         new() { ["x-telegram-bot-api-secret-token"] = secret };
@@ -152,10 +159,9 @@ public class TelegramWebhookHandlerTests
     [Fact]
     public void ValidateSecret_ShouldReturnTrue_WhenSecretMatches()
     {
-        var handler = CreateHandler(WebhookSecret);
         var headers = SecretHeaders(WebhookSecret);
 
-        var valid = handler.ValidateSecret(headers);
+        var valid = TelegramWebhookHandler.ValidateSecret(headers, WebhookSecret);
 
         valid.Should().BeTrue();
     }
@@ -165,10 +171,9 @@ public class TelegramWebhookHandlerTests
     [Fact]
     public void ValidateSecret_ShouldReturnFalse_WhenSecretDoesNotMatch()
     {
-        var handler = CreateHandler(WebhookSecret);
         var headers = SecretHeaders("wrong-secret");
 
-        var valid = handler.ValidateSecret(headers);
+        var valid = TelegramWebhookHandler.ValidateSecret(headers, WebhookSecret);
 
         valid.Should().BeFalse();
     }
@@ -230,10 +235,8 @@ public class TelegramWebhookHandlerTests
     [Fact]
     public void ValidateSecret_ShouldReturnTrue_WhenNoSecretConfigured()
     {
-        var handler = CreateHandler(webhookSecret: null);
-
         // Any headers (or none) should pass when no secret is configured
-        var valid = handler.ValidateSecret(new Dictionary<string, string>());
+        var valid = TelegramWebhookHandler.ValidateSecret(new Dictionary<string, string>(), secret: null);
 
         valid.Should().BeTrue();
     }

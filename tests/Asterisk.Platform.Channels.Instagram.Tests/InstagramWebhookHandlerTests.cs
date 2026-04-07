@@ -6,6 +6,7 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace Asterisk.Platform.Channels.Instagram.Tests;
 
@@ -28,7 +29,10 @@ public class InstagramWebhookHandlerTests
             WebhookVerifyToken = verifyToken ?? VerifyToken,
             AppSecret = appSecret ?? AppSecret,
         });
-        return new InstagramWebhookHandler(options, NullLogger<InstagramWebhookHandler>.Instance);
+        var configStore = Substitute.For<ITenantChannelConfigStore>();
+        configStore.GetAsync(Arg.Any<TenantId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .Returns((TenantChannelConfig?)null);
+        return new InstagramWebhookHandler(options, configStore, NullLogger<InstagramWebhookHandler>.Instance);
     }
 
     private static Dictionary<string, string> SignedHeaders(
@@ -148,11 +152,10 @@ public class InstagramWebhookHandlerTests
     [Fact]
     public void ValidateSignature_ShouldReturnTrue_WhenHmacIsCorrect()
     {
-        var handler = CreateHandler();
         var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes("{\"object\":\"instagram\"}"));
         var headers = SignedHeaders(body);
 
-        var valid = handler.ValidateSignature(body, headers);
+        var valid = InstagramWebhookHandler.ValidateSignature(body, headers, AppSecret);
 
         valid.Should().BeTrue();
     }
@@ -160,11 +163,10 @@ public class InstagramWebhookHandlerTests
     [Fact]
     public void ValidateSignature_ShouldReturnFalse_WhenHmacIsWrong()
     {
-        var handler = CreateHandler();
         var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes("{\"object\":\"instagram\"}"));
         var wrongHeaders = SignedHeaders(body, "bad-secret");
 
-        var valid = handler.ValidateSignature(body, wrongHeaders);
+        var valid = InstagramWebhookHandler.ValidateSignature(body, wrongHeaders, AppSecret);
 
         valid.Should().BeFalse();
     }

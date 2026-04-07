@@ -18,31 +18,37 @@ namespace Asterisk.Platform.Channels.Messenger;
 public sealed class MessengerWebhookHandler : IWebhookHandler
 {
     private readonly MessengerOptions _options;
+    private readonly ITenantChannelConfigStore _configStore;
     private readonly ILogger<MessengerWebhookHandler> _logger;
 
     public ChannelType Channel => ChannelType.Messenger;
 
     public MessengerWebhookHandler(
         IOptions<MessengerOptions> options,
+        ITenantChannelConfigStore configStore,
         ILogger<MessengerWebhookHandler> logger)
     {
         _options = options.Value;
+        _configStore = configStore;
         _logger = logger;
     }
 
-    public Task<WebhookResult> HandleAsync(
+    public async Task<WebhookResult> HandleAsync(
         ReadOnlyMemory<byte> body,
         IReadOnlyDictionary<string, string> headers,
         TenantId tenantId,
         CancellationToken ct)
     {
-        if (!ValidateSignature(body, headers))
+        var config = await _configStore.GetAsync(tenantId, Channel, ct);
+        var secret = config?.Credentials.GetValueOrDefault("AppSecret") ?? _options.AppSecret;
+
+        if (!ValidateSignature(body, headers, secret))
         {
             Log.HmacValidationFailed(_logger, tenantId.Value);
-            return Task.FromResult(Ignored());
+            return Ignored();
         }
 
-        return Task.FromResult(ParsePayload(body.Span));
+        return ParsePayload(body.Span);
     }
 
     /// <summary>
@@ -62,7 +68,7 @@ public sealed class MessengerWebhookHandler : IWebhookHandler
         return challenge;
     }
 
-    internal bool ValidateSignature(ReadOnlyMemory<byte> body, IReadOnlyDictionary<string, string> headers)
+    internal static bool ValidateSignature(ReadOnlyMemory<byte> body, IReadOnlyDictionary<string, string> headers, string secret)
     {
         if (!headers.TryGetValue("x-hub-signature-256", out var signature))
             return false;
@@ -72,7 +78,7 @@ public sealed class MessengerWebhookHandler : IWebhookHandler
 
         var expectedHex = signature["sha256=".Length..];
 
-        var keyBytes = Encoding.UTF8.GetBytes(_options.AppSecret);
+        var keyBytes = Encoding.UTF8.GetBytes(secret);
         var hashBytes = HMACSHA256.HashData(keyBytes, body.Span);
         var actualHex = Convert.ToHexString(hashBytes);
 

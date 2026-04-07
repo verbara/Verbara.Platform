@@ -18,19 +18,22 @@ namespace Asterisk.Platform.Channels.Twitter;
 public sealed class TwitterWebhookHandler : IWebhookHandler
 {
     private readonly TwitterOptions _options;
+    private readonly ITenantChannelConfigStore _configStore;
     private readonly ILogger<TwitterWebhookHandler> _logger;
 
     public ChannelType Channel => ChannelType.Twitter;
 
     public TwitterWebhookHandler(
         IOptions<TwitterOptions> options,
+        ITenantChannelConfigStore configStore,
         ILogger<TwitterWebhookHandler> logger)
     {
         _options = options.Value;
+        _configStore = configStore;
         _logger = logger;
     }
 
-    public Task<WebhookResult> HandleAsync(
+    public async Task<WebhookResult> HandleAsync(
         ReadOnlyMemory<byte> body,
         IReadOnlyDictionary<string, string> headers,
         TenantId tenantId,
@@ -40,21 +43,24 @@ public sealed class TwitterWebhookHandler : IWebhookHandler
         // this is surfaced as an x-twitter-webhooks-signature header that must be validated.
         if (headers.TryGetValue("x-twitter-webhooks-signature", out var signature))
         {
-            if (!ValidateHmacSignature(body.Span, signature))
+            var config = await _configStore.GetAsync(tenantId, Channel, ct);
+            var secret = config?.Credentials.GetValueOrDefault("ApiSecret") ?? _options.ApiSecret;
+
+            if (!ValidateHmacSignature(body.Span, signature, secret))
             {
                 Log.CrcValidationFailed(_logger, tenantId.Value);
-                return Task.FromResult(Ignored());
+                return Ignored();
             }
         }
 
-        return Task.FromResult(ParsePayload(body.Span));
+        return ParsePayload(body.Span);
     }
 
     /// <summary>
     /// Validates the HMAC-SHA256 signature from X Account Activity API.
     /// The signature header value is "sha256=base64(HMAC-SHA256(apiSecret, body))".
     /// </summary>
-    internal bool ValidateHmacSignature(ReadOnlySpan<byte> body, string signatureHeader)
+    internal static bool ValidateHmacSignature(ReadOnlySpan<byte> body, string signatureHeader, string secret)
     {
         const string prefix = "sha256=";
         if (!signatureHeader.StartsWith(prefix, StringComparison.Ordinal))
@@ -72,7 +78,7 @@ public sealed class TwitterWebhookHandler : IWebhookHandler
             return false;
         }
 
-        var keyBytes = Encoding.UTF8.GetBytes(_options.ApiSecret);
+        var keyBytes = Encoding.UTF8.GetBytes(secret);
         var bodyBytes = body.ToArray();
         var computedBytes = HMACSHA256.HashData(keyBytes, bodyBytes);
 
@@ -83,9 +89,9 @@ public sealed class TwitterWebhookHandler : IWebhookHandler
     /// Computes the CRC response token for a CRC challenge request.
     /// X sends a GET /?crc_token=TOKEN; this method produces the "sha256=..." response.
     /// </summary>
-    internal string ComputeCrcResponse(string crcToken)
+    internal static string ComputeCrcResponse(string crcToken, string secret)
     {
-        var keyBytes = Encoding.UTF8.GetBytes(_options.ApiSecret);
+        var keyBytes = Encoding.UTF8.GetBytes(secret);
         var tokenBytes = Encoding.UTF8.GetBytes(crcToken);
         var hash = HMACSHA256.HashData(keyBytes, tokenBytes);
         return $"sha256={Convert.ToBase64String(hash)}";
