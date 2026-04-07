@@ -39,4 +39,12 @@ public sealed class InMemoryInvoiceStore : IInvoiceStore
 
         return Task.CompletedTask;
     }
+
+    public Task<IReadOnlyList<Invoice>> ListByStatusAsync(InvoiceStatus status, CancellationToken ct = default)
+    {
+        var result = _invoices.Values
+            .Where(i => i.Status == status)
+            .ToList();
+        return Task.FromResult<IReadOnlyList<Invoice>>(result);
+    }
 }

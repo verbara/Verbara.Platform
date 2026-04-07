@@ -17,6 +17,8 @@ public sealed class Invoice : ITenantScoped
     public required DateTimeOffset GeneratedAt { get; init; }
     public DateTimeOffset? IssuedAt { get; set; }
     public DateTimeOffset? PaidAt { get; set; }
+    public PaymentStatus PaymentStatus { get; set; } = PaymentStatus.Current;
+    public DateTimeOffset? DueDate { get; set; }
 }
 
 public enum InvoiceStatus

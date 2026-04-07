@@ -75,6 +75,17 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
             new { TenantId = tenantId.Value, InvoiceId = invoiceId.Value, Status = (short)status });
     }
 
+    public async Task<IReadOnlyList<Invoice>> ListByStatusAsync(InvoiceStatus status, CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<InvoiceRow>(
+            "SELECT invoice_id, tenant_id, period_start, period_end, currency, line_items, subtotal, tax, total, status, generated_at, issued_at, paid_at " +
+            "FROM invoices WHERE status = @Status ORDER BY period_start DESC",
+            new { Status = (short)status });
+
+        return rows.Select(r => r.ToInvoice()).ToList();
+    }
+
     private sealed class InvoiceRow
     {
         public string invoice_id { get; init; } = null!;
