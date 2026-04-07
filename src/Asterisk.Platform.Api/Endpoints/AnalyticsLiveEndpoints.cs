@@ -1,5 +1,6 @@
 using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Analytics;
 using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
@@ -20,61 +21,78 @@ internal static class AnalyticsLiveEndpoints
 
     // ─── All Live States ───────────────────────────────────────────────────────
 
-    private static IResult GetAllLiveStates([FromServices] AnalyticsQueryService svc)
+    private static async Task<IResult> GetAllLiveStates(
+        HttpContext context,
+        [FromServices] AnalyticsQueryService svc,
+        [FromServices] IQueueStore queueStore,
+        CancellationToken ct)
     {
-        var states = svc.GetAllLiveStates();
+        var allowedQueues = await GetTenantQueueNames(context, queueStore, ct);
+        var states = svc.GetAllLiveStates(allowedQueues);
         var dtos = states.Select(s => new LiveStateDto(
-            s.QueueName,
-            s.CallsWaiting,
-            s.LongestWaitMs,
-            s.AgentsAvailable,
-            s.AgentsOnCall,
-            s.AgentsPaused,
-            s.AgentsInWrapUp)).ToList();
+            s.QueueName, s.CallsWaiting, s.LongestWaitMs,
+            s.AgentsAvailable, s.AgentsOnCall, s.AgentsPaused, s.AgentsInWrapUp)).ToList();
         return Results.Ok(dtos);
     }
 
     // ─── Live State by Queue ───────────────────────────────────────────────────
 
-    private static IResult GetLiveState(string queueName, [FromServices] AnalyticsQueryService svc)
+    private static async Task<IResult> GetLiveState(
+        string queueName,
+        HttpContext context,
+        [FromServices] AnalyticsQueryService svc,
+        [FromServices] IQueueStore queueStore,
+        CancellationToken ct)
     {
-        var state = svc.GetLiveState(queueName);
+        var allowedQueues = await GetTenantQueueNames(context, queueStore, ct);
+        var state = svc.GetLiveState(queueName, allowedQueues);
         if (state is null)
             return Results.NotFound();
 
-        var dto = new LiveStateDto(
-            state.QueueName,
-            state.CallsWaiting,
-            state.LongestWaitMs,
-            state.AgentsAvailable,
-            state.AgentsOnCall,
-            state.AgentsPaused,
-            state.AgentsInWrapUp);
-        return Results.Ok(dto);
+        return Results.Ok(new LiveStateDto(
+            state.QueueName, state.CallsWaiting, state.LongestWaitMs,
+            state.AgentsAvailable, state.AgentsOnCall, state.AgentsPaused, state.AgentsInWrapUp));
     }
 
     // ─── Current Interval ─────────────────────────────────────────────────────
 
-    private static IResult GetCurrentInterval([FromServices] AnalyticsQueryService svc, string? queueName)
+    private static async Task<IResult> GetCurrentInterval(
+        HttpContext context,
+        [FromServices] AnalyticsQueryService svc,
+        [FromServices] IQueueStore queueStore,
+        string? queueName,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(queueName))
             return Results.NotFound();
 
-        var snapshot = svc.GetCurrentInterval(queueName);
+        var allowedQueues = await GetTenantQueueNames(context, queueStore, ct);
+        var snapshot = svc.GetCurrentInterval(queueName, allowedQueues);
         if (snapshot is null)
             return Results.NotFound();
 
-        var dto = new CurrentIntervalDto(
+        return Results.Ok(new CurrentIntervalDto(
             snapshot.IntervalStart,
             snapshot.IntervalStart.AddSeconds(snapshot.IntervalSeconds),
-            snapshot.CallsOffered,
-            snapshot.CallsAnswered,
-            snapshot.CallsAbandoned,
-            snapshot.AhtMs,
-            snapshot.AsaMs,
-            snapshot.SlaPercent,
-            snapshot.AbandonRatePercent);
-        return Results.Ok(dto);
+            snapshot.CallsOffered, snapshot.CallsAnswered, snapshot.CallsAbandoned,
+            snapshot.AhtMs, snapshot.AsaMs, snapshot.SlaPercent, snapshot.AbandonRatePercent));
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private static async Task<IReadOnlySet<string>> GetTenantQueueNames(
+        HttpContext context, IQueueStore queueStore, CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var result = await queueStore.ListAsync(new TenantId(tenantId), new PagedQuery(1, 1000), ct);
+        return result.Items.Select(q => q.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string GetTenantId(HttpContext context)
+    {
+        if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
+            return tid.Value;
+        throw new InvalidOperationException("Tenant ID not resolved");
     }
 }
 
