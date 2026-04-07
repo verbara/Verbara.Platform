@@ -14,6 +14,7 @@ using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Surveys;
 using Asterisk.Platform.Core.Branding;
+using Asterisk.Platform.Core.Notifications;
 using Asterisk.Platform.Core.Reports;
 using Asterisk.Platform.Core.Webhooks;
 using Asterisk.Sdk.Pro.MultiTenant;
@@ -96,6 +97,9 @@ public static class ServiceCollectionExtensions
 
         // Branding
         services.AddSingleton<ITenantBrandingStore, InMemoryTenantBrandingStore>();
+
+        // Notifications
+        services.AddSingleton<INotificationStore, InMemoryNotificationStore>();
 
         // GDPR
         services.AddSingleton<IPurgeLogStore, InMemoryPurgeLogStore>();
