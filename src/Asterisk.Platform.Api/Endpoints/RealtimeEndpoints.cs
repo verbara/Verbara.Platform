@@ -1,6 +1,7 @@
 using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Licensing;
+using Asterisk.Sdk.Pro.MultiTenant;
 using Asterisk.Sdk.Pro.Realtime;
 using Asterisk.Sdk.Pro.Realtime.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -64,10 +65,16 @@ internal static class RealtimeEndpoints
     private static async Task<IResult> CreateProfile(
         HttpContext context,
         [FromBody] CreateEndpointProfileRequest body,
-        EndpointProfileStoreBase store,
+        [FromServices] EndpointProfileStoreBase store,
+        [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var tenant = await tenantStore.GetAsync(tenantId, ct);
+        var (valid, resolvedContext, error) = ValidateContext(body.Context, tenant?.Options.DialplanContextPrefix);
+        if (!valid)
+            return Results.BadRequest(new { error });
+
         var profile = new EndpointProfile
         {
             Name = body.Name,
@@ -77,7 +84,7 @@ internal static class RealtimeEndpoints
             Webrtc = body.Webrtc ?? false,
             MaxContacts = body.MaxContacts ?? 1,
             DirectMedia = body.DirectMedia ?? false,
-            Context = body.Context ?? "from-internal",
+            Context = resolvedContext,
             QualifyFrequency = body.QualifyFrequency ?? 30,
         };
         var id = await store.CreateAsync(profile, tenantId, ct);
@@ -89,7 +96,8 @@ internal static class RealtimeEndpoints
         long id,
         HttpContext context,
         [FromBody] UpdateEndpointProfileRequest body,
-        EndpointProfileStoreBase store,
+        [FromServices] EndpointProfileStoreBase store,
+        [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -104,7 +112,14 @@ internal static class RealtimeEndpoints
         if (body.MaxContacts.HasValue) profile.MaxContacts = body.MaxContacts.Value;
         if (body.IsDefault.HasValue) profile.IsDefault = body.IsDefault.Value;
         if (body.DirectMedia.HasValue) profile.DirectMedia = body.DirectMedia.Value;
-        if (body.Context is not null) profile.Context = body.Context;
+        if (body.Context is not null)
+        {
+            var tenant = await tenantStore.GetAsync(tenantId, ct);
+            var (valid, resolvedContext, error) = ValidateContext(body.Context, tenant?.Options.DialplanContextPrefix);
+            if (!valid)
+                return Results.BadRequest(new { error });
+            profile.Context = resolvedContext;
+        }
         if (body.QualifyFrequency.HasValue) profile.QualifyFrequency = body.QualifyFrequency.Value;
 
         await store.UpdateAsync(profile, tenantId, ct);
@@ -130,6 +145,25 @@ internal static class RealtimeEndpoints
         var tenantId = GetTenantId(context);
         await store.SeedDefaultsAsync(tenantId, ct);
         return Results.NoContent();
+    }
+
+    // ─── Validation Helpers ───────────────────────────────────────────────────
+
+    private static readonly string[] AllowedContexts = ["from-internal", "from-external", "default"];
+
+    private static (bool Valid, string ResolvedContext, string? Error) ValidateContext(
+        string? requestedContext, string? dialplanContextPrefix)
+    {
+        var context = requestedContext ?? "from-internal";
+
+        if (dialplanContextPrefix is not null)
+            return (true, $"{dialplanContextPrefix}-{context}", null);
+
+        if (AllowedContexts.Contains(context, StringComparer.OrdinalIgnoreCase))
+            return (true, context, null);
+
+        return (false, context, $"Context must be one of: {string.Join(", ", AllowedContexts)}. " +
+            "Configure DialplanContextPrefix on the tenant for custom contexts.");
     }
 
     // ─── Mapping Helpers ──────────────────────────────────────────────────────
