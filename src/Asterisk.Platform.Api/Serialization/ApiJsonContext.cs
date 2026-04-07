@@ -161,6 +161,18 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(List<MgmtTenantDto>))]
 [JsonSerializable(typeof(CreateMgmtTenantRequest))]
 [JsonSerializable(typeof(UpdateMgmtTenantRequest))]
+// Partner Customers
+[JsonSerializable(typeof(PartnerCustomerDto))]
+[JsonSerializable(typeof(List<PartnerCustomerDto>))]
+[JsonSerializable(typeof(CreatePartnerCustomerRequest))]
+[JsonSerializable(typeof(UpdatePartnerCustomerRequest))]
+// Partner Billing
+[JsonSerializable(typeof(PartnerGenerateInvoiceResponse))]
+[JsonSerializable(typeof(PartnerRevenueSnapshotDto))]
+// Partner Revenue
+[JsonSerializable(typeof(PartnerRevenueSummaryDto))]
+[JsonSerializable(typeof(PartnerRevenueDetailDto))]
+[JsonSerializable(typeof(List<PartnerRevenueDetailDto>))]
 // Management API Keys
 [JsonSerializable(typeof(MgmtApiKeyDto))]
 [JsonSerializable(typeof(List<MgmtApiKeyDto>))]
