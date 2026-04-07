@@ -521,6 +521,18 @@ Four commits fixing critical auth and deployment issues discovered during full-s
 3. **Dynamic version** -- Replaced hardcoded "1.3.0" in SystemInfoDto with `AssemblyInformationalVersionAttribute` read from `<Version>1.3.1</Version>` in csproj.
 4. **Web tenant resolution** -- `VITE_DEFAULT_TENANT_ID` build arg in Platform.Web Dockerfile + docker-compose.full.yml for localhost login.
 
+## Sprint 0: Multi-Tenant Security Fixes -- COMPLETE (2026-04-07)
+
+**Spec:** `docs/superpowers/specs/2026-04-07-sprint0-security-fixes-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-07-sprint0-security-fixes.md`
+
+Five multi-tenant security vulnerabilities fixed (7 Platform commits + 1 Sdk.Pro commit):
+1. **Analytics cross-tenant leak** -- Queue-filtered overloads in Sdk.Pro (`GetAllLiveStates(IReadOnlySet<string>? allowedQueues)`). Platform endpoint loads tenant's queue names from `IQueueStore` and passes as filter.
+2. **Recording path traversal** -- `ResolveRecordingPath` helper: `Path.GetFileName` sanitization + `GetFullPath`/`StartsWith` bounds check + per-tenant subdirectory with legacy fallback.
+3. **Realtime context isolation** -- `ValidateContext` helper: whitelist (`from-internal`, `from-external`, `default`) + auto-prefix with `TenantOptions.DialplanContextPrefix` when configured.
+4. **Partner ownership bypass** -- Non-platform callers can only create children under their own tenant. Parent must be Active.
+5. **Webhook security** -- Layer 1: `IsActive` gate via `ITenantChannelConfigStore` in WebhookEndpoints. Layer 2: Per-tenant HMAC in 5 handlers (WhatsApp, Messenger, Instagram, Telegram, Twitter) with fallback to global `IOptions<T>` secret.
+
 ## Plan Execution
 
 **Always use Subagent-Driven Development** with risk-weighted batching (FCM pattern):
