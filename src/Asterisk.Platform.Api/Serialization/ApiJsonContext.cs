@@ -233,6 +233,7 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(Dictionary<string, int>))]
 // TenantSettings Facade
 [JsonSerializable(typeof(TenantSettingsDto))]
+[JsonSerializable(typeof(DunningStatusDto))]
 [JsonSerializable(typeof(UpdateTenantSettingsRequest))]
 [JsonSerializable(typeof(OperationalSettingsDto))]
 [JsonSerializable(typeof(AuthSettingsDto))]

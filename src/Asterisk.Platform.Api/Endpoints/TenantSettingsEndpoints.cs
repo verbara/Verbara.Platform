@@ -10,6 +10,13 @@ namespace Asterisk.Platform.Api.Endpoints;
 
 // ── Read DTOs ────────────────────────────────────────────────────────────────
 
+internal sealed record DunningStatusDto(
+    string InvoiceId,
+    string CurrentStage,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? EscalatedAt,
+    bool IsPaused);
+
 internal sealed record TenantSettingsDto(
     string TenantId,
     string Name,
@@ -19,7 +26,11 @@ internal sealed record TenantSettingsDto(
     AuthSettingsDto Auth,
     QuotaSettingsDto Quotas,
     RetentionSettingsDto Retention,
-    RateLimitTier RateLimitTier);
+    RateLimitTier RateLimitTier,
+    string Plan,
+    IReadOnlyList<string> EnabledFeatures,
+    IReadOnlyList<string> AddOns,
+    DunningStatusDto? Dunning);
 
 internal sealed record OperationalSettingsDto(
     int MaxConcurrentChannels,
@@ -65,7 +76,9 @@ internal sealed record UpdateTenantSettingsRequest(
     UpdateAuthSettingsDto? Auth = null,
     UpdateQuotaSettingsDto? Quotas = null,
     UpdateRetentionSettingsDto? Retention = null,
-    RateLimitTier? RateLimitTier = null);
+    RateLimitTier? RateLimitTier = null,
+    TenantPlan? Plan = null,
+    IReadOnlyList<PlanFeature>? AddOns = null);
 
 internal sealed record UpdateOperationalSettingsDto(
     int? MaxConcurrentChannels = null,
@@ -124,6 +137,9 @@ internal static class TenantSettingsEndpoints
         [FromServices] ITenantAuthConfigStore authConfigStore,
         [FromServices] ITenantQuotaStore quotaStore,
         [FromServices] ITenantRetentionPolicyStore retentionStore,
+        [FromServices] ITenantAddOnStore addOnStore,
+        [FromServices] IDunningStore dunningStore,
+        [FromServices] IFeatureGateService featureGateService,
         CancellationToken ct)
     {
         var tenantId = context.User.FindFirst("tid")?.Value
@@ -132,7 +148,8 @@ internal static class TenantSettingsEndpoints
         if (tenantId is null)
             return Results.Unauthorized();
 
-        var dto = await BuildSettingsDto(tenantId, tenantStore, authConfigStore, quotaStore, retentionStore, ct);
+        var dto = await BuildSettingsDto(tenantId, tenantStore, authConfigStore, quotaStore, retentionStore,
+            addOnStore, dunningStore, featureGateService, ct);
         return dto is null ? Results.NotFound() : Results.Ok(dto);
     }
 
@@ -144,6 +161,10 @@ internal static class TenantSettingsEndpoints
         [FromServices] ITenantQuotaStore quotaStore,
         [FromServices] ITenantRetentionPolicyStore retentionStore,
         [FromServices] TenantTierCache tierCache,
+        [FromServices] ITenantAddOnStore addOnStore,
+        [FromServices] IDunningStore dunningStore,
+        [FromServices] IFeatureGateService featureGateService,
+        [FromServices] FeatureGateCache featureGateCache,
         CancellationToken ct)
     {
         var tenantId = context.User.FindFirst("tid")?.Value
@@ -152,12 +173,14 @@ internal static class TenantSettingsEndpoints
         if (tenantId is null)
             return Results.Unauthorized();
 
-        // AdminOnly cannot write quotas or rateLimitTier — strip them
-        var sanitized = body with { Quotas = null, RateLimitTier = null };
+        // AdminOnly cannot write quotas, rateLimitTier, plan, or addOns — strip them
+        var sanitized = body with { Quotas = null, RateLimitTier = null, Plan = null, AddOns = null };
 
-        await ApplyUpdates(tenantId, sanitized, tenantStore, authConfigStore, quotaStore, retentionStore, tierCache, ct);
+        await ApplyUpdates(tenantId, sanitized, tenantStore, authConfigStore, quotaStore, retentionStore,
+            tierCache, featureGateCache, addOnStore, ct);
 
-        var dto = await BuildSettingsDto(tenantId, tenantStore, authConfigStore, quotaStore, retentionStore, ct);
+        var dto = await BuildSettingsDto(tenantId, tenantStore, authConfigStore, quotaStore, retentionStore,
+            addOnStore, dunningStore, featureGateService, ct);
         return dto is null ? Results.NotFound() : Results.Ok(dto);
     }
 
@@ -169,6 +192,9 @@ internal static class TenantSettingsEndpoints
         ITenantAuthConfigStore authConfigStore,
         ITenantQuotaStore quotaStore,
         ITenantRetentionPolicyStore retentionStore,
+        ITenantAddOnStore? addOnStore,
+        IDunningStore? dunningStore,
+        IFeatureGateService? featureGateService,
         CancellationToken ct)
     {
         var tenantTask = tenantStore.GetAsync(tenantId, ct).AsTask();
@@ -185,6 +211,18 @@ internal static class TenantSettingsEndpoints
         var auth = await authTask ?? new TenantAuthConfig { TenantId = tenantId };
         var quota = await quotaTask ?? new TenantQuota { TenantId = new TenantId(tenantId) };
         var retention = await retentionTask;
+
+        var addOns = addOnStore is not null
+            ? await addOnStore.GetAsync(tenantId, ct)
+            : Array.Empty<TenantAddOn>();
+
+        var dunning = dunningStore is not null
+            ? await dunningStore.GetActiveAsync(tenantId, ct)
+            : null;
+
+        var plan = tenant.GetPlan();
+        var enabledFeatures = featureGateService?.GetEnabledFeatures(tenantId)
+            ?? (IReadOnlySet<PlanFeature>)PlanDefinition.GetFeatures(plan);
 
         return new TenantSettingsDto(
             TenantId: tenant.TenantId,
@@ -224,7 +262,16 @@ internal static class TenantSettingsEndpoints
                 AuthEventRetentionDays: retention?.AuthEventRetentionDays,
                 AuditRetentionDays: retention?.AuditRetentionDays,
                 UsageRecordRetentionDays: retention?.UsageRecordRetentionDays),
-            RateLimitTier: tenant.GetRateLimitTier());
+            RateLimitTier: tenant.GetRateLimitTier(),
+            Plan: plan.ToString(),
+            EnabledFeatures: enabledFeatures.Select(f => f.ToString()).ToList(),
+            AddOns: addOns.Select(a => a.Feature.ToString()).ToList(),
+            Dunning: dunning is null ? null : new DunningStatusDto(
+                InvoiceId: dunning.InvoiceId,
+                CurrentStage: dunning.CurrentStage.ToString(),
+                StartedAt: dunning.StartedAt,
+                EscalatedAt: dunning.EscalatedAt,
+                IsPaused: dunning.IsPaused));
     }
 
     internal static async Task ApplyUpdates(
@@ -235,9 +282,11 @@ internal static class TenantSettingsEndpoints
         ITenantQuotaStore quotaStore,
         ITenantRetentionPolicyStore retentionStore,
         TenantTierCache? tierCache,
+        FeatureGateCache? featureGateCache,
+        ITenantAddOnStore? addOnStore,
         CancellationToken ct)
     {
-        if (body.Operational is not null || body.RateLimitTier is not null)
+        if (body.Operational is not null || body.RateLimitTier is not null || body.Plan is not null)
         {
             var tenant = await tenantStore.GetAsync(tenantId, ct);
             if (tenant is not null)
@@ -249,6 +298,26 @@ internal static class TenantSettingsEndpoints
 
                 if (body.RateLimitTier is { } tier)
                     newMetadata["RateLimitTier"] = tier.ToString();
+
+                if (body.Plan is { } newPlan)
+                {
+                    // Hierarchy ceiling: child cannot exceed parent plan
+                    if (tenant.ParentTenantId is not null)
+                    {
+                        var parent = await tenantStore.GetAsync(tenant.ParentTenantId, ct);
+                        if (parent is not null && parent.GetPlan() < newPlan)
+                            return; // Silently skip — validation should be done at endpoint level
+                    }
+
+                    newMetadata["Plan"] = newPlan.ToString();
+
+                    // Derive tier from plan if no manual override
+                    if (!newMetadata.ContainsKey("RateLimitTier"))
+                    {
+                        var derivedTier = PlanDefinition.GetDefaultTier(newPlan);
+                        tierCache?.SetTier(tenantId, derivedTier);
+                    }
+                }
 
                 var updated = new Tenant
                 {
@@ -336,5 +405,29 @@ internal static class TenantSettingsEndpoints
 
             await retentionStore.SaveAsync(policy, ct);
         }
+
+        if (body.AddOns is not null && addOnStore is not null)
+        {
+            var existingAddOns = await addOnStore.GetAsync(tenantId, ct);
+            var requestedSet = body.AddOns.ToHashSet();
+            var existingSet = existingAddOns.Select(a => a.Feature).ToHashSet();
+
+            foreach (var feature in requestedSet.Except(existingSet))
+            {
+                await addOnStore.UpsertAsync(new TenantAddOn
+                {
+                    TenantId = tenantId,
+                    Feature = feature,
+                    EnabledAt = DateTimeOffset.UtcNow,
+                }, ct);
+            }
+
+            foreach (var feature in existingSet.Except(requestedSet))
+                await addOnStore.DeleteAsync(tenantId, feature, ct);
+        }
+
+        // Invalidate feature cache after plan/add-on changes
+        if (body.Plan is not null || body.AddOns is not null)
+            featureGateCache?.Remove(tenantId);
     }
 }

@@ -336,6 +336,8 @@ builder.Services.AddHealthChecks();
 
 builder.Services.AddRateLimiter(TenantRateLimitPolicy.ConfigureRateLimiting);
 builder.Services.AddSingleton<Asterisk.Platform.Api.Services.TenantTierCache>();
+builder.Services.AddSingleton<Asterisk.Platform.Api.Services.FeatureGateCache>();
+builder.Services.AddSingleton<Asterisk.Platform.Core.IFeatureGateService, Asterisk.Platform.Api.Services.DefaultFeatureGateService>();
 
 // ─── API Versioning ───────────────────────────────────────────────────────────
 

@@ -24,10 +24,14 @@ internal static class ManagementTenantSettingsEndpoints
         [FromServices] ITenantAuthConfigStore authConfigStore,
         [FromServices] ITenantQuotaStore quotaStore,
         [FromServices] ITenantRetentionPolicyStore retentionStore,
+        [FromServices] ITenantAddOnStore addOnStore,
+        [FromServices] IDunningStore dunningStore,
+        [FromServices] IFeatureGateService featureGateService,
         CancellationToken ct)
     {
         var dto = await TenantSettingsEndpoints.BuildSettingsDto(
-            id, tenantStore, authConfigStore, quotaStore, retentionStore, ct);
+            id, tenantStore, authConfigStore, quotaStore, retentionStore,
+            addOnStore, dunningStore, featureGateService, ct);
         return dto is null ? Results.NotFound() : Results.Ok(dto);
     }
 
@@ -39,6 +43,10 @@ internal static class ManagementTenantSettingsEndpoints
         [FromServices] ITenantQuotaStore quotaStore,
         [FromServices] ITenantRetentionPolicyStore retentionStore,
         [FromServices] TenantTierCache tierCache,
+        [FromServices] ITenantAddOnStore addOnStore,
+        [FromServices] IDunningStore dunningStore,
+        [FromServices] IFeatureGateService featureGateService,
+        [FromServices] FeatureGateCache featureGateCache,
         CancellationToken ct)
     {
         var existing = await tenantStore.GetAsync(id, ct);
@@ -46,10 +54,12 @@ internal static class ManagementTenantSettingsEndpoints
             return Results.NotFound();
 
         await TenantSettingsEndpoints.ApplyUpdates(
-            id, body, tenantStore, authConfigStore, quotaStore, retentionStore, tierCache, ct);
+            id, body, tenantStore, authConfigStore, quotaStore, retentionStore,
+            tierCache, featureGateCache, addOnStore, ct);
 
         var dto = await TenantSettingsEndpoints.BuildSettingsDto(
-            id, tenantStore, authConfigStore, quotaStore, retentionStore, ct);
+            id, tenantStore, authConfigStore, quotaStore, retentionStore,
+            addOnStore, dunningStore, featureGateService, ct);
         return Results.Ok(dto);
     }
 }
