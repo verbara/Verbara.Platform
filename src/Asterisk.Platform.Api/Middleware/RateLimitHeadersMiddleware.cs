@@ -24,8 +24,7 @@ internal sealed class RateLimitHeadersMiddleware
         if (!context.Items.TryGetValue("TenantId", out var tenantIdObj) || tenantIdObj is not string tenantId)
             return;
 
-        // Default tier — will come from tenant config in a future update
-        var tier = RateLimitTier.Standard;
+        var tier = context.RequestServices.GetService<Services.TenantTierCache>()?.GetTier(tenantId) ?? RateLimitTier.Standard;
         var limit = tier.GetPermitLimit();
 
         // Reset = start of next 1-minute window

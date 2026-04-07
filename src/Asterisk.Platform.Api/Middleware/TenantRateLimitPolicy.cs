@@ -27,7 +27,7 @@ internal static class TenantRateLimitPolicy
 
             var tier = tenantId == "__global__"
                 ? RateLimitTier.Unlimited
-                : RateLimitTier.Standard; // Default tier; will be read from tenant config in a future update
+                : context.RequestServices.GetService<Services.TenantTierCache>()?.GetTier(tenantId) ?? RateLimitTier.Standard;
 
             if (tier.IsUnlimited())
                 return RateLimitPartition.GetNoLimiter(tenantId);
