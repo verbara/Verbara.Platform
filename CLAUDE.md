@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.1-pro).
 
-**28 packages, 1103 tests, 0 warnings, AOT-compatible, 47 endpoint groups, version 1.3.1:**
+**28 packages, 1396 tests, 0 warnings, AOT-compatible, 47 endpoint groups, version 1.3.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -34,7 +34,7 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
 | Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, DI | 40 |
 | Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 115 |
-| Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 5 |
+| Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 6 |
 | Platform.Api | HTTP host -- 47 endpoint groups, auth, middleware, SSE, OpenAPI | 410 |
 
 ## Build & Test
@@ -229,7 +229,7 @@ Full documentation at `docs/demo-environment.md`. **This file MUST be updated wh
 - Central package management in Directory.Packages.props
 - Key NuGet versions: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0, Asp.Versioning.Http, QuestPDF, ScottPlot, MailKit, NCrontab
 - **PostgreSQL 18** — all Docker compose files standardized on `postgres:18-alpine`
-- **Npgsql 9 + Dapper:** Postgres row types MUST be class-based with `{get; init;}`, NOT positional records. Npgsql 9 returns `DateTime` for `timestamptz`; Dapper constructor matching fails with nullable `DateTime?` params. All 40 stores already converted.
+- **Npgsql 9 + Dapper:** Postgres row types MUST be class-based with `{get; init;}`, NOT positional records. Npgsql 9 returns `DateTime` for `timestamptz`; Dapper constructor matching fails with nullable `DateTime?` params. All 43 stores already converted.
 
 ## v1.1.0 "Enterprise Ready" -- COMPLETE (2026-03-26)
 
@@ -503,6 +503,14 @@ builder.Services.AddPlatformApiVersioning();  // wired in Program.cs
 Two stabilization commits:
 1. **API URL migration** -- Updated all 55 Platform.Web files (38 hooks, 6 auth pages, API client, SSE, vite proxy, config.json, E2E fixtures) from `/api/` to `/api/v1/`, eliminating reliance on VersionRedirectMiddleware
 2. **GDPR export fix** -- Made `[FromQuery] string format` nullable on `ExportContactData` endpoint, fixing 2 pre-existing test failures (non-nullable string treated as required by ASP.NET model binding)
+
+## Docker & Storage Stabilization -- COMPLETE (2026-04-06)
+
+Six commits fixing Docker deployment and storage gaps:
+1. **Full-stack compose fixes** -- Install curl in Dockerfile for healthcheck, disable licensing in dev, robust healthcheck with start_period
+2. **Docker image upgrades** -- PostgreSQL 16/17→18-alpine, Redis 7→8-alpine across all 4 compose files
+3. **PostgresTenantStore** -- New Dapper implementation of ITenantStore (was InMemory-only, tenants lost on restart). Migration 007 adds tenants + scheduled_reports + report_executions tables
+4. **Pro Analytics InMemory fallbacks** -- InMemoryCompletedSessionStore, InMemoryIntervalSnapshotStore, InMemoryCallAnalyticsStore prevent DI crashes when Analytics connection string is absent
 
 ## Plan Execution
 
