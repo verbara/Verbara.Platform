@@ -15,4 +15,16 @@ public static class TenantExtensions
         if (tenant.Metadata is not null)
             tenant.Metadata[RateLimitTierKey] = tier.ToString();
     }
+
+    private const string PlanKey = "Plan";
+
+    public static TenantPlan GetPlan(this Tenant tenant)
+        => tenant.Metadata?.GetValueOrDefault(PlanKey) is string s
+            && Enum.TryParse<TenantPlan>(s, out var plan) ? plan : TenantPlan.Starter;
+
+    public static void SetPlan(this Tenant tenant, TenantPlan plan)
+    {
+        if (tenant.Metadata is not null)
+            tenant.Metadata[PlanKey] = plan.ToString();
+    }
 }
