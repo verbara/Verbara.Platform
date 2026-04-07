@@ -66,6 +66,8 @@ services:
     build:
       context: ../../Asterisk.Platform.Web
       dockerfile: Dockerfile
+      args:
+        VITE_DEFAULT_TENANT_ID: platform
     ports:
       - "80:80"
     depends_on:
