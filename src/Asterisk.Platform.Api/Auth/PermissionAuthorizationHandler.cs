@@ -18,7 +18,8 @@ internal sealed class PermissionAuthorizationHandler : AuthorizationHandler<Perm
         AuthorizationHandlerContext context, PermissionRequirement requirement)
     {
         // API keys with Admin role get all permissions (backward compat)
-        var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value;
+        var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value
+            ?? context.User.FindFirst("role")?.Value;
         if (roleClaim is "Admin" or "SystemAdmin")
         {
             context.Succeed(requirement);

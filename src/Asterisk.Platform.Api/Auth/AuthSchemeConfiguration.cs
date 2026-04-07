@@ -46,6 +46,7 @@ internal static class AuthSchemeConfiguration
             })
             .AddJwtBearer(JwtScheme, options =>
             {
+                options.MapInboundClaims = false;
                 options.TokenValidationParameters = jwtTokenService.ValidationParameters;
 
                 options.Events = new JwtBearerEvents

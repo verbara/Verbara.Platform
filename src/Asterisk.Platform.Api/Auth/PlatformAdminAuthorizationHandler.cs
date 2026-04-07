@@ -62,7 +62,7 @@ internal sealed class PlatformAdminAuthorizationHandler : AuthorizationHandler<P
             if (string.IsNullOrEmpty(userIdClaim))
                 return;
 
-            var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value;
+            var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value ?? context.User.FindFirst("role")?.Value;
             if (roleClaim is not ("Admin" or "SystemAdmin"))
             {
                 var tenantId = new TenantId(tenantIdClaim);
@@ -75,7 +75,7 @@ internal sealed class PlatformAdminAuthorizationHandler : AuthorizationHandler<P
         else
         {
             // No specific permission — require Admin role at minimum
-            var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value;
+            var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value ?? context.User.FindFirst("role")?.Value;
             if (roleClaim is not ("Admin" or "SystemAdmin"))
                 return;
         }
