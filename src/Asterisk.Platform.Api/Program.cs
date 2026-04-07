@@ -335,6 +335,7 @@ builder.Services.AddHealthChecks();
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
 builder.Services.AddRateLimiter(TenantRateLimitPolicy.ConfigureRateLimiting);
+builder.Services.AddSingleton<Asterisk.Platform.Api.Services.TenantTierCache>();
 
 // ─── API Versioning ───────────────────────────────────────────────────────────
 
@@ -381,6 +382,7 @@ app.UseMiddleware<RateLimitHeadersMiddleware>();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<TenantStatusMiddleware>();
 app.UseMiddleware<LicenseGateMiddleware>();
 
 app.MapOpenApi();
