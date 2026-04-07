@@ -86,9 +86,6 @@ var coreConnectionString = builder.Configuration.GetConnectionString("Postgres")
 if (!string.IsNullOrEmpty(coreConnectionString))
 {
     builder.Services.AddPostgresStorage(coreConnectionString);
-    // ITenantStore has no Postgres implementation yet — use InMemory as fallback
-    builder.Services.AddSingleton<Asterisk.Sdk.Pro.MultiTenant.ITenantStore,
-        Asterisk.Platform.Storage.InMemory.InMemoryTenantStore>();
 }
 else
 {
@@ -280,6 +277,14 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     // AgentAssist Postgres query stores (read-only endpoints for supervisor dashboard)
     builder.Services.AddProAgentAssistPostgres(analyticsConnectionString);
 }
+
+// ─── Pro Analytics InMemory fallbacks (when no Analytics/Dialer connection string) ──
+if (!builder.Services.Any(d => d.ServiceType == typeof(Asterisk.Sdk.Pro.EventStore.ICompletedSessionStore)))
+    builder.Services.AddSingleton<Asterisk.Sdk.Pro.EventStore.ICompletedSessionStore, Asterisk.Platform.Storage.InMemory.InMemoryCompletedSessionStore>();
+if (!builder.Services.Any(d => d.ServiceType == typeof(Asterisk.Sdk.Pro.Analytics.IIntervalSnapshotStore)))
+    builder.Services.AddSingleton<Asterisk.Sdk.Pro.Analytics.IIntervalSnapshotStore, Asterisk.Platform.Storage.InMemory.InMemoryIntervalSnapshotStore>();
+if (!builder.Services.Any(d => d.ServiceType == typeof(Asterisk.Sdk.Pro.CallAnalytics.Store.ICallAnalyticsStore)))
+    builder.Services.AddSingleton<Asterisk.Sdk.Pro.CallAnalytics.Store.ICallAnalyticsStore, Asterisk.Platform.Storage.InMemory.InMemoryCallAnalyticsStore>();
 
 // ─── Recordings ─────────────────────────────────────────────────────────────
 builder.Services.Configure<RecordingOptions>(o =>

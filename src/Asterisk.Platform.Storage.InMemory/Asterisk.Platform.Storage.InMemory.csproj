@@ -30,6 +30,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Asterisk.Sdk.Pro.MultiTenant" />
+    <PackageReference Include="Asterisk.Sdk.Pro.EventStore" />
+    <PackageReference Include="Asterisk.Sdk.Pro.Analytics" />
+    <PackageReference Include="Asterisk.Sdk.Pro.CallAnalytics" />
   </ItemGroup>
 
 </Project>

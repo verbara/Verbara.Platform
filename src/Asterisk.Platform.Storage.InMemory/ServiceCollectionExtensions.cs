@@ -16,6 +16,9 @@ using Asterisk.Platform.Surveys;
 using Asterisk.Platform.Core.Reports;
 using Asterisk.Platform.Core.Webhooks;
 using Asterisk.Sdk.Pro.MultiTenant;
+using Asterisk.Sdk.Pro.EventStore;
+using Asterisk.Sdk.Pro.Analytics;
+using Asterisk.Sdk.Pro.CallAnalytics.Store;
 
 namespace Asterisk.Platform.Storage.InMemory;
 
@@ -101,6 +104,14 @@ public static class ServiceCollectionExtensions
         // MultiTenant
         if (!services.Any(d => d.ServiceType == typeof(ITenantStore)))
             services.AddSingleton<ITenantStore, InMemoryTenantStore>();
+
+        // Pro Analytics (fallback when no Postgres analytics configured)
+        if (!services.Any(d => d.ServiceType == typeof(ICompletedSessionStore)))
+            services.AddSingleton<ICompletedSessionStore, InMemoryCompletedSessionStore>();
+        if (!services.Any(d => d.ServiceType == typeof(IIntervalSnapshotStore)))
+            services.AddSingleton<IIntervalSnapshotStore, InMemoryIntervalSnapshotStore>();
+        if (!services.Any(d => d.ServiceType == typeof(ICallAnalyticsStore)))
+            services.AddSingleton<ICallAnalyticsStore, InMemoryCallAnalyticsStore>();
 
         // Media
         services.AddSingleton<IMediaStore, InMemoryMediaStore>();
