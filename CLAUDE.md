@@ -229,6 +229,7 @@ Full documentation at `docs/demo-environment.md`. **This file MUST be updated wh
 - Central package management in Directory.Packages.props
 - Key NuGet versions: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0, Asp.Versioning.Http, QuestPDF, ScottPlot, MailKit, NCrontab
 - **PostgreSQL 18** — all Docker compose files standardized on `postgres:18-alpine`
+- **JWT claims** — `MapInboundClaims = false` in AddJwtBearer. All auth handlers use short claim names (`tid`, `role`, `sub`). .NET 10 maps claims by default; without this setting, `FindFirst("tid")` fails.
 - **Npgsql 9 + Dapper:** Postgres row types MUST be class-based with `{get; init;}`, NOT positional records. Npgsql 9 returns `DateTime` for `timestamptz`; Dapper constructor matching fails with nullable `DateTime?` params. All 43 stores already converted.
 
 ## v1.1.0 "Enterprise Ready" -- COMPLETE (2026-03-26)
@@ -511,6 +512,14 @@ Six commits fixing Docker deployment and storage gaps:
 2. **Docker image upgrades** -- PostgreSQL 16/17→18-alpine, Redis 7→8-alpine across all 4 compose files
 3. **PostgresTenantStore** -- New Dapper implementation of ITenantStore (was InMemory-only, tenants lost on restart). Migration 007 adds tenants + scheduled_reports + report_executions tables
 4. **Pro Analytics InMemory fallbacks** -- InMemoryCompletedSessionStore, InMemoryIntervalSnapshotStore, InMemoryCallAnalyticsStore prevent DI crashes when Analytics connection string is absent
+
+## Auth & Deployment Fixes -- COMPLETE (2026-04-07)
+
+Four commits fixing critical auth and deployment issues discovered during full-stack testing:
+1. **JWT MapInboundClaims** -- .NET 10 JWT Bearer maps claims by default (`tid`→full URI), breaking PlatformAdminOnly authorization. Set `MapInboundClaims = false` explicitly + role claim fallback in both auth handlers.
+2. **API Key key_type** -- Added `key_type` column to api_keys table (migration 008), PostgresApiKeyStore now persists `ApiKeyType.Management`. Management API keys work correctly from Postgres.
+3. **Dynamic version** -- Replaced hardcoded "1.3.0" in SystemInfoDto with `AssemblyInformationalVersionAttribute` read from `<Version>1.3.1</Version>` in csproj.
+4. **Web tenant resolution** -- `VITE_DEFAULT_TENANT_ID` build arg in Platform.Web Dockerfile + docker-compose.full.yml for localhost login.
 
 ## Plan Execution
 
