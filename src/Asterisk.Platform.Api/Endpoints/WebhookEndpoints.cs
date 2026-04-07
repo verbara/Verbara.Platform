@@ -35,6 +35,7 @@ internal static class WebhookEndpoints
         [FromServices] IContactStore contactStore,
         IVirtualAgent virtualAgent,
         [FromServices] DeliveryStatusHandler deliveryStatusHandler,
+        [FromServices] ITenantChannelConfigStore configStore,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
@@ -44,6 +45,11 @@ internal static class WebhookEndpoints
             return Results.BadRequest(new ErrorResponse($"Unknown channel: {channel}"));
 
         var tid = new TenantId(tenantId);
+
+        // Verify channel is configured and active for this tenant
+        var channelConfig = await configStore.GetAsync(tid, channelType, ct);
+        if (channelConfig is null || !channelConfig.IsActive)
+            return Results.NotFound();
 
         // Read body
         using var ms = new MemoryStream();
