@@ -1,4 +1,5 @@
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.MultiTenant;
@@ -109,6 +110,14 @@ internal static class ManagementTenantEndpoints
         if (parent.Status != TenantStatus.Active)
             return Results.BadRequest(new ErrorResponse("Cannot create children under an inactive tenant."));
 
+        // Validate template if provided
+        if (body.Template is not null && !TenantProvisioningTemplates.ValidTemplateNames.Contains(body.Template))
+            return Results.BadRequest(new ErrorResponse($"Invalid template '{body.Template}'. Valid: support, sales, blended."));
+
+        var metadata = body.Metadata ?? new Dictionary<string, string>();
+        if (body.Template is not null)
+            metadata["OnboardingTemplate"] = body.Template;
+
         var tenant = new Tenant
         {
             TenantId = body.TenantId,
@@ -121,7 +130,7 @@ internal static class ManagementTenantEndpoints
                 MaxConcurrentChannels = body.MaxConcurrentChannels ?? 100,
                 MaxActiveCampaigns = body.MaxActiveCampaigns ?? 10,
             },
-            Metadata = body.Metadata,
+            Metadata = metadata,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow,
         };
@@ -324,7 +333,8 @@ internal sealed record CreateMgmtTenantRequest(
     string? ParentTenantId = null,
     int? MaxConcurrentChannels = null,
     int? MaxActiveCampaigns = null,
-    Dictionary<string, string>? Metadata = null);
+    Dictionary<string, string>? Metadata = null,
+    string? Template = null);
 
 internal sealed record UpdateMgmtTenantRequest(
     string? Name = null,

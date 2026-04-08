@@ -106,12 +106,18 @@ internal static class PartnerCustomerEndpoints
             customerPlan = TenantPlan.Starter;
         }
 
+        // Validate template if provided
+        if (body.Template is not null && !TenantProvisioningTemplates.ValidTemplateNames.Contains(body.Template))
+            return Results.BadRequest(new ErrorResponse($"Invalid template '{body.Template}'. Valid: support, sales, blended."));
+
         var derivedTier = PlanDefinition.GetDefaultTier(customerPlan);
         var metadata = new Dictionary<string, string>
         {
             ["Plan"] = customerPlan.ToString(),
             ["RateLimitTier"] = derivedTier.ToString(),
         };
+        if (body.Template is not null)
+            metadata["OnboardingTemplate"] = body.Template;
 
         var tenant = new Tenant
         {
@@ -419,7 +425,8 @@ internal sealed record PartnerCustomerDto(
 internal sealed record CreatePartnerCustomerRequest(
     string TenantId,
     string Name,
-    string? Plan = null);
+    string? Plan = null,
+    string? Template = null);
 
 internal sealed record UpdatePartnerCustomerRequest(
     string? Name = null,
