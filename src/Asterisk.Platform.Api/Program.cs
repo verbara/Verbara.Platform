@@ -468,6 +468,7 @@ v1.MapPartnerCustomerEndpoints();
 v1.MapPartnerBillingEndpoints();
 v1.MapPartnerRevenueEndpoints();
 v1.MapPartnerSettingsEndpoints();
+v1.MapBrandingEndpoints();
 
 // ─── RBAC seed: permissions, role templates (Postgres only) ──────────────────
 if (!app.Environment.IsEnvironment("Testing"))
