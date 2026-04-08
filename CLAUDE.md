@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.1-pro).
 
-**28 packages, 1546 tests, 0 warnings, AOT-compatible, 56 endpoint groups (14 with feature gates), version 1.3.1:**
+**30 packages, 1546 tests, 0 warnings, NativeAOT (IsAotCompatible=true), 56 endpoint groups (14 with feature gates), version 1.3.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -33,9 +33,11 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Audit | Audit trail -- event logging, query, retention, DI | 41 |
 | Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
 | Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, dunning lifecycle, DI | 46 |
+| Platform.Renderer | Stateless PDF/CSV rendering microservice (`:5010`) -- QuestPDF + ScottPlot, concurrency semaphore | 0 |
+| Platform.Mail | Email + Microsoft 365 Graph microservice (`:5020`) -- MailKit SMTP, Graph API, OAuth PKCE | 0 |
 | Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 106 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 6 |
-| Platform.Api | HTTP host -- 49 endpoint groups (14 feature-gated), auth, middleware, SSE, OpenAPI | 434 |
+| Platform.Api | HTTP host -- 49 endpoint groups (14 feature-gated), auth, middleware, SSE, NativeAOT | 434 |
 
 ## Build & Test
 
@@ -231,7 +233,7 @@ Full documentation at `docs/demo-environment.md`. **This file MUST be updated wh
 - Test stack: xunit 2.9.3, FluentAssertions 7.1.0, NSubstitute 5.3.0
 - TreatWarningsAsErrors ON, WarningLevel 9999
 - Central package management in Directory.Packages.props
-- Key NuGet versions: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0, Asp.Versioning.Http, QuestPDF, ScottPlot, MailKit, NCrontab
+- Key NuGet versions: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0, Asp.Versioning.Http, QuestPDF (Renderer only), ScottPlot (Renderer only), MailKit (Mail only), Microsoft.Graph + Azure.Identity (Mail only), NCrontab
 - **PostgreSQL 18** — all Docker compose files standardized on `postgres:18-alpine`
 - **JWT claims** — `MapInboundClaims = false` in AddJwtBearer. All auth handlers use short claim names (`tid`, `role`, `sub`). .NET 10 maps claims by default; without this setting, `FindFirst("tid")` fails.
 - **Npgsql 9 + Dapper:** Postgres row types MUST be class-based with `{get; init;}`, NOT positional records. Npgsql 9 returns `DateTime` for `timestamptz`; Dapper constructor matching fails with nullable `DateTime?` params. All 43 stores already converted.
@@ -582,6 +584,20 @@ Two deliverables (12 commits, +35 tests):
 Two deliverables (10 commits, +39 tests):
 1. **Tenant Onboarding** -- `TenantProvisioningService` implements `ITenantLifecycleHandler.OnTenantCreatedAsync` to auto-provision Golden Defaults (clone 8 role templates, plan-derived auth config + retention policy, default CSAT survey). 3 built-in use-case templates (`support`/`sales`/`blended`) with pre-configured queues, flows, and automation rules via `TenantProvisioningTemplates`. Template param added to `POST /management/tenants` and `POST /partner/customers`. 4 onboarding endpoints (`/admin/onboarding/*`: status, apply-template, complete, dismiss-checklist) with 7-item dynamic Getting Started checklist. State in `Tenant.Metadata` (OnboardingCompleted, OnboardingTemplate, OnboardingChannels, OnboardingDismissedChecklist).
 2. **Impersonation Read-Only** -- Permission intersection model: `ImpersonateRequest` gains `bool ReadOnly` field. When `readOnly=true`, JWT contains only 22 view permissions (`:view`, `:monitor`, `:play`, `:export`) — endpoints with manage permissions fail naturally via RBAC. `readonly=true` JWT claim added. Middleware safety net blocks PUT/DELETE/PATCH in read-only mode, allows GET/HEAD/OPTIONS + safe POSTs (/sse, /search, /export) + end-session. `AuditEntry.ImpersonatorId` new field (migration 011) for tracking admin identity during impersonated actions. Audit `ImpersonationStarted` event includes `mode: "read_only" | "full"`.
+
+## Sprint 6: Microservice Extraction + NativeAOT -- COMPLETE (2026-04-08)
+
+**Spec:** `docs/superpowers/specs/2026-04-08-sprint6-microservice-extraction-design.md`
+
+Two commits (f9ad703 + c828885), 2 new microservices, NativeAOT activated:
+
+1. **Platform.Renderer** (`:5010`) -- Stateless PDF/CSV rendering microservice. QuestPDF + ScottPlot extracted from Platform.Api. Single endpoint `POST /api/v1/render?format=pdf|csv`, concurrency semaphore (max 3), X-Service-Key auth. Dockerfile.renderer.
+2. **Platform.Mail** (`:5020`) -- Email + Microsoft 365 Graph microservice. MailKit SMTP sending + template rendering extracted from Platform.Api. Microsoft Graph API integration: OAuth 2.0 PKCE with Azure AD (3 auth endpoints), 7 mailbox operations (list/send/reply/forward/delete/mark-read/attachments), PostgreSQL token store with auto-refresh (BackgroundService). Migration 012. Dockerfile.mail.
+3. **Platform.Api NativeAOT** -- `IsAotCompatible=true`, `EnableRequestDelegateGenerator=true`, all AOT analyzers enabled. 15 IL2026/IL3050 fixes (JsonSerializer → typed overloads, WriteAsJsonAsync → ProblemDetails, Configure<T> → manual binding). 1356 → 0 AOT errors.
+4. **HTTP Proxies** -- `HttpPdfReportRenderer`, `HttpEmailService`, `HttpEmailTemplateService` replace in-process implementations via IHttpClientFactory named clients.
+5. **Docker** -- renderer + mail services added to full + production compose files. Services__ServiceKey shared secret for internal auth.
+
+CsvReportRenderer remains in Platform.Api (AOT-safe, no external rendering dependency).
 
 ## Plan Execution
 
