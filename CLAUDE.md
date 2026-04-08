@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.1-pro).
 
-**28 packages, 1507 tests, 0 warnings, AOT-compatible, 55 endpoint groups (14 with feature gates), version 1.3.1:**
+**28 packages, 1546 tests, 0 warnings, AOT-compatible, 56 endpoint groups (14 with feature gates), version 1.3.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -116,7 +116,7 @@ ErrorHandlingMiddleware -> CORS -> RateLimiter -> TenantResolutionMiddleware -> 
 - **RBAC:** 64 permissions (`domain:resource:action`), 8 role templates (Agent, Supervisor, Quality Analyst, Manager, Admin, System Admin, API, Platform Admin), custom roles per-tenant, permission cascading via `PermissionResolver` + `PermissionAuthorizationHandler`
 - **Authorization policies:** `AdminOnly`, `SupervisorPlus`, `Authenticated`
 
-### Endpoint Inventory (53 groups, 53 files)
+### Endpoint Inventory (56 groups, 56 files)
 
 All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all routes are versioned under `/api/v1/` (Asp.Versioning.Http, URL-segment strategy). Legacy `/api/` paths redirect for backward compatibility. Key groups:
 
@@ -137,6 +137,7 @@ All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all r
 | Partner | PartnerCustomerEndpoints, PartnerBillingEndpoints, PartnerRevenueEndpoints, PartnerSettingsEndpoints |
 | Branding | BrandingEndpoints (public, no auth) |
 | Notifications | NotificationEndpoints |
+| Onboarding | OnboardingEndpoints (status, apply-template, complete, dismiss-checklist) |
 | Other | DispositionEndpoints, SurveyEndpoints |
 
 ### Pro Package Integration
@@ -572,6 +573,15 @@ Two deliverables (10 commits, +26 tests):
 Two deliverables (12 commits, +35 tests):
 1. **White-Label Branding** -- `TenantBranding` model (14 fields) with dedicated store (`ITenantBrandingStore`, InMemory + Postgres, migration 010). 3-tier inheritance (Customer → Partner → Platform defaults). Public branding endpoints (`/branding/{tenantId}`, `/branding/by-subdomain/{subdomain}`) for pre-login UI. Branding section in TenantSettings facade (AdminOnly + PlatformAdminOnly with Subdomain control). Subdomain resolution via branding store in `TenantResolutionMiddleware`. Branded PDF reports (tenant colors replace hardcoded blue). Per-tenant email From address.
 2. **Notification System** -- `Notification` model with `NotificationCategory` (Operational/System/Security/Billing) + `NotificationSeverity` (Info/Warning/Critical). `NotificationTypeRegistry` with 14 types and role-based routing matrix. `NotificationService` orchestrator with 5-min dedup, SSE delivery via `NotificationEvent` on `PlatformEventBus`, critical→email with branded templates, and partner cross-tenant propagation. 5 notification endpoints (list/count/get/mark-read/mark-all). 6 branded HTML email templates (notification-critical, notification-warning, scheduled-report, gdpr-export-ready, password-reset, welcome-user) via `EmbeddedEmailTemplateService`. Password reset email implemented (was placeholder). GDPR export/purge notifications.
+
+## Sprint 5: Onboarding Wizard + Impersonation Read-Only -- COMPLETE (2026-04-07)
+
+**Spec:** `docs/superpowers/specs/2026-04-07-sprint5-onboarding-impersonation-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-07-sprint5-onboarding-impersonation.md`
+
+Two deliverables (10 commits, +39 tests):
+1. **Tenant Onboarding** -- `TenantProvisioningService` implements `ITenantLifecycleHandler.OnTenantCreatedAsync` to auto-provision Golden Defaults (clone 8 role templates, plan-derived auth config + retention policy, default CSAT survey). 3 built-in use-case templates (`support`/`sales`/`blended`) with pre-configured queues, flows, and automation rules via `TenantProvisioningTemplates`. Template param added to `POST /management/tenants` and `POST /partner/customers`. 4 onboarding endpoints (`/admin/onboarding/*`: status, apply-template, complete, dismiss-checklist) with 7-item dynamic Getting Started checklist. State in `Tenant.Metadata` (OnboardingCompleted, OnboardingTemplate, OnboardingChannels, OnboardingDismissedChecklist).
+2. **Impersonation Read-Only** -- Permission intersection model: `ImpersonateRequest` gains `bool ReadOnly` field. When `readOnly=true`, JWT contains only 22 view permissions (`:view`, `:monitor`, `:play`, `:export`) — endpoints with manage permissions fail naturally via RBAC. `readonly=true` JWT claim added. Middleware safety net blocks PUT/DELETE/PATCH in read-only mode, allows GET/HEAD/OPTIONS + safe POSTs (/sse, /search, /export) + end-session. `AuditEntry.ImpersonatorId` new field (migration 011) for tracking admin identity during impersonated actions. Audit `ImpersonationStarted` event includes `mode: "read_only" | "full"`.
 
 ## Plan Execution
 
