@@ -273,6 +273,10 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateWebhookSubscriptionRequest))]
 [JsonSerializable(typeof(WebhookEventTypeDto))]
 [JsonSerializable(typeof(List<WebhookEventTypeDto>))]
+// Notifications
+[JsonSerializable(typeof(NotificationEndpoints.NotificationDto))]
+[JsonSerializable(typeof(List<NotificationEndpoints.NotificationDto>))]
+[JsonSerializable(typeof(NotificationEndpoints.UnreadCountDto))]
 // Branding (public)
 [JsonSerializable(typeof(BrandingEndpoints.PublicBrandingDto))]
 [JsonSourceGenerationOptions(
