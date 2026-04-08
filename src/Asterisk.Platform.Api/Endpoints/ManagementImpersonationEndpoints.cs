@@ -10,6 +10,32 @@ namespace Asterisk.Platform.Api.Endpoints;
 
 internal static class ManagementImpersonationEndpoints
 {
+    private static readonly HashSet<string> ReadOnlyPermissions = new(StringComparer.Ordinal)
+    {
+        "contacts:contact:view",
+        "contacts:conversation:monitor",
+        "queues:queue:view",
+        "users:user:view",
+        "campaigns:campaign:view",
+        "reporting:realtime:view",
+        "reporting:historical:view",
+        "reporting:historical:export",
+        "quality:evaluation:view",
+        "recording:recording:play",
+        "recording:recording:export",
+        "routing:skill:view",
+        "routing:flow:view",
+        "analytics:cdr:view",
+        "analytics:cdr:export",
+        "analytics:interval:view",
+        "system:audit:view",
+        "agentassist:session:view",
+        "callanalytics:analysis:view",
+        "partner:customer:view",
+        "partner:billing:view",
+        "partner:settings:view",
+    };
+
     public static void MapManagementImpersonationEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/management").RequireAuthorization("PlatformAdminOnly");
@@ -64,12 +90,16 @@ internal static class ManagementImpersonationEndpoints
             return Results.NotFound(new ErrorResponse("Admin user not found."));
 
         // Target permissions: caller's permissions minus platform:* scoped ones
-        var targetPermissions = new HashSet<string>(
-            callerPermissions.Where(p => !p.StartsWith("platform:", StringComparison.Ordinal)));
+        var nonPlatformPerms = callerPermissions
+            .Where(p => !p.StartsWith("platform:", StringComparison.Ordinal));
+
+        var targetPermissions = body.ReadOnly
+            ? new HashSet<string>(nonPlatformPerms.Where(p => ReadOnlyPermissions.Contains(p)))
+            : new HashSet<string>(nonPlatformPerms);
 
         // Generate shadow JWT
         var (token, expiresAt) = jwtTokenService.GenerateImpersonationToken(
-            adminUser, body.TargetTenantId, targetPermissions);
+            adminUser, body.TargetTenantId, targetPermissions, body.ReadOnly);
 
         // Audit log
         await authEventService.LogAsync(
@@ -78,10 +108,10 @@ internal static class ManagementImpersonationEndpoints
             AuthEventTypes.ImpersonationStarted,
             context.Connection.RemoteIpAddress?.ToString(),
             context.Request.Headers.UserAgent,
-            new { targetTenantId = body.TargetTenantId, targetTenantName = targetTenant.Name },
+            new { targetTenantId = body.TargetTenantId, targetTenantName = targetTenant.Name, mode = body.ReadOnly ? "read_only" : "full" },
             ct);
 
-        return Results.Ok(new ImpersonateResponse(token, expiresAt, body.TargetTenantId, targetTenant.Name));
+        return Results.Ok(new ImpersonateResponse(token, expiresAt, body.TargetTenantId, targetTenant.Name, body.ReadOnly));
     }
 
     private static async Task<IResult> EndImpersonation(
@@ -112,5 +142,5 @@ internal static class ManagementImpersonationEndpoints
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
-internal sealed record ImpersonateRequest(string TargetTenantId);
-internal sealed record ImpersonateResponse(string AccessToken, DateTimeOffset ExpiresAt, string TargetTenantId, string TargetTenantName);
+internal sealed record ImpersonateRequest(string TargetTenantId, bool ReadOnly = false);
+internal sealed record ImpersonateResponse(string AccessToken, DateTimeOffset ExpiresAt, string TargetTenantId, string TargetTenantName, bool ReadOnly);

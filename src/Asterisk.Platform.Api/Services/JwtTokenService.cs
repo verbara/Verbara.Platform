@@ -89,7 +89,7 @@ internal sealed class JwtTokenService
     }
 
     public (string Token, DateTimeOffset ExpiresAt) GenerateImpersonationToken(
-        User admin, string targetTenantId, IReadOnlySet<string> targetPermissions)
+        User admin, string targetTenantId, IReadOnlySet<string> targetPermissions, bool readOnly = false)
     {
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.Add(TimeSpan.FromMinutes(30));
@@ -105,6 +105,9 @@ internal sealed class JwtTokenService
             new("impersonator_tenant", admin.TenantId.Value),
             new("impersonation", "true"),
         };
+
+        if (readOnly)
+            claims.Add(new Claim("readonly", "true"));
 
         foreach (var permission in targetPermissions)
         {
