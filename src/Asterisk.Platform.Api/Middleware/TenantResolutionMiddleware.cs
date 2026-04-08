@@ -41,6 +41,16 @@ internal sealed class TenantResolutionMiddleware
             return;
         }
 
+        // Block write operations during read-only impersonation
+        if (IsReadOnlyImpersonation(context) && IsBlockedInReadOnlyMode(context))
+        {
+            context.Response.StatusCode = 403;
+            context.Response.ContentType = "application/json";
+            var error = new ErrorResponse("Operation not allowed in read-only impersonation mode");
+            await JsonSerializer.SerializeAsync(context.Response.Body, error, ApiJsonContext.Default.ErrorResponse);
+            return;
+        }
+
         await _next(context);
     }
 
@@ -126,6 +136,50 @@ internal sealed class TenantResolutionMiddleware
             && (path.StartsWith("/api/management/system/", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("/api/v1/management/system/", StringComparison.OrdinalIgnoreCase)))
         {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsReadOnlyImpersonation(HttpContext context)
+    {
+        return IsImpersonating(context)
+            && context.User.FindFirstValue("readonly") == "true";
+    }
+
+    internal static bool IsBlockedInReadOnlyMode(HttpContext context)
+    {
+        var method = context.Request.Method;
+        var path = context.Request.Path.Value ?? "";
+
+        // GET, HEAD, OPTIONS always allowed
+        if (string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(method, "OPTIONS", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // DELETE /management/impersonate always allowed (end session)
+        if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase)
+            && (path.Equals("/api/v1/management/impersonate", StringComparison.OrdinalIgnoreCase)
+                || path.Equals("/api/management/impersonate", StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        // Block all other DELETE, PUT, PATCH
+        if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(method, "PUT", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(method, "PATCH", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // POST: allow safe read-only operations
+        if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
+        {
+            if (path.Contains("/sse", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (path.Contains("/search", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (path.Contains("/export", StringComparison.OrdinalIgnoreCase))
+                return false;
             return true;
         }
 
