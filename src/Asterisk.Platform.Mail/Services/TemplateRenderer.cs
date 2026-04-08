@@ -2,11 +2,11 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using Asterisk.Platform.Core.Email;
 
-namespace Asterisk.Platform.Api.Services.Email;
+namespace Asterisk.Platform.Mail.Services;
 
-internal sealed class EmbeddedEmailTemplateService : IEmailTemplateService
+internal sealed class TemplateRenderer : IEmailTemplateService
 {
-    private static readonly Assembly _assembly = typeof(EmbeddedEmailTemplateService).Assembly;
+    private static readonly Assembly _assembly = typeof(TemplateRenderer).Assembly;
     private static readonly ConcurrentDictionary<string, string> _cache = new(StringComparer.Ordinal);
 
     public string Render(string templateName, BrandingContext branding,
@@ -20,16 +20,10 @@ internal sealed class EmbeddedEmailTemplateService : IEmailTemplateService
         if (layout is null)
             return $"<p>Base layout template not found.</p>";
 
-        // Inject content into layout
         var rendered = layout.Replace("{{Content}}", content, StringComparison.Ordinal);
-
-        // Apply branding placeholders
         rendered = ApplyBranding(rendered, branding);
-
-        // Apply content-specific variables (HTML-escaped)
         foreach (var (key, value) in variables)
             rendered = rendered.Replace($"{{{{{key}}}}}", EscapeHtml(value), StringComparison.Ordinal);
-
         return rendered;
     }
 
@@ -37,10 +31,9 @@ internal sealed class EmbeddedEmailTemplateService : IEmailTemplateService
     {
         return _cache.GetOrAdd(templateName, name =>
         {
-            var resourceName = $"Asterisk.Platform.Api.Services.Email.Templates.{name}.html";
+            var resourceName = $"Asterisk.Platform.Mail.Templates.{name}.html";
             using var stream = _assembly.GetManifestResourceStream(resourceName);
-            if (stream is null)
-                return null!;
+            if (stream is null) return null!;
             using var reader = new StreamReader(stream);
             return reader.ReadToEnd();
         }) is { Length: > 0 } cached ? cached : null;

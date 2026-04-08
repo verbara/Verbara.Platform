@@ -31,74 +31,7 @@ public class ReportRendererTests
         },
     };
 
-    private static ReportData CreateEmptyData() => new()
-    {
-        ReportName = "Empty Report",
-        TenantName = "Acme Corp",
-        ReportType = "interval_summary",
-        From = DateTimeOffset.UtcNow.AddDays(-1),
-        To = DateTimeOffset.UtcNow,
-        GeneratedAt = DateTimeOffset.UtcNow,
-        Rows = null,
-        Summary = null,
-    };
-
-    // ── PDF renderer ─────────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task RenderAsync_ShouldProduceNonEmptyBytes_WhenCalledOnPdfRenderer()
-    {
-        var renderer = new PdfReportRenderer();
-        var data = CreateTestData();
-
-        var bytes = await renderer.RenderAsync(data, CancellationToken.None);
-
-        bytes.Should().NotBeNullOrEmpty();
-    }
-
-    [Fact]
-    public async Task RenderAsync_ShouldProducePdfMagicHeader_WhenCalledOnPdfRenderer()
-    {
-        var renderer = new PdfReportRenderer();
-        var data = CreateTestData();
-
-        var bytes = await renderer.RenderAsync(data, CancellationToken.None);
-
-        var header = Encoding.ASCII.GetString(bytes, 0, 4);
-        header.Should().Be("%PDF");
-    }
-
-    [Fact]
-    public async Task RenderAsync_ShouldNotThrow_WhenPdfRendererReceivesEmptyData()
-    {
-        var renderer = new PdfReportRenderer();
-        var data = CreateEmptyData();
-
-        var act = async () => await renderer.RenderAsync(data, CancellationToken.None);
-
-        await act.Should().NotThrowAsync();
-    }
-
-    [Fact]
-    public async Task RenderAsync_ShouldProduceNonEmptyBytes_WhenPdfRendererReceivesEmptyData()
-    {
-        var renderer = new PdfReportRenderer();
-        var data = CreateEmptyData();
-
-        var bytes = await renderer.RenderAsync(data, CancellationToken.None);
-
-        bytes.Should().NotBeNullOrEmpty();
-    }
-
-    [Fact]
-    public void ContentType_ShouldReturnApplicationPdf_WhenQueriedOnPdfRenderer()
-    {
-        var renderer = new PdfReportRenderer();
-
-        renderer.ContentType.Should().Be("application/pdf");
-    }
-
-    // ── CSV renderer ─────────────────────────────────────────────────────────
+    // ── CSV renderer (still in Platform.Api) ─────────────────────────────────
 
     [Fact]
     public async Task RenderAsync_ShouldIncludeUtf8Bom_WhenCalledOnCsvRenderer()

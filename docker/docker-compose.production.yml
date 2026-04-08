@@ -12,6 +12,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      renderer:
+        condition: service_healthy
+      mail:
+        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:
@@ -19,6 +23,39 @@ services:
           memory: 512M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  renderer:
+    build:
+      context: ..
+      dockerfile: src/Asterisk.Platform.Renderer/Dockerfile.renderer
+    env_file:
+      - .env.production
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5010/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  mail:
+    build:
+      context: ..
+      dockerfile: src/Asterisk.Platform.Mail/Dockerfile.mail
+    env_file:
+      - .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5020/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

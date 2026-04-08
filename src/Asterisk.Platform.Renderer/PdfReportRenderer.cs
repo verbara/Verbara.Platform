@@ -6,15 +6,10 @@ using ScottPlot;
 using PdfColors = QuestPDF.Helpers.Colors;
 using SpImageFormat = ScottPlot.ImageFormat;
 
-namespace Asterisk.Platform.Api.Services.Reports;
+namespace Asterisk.Platform.Renderer;
 
 internal sealed class PdfReportRenderer : IReportRenderer
 {
-    static PdfReportRenderer()
-    {
-        QuestPDF.Settings.License = LicenseType.Community;
-    }
-
     public string ContentType => "application/pdf";
     public string FileExtension => "pdf";
 

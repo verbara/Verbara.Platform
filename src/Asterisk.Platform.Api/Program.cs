@@ -130,16 +130,27 @@ builder.Services.AddSingleton<AgentAssistConfigStore>();
 // ─── System Settings Store (singleton for mutable system settings) ────────────
 builder.Services.AddSingleton<SystemSettingsStore>();
 
-// ─── Scheduled Reports ───────────────────────────────────────────────────────
-builder.Services.Configure<Asterisk.Platform.Core.Email.SmtpOptions>(
-    builder.Configuration.GetSection("Smtp"));
+// ─── Scheduled Reports + Email (via external microservices) ─────────────────
+var serviceKey = builder.Configuration["Services:ServiceKey"] ?? "platform_internal_secret";
+builder.Services.AddHttpClient("renderer", c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["Services:Renderer:BaseUrl"] ?? "http://renderer:5010");
+    c.Timeout = TimeSpan.FromSeconds(60);
+    c.DefaultRequestHeaders.Add("X-Service-Key", serviceKey);
+});
+builder.Services.AddHttpClient("mail", c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["Services:Mail:BaseUrl"] ?? "http://mail:5020");
+    c.Timeout = TimeSpan.FromSeconds(30);
+    c.DefaultRequestHeaders.Add("X-Service-Key", serviceKey);
+});
 builder.Services.AddSingleton<Asterisk.Platform.Core.Email.IEmailService,
-    Asterisk.Platform.Api.Services.SmtpEmailService>();
+    Asterisk.Platform.Api.Services.HttpEmailService>();
 builder.Services.AddSingleton<Asterisk.Platform.Core.Email.IEmailTemplateService,
-    Asterisk.Platform.Api.Services.Email.EmbeddedEmailTemplateService>();
+    Asterisk.Platform.Api.Services.HttpEmailTemplateService>();
 builder.Services.AddSingleton<Asterisk.Platform.Api.Services.NotificationService>();
 builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRenderer,
-    Asterisk.Platform.Api.Services.Reports.PdfReportRenderer>("pdf");
+    Asterisk.Platform.Api.Services.Reports.HttpPdfReportRenderer>("pdf");
 builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRenderer,
     Asterisk.Platform.Api.Services.Reports.CsvReportRenderer>("csv");
 // IScheduledReportStore — Postgres when available, InMemory otherwise (registered below with storage)

@@ -47,6 +47,9 @@ services:
       Recordings__BasePath: /recordings
       Licensing__EnforcementMode: Disabled
       CORS_ORIGINS: http://localhost
+      Services__Renderer__BaseUrl: http://renderer:5010
+      Services__Mail__BaseUrl: http://mail:5020
+      Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
     volumes:
       - recordings:/recordings
     depends_on:
@@ -54,12 +57,61 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      renderer:
+        condition: service_healthy
+      mail:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 15s
+    restart: unless-stopped
+
+  renderer:
+    build:
+      context: ..
+      dockerfile: src/Asterisk.Platform.Renderer/Dockerfile.renderer
+    environment:
+      ASPNETCORE_URLS: http://+:5010
+      Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5010/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  mail:
+    build:
+      context: ..
+      dockerfile: src/Asterisk.Platform.Mail/Dockerfile.mail
+    environment:
+      ASPNETCORE_URLS: http://+:5020
+      ConnectionStrings__Postgres: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret}
+      Smtp__Host: ${SMTP_HOST:-localhost}
+      Smtp__Port: ${SMTP_PORT:-587}
+      Smtp__UseTls: ${SMTP_USE_TLS:-false}
+      Smtp__FromAddress: ${SMTP_FROM:-reports@platform.local}
+      Smtp__FromName: ${SMTP_FROM_NAME:-Platform Reports}
+      Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
+      Microsoft__ClientId: ${MS_CLIENT_ID:-}
+      Microsoft__TenantId: ${MS_TENANT_ID:-common}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5020/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   web:

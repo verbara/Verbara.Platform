@@ -4,17 +4,17 @@ using MailKit.Security;
 using Microsoft.Extensions.Options;
 using MimeKit;
 
-namespace Asterisk.Platform.Api.Services;
+namespace Asterisk.Platform.Mail.Services;
 
-internal sealed partial class SmtpEmailService : IEmailService
+internal sealed partial class SmtpSender : IEmailService
 {
     private const int MaxAttempts = 2;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(30);
 
     private readonly SmtpOptions _options;
-    private readonly ILogger<SmtpEmailService> _logger;
+    private readonly ILogger<SmtpSender> _logger;
 
-    public SmtpEmailService(IOptions<SmtpOptions> options, ILogger<SmtpEmailService> logger)
+    public SmtpSender(IOptions<SmtpOptions> options, ILogger<SmtpSender> logger)
     {
         _options = options.Value;
         _logger = logger;
@@ -39,7 +39,6 @@ internal sealed partial class SmtpEmailService : IEmailService
             }
         }
 
-        // Final attempt without catch — let exception propagate
         await SendMimeAsync(mime, ct);
         LogSent(message.Subject, message.Recipients.Count);
     }
@@ -47,16 +46,10 @@ internal sealed partial class SmtpEmailService : IEmailService
     private async Task SendMimeAsync(MimeMessage mime, CancellationToken ct)
     {
         using var client = new SmtpClient();
-
-        var secureSocketOptions = _options.UseTls
-            ? SecureSocketOptions.StartTls
-            : SecureSocketOptions.None;
-
+        var secureSocketOptions = _options.UseTls ? SecureSocketOptions.StartTls : SecureSocketOptions.None;
         await client.ConnectAsync(_options.Host, _options.Port, secureSocketOptions, ct);
-
         if (_options.Username is not null && _options.Password is not null)
             await client.AuthenticateAsync(_options.Username, _options.Password, ct);
-
         await client.SendAsync(mime, ct);
         await client.DisconnectAsync(quit: true, ct);
     }
@@ -67,34 +60,22 @@ internal sealed partial class SmtpEmailService : IEmailService
         var fromName = message.FromName ?? _options.FromName;
         var fromAddress = message.FromAddress ?? _options.FromAddress;
         mime.From.Add(new MailboxAddress(fromName, fromAddress));
-
         foreach (var r in message.Recipients)
             mime.To.Add(new MailboxAddress(r.Name ?? r.Email, r.Email));
-
         mime.Subject = message.Subject;
-
-        var builder = new BodyBuilder
-        {
-            TextBody = message.TextBody,
-            HtmlBody = message.HtmlBody
-        };
-
+        var builder = new BodyBuilder { TextBody = message.TextBody, HtmlBody = message.HtmlBody };
         if (message.Attachments is not null)
         {
             foreach (var attachment in message.Attachments)
-                builder.Attachments.Add(attachment.FileName, attachment.Content,
-                    ContentType.Parse(attachment.ContentType));
+                builder.Attachments.Add(attachment.FileName, attachment.Content, ContentType.Parse(attachment.ContentType));
         }
-
         mime.Body = builder.ToMessageBody();
         return mime;
     }
 
-    [LoggerMessage(Level = LogLevel.Information,
-        Message = "Email sent: subject={Subject} recipients={RecipientCount}")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Email sent: subject={Subject} recipients={RecipientCount}")]
     private partial void LogSent(string subject, int recipientCount);
 
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Email send attempt {Attempt} failed for subject={Subject}: {Error} — retrying")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Email send attempt {Attempt} failed for subject={Subject}: {Error} — retrying")]
     private partial void LogRetry(int attempt, string subject, string error);
 }

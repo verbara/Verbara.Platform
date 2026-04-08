@@ -14,11 +14,7 @@
     <InternalsVisibleTo Include="Asterisk.Platform.Api.Tests" />
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="Services\Email\Templates\*.html" />
-  </ItemGroup>
-
-  <ItemGroup>
+<ItemGroup>
     <ProjectReference Include="..\Asterisk.Platform.Core\Asterisk.Platform.Core.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Identity\Asterisk.Platform.Identity.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Conversations\Asterisk.Platform.Conversations.csproj" />
@@ -58,9 +54,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
     <PackageReference Include="Dapper" />
     <PackageReference Include="Npgsql" />
-    <PackageReference Include="QuestPDF" />
-    <PackageReference Include="ScottPlot" />
-    <PackageReference Include="MailKit" />
+    <!-- QuestPDF, ScottPlot, MailKit moved to Platform.Renderer and Platform.Mail microservices -->
     <PackageReference Include="NCrontab" />
     <PackageReference Include="Asterisk.Sdk.Hosting" />
     <PackageReference Include="Asterisk.Sdk.Pro.EventStore" />
