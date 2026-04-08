@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.1-pro).
 
-**28 packages, 1472 tests, 0 warnings, AOT-compatible, 53 endpoint groups (14 with feature gates), version 1.3.1:**
+**28 packages, 1507 tests, 0 warnings, AOT-compatible, 55 endpoint groups (14 with feature gates), version 1.3.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -135,6 +135,8 @@ All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all r
 | Media | MediaEndpoints, RecordingEndpoints |
 | Realtime | RealtimeEndpoints, ClusterEndpoints |
 | Partner | PartnerCustomerEndpoints, PartnerBillingEndpoints, PartnerRevenueEndpoints, PartnerSettingsEndpoints |
+| Branding | BrandingEndpoints (public, no auth) |
+| Notifications | NotificationEndpoints |
 | Other | DispositionEndpoints, SurveyEndpoints |
 
 ### Pro Package Integration
@@ -561,6 +563,15 @@ Three deliverables (9 commits, +36 tests):
 Two deliverables (10 commits, +26 tests):
 1. **Partner Portal** -- Dedicated `/partner/*` API surface with 19 endpoints across 4 files (`PartnerCustomerEndpoints`, `PartnerBillingEndpoints`, `PartnerRevenueEndpoints`, `PartnerSettingsEndpoints`). `PartnerAdminOnly` authorization handler validates `TenantType.Partner` + operational status. 8 new `partner:*` permissions, 3 role templates (`partner_admin`, `partner_billing`, `partner_viewer`). Partners operate as mini-Platform for their Customer sub-tree: CRUD, suspend/activate, settings facade, plan hierarchy ceiling enforcement.
 2. **Partner Billing** -- Markup pricing via Partner's own `RateCard`. `GenerateWithRateCardAsync` overload on `IInvoiceGenerationService` for explicit rate card injection. `PartnerRevenueRecord` model captures margin snapshots (GrossAmount - PlatformCost = PartnerMargin) at invoice generation. Revenue dashboard endpoints aggregate margins per period. Platform base RateCard (`IsDefault=true` on host tenant) used for cost calculation.
+
+## Sprint 4: White-Label + Notifications -- COMPLETE (2026-04-07)
+
+**Spec:** `docs/superpowers/specs/2026-04-07-sprint4-whitelabel-notifications-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-07-sprint4-whitelabel-notifications.md`
+
+Two deliverables (12 commits, +35 tests):
+1. **White-Label Branding** -- `TenantBranding` model (14 fields) with dedicated store (`ITenantBrandingStore`, InMemory + Postgres, migration 010). 3-tier inheritance (Customer → Partner → Platform defaults). Public branding endpoints (`/branding/{tenantId}`, `/branding/by-subdomain/{subdomain}`) for pre-login UI. Branding section in TenantSettings facade (AdminOnly + PlatformAdminOnly with Subdomain control). Subdomain resolution via branding store in `TenantResolutionMiddleware`. Branded PDF reports (tenant colors replace hardcoded blue). Per-tenant email From address.
+2. **Notification System** -- `Notification` model with `NotificationCategory` (Operational/System/Security/Billing) + `NotificationSeverity` (Info/Warning/Critical). `NotificationTypeRegistry` with 14 types and role-based routing matrix. `NotificationService` orchestrator with 5-min dedup, SSE delivery via `NotificationEvent` on `PlatformEventBus`, critical→email with branded templates, and partner cross-tenant propagation. 5 notification endpoints (list/count/get/mark-read/mark-all). 6 branded HTML email templates (notification-critical, notification-warning, scheduled-report, gdpr-export-ready, password-reset, welcome-user) via `EmbeddedEmailTemplateService`. Password reset email implemented (was placeholder). GDPR export/purge notifications.
 
 ## Plan Execution
 
