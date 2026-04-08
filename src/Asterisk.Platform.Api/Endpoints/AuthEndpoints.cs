@@ -5,8 +5,12 @@ using System.Text;
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Branding;
+using Asterisk.Platform.Core.Email;
 using Asterisk.Platform.Identity;
+using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -339,8 +343,57 @@ internal static class AuthEndpoints
                     ExpiresAt = DateTimeOffset.UtcNow.Add(PasswordResetTtl),
                 };
 
-                // In production, send email with resetToken.
-                // For now, token is stored in cache for /reset-password endpoint.
+                // Send password reset email
+                try
+                {
+                    var brandingStore = context.RequestServices.GetService<ITenantBrandingStore>();
+                    var emailTemplateService = context.RequestServices.GetService<IEmailTemplateService>();
+                    var emailSvc = context.RequestServices.GetService<IEmailService>();
+                    var smtpOpts = context.RequestServices.GetService<IOptions<SmtpOptions>>();
+
+                    if (emailTemplateService is not null && emailSvc is not null && smtpOpts is not null)
+                    {
+                        var tenantBranding = brandingStore is not null
+                            ? await brandingStore.GetAsync(forgotTenantId!, ct) : null;
+                        var tenantSvc = context.RequestServices.GetRequiredService<ITenantStore>();
+                        var tenant = await tenantSvc.GetAsync(forgotTenantId!, ct);
+
+                        var brandingContext = new BrandingContext(
+                            CompanyName: tenantBranding?.DisplayName ?? tenant?.Name ?? "Platform",
+                            LogoUrl: tenantBranding?.LogoUrl,
+                            PrimaryColor: tenantBranding?.PrimaryColor ?? "#1E40AF",
+                            SecondaryColor: tenantBranding?.SecondaryColor ?? "#64748B",
+                            AccentColor: tenantBranding?.AccentColor ?? "#0D9488",
+                            SupportEmail: tenantBranding?.SupportEmail,
+                            SupportUrl: tenantBranding?.SupportUrl,
+                            FromName: tenantBranding?.EmailFromName ?? smtpOpts.Value.FromName,
+                            FromAddress: tenantBranding?.EmailFromAddress ?? smtpOpts.Value.FromAddress);
+
+                        var resetLink = $"{context.Request.Scheme}://{context.Request.Host}/reset-password?token={resetToken}";
+                        var variables = new Dictionary<string, string>
+                        {
+                            ["UserEmail"] = body.Email,
+                            ["ResetLink"] = resetLink,
+                            ["ExpiresIn"] = "1 hour",
+                        };
+
+                        var html = emailTemplateService.Render("password-reset", brandingContext, variables);
+                        var message = new EmailMessage
+                        {
+                            Recipients = [new EmailRecipient(body.Email, user.DisplayName)],
+                            Subject = "Password Reset Request",
+                            HtmlBody = html,
+                            TextBody = $"Reset your password: {resetLink}\nThis link expires in 1 hour.",
+                            FromName = brandingContext.FromName,
+                            FromAddress = brandingContext.FromAddress,
+                        };
+                        await emailSvc.SendAsync(message, ct);
+                    }
+                }
+                catch
+                {
+                    // Silently fail — don't reveal email existence via error
+                }
             }
         }
 
