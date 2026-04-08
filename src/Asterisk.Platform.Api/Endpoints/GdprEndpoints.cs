@@ -43,18 +43,32 @@ internal static class GdprEndpoints
 
         var normalizedFormat = string.IsNullOrWhiteSpace(format) ? "json" : format.ToLowerInvariant();
 
+        IResult response;
         if (normalizedFormat == "csv")
         {
             var formatter = context.RequestServices.GetRequiredKeyedService<IGdprExportFormatter>("csv");
             var exportData = BuildExportData(result, body.ContactId);
             var bytes = await formatter.FormatAsync(exportData, ct);
             var fileName = $"gdpr-export-{body.ContactId}-{DateTimeOffset.UtcNow:yyyyMMdd}{formatter.FileExtension}";
-            return Results.File(bytes, formatter.ContentType, fileName);
+            response = Results.File(bytes, formatter.ContentType, fileName);
         }
         else
         {
-            return Results.Ok(result);
+            response = Results.Ok(result);
         }
+
+        var notificationService = context.RequestServices.GetService<Asterisk.Platform.Api.Services.NotificationService>();
+        if (notificationService is not null)
+        {
+            _ = notificationService.CreateAsync(
+                tenantId.Value, "gdpr.export_completed",
+                "Data Export Ready",
+                $"Data export for contact {body.ContactId} is ready for download.",
+                "/admin/gdpr",
+                CancellationToken.None);
+        }
+
+        return response;
     }
 
     // --- Purge (contact) ------------------------------------------------------
@@ -75,6 +89,17 @@ internal static class GdprEndpoints
 
         var result = await purgeService.PurgeContactDataAsync(
             tenantId.Value, body.ContactId, userId, body.Reason, ct);
+
+        var notificationService = context.RequestServices.GetService<Asterisk.Platform.Api.Services.NotificationService>();
+        if (notificationService is not null)
+        {
+            _ = notificationService.CreateAsync(
+                tenantId.Value, "gdpr.purge_completed",
+                "Data Purge Completed",
+                $"Data purge for contact {body.ContactId} has been completed.",
+                "/admin/gdpr",
+                CancellationToken.None);
+        }
 
         return Results.Ok(result);
     }

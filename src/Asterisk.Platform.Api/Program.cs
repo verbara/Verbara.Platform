@@ -135,6 +135,9 @@ builder.Services.Configure<Asterisk.Platform.Core.Email.SmtpOptions>(
     builder.Configuration.GetSection("Smtp"));
 builder.Services.AddSingleton<Asterisk.Platform.Core.Email.IEmailService,
     Asterisk.Platform.Api.Services.SmtpEmailService>();
+builder.Services.AddSingleton<Asterisk.Platform.Core.Email.IEmailTemplateService,
+    Asterisk.Platform.Api.Services.Email.EmbeddedEmailTemplateService>();
+builder.Services.AddSingleton<Asterisk.Platform.Api.Services.NotificationService>();
 builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRenderer,
     Asterisk.Platform.Api.Services.Reports.PdfReportRenderer>("pdf");
 builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRenderer,
