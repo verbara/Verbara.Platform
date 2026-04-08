@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Core.Reports;
 
 namespace Asterisk.Platform.Api.Services.Reports;
@@ -14,7 +15,7 @@ internal sealed partial class HttpPdfReportRenderer(
     {
         using var client = httpClientFactory.CreateClient("renderer");
         using var response = await client.PostAsJsonAsync(
-            "/api/v1/render?format=pdf", data, ct).ConfigureAwait(false);
+            "/api/v1/render?format=pdf", data, ApiJsonContext.Default.ReportData, ct).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
         {

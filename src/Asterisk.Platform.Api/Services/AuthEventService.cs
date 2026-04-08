@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
 
@@ -16,7 +17,7 @@ internal sealed class AuthEventService
         string eventType,
         string? ipAddress,
         string? userAgent,
-        object? details,
+        Dictionary<string, string>? details,
         CancellationToken ct)
     {
         var authEvent = new AuthEvent
@@ -27,7 +28,9 @@ internal sealed class AuthEventService
             EventType = eventType,
             IpAddress = ipAddress,
             UserAgent = userAgent,
-            Details = details is not null ? JsonSerializer.SerializeToDocument(details) : null,
+            Details = details is not null
+                ? JsonDocument.Parse(JsonSerializer.Serialize(details, ApiJsonContext.Default.DictionaryStringString))
+                : null,
             CreatedAt = DateTimeOffset.UtcNow,
         };
 

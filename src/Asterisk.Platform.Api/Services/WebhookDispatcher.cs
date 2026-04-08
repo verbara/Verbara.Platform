@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Core.Webhooks;
 
@@ -83,12 +84,6 @@ internal sealed partial class WebhookDispatcher : IDisposable
         }
     }
 
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-    };
-
     private static string SerializePayload(PlatformEvent evt)
     {
         var envelope = new WebhookEventPayload(
@@ -98,7 +93,7 @@ internal sealed partial class WebhookDispatcher : IDisposable
             Timestamp: evt.Timestamp,
             Data: evt);
 
-        return JsonSerializer.Serialize(envelope, SerializerOptions);
+        return JsonSerializer.Serialize(envelope, ApiJsonContext.Default.WebhookEventPayload);
     }
 
     public void Dispose()

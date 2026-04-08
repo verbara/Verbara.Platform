@@ -45,7 +45,8 @@ internal sealed partial class RetentionPurgeService : BackgroundService
         _clock = clock;
         _logger = logger;
 
-        var hours = configuration.GetValue("Retention:PurgeIntervalHours", 24);
+        var hoursStr = configuration["Retention:PurgeIntervalHours"];
+        var hours = int.TryParse(hoursStr, out var h) ? h : 24;
         _interval = TimeSpan.FromHours(hours);
     }
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Asterisk.Platform.Api.Serialization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Middleware;
@@ -54,6 +55,7 @@ internal sealed class ErrorHandlingMiddleware
         context.Response.StatusCode = status;
         context.Response.ContentType = "application/problem+json";
 
-        await context.Response.WriteAsync(JsonSerializer.Serialize(problem));
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(problem, ApiJsonContext.Default.ProblemDetails));
     }
 }

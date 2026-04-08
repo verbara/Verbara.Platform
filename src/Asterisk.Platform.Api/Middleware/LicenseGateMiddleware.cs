@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Licensing;
@@ -100,13 +102,16 @@ internal sealed partial class LicenseGateMiddleware
 
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         context.Response.ContentType = "application/problem+json";
-        await context.Response.WriteAsJsonAsync(new
+        var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails
         {
-            status = 403,
-            title = "Feature Not Licensed",
-            detail = $"The '{feature}' feature is not included in your current license.",
-            instance = context.Request.Path.Value,
-        }, context.RequestAborted);
+            Status = 403,
+            Title = "Feature Not Licensed",
+            Detail = $"The '{feature}' feature is not included in your current license.",
+            Instance = context.Request.Path.Value,
+        };
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(problem, ApiJsonContext.Default.ProblemDetails),
+            context.RequestAborted);
     }
 
     [LoggerMessage(Level = LogLevel.Warning,

@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Threading.RateLimiting;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Core;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -52,13 +54,16 @@ internal static class TenantRateLimitPolicy
 
             context.HttpContext.Response.Headers["Retry-After"] = retryAfter.ToString(CultureInfo.InvariantCulture);
 
-            await context.HttpContext.Response.WriteAsJsonAsync(new
+            var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails
             {
-                type = "rate_limit_exceeded",
-                title = "Too Many Requests",
-                detail = "Tenant rate limit exceeded",
-                retryAfter,
-            }, ct);
+                Type = "rate_limit_exceeded",
+                Title = "Too Many Requests",
+                Status = 429,
+                Detail = "Tenant rate limit exceeded",
+            };
+            problem.Extensions["retryAfter"] = retryAfter;
+            await context.HttpContext.Response.WriteAsync(
+                JsonSerializer.Serialize(problem, ApiJsonContext.Default.ProblemDetails), ct);
         };
     }
 }

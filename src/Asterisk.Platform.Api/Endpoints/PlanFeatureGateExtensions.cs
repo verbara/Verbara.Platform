@@ -1,3 +1,5 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.MultiTenant;
@@ -26,12 +28,10 @@ internal static class PlanFeatureGateExtensions
 
             var plan = httpContext.RequestServices.GetService<FeatureGateCache>()?.Get(tenantId)?.EffectivePlan ?? TenantPlan.Starter;
 
-            return Results.Json(new
-            {
-                type = "feature_not_available",
-                title = "Feature Not Available",
-                detail = $"This feature is not available on your current plan ({plan}). Upgrade to access this feature.",
-            }, statusCode: 403);
+            return Results.Json(
+                new ErrorResponse($"This feature is not available on your current plan ({plan}). Upgrade to access this feature."),
+                ApiJsonContext.Default.ErrorResponse,
+                statusCode: 403);
         });
 
         return group;

@@ -35,7 +35,10 @@ internal sealed class PlatformDesiredStateProvider : IDesiredStateProvider
 
     public ValueTask<IReadOnlyList<string>> GetActiveTenantIdsAsync(CancellationToken ct = default)
     {
-        var tenantIds = _configuration.GetSection("Realtime:TenantIds").Get<string[]>() ?? ["demo"];
+        var section = _configuration.GetSection("Realtime:TenantIds");
+        var tenantIds = section.Exists()
+            ? section.GetChildren().Select(c => c.Value!).Where(v => v is not null).ToArray()
+            : (string[])["demo"];
         return new ValueTask<IReadOnlyList<string>>(tenantIds);
     }
 

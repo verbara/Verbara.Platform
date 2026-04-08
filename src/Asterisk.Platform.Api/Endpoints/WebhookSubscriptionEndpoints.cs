@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Core.Webhooks;
@@ -182,8 +183,8 @@ internal static class WebhookSubscriptionEndpoints
             Type: WebhookEventTypes.WebhookTest,
             TenantId: tenantId,
             Timestamp: now,
-            Data: new { message = "This is a test webhook delivery" }),
-            TestSerializerOptions);
+            Data: new Dictionary<string, string> { ["message"] = "This is a test webhook delivery" }),
+            ApiJsonContext.Default.WebhookEventPayload);
 
         var delivery = new WebhookDelivery(
             DeliveryId: Guid.NewGuid().ToString("N"),
@@ -304,11 +305,6 @@ internal static class WebhookSubscriptionEndpoints
             sub.CircuitNextProbeAt,
             sub.CircuitProbeAttempts));
     }
-
-    private static readonly JsonSerializerOptions TestSerializerOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
 
     private static WebhookSubscription MaskSecret(WebhookSubscription sub)
         => sub with { Secret = $"{sub.Secret[..8]}...{sub.Secret[^4..]}" };

@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Core.Email;
 
 namespace Asterisk.Platform.Api.Services;
@@ -11,7 +12,7 @@ internal sealed partial class HttpEmailService(
     {
         using var client = httpClientFactory.CreateClient("mail");
         using var response = await client.PostAsJsonAsync(
-            "/api/v1/send", message, ct).ConfigureAwait(false);
+            "/api/v1/send", message, ApiJsonContext.Default.EmailMessage, ct).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
         {

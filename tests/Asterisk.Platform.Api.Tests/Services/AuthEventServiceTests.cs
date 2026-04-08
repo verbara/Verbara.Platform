@@ -32,7 +32,7 @@ public sealed class AuthEventServiceTests
     [Fact]
     public async Task LogAsync_ShouldIncludeDetails_WhenProvided()
     {
-        var details = new { reason = "bad password" };
+        var details = new Dictionary<string, string> { ["reason"] = "bad password" };
 
         await _sut.LogAsync("t1", "u1", AuthEventTypes.LoginFailure, null, null, details, CancellationToken.None);
 

@@ -3,10 +3,11 @@
   <PropertyGroup>
     <Version>1.3.1</Version>
     <Description>ASP.NET Core Minimal API layer for Asterisk.Platform — webhook ingestion, agent desktop, admin CRUD, SSE events</Description>
-    <IsAotCompatible>false</IsAotCompatible>
-    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
-    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
-    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

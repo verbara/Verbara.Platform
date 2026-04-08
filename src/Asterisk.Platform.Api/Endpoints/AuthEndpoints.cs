@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Core.Branding;
@@ -79,18 +80,19 @@ internal static class AuthEndpoints
         if (user is null || string.IsNullOrEmpty(user.PasswordHash))
         {
             await authEvents.LogAsync(rawTenantId!, null, AuthEventTypes.LoginFailure, ip, ua,
-                new AuthEventDetail(Email: body.Email, Reason: "invalid_credentials"), ct);
+                new Dictionary<string, string> { ["email"] = body.Email, ["reason"] = "invalid_credentials" }, ct);
             return Results.Unauthorized();
         }
 
         if (user.IsLockedOut(DateTimeOffset.UtcNow))
-            return Results.Json(new ErrorResponse("Account is locked"), statusCode: 423);
+            return Results.Json(new ErrorResponse("Account is locked"),
+                ApiJsonContext.Default.ErrorResponse, statusCode: 423);
 
         if (!PasswordService.VerifyPassword(body.Password, user.PasswordHash))
         {
             await lockoutService.RecordFailedAttemptAsync(user, ip, ua, ct);
             await authEvents.LogAsync(rawTenantId!, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
-                new AuthEventDetail(Reason: "invalid_password"), ct);
+                new Dictionary<string, string> { ["reason"] = "invalid_password" }, ct);
             return Results.Unauthorized();
         }
 

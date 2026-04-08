@@ -257,8 +257,7 @@ public sealed class LicenseGateTests
 
         await middleware.InvokeAsync(ctx);
 
-        // WriteAsJsonAsync sets the final content type; verify it is JSON.
-        ctx.Response.ContentType.Should().Contain("application/json");
+        ctx.Response.ContentType.Should().Contain("application/problem+json");
     }
 
     // ── Disabled mode → always pass regardless of license ────────────────────

@@ -108,7 +108,7 @@ internal static class ManagementImpersonationEndpoints
             AuthEventTypes.ImpersonationStarted,
             context.Connection.RemoteIpAddress?.ToString(),
             context.Request.Headers.UserAgent,
-            new { targetTenantId = body.TargetTenantId, targetTenantName = targetTenant.Name, mode = body.ReadOnly ? "read_only" : "full" },
+            new Dictionary<string, string> { ["targetTenantId"] = body.TargetTenantId, ["targetTenantName"] = targetTenant.Name, ["mode"] = body.ReadOnly ? "read_only" : "full" },
             ct);
 
         return Results.Ok(new ImpersonateResponse(token, expiresAt, body.TargetTenantId, targetTenant.Name, body.ReadOnly));

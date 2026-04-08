@@ -40,7 +40,7 @@ internal sealed class AccountLockoutService
                 AuthEventTypes.Lockout,
                 ipAddress,
                 userAgent,
-                new { threshold = config.LockoutThreshold },
+                new Dictionary<string, string> { ["threshold"] = config.LockoutThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture) },
                 ct);
         }
 

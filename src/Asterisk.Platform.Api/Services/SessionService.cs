@@ -43,7 +43,7 @@ internal sealed class SessionService
             AuthEventTypes.SessionRevoked,
             ipAddress,
             userAgent,
-            new { tokenId },
+            new Dictionary<string, string> { ["tokenId"] = tokenId },
             ct);
     }
 }

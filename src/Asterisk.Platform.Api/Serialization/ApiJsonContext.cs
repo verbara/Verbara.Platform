@@ -4,11 +4,14 @@ using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Email;
+using Asterisk.Platform.Core.Reports;
 using Asterisk.Platform.Core.Webhooks;
 using Asterisk.Platform.Flows;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Switchboard;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Serialization;
 
@@ -288,7 +291,15 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(ChecklistItemDto))]
 [JsonSerializable(typeof(List<ChecklistItemDto>))]
 [JsonSerializable(typeof(ApplyTemplateRequest))]
+// AOT: ProblemDetails, Email, Reports
+[JsonSerializable(typeof(ProblemDetails))]
+[JsonSerializable(typeof(EmailMessage))]
+[JsonSerializable(typeof(EmailRecipient))]
+[JsonSerializable(typeof(EmailAttachment))]
+[JsonSerializable(typeof(ReportData))]
+[JsonSerializable(typeof(ReportDataRow))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    UseStringEnumConverter = true)]
 internal partial class ApiJsonContext : JsonSerializerContext;

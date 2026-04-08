@@ -33,6 +33,7 @@ using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.AgentAssist.DependencyInjection;
 using Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
+using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Sdk.Pro.AgentAssist.Engine;
 using Asterisk.Sdk.Pro.Routing.Skills;
@@ -159,12 +160,26 @@ builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<Asterisk.Platform.Api.Services.Reports.ReportSchedulerService>());
 
 // ─── Dunning ─────────────────────────────────────────────────────────────────
-builder.Services.Configure<DunningConfig>(builder.Configuration.GetSection("Dunning"));
+builder.Services.Configure<DunningConfig>(o =>
+{
+    var s = builder.Configuration.GetSection("Dunning");
+    if (int.TryParse(s["WarningDays"], out var wd)) o.WarningDays = wd;
+    if (int.TryParse(s["DegradedDays"], out var dd)) o.DegradedDays = dd;
+    if (int.TryParse(s["SuspendedDays"], out var sd)) o.SuspendedDays = sd;
+    if (int.TryParse(s["PendingDeletionDays"], out var pdd)) o.PendingDeletionDays = pdd;
+    if (int.TryParse(s["CheckIntervalHours"], out var cih)) o.CheckIntervalHours = cih;
+});
 builder.Services.AddHostedService<DunningService>();
 
 // ─── Outbound Webhooks ──────────────────────────────────────────────────────
-builder.Services.Configure<Asterisk.Platform.Core.Webhooks.CircuitBreakerOptions>(
-    builder.Configuration.GetSection("Webhooks:CircuitBreaker"));
+builder.Services.Configure<Asterisk.Platform.Core.Webhooks.CircuitBreakerOptions>(o =>
+{
+    var s = builder.Configuration.GetSection("Webhooks:CircuitBreaker");
+    if (int.TryParse(s["FailureThreshold"], out var ft)) o.FailureThreshold = ft;
+    if (int.TryParse(s["CooldownSeconds"], out var cs)) o.CooldownSeconds = cs;
+    if (int.TryParse(s["MaxCooldownSeconds"], out var mcs)) o.MaxCooldownSeconds = mcs;
+    if (double.TryParse(s["CooldownMultiplier"], System.Globalization.CultureInfo.InvariantCulture, out var cm)) o.CooldownMultiplier = cm;
+});
 builder.Services.AddSingleton<Asterisk.Platform.Core.Webhooks.CircuitBreakerPolicy>();
 builder.Services.AddSingleton<WebhookDispatcher>();
 builder.Services.AddHostedService<WebhookDeliveryService>();
@@ -388,9 +403,12 @@ builder.Services.AddCors(options =>
 builder.Services.AddProblemDetails();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
     options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     options.SerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, ApiJsonContext.Default);
+#pragma warning disable IL3050 // Non-generic JsonStringEnumConverter: fallback for enums not in ApiJsonContext
+    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+#pragma warning restore IL3050
 });
 builder.Services.AddOpenApi();
 
