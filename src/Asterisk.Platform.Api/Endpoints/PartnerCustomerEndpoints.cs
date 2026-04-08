@@ -3,6 +3,7 @@ using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Branding;
 using Asterisk.Platform.Identity;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
@@ -315,6 +316,7 @@ internal static class PartnerCustomerEndpoints
         [FromServices] ITenantAddOnStore addOnStore,
         [FromServices] IDunningStore dunningStore,
         [FromServices] IFeatureGateService featureGateService,
+        [FromServices] ITenantBrandingStore brandingStore,
         CancellationToken ct)
     {
         var callerTenantId = context.User.FindFirst("tid")?.Value
@@ -327,7 +329,7 @@ internal static class PartnerCustomerEndpoints
             return Results.NotFound();
 
         var dto = await TenantSettingsEndpoints.BuildSettingsDto(customerId, tenantStore, authConfigStore,
-            quotaStore, retentionStore, addOnStore, dunningStore, featureGateService, ct);
+            quotaStore, retentionStore, addOnStore, dunningStore, featureGateService, brandingStore, ct);
 
         return dto is null ? Results.NotFound() : Results.Ok(dto);
     }
@@ -347,6 +349,7 @@ internal static class PartnerCustomerEndpoints
         [FromServices] IDunningStore dunningStore,
         [FromServices] IFeatureGateService featureGateService,
         [FromServices] FeatureGateCache featureGateCache,
+        [FromServices] ITenantBrandingStore brandingStore,
         CancellationToken ct)
     {
         var callerTenantId = context.User.FindFirst("tid")?.Value
@@ -370,10 +373,10 @@ internal static class PartnerCustomerEndpoints
         }
 
         await TenantSettingsEndpoints.ApplyUpdates(customerId, sanitized, tenantStore, authConfigStore,
-            quotaStore, retentionStore, tierCache, featureGateCache, addOnStore, ct);
+            quotaStore, retentionStore, tierCache, featureGateCache, addOnStore, brandingStore, ct);
 
         var dto = await TenantSettingsEndpoints.BuildSettingsDto(customerId, tenantStore, authConfigStore,
-            quotaStore, retentionStore, addOnStore, dunningStore, featureGateService, ct);
+            quotaStore, retentionStore, addOnStore, dunningStore, featureGateService, brandingStore, ct);
 
         return dto is null ? Results.NotFound() : Results.Ok(dto);
     }

@@ -2,6 +2,7 @@ using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Branding;
 using Asterisk.Platform.Identity;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
@@ -30,7 +31,8 @@ internal sealed record TenantSettingsDto(
     string Plan,
     IReadOnlyList<string> EnabledFeatures,
     IReadOnlyList<string> AddOns,
-    DunningStatusDto? Dunning);
+    DunningStatusDto? Dunning,
+    BrandingSettingsDto? Branding);
 
 internal sealed record OperationalSettingsDto(
     int MaxConcurrentChannels,
@@ -78,7 +80,8 @@ internal sealed record UpdateTenantSettingsRequest(
     UpdateRetentionSettingsDto? Retention = null,
     RateLimitTier? RateLimitTier = null,
     TenantPlan? Plan = null,
-    IReadOnlyList<PlanFeature>? AddOns = null);
+    IReadOnlyList<PlanFeature>? AddOns = null,
+    UpdateBrandingSettingsDto? Branding = null);
 
 internal sealed record UpdateOperationalSettingsDto(
     int? MaxConcurrentChannels = null,
@@ -118,6 +121,29 @@ internal sealed record UpdateRetentionSettingsDto(
     int? AuditRetentionDays = null,
     int? UsageRecordRetentionDays = null);
 
+// ── Branding DTOs ───────────────────────────────────────────────────────────
+
+internal sealed record BrandingSettingsDto(
+    string? DisplayName, string? LogoUrl, string? FaviconUrl,
+    string? PrimaryColor, string? SecondaryColor, string? AccentColor,
+    string? Locale, string? Timezone, string? Subdomain,
+    string? SupportEmail, string? SupportUrl,
+    string? EmailFromName, string? EmailFromAddress);
+
+internal sealed record UpdateBrandingSettingsDto(
+    string? DisplayName = null, string? LogoUrl = null, string? FaviconUrl = null,
+    string? PrimaryColor = null, string? SecondaryColor = null, string? AccentColor = null,
+    string? Locale = null, string? Timezone = null,
+    string? SupportEmail = null, string? SupportUrl = null,
+    string? EmailFromName = null, string? EmailFromAddress = null);
+
+internal sealed record UpdateManagementBrandingSettingsDto(
+    string? DisplayName = null, string? LogoUrl = null, string? FaviconUrl = null,
+    string? PrimaryColor = null, string? SecondaryColor = null, string? AccentColor = null,
+    string? Locale = null, string? Timezone = null, string? Subdomain = null,
+    string? SupportEmail = null, string? SupportUrl = null,
+    string? EmailFromName = null, string? EmailFromAddress = null);
+
 // ── Endpoint handlers ────────────────────────────────────────────────────────
 
 internal static class TenantSettingsEndpoints
@@ -140,6 +166,7 @@ internal static class TenantSettingsEndpoints
         [FromServices] ITenantAddOnStore addOnStore,
         [FromServices] IDunningStore dunningStore,
         [FromServices] IFeatureGateService featureGateService,
+        [FromServices] ITenantBrandingStore brandingStore,
         CancellationToken ct)
     {
         var tenantId = context.User.FindFirst("tid")?.Value
@@ -149,7 +176,7 @@ internal static class TenantSettingsEndpoints
             return Results.Unauthorized();
 
         var dto = await BuildSettingsDto(tenantId, tenantStore, authConfigStore, quotaStore, retentionStore,
-            addOnStore, dunningStore, featureGateService, ct);
+            addOnStore, dunningStore, featureGateService, brandingStore, ct);
         return dto is null ? Results.NotFound() : Results.Ok(dto);
     }
 
@@ -165,6 +192,7 @@ internal static class TenantSettingsEndpoints
         [FromServices] IDunningStore dunningStore,
         [FromServices] IFeatureGateService featureGateService,
         [FromServices] FeatureGateCache featureGateCache,
+        [FromServices] ITenantBrandingStore brandingStore,
         CancellationToken ct)
     {
         var tenantId = context.User.FindFirst("tid")?.Value
@@ -177,10 +205,10 @@ internal static class TenantSettingsEndpoints
         var sanitized = body with { Quotas = null, RateLimitTier = null, Plan = null, AddOns = null };
 
         await ApplyUpdates(tenantId, sanitized, tenantStore, authConfigStore, quotaStore, retentionStore,
-            tierCache, featureGateCache, addOnStore, ct);
+            tierCache, featureGateCache, addOnStore, brandingStore, ct);
 
         var dto = await BuildSettingsDto(tenantId, tenantStore, authConfigStore, quotaStore, retentionStore,
-            addOnStore, dunningStore, featureGateService, ct);
+            addOnStore, dunningStore, featureGateService, brandingStore, ct);
         return dto is null ? Results.NotFound() : Results.Ok(dto);
     }
 
@@ -195,6 +223,7 @@ internal static class TenantSettingsEndpoints
         ITenantAddOnStore? addOnStore,
         IDunningStore? dunningStore,
         IFeatureGateService? featureGateService,
+        ITenantBrandingStore? brandingStore,
         CancellationToken ct)
     {
         var tenantTask = tenantStore.GetAsync(tenantId, ct).AsTask();
@@ -223,6 +252,32 @@ internal static class TenantSettingsEndpoints
         var plan = tenant.GetPlan();
         var enabledFeatures = featureGateService?.GetEnabledFeatures(tenantId)
             ?? (IReadOnlySet<PlanFeature>)PlanDefinition.GetFeatures(plan);
+
+        // Load branding with 3-tier inheritance: Customer → Partner → Platform defaults
+        BrandingSettingsDto? brandingDto = null;
+        if (brandingStore is not null)
+        {
+            var branding = await brandingStore.GetAsync(tenantId, ct);
+
+            TenantBranding? parentBranding = null;
+            if (tenant.ParentTenantId is not null)
+                parentBranding = await brandingStore.GetAsync(tenant.ParentTenantId, ct);
+
+            brandingDto = new BrandingSettingsDto(
+                DisplayName: branding?.DisplayName ?? parentBranding?.DisplayName,
+                LogoUrl: branding?.LogoUrl ?? parentBranding?.LogoUrl,
+                FaviconUrl: branding?.FaviconUrl ?? parentBranding?.FaviconUrl,
+                PrimaryColor: branding?.PrimaryColor ?? parentBranding?.PrimaryColor,
+                SecondaryColor: branding?.SecondaryColor ?? parentBranding?.SecondaryColor,
+                AccentColor: branding?.AccentColor ?? parentBranding?.AccentColor,
+                Locale: branding?.Locale ?? parentBranding?.Locale,
+                Timezone: branding?.Timezone ?? parentBranding?.Timezone,
+                Subdomain: branding?.Subdomain, // Subdomain does NOT inherit
+                SupportEmail: branding?.SupportEmail ?? parentBranding?.SupportEmail,
+                SupportUrl: branding?.SupportUrl ?? parentBranding?.SupportUrl,
+                EmailFromName: branding?.EmailFromName ?? parentBranding?.EmailFromName,
+                EmailFromAddress: branding?.EmailFromAddress ?? parentBranding?.EmailFromAddress);
+        }
 
         return new TenantSettingsDto(
             TenantId: tenant.TenantId,
@@ -271,7 +326,8 @@ internal static class TenantSettingsEndpoints
                 CurrentStage: dunning.CurrentStage.ToString(),
                 StartedAt: dunning.StartedAt,
                 EscalatedAt: dunning.EscalatedAt,
-                IsPaused: dunning.IsPaused));
+                IsPaused: dunning.IsPaused),
+            Branding: brandingDto);
     }
 
     internal static async Task ApplyUpdates(
@@ -284,6 +340,7 @@ internal static class TenantSettingsEndpoints
         TenantTierCache? tierCache,
         FeatureGateCache? featureGateCache,
         ITenantAddOnStore? addOnStore,
+        ITenantBrandingStore? brandingStore,
         CancellationToken ct)
     {
         if (body.Operational is not null || body.RateLimitTier is not null || body.Plan is not null)
@@ -426,8 +483,61 @@ internal static class TenantSettingsEndpoints
                 await addOnStore.DeleteAsync(tenantId, feature, ct);
         }
 
+        if (body.Branding is not null && brandingStore is not null)
+        {
+            var existing = await brandingStore.GetAsync(tenantId, ct)
+                        ?? new TenantBranding { TenantId = tenantId };
+
+            var b = body.Branding;
+            if (b.DisplayName is not null) existing.DisplayName = b.DisplayName;
+            if (b.LogoUrl is not null) existing.LogoUrl = b.LogoUrl;
+            if (b.FaviconUrl is not null) existing.FaviconUrl = b.FaviconUrl;
+            if (b.PrimaryColor is not null) existing.PrimaryColor = b.PrimaryColor;
+            if (b.SecondaryColor is not null) existing.SecondaryColor = b.SecondaryColor;
+            if (b.AccentColor is not null) existing.AccentColor = b.AccentColor;
+            if (b.Locale is not null) existing.Locale = b.Locale;
+            if (b.Timezone is not null) existing.Timezone = b.Timezone;
+            if (b.SupportEmail is not null) existing.SupportEmail = b.SupportEmail;
+            if (b.SupportUrl is not null) existing.SupportUrl = b.SupportUrl;
+            if (b.EmailFromName is not null) existing.EmailFromName = b.EmailFromName;
+            if (b.EmailFromAddress is not null) existing.EmailFromAddress = b.EmailFromAddress;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await brandingStore.UpsertAsync(existing, ct);
+        }
+
         // Invalidate feature cache after plan/add-on changes
         if (body.Plan is not null || body.AddOns is not null)
             featureGateCache?.Remove(tenantId);
+    }
+
+    /// <summary>
+    /// Applies management branding updates including Subdomain (PlatformAdminOnly).
+    /// </summary>
+    internal static async Task ApplyManagementBrandingUpdates(
+        string tenantId,
+        UpdateManagementBrandingSettingsDto branding,
+        ITenantBrandingStore brandingStore,
+        CancellationToken ct)
+    {
+        var existing = await brandingStore.GetAsync(tenantId, ct)
+                    ?? new TenantBranding { TenantId = tenantId };
+
+        if (branding.DisplayName is not null) existing.DisplayName = branding.DisplayName;
+        if (branding.LogoUrl is not null) existing.LogoUrl = branding.LogoUrl;
+        if (branding.FaviconUrl is not null) existing.FaviconUrl = branding.FaviconUrl;
+        if (branding.PrimaryColor is not null) existing.PrimaryColor = branding.PrimaryColor;
+        if (branding.SecondaryColor is not null) existing.SecondaryColor = branding.SecondaryColor;
+        if (branding.AccentColor is not null) existing.AccentColor = branding.AccentColor;
+        if (branding.Locale is not null) existing.Locale = branding.Locale;
+        if (branding.Timezone is not null) existing.Timezone = branding.Timezone;
+        if (branding.Subdomain is not null) existing.Subdomain = branding.Subdomain;
+        if (branding.SupportEmail is not null) existing.SupportEmail = branding.SupportEmail;
+        if (branding.SupportUrl is not null) existing.SupportUrl = branding.SupportUrl;
+        if (branding.EmailFromName is not null) existing.EmailFromName = branding.EmailFromName;
+        if (branding.EmailFromAddress is not null) existing.EmailFromAddress = branding.EmailFromAddress;
+        existing.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await brandingStore.UpsertAsync(existing, ct);
     }
 }

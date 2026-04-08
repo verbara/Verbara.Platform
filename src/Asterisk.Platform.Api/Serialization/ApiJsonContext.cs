@@ -261,6 +261,10 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateAuthSettingsDto))]
 [JsonSerializable(typeof(UpdateQuotaSettingsDto))]
 [JsonSerializable(typeof(UpdateRetentionSettingsDto))]
+[JsonSerializable(typeof(BrandingSettingsDto))]
+[JsonSerializable(typeof(UpdateBrandingSettingsDto))]
+[JsonSerializable(typeof(UpdateManagementBrandingSettingsDto))]
+[JsonSerializable(typeof(ManagementUpdateTenantSettingsRequest))]
 // Webhooks
 [JsonSerializable(typeof(WebhookSubscription))]
 [JsonSerializable(typeof(List<WebhookSubscription>))]
