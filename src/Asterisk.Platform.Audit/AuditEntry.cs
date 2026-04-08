@@ -63,6 +63,12 @@ public sealed class AuditEntry : ITenantScoped
     /// </summary>
     public string? IntegrityHash { get; init; }
 
+    /// <summary>
+    /// When set, indicates the action was performed during an impersonation session.
+    /// Contains the user ID of the admin who initiated the impersonation.
+    /// </summary>
+    public string? ImpersonatorId { get; init; }
+
     /// <summary>Optional key/value metadata providing additional context for the action.</summary>
     public IReadOnlyDictionary<string, string>? Metadata { get; init; }
 

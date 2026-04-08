@@ -21,9 +21,9 @@ internal sealed class PostgresAuditStore : IAuditStore
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(
             "INSERT INTO audit_entries (entry_id, tenant_id, action, entity_type, entity_id, " +
-            "performed_by, details, occurred_at) " +
+            "performed_by, details, occurred_at, impersonator_id) " +
             "VALUES (@EntryId, @TenantId, @Action, @EntityType, @EntityId, " +
-            "@PerformedBy, @Details::jsonb, @OccurredAt)",
+            "@PerformedBy, @Details::jsonb, @OccurredAt, @ImpersonatorId)",
             new
             {
                 EntryId = entry.EntryId.Value,
@@ -34,6 +34,7 @@ internal sealed class PostgresAuditStore : IAuditStore
                 PerformedBy = entry.ActorId,
                 Details = metadataJson,
                 entry.OccurredAt,
+                ImpersonatorId = entry.ImpersonatorId,
             });
     }
 
@@ -42,7 +43,7 @@ internal sealed class PostgresAuditStore : IAuditStore
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<AuditRow>(
-            "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at " +
+            "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
             "FROM audit_entries WHERE tenant_id = @TenantId AND entity_type = @EntityType AND entity_id = @EntityId " +
             "ORDER BY occurred_at",
             new { TenantId = tenantId.Value, EntityType = entityType, EntityId = entityId });
@@ -94,7 +95,7 @@ internal sealed class PostgresAuditStore : IAuditStore
         parameters.Add("Offset", offset);
 
         var rows = await conn.QueryAsync<AuditRow>(
-            "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at " +
+            "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
             $"FROM audit_entries WHERE {where} ORDER BY occurred_at DESC LIMIT @Limit OFFSET @Offset",
             parameters);
 
@@ -120,6 +121,7 @@ internal sealed class PostgresAuditStore : IAuditStore
         public string? performed_by { get; init; }
         public string? details { get; init; }
         public DateTime occurred_at { get; init; }
+        public string? impersonator_id { get; init; }
 
         public AuditEntry ToEntry()
         {
@@ -140,6 +142,7 @@ internal sealed class PostgresAuditStore : IAuditStore
                 TargetId = entity_id,
                 Metadata = metadata,
                 OccurredAt = occurred_at,
+                ImpersonatorId = impersonator_id,
             };
         }
     }
