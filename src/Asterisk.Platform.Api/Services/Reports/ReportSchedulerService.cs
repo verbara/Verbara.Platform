@@ -1,8 +1,10 @@
 using Asterisk.Platform.Audit;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Branding;
 using Asterisk.Platform.Core.Email;
 using Asterisk.Platform.Core.Reports;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NCrontab;
 
 namespace Asterisk.Platform.Api.Services.Reports;
@@ -16,8 +18,11 @@ internal sealed partial class ReportSchedulerService : BackgroundService
     private readonly IReportRenderer _pdfRenderer;
     private readonly IReportRenderer _csvRenderer;
     private readonly IEmailService _emailService;
+    private readonly IEmailTemplateService _emailTemplateService;
+    private readonly ITenantBrandingStore _brandingStore;
     private readonly IAuditService _auditService;
     private readonly IClock _clock;
+    private readonly SmtpOptions _smtpOptions;
     private readonly ILogger<ReportSchedulerService> _logger;
     private readonly SemaphoreSlim _concurrencyLimiter = new(3, 3);
 
@@ -26,16 +31,22 @@ internal sealed partial class ReportSchedulerService : BackgroundService
         [FromKeyedServices("pdf")] IReportRenderer pdfRenderer,
         [FromKeyedServices("csv")] IReportRenderer csvRenderer,
         IEmailService emailService,
+        IEmailTemplateService emailTemplateService,
+        ITenantBrandingStore brandingStore,
         IAuditService auditService,
         IClock clock,
+        IOptions<SmtpOptions> smtpOptions,
         ILogger<ReportSchedulerService> logger)
     {
         _store = store;
         _pdfRenderer = pdfRenderer;
         _csvRenderer = csvRenderer;
         _emailService = emailService;
+        _emailTemplateService = emailTemplateService;
+        _brandingStore = brandingStore;
         _auditService = auditService;
         _clock = clock;
+        _smtpOptions = smtpOptions.Value;
         _logger = logger;
     }
 
@@ -114,8 +125,21 @@ internal sealed partial class ReportSchedulerService : BackgroundService
         DateTimeOffset? nextRun = null;
         try
         {
+            // Load branding early — used for both PDF color and email template
+            var tenantBranding = await _brandingStore.GetAsync(report.TenantId, ct);
+            var brandingContext = new BrandingContext(
+                CompanyName: tenantBranding?.DisplayName ?? "Platform",
+                LogoUrl: tenantBranding?.LogoUrl,
+                PrimaryColor: tenantBranding?.PrimaryColor ?? "#1E40AF",
+                SecondaryColor: tenantBranding?.SecondaryColor ?? "#64748B",
+                AccentColor: tenantBranding?.AccentColor ?? "#0D9488",
+                SupportEmail: tenantBranding?.SupportEmail,
+                SupportUrl: tenantBranding?.SupportUrl,
+                FromName: tenantBranding?.EmailFromName ?? _smtpOptions.FromName,
+                FromAddress: tenantBranding?.EmailFromAddress ?? _smtpOptions.FromAddress);
+
             // Build report data (placeholder — actual queries wired by consuming app)
-            var data = await BuildReportDataAsync(report, now, ct);
+            var data = BuildReportData(report, now, brandingContext.PrimaryColor);
 
             // Select renderer based on format
             var renderer = string.Equals(report.Format, "csv", StringComparison.OrdinalIgnoreCase)
@@ -136,11 +160,22 @@ internal sealed partial class ReportSchedulerService : BackgroundService
                     var subject = $"[Report] {report.Name} — {now:yyyy-MM-dd}";
                     var filename = $"{report.Name}_{now:yyyyMMdd}.{renderer.FileExtension}";
 
+                    var variables = new Dictionary<string, string>
+                    {
+                        ["ReportName"] = report.Name,
+                        ["Period"] = $"{data.From:yyyy-MM-dd} — {data.To:yyyy-MM-dd}",
+                        ["GeneratedAt"] = now.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+                    };
+                    var html = _emailTemplateService.Render("scheduled-report", brandingContext, variables);
+
                     var message = new EmailMessage
                     {
                         Recipients = recipients,
                         Subject = subject,
+                        HtmlBody = html,
                         TextBody = $"Please find the {report.ReportType} report attached.",
+                        FromName = brandingContext.FromName,
+                        FromAddress = brandingContext.FromAddress,
                         Attachments =
                         [
                             new EmailAttachment(filename, renderer.ContentType, fileBytes),
@@ -228,11 +263,11 @@ internal sealed partial class ReportSchedulerService : BackgroundService
         }
     }
 
-    private static ValueTask<ReportData> BuildReportDataAsync(
-        ScheduledReport report, DateTimeOffset now, CancellationToken ct)
+    private static ReportData BuildReportData(
+        ScheduledReport report, DateTimeOffset now, string primaryColor)
     {
         // Placeholder — actual data source queries are wired by consuming application
-        var data = new ReportData
+        return new ReportData
         {
             ReportName = report.Name,
             TenantName = report.TenantId,
@@ -240,8 +275,8 @@ internal sealed partial class ReportSchedulerService : BackgroundService
             From = now.AddDays(-30),
             To = now,
             GeneratedAt = now,
+            PrimaryColor = primaryColor,
         };
-        return ValueTask.FromResult(data);
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Report scheduler tick: {Count} due reports found")]

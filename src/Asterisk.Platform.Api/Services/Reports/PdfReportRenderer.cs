@@ -45,8 +45,7 @@ internal sealed class PdfReportRenderer : IReportRenderer
 
             col.Item().DefaultTextStyle(s => s.FontSize(10).FontColor(PdfColors.Grey.Darken2)).Text(t =>
             {
-                t.Span("Tenant: ").Bold();
-                t.Span(data.TenantName);
+                t.Span(data.TenantName).Bold();
                 t.Span("   |   ").FontColor(PdfColors.Grey.Medium);
                 t.Span("Period: ").Bold();
                 t.Span($"{data.From:yyyy-MM-dd} — {data.To:yyyy-MM-dd}");
@@ -56,8 +55,13 @@ internal sealed class PdfReportRenderer : IReportRenderer
         });
     }
 
+    private static string ResolveHeaderColor(ReportData data) =>
+        string.IsNullOrWhiteSpace(data.PrimaryColor) ? PdfColors.Blue.Darken3 : data.PrimaryColor;
+
     private static void BuildContent(IContainer container, ReportData data)
     {
+        var headerColor = ResolveHeaderColor(data);
+
         container.Column(col =>
         {
             var rows = data.Rows;
@@ -88,8 +92,8 @@ internal sealed class PdfReportRenderer : IReportRenderer
                     });
 
                     // Header row
-                    static IContainer HeaderCell(IContainer c) =>
-                        c.Background(PdfColors.Blue.Darken3).Padding(4);
+                    IContainer HeaderCell(IContainer c) =>
+                        c.Background(headerColor).Padding(4);
 
                     table.Header(header =>
                     {
@@ -145,9 +149,9 @@ internal sealed class PdfReportRenderer : IReportRenderer
 
                     table.Header(header =>
                     {
-                        header.Cell().Background(PdfColors.Blue.Darken3).Padding(4)
+                        header.Cell().Background(headerColor).Padding(4)
                             .Text("Metric").FontColor(PdfColors.White).Bold().FontSize(9);
-                        header.Cell().Background(PdfColors.Blue.Darken3).Padding(4)
+                        header.Cell().Background(headerColor).Padding(4)
                             .Text("Value").FontColor(PdfColors.White).Bold().FontSize(9);
                     });
 

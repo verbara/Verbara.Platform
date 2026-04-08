@@ -17,6 +17,12 @@ public sealed class ReportData
     public required DateTimeOffset GeneratedAt { get; init; }
     public IReadOnlyList<ReportDataRow>? Rows { get; init; }
     public IReadOnlyDictionary<string, double>? Summary { get; init; }
+
+    /// <summary>
+    /// Optional hex color (e.g. "#1E40AF") for branding table headers in PDF output.
+    /// Falls back to the renderer's default when null.
+    /// </summary>
+    public string? PrimaryColor { get; init; }
 }
 
 public sealed record ReportDataRow(
