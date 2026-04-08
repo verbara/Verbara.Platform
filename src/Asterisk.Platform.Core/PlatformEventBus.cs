@@ -1,5 +1,6 @@
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using Asterisk.Platform.Core.Notifications;
 
 namespace Asterisk.Platform.Core;
 
@@ -127,3 +128,19 @@ public sealed record AgentAssistTranscriptEvent(
     string Text,
     bool IsFinal)
     : PlatformEvent(TenantId, "agentassist.transcript", DateTimeOffset.UtcNow);
+
+// ─── Notification Events ─────────────────────────────────────────────────────
+
+/// <summary>Raised when a notification is created and persisted for a user.</summary>
+public sealed record NotificationEvent(
+    string TenantId,
+    string NotificationType,
+    DateTimeOffset Timestamp,
+    string NotificationId,
+    string UserId,
+    NotificationCategory Category,
+    NotificationSeverity Severity,
+    string Title,
+    string Body,
+    string? ActionUrl)
+    : PlatformEvent(TenantId, "notification.created", Timestamp);
