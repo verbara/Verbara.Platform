@@ -64,7 +64,9 @@ internal sealed partial class SmtpEmailService : IEmailService
     private MimeMessage BuildMimeMessage(EmailMessage message)
     {
         var mime = new MimeMessage();
-        mime.From.Add(new MailboxAddress(_options.FromName, _options.FromAddress));
+        var fromName = message.FromName ?? _options.FromName;
+        var fromAddress = message.FromAddress ?? _options.FromAddress;
+        mime.From.Add(new MailboxAddress(fromName, fromAddress));
 
         foreach (var r in message.Recipients)
             mime.To.Add(new MailboxAddress(r.Name ?? r.Email, r.Email));

@@ -7,6 +7,8 @@ public sealed class EmailMessage
     public string? TextBody { get; init; }
     public string? HtmlBody { get; init; }
     public IReadOnlyList<EmailAttachment>? Attachments { get; init; }
+    public string? FromName { get; init; }
+    public string? FromAddress { get; init; }
 }
 
 public sealed record EmailRecipient(string Email, string? Name = null);
