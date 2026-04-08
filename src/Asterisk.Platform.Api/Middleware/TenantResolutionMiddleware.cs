@@ -3,6 +3,7 @@ using System.Text.Json;
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Branding;
 
 namespace Asterisk.Platform.Api.Middleware;
 
@@ -25,7 +26,7 @@ internal sealed class TenantResolutionMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var tenantId = ResolveTenantId(context);
+        var tenantId = await ResolveTenantIdAsync(context);
 
         if (tenantId is not null)
             context.Items["TenantId"] = tenantId.Value;
@@ -43,7 +44,7 @@ internal sealed class TenantResolutionMiddleware
         await _next(context);
     }
 
-    private static TenantId? ResolveTenantId(HttpContext context)
+    private static async ValueTask<TenantId?> ResolveTenantIdAsync(HttpContext context)
     {
         // Webhook routes: /api/webhooks/{tenantId}/{channel} or /api/v1/webhooks/{tenantId}/{channel}
         if (context.Request.Path.StartsWithSegments("/api/webhooks", out var remaining)
@@ -55,16 +56,11 @@ internal sealed class TenantResolutionMiddleware
         }
 
         // Subdomain: acme.platform.com → "acme"
-        var host = context.Request.Host.Host;
-        var dotIndex = host.IndexOf('.');
-        if (dotIndex > 0)
-        {
-            var subdomain = host[..dotIndex];
-            if (subdomain is not ("www" or "api" or "localhost"))
-                return new TenantId(subdomain);
-        }
+        var fromSubdomain = await ResolveFromSubdomainAsync(context);
+        if (fromSubdomain is not null)
+            return fromSubdomain;
 
-        // API routes: X-Tenant-Id header
+        // X-Tenant-Id header
         if (context.Request.Headers.TryGetValue("X-Tenant-Id", out var headerValue)
             && !string.IsNullOrWhiteSpace(headerValue))
         {
@@ -72,6 +68,30 @@ internal sealed class TenantResolutionMiddleware
         }
 
         return null;
+    }
+
+    private static async ValueTask<TenantId?> ResolveFromSubdomainAsync(HttpContext context)
+    {
+        var host = context.Request.Host.Host;
+        var dotIndex = host.IndexOf('.');
+        if (dotIndex <= 0)
+            return null;
+
+        var subdomain = host[..dotIndex];
+        if (subdomain is "www" or "api" or "localhost")
+            return null;
+
+        // Try branding store first (white-label subdomain mapping)
+        var brandingStore = context.RequestServices.GetService<ITenantBrandingStore>();
+        if (brandingStore is not null)
+        {
+            var branding = await brandingStore.GetBySubdomainAsync(subdomain, context.RequestAborted);
+            if (branding is not null)
+                return new TenantId(branding.TenantId);
+        }
+
+        // Fallback: use subdomain directly as tenantId (backward compat)
+        return new TenantId(subdomain);
     }
 
     private static bool IsImpersonating(HttpContext context)
