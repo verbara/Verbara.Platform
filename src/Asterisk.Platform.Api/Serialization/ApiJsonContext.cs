@@ -283,6 +283,11 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(NotificationEndpoints.UnreadCountDto))]
 // Branding (public)
 [JsonSerializable(typeof(BrandingEndpoints.PublicBrandingDto))]
+// Onboarding
+[JsonSerializable(typeof(OnboardingStatusDto))]
+[JsonSerializable(typeof(ChecklistItemDto))]
+[JsonSerializable(typeof(List<ChecklistItemDto>))]
+[JsonSerializable(typeof(ApplyTemplateRequest))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

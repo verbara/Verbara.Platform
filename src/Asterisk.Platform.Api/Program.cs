@@ -170,6 +170,8 @@ builder.Services.AddSingleton<RefreshTokenService>();
 builder.Services.AddSingleton<AuthEventService>();
 builder.Services.AddSingleton<AccountLockoutService>();
 builder.Services.AddSingleton<SessionService>();
+builder.Services.AddSingleton<TenantProvisioningService>();
+builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredService<TenantProvisioningService>());
 
 // ─── OIDC SSO Services ──────────────────────────────────────────────────────
 builder.Services.AddHttpClient("oidc");
@@ -473,6 +475,7 @@ v1.MapPartnerRevenueEndpoints();
 v1.MapPartnerSettingsEndpoints();
 v1.MapBrandingEndpoints();
 v1.MapNotificationEndpoints();
+v1.MapOnboardingEndpoints();
 
 // ─── RBAC seed: permissions, role templates (Postgres only) ──────────────────
 if (!app.Environment.IsEnvironment("Testing"))
