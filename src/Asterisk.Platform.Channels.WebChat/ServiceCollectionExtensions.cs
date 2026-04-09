@@ -20,6 +20,8 @@ public static class ServiceCollectionExtensions
             services.AddOptions<WebChatOptions>();
 
         services.AddSingleton<WebChatSessionManager>();
+        services.AddSingleton<WebSocketWebChatTransport>();
+        services.AddSingleton<IWebChatTransport>(sp => sp.GetRequiredService<WebSocketWebChatTransport>());
         services.AddSingleton<WebChatConnector>();
 
         return services;

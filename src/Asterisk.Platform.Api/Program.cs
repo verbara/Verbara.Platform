@@ -51,6 +51,7 @@ using Asterisk.Sdk.Ami.Connection;
 using Asterisk.Sdk.Pro.Cluster;
 using Asterisk.Sdk.Pro.Cluster.DependencyInjection;
 using Asterisk.Sdk.Pro.Cluster.Storage.Postgres.DependencyInjection;
+using Asterisk.Platform.Channels.WebChat;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Asterisk.Sdk.Pro.MultiTenant.DependencyInjection;
 
@@ -74,6 +75,7 @@ builder.Services.AddPlatformMedia();
 builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
 builder.Services.AddPlatformBilling();
+builder.Services.AddWebChat();
 
 // ─── GDPR Services ──────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IGdprExportService, GdprExportService>();
@@ -445,6 +447,8 @@ var app = builder.Build();
 
 // ─── Middleware pipeline ──────────────────────────────────────────────────────
 
+app.UseWebSockets();
+app.UseStaticFiles();
 app.UseMiddleware<VersionRedirectMiddleware>();
 app.UseRouting();
 app.UseMiddleware<ErrorHandlingMiddleware>();
