@@ -83,4 +83,24 @@ internal sealed class InMemoryConversationStore : IConversationStore
 
         return Task.FromResult(toDelete.Count);
     }
+
+    public Task<IReadOnlyList<Conversation>> ListQueuedAsync(TenantId tenantId, int limit, CancellationToken ct)
+    {
+        IReadOnlyList<Conversation> result = _items.Values
+            .Where(c => c.TenantId == tenantId && c.State == ConversationState.Queued)
+            .OrderBy(c => c.CreatedAt)
+            .Take(limit)
+            .ToList();
+        return Task.FromResult(result);
+    }
+
+    public Task<IReadOnlyList<Conversation>> ListByStateAsync(TenantId tenantId, ConversationState state, int limit, CancellationToken ct)
+    {
+        IReadOnlyList<Conversation> result = _items.Values
+            .Where(c => c.TenantId == tenantId && c.State == state)
+            .OrderBy(c => c.CreatedAt)
+            .Take(limit)
+            .ToList();
+        return Task.FromResult(result);
+    }
 }

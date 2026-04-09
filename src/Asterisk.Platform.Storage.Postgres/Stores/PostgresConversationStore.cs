@@ -160,6 +160,30 @@ internal sealed class PostgresConversationStore : IConversationStore
             new { TenantId = tenantId.Value, Cutoff = cutoff });
     }
 
+    public async Task<IReadOnlyList<Conversation>> ListQueuedAsync(TenantId tenantId, int limit, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<ConversationRow>(
+            "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
+            "FROM conversations WHERE tenant_id = @TenantId AND state = @State " +
+            "ORDER BY created_at ASC LIMIT @Limit",
+            new { TenantId = tenantId.Value, State = (int)ConversationState.Queued, Limit = limit });
+        return rows.Select(r => r.ToConversation()).ToList();
+    }
+
+    public async Task<IReadOnlyList<Conversation>> ListByStateAsync(TenantId tenantId, ConversationState state, int limit, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<ConversationRow>(
+            "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
+            "FROM conversations WHERE tenant_id = @TenantId AND state = @State " +
+            "ORDER BY created_at ASC LIMIT @Limit",
+            new { TenantId = tenantId.Value, State = (int)state, Limit = limit });
+        return rows.Select(r => r.ToConversation()).ToList();
+    }
+
     private static int[] GetTerminalStateInts()
     {
         var terminalStates = new List<int>();
