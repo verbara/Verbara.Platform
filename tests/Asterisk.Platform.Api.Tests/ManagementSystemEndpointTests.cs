@@ -21,7 +21,7 @@ public sealed class ManagementSystemEndpointTests : IClassFixture<PlatformAdminA
 
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("platform");
-        body.Should().Contain("1.3.1");
+        body.Should().Contain("1.4.0");
     }
 
     [Fact]
