@@ -33,8 +33,9 @@ public class EmailConnectorTests
         var threading = Substitute.For<IEmailThreadingContext>();
         threading.GetThreadInfo(Arg.Any<EntityId>()).Returns((EmailThreadInfo?)null);
 
+        var handler = new FakeHttpMessageHandler();
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
-        httpClientFactory.CreateClient(Arg.Any<string>()).Returns(new HttpClient());
+        httpClientFactory.CreateClient(Arg.Any<string>()).Returns(new HttpClient(handler));
 
         var connector = new EmailConnector(
             smtp,
@@ -220,5 +221,15 @@ public class EmailConnectorTests
         var result = await connector.GetStatusAsync("msg-id", CancellationToken.None);
 
         result.Should().BeNull();
+    }
+
+    private sealed class FakeHttpMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(new byte[] { 0x25, 0x50, 0x44, 0x46 }) // %PDF
+            });
     }
 }
