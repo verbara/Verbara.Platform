@@ -27,6 +27,7 @@ internal static class ConversationEndpoints
         group.MapPost("/{id}/wrapup", WrapUpConversation);
         group.MapPost("/{id}/hold", HoldConversation);
         group.MapPost("/{id}/unhold", UnholdConversation);
+        group.MapPost("/", CreateConversation);
     }
 
     private static async Task<IResult> ListConversations(
@@ -248,6 +249,39 @@ internal static class ConversationEndpoints
         return Results.Ok(record);
     }
 
+    private static async Task<IResult> CreateConversation(
+        HttpContext context,
+        [FromBody] CreateConversationRequest body,
+        IConversationService conversationService,
+        [FromServices] IContactStore contactStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+
+        if (!Enum.TryParse<ChannelType>(body.Channel, ignoreCase: true, out var channelType))
+            return Results.BadRequest(new ErrorResponse($"Unknown channel: {body.Channel}"));
+
+        var contactId = EntityId.From(body.ContactId);
+
+        var contact = await contactStore.GetByIdAsync(tenantId, contactId, ct);
+        if (contact is null)
+            return Results.NotFound(new ErrorResponse("Contact not found"));
+
+        var conversation = await conversationService.GetOrCreateForContactAsync(
+            tenantId, contactId, channelType, ct);
+
+        if (body.InitialMessage is not null)
+        {
+            var envelope = new MessageEnvelope([new TextBlock(body.InitialMessage)]);
+            await conversationService.SendMessageAsync(
+                conversation.ConversationId, tenantId, envelope,
+                agentId, ConversationOwnerKind.Agent, ct);
+        }
+
+        return Results.Created($"/conversations/{conversation.ConversationId.Value}", conversation);
+    }
+
     private static async Task<IResult> HoldConversation(
         string id,
         HttpContext context,
@@ -301,3 +335,7 @@ internal sealed record WrapUpRequest(
     long? CampaignDispositionId = null,
     string? CallbackDate = null,
     string? CallbackPhone = null);
+internal sealed record CreateConversationRequest(
+    string ContactId,
+    string Channel,
+    string? InitialMessage = null);

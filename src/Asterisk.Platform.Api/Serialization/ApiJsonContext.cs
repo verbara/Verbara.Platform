@@ -56,6 +56,7 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(CampaignMetricsDto))]
 [JsonSerializable(typeof(List<CampaignMetricsDto>))]
 [JsonSerializable(typeof(WrapUpRequest))]
+[JsonSerializable(typeof(CreateConversationRequest))]
 [JsonSerializable(typeof(DashboardDto))]
 [JsonSerializable(typeof(DashboardKpisDto))]
 [JsonSerializable(typeof(TrendPointDto))]
