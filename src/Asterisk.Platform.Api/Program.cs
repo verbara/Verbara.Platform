@@ -539,6 +539,7 @@ v1.MapBrandingEndpoints();
 v1.MapNotificationEndpoints();
 v1.MapOnboardingEndpoints();
 v1.MapWebChatEndpoints();
+v1.MapCannedResponseEndpoints();
 
 // WebSocket endpoint for WebChat (outside versioned API group)
 app.MapWebChatWebSocket();

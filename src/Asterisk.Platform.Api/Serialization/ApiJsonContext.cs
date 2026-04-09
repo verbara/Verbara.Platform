@@ -287,6 +287,11 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(NotificationEndpoints.UnreadCountDto))]
 // Branding (public)
 [JsonSerializable(typeof(BrandingEndpoints.PublicBrandingDto))]
+// Canned Responses
+[JsonSerializable(typeof(CannedResponseEndpoints.CreateCannedResponseRequest))]
+[JsonSerializable(typeof(CannedResponseEndpoints.UpdateCannedResponseRequest))]
+[JsonSerializable(typeof(CannedResponseEndpoints.CannedResponseDto))]
+[JsonSerializable(typeof(List<CannedResponseEndpoints.CannedResponseDto>))]
 // WebChat
 [JsonSerializable(typeof(WebChatEndpoints.CreateSessionRequest))]
 [JsonSerializable(typeof(WebChatEndpoints.CreateSessionResponse))]
