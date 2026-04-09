@@ -34,6 +34,7 @@ internal static class WebhookEndpoints
         [FromServices] IConversationStore conversationStore,
         [FromServices] IContactStore contactStore,
         IVirtualAgent virtualAgent,
+        [FromServices] IConversationLifecycleService lifecycleService,
         [FromServices] DeliveryStatusHandler deliveryStatusHandler,
         [FromServices] ITenantChannelConfigStore configStore,
         [FromServices] PlatformEventBus eventBus,
@@ -125,6 +126,21 @@ internal static class WebhookEndpoints
                                 ConversationOwnerKind.Bot,
                                 ct);
                         }
+                    }
+                    else if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
+                    {
+                        await switchboard.AssignToQueueAsync(
+                            updated.ConversationId,
+                            tid,
+                            botResponse.TargetQueueId.Value,
+                            ct);
+
+                        eventBus.Publish(new ConversationStateChangedEvent(
+                            tid.Value, updated.ConversationId.Value, "Bot", "Queued"));
+                    }
+                    else if (botResponse.Action == BotResponseAction.EndConversation)
+                    {
+                        await lifecycleService.CloseAsync(tid, updated.ConversationId, wrapUp: null, ct);
                     }
                 }
             }

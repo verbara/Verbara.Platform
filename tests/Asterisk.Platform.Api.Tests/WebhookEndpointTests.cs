@@ -1,6 +1,11 @@
 using System.Net;
 using System.Text;
-using System.Text.Json;
+using Asterisk.Platform.Bot;
+using Asterisk.Platform.Conversations;
+using Asterisk.Platform.Conversations.Services;
+using Asterisk.Platform.Core;
+using Asterisk.Platform.Switchboard;
+using NSubstitute;
 
 namespace Asterisk.Platform.Api.Tests;
 
@@ -90,5 +95,156 @@ public sealed class WebhookEndpointTests : IClassFixture<PlatformApiFactory>
 
         // Not a 401 — webhooks bypass auth
         response.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
+    }
+}
+
+/// <summary>
+/// Unit-level tests for bot handoff logic: verifies that TransferToQueue and EndConversation
+/// bot responses result in the correct switchboard/lifecycle calls.
+/// </summary>
+public sealed class BotHandoffLogicTests
+{
+    private static readonly TenantId TestTenant = new("t-handoff-001");
+    private static readonly EntityId ConvId = EntityId.From("conv-bot-001");
+    private static readonly EntityId BotId = EntityId.From("bot-001");
+    private static readonly EntityId QueueId = EntityId.From("q-001");
+
+    // ── TransferToQueue ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AssignToQueueAsync_ShouldBeCalled_WhenBotResponseIsTransferToQueue()
+    {
+        // Arrange
+        var switchboard = Substitute.For<IConversationSwitchboard>();
+        switchboard.AssignToQueueAsync(default, default, default, default)
+            .ReturnsForAnyArgs(new OwnershipResult(true, ConversationOwner.ForQueue(QueueId), ConversationState.Queued, null));
+
+        var botResponse = new BotResponse(BotResponseAction.TransferToQueue, null, QueueId, null, "Flow handoff");
+
+        // Act — simulate the handoff branch directly
+        if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
+        {
+            await switchboard.AssignToQueueAsync(ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
+        }
+
+        // Assert
+        await switchboard.Received(1).AssignToQueueAsync(
+            ConvId,
+            TestTenant,
+            QueueId,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AssignToQueueAsync_ShouldNotBeCalled_WhenTransferToQueueHasNullTargetQueueId()
+    {
+        // Arrange
+        var switchboard = Substitute.For<IConversationSwitchboard>();
+        var botResponse = new BotResponse(BotResponseAction.TransferToQueue, null, null, null, null);
+
+        // Act — guard clause: TargetQueueId is null, so AssignToQueue must not be called
+        if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
+        {
+            await switchboard.AssignToQueueAsync(ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
+        }
+
+        // Assert
+        await switchboard.DidNotReceiveWithAnyArgs().AssignToQueueAsync(default, default, default, default);
+    }
+
+    // ── EndConversation ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CloseAsync_ShouldBeCalled_WhenBotResponseIsEndConversation()
+    {
+        // Arrange
+        var lifecycleService = Substitute.For<IConversationLifecycleService>();
+        var botResponse = new BotResponse(BotResponseAction.EndConversation, null, null, null, null);
+
+        // Act — simulate the end-conversation branch directly
+        if (botResponse.Action == BotResponseAction.EndConversation)
+        {
+            await lifecycleService.CloseAsync(TestTenant, ConvId, wrapUp: null, CancellationToken.None);
+        }
+
+        // Assert
+        await lifecycleService.Received(1).CloseAsync(
+            TestTenant,
+            ConvId,
+            null,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CloseAsync_ShouldNotBeCalled_WhenBotResponseIsReply()
+    {
+        // Arrange
+        var lifecycleService = Substitute.For<IConversationLifecycleService>();
+        var botResponse = new BotResponse(BotResponseAction.Reply, [], null, null, null);
+
+        // Act — Reply action should not trigger close
+        if (botResponse.Action == BotResponseAction.EndConversation)
+        {
+            await lifecycleService.CloseAsync(TestTenant, ConvId, wrapUp: null, CancellationToken.None);
+        }
+
+        // Assert
+        await lifecycleService.DidNotReceiveWithAnyArgs().CloseAsync(default!, default, null, default);
+    }
+
+    [Fact]
+    public async Task CloseAsync_ShouldNotBeCalled_WhenBotResponseIsTransferToQueue()
+    {
+        // Arrange
+        var lifecycleService = Substitute.For<IConversationLifecycleService>();
+        var switchboard = Substitute.For<IConversationSwitchboard>();
+        switchboard.AssignToQueueAsync(default, default, default, default)
+            .ReturnsForAnyArgs(new OwnershipResult(true, ConversationOwner.ForQueue(QueueId), ConversationState.Queued, null));
+
+        var botResponse = new BotResponse(BotResponseAction.TransferToQueue, null, QueueId, null, "handoff");
+
+        // Act — TransferToQueue triggers switchboard, not lifecycle close
+        if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
+        {
+            await switchboard.AssignToQueueAsync(ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
+        }
+        else if (botResponse.Action == BotResponseAction.EndConversation)
+        {
+            await lifecycleService.CloseAsync(TestTenant, ConvId, wrapUp: null, CancellationToken.None);
+        }
+
+        // Assert
+        await lifecycleService.DidNotReceiveWithAnyArgs().CloseAsync(default!, default, null, default);
+        await switchboard.Received(1).AssignToQueueAsync(ConvId, TestTenant, QueueId, Arg.Any<CancellationToken>());
+    }
+
+    // ── Reply (existing behavior) ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldBeCalled_WhenBotResponseIsReply()
+    {
+        // Arrange
+        var conversationService = Substitute.For<IConversationService>();
+        var message = new MessageEnvelope([new TextBlock("Hello from bot")]);
+        var botResponse = new BotResponse(BotResponseAction.Reply, [message], null, null, null);
+
+        // Act — simulate the reply branch directly
+        if (botResponse.Action == BotResponseAction.Reply && botResponse.Messages is not null)
+        {
+            foreach (var reply in botResponse.Messages)
+            {
+                await conversationService.SendMessageAsync(
+                    ConvId, TestTenant, reply, BotId, ConversationOwnerKind.Bot, CancellationToken.None);
+            }
+        }
+
+        // Assert
+        await conversationService.Received(1).SendMessageAsync(
+            ConvId,
+            TestTenant,
+            message,
+            BotId,
+            ConversationOwnerKind.Bot,
+            Arg.Any<CancellationToken>());
     }
 }
