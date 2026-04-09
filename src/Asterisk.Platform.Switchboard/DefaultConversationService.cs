@@ -16,6 +16,7 @@ internal sealed partial class DefaultConversationService : IConversationService
     private readonly IConversationLifecycleService _lifecycleService;
     private readonly IClock _clock;
     private readonly ILogger<DefaultConversationService> _logger;
+    private readonly PlatformEventBus _eventBus;
 
     public DefaultConversationService(
         IConversationStore conversationStore,
@@ -24,7 +25,8 @@ internal sealed partial class DefaultConversationService : IConversationService
         IChannelRegistry channelRegistry,
         IConversationLifecycleService lifecycleService,
         IClock clock,
-        ILogger<DefaultConversationService> logger)
+        ILogger<DefaultConversationService> logger,
+        PlatformEventBus eventBus)
     {
         _conversationStore = conversationStore;
         _contactStore = contactStore;
@@ -33,6 +35,7 @@ internal sealed partial class DefaultConversationService : IConversationService
         _lifecycleService = lifecycleService;
         _clock = clock;
         _logger = logger;
+        _eventBus = eventBus;
     }
 
     public async Task<Message> SendMessageAsync(
@@ -87,6 +90,10 @@ internal sealed partial class DefaultConversationService : IConversationService
         {
             LogNoAddress(_logger, conversationId.Value, conversation.Channel.ToString());
         }
+
+        _eventBus.Publish(new ConversationMessageEvent(
+            tenantId.Value, conversationId.Value, message.MessageId.Value,
+            "Outbound", conversation.Channel.ToString()));
 
         return message;
     }

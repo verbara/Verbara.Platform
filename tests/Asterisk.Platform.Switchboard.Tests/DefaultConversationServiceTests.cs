@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Asterisk.Platform.Switchboard.Tests;
 
-public class DefaultConversationServiceTests
+public sealed class DefaultConversationServiceTests : IDisposable
 {
     private readonly IConversationStore _conversationStore = Substitute.For<IConversationStore>();
     private readonly IContactStore _contactStore = Substitute.For<IContactStore>();
@@ -17,6 +17,7 @@ public class DefaultConversationServiceTests
     private readonly IConversationLifecycleService _lifecycleService = Substitute.For<IConversationLifecycleService>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IChannelConnector _connector = Substitute.For<IChannelConnector>();
+    private readonly PlatformEventBus _eventBus = new();
 
     private readonly TenantId _tenantId = new("tenant-1");
     private readonly EntityId _conversationId = EntityId.From("conv-001");
@@ -35,9 +36,11 @@ public class DefaultConversationServiceTests
             .Returns(new SendResult(true, "ext-123", null, null));
     }
 
+    public void Dispose() => _eventBus.Dispose();
+
     private DefaultConversationService CreateSut() =>
         new(_conversationStore, _contactStore, _messageStore, _channelRegistry,
-            _lifecycleService, _clock, NullLogger<DefaultConversationService>.Instance);
+            _lifecycleService, _clock, NullLogger<DefaultConversationService>.Instance, _eventBus);
 
     private Conversation BuildConversation(
         ConversationState state = ConversationState.Active,
