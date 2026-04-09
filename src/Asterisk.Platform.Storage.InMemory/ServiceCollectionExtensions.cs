@@ -43,6 +43,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICaseStore, InMemoryCaseStore>();
         services.AddSingleton<IDispositionStore, InMemoryDispositionStore>();
         services.AddSingleton<IWrapUpStore, InMemoryWrapUpStore>();
+        services.AddSingleton<ICannedResponseStore, InMemoryCannedResponseStore>();
 
         // Identity
         services.AddSingleton<IUserStore, InMemoryUserStore>();
