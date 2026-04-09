@@ -287,6 +287,10 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(NotificationEndpoints.UnreadCountDto))]
 // Branding (public)
 [JsonSerializable(typeof(BrandingEndpoints.PublicBrandingDto))]
+// WebChat
+[JsonSerializable(typeof(WebChatEndpoints.CreateSessionRequest))]
+[JsonSerializable(typeof(WebChatEndpoints.CreateSessionResponse))]
+[JsonSerializable(typeof(WebChatEndpoints.WebChatMessageRequest))]
 // Onboarding
 [JsonSerializable(typeof(OnboardingStatusDto))]
 [JsonSerializable(typeof(ChecklistItemDto))]

@@ -538,6 +538,10 @@ v1.MapPartnerSettingsEndpoints();
 v1.MapBrandingEndpoints();
 v1.MapNotificationEndpoints();
 v1.MapOnboardingEndpoints();
+v1.MapWebChatEndpoints();
+
+// WebSocket endpoint for WebChat (outside versioned API group)
+app.MapWebChatWebSocket();
 
 // ─── RBAC seed: permissions, role templates (Postgres only) ──────────────────
 if (!app.Environment.IsEnvironment("Testing"))

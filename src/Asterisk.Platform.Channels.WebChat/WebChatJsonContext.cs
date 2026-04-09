@@ -7,4 +7,4 @@ namespace Asterisk.Platform.Channels.WebChat;
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-internal partial class WebChatJsonContext : JsonSerializerContext;
+public partial class WebChatJsonContext : JsonSerializerContext;
