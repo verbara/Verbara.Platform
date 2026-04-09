@@ -9,15 +9,18 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
     private readonly IConversationStore _store;
     private readonly IAgentCapacityService _capacity;
     private readonly IClock _clock;
+    private readonly PlatformEventBus _eventBus;
 
     public ConversationSwitchboard(
         IConversationStore store,
         IAgentCapacityService capacity,
-        IClock clock)
+        IClock clock,
+        PlatformEventBus eventBus)
     {
         _store = store;
         _capacity = capacity;
         _clock = clock;
+        _eventBus = eventBus;
     }
 
     public async Task<OwnershipResult> AssignToQueueAsync(
@@ -34,6 +37,7 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
             && conversation.State != ConversationState.Queued)
             return Fail(conversation.State, $"Cannot transition from {conversation.State} to Queued.");
 
+        var oldState = conversation.State;
         if (conversation.State != ConversationState.Queued)
             conversation.TransitionTo(ConversationState.Queued, _clock.UtcNow);
 
@@ -42,6 +46,8 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         conversation.UpdatedAt = _clock.UtcNow;
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, oldState.ToString(), conversation.State.ToString()));
         return new OwnershipResult(true, owner, conversation.State, null);
     }
 
@@ -62,6 +68,11 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         conversation.UpdatedAt = _clock.UtcNow;
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationOfferedEvent(
+            tenantId.Value, conversationId.Value, agentId.Value,
+            conversation.Owner?.OwnerId?.Value ?? ""));
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, "Queued", "Offered"));
         return new OwnershipResult(true, conversation.Owner, conversation.State, null);
     }
 
@@ -89,6 +100,10 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
 
         await _capacity.ReserveAsync(tenantId, agentId, conversation.Channel, ct).ConfigureAwait(false);
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationAssignedEvent(
+            tenantId.Value, conversationId.Value, agentId.Value, "", "", ""));
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, "Offered", "Active"));
         return new OwnershipResult(true, owner, conversation.State, null);
     }
 
@@ -109,6 +124,8 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         conversation.UpdatedAt = _clock.UtcNow;
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, "Offered", "Queued"));
         return new OwnershipResult(true, conversation.Owner, conversation.State, null);
     }
 
@@ -146,6 +163,8 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         conversation.UpdatedAt = _clock.UtcNow;
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, "Active", conversation.State.ToString()));
         return new OwnershipResult(true, owner, conversation.State, null);
     }
 
@@ -177,6 +196,8 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
 
         await _capacity.ReserveAsync(tenantId, targetAgentId, conversation.Channel, ct).ConfigureAwait(false);
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationAssignedEvent(
+            tenantId.Value, conversationId.Value, targetAgentId.Value, "", "", ""));
         return new OwnershipResult(true, owner, conversation.State, null);
     }
 
@@ -206,6 +227,8 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         conversation.UpdatedAt = _clock.UtcNow;
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, "Active", conversation.State.ToString()));
         return new OwnershipResult(true, owner, conversation.State, null);
     }
 

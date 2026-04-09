@@ -5,11 +5,12 @@ using Asterisk.Platform.Switchboard;
 
 namespace Asterisk.Platform.Switchboard.Tests;
 
-public class ConversationSwitchboardTests
+public sealed class ConversationSwitchboardTests : IDisposable
 {
     private readonly IConversationStore _store = Substitute.For<IConversationStore>();
     private readonly IAgentCapacityService _capacity = Substitute.For<IAgentCapacityService>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly PlatformEventBus _eventBus = new();
 
     private readonly TenantId _tenantId = new("t1");
     private readonly EntityId _conversationId = EntityId.From("conv-001");
@@ -18,7 +19,7 @@ public class ConversationSwitchboardTests
     private readonly DateTimeOffset _now = new(2026, 3, 21, 12, 0, 0, TimeSpan.Zero);
 
     private ConversationSwitchboard CreateSut() =>
-        new(_store, _capacity, _clock);
+        new(_store, _capacity, _clock, _eventBus);
 
     private Conversation BuildConversation(ConversationState state, ConversationOwner? owner = null) =>
         new()
@@ -36,6 +37,8 @@ public class ConversationSwitchboardTests
     {
         _clock.UtcNow.Returns(_now);
     }
+
+    public void Dispose() => _eventBus.Dispose();
 
     // ─── AssignToQueue ────────────────────────────────────────────────────────
 
@@ -403,5 +406,101 @@ public class ConversationSwitchboardTests
         await sut.TransferToQueueAsync(_conversationId, _tenantId, targetQueue, CancellationToken.None);
 
         await _capacity.DidNotReceive().ReleaseAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
+    }
+
+    // ─── Event publishing ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AssignToQueueAsync_ShouldPublishStateChangedEvent_WhenSuccessful()
+    {
+        var conversation = BuildConversation(ConversationState.Queued);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var events = new List<PlatformEvent>();
+        using var sub = _eventBus.Events.Subscribe(e => events.Add(e));
+
+        var sut = CreateSut();
+        await sut.AssignToQueueAsync(_conversationId, _tenantId, _queueId, CancellationToken.None);
+
+        events.Should().ContainSingle(e => e is ConversationStateChangedEvent);
+        var stateEvent = (ConversationStateChangedEvent)events.Single(e => e is ConversationStateChangedEvent);
+        stateEvent.TenantId.Should().Be(_tenantId.Value);
+        stateEvent.ConversationId.Should().Be(_conversationId.Value);
+        stateEvent.NewState.Should().Be("Queued");
+    }
+
+    [Fact]
+    public async Task OfferToAgentAsync_ShouldPublishOfferedAndStateChangedEvents_WhenSuccessful()
+    {
+        var conversation = BuildConversation(ConversationState.Queued, ConversationOwner.ForQueue(_queueId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var events = new List<PlatformEvent>();
+        using var sub = _eventBus.Events.Subscribe(e => events.Add(e));
+
+        var sut = CreateSut();
+        await sut.OfferToAgentAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        events.Should().Contain(e => e is ConversationOfferedEvent);
+        events.Should().Contain(e => e is ConversationStateChangedEvent);
+
+        var offeredEvent = (ConversationOfferedEvent)events.Single(e => e is ConversationOfferedEvent);
+        offeredEvent.TenantId.Should().Be(_tenantId.Value);
+        offeredEvent.ConversationId.Should().Be(_conversationId.Value);
+        offeredEvent.AgentId.Should().Be(_agentId.Value);
+
+        var stateEvent = (ConversationStateChangedEvent)events.Single(e => e is ConversationStateChangedEvent);
+        stateEvent.OldState.Should().Be("Queued");
+        stateEvent.NewState.Should().Be("Offered");
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ShouldPublishAssignedAndStateChangedEvents_WhenSuccessful()
+    {
+        var conversation = BuildConversation(ConversationState.Offered, ConversationOwner.ForQueue(_queueId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+        _capacity.HasCapacityAsync(_tenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>())
+                 .Returns(true);
+
+        var events = new List<PlatformEvent>();
+        using var sub = _eventBus.Events.Subscribe(e => events.Add(e));
+
+        var sut = CreateSut();
+        await sut.AcceptAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        events.Should().Contain(e => e is ConversationAssignedEvent);
+        events.Should().Contain(e => e is ConversationStateChangedEvent);
+
+        var assignedEvent = (ConversationAssignedEvent)events.Single(e => e is ConversationAssignedEvent);
+        assignedEvent.TenantId.Should().Be(_tenantId.Value);
+        assignedEvent.ConversationId.Should().Be(_conversationId.Value);
+        assignedEvent.AgentId.Should().Be(_agentId.Value);
+
+        var stateEvent = (ConversationStateChangedEvent)events.Single(e => e is ConversationStateChangedEvent);
+        stateEvent.OldState.Should().Be("Offered");
+        stateEvent.NewState.Should().Be("Active");
+    }
+
+    [Fact]
+    public async Task RejectAsync_ShouldPublishStateChangedEvent_WhenSuccessful()
+    {
+        var queueOwner = ConversationOwner.ForQueue(_queueId);
+        var conversation = BuildConversation(ConversationState.Offered, queueOwner);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var events = new List<PlatformEvent>();
+        using var sub = _eventBus.Events.Subscribe(e => events.Add(e));
+
+        var sut = CreateSut();
+        await sut.RejectAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        events.Should().ContainSingle(e => e is ConversationStateChangedEvent);
+        var stateEvent = (ConversationStateChangedEvent)events.Single(e => e is ConversationStateChangedEvent);
+        stateEvent.OldState.Should().Be("Offered");
+        stateEvent.NewState.Should().Be("Queued");
     }
 }
