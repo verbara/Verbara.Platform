@@ -202,6 +202,11 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(SuggestionLogRowDto[]))]
 [JsonSerializable(typeof(ComplianceAlertRowDto))]
 [JsonSerializable(typeof(ComplianceAlertRowDto[]))]
+// Cases
+[JsonSerializable(typeof(Case))]
+[JsonSerializable(typeof(PagedResult<Case>))]
+[JsonSerializable(typeof(CreateCaseRequest))]
+[JsonSerializable(typeof(UpdateCaseRequest))]
 // Bot Analytics
 [JsonSerializable(typeof(BotAnalyticsSummary))]
 // Shared response DTOs

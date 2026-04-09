@@ -79,6 +79,20 @@ builder.Services.AddPlatformSurveys();
 builder.Services.AddPlatformBilling();
 builder.Services.AddWebChat();
 
+// ─── Twilio SMS (conditional on config) ─────────────────────────────────────
+var twilioSection = builder.Configuration.GetSection("Twilio");
+if (!string.IsNullOrEmpty(twilioSection["AccountSid"]))
+{
+    builder.Services.Configure<Asterisk.Platform.Channels.Sms.Providers.TwilioOptions>(o =>
+    {
+        o.AccountSid = twilioSection["AccountSid"]!;
+        o.AuthToken = twilioSection["AuthToken"]!;
+    });
+    builder.Services.AddHttpClient("twilio");
+    builder.Services.AddSingleton<Asterisk.Platform.Channels.Sms.ISmsProvider,
+        Asterisk.Platform.Channels.Sms.Providers.TwilioSmsProvider>();
+}
+
 // ─── GDPR Services ──────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IGdprExportService, GdprExportService>();
 builder.Services.AddSingleton<IGdprPurgeService, GdprPurgeService>();
@@ -588,6 +602,7 @@ v1.MapNotificationEndpoints();
 v1.MapOnboardingEndpoints();
 v1.MapWebChatEndpoints();
 v1.MapCannedResponseEndpoints();
+v1.MapCaseEndpoints();
 
 // WebSocket endpoint for WebChat (outside versioned API group)
 app.MapWebChatWebSocket();

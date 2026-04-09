@@ -28,3 +28,6 @@ CREATE TABLE IF NOT EXISTS bot_analytics (
 );
 CREATE INDEX IF NOT EXISTS ix_bot_analytics_tenant_date
     ON bot_analytics (tenant_id, created_at);
+
+-- Cases: add case_number if missing from initial schema
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS case_number TEXT;
