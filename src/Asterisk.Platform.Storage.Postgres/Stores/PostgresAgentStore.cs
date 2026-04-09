@@ -34,6 +34,17 @@ internal sealed class PostgresAgentStore : IAgentStore
         return row?.ToAgent();
     }
 
+    public async Task<Agent?> GetByExtensionAsync(TenantId tenantId, string extension, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<AgentRow>(
+            "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
+            "extension, sip_password, created_at, updated_at, created_by, updated_by " +
+            "FROM agents WHERE tenant_id = @TenantId AND extension = @Extension LIMIT 1",
+            new { TenantId = tenantId.Value, Extension = extension });
+        return row?.ToAgent();
+    }
+
     public async Task<PagedResult<Agent>> ListAsync(TenantId tenantId, AgentQuery query, CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);

@@ -23,6 +23,15 @@ internal sealed class InMemoryAgentStore : IAgentStore
         return Task.FromResult(result);
     }
 
+    public Task<Agent?> GetByExtensionAsync(TenantId tenantId, string extension, CancellationToken ct)
+    {
+        var result = _items.Values.FirstOrDefault(a =>
+            a.TenantId == tenantId &&
+            a.Extension == extension);
+
+        return Task.FromResult(result);
+    }
+
     public Task<PagedResult<Agent>> ListAsync(TenantId tenantId, AgentQuery query, CancellationToken ct)
     {
         var filtered = _items.Values

@@ -6,6 +6,7 @@ public interface IAgentStore
 {
     Task<Agent?> GetByIdAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
     Task<Agent?> GetByUserIdAsync(TenantId tenantId, EntityId userId, CancellationToken ct);
+    Task<Agent?> GetByExtensionAsync(TenantId tenantId, string extension, CancellationToken ct);
     Task<PagedResult<Agent>> ListAsync(TenantId tenantId, AgentQuery query, CancellationToken ct);
     Task SaveAsync(Agent agent, CancellationToken ct);
     Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);

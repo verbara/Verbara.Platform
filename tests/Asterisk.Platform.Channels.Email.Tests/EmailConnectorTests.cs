@@ -33,10 +33,14 @@ public class EmailConnectorTests
         var threading = Substitute.For<IEmailThreadingContext>();
         threading.GetThreadInfo(Arg.Any<EntityId>()).Returns((EmailThreadInfo?)null);
 
+        var httpClientFactory = Substitute.For<IHttpClientFactory>();
+        httpClientFactory.CreateClient(Arg.Any<string>()).Returns(new HttpClient());
+
         var connector = new EmailConnector(
             smtp,
             Options.Create(options ?? DefaultOptions()),
             threading,
+            httpClientFactory,
             NullLogger<EmailConnector>.Instance);
 
         return (connector, smtp, threading);

@@ -192,6 +192,9 @@ builder.Services.Configure<DistributionOptions>(o =>
 builder.Services.AddHostedService<QueueDistributionWorker>();
 builder.Services.AddHostedService<ConversationTimeoutWorker>();
 
+// ─── Asterisk Capacity Sync (voice ↔ digital) ──────────────────────────────
+builder.Services.AddHostedService<AsteriskCapacitySyncService>();
+
 // ─── Outbound Webhooks ──────────────────────────────────────────────────────
 builder.Services.Configure<Asterisk.Platform.Core.Webhooks.CircuitBreakerOptions>(o =>
 {
