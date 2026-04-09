@@ -93,6 +93,11 @@ if (!string.IsNullOrEmpty(coreConnectionString))
 {
     builder.Services.AddPostgresStorage(coreConnectionString);
 
+    // Auto-apply SQL migrations at startup
+    builder.Services.AddSingleton<Asterisk.Platform.Api.Services.DatabaseMigrationService>();
+    builder.Services.AddHostedService(sp =>
+        sp.GetRequiredService<Asterisk.Platform.Api.Services.DatabaseMigrationService>());
+
     // Override in-memory capacity with persistent version for restart recovery
     builder.Services.AddSingleton<IAgentCapacityService>(sp =>
         new PersistentAgentCapacityService(
@@ -144,7 +149,7 @@ builder.Services.AddSingleton<AgentAssistConfigStore>();
 builder.Services.AddSingleton<SystemSettingsStore>();
 
 // ─── Scheduled Reports + Email (via external microservices) ─────────────────
-var serviceKey = builder.Configuration["Services:ServiceKey"] ?? "platform_internal_secret";
+var serviceKey = builder.Configuration["Services:ServiceKey"] ?? "";
 builder.Services.AddHttpClient("renderer", c =>
 {
     c.BaseAddress = new Uri(builder.Configuration["Services:Renderer:BaseUrl"] ?? "http://renderer:5010");
@@ -405,7 +410,14 @@ builder.Services.AddSingleton<IAuthorizationHandler, PartnerAdminAuthorizationHa
 
 // ─── Health Checks ───────────────────────────────────────────────────────────
 
-builder.Services.AddHealthChecks();
+builder.Services.AddSingleton<Asterisk.Platform.Api.Health.IServiceHeartbeat, Asterisk.Platform.Api.Health.ServiceHeartbeat>();
+var healthBuilder = builder.Services.AddHealthChecks()
+    .AddCheck<Asterisk.Platform.Api.Health.BackgroundServiceHealthCheck>("services", tags: ["ready"])
+    .AddCheck<Asterisk.Platform.Api.Health.AsteriskAmiHealthCheck>("asterisk", tags: ["ready"]);
+
+// Only add Postgres health check if NpgsqlDataSource is registered
+if (builder.Services.Any(d => d.ServiceType == typeof(NpgsqlDataSource)))
+    healthBuilder.AddCheck<Asterisk.Platform.Api.Health.PostgresHealthCheck>("postgres", tags: ["ready"]);
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
@@ -451,6 +463,32 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
+// ─── Production Config Validation ────────────────────────────────────────────
+
+if (app.Environment.IsProduction())
+{
+    var configErrors = new List<string>();
+
+    if (string.IsNullOrEmpty(serviceKey) || serviceKey == "platform_internal_secret")
+        configErrors.Add("Services:ServiceKey must be configured (not default) in production");
+
+    if (corsOrigins.Contains("*"))
+        configErrors.Add("CORS_ORIGINS must not contain '*' in production");
+
+    var amiHost = builder.Configuration["Asterisk:Ami:Hostname"];
+    if (!string.IsNullOrEmpty(amiHost))
+    {
+        var amiUser = builder.Configuration["Asterisk:Ami:Username"];
+        var amiPass = builder.Configuration["Asterisk:Ami:Password"];
+        if (string.IsNullOrEmpty(amiUser) || string.IsNullOrEmpty(amiPass))
+            configErrors.Add("Asterisk:Ami:Username and Password are required when Ami:Hostname is set");
+    }
+
+    if (configErrors.Count > 0)
+        throw new InvalidOperationException(
+            $"Production configuration errors:\n  - {string.Join("\n  - ", configErrors)}");
+}
+
 // ─── Middleware pipeline ──────────────────────────────────────────────────────
 
 app.UseWebSockets();
@@ -469,6 +507,10 @@ app.UseMiddleware<LicenseGateMiddleware>();
 
 app.MapOpenApi();
 app.MapHealthChecks("/health");
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = r => r.Tags.Contains("ready"),
+});
 app.MapGet("/metrics", () => Results.Ok(new
 {
     status = "ok",

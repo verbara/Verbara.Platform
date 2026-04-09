@@ -40,6 +40,7 @@ public sealed class ConversationTimeoutWorkerTests : IDisposable
             _switchboard,
             _eventBus,
             _clock,
+            new Asterisk.Platform.Api.Health.ServiceHeartbeat(),
             _options,
             NullLogger<ConversationTimeoutWorker>.Instance);
     }

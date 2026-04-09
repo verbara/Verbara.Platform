@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Health;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Switchboard;
@@ -13,6 +14,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     private readonly IConversationSwitchboard _switchboard;
     private readonly PlatformEventBus _eventBus;
     private readonly IClock _clock;
+    private readonly IServiceHeartbeat _heartbeat;
     private readonly DistributionOptions _options;
     private readonly ILogger<ConversationTimeoutWorker> _logger;
 
@@ -22,6 +24,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         IConversationSwitchboard switchboard,
         PlatformEventBus eventBus,
         IClock clock,
+        IServiceHeartbeat heartbeat,
         IOptions<DistributionOptions> options,
         ILogger<ConversationTimeoutWorker> logger)
     {
@@ -30,6 +33,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         _switchboard = switchboard;
         _eventBus = eventBus;
         _clock = clock;
+        _heartbeat = heartbeat;
         _options = options.Value;
         _logger = logger;
     }
@@ -42,6 +46,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            _heartbeat.RecordTick(nameof(ConversationTimeoutWorker), TimeSpan.FromSeconds(5));
             try
             {
                 await ProcessTimeoutsAsync(stoppingToken);

@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Health;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Routing.Inbound;
@@ -15,6 +16,7 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
     private readonly IConversationSwitchboard _switchboard;
     private readonly PlatformEventBus _eventBus;
     private readonly IClock _clock;
+    private readonly IServiceHeartbeat _heartbeat;
     private readonly DistributionOptions _options;
     private readonly ILogger<QueueDistributionWorker> _logger;
 
@@ -25,6 +27,7 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
         IConversationSwitchboard switchboard,
         PlatformEventBus eventBus,
         IClock clock,
+        IServiceHeartbeat heartbeat,
         IOptions<DistributionOptions> options,
         ILogger<QueueDistributionWorker> logger)
     {
@@ -34,6 +37,7 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
         _switchboard = switchboard;
         _eventBus = eventBus;
         _clock = clock;
+        _heartbeat = heartbeat;
         _options = options.Value;
         _logger = logger;
     }
@@ -44,8 +48,10 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
 
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_options.PollIntervalMs));
 
+        var pollInterval = TimeSpan.FromMilliseconds(_options.PollIntervalMs);
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            _heartbeat.RecordTick(nameof(QueueDistributionWorker), pollInterval);
             try
             {
                 await DistributeAsync(stoppingToken);

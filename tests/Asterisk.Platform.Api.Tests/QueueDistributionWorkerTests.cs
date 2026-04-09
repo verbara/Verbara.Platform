@@ -35,6 +35,7 @@ public sealed class QueueDistributionWorkerTests : IDisposable
             _switchboard,
             _eventBus,
             _clock,
+            new Asterisk.Platform.Api.Health.ServiceHeartbeat(),
             _options,
             NullLogger<QueueDistributionWorker>.Instance);
     }
