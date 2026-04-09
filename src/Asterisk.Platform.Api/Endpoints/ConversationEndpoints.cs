@@ -25,6 +25,8 @@ internal static class ConversationEndpoints
         group.MapPost("/{id}/transfer", TransferConversation);
         group.MapPost("/{id}/close", CloseConversation);
         group.MapPost("/{id}/wrapup", WrapUpConversation);
+        group.MapPost("/{id}/hold", HoldConversation);
+        group.MapPost("/{id}/unhold", UnholdConversation);
     }
 
     private static async Task<IResult> ListConversations(
@@ -244,6 +246,36 @@ internal static class ConversationEndpoints
         }
 
         return Results.Ok(record);
+    }
+
+    private static async Task<IResult> HoldConversation(
+        string id,
+        HttpContext context,
+        IConversationSwitchboard switchboard,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+        var result = await switchboard.HoldAsync(EntityId.From(id), tenantId, agentId, ct);
+
+        return result.Success
+            ? Results.Ok(result)
+            : Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot hold conversation"));
+    }
+
+    private static async Task<IResult> UnholdConversation(
+        string id,
+        HttpContext context,
+        IConversationSwitchboard switchboard,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+        var result = await switchboard.UnholdAsync(EntityId.From(id), tenantId, agentId, ct);
+
+        return result.Success
+            ? Results.Ok(result)
+            : Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot unhold conversation"));
     }
 
     private static TenantId GetTenantId(HttpContext context)
