@@ -31,23 +31,23 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore.Postgres" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics.Storage.Postgres" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Licensing" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Routing" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime.Storage.Postgres" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster.Storage.Postgres" Version="1.1.1-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.MultiTenant" Version="1.1.1-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore.Postgres" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics.Storage.Postgres" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Licensing" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Routing" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime.Storage.Postgres" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster.Storage.Postgres" Version="1.1.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.MultiTenant" Version="1.1.2-pro" />
   </ItemGroup>
 
   <ItemGroup>
