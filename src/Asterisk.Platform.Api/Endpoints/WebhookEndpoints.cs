@@ -36,6 +36,7 @@ internal static class WebhookEndpoints
         IVirtualAgent virtualAgent,
         [FromServices] DeliveryStatusHandler deliveryStatusHandler,
         [FromServices] ITenantChannelConfigStore configStore,
+        [FromServices] PlatformEventBus eventBus,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
@@ -81,6 +82,17 @@ internal static class WebhookEndpoints
         if (result.Type == WebhookResultType.NewMessage && result.Message is not null)
         {
             var pipelineResult = await pipeline.ProcessAsync(result.Message, tid, channelType, ct);
+
+            // Publish SSE events for real-time UI updates
+            if (pipelineResult.IsNewConversation)
+            {
+                eventBus.Publish(new ConversationStateChangedEvent(
+                    tid.Value, pipelineResult.ConversationId.Value, "", "Queued"));
+            }
+
+            eventBus.Publish(new ConversationMessageEvent(
+                tid.Value, pipelineResult.ConversationId.Value,
+                pipelineResult.MessageId.Value, "Inbound", channelType.ToString()));
 
             // Fetch conversation and contact by IDs returned from pipeline
             var conversation = await conversationStore.GetByIdAsync(tid, pipelineResult.ConversationId, ct);
