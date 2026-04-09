@@ -184,6 +184,11 @@ builder.Services.AddSingleton<Asterisk.Platform.Core.Webhooks.CircuitBreakerPoli
 builder.Services.AddSingleton<WebhookDispatcher>();
 builder.Services.AddHostedService<WebhookDeliveryService>();
 builder.Services.AddHttpClient("webhooks");
+builder.Services.AddHttpClient("EmailAttachments", c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(30);
+    c.MaxResponseContentBufferSize = 25 * 1024 * 1024;
+});
 
 // ─── Auth Services ──────────────────────────────────────────────────────────
 // PasswordService and MfaService are static — no DI registration needed

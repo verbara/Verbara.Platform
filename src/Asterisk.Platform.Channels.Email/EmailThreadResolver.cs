@@ -148,4 +148,8 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Failed to parse inbound email")]
     internal static partial void ParseFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Failed to download attachment '{Url}' — skipping")]
+    internal static partial void AttachmentDownloadFailed(ILogger logger, Exception exception, string url);
 }

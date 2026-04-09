@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Net.Mail;
 using System.Net.Mime;
 using Asterisk.Platform.Channels.Core;
@@ -24,6 +25,7 @@ public sealed class EmailConnector : IChannelConnector
     private readonly EmailOptions _options;
     private readonly ISmtpClientWrapper _smtp;
     private readonly IEmailThreadingContext _threading;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<EmailConnector> _logger;
 
     public ChannelType Channel => ChannelType.Email;
@@ -32,11 +34,13 @@ public sealed class EmailConnector : IChannelConnector
         ISmtpClientWrapper smtp,
         IOptions<EmailOptions> options,
         IEmailThreadingContext threading,
+        IHttpClientFactory httpClientFactory,
         ILogger<EmailConnector> logger)
     {
         _smtp = smtp;
         _options = options.Value;
         _threading = threading;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -81,7 +85,7 @@ public sealed class EmailConnector : IChannelConnector
 
                 case ImageBlock image:
                     var imgName = ExtractFileName(image.Url) ?? "image";
-                    AddUrlAttachment(mail, image.Url, imgName, image.MimeType ?? MediaTypeNames.Image.Jpeg);
+                    await AddUrlAttachmentAsync(mail, image.Url, imgName, image.MimeType ?? MediaTypeNames.Image.Jpeg, ct).ConfigureAwait(false);
                     if (image.Caption is not null)
                         textParts.Add(image.Caption);
                     break;
@@ -97,17 +101,17 @@ public sealed class EmailConnector : IChannelConnector
                         }
                     }
 
-                    AddUrlAttachment(mail, file.Url, file.FileName, file.MimeType ?? MediaTypeNames.Application.Octet);
+                    await AddUrlAttachmentAsync(mail, file.Url, file.FileName, file.MimeType ?? MediaTypeNames.Application.Octet, ct).ConfigureAwait(false);
                     break;
 
                 case AudioBlock audio:
                     var audioName = ExtractFileName(audio.Url) ?? "audio";
-                    AddUrlAttachment(mail, audio.Url, audioName, audio.MimeType ?? "audio/mpeg");
+                    await AddUrlAttachmentAsync(mail, audio.Url, audioName, audio.MimeType ?? "audio/mpeg", ct).ConfigureAwait(false);
                     break;
 
                 case VideoBlock video:
                     var videoName = ExtractFileName(video.Url) ?? "video";
-                    AddUrlAttachment(mail, video.Url, videoName, video.MimeType ?? "video/mp4");
+                    await AddUrlAttachmentAsync(mail, video.Url, videoName, video.MimeType ?? "video/mp4", ct).ConfigureAwait(false);
                     if (video.Caption is not null)
                         textParts.Add(video.Caption);
                     break;
@@ -137,11 +141,28 @@ public sealed class EmailConnector : IChannelConnector
         return Task.FromResult<MessageDeliveryStatus?>(null);
     }
 
-    private static void AddUrlAttachment(MailMessage mail, string url, string fileName, string mimeType)
+    private async Task AddUrlAttachmentAsync(
+        MailMessage mail, string url, string fileName, string mimeType, CancellationToken ct)
     {
-        // Store the URL as the attachment content — real implementations would download the resource.
-        var data = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(url));
-        mail.Attachments.Add(new Attachment(data, fileName, mimeType));
+        try
+        {
+            var client = _httpClientFactory.CreateClient("EmailAttachments");
+            var response = await client.GetAsync(url, ct).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var bytes = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+            if (bytes.Length > 25 * 1024 * 1024)
+            {
+                Log.AttachmentTooLarge(_logger, fileName, 25);
+                return;
+            }
+
+            mail.Attachments.Add(new Attachment(new MemoryStream(bytes), fileName, mimeType));
+        }
+        catch (Exception ex)
+        {
+            Log.AttachmentDownloadFailed(_logger, ex, url);
+        }
     }
 
     private string GetDomain()
