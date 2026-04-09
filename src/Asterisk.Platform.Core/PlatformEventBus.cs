@@ -65,6 +65,27 @@ public sealed record AgentStateChangedEvent(
     string NewState)
     : PlatformEvent(TenantId, "agent.state_changed", DateTimeOffset.UtcNow);
 
+/// <summary>Raised when a conversation is offered to an agent from a queue.</summary>
+public sealed record ConversationOfferedEvent(
+    string TenantId, string ConversationId, string AgentId, string QueueId)
+    : PlatformEvent(TenantId, "conversation.offered", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when a conversation offer to an agent expires without acceptance.</summary>
+public sealed record ConversationOfferExpiredEvent(
+    string TenantId, string ConversationId, string AgentId)
+    : PlatformEvent(TenantId, "conversation.offer_expired", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when a conversation is abandoned while waiting in a queue.</summary>
+public sealed record ConversationAbandonedEvent(
+    string TenantId, string ConversationId, string QueueId)
+    : PlatformEvent(TenantId, "conversation.abandoned", DateTimeOffset.UtcNow);
+
+/// <summary>Raised when an agent's channel capacity or load changes.</summary>
+public sealed record AgentCapacityChangedEvent(
+    string TenantId, string AgentId, string Channel,
+    int CurrentLoad, int MaxLoad, bool CanAcceptVoice)
+    : PlatformEvent(TenantId, "agent.capacity_changed", DateTimeOffset.UtcNow);
+
 /// <summary>Raised when an outbound campaign changes status (e.g. running → paused).</summary>
 public sealed record CampaignStatusChangedEvent(
     string TenantId, long CampaignId, string CampaignName,
