@@ -1,0 +1,141 @@
+.ast-webchat-bubble {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--ast-primary, #2563eb);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  transition: transform 0.2s;
+}
+.ast-webchat-bubble:hover { transform: scale(1.1); }
+.ast-webchat-bubble svg { width: 24px; height: 24px; fill: currentColor; }
+
+.ast-webchat-panel {
+  position: fixed;
+  bottom: 90px;
+  right: 24px;
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  height: 520px;
+  max-height: calc(100vh - 120px);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 99999;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+.ast-webchat-panel[hidden] { display: none; }
+
+.ast-webchat-header {
+  padding: 16px;
+  background: var(--ast-primary, #2563eb);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ast-webchat-header img { width: 32px; height: 32px; border-radius: 50%; }
+.ast-webchat-header-title { font-weight: 600; font-size: 15px; }
+.ast-webchat-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.ast-webchat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ast-webchat-msg {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.4;
+  word-wrap: break-word;
+}
+.ast-webchat-msg--out {
+  align-self: flex-end;
+  background: var(--ast-primary, #2563eb);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.ast-webchat-msg--in {
+  align-self: flex-start;
+  background: #f1f5f9;
+  color: #1e293b;
+  border-bottom-left-radius: 4px;
+}
+
+.ast-webchat-typing {
+  align-self: flex-start;
+  padding: 10px 14px;
+  background: #f1f5f9;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #64748b;
+}
+.ast-webchat-typing[hidden] { display: none; }
+
+.ast-webchat-input-area {
+  display: flex;
+  padding: 12px;
+  border-top: 1px solid #e2e8f0;
+  gap: 8px;
+}
+.ast-webchat-input {
+  flex: 1;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+}
+.ast-webchat-input:focus { border-color: var(--ast-primary, #2563eb); }
+.ast-webchat-send {
+  background: var(--ast-primary, #2563eb);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+.ast-webchat-send:disabled { opacity: 0.5; cursor: default; }
+
+@media (max-width: 480px) {
+  .ast-webchat-panel {
+    bottom: 0;
+    right: 0;
+    width: 100vw;
+    height: 100vh;
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .ast-webchat-bubble { bottom: 16px; right: 16px; }
+}
