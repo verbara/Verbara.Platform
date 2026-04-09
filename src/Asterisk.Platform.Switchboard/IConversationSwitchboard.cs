@@ -11,4 +11,6 @@ public interface IConversationSwitchboard
     Task<OwnershipResult> TransferToQueueAsync(EntityId conversationId, TenantId tenantId, EntityId targetQueueId, CancellationToken ct);
     Task<OwnershipResult> TransferToAgentAsync(EntityId conversationId, TenantId tenantId, EntityId targetAgentId, CancellationToken ct);
     Task<OwnershipResult> ReturnToBotAsync(EntityId conversationId, TenantId tenantId, EntityId botId, CancellationToken ct);
+    Task<OwnershipResult> HoldAsync(EntityId conversationId, TenantId tenantId, EntityId agentId, CancellationToken ct);
+    Task<OwnershipResult> UnholdAsync(EntityId conversationId, TenantId tenantId, EntityId agentId, CancellationToken ct);
 }

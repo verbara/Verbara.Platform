@@ -307,6 +307,77 @@ public sealed class ConversationSwitchboardTests : IDisposable
         await _capacity.Received(1).ReleaseAsync(_tenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>());
     }
 
+    // ─── Hold ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Hold_ShouldTransitionToOnHold_WhenActive()
+    {
+        var conversation = BuildConversation(ConversationState.Active, ConversationOwner.ForAgent(_agentId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.HoldAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.NewState.Should().Be(ConversationState.OnHold);
+    }
+
+    [Fact]
+    public async Task Hold_ShouldFail_WhenNotOwnedByAgent()
+    {
+        var conversation = BuildConversation(ConversationState.Active, ConversationOwner.ForQueue(_queueId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.HoldAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Hold_ShouldFail_WhenNotActive()
+    {
+        var conversation = BuildConversation(ConversationState.Queued, ConversationOwner.ForAgent(_agentId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.HoldAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+    }
+
+    // ─── Unhold ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Unhold_ShouldTransitionToActive_WhenOnHold()
+    {
+        var conversation = BuildConversation(ConversationState.OnHold, ConversationOwner.ForAgent(_agentId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.UnholdAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.NewState.Should().Be(ConversationState.Active);
+    }
+
+    [Fact]
+    public async Task Unhold_ShouldFail_WhenNotOnHold()
+    {
+        var conversation = BuildConversation(ConversationState.Active, ConversationOwner.ForAgent(_agentId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.UnholdAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+    }
+
     // ─── Error cases ──────────────────────────────────────────────────────────
 
     [Fact]

@@ -232,6 +232,60 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         return new OwnershipResult(true, owner, conversation.State, null);
     }
 
+    public async Task<OwnershipResult> HoldAsync(
+        EntityId conversationId,
+        TenantId tenantId,
+        EntityId agentId,
+        CancellationToken ct)
+    {
+        var conversation = await _store.GetByIdAsync(tenantId, conversationId, ct).ConfigureAwait(false);
+        if (conversation is null)
+            return Fail(ConversationState.Active, "Conversation not found.");
+
+        if (conversation.Owner?.Kind != ConversationOwnerKind.Agent ||
+            conversation.Owner.OwnerId != agentId)
+            return Fail(conversation.State, "Only the assigned agent can hold the conversation.");
+
+        if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.OnHold))
+            return Fail(conversation.State, $"Cannot transition from {conversation.State} to OnHold.");
+
+        var oldState = conversation.State;
+        conversation.TransitionTo(ConversationState.OnHold, _clock.UtcNow);
+        conversation.UpdatedAt = _clock.UtcNow;
+
+        await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, oldState.ToString(), "OnHold"));
+        return new OwnershipResult(true, conversation.Owner, conversation.State, null);
+    }
+
+    public async Task<OwnershipResult> UnholdAsync(
+        EntityId conversationId,
+        TenantId tenantId,
+        EntityId agentId,
+        CancellationToken ct)
+    {
+        var conversation = await _store.GetByIdAsync(tenantId, conversationId, ct).ConfigureAwait(false);
+        if (conversation is null)
+            return Fail(ConversationState.OnHold, "Conversation not found.");
+
+        if (conversation.Owner?.Kind != ConversationOwnerKind.Agent ||
+            conversation.Owner.OwnerId != agentId)
+            return Fail(conversation.State, "Only the assigned agent can unhold the conversation.");
+
+        if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.Active))
+            return Fail(conversation.State, $"Cannot transition from {conversation.State} to Active.");
+
+        var oldState = conversation.State;
+        conversation.TransitionTo(ConversationState.Active, _clock.UtcNow);
+        conversation.UpdatedAt = _clock.UtcNow;
+
+        await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, oldState.ToString(), "Active"));
+        return new OwnershipResult(true, conversation.Owner, conversation.State, null);
+    }
+
     private static OwnershipResult Fail(ConversationState currentState, string reason) =>
         new(false, null, currentState, reason);
 }
