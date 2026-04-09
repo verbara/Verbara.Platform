@@ -1,10 +1,12 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Asterisk.Platform.Api.Serialization;
+using Asterisk.Platform.Core;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Middleware;
 
-internal sealed class ErrorHandlingMiddleware
+internal sealed partial class ErrorHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ErrorHandlingMiddleware> _logger;
@@ -31,18 +33,19 @@ internal sealed class ErrorHandlingMiddleware
     {
         var (status, title) = exception switch
         {
+            PlatformException px => (StatusCodes.Status400BadRequest, px.Code),
+            ArgumentException => (StatusCodes.Status400BadRequest, "Bad Request"),
             InvalidOperationException => (StatusCodes.Status400BadRequest, "Bad Request"),
             UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, "Unauthorized"),
             KeyNotFoundException => (StatusCodes.Status404NotFound, "Not Found"),
+            OperationCanceledException => (499, "Client Closed Request"),
             _ => (StatusCodes.Status500InternalServerError, "Internal Server Error"),
         };
 
-#pragma warning disable CA1848 // Use LoggerMessage delegates
         if (status == StatusCodes.Status500InternalServerError)
-            _logger.LogError(exception, "Unhandled exception");
+            LogUnhandledException(_logger, exception);
         else
-            _logger.LogWarning(exception, "Request error: {Title}", title);
-#pragma warning restore CA1848
+            LogRequestError(_logger, title, exception);
 
         var problem = new ProblemDetails
         {
@@ -52,10 +55,18 @@ internal sealed class ErrorHandlingMiddleware
             Instance = context.Request.Path,
         };
 
+        problem.Extensions["traceId"] = Activity.Current?.Id ?? context.TraceIdentifier;
+
         context.Response.StatusCode = status;
         context.Response.ContentType = "application/problem+json";
 
         await context.Response.WriteAsync(
             JsonSerializer.Serialize(problem, ApiJsonContext.Default.ProblemDetails));
     }
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception")]
+    private static partial void LogUnhandledException(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Request error: {Title}")]
+    private static partial void LogRequestError(ILogger logger, string title, Exception exception);
 }
