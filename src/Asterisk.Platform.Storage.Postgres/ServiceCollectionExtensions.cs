@@ -17,6 +17,7 @@ using Asterisk.Platform.Core.Notifications;
 using Asterisk.Platform.Core.Reports;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
+using Asterisk.Platform.Queues.Services;
 using Asterisk.Platform.Storage.Postgres.Stores;
 using Asterisk.Platform.Surveys;
 using Asterisk.Platform.Core.Webhooks;
@@ -54,6 +55,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAgentStore, PostgresAgentStore>();
         services.AddSingleton<ITeamStore, PostgresTeamStore>();
         services.AddSingleton<IQueueMembershipStore, PostgresQueueMembershipStore>();
+        services.AddSingleton<IAgentCapacityStore, PostgresAgentCapacityStore>();
 
         // Channels
         services.AddSingleton<ITenantChannelConfigStore, PostgresTenantChannelConfigStore>();

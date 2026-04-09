@@ -18,6 +18,7 @@ using Asterisk.Platform.Switchboard;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Identity.OidcTokenExchange;
 using Asterisk.Platform.Queues;
+using Asterisk.Platform.Queues.Services;
 using Asterisk.Sdk.Hosting;
 using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Surveys;
@@ -87,6 +88,13 @@ var coreConnectionString = builder.Configuration.GetConnectionString("Postgres")
 if (!string.IsNullOrEmpty(coreConnectionString))
 {
     builder.Services.AddPostgresStorage(coreConnectionString);
+
+    // Override in-memory capacity with persistent version for restart recovery
+    builder.Services.AddSingleton<IAgentCapacityService>(sp =>
+        new PersistentAgentCapacityService(
+            sp.GetRequiredService<IAgentStore>(),
+            sp.GetRequiredService<IAgentCapacityStore>(),
+            sp.GetRequiredService<IConversationStore>()));
 }
 else
 {

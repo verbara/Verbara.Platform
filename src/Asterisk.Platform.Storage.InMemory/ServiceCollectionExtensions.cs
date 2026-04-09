@@ -12,6 +12,7 @@ using Asterisk.Platform.Identity;
 using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Queues;
+using Asterisk.Platform.Queues.Services;
 using Asterisk.Platform.Surveys;
 using Asterisk.Platform.Core.Branding;
 using Asterisk.Platform.Core.Notifications;
@@ -60,6 +61,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAgentStore, InMemoryAgentStore>();
         services.AddSingleton<ITeamStore, InMemoryTeamStore>();
         services.AddSingleton<IQueueMembershipStore, InMemoryQueueMembershipStore>();
+        services.AddSingleton<IAgentCapacityStore, InMemoryAgentCapacityStore>();
 
         // Channels
         services.AddSingleton<ITenantChannelConfigStore, InMemoryTenantChannelConfigStore>();

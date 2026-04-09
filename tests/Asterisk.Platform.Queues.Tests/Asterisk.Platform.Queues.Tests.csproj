@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Asterisk.Platform.Queues\Asterisk.Platform.Queues.csproj" />
+    <ProjectReference Include="..\..\src\Asterisk.Platform.Conversations\Asterisk.Platform.Conversations.csproj" />
   </ItemGroup>
 
   <ItemGroup>
