@@ -132,6 +132,9 @@ public static class ServiceCollectionExtensions
         // Tenant Add-Ons
         services.AddSingleton<ITenantAddOnStore, PostgresTenantAddOnStore>();
 
+        // Canned Responses
+        services.AddSingleton<ICannedResponseStore, PostgresCannedResponseStore>();
+
         return services;
     }
 }
