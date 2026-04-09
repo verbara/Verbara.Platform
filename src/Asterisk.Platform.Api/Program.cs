@@ -171,6 +171,19 @@ builder.Services.Configure<DunningConfig>(o =>
 });
 builder.Services.AddHostedService<DunningService>();
 
+// ─── ACD Distribution ───────────────────────────────────────────────────────
+builder.Services.Configure<DistributionOptions>(o =>
+{
+    var s = builder.Configuration.GetSection("Distribution");
+    if (int.TryParse(s["PollIntervalMs"], out var pim)) o.PollIntervalMs = pim;
+    if (int.TryParse(s["OfferTimeoutSeconds"], out var ots)) o.OfferTimeoutSeconds = ots;
+    if (int.TryParse(s["DefaultQueueTimeoutSeconds"], out var dqts)) o.DefaultQueueTimeoutSeconds = dqts;
+    if (int.TryParse(s["DefaultWrapUpTimeoutSeconds"], out var dwuts)) o.DefaultWrapUpTimeoutSeconds = dwuts;
+    if (int.TryParse(s["MaxConversationsPerCycle"], out var mcpc)) o.MaxConversationsPerCycle = mcpc;
+});
+builder.Services.AddHostedService<QueueDistributionWorker>();
+builder.Services.AddHostedService<ConversationTimeoutWorker>();
+
 // ─── Outbound Webhooks ──────────────────────────────────────────────────────
 builder.Services.Configure<Asterisk.Platform.Core.Webhooks.CircuitBreakerOptions>(o =>
 {
