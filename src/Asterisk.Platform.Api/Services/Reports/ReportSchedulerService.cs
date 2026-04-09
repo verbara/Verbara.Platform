@@ -15,6 +15,7 @@ internal sealed partial class ReportSchedulerService : BackgroundService
     private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(30);
 
     private readonly IScheduledReportStore _store;
+    private readonly ReportDataBuilderRegistry _registry;
     private readonly IReportRenderer _pdfRenderer;
     private readonly IReportRenderer _csvRenderer;
     private readonly IEmailService _emailService;
@@ -28,6 +29,7 @@ internal sealed partial class ReportSchedulerService : BackgroundService
 
     public ReportSchedulerService(
         IScheduledReportStore store,
+        ReportDataBuilderRegistry registry,
         [FromKeyedServices("pdf")] IReportRenderer pdfRenderer,
         [FromKeyedServices("csv")] IReportRenderer csvRenderer,
         IEmailService emailService,
@@ -39,6 +41,7 @@ internal sealed partial class ReportSchedulerService : BackgroundService
         ILogger<ReportSchedulerService> logger)
     {
         _store = store;
+        _registry = registry;
         _pdfRenderer = pdfRenderer;
         _csvRenderer = csvRenderer;
         _emailService = emailService;
@@ -138,8 +141,9 @@ internal sealed partial class ReportSchedulerService : BackgroundService
                 FromName: tenantBranding?.EmailFromName ?? _smtpOptions.FromName,
                 FromAddress: tenantBranding?.EmailFromAddress ?? _smtpOptions.FromAddress);
 
-            // Build report data (placeholder — actual queries wired by consuming app)
-            var data = BuildReportData(report, now, brandingContext.PrimaryColor);
+            // Build report data via registered builder
+            var data = await BuildReportDataAsync(report, now, ct);
+            data.PrimaryColor = brandingContext.PrimaryColor;
 
             // Select renderer based on format
             var renderer = string.Equals(report.Format, "csv", StringComparison.OrdinalIgnoreCase)
@@ -263,20 +267,19 @@ internal sealed partial class ReportSchedulerService : BackgroundService
         }
     }
 
-    private static ReportData BuildReportData(
-        ScheduledReport report, DateTimeOffset now, string primaryColor)
+    private async Task<ReportData> BuildReportDataAsync(
+        ScheduledReport report, DateTimeOffset now, CancellationToken ct)
     {
-        // Placeholder — actual data source queries are wired by consuming application
-        return new ReportData
+        if (!_registry.TryGetBuilder(report.ReportType, out var builder))
         {
-            ReportName = report.Name,
-            TenantName = report.TenantId,
-            ReportType = report.ReportType,
-            From = now.AddDays(-30),
-            To = now,
-            GeneratedAt = now,
-            PrimaryColor = primaryColor,
-        };
+            throw new PlatformException(
+                "UNKNOWN_REPORT_TYPE",
+                $"No builder registered for report type '{report.ReportType}'");
+        }
+
+        var to = now;
+        var from = to.AddDays(-30);
+        return await builder.BuildAsync(report.TenantId, from, to, report.Filters, ct);
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Report scheduler tick: {Count} due reports found")]

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Middleware;
+using Asterisk.Platform.Bot;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Analytics;
@@ -26,6 +27,7 @@ internal static class AnalyticsEndpoints
         analytics.MapGet("/qa/{sessionId}", GetQaDetail);
         analytics.MapGet("/intervals/agents", ListAgentIntervals);
         analytics.MapGet("/intervals", ListIntervals);
+        analytics.MapGet("/bot", GetBotAnalytics);
     }
 
     // ─── Dashboard Handler ─────────────────────────────────────────────────────
@@ -501,6 +503,23 @@ internal static class AnalyticsEndpoints
             SlaMetCount: s.SlaMetCount)).ToArray();
 
         return Results.Ok(dtos);
+    }
+
+    // ─── Bot Analytics Handler ─────────────────────────────────────────────────
+
+    private static async Task<IResult> GetBotAnalytics(
+        HttpContext context,
+        [FromServices] IBotAnalyticsStore botAnalyticsStore,
+        string? from,
+        string? to,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-30);
+
+        var summary = await botAnalyticsStore.GetSummaryAsync(new TenantId(tenantId), fromDate, toDate, ct);
+        return Results.Ok(summary);
     }
 
     // ─── CDR Helpers ──────────────────────────────────────────────────────────

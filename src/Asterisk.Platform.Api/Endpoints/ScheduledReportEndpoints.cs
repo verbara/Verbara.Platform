@@ -1,3 +1,4 @@
+using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Api.Services.Reports;
 using Asterisk.Platform.Core;
@@ -42,10 +43,18 @@ internal static class ScheduledReportEndpoints
         HttpContext context,
         [FromBody] CreateScheduledReportRequest body,
         [FromServices] IScheduledReportStore store,
+        [FromServices] ReportDataBuilderRegistry registry,
         [FromServices] IClock clock,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+
+        if (!registry.TryGetBuilder(body.ReportType, out _))
+        {
+            return Results.BadRequest(new ErrorResponse(
+                $"Unknown report type '{body.ReportType}'. Valid types: {string.Join(", ", registry.RegisteredTypes)}"));
+        }
+
         var now = clock.UtcNow;
 
         DateTimeOffset? nextRunAt = null;
@@ -101,6 +110,7 @@ internal static class ScheduledReportEndpoints
         HttpContext context,
         [FromBody] UpdateScheduledReportRequest body,
         [FromServices] IScheduledReportStore store,
+        [FromServices] ReportDataBuilderRegistry registry,
         [FromServices] IClock clock,
         CancellationToken ct)
     {
@@ -108,6 +118,12 @@ internal static class ScheduledReportEndpoints
         var existing = await store.GetByIdAsync(id, ct);
         if (existing is null || !string.Equals(existing.TenantId, tenantId.Value, StringComparison.Ordinal))
             return Results.NotFound();
+
+        if (body.ReportType is not null && !registry.TryGetBuilder(body.ReportType, out _))
+        {
+            return Results.BadRequest(new ErrorResponse(
+                $"Unknown report type '{body.ReportType}'. Valid types: {string.Join(", ", registry.RegisteredTypes)}"));
+        }
 
         var now = clock.UtcNow;
 

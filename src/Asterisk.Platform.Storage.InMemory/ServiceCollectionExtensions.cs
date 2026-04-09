@@ -73,6 +73,7 @@ public static class ServiceCollectionExtensions
 
         // Bot
         services.AddSingleton<IBotConfigStore, InMemoryBotConfigStore>();
+        services.AddSingleton<IBotAnalyticsStore, InMemoryBotAnalyticsStore>();
 
         // KnowledgeBase
         services.AddSingleton<IArticleStore, InMemoryArticleStore>();

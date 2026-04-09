@@ -22,7 +22,7 @@ public sealed class ReportData
     /// Optional hex color (e.g. "#1E40AF") for branding table headers in PDF output.
     /// Falls back to the renderer's default when null.
     /// </summary>
-    public string? PrimaryColor { get; init; }
+    public string? PrimaryColor { get; set; }
 }
 
 public sealed record ReportDataRow(

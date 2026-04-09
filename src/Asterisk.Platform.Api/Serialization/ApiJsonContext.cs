@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Bot;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
@@ -201,6 +202,8 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(SuggestionLogRowDto[]))]
 [JsonSerializable(typeof(ComplianceAlertRowDto))]
 [JsonSerializable(typeof(ComplianceAlertRowDto[]))]
+// Bot Analytics
+[JsonSerializable(typeof(BotAnalyticsSummary))]
 // Shared response DTOs
 [JsonSerializable(typeof(ErrorResponse))]
 [JsonSerializable(typeof(ErrorDetailResponse))]

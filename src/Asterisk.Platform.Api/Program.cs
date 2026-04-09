@@ -23,6 +23,7 @@ using Asterisk.Sdk.Hosting;
 using Asterisk.Platform.KnowledgeBase;
 using Asterisk.Platform.Surveys;
 using Asterisk.Platform.Billing;
+using Asterisk.Platform.Core.Reports;
 using Asterisk.Sdk.Pro.Dialer.DependencyInjection;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.EventStore.DependencyInjection;
@@ -70,6 +71,7 @@ builder.Services.AddPlatformChannels();
 builder.Services.AddInboundRouting();
 builder.Services.AddSwitchboard();
 builder.Services.AddPlatformBot();
+builder.Services.AddHostedService<Asterisk.Platform.Api.Services.BotAnalyticsPersistenceService>();
 builder.Services.AddPlatformAudit();
 builder.Services.AddPlatformMedia();
 builder.Services.AddPlatformKnowledgeBase();
@@ -165,6 +167,10 @@ builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRendere
 builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRenderer,
     Asterisk.Platform.Api.Services.Reports.CsvReportRenderer>("csv");
 // IScheduledReportStore — Postgres when available, InMemory otherwise (registered below with storage)
+builder.Services.AddSingleton<IReportDataBuilder, Asterisk.Platform.Api.Services.Reports.AgentPerformanceReportBuilder>();
+builder.Services.AddSingleton<IReportDataBuilder, Asterisk.Platform.Api.Services.Reports.QueueAnalyticsReportBuilder>();
+builder.Services.AddSingleton<IReportDataBuilder, Asterisk.Platform.Api.Services.Reports.ConversationSummaryReportBuilder>();
+builder.Services.AddSingleton<Asterisk.Platform.Api.Services.Reports.ReportDataBuilderRegistry>();
 builder.Services.AddSingleton<Asterisk.Platform.Api.Services.Reports.ReportSchedulerService>();
 builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<Asterisk.Platform.Api.Services.Reports.ReportSchedulerService>());

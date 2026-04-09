@@ -66,6 +66,7 @@ public static class ServiceCollectionExtensions
 
         // Bot
         services.AddSingleton<IBotConfigStore, PostgresBotConfigStore>();
+        services.AddSingleton<IBotAnalyticsStore, PostgresBotAnalyticsStore>();
 
         // Automation
         services.AddSingleton<IAutomationRuleStore, PostgresAutomationRuleStore>();
