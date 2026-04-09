@@ -124,6 +124,12 @@ public static class ServiceCollectionExtensions
         // Notifications
         services.AddSingleton<INotificationStore, PostgresNotificationStore>();
 
+        // Dunning
+        services.AddSingleton<IDunningStore, PostgresDunningStore>();
+
+        // Tenant Add-Ons
+        services.AddSingleton<ITenantAddOnStore, PostgresTenantAddOnStore>();
+
         return services;
     }
 }
