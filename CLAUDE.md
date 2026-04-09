@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.2-pro).
 
-**30 packages, 1546 tests, 0 warnings, NativeAOT (IsAotCompatible=true), 56 endpoint groups (14 with feature gates), version 1.4.0:**
+**30 packages, 1557 tests, 0 warnings, NativeAOT (IsAotCompatible=true), 56 endpoint groups (14 with feature gates), version 1.4.1:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -37,7 +37,7 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Mail | Email + Microsoft 365 Graph microservice (`:5020`) -- MailKit SMTP, Graph API, OAuth PKCE | 0 |
 | Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 106 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 6 |
-| Platform.Api | HTTP host -- 49 endpoint groups (14 feature-gated), auth, middleware, SSE, NativeAOT | 434 |
+| Platform.Api | HTTP host -- 49 endpoint groups (14 feature-gated), auth, middleware, SSE, NativeAOT | 445 |
 
 ## Build & Test
 
@@ -598,6 +598,22 @@ Two commits (f9ad703 + c828885), 2 new microservices, NativeAOT activated:
 5. **Docker** -- renderer + mail services added to full + production compose files. Services__ServiceKey shared secret for internal auth.
 
 CsvReportRenderer remains in Platform.Api (AOT-safe, no external rendering dependency).
+
+## v1.4.1 "Core Operations" -- COMPLETE (2026-04-09)
+
+**Spec:** `docs/superpowers/specs/2026-04-08-v141-core-operations-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-08-plan31-v141-core-operations.md`
+
+8 sub-projects across 4 phases making the contact center operationally functional:
+
+1. **SSE Event Wiring** -- PlatformEventBus publish calls in ConversationSwitchboard (7 methods), WebhookEndpoints (inbound messages), DefaultConversationService (outbound messages). New events: ConversationOfferedEvent, ConversationOfferExpiredEvent, ConversationAbandonedEvent, AgentCapacityChangedEvent.
+2. **Queue Distribution Worker** -- QueueDistributionWorker BackgroundService polls queued conversations every 2s, selects agents via RoundRobinAgentSelector, offers via ConversationSwitchboard. Push model with offer metadata tracking.
+3. **Conversation Timeouts** -- ConversationTimeoutWorker BackgroundService handles offer timeout (30s → Queued), queue timeout (300s → Abandoned), wrap-up timeout (120s → Closed). Configurable via DistributionOptions.
+4. **Asterisk Capacity Sync** -- AsteriskCapacitySyncService bridges voice (AMI) and digital capacity. Resolves agents by extension, reserves/releases voice capacity, subscribes to AgentCapacityChangedEvent for digital→voice sync.
+5. **Missing Postgres Stores** -- PostgresDunningStore + PostgresTenantAddOnStore with migration 013 (dunning_records, tenant_add_ons, agent_capacity tables).
+6. **Agent Capacity Persistence** -- IAgentCapacityStore interface, PersistentAgentCapacityService wraps InMemory with Postgres write-through, startup reconciliation from active conversations.
+7. **Email Attachment Fix** -- EmailConnector.AddUrlAttachmentAsync downloads actual file content via IHttpClientFactory instead of storing URL string. 25MB limit, graceful fallback.
+8. **Agent State UI** -- AgentStatusSelector component in Platform.Web workspace header with 8 states, color-coded dropdown.
 
 ## Plan Execution
 
