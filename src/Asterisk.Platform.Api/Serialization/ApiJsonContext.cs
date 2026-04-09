@@ -287,6 +287,9 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(NotificationEndpoints.UnreadCountDto))]
 // Branding (public)
 [JsonSerializable(typeof(BrandingEndpoints.PublicBrandingDto))]
+// Supervisor Digital
+[JsonSerializable(typeof(SupervisorCloseRequest))]
+[JsonSerializable(typeof(CoachingNoteRequest))]
 // Canned Responses
 [JsonSerializable(typeof(CannedResponseEndpoints.CreateCannedResponseRequest))]
 [JsonSerializable(typeof(CannedResponseEndpoints.UpdateCannedResponseRequest))]
