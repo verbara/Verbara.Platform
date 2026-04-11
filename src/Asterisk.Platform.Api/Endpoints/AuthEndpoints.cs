@@ -700,7 +700,7 @@ internal static class RoleDefaultPermissions
     ];
 }
 
-internal sealed record MfaChallengeResponse(bool MfaRequired, string ChallengeToken);
+internal sealed record MfaChallengeResponse(bool RequiresMfa, string MfaToken);
 internal sealed record AuthEventDetail(string? Email = null, string? Reason = null);
 
 internal sealed class MfaPendingEntry
