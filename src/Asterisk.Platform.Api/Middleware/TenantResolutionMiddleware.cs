@@ -17,6 +17,12 @@ internal sealed class TenantResolutionMiddleware
         "/api/setup",
         "/api/v1/management/impersonate",
         "/api/v1/setup",
+        // Security-critical auth operations (Sub C T0.2)
+        "/api/v1/auth/mfa/setup",
+        "/api/v1/auth/mfa/confirm",
+        "/api/v1/auth/mfa/recovery-codes/regenerate",
+        "/api/v1/auth/change-password",
+        "/api/v1/auth/sessions/revoke-others",
     };
 
     public TenantResolutionMiddleware(RequestDelegate next)
@@ -135,6 +141,21 @@ internal sealed class TenantResolutionMiddleware
         if (string.Equals(method, "PUT", StringComparison.OrdinalIgnoreCase)
             && (path.StartsWith("/api/management/system/", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("/api/v1/management/system/", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // Sub C T0.2: DELETE security-critical auth paths
+        // DELETE /api/v1/auth/mfa (disable MFA)
+        if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase)
+            && path.Equals("/api/v1/auth/mfa", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // DELETE /api/v1/auth/sessions/{tokenId}
+        if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase)
+            && path.StartsWith("/api/v1/auth/sessions/", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
