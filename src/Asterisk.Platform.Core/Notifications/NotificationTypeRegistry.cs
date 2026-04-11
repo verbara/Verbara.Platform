@@ -35,6 +35,18 @@ public static class NotificationTypeRegistry
             NotificationCategory.Security, NotificationSeverity.Warning,
             ["admin", "system_admin"]),
 
+        ["security.mfa_enabled"] = new("security.mfa_enabled",
+            NotificationCategory.Security, NotificationSeverity.Info,
+            ["admin", "system_admin"]),
+
+        ["security.mfa_disabled"] = new("security.mfa_disabled",
+            NotificationCategory.Security, NotificationSeverity.Warning,
+            ["admin", "system_admin"]),
+
+        ["security.password_changed"] = new("security.password_changed",
+            NotificationCategory.Security, NotificationSeverity.Info,
+            ["admin", "system_admin"]),
+
         ["system.license_expiring"] = new("system.license_expiring",
             NotificationCategory.System, NotificationSeverity.Warning,
             ["admin", "system_admin", "platform_admin"]),

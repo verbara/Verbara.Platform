@@ -181,6 +181,8 @@ builder.Services.AddSingleton<Asterisk.Platform.Core.Email.IEmailService,
 builder.Services.AddSingleton<Asterisk.Platform.Core.Email.IEmailTemplateService,
     Asterisk.Platform.Api.Services.HttpEmailTemplateService>();
 builder.Services.AddSingleton<Asterisk.Platform.Api.Services.NotificationService>();
+builder.Services.AddSingleton<Asterisk.Platform.Core.Notifications.INotificationService>(
+    sp => sp.GetRequiredService<Asterisk.Platform.Api.Services.NotificationService>());
 builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRenderer,
     Asterisk.Platform.Api.Services.Reports.HttpPdfReportRenderer>("pdf");
 builder.Services.AddKeyedSingleton<Asterisk.Platform.Core.Reports.IReportRenderer,

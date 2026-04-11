@@ -5,11 +5,13 @@ using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.Notifications;
 using Asterisk.Platform.Identity;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using NSubstitute;
+using OtpNet;
 
 namespace Asterisk.Platform.Api.Tests.Endpoints;
 
@@ -43,6 +45,7 @@ public sealed class AuthEndpointsTests
         var tenantAuthConfigStore = Substitute.For<ITenantAuthConfigStore>();
         var authEventStore = Substitute.For<IAuthEventStore>();
         var authEventService = new AuthEventService(authEventStore);
+        var notifications = Substitute.For<INotificationService>();
 
         var user = BuildUser(mfaEnabled: true, role: UserRole.Agent);
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
@@ -59,11 +62,13 @@ public sealed class AuthEndpointsTests
         var request = new MfaDisableRequest(TestPassword);
         var result = await AuthEndpoints.MfaDisable(
             request, BuildHttpContext(), userStore, tenantAuthConfigStore,
-            authEventService, CancellationToken.None);
+            authEventService, notifications, CancellationToken.None);
 
         var statusResult = result.Should().BeOfType<JsonHttpResult<ErrorResponse>>().Subject;
         statusResult.StatusCode.Should().Be(403);
         user.MfaEnabled.Should().BeTrue("policy should block disable and leave MFA enabled");
+        await notifications.DidNotReceiveWithAnyArgs().CreateAsync(
+            default!, default!, default!, default!, default, default);
     }
 
     [Fact]
@@ -73,6 +78,7 @@ public sealed class AuthEndpointsTests
         var tenantAuthConfigStore = Substitute.For<ITenantAuthConfigStore>();
         var authEventStore = Substitute.For<IAuthEventStore>();
         var authEventService = new AuthEventService(authEventStore);
+        var notifications = Substitute.For<INotificationService>();
 
         var user = BuildUser(mfaEnabled: true, role: UserRole.Admin);
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
@@ -90,11 +96,13 @@ public sealed class AuthEndpointsTests
         var request = new MfaDisableRequest(TestPassword);
         var result = await AuthEndpoints.MfaDisable(
             request, BuildHttpContext(), userStore, tenantAuthConfigStore,
-            authEventService, CancellationToken.None);
+            authEventService, notifications, CancellationToken.None);
 
         var statusResult = result.Should().BeOfType<JsonHttpResult<ErrorResponse>>().Subject;
         statusResult.StatusCode.Should().Be(403);
         user.MfaEnabled.Should().BeTrue("policy should block disable and leave MFA enabled");
+        await notifications.DidNotReceiveWithAnyArgs().CreateAsync(
+            default!, default!, default!, default!, default, default);
     }
 
     // ─── Sub C T2.1a: user-scoped sessions management ──────────────────────
@@ -221,6 +229,7 @@ public sealed class AuthEndpointsTests
         var tenantAuthConfigStore = Substitute.For<ITenantAuthConfigStore>();
         var authEventStore = Substitute.For<IAuthEventStore>();
         var authEventService = new AuthEventService(authEventStore);
+        var notifications = Substitute.For<INotificationService>();
 
         var user = BuildUser(mfaEnabled: true, role: UserRole.Agent);
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
@@ -237,13 +246,124 @@ public sealed class AuthEndpointsTests
         var request = new MfaDisableRequest(TestPassword);
         var result = await AuthEndpoints.MfaDisable(
             request, BuildHttpContext(), userStore, tenantAuthConfigStore,
-            authEventService, CancellationToken.None);
+            authEventService, notifications, CancellationToken.None);
 
         result.Should().BeOfType<Ok<MessageResponse>>();
         user.MfaEnabled.Should().BeFalse();
         user.MfaSecret.Should().BeNull();
         user.MfaRecoveryCodes.Should().BeNull();
         user.MfaConfirmedAt.Should().BeNull();
+    }
+
+    // ─── Sub C T2.4a: security notification emits ──────────────────────────
+
+    [Fact]
+    public async Task MfaConfirm_ShouldEmitNotification_WhenSucceeds()
+    {
+        var userStore = Substitute.For<IUserStore>();
+        var authEventStore = Substitute.For<IAuthEventStore>();
+        var notifications = Substitute.For<INotificationService>();
+
+        // Use a real base32 secret so MfaService.VerifyCode accepts the TOTP we compute.
+        var secretBytes = KeyGeneration.GenerateRandomKey(20);
+        var secret = Base32Encoding.ToString(secretBytes);
+
+        var user = BuildUser(mfaEnabled: false);
+        user.MfaSecret = secret;
+        userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<User?>(user));
+
+        var validCode = new Totp(secretBytes).ComputeTotp(DateTime.UtcNow);
+
+        var request = new MfaConfirmRequest(validCode);
+        var result = await AuthEndpoints.MfaConfirm(
+            request,
+            BuildHttpContext(),
+            userStore,
+            new AuthEventService(authEventStore),
+            notifications,
+            CancellationToken.None);
+
+        result.Should().BeOfType<Ok<MessageResponse>>();
+        user.MfaEnabled.Should().BeTrue();
+        await notifications.Received(1).CreateAsync(
+            TestTenantId,
+            "security.mfa_enabled",
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task MfaDisable_ShouldEmitNotification_WhenSucceeds()
+    {
+        var userStore = Substitute.For<IUserStore>();
+        var tenantAuthConfigStore = Substitute.For<ITenantAuthConfigStore>();
+        var authEventStore = Substitute.For<IAuthEventStore>();
+        var notifications = Substitute.For<INotificationService>();
+
+        var user = BuildUser(mfaEnabled: true, role: UserRole.Agent);
+        userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<User?>(user));
+
+        var authConfig = new TenantAuthConfig { TenantId = TestTenantId, MfaPolicy = "optional" };
+        tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TenantAuthConfig?>(authConfig));
+
+        var request = new MfaDisableRequest(TestPassword);
+        var result = await AuthEndpoints.MfaDisable(
+            request,
+            BuildHttpContext(),
+            userStore,
+            tenantAuthConfigStore,
+            new AuthEventService(authEventStore),
+            notifications,
+            CancellationToken.None);
+
+        result.Should().BeOfType<Ok<MessageResponse>>();
+        await notifications.Received(1).CreateAsync(
+            TestTenantId,
+            "security.mfa_disabled",
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ChangePassword_ShouldEmitNotification_WhenSucceeds()
+    {
+        var userStore = Substitute.For<IUserStore>();
+        var tenantAuthConfigStore = Substitute.For<ITenantAuthConfigStore>();
+        var authEventStore = Substitute.For<IAuthEventStore>();
+        var notifications = Substitute.For<INotificationService>();
+
+        var user = BuildUser();
+        userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<User?>(user));
+
+        tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TenantAuthConfig?>(new TenantAuthConfig { TenantId = TestTenantId }));
+
+        var request = new ChangePasswordRequest(TestPassword, "NewValidPassword456!");
+        var result = await AuthEndpoints.ChangePassword(
+            request,
+            BuildHttpContext(),
+            userStore,
+            tenantAuthConfigStore,
+            new AuthEventService(authEventStore),
+            notifications,
+            CancellationToken.None);
+
+        result.Should().BeOfType<Ok<MessageResponse>>();
+        await notifications.Received(1).CreateAsync(
+            TestTenantId,
+            "security.password_changed",
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>());
     }
 
     // ─── Sub C T2.2a: recovery codes regenerate ─────────────────────────────

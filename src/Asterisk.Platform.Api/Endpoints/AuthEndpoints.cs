@@ -8,6 +8,7 @@ using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Core.Branding;
 using Asterisk.Platform.Core.Email;
+using Asterisk.Platform.Core.Notifications;
 using Asterisk.Platform.Identity;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
@@ -296,12 +297,13 @@ internal static class AuthEndpoints
 
     // ─── Change Password ────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ChangePassword(
+    internal static async Task<IResult> ChangePassword(
         [FromBody] ChangePasswordRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
         [FromServices] ITenantAuthConfigStore configStore,
         AuthEventService authEvents,
+        INotificationService notifications,
         CancellationToken ct)
     {
         var (tenantId, userId) = GetAuthClaims(context);
@@ -326,6 +328,14 @@ internal static class AuthEndpoints
 
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.PasswordChange,
             GetIpAddress(context), GetUserAgent(context), null, ct);
+
+        await notifications.CreateAsync(
+            tenantId,
+            "security.password_changed",
+            "Password changed",
+            $"User {user.Email} changed their password.",
+            "/admin/security",
+            ct);
 
         return Results.Ok(new MessageResponse("Password changed"));
     }
@@ -477,11 +487,12 @@ internal static class AuthEndpoints
 
     // ─── MFA Confirm ────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> MfaConfirm(
+    internal static async Task<IResult> MfaConfirm(
         [FromBody] MfaConfirmRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
         AuthEventService authEvents,
+        INotificationService notifications,
         CancellationToken ct)
     {
         var (tenantId, userId) = GetAuthClaims(context);
@@ -502,6 +513,14 @@ internal static class AuthEndpoints
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.MfaEnroll,
             GetIpAddress(context), GetUserAgent(context), null, ct);
 
+        await notifications.CreateAsync(
+            tenantId,
+            "security.mfa_enabled",
+            "Two-factor authentication enabled",
+            $"User {user.Email} enabled MFA on their account.",
+            "/admin/security",
+            ct);
+
         return Results.Ok(new MessageResponse("MFA enabled"));
     }
 
@@ -515,6 +534,7 @@ internal static class AuthEndpoints
         [FromServices] IUserStore userStore,
         [FromServices] ITenantAuthConfigStore tenantAuthConfigStore,
         AuthEventService authEvents,
+        INotificationService notifications,
         CancellationToken ct)
     {
         var (tenantId, userId) = GetAuthClaims(context);
@@ -548,6 +568,14 @@ internal static class AuthEndpoints
 
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.MfaDisable,
             GetIpAddress(context), GetUserAgent(context), null, ct);
+
+        await notifications.CreateAsync(
+            tenantId,
+            "security.mfa_disabled",
+            "Two-factor authentication disabled",
+            $"User {user.Email} disabled MFA on their account.",
+            "/admin/security",
+            ct);
 
         return Results.Ok(new MessageResponse("MFA disabled"));
     }

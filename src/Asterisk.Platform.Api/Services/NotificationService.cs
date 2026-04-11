@@ -13,7 +13,7 @@ namespace Asterisk.Platform.Api.Services;
 /// Orchestrates notification creation: resolves target users by role, persists notifications,
 /// publishes events, sends critical emails, and propagates to parent tenants.
 /// </summary>
-internal sealed partial class NotificationService
+internal sealed partial class NotificationService : INotificationService
 {
     private static readonly TimeSpan DedupWindow = TimeSpan.FromMinutes(5);
 
