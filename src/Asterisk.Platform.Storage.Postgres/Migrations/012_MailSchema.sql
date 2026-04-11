@@ -1,6 +1,6 @@
 CREATE SCHEMA IF NOT EXISTS mail;
 
-CREATE TABLE mail.oauth_tokens (
+CREATE TABLE IF NOT EXISTS mail.oauth_tokens (
     id             TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     tenant_id      TEXT NOT NULL,
     user_id        TEXT NOT NULL,
@@ -14,4 +14,4 @@ CREATE TABLE mail.oauth_tokens (
     UNIQUE (tenant_id, user_id, provider)
 );
 
-CREATE INDEX idx_oauth_tokens_expiring ON mail.oauth_tokens (expires_at) WHERE expires_at > now();
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_expiring ON mail.oauth_tokens (expires_at);

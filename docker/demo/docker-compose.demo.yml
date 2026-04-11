@@ -3,7 +3,6 @@ services:
     image: postgres:18-alpine
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ../../src/Asterisk.Platform.Storage.Postgres/Migrations:/docker-entrypoint-initdb.d:ro
       - ./sql:/demo-sql:ro
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-platform}
