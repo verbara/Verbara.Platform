@@ -160,6 +160,16 @@ internal sealed class TenantResolutionMiddleware
             return true;
         }
 
+        // Sub C T0.2 (follow-up): DELETE /api/v1/admin/auth/sessions/{sessionId}
+        // Protects the existing admin session endpoint against full impersonation abuse.
+        // Read-only impersonation already blocks this via IsBlockedInReadOnlyMode.
+        if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase)
+            && (path.StartsWith("/api/v1/admin/auth/sessions/", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/api/admin/auth/sessions/", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
         return false;
     }
 
