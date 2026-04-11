@@ -27,6 +27,29 @@ internal sealed class SessionService
         }).ToList();
     }
 
+    public async Task<int> RevokeAllSessionsForUserAsync(
+        string tenantId,
+        string adminUserId,
+        string targetUserId,
+        string? ipAddress,
+        string? userAgent,
+        CancellationToken ct)
+    {
+        var tokens = await _refreshTokenStore.GetActiveByUserAsync(tenantId, targetUserId, ct);
+        await _refreshTokenStore.RevokeAllForUserAsync(tenantId, targetUserId, DateTimeOffset.UtcNow, ct);
+
+        await _authEvents.LogAsync(
+            tenantId,
+            adminUserId,
+            AuthEventTypes.SessionRevoked,
+            ipAddress,
+            userAgent,
+            new Dictionary<string, string> { ["targetUserId"] = targetUserId, ["count"] = tokens.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) },
+            ct);
+
+        return tokens.Count;
+    }
+
     public async Task RevokeSessionAsync(
         string tenantId,
         string userId,
