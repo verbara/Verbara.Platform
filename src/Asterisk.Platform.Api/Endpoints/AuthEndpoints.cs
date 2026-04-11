@@ -496,10 +496,13 @@ internal static class AuthEndpoints
 
     // ─── MFA Disable ────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> MfaDisable(
+    // Visibility elevated from `private` to `internal` so the Api.Tests project
+    // (which has InternalsVisibleTo) can invoke this handler directly in unit tests.
+    internal static async Task<IResult> MfaDisable(
         [FromBody] MfaDisableRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
+        [FromServices] ITenantAuthConfigStore tenantAuthConfigStore,
         AuthEventService authEvents,
         CancellationToken ct)
     {
@@ -510,6 +513,18 @@ internal static class AuthEndpoints
         var user = await userStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(userId), ct);
         if (user is null)
             return Results.Unauthorized();
+
+        // Sub C T0.5: enforce tenant MFA policy. A user whose role is covered by the
+        // tenant's MfaPolicy ("required_all" or "required_for_roles" containing their
+        // role) MUST NOT be allowed to disable MFA via the self-service endpoint.
+        var authConfig = await tenantAuthConfigStore.GetAsync(tenantId, ct);
+        if (authConfig is not null && authConfig.IsMfaRequiredForRole(user.Role.ToString()))
+        {
+            return Results.Json(
+                new ErrorResponse("MFA is required by your organization and cannot be disabled."),
+                ApiJsonContext.Default.ErrorResponse,
+                statusCode: 403);
+        }
 
         if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(body.Password, user.PasswordHash))
             return Results.BadRequest(new ErrorResponse("Invalid password"));
