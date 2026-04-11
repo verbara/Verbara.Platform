@@ -22,6 +22,9 @@ public sealed class AuthEndpointsTests
     // BCrypt hash of TestPassword — computed once at class load to avoid rehashing for every test.
     private static readonly string s_knownHash = PasswordService.HashPassword(TestPassword);
 
+    private static readonly string[] s_expectedPasswordPolicyProps =
+        ["MinLength", "RequireUppercase", "RequireNumber", "RequireSpecial"];
+
     [Fact]
     public void MfaChallengeResponse_ShouldSerializeWithFrontendFieldNames_WhenSerialized()
     {
@@ -297,6 +300,48 @@ public sealed class AuthEndpointsTests
 
         result.Should().BeOfType<BadRequest<ErrorResponse>>();
         await authEventStore.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+    }
+
+    // ─── Sub C T2.3a: password policy endpoint ─────────────────────────────
+
+    [Fact]
+    public async Task GetPasswordPolicy_ShouldReturnTenantPolicy_WhenCalled()
+    {
+        var tenantAuthConfigStore = Substitute.For<ITenantAuthConfigStore>();
+        var authConfig = new TenantAuthConfig
+        {
+            TenantId = TestTenantId,
+            PasswordMinLength = 14,
+            PasswordRequireUppercase = true,
+            PasswordRequireNumber = true,
+            PasswordRequireSpecial = false,
+        };
+        tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TenantAuthConfig?>(authConfig));
+
+        var result = await AuthEndpoints.GetPasswordPolicy(
+            BuildHttpContext(),
+            tenantAuthConfigStore,
+            CancellationToken.None);
+
+        result.Should().BeOfType<Ok<PasswordPolicyDto>>();
+        var dto = ((Ok<PasswordPolicyDto>)result).Value!;
+        dto.MinLength.Should().Be(14);
+        dto.RequireUppercase.Should().BeTrue();
+        dto.RequireNumber.Should().BeTrue();
+        dto.RequireSpecial.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GetPasswordPolicy_ShouldNotLeakSecrets_WhenCalled()
+    {
+        // Verify the DTO shape via reflection — ensure only the 4 password-related
+        // properties exist (no OIDC secrets, no lockout config, no MFA policy, etc.)
+        var props = typeof(PasswordPolicyDto).GetProperties()
+            .Select(p => p.Name)
+            .ToHashSet();
+
+        props.Should().BeEquivalentTo(s_expectedPasswordPolicyProps);
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────

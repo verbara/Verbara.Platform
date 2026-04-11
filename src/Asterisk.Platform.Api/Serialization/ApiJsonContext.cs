@@ -223,6 +223,7 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(UserSessionDto[]))]
 [JsonSerializable(typeof(RegenerateRecoveryCodesRequest))]
 [JsonSerializable(typeof(RecoveryCodesResponse))]
+[JsonSerializable(typeof(PasswordPolicyDto))]
 // RBAC
 [JsonSerializable(typeof(PermissionGroupDto))]
 [JsonSerializable(typeof(List<PermissionGroupDto>))]

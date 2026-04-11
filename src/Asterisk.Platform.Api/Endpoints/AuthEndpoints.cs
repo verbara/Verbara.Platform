@@ -57,6 +57,9 @@ internal static class AuthEndpoints
         group.MapGet("/sessions", GetOwnSessions).RequireAuthorization();
         group.MapDelete("/sessions/{tokenId}", RevokeOwnSession).RequireAuthorization();
         group.MapPost("/sessions/revoke-others", RevokeOtherSessions).RequireAuthorization();
+
+        // Sub C T2.3a: expose tenant password policy for frontend validation
+        group.MapGet("/password-policy", GetPasswordPolicy).RequireAuthorization();
     }
 
     // ─── Login ──────────────────────────────────────────────────────────────────
@@ -584,6 +587,32 @@ internal static class AuthEndpoints
         return Results.Ok(new RecoveryCodesResponse(newCodes.ToArray()));
     }
 
+    // ─── Password Policy (Sub C T2.3a) ─────────────────────────────────────────
+
+    // Returns the tenant's password policy as a sanitized DTO — only the 4 password
+    // fields, never OIDC secrets, lockout, session, or MFA policy. Used by the
+    // frontend to render a live validation checklist without hardcoding the rules.
+    internal static async Task<IResult> GetPasswordPolicy(
+        HttpContext context,
+        [FromServices] ITenantAuthConfigStore tenantAuthConfigStore,
+        CancellationToken ct)
+    {
+        var (tenantId, _) = GetAuthClaims(context);
+        if (tenantId is null)
+            return Results.Unauthorized();
+
+        var config = await tenantAuthConfigStore.GetAsync(tenantId, ct);
+
+        // Fallback to TenantAuthConfig's platform defaults when no tenant-specific config exists.
+        var dto = new PasswordPolicyDto(
+            MinLength: config?.PasswordMinLength ?? 12,
+            RequireUppercase: config?.PasswordRequireUppercase ?? true,
+            RequireNumber: config?.PasswordRequireNumber ?? true,
+            RequireSpecial: config?.PasswordRequireSpecial ?? false);
+
+        return Results.Ok(dto);
+    }
+
     // ─── Sessions Management (Sub C T2.1a) ─────────────────────────────────────
 
     internal static async Task<IResult> GetOwnSessions(
@@ -853,6 +882,16 @@ internal sealed record UserSessionDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt,
     bool IsCurrentSession);
+
+// Sub C T2.3a: sanitized password policy DTO. MUST NOT include OIDC secrets,
+// lockout config, session timeouts, MFA policy, or any other TenantAuthConfig
+// fields — only the 4 password-related flags. Note: TenantAuthConfig has no
+// PasswordRequireLowercase field, so neither does this DTO.
+internal sealed record PasswordPolicyDto(
+    int MinLength,
+    bool RequireUppercase,
+    bool RequireNumber,
+    bool RequireSpecial);
 
 internal sealed class MfaPendingEntry
 {
