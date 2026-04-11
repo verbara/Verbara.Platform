@@ -49,6 +49,11 @@ internal static class AuthEndpoints
         group.MapPost("/mfa/setup", MfaSetup).RequireAuthorization();
         group.MapPost("/mfa/confirm", MfaConfirm).RequireAuthorization();
         group.MapDelete("/mfa", MfaDisable).RequireAuthorization();
+
+        // Sub C T2.1a: user-scoped sessions management
+        group.MapGet("/sessions", GetOwnSessions).RequireAuthorization();
+        group.MapDelete("/sessions/{tokenId}", RevokeOwnSession).RequireAuthorization();
+        group.MapPost("/sessions/revoke-others", RevokeOtherSessions).RequireAuthorization();
     }
 
     // ─── Login ──────────────────────────────────────────────────────────────────
@@ -541,6 +546,89 @@ internal static class AuthEndpoints
         return Results.Ok(new MessageResponse("MFA disabled"));
     }
 
+    // ─── Sessions Management (Sub C T2.1a) ─────────────────────────────────────
+
+    internal static async Task<IResult> GetOwnSessions(
+        HttpContext context,
+        [FromServices] IRefreshTokenStore refreshTokenStore,
+        CancellationToken ct)
+    {
+        var (tenantId, userId) = GetAuthClaims(context);
+        if (tenantId is null || userId is null)
+            return Results.Unauthorized();
+
+        var tokens = await refreshTokenStore.GetActiveByUserAsync(tenantId, userId, ct);
+        var currentTokenId = await TryGetCurrentTokenIdAsync(context, refreshTokenStore, ct);
+
+        var dtos = tokens
+            .Select(t => new UserSessionDto(
+                t.TokenId,
+                t.UserAgent,
+                t.IpAddress,
+                t.CreatedAt,
+                t.ExpiresAt,
+                IsCurrentSession: t.TokenId == currentTokenId))
+            .ToArray();
+
+        return Results.Ok(dtos);
+    }
+
+    internal static async Task<IResult> RevokeOwnSession(
+        string tokenId,
+        HttpContext context,
+        [FromServices] IRefreshTokenStore refreshTokenStore,
+        CancellationToken ct)
+    {
+        var (tenantId, userId) = GetAuthClaims(context);
+        if (tenantId is null || userId is null)
+            return Results.Unauthorized();
+
+        var tokens = await refreshTokenStore.GetActiveByUserAsync(tenantId, userId, ct);
+        var target = tokens.FirstOrDefault(t => t.TokenId == tokenId);
+        if (target is null)
+            return Results.NotFound();
+
+        await refreshTokenStore.RevokeAsync(tokenId, DateTimeOffset.UtcNow, null, ct);
+        return Results.Ok();
+    }
+
+    internal static async Task<IResult> RevokeOtherSessions(
+        HttpContext context,
+        [FromServices] IRefreshTokenStore refreshTokenStore,
+        CancellationToken ct)
+    {
+        var (tenantId, userId) = GetAuthClaims(context);
+        if (tenantId is null || userId is null)
+            return Results.Unauthorized();
+
+        var currentTokenId = await TryGetCurrentTokenIdAsync(context, refreshTokenStore, ct);
+        var tokens = await refreshTokenStore.GetActiveByUserAsync(tenantId, userId, ct);
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var token in tokens)
+        {
+            if (token.TokenId == currentTokenId)
+                continue;
+            await refreshTokenStore.RevokeAsync(token.TokenId, now, null, ct);
+        }
+
+        return Results.Ok();
+    }
+
+    private static async Task<string?> TryGetCurrentTokenIdAsync(
+        HttpContext context,
+        IRefreshTokenStore refreshTokenStore,
+        CancellationToken ct)
+    {
+        if (!context.Request.Cookies.TryGetValue(RefreshCookieName, out var refreshToken) ||
+            string.IsNullOrEmpty(refreshToken))
+            return null;
+
+        var hash = RefreshTokenService.HashToken(refreshToken);
+        var stored = await refreshTokenStore.GetByHashAsync(hash, ct);
+        return stored?.TokenId;
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────────────
 
     private static async Task<IResult> IssueTokensAsync(
@@ -717,6 +805,14 @@ internal static class RoleDefaultPermissions
 
 internal sealed record MfaChallengeResponse(bool RequiresMfa, string MfaToken);
 internal sealed record AuthEventDetail(string? Email = null, string? Reason = null);
+
+internal sealed record UserSessionDto(
+    string TokenId,
+    string? UserAgent,
+    string? IpAddress,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    bool IsCurrentSession);
 
 internal sealed class MfaPendingEntry
 {
