@@ -101,6 +101,7 @@ services:
       Asterisk__Ari__Password: ${ARI_PASSWORD:-platform_demo}
       Asterisk__Ari__Application: asterisk-platform
       Redis__ConnectionString: redis:6379
+      Services__ServiceKey: demo-service-key-2026
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
     depends_on:
       postgres:

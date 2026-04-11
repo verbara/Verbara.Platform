@@ -68,6 +68,7 @@ builder.Services.AddAsteriskSessionsMultiServer();
 builder.Services.AddPlatformCore();
 builder.Services.AddPlatformConversations();
 builder.Services.AddPlatformChannels();
+builder.Services.AddPlatformQueues();
 builder.Services.AddInboundRouting();
 builder.Services.AddSwitchboard();
 builder.Services.AddPlatformBot();
