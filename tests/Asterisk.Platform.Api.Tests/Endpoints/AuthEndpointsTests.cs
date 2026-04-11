@@ -243,6 +243,62 @@ public sealed class AuthEndpointsTests
         user.MfaConfirmedAt.Should().BeNull();
     }
 
+    // ─── Sub C T2.2a: recovery codes regenerate ─────────────────────────────
+
+    [Fact]
+    public async Task RegenerateRecoveryCodes_ShouldReturn10Codes_WhenMfaEnabledAndPasswordCorrect()
+    {
+        var userStore = Substitute.For<IUserStore>();
+        var authEventStore = Substitute.For<IAuthEventStore>();
+        var user = BuildUser(mfaEnabled: true);
+        var originalCodes = new[] { "old1", "old2" };
+        user.MfaRecoveryCodes = originalCodes;
+        userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<User?>(user));
+
+        var request = new RegenerateRecoveryCodesRequest(TestPassword);
+
+        var result = await AuthEndpoints.RegenerateRecoveryCodes(
+            request,
+            BuildHttpContext(),
+            userStore,
+            new AuthEventService(authEventStore),
+            CancellationToken.None);
+
+        result.Should().BeOfType<Ok<RecoveryCodesResponse>>();
+        var response = ((Ok<RecoveryCodesResponse>)result).Value!;
+        response.RecoveryCodes.Should().HaveCount(10);
+        user.MfaRecoveryCodes.Should().NotBeNull();
+        user.MfaRecoveryCodes!.Should().NotBeSameAs(originalCodes);
+        user.MfaRecoveryCodes.Should().NotContain("old1");
+        user.MfaRecoveryCodes.Should().NotContain("old2");
+        await authEventStore.Received(1).SaveAsync(
+            Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.RecoveryCodesRegenerated),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RegenerateRecoveryCodes_ShouldReturn400_WhenMfaNotEnabled()
+    {
+        var userStore = Substitute.For<IUserStore>();
+        var authEventStore = Substitute.For<IAuthEventStore>();
+        var user = BuildUser(mfaEnabled: false);
+        userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<User?>(user));
+
+        var request = new RegenerateRecoveryCodesRequest(TestPassword);
+
+        var result = await AuthEndpoints.RegenerateRecoveryCodes(
+            request,
+            BuildHttpContext(),
+            userStore,
+            new AuthEventService(authEventStore),
+            CancellationToken.None);
+
+        result.Should().BeOfType<BadRequest<ErrorResponse>>();
+        await authEventStore.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────────
 
     private static User BuildUser(bool mfaEnabled = false, UserRole role = UserRole.Agent)

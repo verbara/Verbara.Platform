@@ -50,6 +50,9 @@ internal static class AuthEndpoints
         group.MapPost("/mfa/confirm", MfaConfirm).RequireAuthorization();
         group.MapDelete("/mfa", MfaDisable).RequireAuthorization();
 
+        // Sub C T2.2a: regenerate recovery codes post-enrollment
+        group.MapPost("/mfa/recovery-codes/regenerate", RegenerateRecoveryCodes).RequireAuthorization();
+
         // Sub C T2.1a: user-scoped sessions management
         group.MapGet("/sessions", GetOwnSessions).RequireAuthorization();
         group.MapDelete("/sessions/{tokenId}", RevokeOwnSession).RequireAuthorization();
@@ -546,6 +549,41 @@ internal static class AuthEndpoints
         return Results.Ok(new MessageResponse("MFA disabled"));
     }
 
+    // ─── Recovery Codes Regenerate (Sub C T2.2a) ───────────────────────────────
+
+    internal static async Task<IResult> RegenerateRecoveryCodes(
+        [FromBody] RegenerateRecoveryCodesRequest request,
+        HttpContext context,
+        [FromServices] IUserStore userStore,
+        AuthEventService authEvents,
+        CancellationToken ct)
+    {
+        var (tenantId, userId) = GetAuthClaims(context);
+        if (tenantId is null || userId is null)
+            return Results.Unauthorized();
+
+        var user = await userStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(userId), ct);
+        if (user is null)
+            return Results.Unauthorized();
+
+        if (!user.MfaEnabled)
+            return Results.BadRequest(new ErrorResponse("MFA is not enabled for this user."));
+
+        if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(request.Password, user.PasswordHash))
+            return Results.BadRequest(new ErrorResponse("Invalid password"));
+
+        // Generate fresh plaintext codes to return to the caller, store hashed copies.
+        var newCodes = MfaService.GenerateRecoveryCodes();
+        user.MfaRecoveryCodes = MfaService.HashRecoveryCodes(newCodes).ToList();
+        user.UpdatedAt = DateTimeOffset.UtcNow;
+        await userStore.SaveAsync(user, ct);
+
+        await authEvents.LogAsync(tenantId, userId, AuthEventTypes.RecoveryCodesRegenerated,
+            GetIpAddress(context), GetUserAgent(context), null, ct);
+
+        return Results.Ok(new RecoveryCodesResponse(newCodes.ToArray()));
+    }
+
     // ─── Sessions Management (Sub C T2.1a) ─────────────────────────────────────
 
     internal static async Task<IResult> GetOwnSessions(
@@ -743,6 +781,8 @@ internal sealed record MfaVerifyRequest(string MfaToken, string? Code, string? R
 internal sealed record MfaConfirmRequest(string Code);
 internal sealed record MfaDisableRequest(string Password);
 internal sealed record MfaSetupResponse(string Secret, string QrUri, IReadOnlyList<string> RecoveryCodes);
+internal sealed record RegenerateRecoveryCodesRequest(string Password);
+internal sealed record RecoveryCodesResponse(string[] RecoveryCodes);
 internal sealed record TokenResponse(
     string AccessToken,
     DateTimeOffset ExpiresAt,

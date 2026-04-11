@@ -22,6 +22,7 @@ public static class AuthEventTypes
     public const string PasswordChange = "password_change";
     public const string MfaEnroll = "mfa_enroll";
     public const string MfaDisable = "mfa_disable";
+    public const string RecoveryCodesRegenerated = "recovery_codes_regenerated";
     public const string Lockout = "lockout";
     public const string SessionRevoked = "session_revoked";
     public const string PasswordReset = "password_reset";
