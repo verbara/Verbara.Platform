@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS dunning_records (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_dunning_records_tenant ON dunning_records(tenant_id) WHERE is_active = TRUE;
-CREATE INDEX idx_dunning_records_invoice ON dunning_records(invoice_id) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_dunning_records_tenant ON dunning_records(tenant_id) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_dunning_records_invoice ON dunning_records(invoice_id) WHERE is_active = TRUE;
 
 CREATE TABLE IF NOT EXISTS tenant_add_ons (
     tenant_id       VARCHAR(64) NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS tenant_add_ons (
     PRIMARY KEY (tenant_id, feature)
 );
 
-CREATE INDEX idx_tenant_add_ons_tenant ON tenant_add_ons(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_add_ons_tenant ON tenant_add_ons(tenant_id);
 
 CREATE TABLE IF NOT EXISTS agent_capacity (
     tenant_id   VARCHAR(64) NOT NULL,
