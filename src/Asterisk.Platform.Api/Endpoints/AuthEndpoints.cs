@@ -126,7 +126,7 @@ internal static class AuthEndpoints
         AuthEventService authEvents,
         CancellationToken ct)
     {
-        if (!MfaPendingCache.TryRemove(body.ChallengeToken, out var pending))
+        if (!MfaPendingCache.TryRemove(body.MfaToken, out var pending))
             return Results.BadRequest(new ErrorResponse("Invalid or expired challenge token"));
 
         if (pending.ExpiresAt < DateTimeOffset.UtcNow)
@@ -651,7 +651,7 @@ internal sealed record ApiKeyLoginRequest(string ApiKey);
 internal sealed record ChangePasswordRequest(string OldPassword, string NewPassword);
 internal sealed record ForgotPasswordRequest(string TenantId, string Email);
 internal sealed record ResetPasswordRequest(string Token, string NewPassword);
-internal sealed record MfaVerifyRequest(string ChallengeToken, string? Code, string? RecoveryCode);
+internal sealed record MfaVerifyRequest(string MfaToken, string? Code, string? RecoveryCode);
 internal sealed record MfaConfirmRequest(string Code);
 internal sealed record MfaDisableRequest(string Password);
 internal sealed record MfaSetupResponse(string Secret, string QrUri, IReadOnlyList<string> RecoveryCodes);
