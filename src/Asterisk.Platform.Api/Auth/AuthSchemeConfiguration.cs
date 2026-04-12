@@ -60,9 +60,14 @@ internal static class AuthSchemeConfiguration
                     },
                     OnTokenValidated = context =>
                     {
-                        var tenantClaim = context.Principal?.FindFirst("tid")?.Value;
-                        if (tenantClaim is not null)
-                            context.HttpContext.Items["TenantId"] = new TenantId(tenantClaim);
+                        // Only set tenant from JWT if middleware didn't already resolve one
+                        // (X-Tenant-Id header / subdomain takes precedence for cross-tenant access)
+                        if (!context.HttpContext.Items.ContainsKey("TenantId"))
+                        {
+                            var tenantClaim = context.Principal?.FindFirst("tid")?.Value;
+                            if (tenantClaim is not null)
+                                context.HttpContext.Items["TenantId"] = new TenantId(tenantClaim);
+                        }
 
                         return Task.CompletedTask;
                     },

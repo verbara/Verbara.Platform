@@ -42,6 +42,8 @@ internal sealed class JwtTokenService
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = _signingKey,
             ClockSkew = TimeSpan.FromSeconds(30),
+            RoleClaimType = "role",
+            NameClaimType = "sub",
         };
     }
 
