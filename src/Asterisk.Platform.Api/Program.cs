@@ -108,10 +108,8 @@ if (!string.IsNullOrEmpty(coreConnectionString))
 {
     builder.Services.AddPostgresStorage(coreConnectionString);
 
-    // Auto-apply SQL migrations at startup
-    builder.Services.AddSingleton<Asterisk.Platform.Api.Services.DatabaseMigrationService>();
-    builder.Services.AddHostedService(sp =>
-        sp.GetRequiredService<Asterisk.Platform.Api.Services.DatabaseMigrationService>());
+    // Apply Platform SQL migrations eagerly (before Pro EnsureSchemaAsync which references Platform tables)
+    Asterisk.Platform.Api.Services.DatabaseMigrationService.ApplyMigrations(coreConnectionString);
 
     // Override in-memory capacity with persistent version for restart recovery
     builder.Services.AddSingleton<IAgentCapacityService>(sp =>

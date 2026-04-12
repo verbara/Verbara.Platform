@@ -427,6 +427,7 @@ CREATE TABLE IF NOT EXISTS teams (
     team_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
     name TEXT NOT NULL, supervisor_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ,
+    created_by TEXT, updated_by TEXT,
     PRIMARY KEY (tenant_id, team_id)
 );
 

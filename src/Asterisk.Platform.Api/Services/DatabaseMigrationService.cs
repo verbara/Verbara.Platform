@@ -1,62 +1,50 @@
-using System.Reflection;
 using Dapper;
 using Npgsql;
 
 namespace Asterisk.Platform.Api.Services;
 
-internal sealed partial class DatabaseMigrationService : IHostedService
+internal static class DatabaseMigrationService
 {
-    private readonly NpgsqlDataSource _dataSource;
-    private readonly ILogger<DatabaseMigrationService> _logger;
-
-    public DatabaseMigrationService(NpgsqlDataSource dataSource, ILogger<DatabaseMigrationService> logger)
+    /// <summary>
+    /// Synchronously apply all pending Platform SQL migrations.
+    /// Called early in Program.cs before Pro packages register
+    /// (their EnsureSchemaAsync references Platform tables like contacts).
+    /// </summary>
+    public static void ApplyMigrations(string connectionString)
     {
-        _dataSource = dataSource;
-        _logger = logger;
-    }
+        var dataSource = NpgsqlDataSource.Create(connectionString);
+        using var conn = dataSource.OpenConnection();
 
-    public async Task StartAsync(CancellationToken ct)
-    {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-
-        // Create tracking table
-        await conn.ExecuteAsync(
+        conn.Execute(
             "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())");
 
-        // Get applied migrations
-        var applied = (await conn.QueryAsync<string>("SELECT name FROM _migrations ORDER BY name"))
+        var applied = conn.Query<string>("SELECT name FROM _migrations ORDER BY name")
             .ToHashSet(StringComparer.Ordinal);
 
-        // Get all migration files sorted by name
-        var migrations = GetMigrationFiles().OrderBy(m => m.Name, StringComparer.Ordinal);
-
-        foreach (var migration in migrations)
+        foreach (var migration in GetMigrationFiles().OrderBy(m => m.Name, StringComparer.Ordinal))
         {
             if (applied.Contains(migration.Name))
                 continue;
 
-            LogApplyingMigration(migration.Name);
-            await using var tx = await conn.BeginTransactionAsync(ct);
+            using var tx = conn.BeginTransaction();
             try
             {
-                await conn.ExecuteAsync(migration.Sql, transaction: tx);
-                await conn.ExecuteAsync(
+                conn.Execute(migration.Sql, transaction: tx);
+                conn.Execute(
                     "INSERT INTO _migrations (name) VALUES (@Name)",
                     new { migration.Name }, tx);
-                await tx.CommitAsync(ct);
-                LogMigrationApplied(migration.Name);
+                tx.Commit();
             }
             catch (Exception ex)
             {
-                await tx.RollbackAsync(ct);
-                LogMigrationFailed(migration.Name, ex);
+                tx.Rollback();
                 throw new InvalidOperationException(
                     $"Migration '{migration.Name}' failed: {ex.Message}", ex);
             }
         }
-    }
 
-    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+        dataSource.Dispose();
+    }
 
     private static IEnumerable<(string Name, string Sql)> GetMigrationFiles()
     {
@@ -72,17 +60,8 @@ internal sealed partial class DatabaseMigrationService : IHostedService
 
             using var reader = new StreamReader(stream);
             var sql = reader.ReadToEnd();
-            var name = resourceName[prefix.Length..]; // e.g., "001_InitialSchema.sql"
+            var name = resourceName[prefix.Length..];
             yield return (name, sql);
         }
     }
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Applying migration: {Name}")]
-    private partial void LogApplyingMigration(string name);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Migration applied: {Name}")]
-    private partial void LogMigrationApplied(string name);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "Migration failed: {Name}")]
-    private partial void LogMigrationFailed(string name, Exception ex);
 }
