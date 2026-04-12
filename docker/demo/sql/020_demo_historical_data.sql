@@ -8,7 +8,7 @@
 -- Distribution: 30 answered, 10 abandoned, 5 busy, 5 no-answer
 -- Queues: 60% support, 40% sales
 INSERT INTO completed_sessions (
-    session_id, server_id, direction,
+    session_id, tenant_id, server_id, direction,
     caller_id_num, caller_id_name,
     agent_id, queue_name,
     started_at, connected_at, completed_at,
@@ -17,6 +17,7 @@ INSERT INTO completed_sessions (
 )
 SELECT
     'demo-' || lpad(i::text, 3, '0'),
+    'demo',
     'demo',
     0, -- inbound
     '555' || lpad((1000 + (i * 7) % 100)::text, 4, '0'),

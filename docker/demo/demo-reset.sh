@@ -104,13 +104,14 @@ else
     echo "  SKIP (no management key)"
 fi
 
-# 8.5. Verify cluster status (primary node auto-registered via InitialNodes config)
-echo "[8.5/11] Verificando cluster..."
+# 8.5. Set demo tenant plan to Pro (enables feature-gated endpoints)
+echo "[8.5/11] Configurando plan Pro para tenant demo..."
 if [ -n "$MGMT_KEY" ]; then
-    CLUSTER_STATUS=$(curl -sf "$API_BASE/api/v1/management/cluster/status" \
-        -H "Authorization: Bearer $MGMT_KEY" 2>/dev/null || echo "{}")
-    echo "  Cluster: $CLUSTER_STATUS" | head -c 200
-    echo ""
+    curl -sf -X PUT "$API_BASE/api/v1/management/tenants/demo/settings" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $MGMT_KEY" \
+        -d '{"plan":"Pro"}' > /dev/null 2>&1 || true
+    echo "  OK (plan=Pro, features: Dialer, BotBasic, AnalyticsExport, Flows, Webhooks, ScheduledReports, KnowledgeBase, Recordings)"
 else
     echo "  SKIP (no management key)"
 fi
@@ -166,7 +167,82 @@ else
     curl -sf -X PUT "$API_BASE/api/v1/admin/channels/webchat" -H "$CT" -H "$AUTH" -H "$TENANT" \
         -d '{"isActive":true,"credentials":{}}' > /dev/null 2>&1 || true
 
-    echo "  OK (admin, supervisor, 6 agents, 2 queues, webchat channel)"
+    # Create teams
+    curl -sf -X POST "$API_BASE/api/v1/admin/teams" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"name":"Sales Team"}' > /dev/null 2>&1 || true
+    curl -sf -X POST "$API_BASE/api/v1/admin/teams" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"name":"Support Team"}' > /dev/null 2>&1 || true
+
+    # Create contacts
+    for contact in \
+        'Juan|Perez|Acme Corp|enterprise|es' \
+        'Laura|Gomez|TechStart|startup|es' \
+        'Roberto|Silva|GlobalTrade|enterprise|pt' \
+        'Carmen|Torres|MediSalud|healthcare|es' \
+        'Miguel|Diaz|EduPlus|education|es'
+    do
+        IFS='|' read -r fn ln company segment lang <<< "$contact"
+        curl -sf -X POST "$API_BASE/api/v1/contacts" -H "$CT" -H "$AUTH" -H "$TENANT" \
+            -d "{\"firstName\":\"$fn\",\"lastName\":\"$ln\",\"company\":\"$company\",\"segment\":\"$segment\",\"preferredLanguage\":\"$lang\"}" > /dev/null 2>&1 || true
+    done
+
+    # Create canned responses
+    curl -sf -X POST "$API_BASE/api/v1/admin/canned-responses" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"shortcut":"/saludo","title":"Saludo inicial","body":"Gracias por comunicarse con nosotros. En que puedo ayudarle?","category":"general"}' > /dev/null 2>&1 || true
+    curl -sf -X POST "$API_BASE/api/v1/admin/canned-responses" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"shortcut":"/espera","title":"Solicitar espera","body":"Un momento mientras verifico la informacion. Podria esperar?","category":"general"}' > /dev/null 2>&1 || true
+    curl -sf -X POST "$API_BASE/api/v1/admin/canned-responses" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"shortcut":"/transfer","title":"Transferencia","body":"Voy a transferirlo con un especialista. Un momento por favor.","category":"general"}' > /dev/null 2>&1 || true
+    curl -sf -X POST "$API_BASE/api/v1/admin/canned-responses" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"shortcut":"/cierre","title":"Cierre","body":"Hay algo mas en que pueda ayudarle? Gracias por contactarnos.","category":"general"}' > /dev/null 2>&1 || true
+    curl -sf -X POST "$API_BASE/api/v1/admin/canned-responses" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"shortcut":"/escalar","title":"Escalacion","body":"Voy a escalar su caso a un supervisor para una mejor solucion.","category":"support"}' > /dev/null 2>&1 || true
+
+    # Create dispositions
+    for disp in 'Resuelto|0' 'Venta completada|0' 'Seguimiento requerido|2' 'Sin respuesta|1' 'Numero equivocado|1' 'Spam|1'; do
+        IFS='|' read -r name cat <<< "$disp"
+        curl -sf -X POST "$API_BASE/api/v1/admin/dispositions" -H "$CT" -H "$AUTH" -H "$TENANT" \
+            -d "{\"name\":\"$name\",\"category\":$cat}" > /dev/null 2>&1 || true
+    done
+
+    # Create scheduled report (valid types: agent_performance, queue_analytics, conversation_summary)
+    curl -sf -X POST "$API_BASE/api/v1/admin/reports" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"name":"Daily Queue Summary","reportType":"queue_analytics","schedule":"0 8 * * *","recipients":"admin@demo.local","format":"pdf","isActive":true}' > /dev/null 2>&1 || true
+
+    # Create webhook subscription (valid types: conversation.assigned, conversation.message, conversation.state_changed, agent.state_changed, campaign.*)
+    curl -sf -X POST "$API_BASE/api/v1/webhooks/subscriptions" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"name":"Demo Events","endpointUrl":"https://webhook.example.com/demo","eventTypes":["conversation.assigned","conversation.message","agent.state_changed"]}' > /dev/null 2>&1 || true
+
+    # Create survey (CSAT)
+    curl -sf -X POST "$API_BASE/api/v1/admin/surveys" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"name":"Satisfaccion del cliente","type":"Csat","questions":[{"text":"Como calificaria el servicio recibido?","type":"Scale"}],"isActive":true}' > /dev/null 2>&1 || true
+
+    # Create KB article
+    curl -sf -X POST "$API_BASE/api/v1/admin/articles" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"title":"Horarios de atencion","content":"Nuestro horario es de lunes a viernes 8:00-18:00. Sabados 9:00-13:00.","tags":["horarios","general"],"isPublished":true,"language":"es"}' > /dev/null 2>&1 || true
+
+    echo "  OK (admin, supervisor, 6 agents, 2 queues, webchat, 2 teams, 5 contacts, 5 canned responses, 6 dispositions, 1 report, 1 webhook, 1 survey, 1 article)"
+fi
+
+# 9.5. Seed billing data via Management API (requires mgmt key, not JWT)
+echo "[9.5/11] Configurando billing..."
+if [ -n "$MGMT_KEY" ]; then
+    MGMT_AUTH="Authorization: Bearer $MGMT_KEY"
+    CT="Content-Type: application/json"
+
+    # Rate card
+    curl -sf -X POST "$API_BASE/api/v1/management/rate-cards?tenantId=demo" \
+        -H "$CT" -H "$MGMT_AUTH" \
+        -d '{"name":"Standard 2026","currency":"USD","effectiveFrom":"2026-01-01T00:00:00Z","isDefault":true,"rates":[{"usageType":"VoiceInbound","unitPrice":0.02,"unit":"Minute","includedQuantity":1000},{"usageType":"VoiceOutbound","unitPrice":0.03,"unit":"Minute","includedQuantity":500},{"usageType":"Message","unitPrice":0.005,"unit":"Message","includedQuantity":5000},{"usageType":"ActiveAgent","unitPrice":25.00,"unit":"Agent","includedQuantity":5}]}' > /dev/null 2>&1 || true
+
+    # Quota
+    curl -sf -X PUT "$API_BASE/api/v1/management/tenants/demo/quota" \
+        -H "$CT" -H "$MGMT_AUTH" \
+        -d '{"maxConcurrentChannels":20,"maxActiveCampaigns":5,"maxMonthlyVoiceMinutes":10000,"maxMonthlyMessages":50000,"maxStorageBytes":5368709120,"maxActiveAgents":10}' > /dev/null 2>&1 || true
+
+    echo "  OK (1 rate card, quotas configured)"
+else
+    echo "  SKIP (no management key)"
 fi
 
 # 10. Load Asterisk Realtime seed + historical data (Pro-owned Postgres tables)
