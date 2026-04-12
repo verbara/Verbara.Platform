@@ -5,7 +5,6 @@ using Asterisk.Sdk.Pro.Cluster;
 using Asterisk.Sdk.Pro.Cluster.Drain;
 using Asterisk.Sdk.Pro.Cluster.Registry;
 using Asterisk.Sdk.Pro.Cluster.Transport;
-using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -16,9 +15,13 @@ internal static class ManagementClusterEndpoints
 
     public static void MapManagementClusterEndpoints(this IEndpointRouteBuilder app)
     {
+        // No RequireLicenseFeature here: /management/* endpoints are the platform
+        // administration surface, gated by PlatformAdminOnly. The license gate protects
+        // tenant-facing features (dialer, analytics, agent-assist), not the admin console
+        // of the installation itself — blocking platform admins from managing their own
+        // cluster when no license is loaded is an operational hole, not a safeguard.
         var group = app.MapGroup("/management/cluster")
-            .RequireAuthorization("PlatformAdminOnly")
-            .RequireLicenseFeature(LicenseFeature.Cluster);
+            .RequireAuthorization("PlatformAdminOnly");
 
         group.MapGet("/status", GetStatus);
         group.MapGet("/nodes", ListNodes);
