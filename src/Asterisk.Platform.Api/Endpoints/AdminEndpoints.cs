@@ -146,7 +146,12 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, ct);
-        return Results.Ok(result);
+        var dtos = new PagedResult<QueueDto>(
+            result.Items.Select(ToQueueDto).ToList(),
+            result.TotalCount,
+            result.Page,
+            result.PageSize);
+        return Results.Ok(dtos);
     }
 
     private static async Task<IResult> GetQueue(
@@ -157,8 +162,19 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var queue = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return queue is null ? Results.NotFound() : Results.Ok(queue);
+        return queue is null ? Results.NotFound() : Results.Ok(ToQueueDto(queue));
     }
+
+    private static QueueDto ToQueueDto(Queue q) => new(
+        q.QueueId.Value,
+        q.Name,
+        q.IsActive,
+        q.MaxWaiting,
+        q.SlaTargets,
+        q.OverflowRule,
+        q.WrapUp,
+        q.RequiredSkills?.ToList() ?? [],
+        q.CreatedAt);
 
     private static async Task<IResult> CreateQueue(
         HttpContext context,
@@ -213,7 +229,7 @@ internal static class AdminEndpoints
             catch { }
         }
 
-        return Results.Created($"/admin/queues/{queue.QueueId}", queue);
+        return Results.Created($"/admin/queues/{queue.QueueId}", ToQueueDto(queue));
     }
 
     private static async Task<IResult> UpdateQueue(
@@ -272,7 +288,7 @@ internal static class AdminEndpoints
             catch { }
         }
 
-        return Results.Ok(queue);
+        return Results.Ok(ToQueueDto(queue));
     }
 
     private static async Task<IResult> DeleteQueue(
@@ -570,8 +586,7 @@ internal sealed record CreateQueueRequest(
     QueueOverflowRuleDto? OverflowRule = null,
     WrapUpConfigDto? WrapUp = null,
     int? MaxWaiting = null,
-    IReadOnlyList<string>? RequiredSkills = null,
-    string? Timezone = null);
+    IReadOnlyList<string>? RequiredSkills = null);
 
 internal sealed record UpdateQueueRequest(
     string? Name = null,
@@ -580,8 +595,7 @@ internal sealed record UpdateQueueRequest(
     QueueOverflowRuleDto? OverflowRule = null,
     WrapUpConfigDto? WrapUp = null,
     int? MaxWaiting = null,
-    IReadOnlyList<string>? RequiredSkills = null,
-    string? Timezone = null);
+    IReadOnlyList<string>? RequiredSkills = null);
 
 internal sealed record SlaPolicyTargetDto(
     int? AnswerWithinSeconds = null,
@@ -612,4 +626,15 @@ internal sealed record UserDto(
     string DisplayName,
     string Role,
     string Status,
+    DateTimeOffset CreatedAt);
+
+internal sealed record QueueDto(
+    string Id,
+    string Name,
+    bool IsActive,
+    int? MaxWaiting,
+    SlaPolicyTarget? SlaTargets,
+    QueueOverflowRule? OverflowRule,
+    WrapUpConfig WrapUp,
+    IReadOnlyList<string> RequiredSkills,
     DateTimeOffset CreatedAt);

@@ -128,6 +128,14 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
         };
         userStore.GetByIdAsync(tenantId_, userEntityId, Arg.Any<CancellationToken>())
                  .Returns(Task.FromResult<User?>(testUser));
+        // ListAsync must return a non-null PagedResult or the endpoint NREs on
+        // `result.Items.Select(ToUserDto)`. Default NSubstitute returns null for
+        // reference-typed Task<T> results, which was silently breaking ListUsers,
+        // AuthTests.GetAdminUsers, and AuthIntegrationTests.ApiKey_ShouldReturn200_OnAdminUsers.
+        userStore.ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
+                 .Returns(ci => Task.FromResult(PagedResult<User>.Empty(
+                     ((PagedQuery)ci[1]).Page,
+                     ((PagedQuery)ci[1]).PageSize)));
         services.AddSingleton(userStore);
     }
 

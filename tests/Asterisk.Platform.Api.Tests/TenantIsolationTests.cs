@@ -38,8 +38,9 @@ public sealed class TenantIsolationTests : IDisposable
         var createResp = await _tenantAClient.PostAsync("/api/admin/queues", body);
         createResp.StatusCode.Should().Be(HttpStatusCode.Created);
 
+        // QueueDto emits `id` (Plan 29A DTO-hardening convention), not the aggregate's `queueId`.
         var created = JsonNode.Parse(await createResp.Content.ReadAsStringAsync());
-        var queueId = created!["queueId"]!.GetValue<string>();
+        var queueId = created!["id"]!.GetValue<string>();
 
         // Tenant A can retrieve it
         var getA = await _tenantAClient.GetAsync($"/api/admin/queues/{queueId}");
