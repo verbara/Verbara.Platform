@@ -469,7 +469,12 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, ct);
-        return Results.Ok(result);
+        var dtos = new PagedResult<TeamDto>(
+            result.Items.Select(ToDto).ToList(),
+            result.TotalCount,
+            result.Page,
+            result.PageSize);
+        return Results.Ok(dtos);
     }
 
     private static async Task<IResult> GetTeam(
@@ -480,7 +485,7 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var team = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return team is null ? Results.NotFound() : Results.Ok(team);
+        return team is null ? Results.NotFound() : Results.Ok(ToDto(team));
     }
 
     private static async Task<IResult> CreateTeam(
@@ -499,7 +504,7 @@ internal static class AdminEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(team, ct);
-        return Results.Created($"/admin/teams/{team.TeamId}", team);
+        return Results.Created($"/admin/teams/{team.TeamId}", ToDto(team));
     }
 
     private static async Task<IResult> UpdateTeam(
@@ -518,8 +523,11 @@ internal static class AdminEndpoints
         if (body.Name is not null) team.Name = body.Name;
         team.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(team, ct);
-        return Results.Ok(team);
+        return Results.Ok(ToDto(team));
     }
+
+    private static TeamDto ToDto(Team t) =>
+        new(t.TeamId.Value, t.Name, 0, t.CreatedAt);
 
     private static async Task<IResult> DeleteTeam(
         string id,
@@ -587,3 +595,5 @@ internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, I
 
 internal sealed record CreateTeamRequest(string Name);
 internal sealed record UpdateTeamRequest(string? Name);
+
+internal sealed record TeamDto(string Id, string Name, int MemberCount, DateTimeOffset CreatedAt);
