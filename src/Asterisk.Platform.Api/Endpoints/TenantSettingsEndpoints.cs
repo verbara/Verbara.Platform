@@ -400,6 +400,10 @@ internal static class TenantSettingsEndpoints
 
                 if (body.RateLimitTier is { } newTier && tierCache is not null)
                     tierCache.SetTier(tenantId, newTier);
+
+                // Invalidate feature cache so the next request re-resolves features from the new plan/add-ons
+                if (body.Plan is not null)
+                    featureGateCache?.Remove(tenantId);
             }
         }
 

@@ -60,14 +60,24 @@ internal sealed class TenantResolutionMiddleware
         await _next(context);
     }
 
+    // Reserved first-path segments for outbound webhook management endpoints — NOT tenant IDs.
+    private static readonly HashSet<string> ReservedWebhookSegments = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "subscriptions", "event-types", "dead-letter", "deliveries",
+    };
+
     private static async ValueTask<TenantId?> ResolveTenantIdAsync(HttpContext context)
     {
-        // Webhook routes: /api/webhooks/{tenantId}/{channel} or /api/v1/webhooks/{tenantId}/{channel}
+        // Inbound channel webhooks: /api/webhooks/{tenantId}/{channel} or /api/v1/webhooks/{tenantId}/{channel}.
+        // Outbound subscription management (/webhooks/subscriptions, /webhooks/event-types, ...) must NOT
+        // be mistaken for a tenant path — fall back to header/subdomain/JWT for those.
         if (context.Request.Path.StartsWithSegments("/api/webhooks", out var remaining)
             || context.Request.Path.StartsWithSegments("/api/v1/webhooks", out remaining))
         {
             var segments = remaining.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
-            if (segments is { Length: >= 1 } && !string.IsNullOrWhiteSpace(segments[0]))
+            if (segments is { Length: >= 2 }
+                && !string.IsNullOrWhiteSpace(segments[0])
+                && !ReservedWebhookSegments.Contains(segments[0]))
                 return new TenantId(segments[0]);
         }
 

@@ -104,14 +104,18 @@ else
     echo "  SKIP (no management key)"
 fi
 
-# 8.5. Set demo tenant plan to Pro (enables feature-gated endpoints)
-echo "[8.5/11] Configurando plan Pro para tenant demo..."
+# 8.5. Set tenant plans (platform=Enterprise, demo=Pro) to enable feature-gated endpoints
+echo "[8.5/11] Configurando planes (platform=Enterprise, demo=Pro)..."
 if [ -n "$MGMT_KEY" ]; then
+    curl -sf -X PUT "$API_BASE/api/v1/management/tenants/platform/settings" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $MGMT_KEY" \
+        -d '{"plan":"Enterprise"}' > /dev/null 2>&1 || true
     curl -sf -X PUT "$API_BASE/api/v1/management/tenants/demo/settings" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $MGMT_KEY" \
         -d '{"plan":"Pro"}' > /dev/null 2>&1 || true
-    echo "  OK (plan=Pro, features: Dialer, BotBasic, AnalyticsExport, Flows, Webhooks, ScheduledReports, KnowledgeBase, Recordings)"
+    echo "  OK (platform=Enterprise all features, demo=Pro: Dialer, BotBasic, AnalyticsExport, Flows, Webhooks, ScheduledReports, KnowledgeBase, Recordings)"
 else
     echo "  SKIP (no management key)"
 fi
