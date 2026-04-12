@@ -92,6 +92,46 @@ else
     echo "  SKIP (platform already initialized or setup failed)"
 fi
 
+# 7.5. Ensure platform admin user has the `platform_admin` role assigned.
+# SetupEndpoints does this on first-run, but Postgres-backed demos that
+# initialized before that fix landed still have an empty user_roles row for
+# platform@admin.local. This block is idempotent: clones the template into a
+# tenant_role (ignoring unique-constraint errors on re-run) and upserts the
+# user_role assignment. Runs inside Postgres so it works even when the setup
+# endpoint returned 409 Conflict.
+echo "[7.5/11] Asignando platform_admin role al platform admin (idempotente)..."
+docker exec -i demo-postgres-1 psql -U platform -d platform >/dev/null 2>&1 <<'SQL' || true
+    -- 1. Clone platform_admin template into a tenant role (if not already present)
+    INSERT INTO tenant_roles (tenant_id, role_id, name, description, source_template_id, is_default, created_at)
+    SELECT 'platform', 'platform-admin-platform', 'Platform Admin',
+           'Full platform administration including cross-tenant operations',
+           'platform_admin', false, NOW()
+    WHERE NOT EXISTS (
+        SELECT 1 FROM tenant_roles
+        WHERE tenant_id = 'platform' AND role_id = 'platform-admin-platform'
+    );
+
+    -- 2. Copy template's permissions into tenant_role_permissions
+    INSERT INTO tenant_role_permissions (tenant_id, role_id, permission_id)
+    SELECT 'platform', 'platform-admin-platform', tp.permission_id
+    FROM template_permissions tp
+    WHERE tp.template_id = 'platform_admin'
+    ON CONFLICT DO NOTHING;
+
+    -- 3. Assign the role to every user on the platform tenant (admins)
+    INSERT INTO user_roles (tenant_id, user_id, role_id, assigned_at, assigned_by)
+    SELECT 'platform', u.user_id, 'platform-admin-platform', NOW(), NULL
+    FROM users u
+    WHERE u.tenant_id = 'platform'
+      AND NOT EXISTS (
+          SELECT 1 FROM user_roles ur
+          WHERE ur.tenant_id = 'platform'
+            AND ur.user_id = u.user_id
+            AND ur.role_id = 'platform-admin-platform'
+      );
+SQL
+echo "  OK"
+
 # 8. Create demo customer tenant via Management API
 echo "[8/11] Creando tenant demo..."
 if [ -n "$MGMT_KEY" ]; then
