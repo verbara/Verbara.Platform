@@ -33,9 +33,23 @@ internal static class ManagementTenantEndpoints
         IReadOnlyList<Tenant> tenants;
 
         if (!string.IsNullOrEmpty(parentId))
+        {
             tenants = await store.GetChildrenAsync(parentId, ct);
+        }
         else
-            tenants = await store.GetAllActiveAsync(ct);
+        {
+            // Management list: return ALL tenants regardless of status (admins need to see
+            // Suspended / Disabled to reactivate them). GetAllActiveAsync only returns Active
+            // so we compose children-of-platform + platform itself for a full view.
+            var host = await store.GetHostTenantAsync(ct);
+            var children = host is null
+                ? []
+                : await store.GetChildrenAsync(host.TenantId, ct);
+            // Exclude soft-deleted tenants from the management list (but KEEP Suspended /
+            // Disabled / Warning / Degraded / PendingDeletion so admins can reactivate them).
+            var visibleChildren = children.Where(t => t.Status != TenantStatus.Deleted).ToList();
+            tenants = host is null ? visibleChildren : [host, .. visibleChildren];
+        }
 
         // Apply optional filters
         var result = tenants.AsEnumerable();
@@ -165,11 +179,18 @@ internal static class ManagementTenantEndpoints
 
         var before = new { existing.TenantId, existing.Name };
 
+        var newStatus = existing.Status;
+        if (body.Status is not null
+            && Enum.TryParse<TenantStatus>(body.Status, ignoreCase: true, out var parsedStatus))
+        {
+            newStatus = parsedStatus;
+        }
+
         var updated = new Tenant
         {
             TenantId = existing.TenantId,
             Name = body.Name ?? existing.Name,
-            Status = existing.Status,
+            Status = newStatus,
             Type = existing.Type,
             ParentTenantId = existing.ParentTenantId,
             Options = new TenantOptions
@@ -338,6 +359,7 @@ internal sealed record CreateMgmtTenantRequest(
 
 internal sealed record UpdateMgmtTenantRequest(
     string? Name = null,
+    string? Status = null,
     int? MaxConcurrentChannels = null,
     int? MaxActiveCampaigns = null,
     Dictionary<string, string>? Metadata = null);
