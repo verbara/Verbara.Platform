@@ -803,10 +803,13 @@ internal static class AuthEndpoints
     private static (string? TenantId, string? UserId) GetAuthClaims(HttpContext context)
     {
         // Support both JWT claims (tid/sub) and API key claims (tenant_id/user_id).
-        // Check user_id first because API key auth sets NameIdentifier to the key ID.
+        // Order matters: user_id wins for API keys (NameIdentifier there holds the API key id).
+        // "sub" is checked before ClaimTypes.NameIdentifier because JWTs with
+        // MapInboundClaims=false keep the raw "sub" claim and don't remap it.
         var tenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         var userId = context.User.FindFirst("user_id")?.Value
+            ?? context.User.FindFirst("sub")?.Value
             ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         return (tenantId, userId);
     }

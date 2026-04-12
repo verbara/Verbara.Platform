@@ -19,8 +19,10 @@ internal static class UsersMeEndpoint
         var tenantId = GetTenantId(context);
 
         // "user_id" claim is set by ApiKeyAuthenticationHandler when the key has a linked user.
-        // ClaimTypes.NameIdentifier holds the API key ID, not the user ID.
-        var userIdValue = context.User.FindFirst("user_id")?.Value;
+        // JWT-authenticated requests put the user id in "sub". Fall back to "sub" so the
+        // endpoint works for both auth schemes.
+        var userIdValue = context.User.FindFirst("user_id")?.Value
+                          ?? context.User.FindFirst("sub")?.Value;
         if (userIdValue is null)
             return Results.Unauthorized();
 
