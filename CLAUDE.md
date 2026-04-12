@@ -631,6 +631,31 @@ CsvReportRenderer remains in Platform.Api (AOT-safe, no external rendering depen
 5. **Production Hardening (E)** -- Health checks (PostgresHealthCheck, BackgroundServiceHealthCheck with IServiceHeartbeat, AsteriskAmiHealthCheck), /health + /health/ready endpoints, DatabaseMigrationService (auto-apply SQL from embedded resources with _migrations tracking), production config validation (ServiceKey, CORS_ORIGINS, AMI), secrets moved to appsettings.Development.json
 6. **Twilio SMS + Cases (F)** -- TwilioSmsProvider (raw HTTP, AOT-compatible), TwilioSignatureValidator (HMAC-SHA1), SmsWebhookHandler inbound parsing with media, conditional DI, CaseEndpoints (5 CRUD endpoints)
 
+## Demo Infrastructure Modernization + E2E Stabilization (2026-04-12)
+
+Two landed batches on `main`:
+
+**Demo infra (earlier that day, 9 commits):**
+- Removed redundant `/docker-entrypoint-initdb.d` migration mount (DatabaseMigrationService already applies from embedded resources).
+- `DatabaseMigrationService` converted from `IHostedService` to static eager call — Pro.Dialer EnsureSchemaAsync runs during DI and assumed Platform tables existed.
+- JWT: `MapInboundClaims = false` + `RoleClaimType = "role"` + `NameClaimType = "sub"` so `RequireRole("Admin")` works with short claim names.
+- Tenant resolution: `OnTokenValidated` only sets `TenantId` when middleware hasn't already (X-Tenant-Id header / subdomain wins over JWT tid for cross-tenant admin access).
+- Migration 001: `teams` table gets `created_by` / `updated_by` columns (was drifting from `PostgresTeamStore` SQL).
+- `DELETE /admin/auth/sessions/by-user/{userId}` endpoint added.
+- `demo-reset.sh` expanded to seed all v1.6.x features (2 teams, 5 contacts, 5 canned responses, 6 dispositions, 1 report, 1 rate card, quotas, 1 webhook, 1 survey, 1 KB article, 1 flow, 1 bot) and now sets the **platform tenant to Enterprise** (customers stay on Pro) so feature-gated management endpoints work.
+
+**E2E stabilization (6 commits, 3 Platform + 3 Web):**
+- `TeamDto` + `UserDto` (id, name, role-as-string, ...) — replaces raw aggregates whose `teamId` / `userId` broke the frontend contract (Plan 29A DTO-hardening pattern).
+- `TenantResolutionMiddleware`: reserved first-segments on the webhooks path (`subscriptions`, `event-types`, `dead-letter`, `deliveries`) + require `segments.Length >= 2` — `POST /api/v1/webhooks/subscriptions` was resolving `TenantId="subscriptions"`, forcing the feature gate to Starter.
+- `FeatureGateCache.Remove(tenantId)` is now called from `ApplyUpdates` when the plan changes; previously the cache was populated by `TenantStatusMiddleware` and never invalidated after a `PUT /settings`.
+- Migration **015_WebhookCircuitBreaker.sql** adds `circuit_status`, `circuit_failures`, `circuit_opened_at`, `circuit_next_probe_at`, `circuit_probe_attempts` to `webhook_subscriptions` (v1.3.1 store code shipped without a migration).
+- `UpdateTenant` (PUT `/management/tenants/{id}`) now reads `body.Status` and `Enum.TryParse` it — UI "Suspend" / "Activate" actions previously no-oped.
+- `ListTenants` returns all non-Deleted tenants (Suspended / Disabled / Warning / Degraded / PendingDeletion) so admins can reactivate them.
+- `GetAuthClaims` + `UsersMeEndpoint` fall back to the raw `sub` JWT claim. `MapInboundClaims=false` keeps `sub` unmapped, so prior code returned 401 on `/users/me`, `/auth/sessions`, MFA/password endpoints for any JWT-authenticated user.
+- Platform.Web: `formatBytes` guards `undefined`, sidebar teams permission changed to existing `users:user:view`, tenants page switched to `ConfirmDeleteDialog` (3s), `data-status` / `data-current` / per-rule testids on security page for locale-proof E2E, tenant-management tests fixed (exact cell role for platform/demo, shadcn option-role for Select, search-before-click pattern).
+
+**Convention reminder for new E2E tests:** locale-proof selectors (`data-*` over `toContainText`), `ConfirmDeleteDialog` for destructive actions, shadcn Select uses role=option not `selectOption()`, always `data-table-search.fill(id)` before clicking a freshly created row.
+
 ## Plan Execution
 
 **Always use Subagent-Driven Development** with risk-weighted batching (FCM pattern):
