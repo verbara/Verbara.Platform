@@ -18,6 +18,7 @@ internal static class AuthAdminEndpoints
         group.MapGet("/events", ListEvents);
         group.MapGet("/sessions", ListSessions);
         group.MapDelete("/sessions/{id}", RevokeSession);
+        group.MapDelete("/sessions/by-user/{userId}", RevokeAllUserSessions);
     }
 
     private static async Task<IResult> GetConfig(
@@ -136,6 +137,26 @@ internal static class AuthAdminEndpoints
         return Results.NoContent();
     }
 
+    private static async Task<IResult> RevokeAllUserSessions(
+        string userId,
+        HttpContext context,
+        [FromServices] SessionService sessionService,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var adminUserId = GetUserId(context);
+        if (tenantId is null)
+            return Results.Unauthorized();
+
+        var ip = context.Connection.RemoteIpAddress?.ToString();
+        var ua = context.Request.Headers.UserAgent.FirstOrDefault();
+
+        var count = await sessionService.RevokeAllSessionsForUserAsync(
+            tenantId, adminUserId ?? "admin", userId, ip, ua, ct);
+
+        return Results.Ok(new RevokedSessionsResponse(count));
+    }
+
     private static string? GetTenantId(HttpContext context) =>
         context.User.FindFirst("tid")?.Value
         ?? context.User.FindFirst("tenant_id")?.Value;
@@ -146,6 +167,8 @@ internal static class AuthAdminEndpoints
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
+
+internal sealed record RevokedSessionsResponse(int RevokedCount);
 
 internal sealed record UpdateTenantAuthConfigRequest
 {

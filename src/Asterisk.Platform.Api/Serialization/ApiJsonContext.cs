@@ -217,6 +217,7 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(PagedDataResponse<CdrRowDto>))]
 [JsonSerializable(typeof(PagedDataResponse<QaRowDto>))]
 // Auth
+[JsonSerializable(typeof(RevokedSessionsResponse))]
 [JsonSerializable(typeof(MfaChallengeResponse))]
 [JsonSerializable(typeof(AuthEventDetail))]
 [JsonSerializable(typeof(UserSessionDto))]
