@@ -4,7 +4,7 @@
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.4) and Pro packages (v1.1.2-pro).
 
-**30 packages, 1557 tests, 0 warnings, NativeAOT (IsAotCompatible=true), 56 endpoint groups (14 with feature gates), version 1.4.1:**
+**30 packages, 1627 tests, 0 warnings, NativeAOT (IsAotCompatible=true), 59 endpoint groups (14 with feature gates), version 1.5.0:**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
@@ -14,7 +14,7 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Queues | Queue config, SLA, Agent with per-channel capacity, Teams, DI | 44 |
 | Platform.Channels.Core | Channel registry, inbound pipeline, delivery status, tenant config, DI | 38 |
 | Platform.Channels.WhatsApp | Meta Business API connector, HMAC webhook, 24h session window, DI | 29 |
-| Platform.Channels.Sms | Provider-agnostic SMS connector, segment calculator, DI | 28 |
+| Platform.Channels.Sms | Provider-agnostic SMS connector, segment calculator, Twilio provider, DI | 32 |
 | Platform.Channels.WebChat | WebChat connector, session manager, transport abstraction, DI | 25 |
 | Platform.Channels.Messenger | Messenger connector, DI | 22 |
 | Platform.Channels.Instagram | Instagram connector, DI | 16 |
@@ -35,9 +35,9 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 | Platform.Billing | Metering engine, quota enforcement, rate cards, invoice generation, dunning lifecycle, DI | 46 |
 | Platform.Renderer | Stateless PDF/CSV rendering microservice (`:5010`) -- QuestPDF + ScottPlot, concurrency semaphore | 0 |
 | Platform.Mail | Email + Microsoft 365 Graph microservice (`:5020`) -- MailKit SMTP, Graph API, OAuth PKCE | 0 |
-| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 106 |
+| Platform.Storage.InMemory | In-memory implementations of all stores -- dev/test, DI | 125 |
 | Platform.Storage.Postgres | PostgreSQL implementations, RBAC seeder, Npgsql + Dapper | 6 |
-| Platform.Api | HTTP host -- 49 endpoint groups (14 feature-gated), auth, middleware, SSE, NativeAOT | 445 |
+| Platform.Api | HTTP host -- 52 endpoint groups (14 feature-gated), auth, middleware, SSE, NativeAOT | 574 |
 
 ## Build & Test
 
@@ -118,7 +118,7 @@ ErrorHandlingMiddleware -> CORS -> RateLimiter -> TenantResolutionMiddleware -> 
 - **RBAC:** 64 permissions (`domain:resource:action`), 8 role templates (Agent, Supervisor, Quality Analyst, Manager, Admin, System Admin, API, Platform Admin), custom roles per-tenant, permission cascading via `PermissionResolver` + `PermissionAuthorizationHandler`
 - **Authorization policies:** `AdminOnly`, `SupervisorPlus`, `Authenticated`
 
-### Endpoint Inventory (56 groups, 56 files)
+### Endpoint Inventory (59 groups, 59 files)
 
 All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all routes are versioned under `/api/v1/` (Asp.Versioning.Http, URL-segment strategy). Legacy `/api/` paths redirect for backward compatibility. Key groups:
 
@@ -140,6 +140,9 @@ All endpoints are in `src/Asterisk.Platform.Api/Endpoints/`. As of v1.3.1, all r
 | Branding | BrandingEndpoints (public, no auth) |
 | Notifications | NotificationEndpoints |
 | Onboarding | OnboardingEndpoints (status, apply-template, complete, dismiss-checklist) |
+| WebChat | WebChatEndpoints (session, WebSocket, REST fallback) |
+| Canned Responses | CannedResponseEndpoints (admin CRUD, agent search) |
+| Cases | CaseEndpoints (CRUD, link conversation) |
 | Other | DispositionEndpoints, SurveyEndpoints |
 
 ### Pro Package Integration
@@ -614,6 +617,19 @@ CsvReportRenderer remains in Platform.Api (AOT-safe, no external rendering depen
 6. **Agent Capacity Persistence** -- IAgentCapacityStore interface, PersistentAgentCapacityService wraps InMemory with Postgres write-through, startup reconciliation from active conversations.
 7. **Email Attachment Fix** -- EmailConnector.AddUrlAttachmentAsync downloads actual file content via IHttpClientFactory instead of storing URL string. 25MB limit, graceful fallback.
 8. **Agent State UI** -- AgentStatusSelector component in Platform.Web workspace header with 8 states, color-coded dropdown.
+
+## v1.5.0 "Production Ready" -- COMPLETE (2026-04-09)
+
+**Spec:** `docs/superpowers/specs/2026-04-09-v150-production-ready-design.md`
+
+6 sub-projects across 4 phases making the platform sellable to Partners:
+
+1. **Critical Fixes (A)** -- Bot handoff execution (TransferToQueue + EndConversation in WebhookEndpoints), hold/unhold endpoints + switchboard methods, outbound conversation creation POST /conversations, error handling expansion (PlatformException, ArgumentException, traceId)
+2. **WebChat E2E (B)** -- WebSocketWebChatTransport implementing IWebChatTransport, WebChat HTTP endpoints (session creation, WebSocket upgrade, REST fallback), embeddable vanilla JS widget with branding integration
+3. **Agent Workspace (C)** -- CannedResponse model + ICannedResponseStore (InMemory + Postgres), CannedResponseEndpoints (admin CRUD + agent search), supervisor digital conversation monitoring (5 endpoints: list, messages, takeover, close, coaching note)
+4. **Report Templates (D)** -- IReportDataBuilder interface + ReportDataBuilderRegistry (pluggable report generation replacing placeholder), 3 report builders (AgentPerformance, QueueAnalytics, ConversationSummary), report type validation on create/update, bot analytics (BotAnalyticsRecord, IBotAnalyticsStore, BotAnalyticsPersistenceService, GET /analytics/bot)
+5. **Production Hardening (E)** -- Health checks (PostgresHealthCheck, BackgroundServiceHealthCheck with IServiceHeartbeat, AsteriskAmiHealthCheck), /health + /health/ready endpoints, DatabaseMigrationService (auto-apply SQL from embedded resources with _migrations tracking), production config validation (ServiceKey, CORS_ORIGINS, AMI), secrets moved to appsettings.Development.json
+6. **Twilio SMS + Cases (F)** -- TwilioSmsProvider (raw HTTP, AOT-compatible), TwilioSignatureValidator (HMAC-SHA1), SmsWebhookHandler inbound parsing with media, conditional DI, CaseEndpoints (5 CRUD endpoints)
 
 ## Plan Execution
 
