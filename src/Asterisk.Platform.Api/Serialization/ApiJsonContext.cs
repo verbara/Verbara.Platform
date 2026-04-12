@@ -22,6 +22,8 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(PagedResult<Team>))]
 [JsonSerializable(typeof(PagedResult<TeamDto>))]
 [JsonSerializable(typeof(TeamDto))]
+[JsonSerializable(typeof(PagedResult<UserDto>))]
+[JsonSerializable(typeof(UserDto))]
 [JsonSerializable(typeof(PagedResult<Conversation>))]
 [JsonSerializable(typeof(PagedResult<Contact>))]
 [JsonSerializable(typeof(PagedResult<ApiKey>))]

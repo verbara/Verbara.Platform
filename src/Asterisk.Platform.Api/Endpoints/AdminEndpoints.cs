@@ -58,7 +58,12 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, ct);
-        return Results.Ok(result);
+        var dtos = new PagedResult<UserDto>(
+            result.Items.Select(ToUserDto).ToList(),
+            result.TotalCount,
+            result.Page,
+            result.PageSize);
+        return Results.Ok(dtos);
     }
 
     private static async Task<IResult> GetUser(
@@ -69,7 +74,7 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var user = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return user is null ? Results.NotFound() : Results.Ok(user);
+        return user is null ? Results.NotFound() : Results.Ok(ToUserDto(user));
     }
 
     private static async Task<IResult> CreateUser(
@@ -92,7 +97,7 @@ internal static class AdminEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(user, ct);
-        return Results.Created($"/admin/users/{user.UserId}", user);
+        return Results.Created($"/admin/users/{user.UserId}", ToUserDto(user));
     }
 
     private static async Task<IResult> UpdateUser(
@@ -113,8 +118,11 @@ internal static class AdminEndpoints
         if (body.Status.HasValue) user.Status = body.Status.Value;
         user.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(user, ct);
-        return Results.Ok(user);
+        return Results.Ok(ToUserDto(user));
     }
+
+    private static UserDto ToUserDto(User u) =>
+        new(u.UserId.Value, u.Email, u.DisplayName, u.Role.ToString(), u.Status.ToString(), u.CreatedAt);
 
     private static async Task<IResult> DeleteUser(
         string id,
@@ -597,3 +605,11 @@ internal sealed record CreateTeamRequest(string Name);
 internal sealed record UpdateTeamRequest(string? Name);
 
 internal sealed record TeamDto(string Id, string Name, int MemberCount, DateTimeOffset CreatedAt);
+
+internal sealed record UserDto(
+    string Id,
+    string Email,
+    string DisplayName,
+    string Role,
+    string Status,
+    DateTimeOffset CreatedAt);
