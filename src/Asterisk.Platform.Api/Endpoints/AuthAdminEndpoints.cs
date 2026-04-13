@@ -112,10 +112,10 @@ internal static class AuthAdminEndpoints
         if (tenantId is null)
             return Results.Unauthorized();
 
-        if (string.IsNullOrWhiteSpace(userId))
-            return Results.BadRequest(new ErrorResponse("userId query parameter is required"));
+        var sessions = string.IsNullOrWhiteSpace(userId)
+            ? await sessionService.ListAllActiveSessionsAsync(tenantId, ct)
+            : await sessionService.ListActiveSessionsAsync(tenantId, userId, ct);
 
-        var sessions = await sessionService.ListActiveSessionsAsync(tenantId, userId, ct);
         return Results.Ok(sessions);
     }
 

@@ -47,11 +47,11 @@ public sealed class AuthAdminTests : IClassFixture<AuthenticatedPlatformApiFacto
     }
 
     [Fact]
-    public async Task ListSessions_ShouldReturn400_WhenNoUserId()
+    public async Task ListSessions_ShouldReturn200_WhenNoUserId()
     {
         var response = await _authClient.GetAsync("/api/admin/auth/sessions");
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
