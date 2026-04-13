@@ -222,6 +222,11 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateCaseRequest))]
 // Bot Analytics
 [JsonSerializable(typeof(BotAnalyticsSummary))]
+// Bots
+[JsonSerializable(typeof(BotDto))]
+[JsonSerializable(typeof(BotDto[]))]
+[JsonSerializable(typeof(CreateBotRequest))]
+[JsonSerializable(typeof(UpdateBotRequest))]
 // Shared response DTOs
 [JsonSerializable(typeof(ErrorResponse))]
 [JsonSerializable(typeof(ErrorDetailResponse))]

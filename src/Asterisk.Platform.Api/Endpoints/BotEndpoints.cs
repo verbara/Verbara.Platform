@@ -28,10 +28,8 @@ internal static class BotEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        // [FromServices] IBotConfigStore does not expose a ListAsync method.
-        // Return the default active bot configuration for the tenant.
-        var bot = await store.GetDefaultAsync(tenantId, ct);
-        return Results.Ok(bot is null ? [] : new[] { bot });
+        var items = await store.ListAsync(tenantId, ct);
+        return Results.Ok(items.Select(ToDto).ToArray());
     }
 
     private static async Task<IResult> CreateBot(
@@ -47,11 +45,12 @@ internal static class BotEndpoints
             BotId = EntityId.New(),
             TenantId = tenantId,
             Name = body.Name,
-            DefaultFlowId = EntityId.From(body.DefaultFlowId),
+            DefaultFlowId = body.DefaultFlowId is not null ? EntityId.From(body.DefaultFlowId) : null,
             FallbackQueueId = body.FallbackQueueId is not null ? EntityId.From(body.FallbackQueueId) : null,
             ConfidenceThreshold = body.ConfidenceThreshold ?? 0.7,
-            MaxTurnsBeforeHandoff = body.MaxTurnsBeforeHandoff ?? 20,
+            MaxTurnsBeforeHandoff = body.MaxTurns ?? 20,
             IsActive = body.IsActive ?? true,
+            CreatedAt = DateTimeOffset.UtcNow,
         };
         await store.SaveAsync(config, ct);
         await audit.RecordAsync(
@@ -65,7 +64,7 @@ internal static class BotEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Created($"/admin/bots/{config.BotId}", config);
+        return Results.Created($"/admin/bots/{config.BotId}", ToDto(config));
     }
 
     private static async Task<IResult> GetBot(
@@ -76,7 +75,7 @@ internal static class BotEndpoints
     {
         var tenantId = GetTenantId(context);
         var config = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return config is null ? Results.NotFound() : Results.Ok(config);
+        return config is null ? Results.NotFound() : Results.Ok(ToDto(config));
     }
 
     private static async Task<IResult> UpdateBot(
@@ -95,9 +94,12 @@ internal static class BotEndpoints
         var before = new { existing.BotId, existing.Name, existing.IsActive };
 
         if (body.Name is not null) existing.Name = body.Name;
-        if (body.FallbackQueueId is not null) existing.FallbackQueueId = EntityId.From(body.FallbackQueueId);
+        if (body.DefaultFlowId is not null)
+            existing.DefaultFlowId = body.DefaultFlowId.Length == 0 ? null : EntityId.From(body.DefaultFlowId);
+        if (body.FallbackQueueId is not null)
+            existing.FallbackQueueId = body.FallbackQueueId.Length == 0 ? null : EntityId.From(body.FallbackQueueId);
         if (body.ConfidenceThreshold.HasValue) existing.ConfidenceThreshold = body.ConfidenceThreshold.Value;
-        if (body.MaxTurnsBeforeHandoff.HasValue) existing.MaxTurnsBeforeHandoff = body.MaxTurnsBeforeHandoff.Value;
+        if (body.MaxTurns.HasValue) existing.MaxTurnsBeforeHandoff = body.MaxTurns.Value;
         if (body.IsActive.HasValue) existing.IsActive = body.IsActive.Value;
 
         await store.SaveAsync(existing, ct);
@@ -112,7 +114,7 @@ internal static class BotEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(existing);
+        return Results.Ok(ToDto(existing));
     }
 
     private static async Task<IResult> DeleteBot(
@@ -122,20 +124,20 @@ internal static class BotEndpoints
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
-        // [FromServices] IBotConfigStore does not expose a DeleteAsync method.
-        // Soft-delete by deactivating the bot configuration.
         var tenantId = GetTenantId(context);
-        var config = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        if (config is null)
+        var existing = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (existing is null)
             return Results.NotFound();
 
-        config.IsActive = false;
-        await store.SaveAsync(config, ct);
+        var removed = await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        if (!removed)
+            return Results.NotFound();
+
         await audit.RecordAsync(
             tenantId, category: "config", action: "bot.deleted", severity: "info",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
             targetId: id, targetType: "bot",
-            changes: new AuditChanges(Before: new { config.BotId, config.Name, IsActive = true }, After: null),
+            changes: new AuditChanges(Before: new { existing.BotId, existing.Name, existing.IsActive }, After: null),
             metadata: new Dictionary<string, string>
             {
                 ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -147,6 +149,16 @@ internal static class BotEndpoints
 
     // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+    private static BotDto ToDto(BotConfiguration c) => new(
+        Id: c.BotId.Value,
+        Name: c.Name,
+        DefaultFlowId: c.DefaultFlowId?.Value,
+        FallbackQueueId: c.FallbackQueueId?.Value,
+        ConfidenceThreshold: c.ConfidenceThreshold,
+        MaxTurns: c.MaxTurnsBeforeHandoff,
+        IsActive: c.IsActive,
+        CreatedAt: c.CreatedAt);
+
     private static TenantId GetTenantId(HttpContext context)
     {
         if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
@@ -156,19 +168,30 @@ internal static class BotEndpoints
     }
 }
 
-// ─── Request DTOs ─────────────────────────────────────────────────────────────
+// ─── DTOs ─────────────────────────────────────────────────────────────────────
+
+internal sealed record BotDto(
+    string Id,
+    string Name,
+    string? DefaultFlowId,
+    string? FallbackQueueId,
+    double ConfidenceThreshold,
+    int MaxTurns,
+    bool IsActive,
+    DateTimeOffset CreatedAt);
 
 internal sealed record CreateBotRequest(
     string Name,
-    string DefaultFlowId,
+    string? DefaultFlowId = null,
     string? FallbackQueueId = null,
     double? ConfidenceThreshold = null,
-    int? MaxTurnsBeforeHandoff = null,
+    int? MaxTurns = null,
     bool? IsActive = null);
 
 internal sealed record UpdateBotRequest(
     string? Name = null,
+    string? DefaultFlowId = null,
     string? FallbackQueueId = null,
     double? ConfidenceThreshold = null,
-    int? MaxTurnsBeforeHandoff = null,
+    int? MaxTurns = null,
     bool? IsActive = null);
