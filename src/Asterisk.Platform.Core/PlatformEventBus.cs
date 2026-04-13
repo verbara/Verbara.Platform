@@ -1,33 +1,90 @@
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+
 using Asterisk.Platform.Core.Notifications;
+using Asterisk.Sdk.Push.Bus;
+using Asterisk.Sdk.Push.Events;
 
 namespace Asterisk.Platform.Core;
 
 /// <summary>
 /// Lightweight in-process event bus for broadcasting platform events to SSE subscribers.
+/// v1.6.0: hybrid facade. Synchronous <see cref="Subject{T}"/> preserves the existing
+/// <c>Publish</c>/<c>Events</c> contract used by 35 publishers, 4 legacy subscribers,
+/// and 8 test fixtures. In parallel, every published event is forwarded to the injected
+/// <see cref="IPushEventBus"/> (when present) so new Asterisk.Sdk.Push-native consumers
+/// can observe the same stream with tenant/user filtering semantics.
 /// </summary>
 public sealed class PlatformEventBus : IDisposable
 {
     private readonly Subject<PlatformEvent> _events = new();
+    private readonly IPushEventBus? _pushBus;
 
     /// <summary>
-    /// Observable stream of all platform events.
+    /// Parameterless constructor retained for test fixtures that instantiate the bus
+    /// directly via <c>new PlatformEventBus()</c>. No Sdk.Push forwarding in this mode.
+    /// </summary>
+    public PlatformEventBus()
+    {
+    }
+
+    /// <summary>
+    /// DI-friendly constructor that also mirrors every publish onto the injected
+    /// <see cref="IPushEventBus"/> so Asterisk.Sdk.Push subscribers receive the same
+    /// events alongside the legacy <see cref="Events"/> observable.
+    /// </summary>
+    public PlatformEventBus(IPushEventBus pushBus)
+    {
+        ArgumentNullException.ThrowIfNull(pushBus);
+        _pushBus = pushBus;
+    }
+
+    /// <summary>
+    /// Observable stream of all platform events (synchronous, hot).
     /// </summary>
     public IObservable<PlatformEvent> Events => _events.AsObservable();
 
     /// <summary>
-    /// Publishes an event to all subscribers.
+    /// Publishes an event to all subscribers. Legacy subscribers receive it synchronously;
+    /// the Sdk.Push bus (if wired) receives an asynchronous copy.
     /// </summary>
-    public void Publish(PlatformEvent evt) => _events.OnNext(evt);
+    public void Publish(PlatformEvent evt)
+    {
+        ArgumentNullException.ThrowIfNull(evt);
+        _events.OnNext(evt);
+
+        if (_pushBus is not null)
+        {
+            // RxPushEventBus enqueues via bounded channel TryWrite → completes synchronously
+            // under the default DropOldest strategy. Await to honor CA2012 and surface
+            // enqueue-time exceptions.
+            var pending = _pushBus.PublishAsync(evt);
+            if (!pending.IsCompletedSuccessfully)
+            {
+                pending.AsTask().GetAwaiter().GetResult();
+            }
+        }
+    }
 
     public void Dispose() => _events.Dispose();
 }
 
 /// <summary>
 /// Base record for all platform events distributed via <see cref="PlatformEventBus"/>.
+/// Inherits from <see cref="PushEvent"/> so events flow through <see cref="IPushEventBus"/>.
 /// </summary>
-public abstract record PlatformEvent(string TenantId, string Type, DateTimeOffset Timestamp);
+public abstract record PlatformEvent(string TenantId, string Type, DateTimeOffset Timestamp) : PushEvent
+{
+    /// <inheritdoc />
+    public override string EventType => Type;
+
+    /// <summary>
+    /// Computed metadata bridging platform-level fields into the Sdk.Push envelope.
+    /// Default: tenant broadcast (no user target). Override in records that carry a
+    /// specific recipient (e.g. <see cref="NotificationEvent"/>).
+    /// </summary>
+    public override PushEventMetadata Metadata => new(TenantId, UserId: null, Timestamp, CorrelationId: null);
+}
 
 /// <summary>Raised when a conversation is assigned to an agent.</summary>
 public sealed record ConversationAssignedEvent(
@@ -152,7 +209,12 @@ public sealed record AgentAssistTranscriptEvent(
 
 // ─── Notification Events ─────────────────────────────────────────────────────
 
-/// <summary>Raised when a notification is created and persisted for a user.</summary>
+/// <summary>
+/// Raised when a notification is created and persisted for a user. This is the only
+/// event that is user-targeted — <see cref="Metadata"/> carries the recipient's UserId
+/// so the Sdk.Push <see cref="Asterisk.Sdk.Push.Delivery.DefaultDeliveryFilter"/>
+/// routes it to the correct SSE stream.
+/// </summary>
 public sealed record NotificationEvent(
     string TenantId,
     string NotificationType,
@@ -164,4 +226,8 @@ public sealed record NotificationEvent(
     string Title,
     string Body,
     string? ActionUrl)
-    : PlatformEvent(TenantId, "notification.created", Timestamp);
+    : PlatformEvent(TenantId, "notification.created", Timestamp)
+{
+    /// <inheritdoc />
+    public override PushEventMetadata Metadata => new(TenantId, UserId, Timestamp, CorrelationId: null);
+}

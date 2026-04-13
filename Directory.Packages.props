@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.5.5" />
+    <PackageVersion Include="Asterisk.Sdk.Push" Version="1.6.0" />
   </ItemGroup>
 
   <ItemGroup>
