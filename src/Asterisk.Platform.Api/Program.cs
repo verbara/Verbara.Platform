@@ -55,6 +55,7 @@ using Asterisk.Sdk.Pro.Cluster.Storage.Postgres.DependencyInjection;
 using Asterisk.Platform.Channels.WebChat;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Asterisk.Sdk.Pro.MultiTenant.DependencyInjection;
+using Asterisk.Sdk.Push.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -65,6 +66,11 @@ builder.Services.AddAsteriskSessionsMultiServer();
 
 // ─── Core Platform Services ──────────────────────────────────────────────────
 
+// Asterisk.Sdk.Push: in-process push event bus + delivery filter abstractions.
+// MUST precede AddPlatformCore() so the IPushEventBus dependency is available
+// for the PlatformEventBus DI ctor and the platform-specific delivery filter
+// can override the SDK default.
+builder.Services.AddAsteriskPush();
 builder.Services.AddPlatformCore();
 builder.Services.AddPlatformConversations();
 builder.Services.AddPlatformChannels();

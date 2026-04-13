@@ -1,9 +1,11 @@
 using System.Reactive.Linq;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Push.Delivery;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -17,6 +19,7 @@ internal static partial class SseEndpoints
     private static async Task StreamEvents(
         HttpContext context,
         PlatformEventBus eventBus,
+        IEventDeliveryFilter deliveryFilter,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
@@ -35,6 +38,19 @@ internal static partial class SseEndpoints
 
         LogClientConnected(logger, tenantId?.Value, userId);
 
+        // Build the SubscriberContext used by the Sdk.Push delivery filter.
+        // When TenantId is absent (anonymous / cross-tenant admin scenario) we fall
+        // back to an empty string so the filter's tenant comparison evaluates against
+        // a deterministic value — anonymous events without TenantId in their metadata
+        // would still match (broadcast UserId == null path).
+        var subscriberRoles = ExtractClaimSet(context.User, ClaimTypes.Role, "role");
+        var subscriberPermissions = ExtractClaimSet(context.User, "permission");
+        var subscriberContext = new SubscriberContext(
+            TenantId: tenantId?.Value ?? string.Empty,
+            UserId: userId,
+            Roles: subscriberRoles,
+            Permissions: subscriberPermissions);
+
         // Buffer events in a channel so the Rx subscription and the write loop are decoupled.
         var channel = Channel.CreateBounded<PlatformEvent>(new BoundedChannelOptions(256)
         {
@@ -42,8 +58,13 @@ internal static partial class SseEndpoints
         });
 
         using var subscription = eventBus.Events
-            .Where(e => tenantId is null || e.TenantId == tenantId.Value.Value)
-            .Where(e => IsDeliverableToUser(e, userId))
+            .Where(e => deliveryFilter.IsDeliverableToSubscriber(
+                e,
+                tenantId is null
+                    // Anonymous / unscoped stream: align subscriber tenant to the event's so the
+                    // filter's tenant check passes; user-targeting still applies.
+                    ? subscriberContext with { TenantId = e.Metadata.TenantId }
+                    : subscriberContext))
             .Subscribe(evt => channel.Writer.TryWrite(evt));
 
         using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -82,16 +103,35 @@ internal static partial class SseEndpoints
     }
 
     /// <summary>
-    /// User-scoped events (currently <see cref="NotificationEvent"/>) are delivered only to the
-    /// target user's SSE stream. Tenant-scoped events pass through to all subscribers in the tenant.
+    /// Back-compat helper retained for existing unit tests. The runtime path now goes through
+    /// <see cref="IEventDeliveryFilter"/> (<see cref="PlatformDeliveryFilter"/> by default), but
+    /// this static surface keeps verifying the user-targeting semantics independent of DI wiring.
     /// </summary>
     internal static bool IsDeliverableToUser(PlatformEvent evt, string? userId)
     {
-        if (evt is NotificationEvent notification)
+        ArgumentNullException.ThrowIfNull(evt);
+
+        // Mirror PlatformDeliveryFilter without requiring tenant resolution.
+        if (evt.Metadata.UserId is null)
         {
-            return userId is not null && notification.UserId == userId;
+            return true;
         }
-        return true;
+        return userId is not null && evt.Metadata.UserId == userId;
+    }
+
+    private static HashSet<string> ExtractClaimSet(ClaimsPrincipal user, params string[] claimTypes)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in claimTypes)
+        {
+            foreach (var value in user.FindAll(type)
+                .Select(c => c.Value)
+                .Where(v => !string.IsNullOrEmpty(v)))
+            {
+                set.Add(value);
+            }
+        }
+        return set;
     }
 
     [LoggerMessage(EventId = 7100, Level = LogLevel.Debug,
