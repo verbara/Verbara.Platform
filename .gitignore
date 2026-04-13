@@ -14,3 +14,4 @@ TestResults/
 **/data/jwt-signing-key.xml
 local-nuget-feed/
 docker/asterisk-config/keys/
+.playwright-mcp/

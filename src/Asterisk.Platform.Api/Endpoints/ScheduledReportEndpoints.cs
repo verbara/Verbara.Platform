@@ -36,8 +36,24 @@ internal static class ScheduledReportEndpoints
     {
         var tenantId = GetTenantId(context);
         var reports = await store.ListByTenantAsync(tenantId.Value, ct);
-        return Results.Ok(reports);
+        return Results.Ok(reports.Select(ToDto).ToArray());
     }
+
+    private static ScheduledReportDto ToDto(ScheduledReport r) =>
+        new(
+            Id: r.ReportId,
+            Name: r.Name,
+            Type: r.ReportType,
+            Schedule: r.Schedule,
+            Filters: r.Filters,
+            Recipients: r.Recipients,
+            Format: r.Format,
+            IsActive: r.IsActive,
+            CreatedBy: r.CreatedBy,
+            CreatedAt: r.CreatedAt,
+            UpdatedAt: r.UpdatedAt,
+            LastRunAt: r.LastRunAt,
+            NextRunAt: r.NextRunAt);
 
     private static async Task<IResult> CreateReport(
         HttpContext context,
@@ -49,10 +65,11 @@ internal static class ScheduledReportEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        if (!registry.TryGetBuilder(body.ReportType, out _))
+        var type = body.EffectiveType;
+        if (string.IsNullOrWhiteSpace(type) || !registry.TryGetBuilder(type, out _))
         {
             return Results.BadRequest(new ErrorResponse(
-                $"Unknown report type '{body.ReportType}'. Valid types: {string.Join(", ", registry.RegisteredTypes)}"));
+                $"Unknown report type '{type}'. Valid types: {string.Join(", ", registry.RegisteredTypes)}"));
         }
 
         var now = clock.UtcNow;
@@ -76,10 +93,10 @@ internal static class ScheduledReportEndpoints
             ReportId = Guid.NewGuid().ToString("N"),
             TenantId = tenantId.Value,
             Name = body.Name,
-            ReportType = body.ReportType,
+            ReportType = type,
             Schedule = body.Schedule,
             Filters = body.Filters,
-            Recipients = body.Recipients,
+            Recipients = body.Recipients ?? string.Empty,
             Format = body.Format,
             IsActive = body.IsActive,
             CreatedBy = context.User.Identity?.Name ?? "unknown",
@@ -89,7 +106,7 @@ internal static class ScheduledReportEndpoints
         };
 
         await store.SaveAsync(report, ct);
-        return Results.Created($"/admin/reports/{report.ReportId}", report);
+        return Results.Created($"/admin/reports/{report.ReportId}", ToDto(report));
     }
 
     private static async Task<IResult> GetReport(
@@ -102,7 +119,7 @@ internal static class ScheduledReportEndpoints
         var report = await store.GetByIdAsync(id, ct);
         if (report is null || !string.Equals(report.TenantId, tenantId.Value, StringComparison.Ordinal))
             return Results.NotFound();
-        return Results.Ok(report);
+        return Results.Ok(ToDto(report));
     }
 
     private static async Task<IResult> UpdateReport(
@@ -119,10 +136,11 @@ internal static class ScheduledReportEndpoints
         if (existing is null || !string.Equals(existing.TenantId, tenantId.Value, StringComparison.Ordinal))
             return Results.NotFound();
 
-        if (body.ReportType is not null && !registry.TryGetBuilder(body.ReportType, out _))
+        var effectiveType = body.EffectiveType;
+        if (effectiveType is not null && !registry.TryGetBuilder(effectiveType, out _))
         {
             return Results.BadRequest(new ErrorResponse(
-                $"Unknown report type '{body.ReportType}'. Valid types: {string.Join(", ", registry.RegisteredTypes)}"));
+                $"Unknown report type '{effectiveType}'. Valid types: {string.Join(", ", registry.RegisteredTypes)}"));
         }
 
         var now = clock.UtcNow;
@@ -147,7 +165,7 @@ internal static class ScheduledReportEndpoints
             ReportId = existing.ReportId,
             TenantId = existing.TenantId,
             Name = body.Name ?? existing.Name,
-            ReportType = body.ReportType ?? existing.ReportType,
+            ReportType = effectiveType ?? existing.ReportType,
             Schedule = body.Schedule ?? existing.Schedule,
             Filters = body.Filters ?? existing.Filters,
             Recipients = body.Recipients ?? existing.Recipients,
@@ -161,7 +179,7 @@ internal static class ScheduledReportEndpoints
         };
 
         await store.SaveAsync(updated, ct);
-        return Results.Ok(updated);
+        return Results.Ok(ToDto(updated));
     }
 
     private static async Task<IResult> DeleteReport(
@@ -260,18 +278,42 @@ internal static class ScheduledReportEndpoints
 
 internal sealed record CreateScheduledReportRequest(
     string Name,
-    string ReportType,
+    string Type,
     string Schedule,
-    string? Filters,
-    string Recipients,
     string Format,
-    bool IsActive);
+    bool IsActive,
+    string? Filters = null,
+    string? Recipients = null)
+{
+    // Backward-compatible alias — some callers send ReportType.
+    public string? ReportType { get; init; }
+    public string EffectiveType => !string.IsNullOrWhiteSpace(Type) ? Type : ReportType ?? string.Empty;
+}
 
 internal sealed record UpdateScheduledReportRequest(
-    string? Name,
-    string? ReportType,
-    string? Schedule,
+    string? Name = null,
+    string? Type = null,
+    string? Schedule = null,
+    string? Filters = null,
+    string? Recipients = null,
+    string? Format = null,
+    bool? IsActive = null)
+{
+    public string? ReportType { get; init; }
+    public string? EffectiveType => !string.IsNullOrWhiteSpace(Type) ? Type : ReportType;
+}
+
+internal sealed record ScheduledReportDto(
+    string Id,
+    string Name,
+    string Type,
+    string Schedule,
     string? Filters,
     string? Recipients,
-    string? Format,
-    bool? IsActive);
+    string Format,
+    bool IsActive,
+    string CreatedBy,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? LastRunAt,
+    DateTimeOffset? NextRunAt);

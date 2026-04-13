@@ -28,6 +28,8 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(QueueDto))]
 [JsonSerializable(typeof(ArticleDto[]))]
 [JsonSerializable(typeof(ArticleDto))]
+[JsonSerializable(typeof(ScheduledReportDto[]))]
+[JsonSerializable(typeof(ScheduledReportDto))]
 [JsonSerializable(typeof(PagedResult<Conversation>))]
 [JsonSerializable(typeof(PagedResult<Contact>))]
 [JsonSerializable(typeof(PagedResult<ApiKey>))]
