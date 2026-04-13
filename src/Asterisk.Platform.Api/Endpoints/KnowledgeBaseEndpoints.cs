@@ -35,7 +35,8 @@ internal static class KnowledgeBaseEndpoints
     {
         var tenantId = GetTenantId(context);
         var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, ct);
-        return Results.Ok(result);
+        var items = result.Items.Select(ToArticleDto).ToArray();
+        return Results.Ok(items);
     }
 
     private static async Task<IResult> CreateArticle(
@@ -58,7 +59,7 @@ internal static class KnowledgeBaseEndpoints
             CreatedAt = clock.UtcNow,
         };
         await store.SaveAsync(article, ct);
-        return Results.Created($"/admin/articles/{article.ArticleId}", article);
+        return Results.Created($"/admin/articles/{article.ArticleId}", ToArticleDto(article));
     }
 
     private static async Task<IResult> UpdateArticle(
@@ -81,8 +82,19 @@ internal static class KnowledgeBaseEndpoints
         if (body.Language is not null) article.Language = body.Language;
         article.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(article, ct);
-        return Results.Ok(article);
+        return Results.Ok(ToArticleDto(article));
     }
+
+    private static ArticleDto ToArticleDto(Article a) =>
+        new(
+            Id: a.ArticleId.Value,
+            Title: a.Title,
+            Content: a.Content,
+            Tags: a.Tags,
+            Published: a.IsPublished,
+            Language: a.Language,
+            CreatedAt: a.CreatedAt,
+            UpdatedAt: a.UpdatedAt ?? a.CreatedAt);
 
     private static async Task<IResult> DeleteArticle(
         string id,
@@ -138,3 +150,13 @@ internal sealed record UpdateArticleRequest(
     IReadOnlyList<string>? Tags = null,
     bool? IsPublished = null,
     string? Language = null);
+
+internal sealed record ArticleDto(
+    string Id,
+    string Title,
+    string Content,
+    IReadOnlyList<string> Tags,
+    bool Published,
+    string? Language,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
