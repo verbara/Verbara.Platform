@@ -173,8 +173,19 @@ if [ -z "$PLATFORM_JWT" ]; then
     echo "  ERROR: Could not obtain platform JWT"
 else
     AUTH="Authorization: Bearer $PLATFORM_JWT"
-    TENANT="X-Tenant-Id: demo"
     CT="Content-Type: application/json"
+
+    # ── Platform tenant baseline ─────────────────────────────────────────
+    # Seed at least one agent in the platform tenant so the platform-admin
+    # UI (and E2E tests that operate as platform admin) have data to render.
+    PLATFORM_TENANT="X-Tenant-Id: platform"
+    curl -sf -X POST "$API_BASE/api/v1/admin/users" -H "$CT" -H "$AUTH" -H "$PLATFORM_TENANT" \
+        -d '{"userId":"platform-user-ops","email":"ops@platform.local","displayName":"Platform Ops","role":"Agent","password":"PlatformOps2026!"}' > /dev/null 2>&1 || true
+    curl -sf -X POST "$API_BASE/api/v1/admin/agents" -H "$CT" -H "$AUTH" -H "$PLATFORM_TENANT" \
+        -d '{"agentId":"platform-agent-ops","userId":"platform-user-ops","displayName":"Platform Ops","extension":"1001","sipPassword":"platform1001","skills":["support"]}' > /dev/null 2>&1 || true
+
+    # ── Demo tenant seed (unchanged below) ───────────────────────────────
+    TENANT="X-Tenant-Id: demo"
 
     # Create demo admin user
     curl -sf -X POST "$API_BASE/api/v1/admin/users" -H "$CT" -H "$AUTH" -H "$TENANT" \

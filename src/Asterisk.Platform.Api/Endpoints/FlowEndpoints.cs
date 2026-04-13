@@ -52,7 +52,15 @@ internal static class FlowEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var nodes = MapNodes(body.Nodes);
+        var nodes = MapNodes(body.Nodes ?? []);
+
+        // Allow creating an empty "scaffold" flow (e.g. from the UI's
+        // "New Flow" button) — auto-generate an entry node id when the
+        // caller hasn't provided one or any nodes yet.
+        var entryNodeId = string.IsNullOrWhiteSpace(body.EntryNodeId)
+            ? EntityId.New()
+            : EntityId.From(body.EntryNodeId);
+
         var flow = new FlowDefinition
         {
             FlowId = EntityId.New(),
@@ -60,7 +68,7 @@ internal static class FlowEndpoints
             Name = body.Name,
             Version = 1,
             IsPublished = false,
-            EntryNodeId = EntityId.From(body.EntryNodeId),
+            EntryNodeId = entryNodeId,
             Nodes = nodes,
             CreatedAt = clock.UtcNow,
         };
@@ -175,8 +183,8 @@ internal static class FlowEndpoints
 
 internal sealed record CreateFlowRequest(
     string Name,
-    string EntryNodeId,
-    IReadOnlyList<FlowNodeDto> Nodes);
+    string? EntryNodeId = null,
+    IReadOnlyList<FlowNodeDto>? Nodes = null);
 
 internal sealed record UpdateFlowRequest(
     string? Name = null,
