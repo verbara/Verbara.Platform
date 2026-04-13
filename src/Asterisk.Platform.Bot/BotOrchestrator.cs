@@ -53,6 +53,12 @@ internal sealed partial class BotOrchestrator : IVirtualAgent
             return new BotResponse(BotResponseAction.EndConversation, null, null, null, "Bot is inactive.");
         }
 
+        if (config.DefaultFlowId is not { } defaultFlowId)
+        {
+            LogNoBotConfig(tenantId.Value);
+            return new BotResponse(BotResponseAction.EndConversation, null, null, null, "Bot has no default flow configured.");
+        }
+
         // 2. Increment turn count and check max-turns guard.
         _turnCounts.TryGetValue(conversationId.Value, out var turns);
         turns++;
@@ -81,7 +87,7 @@ internal sealed partial class BotOrchestrator : IVirtualAgent
 
         if (active is null)
         {
-            active = await _flowEngine.StartAsync(tenantId, config.DefaultFlowId, conversationId, ct).ConfigureAwait(false);
+            active = await _flowEngine.StartAsync(tenantId, defaultFlowId, conversationId, ct).ConfigureAwait(false);
 
             _analytics.Emit(new BotAnalyticsEvent(
                 config.BotId, tenantId, conversationId,
@@ -89,7 +95,7 @@ internal sealed partial class BotOrchestrator : IVirtualAgent
                 DateTimeOffset.UtcNow,
                 TurnCount: turns));
 
-            LogExecutionStarted(conversationId.Value, config.DefaultFlowId.Value);
+            LogExecutionStarted(conversationId.Value, defaultFlowId.Value);
         }
 
         FlowExecution execution = active;

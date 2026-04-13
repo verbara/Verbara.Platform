@@ -23,9 +23,37 @@ internal sealed class InMemoryBotConfigStore : IBotConfigStore
         return Task.FromResult(result);
     }
 
+    public Task<IReadOnlyList<BotConfiguration>> ListAsync(TenantId tenantId, CancellationToken ct)
+    {
+        IReadOnlyList<BotConfiguration> result = _items.Values
+            .Where(b => b.TenantId == tenantId)
+            .OrderBy(b => b.CreatedAt)
+            .ToArray();
+        return Task.FromResult(result);
+    }
+
     public Task SaveAsync(BotConfiguration config, CancellationToken ct)
     {
-        _items[(config.TenantId, config.BotId)] = config;
+        _items.AddOrUpdate(
+            (config.TenantId, config.BotId),
+            _ =>
+            {
+                if (config.CreatedAt == default)
+                    config.CreatedAt = DateTimeOffset.UtcNow;
+                return config;
+            },
+            (_, existing) =>
+            {
+                // Preserve original CreatedAt on update.
+                config.CreatedAt = existing.CreatedAt;
+                return config;
+            });
         return Task.CompletedTask;
+    }
+
+    public Task<bool> DeleteAsync(TenantId tenantId, EntityId botId, CancellationToken ct)
+    {
+        var removed = _items.TryRemove((tenantId, botId), out _);
+        return Task.FromResult(removed);
     }
 }
