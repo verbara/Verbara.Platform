@@ -183,6 +183,12 @@ else
         -d '{"userId":"platform-user-ops","email":"ops@platform.local","displayName":"Platform Ops","role":"Agent","password":"PlatformOps2026!"}' > /dev/null 2>&1 || true
     curl -sf -X POST "$API_BASE/api/v1/admin/agents" -H "$CT" -H "$AUTH" -H "$PLATFORM_TENANT" \
         -d '{"agentId":"platform-agent-ops","userId":"platform-user-ops","displayName":"Platform Ops","extension":"1001","sipPassword":"platform1001","skills":["support"]}' > /dev/null 2>&1 || true
+    # Seed at least one queue + bot on platform tenant so platformAdmin E2E
+    # listing tests render DataTable instead of EmptyState (fail loud on contract drift).
+    curl -fsS -X POST "$API_BASE/api/v1/admin/queues" -H "$CT" -H "$AUTH" -H "$PLATFORM_TENANT" \
+        -d '{"name":"Platform Ops","isActive":true}' > /dev/null
+    curl -fsS -X POST "$API_BASE/api/v1/admin/bots" -H "$CT" -H "$AUTH" -H "$PLATFORM_TENANT" \
+        -d '{"name":"Platform Bot","confidenceThreshold":0.7,"maxTurns":20,"isActive":true}' > /dev/null
 
     # ── Demo tenant seed (unchanged below) ───────────────────────────────
     TENANT="X-Tenant-Id: demo"
@@ -212,11 +218,15 @@ else
             -d "{\"agentId\":\"$aid\",\"userId\":\"$uid\",\"displayName\":\"$name\",\"extension\":\"$ext\",\"sipPassword\":\"$sippwd\",\"skills\":[\"$skill\"]}" > /dev/null 2>&1 || true
     done
 
-    # Create queues
-    curl -sf -X POST "$API_BASE/api/v1/admin/queues" -H "$CT" -H "$AUTH" -H "$TENANT" \
-        -d '{"queueId":"demo-queue-sales","name":"Sales","isActive":true}' > /dev/null 2>&1 || true
-    curl -sf -X POST "$API_BASE/api/v1/admin/queues" -H "$CT" -H "$AUTH" -H "$TENANT" \
-        -d '{"queueId":"demo-queue-support","name":"Support","isActive":true}' > /dev/null 2>&1 || true
+    # Create queues (fail loud: contract changed to drop client-supplied queueId)
+    curl -fsS -X POST "$API_BASE/api/v1/admin/queues" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"name":"Sales","isActive":true}' > /dev/null
+    curl -fsS -X POST "$API_BASE/api/v1/admin/queues" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"name":"Support","isActive":true}' > /dev/null
+
+    # Create demo bot (fail loud: bots are now multi-bot CRUD as of v1.6.x)
+    curl -fsS -X POST "$API_BASE/api/v1/admin/bots" -H "$CT" -H "$AUTH" -H "$TENANT" \
+        -d '{"name":"Demo Bot","confidenceThreshold":0.7,"maxTurns":20,"isActive":true}' > /dev/null
 
     # Activate WebChat channel
     curl -sf -X PUT "$API_BASE/api/v1/admin/channels/webchat" -H "$CT" -H "$AUTH" -H "$TENANT" \
@@ -276,7 +286,7 @@ else
     curl -sf -X POST "$API_BASE/api/v1/admin/articles" -H "$CT" -H "$AUTH" -H "$TENANT" \
         -d '{"title":"Horarios de atencion","content":"Nuestro horario es de lunes a viernes 8:00-18:00. Sabados 9:00-13:00.","tags":["horarios","general"],"isPublished":true,"language":"es"}' > /dev/null 2>&1 || true
 
-    echo "  OK (admin, supervisor, 6 agents, 2 queues, webchat, 2 teams, 5 contacts, 5 canned responses, 6 dispositions, 1 report, 1 webhook, 1 survey, 1 article)"
+    echo "  OK (admin, supervisor, 6 agents, 2 queues, 1 bot, webchat, 2 teams, 5 contacts, 5 canned responses, 6 dispositions, 1 report, 1 webhook, 1 survey, 1 article)"
 fi
 
 # 9.5. Seed billing data via Management API (requires mgmt key, not JWT)
