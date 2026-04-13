@@ -54,6 +54,18 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(CampaignStatusChangedEvent))]
 [JsonSerializable(typeof(CampaignMetricsUpdatedEvent))]
 [JsonSerializable(typeof(CampaignDispositionSubmittedEvent))]
+// SSE: Switchboard & Queue events
+[JsonSerializable(typeof(ConversationOfferedEvent))]
+[JsonSerializable(typeof(ConversationOfferExpiredEvent))]
+[JsonSerializable(typeof(ConversationAbandonedEvent))]
+[JsonSerializable(typeof(AgentCapacityChangedEvent))]
+// SSE: Agent Assist events
+[JsonSerializable(typeof(AgentAssistSuggestionEvent))]
+[JsonSerializable(typeof(AgentAssistSentimentEvent))]
+[JsonSerializable(typeof(AgentAssistComplianceAlertEvent))]
+[JsonSerializable(typeof(AgentAssistTranscriptEvent))]
+// SSE: Notification events
+[JsonSerializable(typeof(NotificationEvent))]
 [JsonSerializable(typeof(CampaignSummaryDto))]
 [JsonSerializable(typeof(CampaignDetailDto))]
 [JsonSerializable(typeof(ScheduleDayDto))]
