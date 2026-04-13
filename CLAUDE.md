@@ -4,9 +4,9 @@
 
 ## Project Overview
 
-Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.5.5) and Pro packages (v1.1.3-pro).
+Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.8.0) and Pro packages (v1.2.0-pro).
 
-**30 packages, 1,636 tests, 0 warnings, NativeAOT (`IsAotCompatible=true`), 59 endpoint groups (14 with feature gates), version 1.6.0.**
+**30 packages, 1,636 tests, 0 warnings, NativeAOT (`IsAotCompatible=true`), 59 endpoint groups (14 with feature gates), version 1.7.0.**
 
 | Package | Purpose | Tests |
 |---------|---------|-------|
