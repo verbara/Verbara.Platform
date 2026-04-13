@@ -7,7 +7,7 @@ using Asterisk.Platform.Core;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
-internal static class SseEndpoints
+internal static partial class SseEndpoints
 {
     public static void MapSseEndpoints(this IEndpointRouteBuilder app)
     {
@@ -17,8 +17,11 @@ internal static class SseEndpoints
     private static async Task StreamEvents(
         HttpContext context,
         PlatformEventBus eventBus,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
+        var logger = loggerFactory.CreateLogger("Asterisk.Platform.Api.Endpoints.Sse");
+
         context.Response.ContentType = "text/event-stream";
         context.Response.Headers.CacheControl = "no-cache";
         context.Response.Headers.Connection = "keep-alive";
@@ -28,6 +31,9 @@ internal static class SseEndpoints
         var tenantId = context.Items.TryGetValue("TenantId", out var tid)
             ? tid as TenantId?
             : null;
+        var userId = context.User.FindFirst("sub")?.Value;
+
+        LogClientConnected(logger, tenantId?.Value, userId);
 
         // Buffer events in a channel so the Rx subscription and the write loop are decoupled.
         var channel = Channel.CreateBounded<PlatformEvent>(new BoundedChannelOptions(256)
@@ -37,6 +43,7 @@ internal static class SseEndpoints
 
         using var subscription = eventBus.Events
             .Where(e => tenantId is null || e.TenantId == tenantId.Value.Value)
+            .Where(e => IsDeliverableToUser(e, userId))
             .Subscribe(evt => channel.Writer.TryWrite(evt));
 
         using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -46,7 +53,19 @@ internal static class SseEndpoints
         {
             await foreach (var evt in channel.Reader.ReadAllAsync(ct))
             {
-                await WriteEventAsync(context.Response, evt.Type, evt, ct);
+                try
+                {
+                    await WriteEventAsync(context.Response, evt.Type, evt, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // One bad event must not kill the stream.
+                    LogEventWriteFailed(logger, evt.Type, ex);
+                }
             }
         }
         catch (OperationCanceledException)
@@ -55,11 +74,37 @@ internal static class SseEndpoints
         }
         finally
         {
+            LogClientDisconnected(logger, tenantId?.Value, userId);
             await heartbeatCts.CancelAsync();
             try { await heartbeatTask; }
             catch (OperationCanceledException) { }
         }
     }
+
+    /// <summary>
+    /// User-scoped events (currently <see cref="NotificationEvent"/>) are delivered only to the
+    /// target user's SSE stream. Tenant-scoped events pass through to all subscribers in the tenant.
+    /// </summary>
+    internal static bool IsDeliverableToUser(PlatformEvent evt, string? userId)
+    {
+        if (evt is NotificationEvent notification)
+        {
+            return userId is not null && notification.UserId == userId;
+        }
+        return true;
+    }
+
+    [LoggerMessage(EventId = 7100, Level = LogLevel.Debug,
+        Message = "SSE client connected (tenant={TenantId}, user={UserId})")]
+    private static partial void LogClientConnected(ILogger logger, string? tenantId, string? userId);
+
+    [LoggerMessage(EventId = 7101, Level = LogLevel.Debug,
+        Message = "SSE client disconnected (tenant={TenantId}, user={UserId})")]
+    private static partial void LogClientDisconnected(ILogger logger, string? tenantId, string? userId);
+
+    [LoggerMessage(EventId = 7102, Level = LogLevel.Warning,
+        Message = "SSE event write failed (type={EventType})")]
+    private static partial void LogEventWriteFailed(ILogger logger, string eventType, Exception ex);
 
     private static async Task SendHeartbeatsAsync(HttpResponse response, CancellationToken ct)
     {
