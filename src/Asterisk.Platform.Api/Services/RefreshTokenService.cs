@@ -26,6 +26,7 @@ internal sealed class RefreshTokenService
             TokenHash = tokenHash,
             ExpiresAt = now.Add(RefreshTokenLifetime),
             CreatedAt = now,
+            LastActivityAt = now,
             IpAddress = ipAddress,
             UserAgent = userAgent,
         };

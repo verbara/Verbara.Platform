@@ -8,6 +8,7 @@ public sealed class RefreshToken
     public required string TokenHash { get; init; }
     public required DateTimeOffset ExpiresAt { get; init; }
     public required DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset LastActivityAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
     public string? ReplacedBy { get; set; }
     public string? IpAddress { get; init; }

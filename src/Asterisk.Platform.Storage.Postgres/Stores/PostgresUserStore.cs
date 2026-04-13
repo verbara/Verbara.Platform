@@ -56,6 +56,18 @@ internal sealed class PostgresUserStore : IUserStore
         return new PagedResult<User>(items, total, query.Page, query.PageSize);
     }
 
+    public async Task<IReadOnlyList<User>> GetByIdsAsync(string tenantId, IReadOnlyCollection<string> userIds, CancellationToken ct)
+    {
+        if (userIds.Count == 0)
+            return [];
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<UserRow>(
+            $"SELECT {SelectColumns} FROM users WHERE tenant_id = @TenantId AND user_id = ANY(@Ids)",
+            new { TenantId = tenantId, Ids = userIds.ToArray() });
+        return rows.Select(r => r.ToUser()).ToList();
+    }
+
     public async Task SaveAsync(User user, CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);

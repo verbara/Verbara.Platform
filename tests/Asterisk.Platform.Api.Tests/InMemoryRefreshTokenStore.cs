@@ -28,6 +28,15 @@ internal sealed class InMemoryRefreshTokenStore : IRefreshTokenStore
         return Task.FromResult<IReadOnlyList<RefreshToken>>(result);
     }
 
+    public Task<IReadOnlyList<RefreshToken>> GetActiveByTenantAsync(string tenantId, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var result = _items.Values
+            .Where(t => t.TenantId == tenantId && t.RevokedAt == null && t.ExpiresAt > now)
+            .ToList();
+        return Task.FromResult<IReadOnlyList<RefreshToken>>(result);
+    }
+
     public Task RevokeAsync(string tokenId, DateTimeOffset revokedAt, string? replacedBy, CancellationToken ct)
     {
         if (_items.TryGetValue(tokenId, out var token))

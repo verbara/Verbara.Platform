@@ -44,6 +44,18 @@ internal sealed class InMemoryUserStore : IUserStore
         return Task.FromResult(new PagedResult<User>(items, totalCount, query.Page, query.PageSize));
     }
 
+    public Task<IReadOnlyList<User>> GetByIdsAsync(string tenantId, IReadOnlyCollection<string> userIds, CancellationToken ct)
+    {
+        if (userIds.Count == 0)
+            return Task.FromResult<IReadOnlyList<User>>([]);
+
+        var idSet = new HashSet<string>(userIds, StringComparer.Ordinal);
+        var result = _items.Values
+            .Where(u => u.TenantId.Value == tenantId && idSet.Contains(u.UserId.Value))
+            .ToList();
+        return Task.FromResult<IReadOnlyList<User>>(result);
+    }
+
     public Task SaveAsync(User user, CancellationToken ct)
     {
         _items[(user.TenantId, user.UserId)] = user;
