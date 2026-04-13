@@ -1,3 +1,4 @@
+using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
 
 namespace Asterisk.Platform.Api.Services;
@@ -5,27 +6,62 @@ namespace Asterisk.Platform.Api.Services;
 internal sealed class SessionService
 {
     private readonly IRefreshTokenStore _refreshTokenStore;
+    private readonly IUserStore _userStore;
     private readonly AuthEventService _authEvents;
 
-    public SessionService(IRefreshTokenStore refreshTokenStore, AuthEventService authEvents)
+    public SessionService(
+        IRefreshTokenStore refreshTokenStore,
+        IUserStore userStore,
+        AuthEventService authEvents)
     {
         _refreshTokenStore = refreshTokenStore;
+        _userStore = userStore;
         _authEvents = authEvents;
     }
 
     public async Task<IReadOnlyList<ActiveSession>> ListActiveSessionsAsync(
         string tenantId, string userId, CancellationToken ct)
     {
+        var user = await _userStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(userId), ct);
+        if (user is null)
+            return Array.Empty<ActiveSession>();
+
         var tokens = await _refreshTokenStore.GetActiveByUserAsync(tenantId, userId, ct);
-        return tokens.Select(t => new ActiveSession
-        {
-            TokenId = t.TokenId,
-            IpAddress = t.IpAddress,
-            UserAgent = t.UserAgent,
-            CreatedAt = t.CreatedAt,
-            ExpiresAt = t.ExpiresAt,
-        }).ToList();
+        return tokens.Select(t => MapSession(t, user)).ToList();
     }
+
+    public async Task<IReadOnlyList<ActiveSession>> ListAllActiveSessionsAsync(
+        string tenantId, CancellationToken ct)
+    {
+        var tokens = await _refreshTokenStore.GetActiveByTenantAsync(tenantId, ct);
+        if (tokens.Count == 0)
+            return Array.Empty<ActiveSession>();
+
+        var userIds = tokens.Select(t => t.UserId).Distinct().ToList();
+        var users = await _userStore.GetByIdsAsync(tenantId, userIds, ct);
+        var userMap = users.ToDictionary(u => u.UserId.Value, u => u);
+
+        var result = new List<ActiveSession>(tokens.Count);
+        foreach (var token in tokens)
+        {
+            if (!userMap.TryGetValue(token.UserId, out var user))
+                continue;
+            result.Add(MapSession(token, user));
+        }
+        return result;
+    }
+
+    private static ActiveSession MapSession(RefreshToken token, User user) =>
+        new ActiveSession(
+            SessionId: token.TokenId,
+            UserId: user.UserId.Value,
+            UserEmail: user.Email,
+            UserDisplayName: user.DisplayName,
+            IpAddress: token.IpAddress,
+            UserAgent: token.UserAgent,
+            CreatedAt: token.CreatedAt,
+            ExpiresAt: token.ExpiresAt,
+            LastActivity: token.LastActivityAt);
 
     public async Task<int> RevokeAllSessionsForUserAsync(
         string tenantId,
@@ -71,11 +107,13 @@ internal sealed class SessionService
     }
 }
 
-internal sealed class ActiveSession
-{
-    public required string TokenId { get; init; }
-    public string? IpAddress { get; init; }
-    public string? UserAgent { get; init; }
-    public required DateTimeOffset CreatedAt { get; init; }
-    public required DateTimeOffset ExpiresAt { get; init; }
-}
+internal sealed record ActiveSession(
+    string SessionId,
+    string UserId,
+    string UserEmail,
+    string UserDisplayName,
+    string? IpAddress,
+    string? UserAgent,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset LastActivity);
