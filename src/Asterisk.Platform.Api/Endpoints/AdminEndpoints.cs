@@ -122,7 +122,13 @@ internal static class AdminEndpoints
     }
 
     private static UserDto ToUserDto(User u) =>
-        new(u.UserId.Value, u.Email, u.DisplayName, u.Role.ToString(), u.Status.ToString(), u.CreatedAt);
+        new(
+            u.UserId.Value,
+            u.Email,
+            u.DisplayName,
+            u.Role.ToString().ToLowerInvariant(),
+            u.Status.ToString().ToLowerInvariant(),
+            u.CreatedAt);
 
     private static async Task<IResult> DeleteUser(
         string id,
