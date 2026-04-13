@@ -65,10 +65,16 @@ internal static partial class SseEndpoints
                     // filter's tenant check passes; user-targeting still applies.
                     ? subscriberContext with { TenantId = e.Metadata.TenantId }
                     : subscriberContext))
-            .Subscribe(evt => channel.Writer.TryWrite(evt));
+            .Subscribe(evt =>
+            {
+                if (!channel.Writer.TryWrite(evt))
+                {
+                    LogEventBufferFull(logger, evt.Type);
+                }
+            });
 
         using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var heartbeatTask = SendHeartbeatsAsync(context.Response, heartbeatCts.Token);
+        var heartbeatTask = SendHeartbeatsAsync(context.Response, logger, heartbeatCts.Token);
 
         try
         {
@@ -96,9 +102,11 @@ internal static partial class SseEndpoints
         finally
         {
             LogClientDisconnected(logger, tenantId?.Value, userId);
+            channel.Writer.TryComplete();
             await heartbeatCts.CancelAsync();
             try { await heartbeatTask; }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* expected */ }
+            catch (Exception ex) { LogHeartbeatCleanupFailed(logger, ex); }
         }
     }
 
@@ -146,7 +154,19 @@ internal static partial class SseEndpoints
         Message = "SSE event write failed (type={EventType})")]
     private static partial void LogEventWriteFailed(ILogger logger, string eventType, Exception ex);
 
-    private static async Task SendHeartbeatsAsync(HttpResponse response, CancellationToken ct)
+    [LoggerMessage(EventId = 7103, Level = LogLevel.Warning,
+        Message = "SSE heartbeat failed — stream may be broken")]
+    private static partial void LogHeartbeatFailed(ILogger logger, Exception ex);
+
+    [LoggerMessage(EventId = 7104, Level = LogLevel.Warning,
+        Message = "SSE event buffer full, dropping oldest event (type={EventType})")]
+    private static partial void LogEventBufferFull(ILogger logger, string eventType);
+
+    [LoggerMessage(EventId = 7105, Level = LogLevel.Debug,
+        Message = "SSE heartbeat cleanup failed")]
+    private static partial void LogHeartbeatCleanupFailed(ILogger logger, Exception ex);
+
+    private static async Task SendHeartbeatsAsync(HttpResponse response, ILogger logger, CancellationToken ct)
     {
         var heartbeat = Encoding.UTF8.GetBytes(": heartbeat\n\n");
 
@@ -160,6 +180,11 @@ internal static partial class SseEndpoints
             }
             catch (OperationCanceledException)
             {
+                break;
+            }
+            catch (Exception ex)
+            {
+                LogHeartbeatFailed(logger, ex);
                 break;
             }
         }
