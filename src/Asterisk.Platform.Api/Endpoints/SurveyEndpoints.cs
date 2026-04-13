@@ -33,8 +33,16 @@ internal static class SurveyEndpoints
     {
         var tenantId = GetTenantId(context);
         var surveys = await store.GetAllAsync(tenantId, ct);
-        return Results.Ok(surveys);
+        return Results.Ok(surveys.Select(ToSurveyDto).ToArray());
     }
+
+    private static SurveyDto ToSurveyDto(Survey s) =>
+        new(
+            Id: s.SurveyId.Value,
+            Name: s.Name,
+            Type: s.Type.ToString(),
+            Questions: s.Questions.Select(q => new SurveyQuestionDto(q.Text, q.Type, q.Options)).ToArray(),
+            IsActive: s.IsActive);
 
     private static async Task<IResult> CreateSurvey(
         HttpContext context,
@@ -66,7 +74,7 @@ internal static class SurveyEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Created($"/admin/surveys/{survey.SurveyId}", survey);
+        return Results.Created($"/admin/surveys/{survey.SurveyId}", ToSurveyDto(survey));
     }
 
     private static async Task<IResult> GetSurvey(
@@ -77,7 +85,7 @@ internal static class SurveyEndpoints
     {
         var tenantId = GetTenantId(context);
         var survey = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return survey is null ? Results.NotFound() : Results.Ok(survey);
+        return survey is null ? Results.NotFound() : Results.Ok(ToSurveyDto(survey));
     }
 
     private static async Task<IResult> UpdateSurvey(
@@ -116,7 +124,7 @@ internal static class SurveyEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(updated);
+        return Results.Ok(ToSurveyDto(updated));
     }
 
     private static async Task<IResult> DeleteSurvey(
@@ -157,7 +165,7 @@ internal static class SurveyEndpoints
 
         existing.IsActive = body.IsActive;
         await store.SaveAsync(existing, ct);
-        return Results.Ok(existing);
+        return Results.Ok(ToSurveyDto(existing));
     }
 
     // ─── Analytics ────────────────────────────────────────────────────────────
@@ -219,6 +227,13 @@ internal sealed record UpdateSurveyRequest(
     bool? IsActive = null);
 
 internal sealed record ActivateSurveyRequest(bool IsActive);
+
+internal sealed record SurveyDto(
+    string Id,
+    string Name,
+    string Type,
+    IReadOnlyList<SurveyQuestionDto> Questions,
+    bool IsActive);
 
 internal sealed record SurveyQuestionDto(
     string Text,
