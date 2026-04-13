@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Endpoints.Shared;
+using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Bot;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Conversations;
@@ -234,6 +235,8 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(AuthEventDetail))]
 [JsonSerializable(typeof(UserSessionDto))]
 [JsonSerializable(typeof(UserSessionDto[]))]
+[JsonSerializable(typeof(ActiveSession))]
+[JsonSerializable(typeof(IReadOnlyList<ActiveSession>))]
 [JsonSerializable(typeof(RegenerateRecoveryCodesRequest))]
 [JsonSerializable(typeof(RecoveryCodesResponse))]
 [JsonSerializable(typeof(PasswordPolicyDto))]
