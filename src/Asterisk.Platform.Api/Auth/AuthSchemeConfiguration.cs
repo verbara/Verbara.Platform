@@ -36,9 +36,10 @@ internal static class AuthSchemeConfiguration
                             return JwtScheme;
                     }
 
-                    // Check for JWT in query string (SSE — EventSource can't set headers)
-                    var queryToken = context.Request.Query["token"].FirstOrDefault();
-                    if (queryToken is not null && queryToken.StartsWith("eyJ", StringComparison.Ordinal))
+                    // Check for JWT in query string — both `token` (legacy SSE) and
+                    // `access_token` (SignalR client default) are accepted.
+                    var queryToken = ExtractJwtQueryParam(context.Request);
+                    if (queryToken is not null)
                         return JwtScheme;
 
                     return ApiKeyScheme;
@@ -53,8 +54,8 @@ internal static class AuthSchemeConfiguration
                 {
                     OnMessageReceived = context =>
                     {
-                        var token = context.Request.Query["token"].FirstOrDefault();
-                        if (token is not null && token.StartsWith("eyJ", StringComparison.Ordinal))
+                        var token = ExtractJwtQueryParam(context.Request);
+                        if (token is not null)
                             context.Token = token;
                         return Task.CompletedTask;
                     },
@@ -74,5 +75,19 @@ internal static class AuthSchemeConfiguration
                 };
             })
             .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyScheme, _ => { });
+    }
+
+    /// <summary>
+    /// Returns the JWT carried in either the <c>?token=</c> (legacy SSE endpoint)
+    /// or <c>?access_token=</c> (SignalR / @microsoft/signalr default) query
+    /// parameter, only when it looks like a JWT (starts with <c>eyJ</c>).
+    /// </summary>
+    private static string? ExtractJwtQueryParam(HttpRequest request)
+    {
+        var token = request.Query["token"].FirstOrDefault()
+            ?? request.Query["access_token"].FirstOrDefault();
+        return token is not null && token.StartsWith("eyJ", StringComparison.Ordinal)
+            ? token
+            : null;
     }
 }

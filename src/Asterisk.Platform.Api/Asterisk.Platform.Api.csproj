@@ -2,11 +2,15 @@
 
   <PropertyGroup>
     <Version>1.7.0</Version>
-    <Description>ASP.NET Core Minimal API layer for Asterisk.Platform — webhook ingestion, agent desktop, admin CRUD, SSE events</Description>
-    <IsAotCompatible>true</IsAotCompatible>
-    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
-    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
-    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <Description>ASP.NET Core Minimal API layer for Asterisk.Platform — webhook ingestion, agent desktop, admin CRUD, SSE events, SignalR PlatformHub</Description>
+    <!-- Platform.Api consumes Asterisk.Sdk.Pro.Push.SignalR (hub + presence CRDT)
+         which depends on Microsoft.AspNetCore.SignalR. SignalR server-side dispatch in
+         .NET 10 still relies on reflection that trips the trim/AOT analyzers. Keep the
+         analyzers off on this project so warnings-as-errors do not gate the build. -->
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
     <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
@@ -75,6 +79,8 @@
     <PackageReference Include="Asterisk.Sdk.Pro.Cluster" />
     <PackageReference Include="Asterisk.Sdk.Pro.Cluster.Storage.Postgres" />
     <PackageReference Include="Asterisk.Sdk.Pro.MultiTenant" />
+    <PackageReference Include="Asterisk.Sdk.Pro.Push" />
+    <PackageReference Include="Asterisk.Sdk.Pro.Push.SignalR" />
   </ItemGroup>
 
 </Project>

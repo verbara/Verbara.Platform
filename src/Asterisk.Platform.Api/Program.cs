@@ -56,6 +56,10 @@ using Asterisk.Platform.Channels.WebChat;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Asterisk.Sdk.Pro.MultiTenant.DependencyInjection;
 using Asterisk.Sdk.Push.Hosting;
+using Asterisk.Sdk.Push.Authz;
+using Asterisk.Sdk.Pro.Push.SignalR.DependencyInjection;
+using Asterisk.Sdk.Pro.Push.SignalR.Hubs;
+using Asterisk.Platform.Api.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -71,6 +75,20 @@ builder.Services.AddAsteriskSessionsMultiServer();
 // for the PlatformEventBus DI ctor and the platform-specific delivery filter
 // can override the SDK default.
 builder.Services.AddAsteriskPush();
+// Asterisk.Sdk.Pro.Push.SignalR: PlatformHub + Phoenix-style Presence CRDT.
+// Registers PresenceTracker (singleton), heartbeat + merge HostedServices,
+// topic registration, SignalR server with ProPresenceJsonContext JSON resolver.
+builder.Services.AddAsteriskProPushSignalR(o =>
+{
+    var clusterNodeId = builder.Configuration["Asterisk:ClusterNodeId"];
+    if (!string.IsNullOrEmpty(clusterNodeId))
+        o.NodeId = clusterNodeId;
+});
+// Override the SDK default AllowAllSubscriptionAuthorizer with RBAC-aware authorizer.
+builder.Services.AddSingleton<ISubscriptionAuthorizer, RbacSubscriptionAuthorizer>();
+// Replace Pro.Push.SignalR's NotImplementedSupervisorCoordinator default with the
+// Platform concrete impl that delegates to AgentAssistSupervisor.
+builder.Services.AddSingleton<ISupervisorCoordinator, PlatformSupervisorCoordinator>();
 builder.Services.AddPlatformCore();
 builder.Services.AddPlatformConversations();
 builder.Services.AddPlatformChannels();
@@ -420,6 +438,14 @@ builder.Services.AddAuthorization(options =>
         p.AddRequirements(new PlatformAdminRequirement()));
     options.AddPolicy("PartnerAdminOnly", p =>
         p.AddRequirements(new PartnerAdminRequirement()));
+
+    // Plan 32C — PlatformHub method-level policies. "Supervisor" is role-based
+    // (Supervisor or Admin); "Agent" is role-based for UpdatePresence/RequestHelp;
+    // "PlatformAdmin" is role-based for hub-level administrative methods (distinct
+    // from the existing "PlatformAdminOnly" which uses the PlatformAdminRequirement).
+    options.AddPolicy("Supervisor", p => p.RequireRole("Supervisor", "Admin"));
+    options.AddPolicy("Agent", p => p.RequireRole("Agent", "Supervisor", "Admin"));
+    options.AddPolicy("PlatformAdmin", p => p.RequireRole("PlatformAdmin"));
 });
 
 // RBAC permission-based authorization
@@ -566,6 +592,11 @@ v1.MapManagementSystemEndpoints();
 v1.MapManagementClusterEndpoints();
 v1.MapManagementApiKeyEndpoints();
 v1.MapSseEndpoints();
+
+// Plan 32C — SignalR PlatformHub for supervisor + presence real-time channels.
+// JWT validation supports both ?token= (legacy) and ?access_token= (SignalR default)
+// via AuthSchemeConfiguration.
+app.MapHub<PlatformHub>("/hubs/platform");
 v1.MapMediaEndpoints();
 v1.MapCampaignEndpoints();
 v1.MapCallAttemptEndpoints();
