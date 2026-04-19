@@ -2,6 +2,8 @@
 
 Project context for Claude Code working on **Asterisk.Platform** — the API host and composition root for an omnichannel contact-center built on .NET 10 Native AOT. Read top-to-bottom for architecture; jump to **Critical Gotchas** for non-obvious pitfalls before editing code.
 
+> **This repo is the authoritative workstream for Platform + Platform.Web.** Plans, specs, ADRs, and research that touch either the API **or** the React frontend are authored under this repo's `docs/` tree. `Asterisk.Platform.Web` remains a separate git repo for frontend source, but its own `docs/` is secondary — open new plans here. Decision recorded 2026-04-19 (feedback memory `feedback_platform_web_consolidation.md`).
+
 > **Do not append completed-work narrative to this file.** Milestone/sprint/plan write-ups belong in `~/.claude/projects/-media-Data-Source-IPcom-Asterisk-Platform/memory/` (indexed by `MEMORY.md`). Only evergreen context — what the codebase IS, not what it WAS — lives here.
 
 ## Project Overview
