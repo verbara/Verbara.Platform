@@ -148,7 +148,7 @@ docker compose -f docker/demo/docker-compose.demo.yml up     # Demo (pre-seeded,
 docker compose up                                             # Dev (root-level, API only)
 ```
 
-**Demo invariant:** `docs/demo-environment.md` MUST be updated whenever any file under `docker/demo/` changes.
+**Demo invariant:** `docs/specs/demo-environment.md` MUST be updated whenever any file under `docker/demo/` changes.
 
 ## DI Registration (Composition Root)
 
@@ -217,6 +217,23 @@ builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProv
 - **Npgsql 9 + Dapper:** Postgres row types MUST be class-based with `{ get; init; }`, NOT positional records. Npgsql 9 returns `DateTime` for `timestamptz`; Dapper constructor matching fails with nullable `DateTime?` params. All 43 stores converted.
 - **DTO hardening (Plan 29A pattern):** never return anonymous `new {}`. Use typed sealed records registered in `ApiJsonContext`. DTO field is `id` (not `teamId`/`userId`/etc.) so frontend hooks work.
 - **E2E conventions:** locale-proof selectors (`data-*` over `toContainText`); `ConfirmDeleteDialog` (3s countdown) for destructive actions; shadcn `Select` uses `role=option` not `selectOption()`; always `data-table-search.fill(id)` before clicking a freshly created row.
+
+## Documentation Layout (all git-tracked, private repo)
+
+| Folder | Purpose | Lifecycle |
+|--------|---------|-----------|
+| `docs/specs/` | Technical designs (input to implementation) | Add on new feature, rarely edited after |
+| `docs/specs/archived/` | Superseded / draft specs kept for history | Append-only |
+| `docs/decisions/` | ADRs — architecture decision records (why, not how) | Append-only; never delete |
+| `docs/plans/active/` | Execution plans currently in progress | Moves to `completed/` on ship |
+| `docs/plans/completed/` | Shipped plans, preserved as historical record | Append-only |
+| `docs/plans/archived/` | Skeletons / superseded / abandoned plans | Append-only |
+| `docs/research/` | Exploratory findings, market analysis, discovery | Freeform |
+| `docs/research/archived/` | Older research kept for context | Append-only |
+
+After `ExitPlanMode` approval, copy the system-path plan file (`~/.claude/plans/*.md`) into `docs/plans/active/` with a date-prefixed meaningful name — the repo is authoritative. When the plan ships, `git mv` it to `docs/plans/completed/`.
+
+ADR numbering is sequential (`0001`, `0002`, …). Once `Accepted`, ADRs are append-only — supersede with a new ADR that references the predecessor.
 
 ## Plan Execution
 
