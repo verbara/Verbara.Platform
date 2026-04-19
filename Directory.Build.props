@@ -25,7 +25,7 @@
     <Product>Asterisk.Platform</Product>
     <RepositoryType>git</RepositoryType>
     <PackageTags>asterisk;platform;contact-center;omnichannel;native-aot</PackageTags>
-    <PackageVersion>1.7.0</PackageVersion>
+    <PackageVersion>1.8.0</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('src'))">
