@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Project context for Claude Code working on **Asterisk.Platform** — the API host and composition root for an omnichannel contact-center built on .NET 10 Native AOT. Read top-to-bottom for architecture; jump to **Critical Gotchas** for non-obvious pitfalls before editing code.
+
 > **Do not append completed-work narrative to this file.** Milestone/sprint/plan write-ups belong in `~/.claude/projects/-media-Data-Source-IPcom-Asterisk-Platform/memory/` (indexed by `MEMORY.md`). Only evergreen context — what the codebase IS, not what it WAS — lives here.
 
 ## Project Overview
