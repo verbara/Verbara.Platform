@@ -5,21 +5,21 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.6" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="System.Reactive" Version="6.0.1" />
+    <PackageVersion Include="System.Reactive" Version="6.1.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Npgsql" Version="9.0.3" />
-    <PackageVersion Include="Dapper" Version="2.1.66" />
+    <PackageVersion Include="Npgsql" Version="10.0.2" />
+    <PackageVersion Include="Dapper" Version="2.1.72" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,30 +27,30 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.10.2" />
-    <PackageVersion Include="Asterisk.Sdk.Push" Version="1.10.2" />
+    <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.11.1" />
+    <PackageVersion Include="Asterisk.Sdk.Push" Version="1.11.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore.Postgres" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics.Storage.Postgres" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Licensing" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Routing" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime.Storage.Postgres" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster.Storage.Postgres" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.MultiTenant" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Push" Version="1.6.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Push.SignalR" Version="1.6.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore.Postgres" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics.Storage.Postgres" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Licensing" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Routing" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime.Storage.Postgres" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster.Storage.Postgres" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.MultiTenant" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Push" Version="1.7.2-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Push.SignalR" Version="1.7.2-pro" />
   </ItemGroup>
 
   <ItemGroup>

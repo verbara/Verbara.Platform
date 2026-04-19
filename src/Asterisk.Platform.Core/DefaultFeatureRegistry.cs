@@ -24,6 +24,7 @@ public sealed class DefaultFeatureRegistry : IFeatureRegistry
         ["cluster"] = false,
         ["multiTenant"] = false,
         ["routing"] = false,
+        ["realtimePushSignalR"] = true,
     };
 
     public IReadOnlyDictionary<string, bool> GetFeatures() => _features;
