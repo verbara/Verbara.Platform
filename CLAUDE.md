@@ -4,42 +4,19 @@
 
 ## Project Overview
 
-Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes MIT SDK packages via NuGet (v1.8.0) and Pro packages (v1.2.0-pro).
+Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes SDK (MIT) and Pro packages via NuGet — versions pinned in `Directory.Packages.props`.
 
-**30 packages, 1,636 tests, 0 warnings, NativeAOT (`IsAotCompatible=true`), 59 endpoint groups (14 with feature gates), version 1.7.0.**
+**NativeAOT (`IsAotCompatible=true`), `/api/v1/` (URL-segment versioning), 59 endpoint groups (14 with feature gates).** Current version in `Directory.Build.props`; package list under `src/`.
 
-| Package | Purpose | Tests |
-|---------|---------|-------|
-| Platform.Core | Abstractions, value objects, IClock, GDPR, Webhooks, Plans, Feature Gates, DI | 96 |
-| Platform.Identity | Users, RBAC, API keys, service accounts, OIDC SSO, DI | 26 |
-| Platform.Conversations | Conversation lifecycle (14 states), Contact CRM-lite, Cases, Tags, DI | 73 |
-| Platform.Queues | Queue config, SLA, Agent with per-channel capacity, Teams, DI | 44 |
-| Platform.Channels.Core | Channel registry, inbound pipeline, delivery status, tenant config, DI | 38 |
-| Platform.Channels.WhatsApp | Meta Business API connector, HMAC webhook, 24h session window, DI | 29 |
-| Platform.Channels.Sms | Provider-agnostic SMS, segment calculator, Twilio provider, DI | 32 |
-| Platform.Channels.WebChat | WebChat connector, session manager, transport abstraction, DI | 25 |
-| Platform.Channels.Messenger | Messenger connector, DI | 22 |
-| Platform.Channels.Instagram | Instagram connector, DI | 16 |
-| Platform.Channels.Telegram | Telegram connector, DI | 24 |
-| Platform.Channels.Email | Email connector, DI | 41 |
-| Platform.Channels.Video | Video connector, DI | 26 |
-| Platform.Channels.Twitter | Twitter connector, DI | 27 |
-| Platform.Channels.Rcs | RCS connector, DI | 33 |
-| Platform.Routing.Inbound | Channel mapping, last-agent, priority, overflow, business hours, DI | 32 |
-| Platform.Switchboard | Conversation ownership -- assign, offer, accept, reject, transfer, DI | 38 |
-| Platform.KnowledgeBase | Knowledge search abstraction, DI | 19 |
-| Platform.Flows | DAG workflow engine -- 11 node types, persistent exec, LLM abstraction, DI | 52 |
-| Platform.Bot | Virtual agent orchestration, flow-driven turn management, analytics, DI | 30 |
-| Platform.Automation | Event triggers, condition evaluator, action executor, DI | 45 |
-| Platform.Surveys | Post-conversation surveys, response collection, DI | 30 |
-| Platform.Audit | Audit trail -- event logging, query, retention, DI | 41 |
-| Platform.Media | Media storage abstraction, FileSystem + S3 backends, recording options, DI | 10 |
-| Platform.Billing | Metering, quota enforcement, rate cards, invoices, dunning, DI | 46 |
-| Platform.Renderer | Stateless PDF/CSV microservice (`:5010`) -- QuestPDF + ScottPlot | 0 |
-| Platform.Mail | Email + MS 365 Graph microservice (`:5020`) -- MailKit SMTP, Graph, OAuth PKCE | 0 |
-| Platform.Storage.InMemory | In-memory store implementations -- dev/test, DI | 125 |
-| Platform.Storage.Postgres | PostgreSQL stores, RBAC seeder, Npgsql + Dapper | 6 |
-| Platform.Api | HTTP host -- 59 endpoint groups, auth, middleware, SSE, NativeAOT | 574 |
+**Package layers** (purpose-grouped; one DI extension per package):
+
+- **Core domain:** `Core` (abstractions, IClock, GDPR, Webhooks, Plans, Feature Gates), `Identity` (Users, RBAC, API keys, OIDC SSO), `Conversations` (14-state lifecycle, Contacts, Cases, Tags), `Queues` (SLA, per-channel agent capacity, Teams), `Switchboard` (assign/offer/accept/reject/transfer), `Routing.Inbound` (channel→queue, last-agent, priority, overflow, business hours)
+- **Channels:** `Channels.Core` (registry, inbound pipeline, delivery status) + 11 connectors: `WhatsApp` (Meta + HMAC + 24h window), `Sms` (provider-agnostic, segment calc, Twilio provider), `WebChat` (session + WebSocket), `Messenger`, `Instagram`, `Telegram`, `Email`, `Video`, `Twitter`, `Rcs`
+- **AI / Workflow:** `Flows` (DAG, 11 node types, LLM abstraction), `Bot` (virtual agent + analytics), `KnowledgeBase`, `Automation` (triggers + conditions + actions), `Surveys`
+- **Cross-cutting:** `Audit`, `Media` (FileSystem + S3 backends), `Billing` (metering, quotas, rate cards, invoices, dunning)
+- **Microservices:** `Renderer` (`:5010` — QuestPDF + ScottPlot PDF/CSV), `Mail` (`:5020` — MailKit SMTP + MS Graph + OAuth PKCE)
+- **Storage:** `Storage.InMemory` (dev/test default), `Storage.Postgres` (Npgsql + Dapper, RBAC seeder)
+- **Host:** `Api` (this composition root)
 
 ## Build & Test
 
@@ -101,28 +78,11 @@ ErrorHandling -> CORS -> RateLimiter -> TenantResolution -> Authentication -> Au
 
 ### Endpoint Inventory
 
-All endpoints in `src/Asterisk.Platform.Api/Endpoints/`. Routes versioned under `/api/v1/` (Asp.Versioning.Http, URL-segment). Legacy `/api/` redirects for backward compat.
+All endpoints in `src/Asterisk.Platform.Api/Endpoints/` (file-per-group). Routes versioned under `/api/v1/` (Asp.Versioning.Http, URL-segment). Legacy `/api/` redirects for backward compat.
 
-| Category | Endpoint Files |
-|----------|---------------|
-| Auth | AuthEndpoints, AuthAdminEndpoints, OidcEndpoints, RbacEndpoints |
-| Omnichannel | WebhookEndpoints, ConversationEndpoints, ChannelConfigEndpoints, ContactEndpoints, SseEndpoints |
-| Agent | AgentEndpoints, SupervisorEndpoints, SkillEndpoints, UsersMeEndpoint |
-| Admin | AdminEndpoints, AuditEndpoints, ScheduledReportEndpoints, TenantSettingsEndpoints |
-| Management | ManagementTenant/Settings/System/Cluster/ApiKey/Billing/Impersonation/Webhook, SetupEndpoints |
-| GDPR | GdprEndpoints |
-| Webhooks (outbound) | WebhookSubscriptionEndpoints, WebhookEventTypeEndpoints |
-| Dialer | Campaign, CallAttempt, DncList, CallerIdPool, HolidayCalendar, DialerSettings, Trunk, OutboundRoute |
-| Analytics | AnalyticsEndpoints, AnalyticsLiveEndpoints, QueueMetricsEndpoints |
-| AI/Bot | BotEndpoints, KnowledgeBaseEndpoints, AgentAssistEndpoints, FlowEndpoints |
-| Media | MediaEndpoints, RecordingEndpoints |
-| Realtime | RealtimeEndpoints, ClusterEndpoints |
-| Partner | PartnerCustomer/Billing/Revenue/Settings |
-| Branding | BrandingEndpoints (public, no auth) |
-| Notifications | NotificationEndpoints |
-| Onboarding | OnboardingEndpoints |
-| WebChat | WebChatEndpoints (session, WebSocket, REST fallback) |
-| Other | CannedResponseEndpoints, CaseEndpoints, DispositionEndpoints, SurveyEndpoints |
+**Categories:** Auth (incl. OIDC, RBAC, AuthAdmin) · Omnichannel (Webhook, Conversation, ChannelConfig, Contact, SSE, WebChat) · Agent (Agent, Supervisor, Skill, UsersMe) · Admin (Admin, Audit, ScheduledReport, TenantSettings) · Management (Tenant/Settings/System/Cluster/ApiKey/Billing/Impersonation/Webhook + Setup) · GDPR · Outbound Webhooks (Subscription, EventType) · Dialer (Campaign, CallAttempt, DncList, CallerIdPool, HolidayCalendar, Settings, Trunk, OutboundRoute) · Analytics (incl. Live + QueueMetrics) · AI/Bot (Bot, KnowledgeBase, AgentAssist, Flow) · Media (incl. Recording) · Realtime + Cluster · Partner (Customer/Billing/Revenue/Settings) · Branding (public) · Notifications · Onboarding · Misc (CannedResponse, Case, Disposition, Survey).
+
+`ls src/Asterisk.Platform.Api/Endpoints/` for the authoritative file list.
 
 ### Pro Package Integration
 
@@ -152,51 +112,15 @@ docker compose up                                             # Dev (root-level,
 
 ## DI Registration (Composition Root)
 
-```csharp
-// ── Core Platform ──
-builder.Services.AddAsterisk(builder.Configuration);     // AMI + ARI
-builder.Services.AddAsteriskSessions();
-builder.Services.AddPlatformCore();
-builder.Services.AddPlatformConversations();
-builder.Services.AddPlatformChannels();
-builder.Services.AddInboundRouting();
-builder.Services.AddSwitchboard();
-builder.Services.AddPlatformBot();
-builder.Services.AddPlatformAudit();
-builder.Services.AddPlatformMedia();
-builder.Services.AddPlatformKnowledgeBase();
-builder.Services.AddPlatformSurveys();
-builder.Services.AddPlatformBilling();
-builder.Services.AddPlatformRateLimiting();              // per-tenant tiers (v1.3.1)
-builder.Services.AddPlatformScheduledReports(o => { ... }); // NCrontab + QuestPDF + MailKit
-builder.Services.AddPlatformApiVersioning();             // /api/v1 (v1.3.1)
+Order in `Program.cs`:
 
-// ── Storage ──
-builder.Services.AddInMemoryStorage();                   // default
-// or:
-builder.Services.AddPostgresStorage(connectionString);
+1. **SDK:** `AddAsterisk(Configuration)` (AMI + ARI), `AddAsteriskSessions()`
+2. **Platform core:** one `AddPlatform*()` per package (Core, Conversations, Channels, InboundRouting, Switchboard, Bot, Audit, Media, KnowledgeBase, Surveys, Billing) + cross-cutting: `AddPlatformRateLimiting` (per-tenant tiers), `AddPlatformScheduledReports` (NCrontab + Renderer + Mail), `AddPlatformApiVersioning` (`/api/v1`)
+3. **Storage:** `AddInMemoryStorage()` by default; `AddPostgresStorage(connString)` when configured
+4. **Pro (conditional on connection strings):** Dialer (`UsePostgresDialerStorage` + `AddProDialer`), Realtime (`AddAsteriskRealtime` + `UsePostgresRealtimeStorage`), EventStore (`UsePostgresEventStore` + `AddAsteriskEventStore`), Analytics, CallAnalytics, AgentAssist, Cluster (`AddAsteriskCluster` + `UsePostgresClusterTransport`), MultiTenant, Licensing
+5. **Auth:** `AddDynamicAuth(jwtTokenService)` + singleton `PermissionResolver` + `PermissionAuthorizationHandler` + `PermissionPolicyProvider`
 
-// ── Pro (conditional on connection strings) ──
-builder.Services.UsePostgresDialerStorage(connectionString);
-builder.Services.AddProDialer(o => { });
-builder.Services.AddAsteriskRealtime(o => { o.ReconcilerIntervalSeconds = 60; });
-builder.Services.UsePostgresRealtimeStorage(realtimeConn);
-builder.Services.UsePostgresEventStore(analyticsConn);
-builder.Services.AddAsteriskEventStore();
-builder.Services.AddAsteriskAnalytics();
-builder.Services.AddProCallAnalytics();
-builder.Services.AddProAgentAssistPostgres(analyticsConn);
-builder.Services.AddAsteriskCluster(c => { c.InstanceId = Environment.MachineName; });
-builder.Services.UsePostgresClusterTransport(clusterConn);
-builder.Services.AddAsteriskMultiTenant();
-builder.Services.AddProLicensing(o => o.EnforcementMode = EnforcementMode.Enforce);
-
-// ── Auth ──
-builder.Services.AddDynamicAuth(jwtTokenService);
-builder.Services.AddSingleton<PermissionResolver>();
-builder.Services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
-builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
-```
+Exact lines live in `src/Asterisk.Platform.Api/Program.cs` — this section only reflects the ordering rules.
 
 ## Code Conventions
 
