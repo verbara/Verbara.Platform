@@ -1,6 +1,6 @@
 # Roadmap — Asterisk.Platform + Asterisk.Platform.Web
 
-**Última actualización:** 2026-04-19 · **Baselines actuales:** Platform `1.8.0` · Platform.Web `1.8.0`
+**Última actualización:** 2026-04-19 · **Baselines actuales:** Platform `1.8.1` · Platform.Web `1.8.0`
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Asterisk.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
@@ -23,6 +23,7 @@ Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/
 | Platform 1.6.0 "Production Polish" | 2026-04-11 | Subs A/C/D/E (Sub B deferred) | — |
 | Platform 1.7.0 "Reseller Enablement" | 2026-04-13 | Partner portal, white-label, onboarding, impersonation | SDK 1.8.0 + Pro 1.2.0-pro |
 | **Platform 1.8.0** | **2026-04-19** | **Plan 32C "Real-Time Presence" end-to-end** — PlatformHub wired, SignalR supervisor actions, frontend @microsoft/signalr 10, realtime store + hooks + E2E | **SDK 1.11.1 + Pro 1.7.2-pro** |
+| **Platform 1.8.1** | **2026-04-19** | **Pro 1.8.x "Enterprise Ready" consumer bump** — `AddProResilience` + `AddProLicenseGuard` + `AddProRetention` (DryRun default) + 5 retention targets wired. 0 breaking, 0 UI change, 1,644 unit tests green. | **SDK 1.11.1 + Pro 1.8.1-pro** |
 
 **Platform.Web** sigue la misma numeración; los hitos principales coinciden 1:1 con Platform.
 
@@ -31,21 +32,6 @@ Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/
 ---
 
 ## En planificación
-
-### Platform 1.8.x (patches, post-Pro-1.8.0-pro)
-
-**Trigger:** Pro shippea `1.8.0-pro "Enterprise Ready"` (~3-4 semanas desde 2026-04-19). Referencia Pro: [Pro roadmap](../../Asterisk.Sdk.Pro/docs/roadmap.md) + [Pro ADR-0002](../../Asterisk.Sdk.Pro/docs/decisions/0002-production-hardening-baseline.md).
-
-**Scope (Platform consumer bump):**
-- Bump Pro `1.7.2-pro` → `1.8.0-pro` en `Directory.Packages.props`.
-- Wire `services.AddProResilience()` antes de los pipelines.
-- Wire `services.AddProRetention(opt => opt.DryRun = false)` en configs production (Pro ships DryRun=true como safety).
-- Wire `services.AddProLicenseGuard()` para activar runtime enforcement.
-- Evaluar activar T27 bridges — `.WithClusterEventBridge()` / `.WithConversationBridge()` / `.WithAgentBridge()` — pueden reemplazar lógica propia de polling.
-- Smoke test full-stack docker-compose; confirmar nuevos meters visibles en Prometheus + RetentionService boot logs.
-- Sin cambios visibles en UI — release patch.
-
-**Tamaño:** S (~1 semana después de Pro 1.8.0-pro shippeado).
 
 ### Platform 1.9.x "Feature Expansion" (post-hardening)
 

@@ -35,6 +35,13 @@ using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.AgentAssist.DependencyInjection;
 using Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
+using Asterisk.Sdk.Pro.Resilience.DependencyInjection;
+using Asterisk.Sdk.Pro.Storage.Common.Retention.DependencyInjection;
+using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.Retention;
+using Asterisk.Sdk.Pro.EventStore.Postgres.Retention;
+using Asterisk.Sdk.Pro.Analytics.Storage.Postgres.Retention;
+using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.Retention;
+using Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres.Retention;
 using Asterisk.Platform.Api.Serialization;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Sdk.Pro.AgentAssist.Engine;
@@ -176,6 +183,16 @@ builder.Services.AddProLicensing(o =>
         : TimeSpan.FromHours(6);
 });
 
+// ─── Pro Hardening (v1.8.0-pro) — Resilience + LicenseGuard + Retention ─────
+// Resilience: meter + TimeProvider for circuit breaker / retry / timeout primitives
+builder.Services.AddProResilience();
+
+// LicenseGuard: runtime feature check (10s cache + 7d grace by default)
+builder.Services.AddProLicenseGuard();
+
+// Retention: orchestrator (DryRun=true by default — flip off in production)
+builder.Services.AddProRetention();
+
 // ─── Pro.Routing — Skill Catalog (in-memory, singleton) ─────────────────────
 builder.Services.AddSingleton<SkillCatalogBase>(new InMemorySkillCatalog());
 
@@ -292,6 +309,7 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
 {
     builder.Services.UsePostgresDialerStorage(dialerConnectionString);
     builder.Services.AddProDialer(o => { });
+    builder.Services.AddDialerRetentionTargets();
     builder.Services.AddHostedService<CampaignMetricsPoller>();
 }
 
@@ -392,6 +410,12 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
 
     // AgentAssist Postgres query stores (read-only endpoints for supervisor dashboard)
     builder.Services.AddProAgentAssistPostgres(analyticsConnectionString);
+
+    // Pro Retention targets (v1.8.0-pro) — DryRun=true default via AddProRetention
+    builder.Services.AddEventStoreRetentionTargets();
+    builder.Services.AddAnalyticsRetentionTargets();
+    builder.Services.AddCallAnalyticsRetentionTargets();
+    builder.Services.AddAgentAssistRetentionTargets();
 }
 
 // ─── Pro Analytics InMemory fallbacks (when no Analytics/Dialer connection string) ──
