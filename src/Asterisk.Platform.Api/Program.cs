@@ -35,7 +35,7 @@ using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.AgentAssist.DependencyInjection;
 using Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Licensing.DependencyInjection;
-using Asterisk.Sdk.Pro.Resilience.DependencyInjection;
+using Asterisk.Sdk.Resilience.DependencyInjection;
 using Asterisk.Sdk.Pro.Storage.Common.Retention.DependencyInjection;
 using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.Retention;
 using Asterisk.Sdk.Pro.EventStore.Postgres.Retention;
@@ -183,9 +183,11 @@ builder.Services.AddProLicensing(o =>
         : TimeSpan.FromHours(6);
 });
 
-// ─── Pro Hardening (v1.8.0-pro) — Resilience + LicenseGuard + Retention ─────
-// Resilience: meter + TimeProvider for circuit breaker / retry / timeout primitives
-builder.Services.AddProResilience();
+// ─── Pro Hardening — Resilience + LicenseGuard + Retention ──────────────────
+// Resilience: meter + TimeProvider for circuit breaker / retry / timeout
+// primitives (Asterisk.Sdk.Resilience MIT, migrated from Pro.Resilience via
+// ADR-0029 in Pro 1.9.0-pro).
+builder.Services.AddAsteriskResilience();
 
 // LicenseGuard: runtime feature check (10s cache + 7d grace by default)
 builder.Services.AddProLicenseGuard();
