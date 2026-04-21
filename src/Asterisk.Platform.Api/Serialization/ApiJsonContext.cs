@@ -250,6 +250,7 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(RevokedSessionsResponse))]
 [JsonSerializable(typeof(MfaChallengeResponse))]
 [JsonSerializable(typeof(MfaEnrollmentRequiredResponse))]
+[JsonSerializable(typeof(MfaStepUpRequiredResponse))]
 [JsonSerializable(typeof(PasswordResetMfaRequiredResponse))]
 [JsonSerializable(typeof(AuthEventDetail))]
 [JsonSerializable(typeof(UserSessionDto))]

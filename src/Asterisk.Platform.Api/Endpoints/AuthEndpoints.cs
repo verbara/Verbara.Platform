@@ -404,6 +404,36 @@ internal static class AuthEndpoints
         if (user is null)
             return Results.Unauthorized();
 
+        // v1.9.2 Frente D — MFA step-up for password change.
+        // Users with MFA enrolled must provide a fresh TOTP code in the same request.
+        // This blocks stolen-session password takeover: an attacker with the session
+        // cookie but not the MFA factor cannot change the password. MFA is verified
+        // before the old-password check to avoid burning a password-guess budget on
+        // requests that would have been rejected by MFA anyway.
+        if (user.MfaEnabled)
+        {
+            if (string.IsNullOrWhiteSpace(body.MfaCode))
+            {
+                await authEvents.LogAsync(tenantId, userId, AuthEventTypes.PasswordChangeFailure,
+                    GetIpAddress(context), GetUserAgent(context),
+                    new Dictionary<string, string> { ["reason"] = "mfa_step_up_required" }, ct);
+                return Results.Json(
+                    new MfaStepUpRequiredResponse(
+                        MfaStepUpRequired: true,
+                        Reason: "Re-authenticate with your MFA code to change your password."),
+                    ApiJsonContext.Default.MfaStepUpRequiredResponse,
+                    statusCode: 401);
+            }
+
+            if (string.IsNullOrEmpty(user.MfaSecret) || !MfaService.VerifyCode(user.MfaSecret, body.MfaCode))
+            {
+                await authEvents.LogAsync(tenantId, userId, AuthEventTypes.PasswordChangeFailure,
+                    GetIpAddress(context), GetUserAgent(context),
+                    new Dictionary<string, string> { ["reason"] = "mfa_code_invalid" }, ct);
+                return Results.Unauthorized();
+            }
+        }
+
         if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(body.OldPassword, user.PasswordHash))
             return Results.BadRequest(new ErrorResponse("Current password is incorrect"));
 
@@ -971,7 +1001,14 @@ internal static class AuthEndpoints
 
 internal sealed record LoginRequest(string? TenantId, string Email, string Password);
 internal sealed record ApiKeyLoginRequest(string ApiKey);
-internal sealed record ChangePasswordRequest(string OldPassword, string NewPassword);
+internal sealed record ChangePasswordRequest(string OldPassword, string NewPassword, string? MfaCode = null);
+
+/// <summary>
+/// Returned as HTTP 401 when the user has MFA enrolled and did not include a TOTP code
+/// in the change-password request. The client must re-submit with MfaCode populated.
+/// No transient challenge token is issued — the user's TOTP device is the source of truth.
+/// </summary>
+internal sealed record MfaStepUpRequiredResponse(bool MfaStepUpRequired, string Reason);
 internal sealed record ForgotPasswordRequest(string TenantId, string Email);
 internal sealed record ResetPasswordRequest(string Token, string NewPassword);
 internal sealed record MfaVerifyRequest(string MfaToken, string? Code, string? RecoveryCode);

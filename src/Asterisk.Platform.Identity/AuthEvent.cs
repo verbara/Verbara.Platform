@@ -20,6 +20,7 @@ public static class AuthEventTypes
     public const string LoginFailure = "login_failure";
     public const string Logout = "logout";
     public const string PasswordChange = "password_change";
+    public const string PasswordChangeFailure = "password_change_failure";
     public const string MfaEnroll = "mfa_enroll";
     public const string MfaDisable = "mfa_disable";
     public const string RecoveryCodesRegenerated = "recovery_codes_regenerated";
