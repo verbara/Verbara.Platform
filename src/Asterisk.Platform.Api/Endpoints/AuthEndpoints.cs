@@ -65,7 +65,10 @@ internal static class AuthEndpoints
 
     // ─── Login ──────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> Login(
+    // Visibility elevated from `private` to `internal` so the Api.Tests project
+    // (which has InternalsVisibleTo) can invoke this handler directly for MFA
+    // policy enforcement regression tests (v1.9.0 P0 security fix).
+    internal static async Task<IResult> Login(
         [FromBody] LoginRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
@@ -108,7 +111,26 @@ internal static class AuthEndpoints
             return Results.Unauthorized();
         }
 
-        // Check MFA
+        // v1.9.0 P0 — Tenant MFA policy enforcement (Gap 1).
+        // If the tenant's policy requires MFA for this user's role AND the user
+        // has not enrolled (no TOTP secret confirmed), block with 401 + an
+        // explicit "mfa_enrollment_required" signal so the frontend can drive
+        // the enrollment flow. User with MfaEnabled=true falls through to the
+        // existing per-user challenge — the policy check does NOT duplicate it.
+        var policyRequiresMfa = await RequiresMfaForUserAsync(configStore, rawTenantId!, user.Role, ct);
+        if (policyRequiresMfa && !user.MfaEnabled)
+        {
+            await authEvents.LogAsync(rawTenantId!, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
+                new Dictionary<string, string> { ["reason"] = "mfa_enrollment_required" }, ct);
+            return Results.Json(
+                new MfaEnrollmentRequiredResponse(
+                    MfaEnrollmentRequired: true,
+                    Reason: "Your organization requires multi-factor authentication for this account. MFA enrollment must be completed before access can be granted."),
+                ApiJsonContext.Default.MfaEnrollmentRequiredResponse,
+                statusCode: 401);
+        }
+
+        // Check per-user MFA (existing behavior — preserved)
         if (user.MfaEnabled)
         {
             var challengeToken = GenerateToken();
@@ -178,11 +200,17 @@ internal static class AuthEndpoints
 
     // ─── Refresh ────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> Refresh(
+    // Visibility elevated from `private` to `internal` so the Api.Tests project
+    // (which has InternalsVisibleTo) can invoke this handler directly for MFA
+    // policy enforcement regression tests (v1.9.0 P0 security fix).
+    internal static async Task<IResult> Refresh(
         HttpContext context,
         [FromServices] IUserStore userStore,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
+        [FromServices] IRefreshTokenStore refreshTokenStore,
+        [FromServices] ITenantAuthConfigStore configStore,
+        AuthEventService authEvents,
         CancellationToken ct)
     {
         var rawToken = context.Request.Cookies[RefreshCookieName];
@@ -204,6 +232,31 @@ internal static class AuthEndpoints
 
         if (user is null)
             return Results.Unauthorized();
+
+        // v1.9.0 P0 — Tenant MFA policy re-evaluation on refresh (Gap 2).
+        // If tenant admin flipped the policy (optional → required_all, or added
+        // this role to MfaRequiredRoles) AFTER this refresh-token was issued
+        // and the user still has not enrolled, we MUST invalidate the whole
+        // refresh-token lineage for this user and force re-authentication. The
+        // original raw token was already revoked by RotateAsync — we also revoke
+        // the freshly-minted replacement + all other active tokens so a lingering
+        // attacker cannot keep rotating.
+        var policyRequiresMfa = await RequiresMfaForUserAsync(configStore, user.TenantId.Value, user.Role, ct);
+        if (policyRequiresMfa && !user.MfaEnabled)
+        {
+            await refreshTokenStore.RevokeAllForUserAsync(
+                user.TenantId.Value, user.UserId.Value, DateTimeOffset.UtcNow, ct);
+            context.Response.Cookies.Delete(RefreshCookieName);
+            await authEvents.LogAsync(user.TenantId.Value, user.UserId.Value,
+                AuthEventTypes.SessionRevoked, ip, ua,
+                new Dictionary<string, string> { ["reason"] = "mfa_policy_updated" }, ct);
+            return Results.Json(
+                new MfaEnrollmentRequiredResponse(
+                    MfaEnrollmentRequired: true,
+                    Reason: "Re-authentication required: your organization's MFA policy has changed and this account must complete MFA enrollment."),
+                ApiJsonContext.Default.MfaEnrollmentRequiredResponse,
+                statusCode: 401);
+        }
 
         // Resolve granular permissions for refreshed JWT
         IReadOnlySet<string>? permissions = null;
@@ -258,12 +311,17 @@ internal static class AuthEndpoints
 
     // ─── API Key Login ──────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ApiKeyLogin(
+    // Visibility elevated from `private` to `internal` so the Api.Tests project
+    // (which has InternalsVisibleTo) can invoke this handler directly for MFA
+    // policy enforcement regression tests (v1.9.0 P0 security fix).
+    internal static async Task<IResult> ApiKeyLogin(
         [FromBody] ApiKeyLoginRequest body,
         HttpContext context,
         [FromServices] IApiKeyStore apiKeyStore,
         [FromServices] IUserStore userStore,
+        [FromServices] ITenantAuthConfigStore configStore,
         JwtTokenService jwtService,
+        AuthEventService authEvents,
         CancellationToken ct)
     {
         var hashedKey = HashKey(body.ApiKey);
@@ -281,6 +339,35 @@ internal static class AuthEndpoints
         var user = await userStore.GetByIdAsync(apiKey.TenantId, linkedUserId, ct);
         if (user is null)
             return Results.Unauthorized();
+
+        // v1.9.0 P0 — Tenant MFA policy enforcement on user-bound API keys (Gap 4).
+        // Machine-to-machine Management keys (ApiKeyType.Management) are exempt by
+        // design: they authenticate a workload, not a human, and cannot satisfy
+        // an interactive TOTP challenge. User-bound Standard keys, however, are
+        // a vector for MFA bypass — an admin could issue themselves a personal
+        // API key and sidestep the tenant's required_all policy. Reject any
+        // user-bound key whose owner's role is covered by the MFA policy.
+        if (apiKey.KeyType != ApiKeyType.Management)
+        {
+            var policyRequiresMfa = await RequiresMfaForUserAsync(
+                configStore, user.TenantId.Value, user.Role, ct);
+            if (policyRequiresMfa)
+            {
+                await authEvents.LogAsync(user.TenantId.Value, user.UserId.Value,
+                    AuthEventTypes.LoginFailure,
+                    GetIpAddress(context), GetUserAgent(context),
+                    new Dictionary<string, string>
+                    {
+                        ["reason"] = "api_key_mfa_policy_blocks",
+                        ["api_key_id"] = apiKey.KeyId.Value,
+                    },
+                    ct);
+                return Results.Json(
+                    new ErrorResponse("Interactive authentication required for MFA-enforced role. Personal API keys cannot be used to bypass MFA policy."),
+                    ApiJsonContext.Default.ErrorResponse,
+                    statusCode: 401);
+            }
+        }
 
         // Resolve granular permissions for API key JWT
         IReadOnlySet<string>? permissions = null;
@@ -425,7 +512,10 @@ internal static class AuthEndpoints
 
     // ─── Reset Password ─────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ResetPassword(
+    // Visibility elevated from `private` to `internal` so the Api.Tests project
+    // (which has InternalsVisibleTo) can invoke this handler directly for MFA
+    // policy enforcement regression tests (v1.9.0 P0 security fix).
+    internal static async Task<IResult> ResetPassword(
         [FromBody] ResetPasswordRequest body,
         [FromServices] IUserStore userStore,
         [FromServices] ITenantAuthConfigStore configStore,
@@ -455,6 +545,34 @@ internal static class AuthEndpoints
 
         await authEvents.LogAsync(entry.TenantId, entry.UserId, AuthEventTypes.PasswordReset,
             null, null, null, ct);
+
+        // v1.9.0 P0 — MFA policy enforcement after password reset (Gap 3).
+        // An attacker with email access could previously reset the password and
+        // log in with NO MFA verification, bypassing the tenant's policy entirely.
+        // Signal the caller to complete the appropriate MFA step BEFORE any
+        // session token is issued. This endpoint never returns an access token;
+        // the caller must re-enter the standard login → MFA verify flow. The two
+        // signals differentiate UX:
+        //   • enrolled user   → action=verify (existing MFA challenge UX)
+        //   • not-enrolled    → action=enroll (enrollment wizard UX)
+        // If the policy does NOT require MFA for this user's role, the original
+        // "password reset successful" response is preserved.
+        var policyRequiresMfa = config.IsMfaRequiredForRole(user.Role.ToString());
+        if (policyRequiresMfa)
+        {
+            if (user.MfaEnabled)
+            {
+                return Results.Ok(new PasswordResetMfaRequiredResponse(
+                    MfaRequired: true,
+                    Action: "verify",
+                    Message: "Password reset successful. MFA verification is required to complete sign-in."));
+            }
+
+            return Results.Ok(new PasswordResetMfaRequiredResponse(
+                MfaRequired: true,
+                Action: "enroll",
+                Message: "Password reset successful. MFA enrollment is required before sign-in can proceed."));
+        }
 
         return Results.Ok(new MessageResponse("Password reset successful"));
     }
@@ -726,6 +844,21 @@ internal static class AuthEndpoints
 
     // ─── Helpers ────────────────────────────────────────────────────────────────
 
+    // v1.9.0 P0 MFA policy enforcement — shared check consulted by Login, Refresh,
+    // ApiKeyLogin, and ResetPassword. Consistent with AuthAdminEndpoints' existing
+    // IsMfaRequiredForRole gate that prevents privileged users from self-disabling
+    // MFA. A null/missing TenantAuthConfig means "no tenant override" which
+    // defaults to MfaPolicy=optional → returns false.
+    private static async Task<bool> RequiresMfaForUserAsync(
+        ITenantAuthConfigStore configStore,
+        string tenantId,
+        UserRole role,
+        CancellationToken ct)
+    {
+        var cfg = await configStore.GetAsync(tenantId, ct);
+        return cfg?.IsMfaRequiredForRole(role.ToString()) == true;
+    }
+
     private static async Task<IResult> IssueTokensAsync(
         User user,
         HttpContext context,
@@ -904,6 +1037,21 @@ internal static class RoleDefaultPermissions
 }
 
 internal sealed record MfaChallengeResponse(bool RequiresMfa, string MfaToken);
+
+// v1.9.0 P0 — Login / Refresh / ApiKeyLogin signal when tenant policy requires
+// MFA and the user has not yet enrolled. Returned with HTTP 401. Distinct from
+// MfaChallengeResponse (which signals "complete the TOTP challenge") because
+// the user has no TOTP secret yet — the frontend must drive an enrollment
+// wizard before allowing sign-in.
+internal sealed record MfaEnrollmentRequiredResponse(bool MfaEnrollmentRequired, string Reason);
+
+// v1.9.0 P0 — ResetPassword signal that the password change succeeded but the
+// tenant's MFA policy requires an additional step before any session token is
+// issued. Action = "verify" (user is already enrolled, run MFA challenge) or
+// "enroll" (user must complete MFA enrollment). Returned with HTTP 200 because
+// the password change itself succeeded — the signal gates the follow-on sign-in.
+internal sealed record PasswordResetMfaRequiredResponse(bool MfaRequired, string Action, string Message);
+
 internal sealed record AuthEventDetail(string? Email = null, string? Reason = null);
 
 internal sealed record UserSessionDto(
