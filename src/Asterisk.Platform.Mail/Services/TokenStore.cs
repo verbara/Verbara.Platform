@@ -17,16 +17,25 @@ internal sealed class OAuthToken
     public required DateTime UpdatedAt { get; init; }
 }
 
-internal sealed class TokenStore
+internal class TokenStore
 {
-    private readonly NpgsqlDataSource _dataSource;
+    private readonly NpgsqlDataSource? _dataSource;
 
     public TokenStore(NpgsqlDataSource dataSource)
     {
         _dataSource = dataSource;
     }
 
-    public async Task<OAuthToken?> GetAsync(string tenantId, string userId, string provider, CancellationToken ct)
+    /// <summary>
+    /// Test-only parameterless constructor — concrete subclasses override the async methods
+    /// to supply in-memory fakes. Production use goes through the <c>NpgsqlDataSource</c> ctor.
+    /// </summary>
+    protected TokenStore()
+    {
+        _dataSource = null;
+    }
+
+    public virtual async Task<OAuthToken?> GetAsync(string tenantId, string userId, string provider, CancellationToken ct)
     {
         const string sql = """
             SELECT id, tenant_id AS TenantId, user_id AS UserId, provider, access_token AS AccessToken,
@@ -36,12 +45,12 @@ internal sealed class TokenStore
             WHERE tenant_id = @TenantId AND user_id = @UserId AND provider = @Provider
             """;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var conn = await _dataSource!.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<OAuthTokenRow>(sql, new { TenantId = tenantId, UserId = userId, Provider = provider });
         return row?.ToModel();
     }
 
-    public async Task UpsertAsync(OAuthToken token, CancellationToken ct)
+    public virtual async Task UpsertAsync(OAuthToken token, CancellationToken ct)
     {
         const string sql = """
             INSERT INTO mail.oauth_tokens (id, tenant_id, user_id, provider, access_token, refresh_token, expires_at, scopes, created_at, updated_at)
@@ -51,7 +60,7 @@ internal sealed class TokenStore
                           scopes = @Scopes, updated_at = @UpdatedAt
             """;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var conn = await _dataSource!.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(sql, new
         {
             token.Id,
@@ -67,15 +76,15 @@ internal sealed class TokenStore
         });
     }
 
-    public async Task DeleteAsync(string tenantId, string userId, string provider, CancellationToken ct)
+    public virtual async Task DeleteAsync(string tenantId, string userId, string provider, CancellationToken ct)
     {
         const string sql = "DELETE FROM mail.oauth_tokens WHERE tenant_id = @TenantId AND user_id = @UserId AND provider = @Provider";
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var conn = await _dataSource!.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(sql, new { TenantId = tenantId, UserId = userId, Provider = provider });
     }
 
-    public async Task<IReadOnlyList<OAuthToken>> GetExpiringAsync(TimeSpan window, CancellationToken ct)
+    public virtual async Task<IReadOnlyList<OAuthToken>> GetExpiringAsync(TimeSpan window, CancellationToken ct)
     {
         const string sql = """
             SELECT id, tenant_id AS TenantId, user_id AS UserId, provider, access_token AS AccessToken,
@@ -87,7 +96,7 @@ internal sealed class TokenStore
             """;
 
         var threshold = DateTime.UtcNow.Add(window);
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var conn = await _dataSource!.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<OAuthTokenRow>(sql, new { Threshold = threshold });
         return rows.Select(r => r.ToModel()).ToList();
     }

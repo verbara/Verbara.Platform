@@ -1,4 +1,6 @@
 using Asterisk.Platform.Mail.Endpoints;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Me.Messages;
@@ -9,13 +11,24 @@ namespace Asterisk.Platform.Mail.Services;
 
 internal sealed partial class GraphMailboxService
 {
+    /// <summary>
+    /// Keyed-service name for the <see cref="ResiliencePolicy"/> that wraps each Graph mailbox
+    /// operation. Registered in Program.cs with circuit 5/60s + retry 2/500ms + timeout 20s.
+    /// </summary>
+    public const string ResiliencePolicyKey = "mail.graph";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<GraphMailboxService> _logger;
+    private readonly ResiliencePolicy _policy;
 
-    public GraphMailboxService(IHttpClientFactory httpClientFactory, ILogger<GraphMailboxService> logger)
+    public GraphMailboxService(
+        IHttpClientFactory httpClientFactory,
+        ILogger<GraphMailboxService> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     public async Task<(IReadOnlyList<MailMessageDto> Messages, int TotalCount)> ListMessagesAsync(
@@ -23,17 +36,20 @@ internal sealed partial class GraphMailboxService
     {
         var client = CreateClient(accessToken);
 
-        var response = await client.Me.Messages.GetAsync(config =>
-        {
-            config.QueryParameters.Top = top;
-            config.QueryParameters.Skip = skip;
-            config.QueryParameters.Orderby = ["receivedDateTime desc"];
-            config.QueryParameters.Select = ["id", "subject", "from", "toRecipients", "receivedDateTime", "isRead", "bodyPreview", "hasAttachments"];
-            config.QueryParameters.Count = true;
-            if (unreadOnly)
-                config.QueryParameters.Filter = "isRead eq false";
-            config.Headers.Add("ConsistencyLevel", "eventual");
-        }, ct);
+        var response = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt => await client.Me.Messages.GetAsync(config =>
+            {
+                config.QueryParameters.Top = top;
+                config.QueryParameters.Skip = skip;
+                config.QueryParameters.Orderby = ["receivedDateTime desc"];
+                config.QueryParameters.Select = ["id", "subject", "from", "toRecipients", "receivedDateTime", "isRead", "bodyPreview", "hasAttachments"];
+                config.QueryParameters.Count = true;
+                if (unreadOnly)
+                    config.QueryParameters.Filter = "isRead eq false";
+                config.Headers.Add("ConsistencyLevel", "eventual");
+            }, innerCt).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
 
         var messages = response?.Value?.Select(MapMessage).ToList() ?? [];
         var total = (int)(response?.OdataCount ?? messages.Count);
@@ -64,11 +80,18 @@ internal sealed partial class GraphMailboxService
             }).ToList();
         }
 
-        await client.Me.SendMail.PostAsync(new SendMailPostRequestBody
-        {
-            Message = message,
-            SaveToSentItems = true,
-        }, cancellationToken: ct);
+        await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt =>
+            {
+                await client.Me.SendMail.PostAsync(new SendMailPostRequestBody
+                {
+                    Message = message,
+                    SaveToSentItems = true,
+                }, cancellationToken: innerCt).ConfigureAwait(false);
+                return 0;
+            },
+            ct).ConfigureAwait(false);
 
         LogMessageSent(request.Subject ?? "(no subject)");
     }
@@ -77,11 +100,18 @@ internal sealed partial class GraphMailboxService
     {
         var client = CreateClient(accessToken);
 
-        await client.Me.Messages[messageId].Reply.PostAsync(
-            new Microsoft.Graph.Me.Messages.Item.Reply.ReplyPostRequestBody
+        await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt =>
             {
-                Comment = request.Comment,
-            }, cancellationToken: ct);
+                await client.Me.Messages[messageId].Reply.PostAsync(
+                    new Microsoft.Graph.Me.Messages.Item.Reply.ReplyPostRequestBody
+                    {
+                        Comment = request.Comment,
+                    }, cancellationToken: innerCt).ConfigureAwait(false);
+                return 0;
+            },
+            ct).ConfigureAwait(false);
 
         LogMessageReplied(messageId);
     }
@@ -90,15 +120,22 @@ internal sealed partial class GraphMailboxService
     {
         var client = CreateClient(accessToken);
 
-        await client.Me.Messages[messageId].Forward.PostAsync(
-            new Microsoft.Graph.Me.Messages.Item.Forward.ForwardPostRequestBody
+        await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt =>
             {
-                Comment = request.Comment,
-                ToRecipients = request.To.Select(r => new Recipient
-                {
-                    EmailAddress = new EmailAddress { Address = r.Email, Name = r.Name },
-                }).ToList(),
-            }, cancellationToken: ct);
+                await client.Me.Messages[messageId].Forward.PostAsync(
+                    new Microsoft.Graph.Me.Messages.Item.Forward.ForwardPostRequestBody
+                    {
+                        Comment = request.Comment,
+                        ToRecipients = request.To.Select(r => new Recipient
+                        {
+                            EmailAddress = new EmailAddress { Address = r.Email, Name = r.Name },
+                        }).ToList(),
+                    }, cancellationToken: innerCt).ConfigureAwait(false);
+                return 0;
+            },
+            ct).ConfigureAwait(false);
 
         LogMessageForwarded(messageId);
     }
@@ -106,17 +143,31 @@ internal sealed partial class GraphMailboxService
     public async Task DeleteMessageAsync(string accessToken, string messageId, CancellationToken ct)
     {
         var client = CreateClient(accessToken);
-        await client.Me.Messages[messageId].DeleteAsync(cancellationToken: ct);
+        await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt =>
+            {
+                await client.Me.Messages[messageId].DeleteAsync(cancellationToken: innerCt).ConfigureAwait(false);
+                return 0;
+            },
+            ct).ConfigureAwait(false);
         LogMessageDeleted(messageId);
     }
 
     public async Task MarkAsReadAsync(string accessToken, string messageId, CancellationToken ct)
     {
         var client = CreateClient(accessToken);
-        await client.Me.Messages[messageId].PatchAsync(new Microsoft.Graph.Models.Message
-        {
-            IsRead = true,
-        }, cancellationToken: ct);
+        await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt =>
+            {
+                await client.Me.Messages[messageId].PatchAsync(new Microsoft.Graph.Models.Message
+                {
+                    IsRead = true,
+                }, cancellationToken: innerCt).ConfigureAwait(false);
+                return 0;
+            },
+            ct).ConfigureAwait(false);
 
         LogMessageMarkedRead(messageId);
     }
@@ -125,10 +176,13 @@ internal sealed partial class GraphMailboxService
     {
         var client = CreateClient(accessToken);
 
-        var response = await client.Me.Messages[messageId].Attachments.GetAsync(config =>
-        {
-            config.QueryParameters.Select = ["id", "name", "contentType", "size"];
-        }, ct);
+        var response = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt => await client.Me.Messages[messageId].Attachments.GetAsync(config =>
+            {
+                config.QueryParameters.Select = ["id", "name", "contentType", "size"];
+            }, innerCt).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
 
         var attachments = response?.Value?.Select(a => new MailAttachmentDto
         {

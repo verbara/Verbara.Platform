@@ -1,10 +1,20 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Mail.Services;
 
 internal sealed partial class TokenRefreshService : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the <see cref="ResiliencePolicy"/> that wraps the Azure AD
+    /// token-endpoint POST. Registered in Program.cs with circuit 3/120s + retry 3/1s + timeout 15s.
+    /// Separate from <see cref="GraphMailboxService.ResiliencePolicyKey"/> because refresh failure
+    /// modes (clock skew, tenant config drift) differ from Graph API transient blips.
+    /// </summary>
+    public const string ResiliencePolicyKey = "mail.token-refresh";
+
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ExpiryWindow = TimeSpan.FromMinutes(10);
 
@@ -12,17 +22,20 @@ internal sealed partial class TokenRefreshService : BackgroundService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TokenRefreshService> _logger;
+    private readonly ResiliencePolicy _policy;
 
     public TokenRefreshService(
         TokenStore tokenStore,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<TokenRefreshService> logger)
+        ILogger<TokenRefreshService> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _tokenStore = tokenStore;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -68,9 +81,16 @@ internal sealed partial class TokenRefreshService : BackgroundService
                 await RefreshTokenAsync(token, clientId, clientSecret, ct);
                 LogTokenRefreshed(token.TenantId, token.UserId);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                LogTokenRefreshFailed(token.TenantId, token.UserId, ex.Message);
+                // Previously this catch silently swallowed the exception with an info-level log.
+                // After the resilience wrap, policy has already exhausted its retries; emit a
+                // structured Warning so operators can see persistent failures in production.
+                LogTokenRefreshExhausted(token.TenantId, token.UserId, ex.GetType().Name, ex.Message);
             }
         }
     }
@@ -80,21 +100,27 @@ internal sealed partial class TokenRefreshService : BackgroundService
         var azureTenantId = _configuration["Microsoft:TenantId"] ?? "common";
         var tokenEndpoint = $"https://login.microsoftonline.com/{azureTenantId}/oauth2/v2.0/token";
 
-        using var client = _httpClientFactory.CreateClient("MicrosoftAuth");
-        var request = new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["client_id"] = clientId,
-            ["client_secret"] = clientSecret,
-            ["grant_type"] = "refresh_token",
-            ["refresh_token"] = token.RefreshToken,
-            ["scope"] = token.Scopes,
-        });
+        var result = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt =>
+            {
+                using var client = _httpClientFactory.CreateClient("MicrosoftAuth");
+                var request = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["client_id"] = clientId,
+                    ["client_secret"] = clientSecret,
+                    ["grant_type"] = "refresh_token",
+                    ["refresh_token"] = token.RefreshToken,
+                    ["scope"] = token.Scopes,
+                });
 
-        var response = await client.PostAsync(tokenEndpoint, request, ct);
-        response.EnsureSuccessStatusCode();
+                using var response = await client.PostAsync(tokenEndpoint, request, innerCt).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
 
-        var result = await response.Content.ReadFromJsonAsync(MailJsonContext.Default.TokenResponse, ct)
-                     ?? throw new InvalidOperationException("Empty token response from Azure AD");
+                return await response.Content.ReadFromJsonAsync(MailJsonContext.Default.TokenResponse, innerCt).ConfigureAwait(false)
+                       ?? throw new InvalidOperationException("Empty token response from Azure AD");
+            },
+            ct).ConfigureAwait(false);
 
         var refreshed = new OAuthToken
         {
@@ -113,6 +139,14 @@ internal sealed partial class TokenRefreshService : BackgroundService
         await _tokenStore.UpsertAsync(refreshed, ct);
     }
 
+    /// <summary>
+    /// Test-only entry point that runs a single refresh cycle without spawning the
+    /// BackgroundService loop. Exposed via <c>InternalsVisibleTo</c> so tests can assert
+    /// the policy wrap (retries + exhaustion warning) without starting the hosted service.
+    /// </summary>
+    internal Task RefreshExpiringTokensForTestAsync(CancellationToken ct)
+        => RefreshExpiringTokensAsync(ct);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Token refresh service started")]
     private partial void LogStarted();
 
@@ -125,8 +159,8 @@ internal sealed partial class TokenRefreshService : BackgroundService
     [LoggerMessage(Level = LogLevel.Information, Message = "Token refreshed for tenant={TenantId} user={UserId}")]
     private partial void LogTokenRefreshed(string tenantId, string userId);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Token refresh failed for tenant={TenantId} user={UserId}: {Error}")]
-    private partial void LogTokenRefreshFailed(string tenantId, string userId, string error);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Token refresh exhausted retries for tenant={TenantId} user={UserId}: {ExceptionType}: {Error}")]
+    private partial void LogTokenRefreshExhausted(string tenantId, string userId, string exceptionType, string error);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Token refresh cycle error: {Error}")]
     private partial void LogRefreshCycleError(string error);
