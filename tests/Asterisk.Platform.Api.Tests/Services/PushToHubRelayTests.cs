@@ -38,23 +38,37 @@ public sealed class PushToHubRelayTests
     }
 
     // -----------------------------------------------------------------------
-    // Factory
+    // Factory helpers
     // -----------------------------------------------------------------------
 
-    private static (PushToHubRelay relay, FakePushEventBus bus, IClientProxy groupProxy)
+    private sealed record HubMocks(
+        IHubContext<PlatformHub, IPlatformHubClient> HubContext,
+        IHubClients<IPlatformHubClient> HubClients,
+        IPlatformHubClient GroupClient);
+
+    private static HubMocks CreateMockHubContext(string group)
+    {
+        var groupClient = Substitute.For<IPlatformHubClient>();
+        groupClient.OnConversationStateChanged(Arg.Any<ConversationStatePayload>()).Returns(Task.CompletedTask);
+        groupClient.OnAgentStateChanged(Arg.Any<AgentStatePayload>()).Returns(Task.CompletedTask);
+        groupClient.OnClusterNodeStateChanged(Arg.Any<ClusterNodeStatePayload>()).Returns(Task.CompletedTask);
+
+        var hubClients = Substitute.For<IHubClients<IPlatformHubClient>>();
+        hubClients.Group(group).Returns(groupClient);
+
+        var hubContext = Substitute.For<IHubContext<PlatformHub, IPlatformHubClient>>();
+        hubContext.Clients.Returns(hubClients);
+
+        return new HubMocks(hubContext, hubClients, groupClient);
+    }
+
+    private static (PushToHubRelay relay, FakePushEventBus bus, HubMocks mocks)
         BuildSut(string group)
     {
         var bus = new FakePushEventBus();
-
-        var groupProxy = Substitute.For<IClientProxy>();
-        var hubClients = Substitute.For<IHubClients>();
-        hubClients.Group(group).Returns(groupProxy);
-
-        var hubContext = Substitute.For<IHubContext<PlatformHub>>();
-        hubContext.Clients.Returns(hubClients);
-
-        var relay = new PushToHubRelay(bus, hubContext, NullLogger<PushToHubRelay>.Instance);
-        return (relay, bus, groupProxy);
+        var mocks = CreateMockHubContext(group);
+        var relay = new PushToHubRelay(bus, mocks.HubContext, NullLogger<PushToHubRelay>.Instance);
+        return (relay, bus, mocks);
     }
 
     private static PushEventMetadata MakeMetadata(string tenantId) =>
@@ -65,9 +79,9 @@ public sealed class PushToHubRelayTests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task StartAsync_ShouldForwardToTenantGroup_WhenConversationStateChangedEventReceived()
+    public async Task StartAsync_ShouldForwardToTenantGroup_WhenConversationStateChangedEventIsPublished()
     {
-        var (relay, bus, groupProxy) = BuildSut("tenant:acme");
+        var (relay, bus, mocks) = BuildSut("tenant:acme");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new ConversationStateChangedEvent
@@ -80,20 +94,23 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100); // allow async fire-and-forget to complete
+        await Task.Delay(100);
 
-        await groupProxy.Received(1).SendCoreAsync(
-            "OnConversationStateChanged",
-            Arg.Is<object[]>(a => a.Length == 1),
-            Arg.Any<CancellationToken>());
+        mocks.HubClients.Received(1).Group("tenant:acme");
+        await mocks.GroupClient.Received(1).OnConversationStateChanged(
+            Arg.Is<ConversationStatePayload>(p =>
+                p.ConversationId == "conv-1" &&
+                p.TenantId == "acme" &&
+                p.PreviousState == "queued" &&
+                p.NewState == "active"));
 
         await relay.StopAsync(CancellationToken.None);
     }
 
     [Fact]
-    public async Task StartAsync_ShouldForwardToTenantGroup_WhenAgentStateChangedEventReceived()
+    public async Task StartAsync_ShouldForwardToTenantGroup_WhenAgentStateChangedEventIsPublished()
     {
-        var (relay, bus, groupProxy) = BuildSut("tenant:acme");
+        var (relay, bus, mocks) = BuildSut("tenant:acme");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new AgentStateChangedEvent
@@ -109,22 +126,26 @@ public sealed class PushToHubRelayTests
         bus.Emit(evt);
         await Task.Delay(100);
 
-        await groupProxy.Received(1).SendCoreAsync(
-            "OnAgentStateChanged",
-            Arg.Is<object[]>(a => a.Length == 1),
-            Arg.Any<CancellationToken>());
+        mocks.HubClients.Received(1).Group("tenant:acme");
+        await mocks.GroupClient.Received(1).OnAgentStateChanged(
+            Arg.Is<AgentStatePayload>(p =>
+                p.AgentId == "agent-42" &&
+                p.TenantId == "acme" &&
+                p.ReasonCode == "break" &&
+                p.PreviousState == "ready" &&
+                p.NewState == "paused"));
 
         await relay.StopAsync(CancellationToken.None);
     }
 
     // -----------------------------------------------------------------------
-    // Null/empty TenantId — SendCoreAsync must NOT be called
+    // Null/empty TenantId — typed method must NOT be called
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task StartAsync_ShouldNotCallSendAsync_WhenConversationEventHasEmptyTenantId()
+    public async Task StartAsync_ShouldSkipForward_WhenConversationEventTenantIdIsNullOrEmpty()
     {
-        var (relay, bus, groupProxy) = BuildSut("tenant:");
+        var (relay, bus, mocks) = BuildSut("tenant:");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new ConversationStateChangedEvent
@@ -139,16 +160,15 @@ public sealed class PushToHubRelayTests
         bus.Emit(evt);
         await Task.Delay(100);
 
-        await groupProxy.DidNotReceive().SendCoreAsync(
-            Arg.Any<string>(), Arg.Any<object[]>(), Arg.Any<CancellationToken>());
+        await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
 
         await relay.StopAsync(CancellationToken.None);
     }
 
     [Fact]
-    public async Task StartAsync_ShouldNotCallSendAsync_WhenAgentEventHasEmptyTenantId()
+    public async Task StartAsync_ShouldSkipForward_WhenAgentEventTenantIdIsNullOrEmpty()
     {
-        var (relay, bus, groupProxy) = BuildSut("tenant:");
+        var (relay, bus, mocks) = BuildSut("tenant:");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new AgentStateChangedEvent
@@ -164,20 +184,19 @@ public sealed class PushToHubRelayTests
         bus.Emit(evt);
         await Task.Delay(100);
 
-        await groupProxy.DidNotReceive().SendCoreAsync(
-            Arg.Any<string>(), Arg.Any<object[]>(), Arg.Any<CancellationToken>());
+        await mocks.GroupClient.DidNotReceive().OnAgentStateChanged(Arg.Any<AgentStatePayload>());
 
         await relay.StopAsync(CancellationToken.None);
     }
 
     // -----------------------------------------------------------------------
-    // StopAsync disposes subscriptions — no SendCoreAsync after stop
+    // StopAsync disposes subscriptions — no forwarding after stop
     // -----------------------------------------------------------------------
 
     [Fact]
     public async Task StopAsync_ShouldDisposeSubscriptions_SoNoMoreForwardingAfterStop()
     {
-        var (relay, bus, groupProxy) = BuildSut("tenant:tenant-x");
+        var (relay, bus, mocks) = BuildSut("tenant:tenant-x");
         await relay.StartAsync(CancellationToken.None);
         await relay.StopAsync(CancellationToken.None);
 
@@ -193,7 +212,59 @@ public sealed class PushToHubRelayTests
         bus.Emit(evt);
         await Task.Delay(100);
 
-        await groupProxy.DidNotReceive().SendCoreAsync(
-            Arg.Any<string>(), Arg.Any<object[]>(), Arg.Any<CancellationToken>());
+        await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
+    }
+
+    // -----------------------------------------------------------------------
+    // ClusterNodeStateChangedEvent
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task StartAsync_ShouldForwardToAdminsPlatformGroup_WhenClusterNodeStateChangedEventIsPublished()
+    {
+        var (relay, bus, mocks) = BuildSut("admins:platform");
+        await relay.StartAsync(CancellationToken.None);
+
+        var evt = new ClusterNodeStateChangedEvent
+        {
+            NodeId = "node-1",
+            PreviousState = "Healthy",
+            NewState = "Degraded",
+            ChangedAt = DateTimeOffset.UtcNow
+        };
+
+        bus.Emit(evt);
+        await Task.Delay(100);
+
+        mocks.HubClients.Received(1).Group("admins:platform");
+        await mocks.GroupClient.Received(1).OnClusterNodeStateChanged(
+            Arg.Is<ClusterNodeStatePayload>(p =>
+                p.NodeId == "node-1" &&
+                p.PreviousState == "Healthy" &&
+                p.NewState == "Degraded"));
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldSkipForward_WhenClusterEventNodeIdIsNullOrEmpty()
+    {
+        var (relay, bus, mocks) = BuildSut("admins:platform");
+        await relay.StartAsync(CancellationToken.None);
+
+        var evt = new ClusterNodeStateChangedEvent
+        {
+            NodeId = string.Empty,
+            PreviousState = "Healthy",
+            NewState = "Degraded",
+            ChangedAt = DateTimeOffset.UtcNow
+        };
+
+        bus.Emit(evt);
+        await Task.Delay(100);
+
+        await mocks.GroupClient.DidNotReceive().OnClusterNodeStateChanged(Arg.Any<ClusterNodeStatePayload>());
+
+        await relay.StopAsync(CancellationToken.None);
     }
 }
