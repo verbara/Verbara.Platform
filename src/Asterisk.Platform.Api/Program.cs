@@ -826,6 +826,7 @@ v1.MapTrunkEndpoints();
 v1.MapOutboundRouteEndpoints();
 v1.MapRecordingEndpoints();
 v1.MapAnalyticsEndpoints();
+v1.MapCallAnalyticsEndpoints();
 v1.MapAnalyticsLiveEndpoints();
 v1.MapQueueMetricsEndpoints();
 v1.MapBotEndpoints();
