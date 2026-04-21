@@ -342,4 +342,97 @@ public sealed class DefaultConversationServiceTests : IDisposable
         result.Should().BeSameAs(newConversation);
         await _lifecycleService.Received(1).CreateAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
     }
+
+    // ─── GetOrCreateForContactAsync — tenant isolation (regression, v1.9.0) ──
+
+    [Fact]
+    public async Task GetOrCreateForContactAsync_ShouldQueryStore_WithCallerTenantId()
+    {
+        // Regression: outbound conversation creation must scope every storage lookup
+        // to the caller's tenant. A tenant-context gap here would allow cross-tenant
+        // reuse of conversations and/or silent misattribution on create.
+        _conversationStore.FindActiveByContactAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns((Conversation?)null);
+        _lifecycleService.CreateAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns(BuildConversation());
+
+        var sut = CreateSut();
+        await sut.GetOrCreateForContactAsync(_tenantId, _contactId, ChannelType.WhatsApp, CancellationToken.None);
+
+        // FindActive must receive the caller's tenantId (not default/empty/other).
+        await _conversationStore.Received(1).FindActiveByContactAsync(
+            _tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
+        await _conversationStore.DidNotReceive().FindActiveByContactAsync(
+            Arg.Is<TenantId>(t => t != _tenantId), Arg.Any<EntityId>(),
+            Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetOrCreateForContactAsync_ShouldInvokeLifecycle_WithCallerTenantId()
+    {
+        // Regression: newly created conversation must be attributed to the caller's
+        // tenant. DefaultConversationLifecycleService.CreateAsync stamps Conversation.TenantId
+        // from its tenantId parameter, so a gap here means cross-tenant writes.
+        _conversationStore.FindActiveByContactAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns((Conversation?)null);
+        _lifecycleService.CreateAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns(BuildConversation());
+
+        var sut = CreateSut();
+        await sut.GetOrCreateForContactAsync(_tenantId, _contactId, ChannelType.WhatsApp, CancellationToken.None);
+
+        await _lifecycleService.Received(1).CreateAsync(
+            _tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
+        await _lifecycleService.DidNotReceive().CreateAsync(
+            Arg.Is<TenantId>(t => t != _tenantId), Arg.Any<EntityId>(),
+            Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetOrCreateForContactAsync_ShouldNotReuseConversation_FromDifferentTenant()
+    {
+        // Regression: a tenant-scoped store returns null when the caller's tenant has no
+        // active conversation, even if another tenant has one for the same contactId.
+        // The service must then fall through to CreateAsync with the caller's tenant —
+        // it MUST NOT return the foreign-tenant conversation.
+        var tenantA = new TenantId("tenant-A");
+        var tenantB = new TenantId("tenant-B");
+        var tenantBConversation = new Conversation
+        {
+            ConversationId = EntityId.From("conv-tenant-B"),
+            TenantId = tenantB,
+            ContactId = _contactId,
+            Channel = ChannelType.WhatsApp,
+            State = ConversationState.Active,
+            CreatedAt = _now,
+        };
+
+        // Properly tenant-scoped store: tenant A lookup returns null even though tenant B has a match.
+        _conversationStore.FindActiveByContactAsync(tenantA, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns((Conversation?)null);
+        _conversationStore.FindActiveByContactAsync(tenantB, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns(tenantBConversation);
+
+        var tenantAConversation = new Conversation
+        {
+            ConversationId = EntityId.From("conv-tenant-A"),
+            TenantId = tenantA,
+            ContactId = _contactId,
+            Channel = ChannelType.WhatsApp,
+            State = ConversationState.Queued,
+            CreatedAt = _now,
+        };
+        _lifecycleService.CreateAsync(tenantA, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns(tenantAConversation);
+
+        var sut = CreateSut();
+        var result = await sut.GetOrCreateForContactAsync(tenantA, _contactId, ChannelType.WhatsApp, CancellationToken.None);
+
+        // The returned conversation belongs to tenant A, not tenant B.
+        result.TenantId.Should().Be(tenantA);
+        result.ConversationId.Value.Should().Be("conv-tenant-A");
+        result.Should().NotBeSameAs(tenantBConversation);
+        await _lifecycleService.Received(1).CreateAsync(
+            tenantA, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
+    }
 }
