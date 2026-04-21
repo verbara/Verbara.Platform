@@ -17,78 +17,9 @@ internal static class CallAnalyticsEndpoints
             .RequireAuthorization("SupervisorPlus")
             .RequireLicenseFeature(LicenseFeature.Analytics);
 
-        group.MapGet("/results", ListResults);
-        group.MapGet("/results/{sessionId}", GetResult);
         group.MapGet("/topics/trends", GetTopicTrends);
-    }
-
-    // ─── List Results ──────────────────────────────────────────────────────────
-
-    private static async Task<IResult> ListResults(
-        HttpContext context,
-        IServiceProvider services,
-        string? from,
-        string? to,
-        string? queueName,
-        string? agentId,
-        double? minQaScore,
-        double? maxQaScore,
-        bool? hasViolations,
-        int limit = 50,
-        int offset = 0,
-        CancellationToken ct = default)
-    {
-        var store = services.GetService<ICallAnalyticsStore>();
-        if (store is null)
-            return Results.Problem(StoreNotConfigured, statusCode: 503);
-
-        var tenantId = GetTenantId(context);
-
-        limit = Math.Min(limit, 200);
-
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
-
-        var query = new CallAnalyticsQuery
-        {
-            TenantId = tenantId,
-            From = fromDate,
-            To = toDate,
-            QueueName = queueName,
-            AgentId = agentId,
-            MinQaScore = minQaScore,
-            MaxQaScore = maxQaScore,
-            HasComplianceViolations = hasViolations,
-            Limit = limit,
-            Offset = offset,
-        };
-
-        var results = await store.QueryAsync(query, ct);
-
-        var dtos = results.Select(MapToSummaryDto).ToArray();
-
-        return Results.Ok(new CallAnalyticsListResponse(dtos, limit, offset, dtos.Length));
-    }
-
-    // ─── Get Detail ────────────────────────────────────────────────────────────
-
-    private static async Task<IResult> GetResult(
-        string sessionId,
-        HttpContext context,
-        IServiceProvider services,
-        CancellationToken ct)
-    {
-        var store = services.GetService<ICallAnalyticsStore>();
-        if (store is null)
-            return Results.Problem(StoreNotConfigured, statusCode: 503);
-
-        var tenantId = GetTenantId(context);
-
-        var result = await store.GetAsync(sessionId, tenantId, ct);
-        if (result is null)
-            return Results.NotFound();
-
-        return Results.Ok(MapToDetailDto(result));
+        group.MapGet("/sentiment/trends", GetSentimentTrends);
+        group.MapGet("/compliance/summary", GetComplianceSummary);
     }
 
     // ─── Topic Trends ──────────────────────────────────────────────────────────
@@ -169,95 +100,218 @@ internal static class CallAnalyticsEndpoints
         return Results.Ok(new TopicTrendsResponse(trends, results.Count));
     }
 
-    // ─── Mapping Helpers ───────────────────────────────────────────────────────
+    // ─── Sentiment Trends ─────────────────────────────────────────────────────
 
-    private static CallAnalyticsSummaryDto MapToSummaryDto(CallAnalysisResult r)
+    private static async Task<IResult> GetSentimentTrends(
+        HttpContext context,
+        IServiceProvider services,
+        string? from,
+        string? to,
+        string bucket = "day",
+        string? queueName = null,
+        CancellationToken ct = default)
     {
-        var qaScore = r.QualityScore is { } qs && qs.MaxPossibleScore > 0
-            ? (double?)(qs.TotalScore / qs.MaxPossibleScore)
-            : null;
+        var store = services.GetService<ICallAnalyticsStore>();
+        if (store is null)
+            return Results.Problem(StoreNotConfigured, statusCode: 503);
 
-        var summaryText = r.Summary?.Narrative is { Length: > 200 } n
-            ? n[..200]
-            : r.Summary?.Narrative;
+        var tenantId = GetTenantId(context);
 
-        return new CallAnalyticsSummaryDto(
-            SessionId: r.SessionId,
-            AnalyzedAt: r.AnalyzedAt,
-            QaScore: qaScore,
-            HasViolations: r.ComplianceViolations.Count > 0,
-            ViolationCount: r.ComplianceViolations.Count,
-            PrimaryTopic: r.Topics?.PrimaryTopic,
-            SentimentLabel: MapSentimentLabel(r.Sentiment?.OverallLabel),
-            SummaryText: summaryText,
-            AgentId: null,
-            QueueName: null);
-    }
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
 
-    private static CallAnalyticsDetailDto MapToDetailDto(CallAnalysisResult r)
-    {
-        var qaScore = r.QualityScore is { } qs && qs.MaxPossibleScore > 0
-            ? (double?)(qs.TotalScore / qs.MaxPossibleScore)
-            : null;
-
-        var criteria = r.QualityScore?.Items.Select(item =>
+        var query = new CallAnalyticsQuery
         {
-            var itemScore = item.Weight <= 0 ? 0.0 : item.Score * 100.0 / item.Weight;
-            return new CallAnalyticsQaCriterionDto(
-                Category: item.Category,
-                Score: itemScore,
-                Weight: item.Weight,
-                Passed: item.Passed,
-                Feedback: item.Feedback);
-        }).ToArray() ?? [];
-
-        var violations = r.ComplianceViolations.Select(v =>
-            new CallAnalyticsViolationDto(
-                RuleId: v.RuleId,
-                RuleName: v.RuleName,
-                Severity: v.Severity.ToString(),
-                Description: v.Description,
-                Evidence: v.Evidence,
-                TranscriptIndex: v.TranscriptIndex)).ToArray();
-
-        var allTopics = r.Topics?.AllTopics.Select(t =>
-            new CallAnalyticsTopicMatchDto(t.TopicId, t.TopicName, t.Confidence)).ToArray() ?? [];
-
-        return new CallAnalyticsDetailDto(
-            SessionId: r.SessionId,
-            TenantId: r.TenantId,
-            AnalyzedAt: r.AnalyzedAt,
-            ProcessingTimeMs: (long)r.ProcessingTime.TotalMilliseconds,
-            SummaryReason: r.Summary?.Reason,
-            SummaryOutcome: r.Summary?.Outcome,
-            SummaryNarrative: r.Summary?.Narrative,
-            SummaryActionItems: r.Summary?.ActionItems.ToArray() ?? [],
-            QaScore: qaScore,
-            QaMaxPossibleScore: r.QualityScore?.MaxPossibleScore,
-            QaCriteria: criteria,
-            Violations: violations,
-            SentimentLabel: MapSentimentLabel(r.Sentiment?.OverallLabel),
-            SentimentTrend: r.Sentiment?.Trend.ToString(),
-            SentimentScore: r.Sentiment?.OverallScore,
-            PrimaryTopic: r.Topics?.PrimaryTopic,
-            AllTopics: allTopics,
-            AgentTalkRatio: r.Metrics.AgentTalkRatio,
-            SilenceCount: r.Metrics.SilenceCount,
-            InterruptionCount: r.Metrics.InterruptionCount,
-            AgentTurnCount: r.Metrics.AgentTurnCount,
-            CallerTurnCount: r.Metrics.CallerTurnCount);
-    }
-
-    private static string? MapSentimentLabel(SentimentLabel? label)
-        => label switch
-        {
-            SentimentLabel.VeryNegative or SentimentLabel.Negative => "Negative",
-            SentimentLabel.Neutral => "Neutral",
-            SentimentLabel.Positive or SentimentLabel.VeryPositive => "Positive",
-            _ => null,
+            TenantId = tenantId,
+            From = fromDate,
+            To = toDate,
+            QueueName = queueName,
+            Limit = 2000,
         };
 
+        var results = await store.QueryAsync(query, ct);
+
+        // Group by bucket key
+        var buckets = new Dictionary<DateTimeOffset, SentimentBucketAggregate>();
+
+        foreach (var r in results)
+        {
+            var bucketStart = TruncateToBucket(r.AnalyzedAt, bucket);
+
+            if (!buckets.TryGetValue(bucketStart, out var agg))
+            {
+                agg = new SentimentBucketAggregate();
+                buckets[bucketStart] = agg;
+            }
+
+            agg.TotalCount++;
+
+            if (r.Sentiment is not null)
+            {
+                agg.SentimentScoreSum += r.Sentiment.OverallScore;
+                agg.SentimentCount++;
+
+                switch (r.Sentiment.OverallLabel)
+                {
+                    case SentimentLabel.Positive or SentimentLabel.VeryPositive:
+                        agg.PositiveCount++;
+                        break;
+                    case SentimentLabel.Neutral:
+                        agg.NeutralCount++;
+                        break;
+                    case SentimentLabel.Negative or SentimentLabel.VeryNegative:
+                        agg.NegativeCount++;
+                        break;
+                }
+            }
+        }
+
+        var points = buckets
+            .OrderBy(kv => kv.Key)
+            .Select(kv => new SentimentTrendPointDto(
+                BucketStart: kv.Key,
+                AvgSentimentScore: kv.Value.SentimentCount > 0
+                    ? (double?)kv.Value.SentimentScoreSum / kv.Value.SentimentCount
+                    : null,
+                PositiveCount: kv.Value.PositiveCount,
+                NeutralCount: kv.Value.NeutralCount,
+                NegativeCount: kv.Value.NegativeCount,
+                TotalCount: kv.Value.TotalCount))
+            .ToArray();
+
+        return Results.Ok(new SentimentTrendsResponse(points, bucket, fromDate, toDate));
+    }
+
+    // ─── Compliance Summary ───────────────────────────────────────────────────
+
+    private static async Task<IResult> GetComplianceSummary(
+        HttpContext context,
+        IServiceProvider services,
+        string? from,
+        string? to,
+        string? queueName = null,
+        string? severity = null,
+        CancellationToken ct = default)
+    {
+        var store = services.GetService<ICallAnalyticsStore>();
+        if (store is null)
+            return Results.Problem(StoreNotConfigured, statusCode: 503);
+
+        var tenantId = GetTenantId(context);
+
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
+
+        var query = new CallAnalyticsQuery
+        {
+            TenantId = tenantId,
+            From = fromDate,
+            To = toDate,
+            QueueName = queueName,
+            HasComplianceViolations = true,
+            Limit = 2000,
+        };
+
+        var results = await store.QueryAsync(query, ct);
+
+        // Parse optional severity filter
+        ComplianceSeverity? severityFilter = severity is not null
+            ? Enum.Parse<ComplianceSeverity>(severity, ignoreCase: true)
+            : null;
+
+        // Aggregate by (RuleId, Severity)
+        var ruleAggregates = new Dictionary<(string RuleId, ComplianceSeverity Severity), ComplianceRuleAggregate>(
+            EqualityComparer<(string, ComplianceSeverity)>.Default);
+
+        int totalInfo = 0, totalWarning = 0, totalCritical = 0;
+        var sessionsWithViolations = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var r in results)
+        {
+            var violations = r.ComplianceViolations;
+            if (violations.Count == 0) continue;
+
+            var sessionHasViolation = false;
+
+            foreach (var v in violations)
+            {
+                if (severityFilter.HasValue && v.Severity != severityFilter.Value) continue;
+
+                sessionHasViolation = true;
+
+                var key = (v.RuleId, v.Severity);
+                if (!ruleAggregates.TryGetValue(key, out var agg))
+                {
+                    agg = new ComplianceRuleAggregate
+                    {
+                        RuleName = v.RuleName,
+                        FirstSeen = r.AnalyzedAt,
+                        LastSeen = r.AnalyzedAt,
+                    };
+                    ruleAggregates[key] = agg;
+                }
+
+                agg.Occurrences++;
+                agg.Sessions.Add(r.SessionId);
+                if (r.AnalyzedAt < agg.FirstSeen) agg.FirstSeen = r.AnalyzedAt;
+                if (r.AnalyzedAt > agg.LastSeen) agg.LastSeen = r.AnalyzedAt;
+
+                // Severity totals (unfiltered — count all for the breakdown)
+                switch (v.Severity)
+                {
+                    case ComplianceSeverity.Info: totalInfo++; break;
+                    case ComplianceSeverity.Warning: totalWarning++; break;
+                    case ComplianceSeverity.Critical: totalCritical++; break;
+                }
+            }
+
+            if (sessionHasViolation)
+                sessionsWithViolations.Add(r.SessionId);
+        }
+
+        var rules = ruleAggregates
+            .OrderByDescending(kv => kv.Value.Occurrences)
+            .Select(kv => new ComplianceRuleSummaryDto(
+                RuleId: kv.Key.RuleId,
+                RuleName: kv.Value.RuleName,
+                Severity: kv.Key.Severity.ToString(),
+                Occurrences: kv.Value.Occurrences,
+                SessionsAffected: kv.Value.Sessions.Count,
+                FirstSeen: kv.Value.FirstSeen,
+                LastSeen: kv.Value.LastSeen))
+            .ToArray();
+
+        // When a severity filter is active, totals reflect only the filtered violations
+        int filteredInfo = severityFilter == ComplianceSeverity.Info ? totalInfo : (severityFilter is null ? totalInfo : 0);
+        int filteredWarning = severityFilter == ComplianceSeverity.Warning ? totalWarning : (severityFilter is null ? totalWarning : 0);
+        int filteredCritical = severityFilter == ComplianceSeverity.Critical ? totalCritical : (severityFilter is null ? totalCritical : 0);
+        int totalViolations = rules.Sum(r => r.Occurrences);
+
+        return Results.Ok(new ComplianceSummaryResponse(
+            Rules: rules,
+            TotalViolations: totalViolations,
+            TotalSessionsWithViolations: sessionsWithViolations.Count,
+            SeverityBreakdown: new ComplianceSeverityBreakdownDto(filteredInfo, filteredWarning, filteredCritical),
+            From: fromDate,
+            To: toDate));
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private static DateTimeOffset TruncateToBucket(DateTimeOffset dt, string bucket)
+    {
+        if (string.Equals(bucket, "week", StringComparison.OrdinalIgnoreCase))
+        {
+            // ISO week: Monday as first day
+            var dow = (int)dt.DayOfWeek;
+            var daysToMonday = dow == 0 ? 6 : dow - 1;
+            var monday = dt.Date.AddDays(-daysToMonday);
+            return new DateTimeOffset(monday, dt.Offset);
+        }
+
+        // Default: day
+        return new DateTimeOffset(dt.Date, dt.Offset);
+    }
 
     private static string GetTenantId(HttpContext context)
     {
@@ -266,71 +320,30 @@ internal static class CallAnalyticsEndpoints
 
         throw new InvalidOperationException("Tenant ID not resolved");
     }
+
+    // ─── Private aggregation state (not DTOs) ────────────────────────────────
+
+    private sealed class SentimentBucketAggregate
+    {
+        public int TotalCount { get; set; }
+        public double SentimentScoreSum { get; set; }
+        public int SentimentCount { get; set; }
+        public int PositiveCount { get; set; }
+        public int NeutralCount { get; set; }
+        public int NegativeCount { get; set; }
+    }
+
+    private sealed class ComplianceRuleAggregate
+    {
+        public required string RuleName { get; init; }
+        public int Occurrences { get; set; }
+        public HashSet<string> Sessions { get; } = new(StringComparer.Ordinal);
+        public DateTimeOffset FirstSeen { get; set; }
+        public DateTimeOffset LastSeen { get; set; }
+    }
 }
 
 // ─── Call Analytics DTOs ──────────────────────────────────────────────────────
-
-internal sealed record CallAnalyticsSummaryDto(
-    string SessionId,
-    DateTimeOffset AnalyzedAt,
-    double? QaScore,
-    bool HasViolations,
-    int ViolationCount,
-    string? PrimaryTopic,
-    string? SentimentLabel,
-    string? SummaryText,
-    string? AgentId,
-    string? QueueName);
-
-internal sealed record CallAnalyticsListResponse(
-    IReadOnlyList<CallAnalyticsSummaryDto> Results,
-    int Limit,
-    int Offset,
-    int ReturnedCount);
-
-internal sealed record CallAnalyticsDetailDto(
-    string SessionId,
-    string TenantId,
-    DateTimeOffset AnalyzedAt,
-    long ProcessingTimeMs,
-    string? SummaryReason,
-    string? SummaryOutcome,
-    string? SummaryNarrative,
-    string[] SummaryActionItems,
-    double? QaScore,
-    double? QaMaxPossibleScore,
-    CallAnalyticsQaCriterionDto[] QaCriteria,
-    CallAnalyticsViolationDto[] Violations,
-    string? SentimentLabel,
-    string? SentimentTrend,
-    float? SentimentScore,
-    string? PrimaryTopic,
-    CallAnalyticsTopicMatchDto[] AllTopics,
-    double AgentTalkRatio,
-    int SilenceCount,
-    int InterruptionCount,
-    int AgentTurnCount,
-    int CallerTurnCount);
-
-internal sealed record CallAnalyticsQaCriterionDto(
-    string Category,
-    double Score,
-    double Weight,
-    bool Passed,
-    string? Feedback);
-
-internal sealed record CallAnalyticsViolationDto(
-    string RuleId,
-    string RuleName,
-    string Severity,
-    string Description,
-    string? Evidence,
-    int? TranscriptIndex);
-
-internal sealed record CallAnalyticsTopicMatchDto(
-    string TopicId,
-    string TopicName,
-    float Confidence);
 
 internal sealed record TopicTrendDto(
     string Topic,
@@ -340,3 +353,39 @@ internal sealed record TopicTrendDto(
 internal sealed record TopicTrendsResponse(
     TopicTrendDto[] Trends,
     int TotalAnalyzed);
+
+internal sealed record SentimentTrendPointDto(
+    DateTimeOffset BucketStart,
+    double? AvgSentimentScore,
+    int PositiveCount,
+    int NeutralCount,
+    int NegativeCount,
+    int TotalCount);
+
+internal sealed record SentimentTrendsResponse(
+    IReadOnlyList<SentimentTrendPointDto> Points,
+    string Bucket,
+    DateTimeOffset From,
+    DateTimeOffset To);
+
+internal sealed record ComplianceRuleSummaryDto(
+    string RuleId,
+    string RuleName,
+    string Severity,
+    int Occurrences,
+    int SessionsAffected,
+    DateTimeOffset FirstSeen,
+    DateTimeOffset LastSeen);
+
+internal sealed record ComplianceSeverityBreakdownDto(
+    int Info,
+    int Warning,
+    int Critical);
+
+internal sealed record ComplianceSummaryResponse(
+    IReadOnlyList<ComplianceRuleSummaryDto> Rules,
+    int TotalViolations,
+    int TotalSessionsWithViolations,
+    ComplianceSeverityBreakdownDto SeverityBreakdown,
+    DateTimeOffset From,
+    DateTimeOffset To);

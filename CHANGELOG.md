@@ -7,40 +7,42 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [1.9.3] — 2026-04-21 — "Call Analytics API" (Ω-1)
+## [1.9.3] — 2026-04-21 — Speech Analytics + Compliance Aggregations API
 
-Foundation for R4 Platform.Web Call Analytics materialization. Zero API
-surface breakage — additive endpoints only.
+Adds `/api/v1/call-analytics/*` endpoint group with aggregation-focused
+operations that complement the existing `/api/v1/analytics/qa` list+detail
+endpoints (which already expose Pro.CallAnalytics raw results):
 
 ### Added
 
-- **`GET /api/v1/call-analytics/results`** — paginated query of
-  `CallAnalysisResult` records. Supports `from`/`to`, `queueName`,
-  `agentId`, `minQaScore`/`maxQaScore`, `hasViolations`, `limit`
-  (max 200), `offset`. Returns `CallAnalyticsListResponse` with
-  lightweight `CallAnalyticsSummaryDto` items (sessionId, qaScore,
-  violationCount, primaryTopic, sentimentLabel, summaryText).
-- **`GET /api/v1/call-analytics/results/{sessionId}`** — full detail
-  for one session: QA criteria breakdown, all compliance violations
-  (with severity + evidence), all topic matches, sentiment trend +
-  score, conversation metrics (agentTalkRatio, silenceCount,
-  interruptionCount, turn counts).
-- **`GET /api/v1/call-analytics/topics/trends`** — in-memory
-  aggregation across up to 1000 results; returns top N topics
-  (default 10, max 50) sorted by occurrence count with average
-  confidence. Foundation for R4 Speech Analytics dashboard.
+- **`GET /api/v1/call-analytics/topics/trends`** — Speech Analytics: top
+  topics over a date range, sorted by occurrence count with average
+  confidence. Foundation for a supervisor-facing topic trends dashboard.
+- **`GET /api/v1/call-analytics/sentiment/trends`** — time-bucketed
+  (day or ISO week) sentiment aggregation: avg score + positive/neutral/
+  negative counts per bucket. Enables tracking tenant / queue sentiment
+  evolution over time.
+- **`GET /api/v1/call-analytics/compliance/summary`** — compliance
+  violations grouped by (RuleId, Severity) with occurrence +
+  sessions-affected counts + first/last seen timestamps + severity
+  breakdown totals. Compliance-officer view complementing the per-session
+  violations already in `/api/v1/analytics/qa` detail.
 - All three endpoints gated by `SupervisorPlus` authorization policy
-  and `LicenseFeature.Analytics` license gate. Graceful `503` when
+  and `LicenseFeature.Analytics` license gate. Returns `503` when
   `ICallAnalyticsStore` is not registered in DI.
-- `CallAnalyticsEndpoints.cs` — 9 new DTOs (`CallAnalyticsSummaryDto`,
-  `CallAnalyticsListResponse`, `CallAnalyticsDetailDto`,
-  `CallAnalyticsQaCriterionDto`, `CallAnalyticsViolationDto`,
-  `CallAnalyticsTopicMatchDto`, `TopicTrendDto`, `TopicTrendsResponse`)
-  registered in `ApiJsonContext` for AOT-safe serialization.
-- `CallAnalyticsEndpointTests.cs` — 9 new integration tests covering
-  empty list, limit/offset, date range filter, minQaScore filter,
-  404 on missing session, full detail mapping, topic trend aggregation,
+- `CallAnalyticsEndpoints.cs` — 7 AOT-safe DTOs (`TopicTrendDto`,
+  `TopicTrendsResponse`, `SentimentTrendPointDto`, `SentimentTrendsResponse`,
+  `ComplianceRuleSummaryDto`, `ComplianceSeverityBreakdownDto`,
+  `ComplianceSummaryResponse`) registered in `ApiJsonContext`.
+- `CallAnalyticsEndpointTests.cs` — 6 tests covering topic trend
+  aggregation, sentiment day-bucketing, queue filter acceptance,
+  compliance rule aggregation, severity filter, severity breakdown totals,
   and 401 auth guard.
+
+**Note** — an initial iteration of this endpoint group (shipped in
+commits ca84105 + bd5c498) duplicated the existing `/api/v1/analytics/qa`
+list+detail functionality and was refactored forward in this release to
+aggregations only. No duplicated routes ship in v1.9.3.
 
 ---
 

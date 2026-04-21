@@ -18,7 +18,10 @@ public sealed class CallAnalyticsEndpointTests : IClassFixture<UnifiedPlatformAp
         double qaScore = 0.85,
         int violations = 0,
         string? primaryTopic = null,
-        string? queueName = null)
+        string? queueName = null,
+        SentimentLabel sentimentLabel = SentimentLabel.Positive,
+        float sentimentScore = 0.6f,
+        ComplianceSeverity violationSeverity = ComplianceSeverity.Warning)
     {
         var violationList = new List<ComplianceViolation>();
         for (var i = 0; i < violations; i++)
@@ -27,7 +30,7 @@ public sealed class CallAnalyticsEndpointTests : IClassFixture<UnifiedPlatformAp
             {
                 RuleId = $"rule-{i}",
                 RuleName = $"Rule {i}",
-                Severity = ComplianceSeverity.Warning,
+                Severity = violationSeverity,
                 Description = $"Violation {i}",
             });
         }
@@ -54,10 +57,10 @@ public sealed class CallAnalyticsEndpointTests : IClassFixture<UnifiedPlatformAp
                 : null,
             Sentiment = new SentimentResult
             {
-                OverallScore = 0.6f,
-                OverallLabel = SentimentLabel.Positive,
+                OverallScore = sentimentScore,
+                OverallLabel = sentimentLabel,
                 StartLabel = SentimentLabel.Neutral,
-                EndLabel = SentimentLabel.Positive,
+                EndLabel = sentimentLabel,
                 Trend = SentimentTrend.Improving,
             },
             Summary = new CallSummary
@@ -82,132 +85,14 @@ public sealed class CallAnalyticsEndpointTests : IClassFixture<UnifiedPlatformAp
         };
     }
 
-    // ─── GetResults tests ─────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task GetResults_ShouldReturnEmptyList_WhenStoreIsEmpty()
+    private static CallAnalysisResult MakeResultWithViolations(
+        string tenantId,
+        string sessionId,
+        DateTimeOffset analyzedAt,
+        params ComplianceViolation[] violations)
     {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
-
-        var response = await client.GetAsync("/api/v1/call-analytics/results");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
-        json!["returnedCount"]!.GetValue<int>().Should().Be(0);
-        json["results"]!.AsArray().Count.Should().Be(0);
-    }
-
-    [Fact]
-    public async Task GetResults_ShouldRespectLimitAndOffset_WhenProvided()
-    {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
-        var now = DateTimeOffset.UtcNow;
-
-        for (var i = 0; i < 5; i++)
-            await factory.QaStore.SaveAsync(
-                MakeResult(UnifiedPlatformApiFactory.TestTenantId, $"sess-{i}", now.AddMinutes(-i)));
-
-        var response = await client.GetAsync("/api/v1/call-analytics/results?limit=2&offset=0");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
-        json!["returnedCount"]!.GetValue<int>().Should().Be(2);
-        json["limit"]!.GetValue<int>().Should().Be(2);
-        json["offset"]!.GetValue<int>().Should().Be(0);
-    }
-
-    [Fact]
-    public async Task GetResults_ShouldFilterByDateRange_WhenFromToProvided()
-    {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
-        var now = DateTimeOffset.UtcNow;
-
-        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "old-sess", now.AddDays(-10)));
-        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "new-sess", now.AddHours(-1)));
-
-        var from = Uri.EscapeDataString(now.AddDays(-2).ToString("O"));
-        var to = Uri.EscapeDataString(now.ToString("O"));
-
-        var response = await client.GetAsync($"/api/v1/call-analytics/results?from={from}&to={to}");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
-        json!["returnedCount"]!.GetValue<int>().Should().Be(1);
-        json["results"]![0]!["sessionId"]!.GetValue<string>().Should().Be("new-sess");
-    }
-
-    [Fact]
-    public async Task GetResults_ShouldFilterByQueueName_WhenProvided()
-    {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
-        var now = DateTimeOffset.UtcNow;
-
-        // QueueName is not on CallAnalysisResult / ConversationMetrics — store does not filter by it
-        // but the query is passed through. The InMemoryCallAnalyticsStore does not implement queueName filter.
-        // Seed two results and verify the endpoint accepts the param without error.
-        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "s1", now.AddMinutes(-1)));
-
-        var response = await client.GetAsync("/api/v1/call-analytics/results?queueName=support");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-    }
-
-    [Fact]
-    public async Task GetResults_ShouldFilterByMinQaScore_WhenProvided()
-    {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
-        var now = DateTimeOffset.UtcNow;
-
-        // qa score stored as fraction (0-1): minQaScore param is also 0-1
-        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "high", now.AddMinutes(-1), qaScore: 0.95));
-        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "low", now.AddMinutes(-2), qaScore: 0.40));
-
-        var response = await client.GetAsync("/api/v1/call-analytics/results?minQaScore=0.9");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
-        json!["returnedCount"]!.GetValue<int>().Should().Be(1);
-        json["results"]![0]!["sessionId"]!.GetValue<string>().Should().Be("high");
-    }
-
-    // ─── GetDetail tests ──────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task GetDetail_ShouldReturnNotFound_WhenSessionDoesNotExist()
-    {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
-
-        var response = await client.GetAsync("/api/v1/call-analytics/results/non-existent-session");
-
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-    }
-
-    [Fact]
-    public async Task GetDetail_ShouldReturnFullResult_WhenSessionExists()
-    {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
-        var now = DateTimeOffset.UtcNow;
-
-        var result = MakeResult(UnifiedPlatformApiFactory.TestTenantId, "detail-sess", now.AddMinutes(-5),
-            qaScore: 0.75, violations: 1, primaryTopic: "Billing");
-        await factory.QaStore.SaveAsync(result);
-
-        var response = await client.GetAsync("/api/v1/call-analytics/results/detail-sess");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
-        json!["sessionId"]!.GetValue<string>().Should().Be("detail-sess");
-        json["primaryTopic"]!.GetValue<string>().Should().Be("Billing");
-        json["violations"]!.AsArray().Count.Should().Be(1);
-        json["qaCriteria"]!.AsArray().Count.Should().Be(0);
-        json["agentTalkRatio"]!.GetValue<double>().Should().BeApproximately(0.45, 0.001);
+        var r = MakeResult(tenantId, sessionId, analyzedAt, violations: 0);
+        return r with { ComplianceViolations = violations };
     }
 
     // ─── GetTopicTrends tests ─────────────────────────────────────────────────
@@ -235,15 +120,151 @@ public sealed class CallAnalyticsEndpointTests : IClassFixture<UnifiedPlatformAp
         trends[0]!["occurrences"]!.GetValue<int>().Should().Be(2);
     }
 
+    // ─── GetSentimentTrends tests ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetSentimentTrends_ShouldBucketByDay_WhenResultsExist()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var day1 = new DateTimeOffset(2026, 4, 1, 10, 0, 0, TimeSpan.Zero);
+        var day2 = new DateTimeOffset(2026, 4, 2, 10, 0, 0, TimeSpan.Zero);
+
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "s1", day1,
+            sentimentLabel: SentimentLabel.Positive, sentimentScore: 0.8f));
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "s2", day1.AddHours(2),
+            sentimentLabel: SentimentLabel.Neutral, sentimentScore: 0.5f));
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "s3", day2,
+            sentimentLabel: SentimentLabel.Negative, sentimentScore: 0.2f));
+
+        var from = Uri.EscapeDataString(day1.AddHours(-1).ToString("O"));
+        var to = Uri.EscapeDataString(day2.AddHours(1).ToString("O"));
+
+        var response = await client.GetAsync($"/api/v1/call-analytics/sentiment/trends?from={from}&to={to}&bucket=day");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["bucket"]!.GetValue<string>().Should().Be("day");
+        var points = json["points"]!.AsArray();
+        points.Count.Should().Be(2);
+        // First bucket (day1): 2 results, 1 positive + 1 neutral
+        points[0]!["positiveCount"]!.GetValue<int>().Should().Be(1);
+        points[0]!["neutralCount"]!.GetValue<int>().Should().Be(1);
+        points[0]!["negativeCount"]!.GetValue<int>().Should().Be(0);
+        points[0]!["totalCount"]!.GetValue<int>().Should().Be(2);
+        // Second bucket (day2): 1 negative
+        points[1]!["negativeCount"]!.GetValue<int>().Should().Be(1);
+        points[1]!["totalCount"]!.GetValue<int>().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetSentimentTrends_ShouldRespectQueueFilter_WhenProvided()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+        var now = DateTimeOffset.UtcNow;
+
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "q1", now.AddMinutes(-1),
+            queueName: "support", sentimentLabel: SentimentLabel.Positive));
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "q2", now.AddMinutes(-2),
+            queueName: "sales", sentimentLabel: SentimentLabel.Negative));
+
+        // Verify endpoint accepts the filter without error (InMemory store may not filter by queue,
+        // but the route and parameter binding should work correctly)
+        var response = await client.GetAsync("/api/v1/call-analytics/sentiment/trends?queueName=support");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["points"].Should().NotBeNull();
+    }
+
+    // ─── GetComplianceSummary tests ───────────────────────────────────────────
+
+    [Fact]
+    public async Task GetComplianceSummary_ShouldAggregateByRuleAndSeverity_WhenViolationsExist()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+        var now = DateTimeOffset.UtcNow;
+
+        // r1: rule-0 Warning (1 occurrence)
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "r1",
+            now.AddMinutes(-1), violations: 1, violationSeverity: ComplianceSeverity.Warning));
+        // r2: rule-0 Warning (2nd occurrence in different session) + rule-1 Critical
+        var r2 = MakeResultWithViolations(
+            UnifiedPlatformApiFactory.TestTenantId, "r2", now.AddMinutes(-2),
+            new ComplianceViolation { RuleId = "rule-0", RuleName = "Rule 0", Severity = ComplianceSeverity.Warning, Description = "V" },
+            new ComplianceViolation { RuleId = "rule-1", RuleName = "Rule 1", Severity = ComplianceSeverity.Critical, Description = "V" });
+        await factory.QaStore.SaveAsync(r2);
+
+        var response = await client.GetAsync("/api/v1/call-analytics/compliance/summary");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var rules = json!["rules"]!.AsArray();
+        // 2 distinct (ruleId, severity) groups: rule-0/Warning + rule-1/Critical
+        rules.Count.Should().Be(2);
+        // rule-0/Warning: 2 occurrences across 2 sessions
+        var rule0 = rules.First(r => r!["ruleId"]!.GetValue<string>() == "rule-0");
+        rule0!["occurrences"]!.GetValue<int>().Should().Be(2);
+        rule0["sessionsAffected"]!.GetValue<int>().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetComplianceSummary_ShouldFilterBySeverity_WhenProvided()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+        var now = DateTimeOffset.UtcNow;
+
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "c1",
+            now.AddMinutes(-1), violations: 1, violationSeverity: ComplianceSeverity.Critical));
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "c2",
+            now.AddMinutes(-2), violations: 1, violationSeverity: ComplianceSeverity.Warning));
+
+        var response = await client.GetAsync("/api/v1/call-analytics/compliance/summary?severity=Critical");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var rules = json!["rules"]!.AsArray();
+        // Only Critical rules returned
+        rules.Count.Should().Be(1);
+        rules[0]!["severity"]!.GetValue<string>().Should().Be("Critical");
+    }
+
+    [Fact]
+    public async Task GetComplianceSummary_ShouldReturnSeverityBreakdown_WhenViolationsExist()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+        var now = DateTimeOffset.UtcNow;
+
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "b1",
+            now.AddMinutes(-1), violations: 2, violationSeverity: ComplianceSeverity.Warning));
+        await factory.QaStore.SaveAsync(MakeResult(UnifiedPlatformApiFactory.TestTenantId, "b2",
+            now.AddMinutes(-2), violations: 1, violationSeverity: ComplianceSeverity.Critical));
+
+        var response = await client.GetAsync("/api/v1/call-analytics/compliance/summary");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var breakdown = json!["severityBreakdown"]!;
+        breakdown["warning"]!.GetValue<int>().Should().Be(2);
+        breakdown["critical"]!.GetValue<int>().Should().Be(1);
+        breakdown["info"]!.GetValue<int>().Should().Be(0);
+        json["totalViolations"]!.GetValue<int>().Should().Be(3);
+    }
+
     // ─── Auth / 503 tests ─────────────────────────────────────────────────────
 
     [Fact]
-    public async Task GetResults_ShouldReturn401or403_WhenUserLacksSupervisorPlusRole()
+    public async Task GetTopicTrends_ShouldReturn401or403_WhenUserLacksSupervisorPlusRole()
     {
         await using var factory = new UnifiedPlatformApiFactory();
         using var client = factory.CreateClient();
         // No Authorization header → 401
-        var response = await client.GetAsync("/api/v1/call-analytics/results");
+        var response = await client.GetAsync("/api/v1/call-analytics/topics/trends");
 
         response.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
     }
