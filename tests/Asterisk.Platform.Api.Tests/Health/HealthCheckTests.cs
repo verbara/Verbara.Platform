@@ -1,9 +1,17 @@
 using Asterisk.Platform.Api.Health;
+using Microsoft.Extensions.Options;
 
 namespace Asterisk.Platform.Api.Tests.Health;
 
 public class HealthCheckTests
 {
+    private static BackgroundServiceHealthCheck BuildCheck(ServiceHeartbeat heartbeat)
+    {
+        var observer = new ResilienceStateObserver();
+        var options = Options.Create(new PlatformHealthCheckOptions());
+        return new BackgroundServiceHealthCheck(heartbeat, observer, options);
+    }
+
     // ── ServiceHeartbeat ─────────────────────────────────────────────────────────
 
     [Fact]
@@ -57,9 +65,9 @@ public class HealthCheckTests
     public async Task BackgroundServiceHealthCheck_ShouldReturnHealthy_WhenNoServicesRegistered()
     {
         var heartbeat = new ServiceHeartbeat();
-        var check = new BackgroundServiceHealthCheck(heartbeat);
+        var check = BuildCheck(heartbeat);
 
-        var result = await check.CheckHealthAsync(null!);
+        var result = await check.CheckHealthAsync(new Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext());
 
         result.Status.Should().Be(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy);
     }
@@ -70,9 +78,9 @@ public class HealthCheckTests
         var heartbeat = new ServiceHeartbeat();
         heartbeat.RecordTick("Worker1", TimeSpan.FromSeconds(10));
         heartbeat.RecordTick("Worker2", TimeSpan.FromSeconds(10));
-        var check = new BackgroundServiceHealthCheck(heartbeat);
+        var check = BuildCheck(heartbeat);
 
-        var result = await check.CheckHealthAsync(null!);
+        var result = await check.CheckHealthAsync(new Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext());
 
         result.Status.Should().Be(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy);
     }
