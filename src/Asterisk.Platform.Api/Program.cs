@@ -66,6 +66,7 @@ using Asterisk.Sdk.Push.Hosting;
 using Asterisk.Sdk.Push.Authz;
 using Asterisk.Sdk.Pro.Push.SignalR.DependencyInjection;
 using Asterisk.Sdk.Pro.Push.SignalR.Hubs;
+using Asterisk.Sdk.Pro.Push.SignalR.Bridges;
 using Asterisk.Platform.Api.Hubs;
 using Asterisk.Sdk.OpenTelemetry;
 using Asterisk.Sdk.Pro.OpenTelemetry;
@@ -93,6 +94,17 @@ builder.Services.AddAsteriskProPushSignalR(o =>
     if (!string.IsNullOrEmpty(clusterNodeId))
         o.NodeId = clusterNodeId;
 });
+// T27 event bridges (v1.8.0-pro): opt-in HostedServices that publish cluster /
+// conversation / agent state transitions to IPushEventBus so cross-node consumers
+// (SignalR clients, webhook subscribers, SSE listeners) observe state changes in
+// real time. Each bridge throttles per key (node/conversation/agent) — see
+// BridgeOptions for tuning knobs. DefaultTenantId only applies when ambient
+// TenantContext.Current is unset (background SDK events without a request scope).
+builder.Services
+    .WithClusterEventBridge()
+    .WithConversationBridge(opt => opt.DefaultTenantId = "default-tenant")
+    .WithAgentBridge();
+
 // Override the SDK default AllowAllSubscriptionAuthorizer with RBAC-aware authorizer.
 builder.Services.AddSingleton<ISubscriptionAuthorizer, RbacSubscriptionAuthorizer>();
 // Replace Pro.Push.SignalR's NotImplementedSupervisorCoordinator default with the
