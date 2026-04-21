@@ -7,6 +7,97 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.9.2] — 2026-04-21 — "Hardening Follow-Through" (R3c)
+
+Closes the five orthogonal security / compatibility concerns that v1.9.0
+and v1.9.1 audits explicitly deferred to this patch. Zero API surface
+breakage — ships safely in parallel with R4 Platform.Web.
+
+### Security
+
+- **JWT tokens now carry `jti` claims** (`GenerateAccessToken` +
+  `GenerateImpersonationToken`). Enables future revocation flows via
+  the new `IJtiRevocationCache` (in-memory impl shipped;
+  `ValidateTokenAsync` consults the cache after standard validation
+  and returns `null` for revoked tokens).
+- **Signing key is now wrapped at rest via `DataProtection`.** Existing
+  deployments with plaintext `jwt-signing-key.xml` are migrated silently
+  on first restart — the file is read, re-encrypted, and overwritten.
+  No config change required.
+- **`kid` header is now derived from the key fingerprint**
+  (`platform-jwt-<16 hex>` from SHA-256 of the public modulus). Survives
+  restarts, changes on key rotation.
+- **Removed the `?token=` query-string fallback in
+  `ApiKeyAuthenticationHandler`.** API keys must now be presented via
+  the `Authorization: Bearer` header only. Key leakage via access logs,
+  referer headers, and browser history is blocked.
+- **OIDC callback now enforces tenant MFA policy** before issuing
+  tokens. Two new redirect branches:
+  - `#oidc_mfa_enrollment_required&...` when the policy requires MFA
+    for the user's role but the user has not enrolled.
+  - `#oidc_mfa_challenge&challenge_token=...` when the user is enrolled
+    and must complete TOTP verification; the existing
+    `/auth/mfa/verify` endpoint handles the challenge unchanged.
+  Frontend fragment handlers are needed to surface these redirects to
+  the user — R4 Platform.Web will land the UI side.
+- **`/auth/change-password` now requires MFA step-up** when the user
+  has MFA enrolled. `ChangePasswordRequest` gains an optional `MfaCode`
+  field; when the user has MFA enabled and the code is missing, the
+  endpoint returns 401 with a new `MfaStepUpRequiredResponse` body
+  (`{ mfaStepUpRequired: true, reason: "…" }`). An invalid code
+  returns 401. MFA is checked before the old-password verification to
+  avoid burning the password-guess budget on a pre-MFA attack.
+
+### Changed
+
+- **`IMfaPolicyEvaluator`** extracted from `AuthEndpoints`'
+  private static helper. Now lives in `Asterisk.Platform.Identity.Mfa`
+  and is injected into `AuthEndpoints.Login`, `AuthEndpoints.Refresh`,
+  `AuthEndpoints.ApiKeyLogin`, and `OidcEndpoints.OidcCallback`.
+  Behavior identical to v1.9.0 / v1.9.1 — this is a pure refactor that
+  opens the extension point for policy overrides.
+- **`IMfaPendingCache` + `IPasswordResetCache`** extracted from the
+  static `ConcurrentDictionary` fields in `AuthEndpoints`. In-memory
+  implementations in `Asterisk.Platform.Identity.Mfa` preserve the
+  previous semantics; `TakeAsync` atomically removes-and-returns.
+  `MfaPendingEntry` and `PasswordResetEntry` records move from
+  `internal` in `Asterisk.Platform.Api` to `public` in
+  `Asterisk.Platform.Identity.Mfa`.
+
+### Added
+
+- **Asterisk 23 Standard build support** — `docker/Dockerfile.asterisk`
+  now accepts an `ASTERISK_VERSION` build argument (default 22), and
+  `docker-compose.full.yml` forwards it via `ASTERISK_VERSION` env var.
+  The codec_opus download URL + directory name are parameterized.
+  Default behavior is unchanged: `docker compose up --build` still
+  builds Asterisk 22 LTS. Test both with
+  `ASTERISK_VERSION=23 docker compose -f docker/docker-compose.full.yml build asterisk`.
+- **Interface contract tests** for `InMemoryMfaPendingCache`,
+  `InMemoryPasswordResetCache`, and `InMemoryJtiRevocationCache` in
+  `Asterisk.Platform.Identity.Tests` and `Asterisk.Platform.Api.Tests`.
+
+### Known limitations / deferred
+
+- **No Redis-backed cache implementation yet.** `IMfaPendingCache` and
+  `IPasswordResetCache` create the extension point; Redis wiring lands
+  in v1.9.3 when a concrete multi-instance deployment driver emerges.
+  Until then, MFA challenges initiated on one instance will not be
+  redeemable on another if a failover occurs mid-flow.
+- **Full multi-key JWT rotation** (simultaneous old + new valid keys
+  during a rolling window) is not included. `kid` is fingerprint-based
+  so it survives restarts, but key rotation still requires an
+  in-flight-tokens flush. Full rotation deferred to v1.10+.
+
+### Tests
+
+- +22 new tests (8 JWT hardening, 3 IMfaPolicyEvaluator, 3 OIDC MFA
+  enforcement, 4 ChangePassword step-up, 8 in-memory cache contract,
+  minus 4 test consolidations from the Frente C + E test-harness moves).
+  All non-Postgres assemblies green — 0 failures, 0 warnings.
+
+---
+
 ## [1.9.1] — 2026-04-21 — "Resilience Coverage" (R3b)
 
 Horizontal completion of v1.9.0's Resilience MVP. Every remaining
