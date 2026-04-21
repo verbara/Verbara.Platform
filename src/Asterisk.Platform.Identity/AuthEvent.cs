@@ -29,6 +29,18 @@ public static class AuthEventTypes
     public const string PasswordResetRequest = "password_reset_request";
     public const string ImpersonationStarted = "impersonation_started";
     public const string ImpersonationEnded = "impersonation_ended";
+
+    /// <summary>Written to the TARGET tenant's audit log when a platform/parent admin
+    /// begins impersonating into it. Gives target-tenant admins visibility of who
+    /// accessed their tenant via impersonation. See P0 hierarchy check (v1.9.0).</summary>
+    public const string ImpersonationTargetAccessed = "impersonation_target_accessed";
+
+    /// <summary>Written to the CALLER's audit log when an impersonation attempt is
+    /// rejected because the target tenant is not in the caller's hierarchy. This is
+    /// a security-critical event (privilege escalation attempt). Severity: error.
+    /// See P0 hierarchy check (v1.9.0).</summary>
+    public const string ImpersonationPrivilegeEscalationAttempted = "impersonation_privilege_escalation_attempted";
+
     public const string OidcLoginSuccess = "oidc_login_success";
     public const string OidcLoginFailure = "oidc_login_failure";
 }
