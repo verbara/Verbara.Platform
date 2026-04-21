@@ -4,12 +4,20 @@ using Asterisk.Platform.Core;
 using Asterisk.Platform.Routing.Inbound;
 using Asterisk.Platform.Switchboard;
 using Asterisk.Sdk.Pro.MultiTenant;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace Asterisk.Platform.Api.Services;
 
 internal sealed partial class QueueDistributionWorker : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the per-tick <see cref="ResiliencePolicy"/> that wraps each
+    /// distribution pass. Circuit-open skips the current tick; the next timer tick retries.
+    /// </summary>
+    public const string ResiliencePolicyKey = "worker.queue-distribution";
+
     private readonly IConversationStore _conversationStore;
     private readonly ITenantStore _tenantStore;
     private readonly IAgentSelector _agentSelector;
@@ -18,6 +26,7 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
     private readonly IClock _clock;
     private readonly IServiceHeartbeat _heartbeat;
     private readonly DistributionOptions _options;
+    private readonly ResiliencePolicy _policy;
     private readonly ILogger<QueueDistributionWorker> _logger;
 
     public QueueDistributionWorker(
@@ -29,7 +38,8 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
         IClock clock,
         IServiceHeartbeat heartbeat,
         IOptions<DistributionOptions> options,
-        ILogger<QueueDistributionWorker> logger)
+        ILogger<QueueDistributionWorker> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _conversationStore = conversationStore;
         _tenantStore = tenantStore;
@@ -40,6 +50,7 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
         _heartbeat = heartbeat;
         _options = options.Value;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -54,7 +65,19 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
             _heartbeat.RecordTick(nameof(QueueDistributionWorker), pollInterval);
             try
             {
-                await DistributeAsync(stoppingToken);
+                await _policy.ExecuteAsync(
+                    ResiliencePolicyKey,
+                    async innerCt =>
+                    {
+                        await DistributeAsync(innerCt);
+                        return 0;
+                    },
+                    stoppingToken);
+            }
+            catch (CircuitBreakerOpenException)
+            {
+                // Circuit open — skip this tick, next timer tick retries.
+                LogCircuitOpen();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -119,4 +142,8 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Distribution cycle failed")]
     private partial void LogDistributionError(Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Circuit open for worker.queue-distribution — skipping tick")]
+    private partial void LogCircuitOpen();
 }

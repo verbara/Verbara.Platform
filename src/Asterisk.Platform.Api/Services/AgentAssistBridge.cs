@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.AgentAssist.Engine;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Api.Services;
 
@@ -10,8 +12,16 @@ namespace Asterisk.Platform.Api.Services;
 /// </summary>
 public sealed partial class AgentAssistBridge : IHostedService, IDisposable
 {
+    /// <summary>
+    /// Keyed-service name for the per-event <see cref="ResiliencePolicy"/> that wraps each
+    /// observable publish pass. In-memory bus means the policy rarely fires, but it protects
+    /// against downstream observable throws from poisoning the subscription.
+    /// </summary>
+    public const string ResiliencePolicyKey = "worker.agent-assist-bridge";
+
     private readonly AgentAssistSupervisor _supervisor;
     private readonly PlatformEventBus _eventBus;
+    private readonly ResiliencePolicy _policy;
     private readonly ILogger<AgentAssistBridge> _logger;
 
     // Per-session composite subscription (4 observables per session)
@@ -23,11 +33,13 @@ public sealed partial class AgentAssistBridge : IHostedService, IDisposable
     public AgentAssistBridge(
         AgentAssistSupervisor supervisor,
         PlatformEventBus eventBus,
-        ILogger<AgentAssistBridge> logger)
+        ILogger<AgentAssistBridge> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _supervisor = supervisor;
         _eventBus = eventBus;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -50,10 +62,9 @@ public sealed partial class AgentAssistBridge : IHostedService, IDisposable
         var agentId   = session.CallSession?.AgentId?.ToString()  ?? string.Empty;
 
         var suggestionSub = session.Suggestions.Subscribe(s =>
-        {
-            try
-            {
-                _eventBus.Publish(new AgentAssistSuggestionEvent(
+            _ = PublishWithPolicyAsync(
+                sessionId,
+                () => _eventBus.Publish(new AgentAssistSuggestionEvent(
                     tenantId,
                     sessionId,
                     agentId,
@@ -61,68 +72,45 @@ public sealed partial class AgentAssistBridge : IHostedService, IDisposable
                     s.Text,
                     s.Priority.ToString(),
                     s.Source.ToString(),
-                    s.TriggerPhrase));
-            }
-            catch (Exception ex)
-            {
-                Log.PublishSuggestionFailed(_logger, sessionId, ex);
-            }
-        });
+                    s.TriggerPhrase)),
+                Log.PublishSuggestionFailed));
 
         var sentimentSub = session.Sentiment.Subscribe(r =>
-        {
-            try
-            {
-                _eventBus.Publish(new AgentAssistSentimentEvent(
+            _ = PublishWithPolicyAsync(
+                sessionId,
+                () => _eventBus.Publish(new AgentAssistSentimentEvent(
                     tenantId,
                     sessionId,
                     agentId,
                     r.Speaker.ToString(),
                     r.Score,
                     r.Label.ToString(),
-                    r.TriggerWords));
-            }
-            catch (Exception ex)
-            {
-                Log.PublishSentimentFailed(_logger, sessionId, ex);
-            }
-        });
+                    r.TriggerWords)),
+                Log.PublishSentimentFailed));
 
         var complianceSub = session.ComplianceAlerts.Subscribe(a =>
-        {
-            try
-            {
-                _eventBus.Publish(new AgentAssistComplianceAlertEvent(
+            _ = PublishWithPolicyAsync(
+                sessionId,
+                () => _eventBus.Publish(new AgentAssistComplianceAlertEvent(
                     tenantId,
                     sessionId,
                     agentId,
                     a.RuleId,
                     a.Phrase,
-                    a.Severity.ToString()));
-            }
-            catch (Exception ex)
-            {
-                Log.PublishComplianceAlertFailed(_logger, sessionId, ex);
-            }
-        });
+                    a.Severity.ToString())),
+                Log.PublishComplianceAlertFailed));
 
         var transcriptSub = session.Transcripts.Subscribe(t =>
-        {
-            try
-            {
-                _eventBus.Publish(new AgentAssistTranscriptEvent(
+            _ = PublishWithPolicyAsync(
+                sessionId,
+                () => _eventBus.Publish(new AgentAssistTranscriptEvent(
                     tenantId,
                     sessionId,
                     agentId,
                     t.Speaker.ToString(),
                     t.Text,
-                    IsFinal: true));
-            }
-            catch (Exception ex)
-            {
-                Log.PublishTranscriptFailed(_logger, sessionId, ex);
-            }
-        });
+                    IsFinal: true)),
+                Log.PublishTranscriptFailed));
 
         // Combine all 4 subscriptions into a single disposable so cleanup is atomic
         var composite = new CompositeDisposable(suggestionSub, sentimentSub, complianceSub, transcriptSub);
@@ -133,6 +121,32 @@ public sealed partial class AgentAssistBridge : IHostedService, IDisposable
     {
         if (_sessionSubs.TryRemove(session.SessionId, out var subs))
             subs.Dispose();
+    }
+
+    internal async Task PublishWithPolicyAsync(
+        string sessionId,
+        Action publish,
+        Action<ILogger, string, Exception> onError)
+    {
+        try
+        {
+            await _policy.ExecuteAsync(
+                ResiliencePolicyKey,
+                innerCt =>
+                {
+                    publish();
+                    return ValueTask.FromResult(0);
+                },
+                CancellationToken.None);
+        }
+        catch (CircuitBreakerOpenException)
+        {
+            Log.CircuitOpen(_logger, sessionId);
+        }
+        catch (Exception ex)
+        {
+            onError(_logger, sessionId, ex);
+        }
     }
 
     public void Dispose()
@@ -159,6 +173,10 @@ public sealed partial class AgentAssistBridge : IHostedService, IDisposable
 
         [LoggerMessage(Level = LogLevel.Warning, Message = "[AgentAssistBridge] Error publishing transcript for session {SessionId}")]
         public static partial void PublishTranscriptFailed(ILogger logger, string sessionId, Exception exception);
+
+        [LoggerMessage(Level = LogLevel.Debug,
+            Message = "[AgentAssistBridge] Circuit open for worker.agent-assist-bridge — dropping event for session {SessionId}")]
+        public static partial void CircuitOpen(ILogger logger, string sessionId);
     }
 
     /// <summary>Composes multiple <see cref="IDisposable"/> instances into one.</summary>

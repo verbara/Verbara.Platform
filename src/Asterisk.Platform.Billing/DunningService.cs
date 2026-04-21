@@ -1,5 +1,6 @@
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.MultiTenant;
+using Asterisk.Sdk.Resilience;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -9,18 +10,27 @@ namespace Asterisk.Platform.Billing;
 
 public sealed partial class DunningService : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the per-cycle <see cref="ResiliencePolicy"/> that wraps each
+    /// dunning pass. Circuit-open skips the current cycle; the next hourly tick retries.
+    /// </summary>
+    public const string ResiliencePolicyKey = "worker.dunning";
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DunningService> _logger;
     private readonly DunningConfig _config;
+    private readonly ResiliencePolicy _policy;
 
     public DunningService(
         IServiceScopeFactory scopeFactory,
         ILogger<DunningService> logger,
-        IOptions<DunningConfig> config)
+        IOptions<DunningConfig> config,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
         _config = config.Value;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -29,9 +39,25 @@ public sealed partial class DunningService : BackgroundService
         {
             try
             {
-                await ProcessDunningCycleAsync(stoppingToken);
+                await _policy.ExecuteAsync(
+                    ResiliencePolicyKey,
+                    async innerCt =>
+                    {
+                        await ProcessDunningCycleAsync(innerCt);
+                        return 0;
+                    },
+                    stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (CircuitBreakerOpenException)
+            {
+                // Circuit open — skip this cycle, next hourly tick retries.
+                LogCircuitOpen(_logger);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
             {
                 LogDunningCycleFailed(_logger, ex);
             }
@@ -166,4 +192,8 @@ public sealed partial class DunningService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Lifecycle handler failed during dunning suspension for {TenantId}")]
     private static partial void LogLifecycleHandlerFailed(ILogger logger, string tenantId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Circuit open for worker.dunning — skipping cycle")]
+    private static partial void LogCircuitOpen(ILogger logger);
 }

@@ -4,7 +4,9 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Conversations.Stores;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Asterisk.Sdk.Resilience;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -12,6 +14,13 @@ namespace Asterisk.Platform.Api.Services;
 
 internal sealed partial class RetentionPurgeService : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the per-cycle <see cref="ResiliencePolicy"/> that wraps each
+    /// retention purge pass. Uses DB-heavy budget (long timeout, 1 retry) — circuit-open
+    /// skips the current cycle; the next daily tick retries.
+    /// </summary>
+    public const string ResiliencePolicyKey = "worker.retention-purge";
+
     private readonly ITenantRetentionPolicyStore _policyStore;
     private readonly IConversationStore _conversationStore;
     private readonly IMessageStore _messageStore;
@@ -20,6 +29,7 @@ internal sealed partial class RetentionPurgeService : BackgroundService
     private readonly IUsageRecordStore _usageRecordStore;
     private readonly IPurgeLogStore _purgeLogStore;
     private readonly IClock _clock;
+    private readonly ResiliencePolicy _policy;
     private readonly ILogger<RetentionPurgeService> _logger;
     private readonly TimeSpan _interval;
 
@@ -33,7 +43,8 @@ internal sealed partial class RetentionPurgeService : BackgroundService
         IPurgeLogStore purgeLogStore,
         IClock clock,
         ILogger<RetentionPurgeService> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _policyStore = policyStore;
         _conversationStore = conversationStore;
@@ -44,6 +55,7 @@ internal sealed partial class RetentionPurgeService : BackgroundService
         _purgeLogStore = purgeLogStore;
         _clock = clock;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
 
         var hoursStr = configuration["Retention:PurgeIntervalHours"];
         var hours = int.TryParse(hoursStr, out var h) ? h : 24;
@@ -59,7 +71,18 @@ internal sealed partial class RetentionPurgeService : BackgroundService
         {
             try
             {
-                await RunRetentionPurgeAsync(stoppingToken);
+                await _policy.ExecuteAsync(
+                    ResiliencePolicyKey,
+                    async innerCt =>
+                    {
+                        await RunRetentionPurgeAsync(innerCt);
+                        return 0;
+                    },
+                    stoppingToken);
+            }
+            catch (CircuitBreakerOpenException)
+            {
+                LogCircuitOpen();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -159,4 +182,8 @@ internal sealed partial class RetentionPurgeService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Retention purge cycle failed")]
     private partial void LogRetentionError(Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Circuit open for worker.retention-purge — skipping cycle")]
+    private partial void LogCircuitOpen();
 }

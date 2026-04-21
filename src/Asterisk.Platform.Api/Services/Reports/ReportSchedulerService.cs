@@ -3,6 +3,7 @@ using Asterisk.Platform.Core;
 using Asterisk.Platform.Core.Branding;
 using Asterisk.Platform.Core.Email;
 using Asterisk.Platform.Core.Reports;
+using Asterisk.Sdk.Resilience;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NCrontab;
@@ -11,6 +12,12 @@ namespace Asterisk.Platform.Api.Services.Reports;
 
 internal sealed partial class ReportSchedulerService : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the per-tick <see cref="ResiliencePolicy"/> that wraps the
+    /// scheduler pass (DB query + fan-out). Circuit-open skips the current tick.
+    /// </summary>
+    public const string ResiliencePolicyKey = "worker.report-scheduler";
+
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(30);
 
@@ -24,6 +31,7 @@ internal sealed partial class ReportSchedulerService : BackgroundService
     private readonly IAuditService _auditService;
     private readonly IClock _clock;
     private readonly SmtpOptions _smtpOptions;
+    private readonly ResiliencePolicy _policy;
     private readonly ILogger<ReportSchedulerService> _logger;
     private readonly SemaphoreSlim _concurrencyLimiter = new(3, 3);
 
@@ -38,7 +46,8 @@ internal sealed partial class ReportSchedulerService : BackgroundService
         IAuditService auditService,
         IClock clock,
         IOptions<SmtpOptions> smtpOptions,
-        ILogger<ReportSchedulerService> logger)
+        ILogger<ReportSchedulerService> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _store = store;
         _registry = registry;
@@ -51,6 +60,7 @@ internal sealed partial class ReportSchedulerService : BackgroundService
         _clock = clock;
         _smtpOptions = smtpOptions.Value;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -61,7 +71,18 @@ internal sealed partial class ReportSchedulerService : BackgroundService
         {
             try
             {
-                await RunSchedulerTickAsync(stoppingToken);
+                await _policy.ExecuteAsync(
+                    ResiliencePolicyKey,
+                    async innerCt =>
+                    {
+                        await RunSchedulerTickAsync(innerCt);
+                        return 0;
+                    },
+                    stoppingToken);
+            }
+            catch (CircuitBreakerOpenException)
+            {
+                LogCircuitOpen();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -301,4 +322,8 @@ internal sealed partial class ReportSchedulerService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Report scheduler tick failed")]
     private partial void LogTickError(Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Circuit open for worker.report-scheduler — skipping tick")]
+    private partial void LogCircuitOpen();
 }

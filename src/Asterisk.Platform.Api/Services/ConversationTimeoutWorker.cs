@@ -3,12 +3,21 @@ using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Switchboard;
 using Asterisk.Sdk.Pro.MultiTenant;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace Asterisk.Platform.Api.Services;
 
 internal sealed partial class ConversationTimeoutWorker : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the per-tick <see cref="ResiliencePolicy"/> that wraps each
+    /// timeout-processing pass. Circuit-open skips the current tick; the next timer tick
+    /// retries automatically.
+    /// </summary>
+    public const string ResiliencePolicyKey = "worker.conversation-timeout";
+
     private readonly IConversationStore _conversationStore;
     private readonly ITenantStore _tenantStore;
     private readonly IConversationSwitchboard _switchboard;
@@ -16,6 +25,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     private readonly IClock _clock;
     private readonly IServiceHeartbeat _heartbeat;
     private readonly DistributionOptions _options;
+    private readonly ResiliencePolicy _policy;
     private readonly ILogger<ConversationTimeoutWorker> _logger;
 
     public ConversationTimeoutWorker(
@@ -26,7 +36,8 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         IClock clock,
         IServiceHeartbeat heartbeat,
         IOptions<DistributionOptions> options,
-        ILogger<ConversationTimeoutWorker> logger)
+        ILogger<ConversationTimeoutWorker> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _conversationStore = conversationStore;
         _tenantStore = tenantStore;
@@ -36,6 +47,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         _heartbeat = heartbeat;
         _options = options.Value;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -49,7 +61,19 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             _heartbeat.RecordTick(nameof(ConversationTimeoutWorker), TimeSpan.FromSeconds(5));
             try
             {
-                await ProcessTimeoutsAsync(stoppingToken);
+                await _policy.ExecuteAsync(
+                    ResiliencePolicyKey,
+                    async innerCt =>
+                    {
+                        await ProcessTimeoutsAsync(innerCt);
+                        return 0;
+                    },
+                    stoppingToken);
+            }
+            catch (CircuitBreakerOpenException)
+            {
+                // Circuit open — skip this tick, next timer tick retries.
+                LogCircuitOpen();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -166,4 +190,8 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Conversation timeout cycle failed")]
     private partial void LogTimeoutCycleError(Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Circuit open for worker.conversation-timeout — skipping tick")]
+    private partial void LogCircuitOpen();
 }

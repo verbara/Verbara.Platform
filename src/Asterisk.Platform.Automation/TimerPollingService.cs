@@ -1,4 +1,6 @@
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -6,24 +8,33 @@ namespace Asterisk.Platform.Automation;
 
 public sealed partial class TimerPollingService : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the per-tick <see cref="ResiliencePolicy"/> that wraps each
+    /// timer-polling pass. Circuit-open skips the current tick; the next 15s tick retries.
+    /// </summary>
+    public const string ResiliencePolicyKey = "worker.timer-polling";
+
     private const int TimerPollIntervalSeconds = 15;
     private const int TimerBatchLimit = 50;
 
     private readonly ITimerStore _timerStore;
     private readonly IAutomationEngine _automationEngine;
     private readonly IClock _clock;
+    private readonly ResiliencePolicy _policy;
     private readonly ILogger<TimerPollingService> _logger;
 
     public TimerPollingService(
         ITimerStore timerStore,
         IAutomationEngine automationEngine,
         IClock clock,
-        ILogger<TimerPollingService> logger)
+        ILogger<TimerPollingService> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _timerStore = timerStore;
         _automationEngine = automationEngine;
         _clock = clock;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -34,7 +45,29 @@ public sealed partial class TimerPollingService : BackgroundService
 
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
         {
-            await PollAsync(stoppingToken).ConfigureAwait(false);
+            try
+            {
+                await _policy.ExecuteAsync(
+                    ResiliencePolicyKey,
+                    async innerCt =>
+                    {
+                        await PollAsync(innerCt).ConfigureAwait(false);
+                        return 0;
+                    },
+                    stoppingToken).ConfigureAwait(false);
+            }
+            catch (CircuitBreakerOpenException)
+            {
+                LogCircuitOpen(_logger);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                LogPollCycleError(_logger, ex);
+            }
         }
     }
 
@@ -81,4 +114,11 @@ public sealed partial class TimerPollingService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error processing timer {TimerId}")]
     private static partial void LogTimerProcessingError(ILogger logger, Exception ex, string timerId);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Circuit open for worker.timer-polling — skipping tick")]
+    private static partial void LogCircuitOpen(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Timer polling tick failed")]
+    private static partial void LogPollCycleError(ILogger logger, Exception ex);
 }

@@ -3,22 +3,33 @@ namespace Asterisk.Platform.Api.Services;
 using Asterisk.Sdk.Pro.Dialer.Campaign;
 using Asterisk.Sdk.Pro.Dialer.Models;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 
-public sealed class CampaignMetricsPoller : BackgroundService
+public sealed partial class CampaignMetricsPoller : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the per-tick <see cref="ResiliencePolicy"/> that wraps each
+    /// metrics-poll pass. Circuit-open skips the current tick; the next 30s tick retries.
+    /// </summary>
+    public const string ResiliencePolicyKey = "worker.campaign-metrics-poller";
+
     private readonly CampaignStoreBase _campaignStore;
     private readonly PlatformEventBus _eventBus;
+    private readonly ResiliencePolicy _policy;
     private readonly ILogger<CampaignMetricsPoller> _logger;
     private readonly Dictionary<long, CampaignMetricsSnapshot> _previousSnapshots = new();
 
     public CampaignMetricsPoller(
         CampaignStoreBase campaignStore,
         PlatformEventBus eventBus,
-        ILogger<CampaignMetricsPoller> logger)
+        ILogger<CampaignMetricsPoller> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _campaignStore = campaignStore;
         _eventBus = eventBus;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -29,18 +40,31 @@ public sealed class CampaignMetricsPoller : BackgroundService
         {
             try
             {
-                await PollMetricsAsync(stoppingToken);
+                await _policy.ExecuteAsync(
+                    ResiliencePolicyKey,
+                    async innerCt =>
+                    {
+                        await PollMetricsAsync(innerCt);
+                        return 0;
+                    },
+                    stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (CircuitBreakerOpenException)
             {
-#pragma warning disable CA1848 // Use LoggerMessage delegates
-                _logger.LogError(ex, "Error polling campaign metrics");
-#pragma warning restore CA1848
+                LogCircuitOpen();
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                LogPollError(ex);
             }
         }
     }
 
-    private async Task PollMetricsAsync(CancellationToken ct)
+    internal async Task PollMetricsAsync(CancellationToken ct)
     {
         // Use empty string for tenant — multi-tenant polling gets all tenants
         var metrics = await _campaignStore.GetActiveCampaignMetricsAsync("", ct);
@@ -82,4 +106,11 @@ public sealed class CampaignMetricsPoller : BackgroundService
         foreach (var id in _previousSnapshots.Keys.Where(k => !activeIds.Contains(k)).ToList())
             _previousSnapshots.Remove(id);
     }
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error polling campaign metrics")]
+    private partial void LogPollError(Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Circuit open for worker.campaign-metrics-poller — skipping tick")]
+    private partial void LogCircuitOpen();
 }

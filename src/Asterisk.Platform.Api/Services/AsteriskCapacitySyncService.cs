@@ -2,6 +2,8 @@ using System.Reactive.Linq;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Queues.Services;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Api.Services;
 
@@ -11,9 +13,16 @@ namespace Asterisk.Platform.Api.Services;
 /// </summary>
 internal sealed partial class AsteriskCapacitySyncService : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the per-call <see cref="ResiliencePolicy"/> that wraps each
+    /// Reserve/Release operation against <see cref="IAgentCapacityService"/>.
+    /// </summary>
+    public const string ResiliencePolicyKey = "worker.asterisk-capacity-sync";
+
     private readonly IAgentCapacityService _capacityService;
     private readonly IAgentStore _agentStore;
     private readonly PlatformEventBus _eventBus;
+    private readonly ResiliencePolicy _policy;
     private readonly ILogger<AsteriskCapacitySyncService> _logger;
     private IDisposable? _subscription;
 
@@ -21,12 +30,14 @@ internal sealed partial class AsteriskCapacitySyncService : BackgroundService
         IAgentCapacityService capacityService,
         IAgentStore agentStore,
         PlatformEventBus eventBus,
-        ILogger<AsteriskCapacitySyncService> logger)
+        ILogger<AsteriskCapacitySyncService> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _capacityService = capacityService;
         _agentStore = agentStore;
         _eventBus = eventBus;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -52,8 +63,22 @@ internal sealed partial class AsteriskCapacitySyncService : BackgroundService
             return;
         }
 
-        await _capacityService.ReserveAsync(tid, agent.AgentId, ChannelType.Voice, ct);
-        LogVoiceReserved(agent.AgentId.Value, extension);
+        try
+        {
+            await _policy.ExecuteAsync(
+                ResiliencePolicyKey,
+                async innerCt =>
+                {
+                    await _capacityService.ReserveAsync(tid, agent.AgentId, ChannelType.Voice, innerCt);
+                    return 0;
+                },
+                ct);
+            LogVoiceReserved(agent.AgentId.Value, extension);
+        }
+        catch (CircuitBreakerOpenException)
+        {
+            LogCircuitOpen(agent.AgentId.Value, "reserve");
+        }
     }
 
     /// <summary>
@@ -70,8 +95,22 @@ internal sealed partial class AsteriskCapacitySyncService : BackgroundService
             return;
         }
 
-        await _capacityService.ReleaseAsync(tid, agent.AgentId, ChannelType.Voice, ct);
-        LogVoiceReleased(agent.AgentId.Value, extension);
+        try
+        {
+            await _policy.ExecuteAsync(
+                ResiliencePolicyKey,
+                async innerCt =>
+                {
+                    await _capacityService.ReleaseAsync(tid, agent.AgentId, ChannelType.Voice, innerCt);
+                    return 0;
+                },
+                ct);
+            LogVoiceReleased(agent.AgentId.Value, extension);
+        }
+        catch (CircuitBreakerOpenException)
+        {
+            LogCircuitOpen(agent.AgentId.Value, "release");
+        }
     }
 
     private Task HandleCapacityChangedAsync(AgentCapacityChangedEvent evt)
@@ -100,4 +139,8 @@ internal sealed partial class AsteriskCapacitySyncService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Capacity changed for agent {AgentId}: {Channel} {CurrentLoad}/{MaxLoad}, canVoice={CanAcceptVoice}")]
     private partial void LogCapacityChanged(string agentId, string channel, int currentLoad, int maxLoad, bool canAcceptVoice);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "Circuit open for worker.asterisk-capacity-sync ({Operation}) — dropping call {AgentId}")]
+    private partial void LogCircuitOpen(string agentId, string operation);
 }
