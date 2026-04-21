@@ -382,6 +382,10 @@ builder.Services.AddSingleton<SessionService>();
 builder.Services.AddSingleton<TenantProvisioningService>();
 builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredService<TenantProvisioningService>());
 
+// ─── MFA Policy Evaluator ────────────────────────────────────────────────────
+builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IMfaPolicyEvaluator,
+    Asterisk.Platform.Identity.Mfa.TenantAuthConfigMfaPolicyEvaluator>();
+
 // ─── OIDC SSO Services ──────────────────────────────────────────────────────
 builder.Services.AddHttpClient("oidc");
 // Transient-retry policy for OIDC token-exchange POST — retry 2 attempts (500ms base),

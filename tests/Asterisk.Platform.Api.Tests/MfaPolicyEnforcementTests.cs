@@ -170,6 +170,7 @@ public sealed class MfaPolicyEnforcementTests
             fixture.RefreshService,
             fixture.RefreshTokenStore,
             fixture.ConfigStore,
+            fixture.MfaPolicyEvaluator,
             fixture.AuthEvents,
             CancellationToken.None);
 
@@ -345,6 +346,8 @@ public sealed class MfaPolicyEnforcementTests
         public readonly ITenantAuthConfigStore ConfigStore = Substitute.For<ITenantAuthConfigStore>();
         public readonly IAuthEventStore AuthEventStore = Substitute.For<IAuthEventStore>();
         public readonly IRefreshTokenStore RefreshTokenStore = Substitute.For<IRefreshTokenStore>();
+        public readonly Asterisk.Platform.Identity.Mfa.IMfaPolicyEvaluator MfaPolicyEvaluator =
+            Substitute.For<Asterisk.Platform.Identity.Mfa.IMfaPolicyEvaluator>();
         public readonly AuthEventService AuthEvents;
         public readonly JwtTokenService JwtService;
         public readonly RefreshTokenService RefreshService;
@@ -430,6 +433,9 @@ public sealed class MfaPolicyEnforcementTests
         {
             ConfigStore.GetAsync(TenantId, Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult<TenantAuthConfig?>(config));
+            // Wire IMfaPolicyEvaluator to delegate to the same config so tests stay coherent.
+            MfaPolicyEvaluator.RequiresMfaAsync(TenantId, Arg.Any<UserRole>(), Arg.Any<CancellationToken>())
+                .Returns(ci => Task.FromResult(config.IsMfaRequiredForRole(ci.Arg<UserRole>().ToString())));
             return this;
         }
 
@@ -484,6 +490,7 @@ public sealed class MfaPolicyEnforcementTests
                 RefreshService,
                 AuthEvents,
                 ConfigStore,
+                MfaPolicyEvaluator,
                 CancellationToken.None);
 
         public Task<IResult> InvokeApiKeyLoginAsync(ApiKeyLoginRequest body) =>
@@ -493,6 +500,7 @@ public sealed class MfaPolicyEnforcementTests
                 ApiKeyStore,
                 UserStore,
                 ConfigStore,
+                MfaPolicyEvaluator,
                 JwtService,
                 AuthEvents,
                 CancellationToken.None);

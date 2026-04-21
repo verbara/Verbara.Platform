@@ -10,6 +10,7 @@ using Asterisk.Platform.Core.Branding;
 using Asterisk.Platform.Core.Email;
 using Asterisk.Platform.Core.Notifications;
 using Asterisk.Platform.Identity;
+using Asterisk.Platform.Identity.Mfa;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -77,6 +78,7 @@ internal static class AuthEndpoints
         RefreshTokenService refreshService,
         AuthEventService authEvents,
         [FromServices] ITenantAuthConfigStore configStore,
+        [FromServices] IMfaPolicyEvaluator mfaPolicyEvaluator,
         CancellationToken ct)
     {
         // Resolve tenant: body > middleware context (header/subdomain)
@@ -117,7 +119,7 @@ internal static class AuthEndpoints
         // explicit "mfa_enrollment_required" signal so the frontend can drive
         // the enrollment flow. User with MfaEnabled=true falls through to the
         // existing per-user challenge — the policy check does NOT duplicate it.
-        var policyRequiresMfa = await RequiresMfaForUserAsync(configStore, rawTenantId!, user.Role, ct);
+        var policyRequiresMfa = await mfaPolicyEvaluator.RequiresMfaAsync(rawTenantId!, user.Role, ct);
         if (policyRequiresMfa && !user.MfaEnabled)
         {
             await authEvents.LogAsync(rawTenantId!, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
@@ -210,6 +212,7 @@ internal static class AuthEndpoints
         RefreshTokenService refreshService,
         [FromServices] IRefreshTokenStore refreshTokenStore,
         [FromServices] ITenantAuthConfigStore configStore,
+        [FromServices] IMfaPolicyEvaluator mfaPolicyEvaluator,
         AuthEventService authEvents,
         CancellationToken ct)
     {
@@ -241,7 +244,7 @@ internal static class AuthEndpoints
         // original raw token was already revoked by RotateAsync — we also revoke
         // the freshly-minted replacement + all other active tokens so a lingering
         // attacker cannot keep rotating.
-        var policyRequiresMfa = await RequiresMfaForUserAsync(configStore, user.TenantId.Value, user.Role, ct);
+        var policyRequiresMfa = await mfaPolicyEvaluator.RequiresMfaAsync(user.TenantId.Value, user.Role, ct);
         if (policyRequiresMfa && !user.MfaEnabled)
         {
             await refreshTokenStore.RevokeAllForUserAsync(
@@ -320,6 +323,7 @@ internal static class AuthEndpoints
         [FromServices] IApiKeyStore apiKeyStore,
         [FromServices] IUserStore userStore,
         [FromServices] ITenantAuthConfigStore configStore,
+        [FromServices] IMfaPolicyEvaluator mfaPolicyEvaluator,
         JwtTokenService jwtService,
         AuthEventService authEvents,
         CancellationToken ct)
@@ -349,8 +353,7 @@ internal static class AuthEndpoints
         // user-bound key whose owner's role is covered by the MFA policy.
         if (apiKey.KeyType != ApiKeyType.Management)
         {
-            var policyRequiresMfa = await RequiresMfaForUserAsync(
-                configStore, user.TenantId.Value, user.Role, ct);
+            var policyRequiresMfa = await mfaPolicyEvaluator.RequiresMfaAsync(user.TenantId.Value, user.Role, ct);
             if (policyRequiresMfa)
             {
                 await authEvents.LogAsync(user.TenantId.Value, user.UserId.Value,
@@ -844,21 +847,6 @@ internal static class AuthEndpoints
 
     // ─── Helpers ────────────────────────────────────────────────────────────────
 
-    // v1.9.0 P0 MFA policy enforcement — shared check consulted by Login, Refresh,
-    // ApiKeyLogin, and ResetPassword. Consistent with AuthAdminEndpoints' existing
-    // IsMfaRequiredForRole gate that prevents privileged users from self-disabling
-    // MFA. A null/missing TenantAuthConfig means "no tenant override" which
-    // defaults to MfaPolicy=optional → returns false.
-    private static async Task<bool> RequiresMfaForUserAsync(
-        ITenantAuthConfigStore configStore,
-        string tenantId,
-        UserRole role,
-        CancellationToken ct)
-    {
-        var cfg = await configStore.GetAsync(tenantId, ct);
-        return cfg?.IsMfaRequiredForRole(role.ToString()) == true;
-    }
-
     private static async Task<IResult> IssueTokensAsync(
         User user,
         HttpContext context,
@@ -955,6 +943,22 @@ internal static class AuthEndpoints
 
     private static string GenerateToken() =>
         Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
+    // Called from OidcEndpoints.CompleteOidcLoginAsync when the OIDC user has MFA
+    // enrolled — creates a pending challenge entry and returns the challenge token.
+    // Both classes live in the same assembly (Asterisk.Platform.Api), so internal
+    // access is sufficient.
+    internal static string GenerateMfaChallengeTokenAndStore(string userId, string tenantId)
+    {
+        var challengeToken = GenerateToken();
+        MfaPendingCache[challengeToken] = new MfaPendingEntry
+        {
+            UserId = userId,
+            TenantId = tenantId,
+            ExpiresAt = DateTimeOffset.UtcNow.Add(MfaPendingTtl),
+        };
+        return challengeToken;
+    }
 
     private static string HashKey(string rawKey)
     {
