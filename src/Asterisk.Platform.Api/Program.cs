@@ -106,6 +106,9 @@ builder.Services
     .WithConversationBridge(opt => opt.DefaultTenantId = "default-tenant")
     .WithAgentBridge();
 
+// Relay T27 bus events (conversation + agent state) to SignalR tenant groups.
+builder.Services.AddHostedService<PushToHubRelay>();
+
 // Override the SDK default AllowAllSubscriptionAuthorizer with RBAC-aware authorizer.
 builder.Services.AddSingleton<ISubscriptionAuthorizer, RbacSubscriptionAuthorizer>();
 // Replace Pro.Push.SignalR's NotImplementedSupervisorCoordinator default with the

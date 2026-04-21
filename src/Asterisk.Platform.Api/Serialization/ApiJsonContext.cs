@@ -353,6 +353,9 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(ChecklistItemDto))]
 [JsonSerializable(typeof(List<ChecklistItemDto>))]
 [JsonSerializable(typeof(ApplyTemplateRequest))]
+// PushToHubRelay payloads
+[JsonSerializable(typeof(Asterisk.Platform.Api.Services.ConversationStateChangedPayload))]
+[JsonSerializable(typeof(Asterisk.Platform.Api.Services.AgentStateChangedPayload))]
 // AOT: ProblemDetails, Email, Reports
 [JsonSerializable(typeof(ProblemDetails))]
 [JsonSerializable(typeof(EmailMessage))]
