@@ -72,13 +72,14 @@ public sealed class OidcMfaEnforcementTests
         redirect.Url.Should().Contain($"tenant_id={Uri.EscapeDataString(TenantId)}");
         redirect.Url.Should().StartWith(ReturnUrl);
 
-        // Verify the pending cache contains an entry for this challenge token.
+        // Verify the pending cache contains an entry for this challenge token
+        // by consuming it via TakeAsync — this also validates the entry's tenantId.
         var fragmentPart = redirect.Url[(redirect.Url.IndexOf('#') + 1)..];
         var challengeToken = ParseQueryParam(fragmentPart, "challenge_token");
         challengeToken.Should().NotBeNullOrEmpty(because: "challenge token must be present in the redirect URL");
-        AuthEndpoints.MfaPendingCache.Should().ContainKey(challengeToken!,
-            because: "MfaPendingCache must hold the entry so /auth/mfa/verify can validate it");
-        AuthEndpoints.MfaPendingCache[challengeToken!].TenantId.Should().Be(TenantId);
+        var entry = await fixture.MfaCache.TakeAsync(challengeToken!, CancellationToken.None);
+        entry.Should().NotBeNull(because: "IMfaPendingCache must hold the entry so /auth/mfa/verify can validate it");
+        entry!.TenantId.Should().Be(TenantId);
     }
 
     // ─── Test 6: no MFA required + user not enrolled → tokens issued normally ──
@@ -130,6 +131,10 @@ public sealed class OidcMfaEnforcementTests
         private readonly JwtTokenService _jwtService;
         private readonly RefreshTokenService _refreshService;
         private readonly AuthEventService _authEvents;
+
+        // Shared in-memory cache instance so tests can inspect captured entries.
+        public readonly InMemoryMfaPendingCache MfaCache = new();
+
         private User _user = null!;
 
         public OidcMfaFixture()
@@ -197,6 +202,7 @@ public sealed class OidcMfaEnforcementTests
                 _refreshService,
                 _authEvents,
                 _mfaEvaluator,
+                MfaCache,
                 _user,
                 flowState,
                 ip: null,

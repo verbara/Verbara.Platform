@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -23,11 +22,6 @@ internal static class AuthEndpoints
     private static readonly TimeSpan MfaPendingTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PasswordResetTtl = TimeSpan.FromHours(1);
 
-    // In-memory caches for MFA challenge tokens and password reset tokens.
-    // Production systems should use a distributed cache, but for now
-    // these match the spec's ConcurrentDictionary approach.
-    internal static readonly ConcurrentDictionary<string, MfaPendingEntry> MfaPendingCache = new();
-    internal static readonly ConcurrentDictionary<string, PasswordResetEntry> PasswordResetCache = new();
 
     public static void MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
@@ -79,6 +73,7 @@ internal static class AuthEndpoints
         AuthEventService authEvents,
         [FromServices] ITenantAuthConfigStore configStore,
         [FromServices] IMfaPolicyEvaluator mfaPolicyEvaluator,
+        [FromServices] IMfaPendingCache mfaCache,
         CancellationToken ct)
     {
         // Resolve tenant: body > middleware context (header/subdomain)
@@ -136,12 +131,12 @@ internal static class AuthEndpoints
         if (user.MfaEnabled)
         {
             var challengeToken = GenerateToken();
-            MfaPendingCache[challengeToken] = new MfaPendingEntry
+            await mfaCache.StoreAsync(challengeToken, new MfaPendingEntry
             {
                 UserId = user.UserId.Value,
                 TenantId = rawTenantId!,
                 ExpiresAt = DateTimeOffset.UtcNow.Add(MfaPendingTtl),
-            };
+            }, ct);
 
             return Results.Ok(new MfaChallengeResponse(true, challengeToken));
         }
@@ -160,13 +155,12 @@ internal static class AuthEndpoints
         RefreshTokenService refreshService,
         AccountLockoutService lockoutService,
         AuthEventService authEvents,
+        [FromServices] IMfaPendingCache mfaCache,
         CancellationToken ct)
     {
-        if (!MfaPendingCache.TryRemove(body.MfaToken, out var pending))
+        var pending = await mfaCache.TakeAsync(body.MfaToken, ct);
+        if (pending is null)
             return Results.BadRequest(new ErrorResponse("Invalid or expired challenge token"));
-
-        if (pending.ExpiresAt < DateTimeOffset.UtcNow)
-            return Results.BadRequest(new ErrorResponse("Challenge token expired"));
 
         var tenantId = new TenantId(pending.TenantId);
         var user = await userStore.GetByIdAsync(tenantId, EntityId.From(pending.UserId), ct);
@@ -466,6 +460,7 @@ internal static class AuthEndpoints
         [FromBody] ForgotPasswordRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
+        [FromServices] IPasswordResetCache resetCache,
         CancellationToken ct)
     {
         var forgotTenantId = body.TenantId;
@@ -479,12 +474,12 @@ internal static class AuthEndpoints
             if (user is not null)
             {
                 var resetToken = GenerateToken();
-                PasswordResetCache[resetToken] = new PasswordResetEntry
+                await resetCache.StoreAsync(resetToken, new PasswordResetEntry
                 {
                     UserId = user.UserId.Value,
                     TenantId = forgotTenantId!,
                     ExpiresAt = DateTimeOffset.UtcNow.Add(PasswordResetTtl),
-                };
+                }, ct);
 
                 // Send password reset email
                 try
@@ -553,13 +548,12 @@ internal static class AuthEndpoints
         [FromServices] IUserStore userStore,
         [FromServices] ITenantAuthConfigStore configStore,
         AuthEventService authEvents,
+        [FromServices] IPasswordResetCache resetCache,
         CancellationToken ct)
     {
-        if (!PasswordResetCache.TryRemove(body.Token, out var entry))
+        var entry = await resetCache.TakeAsync(body.Token, ct);
+        if (entry is null)
             return Results.BadRequest(new ErrorResponse("Invalid or expired reset token"));
-
-        if (entry.ExpiresAt < DateTimeOffset.UtcNow)
-            return Results.BadRequest(new ErrorResponse("Reset token expired"));
 
         var user = await userStore.GetByIdAsync(new TenantId(entry.TenantId), EntityId.From(entry.UserId), ct);
         if (user is null)
@@ -978,15 +972,16 @@ internal static class AuthEndpoints
     // enrolled — creates a pending challenge entry and returns the challenge token.
     // Both classes live in the same assembly (Asterisk.Platform.Api), so internal
     // access is sufficient.
-    internal static string GenerateMfaChallengeTokenAndStore(string userId, string tenantId)
+    internal static async Task<string> GenerateMfaChallengeTokenAndStoreAsync(
+        string userId, string tenantId, IMfaPendingCache mfaCache, CancellationToken ct)
     {
         var challengeToken = GenerateToken();
-        MfaPendingCache[challengeToken] = new MfaPendingEntry
+        await mfaCache.StoreAsync(challengeToken, new MfaPendingEntry
         {
             UserId = userId,
             TenantId = tenantId,
             ExpiresAt = DateTimeOffset.UtcNow.Add(MfaPendingTtl),
-        };
+        }, ct);
         return challengeToken;
     }
 
@@ -1113,16 +1108,3 @@ internal sealed record PasswordPolicyDto(
     bool RequireNumber,
     bool RequireSpecial);
 
-internal sealed class MfaPendingEntry
-{
-    public required string UserId { get; init; }
-    public required string TenantId { get; init; }
-    public required DateTimeOffset ExpiresAt { get; init; }
-}
-
-internal sealed class PasswordResetEntry
-{
-    public required string UserId { get; init; }
-    public required string TenantId { get; init; }
-    public required DateTimeOffset ExpiresAt { get; init; }
-}

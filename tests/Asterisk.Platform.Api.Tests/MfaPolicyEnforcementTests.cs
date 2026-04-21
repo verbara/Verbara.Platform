@@ -7,6 +7,7 @@ using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Asterisk.Platform.Identity.Mfa;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -203,20 +204,21 @@ public sealed class MfaPolicyEnforcementTests
             .WithUser(mfaEnabled: true, role: UserRole.Agent)
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "required_all" });
 
-        // Seed a password-reset token
+        // Seed a password-reset token via the cache interface
         var resetToken = "reset-token-" + Guid.NewGuid().ToString("N");
-        AuthEndpoints.PasswordResetCache[resetToken] = new PasswordResetEntry
+        await fixture.PasswordResetCache.StoreAsync(resetToken, new PasswordResetEntry
         {
             UserId = UserId,
             TenantId = TenantId,
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30),
-        };
+        }, CancellationToken.None);
 
         var result = await AuthEndpoints.ResetPassword(
             new ResetPasswordRequest(resetToken, "ReplacementPass456!"),
             fixture.UserStore,
             fixture.ConfigStore,
             fixture.AuthEvents,
+            fixture.PasswordResetCache,
             CancellationToken.None);
 
         var ok = result.Should().BeOfType<Ok<PasswordResetMfaRequiredResponse>>().Subject;
@@ -237,18 +239,19 @@ public sealed class MfaPolicyEnforcementTests
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "required_all" });
 
         var resetToken = "reset-token-" + Guid.NewGuid().ToString("N");
-        AuthEndpoints.PasswordResetCache[resetToken] = new PasswordResetEntry
+        await fixture.PasswordResetCache.StoreAsync(resetToken, new PasswordResetEntry
         {
             UserId = UserId,
             TenantId = TenantId,
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30),
-        };
+        }, CancellationToken.None);
 
         var result = await AuthEndpoints.ResetPassword(
             new ResetPasswordRequest(resetToken, "ReplacementPass789!"),
             fixture.UserStore,
             fixture.ConfigStore,
             fixture.AuthEvents,
+            fixture.PasswordResetCache,
             CancellationToken.None);
 
         var ok = result.Should().BeOfType<Ok<PasswordResetMfaRequiredResponse>>().Subject;
@@ -267,18 +270,19 @@ public sealed class MfaPolicyEnforcementTests
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "optional" });
 
         var resetToken = "reset-token-" + Guid.NewGuid().ToString("N");
-        AuthEndpoints.PasswordResetCache[resetToken] = new PasswordResetEntry
+        await fixture.PasswordResetCache.StoreAsync(resetToken, new PasswordResetEntry
         {
             UserId = UserId,
             TenantId = TenantId,
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30),
-        };
+        }, CancellationToken.None);
 
         var result = await AuthEndpoints.ResetPassword(
             new ResetPasswordRequest(resetToken, "ReplacementPass321!"),
             fixture.UserStore,
             fixture.ConfigStore,
             fixture.AuthEvents,
+            fixture.PasswordResetCache,
             CancellationToken.None);
 
         result.Should().BeOfType<Ok<MessageResponse>>(
@@ -348,6 +352,8 @@ public sealed class MfaPolicyEnforcementTests
         public readonly IRefreshTokenStore RefreshTokenStore = Substitute.For<IRefreshTokenStore>();
         public readonly Asterisk.Platform.Identity.Mfa.IMfaPolicyEvaluator MfaPolicyEvaluator =
             Substitute.For<Asterisk.Platform.Identity.Mfa.IMfaPolicyEvaluator>();
+        public readonly Asterisk.Platform.Identity.Mfa.InMemoryMfaPendingCache MfaPendingCache = new();
+        public readonly Asterisk.Platform.Identity.Mfa.InMemoryPasswordResetCache PasswordResetCache = new();
         public readonly AuthEventService AuthEvents;
         public readonly JwtTokenService JwtService;
         public readonly RefreshTokenService RefreshService;
@@ -491,6 +497,7 @@ public sealed class MfaPolicyEnforcementTests
                 AuthEvents,
                 ConfigStore,
                 MfaPolicyEvaluator,
+                MfaPendingCache,
                 CancellationToken.None);
 
         public Task<IResult> InvokeApiKeyLoginAsync(ApiKeyLoginRequest body) =>

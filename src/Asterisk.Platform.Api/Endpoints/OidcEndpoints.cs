@@ -91,6 +91,7 @@ internal static class OidcEndpoints
         [FromServices] IOidcUserProvisioningService provisioning,
         [FromServices] IDataProtectionProvider dataProtection,
         [FromServices] IMfaPolicyEvaluator mfaEvaluator,
+        [FromServices] IMfaPendingCache mfaCache,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
@@ -170,7 +171,7 @@ internal static class OidcEndpoints
             return Results.Unauthorized();
         }
 
-        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, user, flowState, ip, ua, ct);
+        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, mfaCache, user, flowState, ip, ua, ct);
     }
 
     private static (OidcFlowState? State, IResult? Error) DecryptFlowState(
@@ -205,8 +206,8 @@ internal static class OidcEndpoints
     // can directly exercise the MFA gate in unit tests without spinning up WebApplicationFactory.
     internal static async Task<IResult> CompleteOidcLoginAsync(
         HttpContext context, JwtTokenService jwtService, RefreshTokenService refreshService,
-        AuthEventService authEvents, IMfaPolicyEvaluator mfaEvaluator, User user, OidcFlowState flowState,
-        string? ip, string? ua, CancellationToken ct)
+        AuthEventService authEvents, IMfaPolicyEvaluator mfaEvaluator, IMfaPendingCache mfaCache,
+        User user, OidcFlowState flowState, string? ip, string? ua, CancellationToken ct)
     {
         var tenantId = flowState.TenantId;
 
@@ -234,8 +235,8 @@ internal static class OidcEndpoints
         // The frontend intercepts #oidc_mfa_challenge and POSTs to /auth/mfa/verify.
         if (user.MfaEnabled)
         {
-            var challengeToken = AuthEndpoints.GenerateMfaChallengeTokenAndStore(
-                user.UserId.Value, tenantId);
+            var challengeToken = await AuthEndpoints.GenerateMfaChallengeTokenAndStoreAsync(
+                user.UserId.Value, tenantId, mfaCache, ct);
             var challengeReturnUrl = flowState.ReturnUrl ?? "/";
             return Results.Redirect(
                 $"{challengeReturnUrl}#oidc_mfa_challenge" +
