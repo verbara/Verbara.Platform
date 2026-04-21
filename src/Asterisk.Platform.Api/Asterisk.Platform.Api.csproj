@@ -81,6 +81,8 @@
     <PackageReference Include="Asterisk.Sdk.Pro.MultiTenant" />
     <PackageReference Include="Asterisk.Sdk.Pro.Push" />
     <PackageReference Include="Asterisk.Sdk.Pro.Push.SignalR" />
+    <PackageReference Include="Asterisk.Sdk.OpenTelemetry" />
+    <PackageReference Include="Asterisk.Sdk.Pro.OpenTelemetry" />
   </ItemGroup>
 
 </Project>

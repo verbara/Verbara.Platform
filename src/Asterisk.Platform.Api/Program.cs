@@ -67,6 +67,8 @@ using Asterisk.Sdk.Push.Authz;
 using Asterisk.Sdk.Pro.Push.SignalR.DependencyInjection;
 using Asterisk.Sdk.Pro.Push.SignalR.Hubs;
 using Asterisk.Platform.Api.Hubs;
+using Asterisk.Sdk.OpenTelemetry;
+using Asterisk.Sdk.Pro.OpenTelemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -182,6 +184,16 @@ builder.Services.AddProLicensing(o =>
         ? interval
         : TimeSpan.FromHours(6);
 });
+
+// ─── Observability — OpenTelemetry tracing + metrics providers ──────────────
+// Enrols every SDK ActivitySource + Meter (incl. Asterisk.Sdk.Resilience) plus
+// the 10 Pro ActivitySources + 15 Pro meters. Prometheus scraping endpoint
+// mapped below via app.MapPrometheusScrapingEndpoint(). OTLP exporter opt-in
+// via OTEL_EXPORTER_OTLP_ENDPOINT environment variable at runtime.
+builder.Services.AddAsteriskOpenTelemetry(b => b
+    .WithAllSources()
+    .AddAsteriskProOpenTelemetry()
+    .WithPrometheusExporter());
 
 // ─── Pro Hardening — Resilience + LicenseGuard + Retention ──────────────────
 // Resilience: meter + TimeProvider for circuit breaker / retry / timeout
@@ -584,12 +596,10 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
 {
     Predicate = r => r.Tags.Contains("ready"),
 });
-app.MapGet("/metrics", () => Results.Ok(new
-{
-    status = "ok",
-    timestamp = DateTimeOffset.UtcNow,
-    uptime_seconds = (long)(DateTimeOffset.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()).TotalSeconds,
-})).ExcludeFromDescription();
+// Prometheus scraping endpoint at /metrics — exposes the full SDK/Pro meter
+// catalog (resilience, licensing, cluster, push, etc.) registered via
+// AddAsteriskOpenTelemetry(...).WithPrometheusExporter() above.
+app.MapPrometheusScrapingEndpoint();
 
 // ─── Versioned route group ───────────────────────────────────────────────────
 
