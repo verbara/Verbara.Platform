@@ -7,6 +7,43 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.9.3] — 2026-04-21 — "Call Analytics API" (Ω-1)
+
+Foundation for R4 Platform.Web Call Analytics materialization. Zero API
+surface breakage — additive endpoints only.
+
+### Added
+
+- **`GET /api/v1/call-analytics/results`** — paginated query of
+  `CallAnalysisResult` records. Supports `from`/`to`, `queueName`,
+  `agentId`, `minQaScore`/`maxQaScore`, `hasViolations`, `limit`
+  (max 200), `offset`. Returns `CallAnalyticsListResponse` with
+  lightweight `CallAnalyticsSummaryDto` items (sessionId, qaScore,
+  violationCount, primaryTopic, sentimentLabel, summaryText).
+- **`GET /api/v1/call-analytics/results/{sessionId}`** — full detail
+  for one session: QA criteria breakdown, all compliance violations
+  (with severity + evidence), all topic matches, sentiment trend +
+  score, conversation metrics (agentTalkRatio, silenceCount,
+  interruptionCount, turn counts).
+- **`GET /api/v1/call-analytics/topics/trends`** — in-memory
+  aggregation across up to 1000 results; returns top N topics
+  (default 10, max 50) sorted by occurrence count with average
+  confidence. Foundation for R4 Speech Analytics dashboard.
+- All three endpoints gated by `SupervisorPlus` authorization policy
+  and `LicenseFeature.Analytics` license gate. Graceful `503` when
+  `ICallAnalyticsStore` is not registered in DI.
+- `CallAnalyticsEndpoints.cs` — 9 new DTOs (`CallAnalyticsSummaryDto`,
+  `CallAnalyticsListResponse`, `CallAnalyticsDetailDto`,
+  `CallAnalyticsQaCriterionDto`, `CallAnalyticsViolationDto`,
+  `CallAnalyticsTopicMatchDto`, `TopicTrendDto`, `TopicTrendsResponse`)
+  registered in `ApiJsonContext` for AOT-safe serialization.
+- `CallAnalyticsEndpointTests.cs` — 9 new integration tests covering
+  empty list, limit/offset, date range filter, minQaScore filter,
+  404 on missing session, full detail mapping, topic trend aggregation,
+  and 401 auth guard.
+
+---
+
 ## [1.9.2] — 2026-04-21 — "Hardening Follow-Through" (R3c)
 
 Closes the five orthogonal security / compatibility concerns that v1.9.0
