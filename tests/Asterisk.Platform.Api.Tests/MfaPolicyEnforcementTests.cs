@@ -1,12 +1,14 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using Asterisk.Platform.Api.Auth;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
 using FluentAssertions;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
@@ -361,7 +363,10 @@ public sealed class MfaPolicyEnforcementTests
             // test runs don't collide.
             _tempKeyDir = Path.Combine(Path.GetTempPath(), "asterisk-mfa-tests-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_tempKeyDir);
-            JwtService = new JwtTokenService(_tempKeyDir);
+            JwtService = new JwtTokenService(
+                _tempKeyDir,
+                DataProtectionProvider.Create("Asterisk.Platform.Tests"),
+                new InMemoryJtiRevocationCache());
 
             // In-memory refresh-token backing store so rotation round-trips.
             var storedTokens = new System.Collections.Concurrent.ConcurrentDictionary<string, RefreshToken>();
