@@ -37,9 +37,6 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
                 apiKeyValue = header["Bearer ".Length..].Trim();
         }
 
-        if (string.IsNullOrEmpty(apiKeyValue))
-            apiKeyValue = Context.Request.Query["token"].FirstOrDefault();
-
         if (string.IsNullOrWhiteSpace(apiKeyValue))
             return AuthenticateResult.NoResult();
 
