@@ -386,6 +386,13 @@ builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredServi
 builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IMfaPolicyEvaluator,
     Asterisk.Platform.Identity.Mfa.TenantAuthConfigMfaPolicyEvaluator>();
 
+// ─── MFA / Password-Reset Token Caches ─────────────────────────────────────
+// In-memory implementations — Redis-backed variants deferred to v1.9.3+.
+builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IMfaPendingCache,
+    Asterisk.Platform.Identity.Mfa.InMemoryMfaPendingCache>();
+builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IPasswordResetCache,
+    Asterisk.Platform.Identity.Mfa.InMemoryPasswordResetCache>();
+
 // ─── OIDC SSO Services ──────────────────────────────────────────────────────
 builder.Services.AddHttpClient("oidc");
 // Transient-retry policy for OIDC token-exchange POST — retry 2 attempts (500ms base),
