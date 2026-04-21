@@ -1,16 +1,18 @@
-FROM andrius/asterisk:22
+ARG ASTERISK_VERSION=22
+FROM andrius/asterisk:${ASTERISK_VERSION}
 
 USER root
 
+ARG ASTERISK_VERSION=22
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libopus0 \
     && rm -rf /var/lib/apt/lists/* \
     && cd /tmp \
-    && curl -fsSL https://downloads.digium.com/pub/telephony/codec_opus/asterisk-22.0/x86-64/codec_opus-22.0_1.3.0-x86_64.tar.gz -o codec_opus.tar.gz \
+    && curl -fsSL https://downloads.digium.com/pub/telephony/codec_opus/asterisk-${ASTERISK_VERSION}.0/x86-64/codec_opus-${ASTERISK_VERSION}.0_1.3.0-x86_64.tar.gz -o codec_opus.tar.gz \
     && tar xzf codec_opus.tar.gz \
-    && cp codec_opus-22.0_1.3.0-x86_64/codec_opus.so /usr/lib/asterisk/modules/ \
-    && cp codec_opus-22.0_1.3.0-x86_64/format_ogg_opus.so /usr/lib/asterisk/modules/ \
-    && rm -rf codec_opus.tar.gz codec_opus-22.0_1.3.0-x86_64 \
+    && cp codec_opus-${ASTERISK_VERSION}.0_1.3.0-x86_64/codec_opus.so /usr/lib/asterisk/modules/ \
+    && cp codec_opus-${ASTERISK_VERSION}.0_1.3.0-x86_64/format_ogg_opus.so /usr/lib/asterisk/modules/ \
+    && rm -rf codec_opus.tar.gz codec_opus-${ASTERISK_VERSION}.0_1.3.0-x86_64 \
     && mkdir -p /var/lib/asterisk/sounds/en \
     && cd /var/lib/asterisk/sounds/en \
     && curl -fsSL https://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-en-ulaw-current.tar.gz | tar xz \

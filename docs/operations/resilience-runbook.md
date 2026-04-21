@@ -145,3 +145,19 @@ Panels included:
 3. Circuit opened/closed events (time series)
 4. Timeout firing rate (per policy)
 5. Per-tenant breakdown (if your scrape config attaches `tenant_id` externalLabel)
+
+---
+
+## Testing against Asterisk 23 Standard
+
+The `docker/Dockerfile.asterisk` image accepts an `ASTERISK_VERSION` build arg (default `22`). To build and run with Asterisk 23 Standard instead of 22 LTS:
+
+```bash
+# Build only
+ASTERISK_VERSION=23 docker compose -f docker/docker-compose.full.yml build asterisk
+
+# Build and start the full stack with Asterisk 23
+ASTERISK_VERSION=23 docker compose -f docker/docker-compose.full.yml up
+```
+
+When `ASTERISK_VERSION` is not set, compose defaults to `22` (Asterisk 22 LTS) — no change to existing workflows. The codec_opus download URL and unpacked directory name are both derived from `ASTERISK_VERSION` automatically.
