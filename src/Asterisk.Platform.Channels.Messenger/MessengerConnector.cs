@@ -6,6 +6,8 @@ using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Channels.Messenger.Meta;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -17,20 +19,29 @@ namespace Asterisk.Platform.Channels.Messenger;
 /// </summary>
 public sealed class MessengerConnector : IChannelConnector
 {
+    /// <summary>
+    /// Keyed-service name for the <see cref="ResiliencePolicy"/> that wraps Messenger HTTP calls.
+    /// Registered via <c>AddMessenger()</c> with circuit 5/60s + retry 2/500ms + timeout 15s.
+    /// </summary>
+    public const string ResiliencePolicyKey = "channel.messenger";
+
     private readonly MessengerOptions _options;
     private readonly HttpClient _httpClient;
     private readonly ILogger<MessengerConnector> _logger;
+    private readonly ResiliencePolicy _policy;
 
     public ChannelType Channel => ChannelType.Messenger;
 
     public MessengerConnector(
         HttpClient httpClient,
         IOptions<MessengerOptions> options,
-        ILogger<MessengerConnector> logger)
+        ILogger<MessengerConnector> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _httpClient = httpClient;
         _options = options.Value;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
 
         _httpClient.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _options.PageAccessToken);
@@ -116,12 +127,19 @@ public sealed class MessengerConnector : IChannelConnector
         var url = $"{_options.BaseUrl}/{_options.ApiVersion}/me/messages";
 
         var json = JsonSerializer.Serialize(request, MessengerJsonContext.Default.MessengerSendRequest);
-        using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.PostAsync(url, content, ct).ConfigureAwait(false);
+            response = await _policy.ExecuteAsync(
+                ResiliencePolicyKey,
+                async innerCt =>
+                {
+                    // StringContent must be rebuilt per attempt — Content is consumed on send.
+                    using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    return await _httpClient.PostAsync(url, content, innerCt).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {

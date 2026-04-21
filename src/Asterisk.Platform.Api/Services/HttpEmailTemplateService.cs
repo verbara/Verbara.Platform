@@ -1,13 +1,34 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Asterisk.Platform.Core.Email;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Api.Services;
 
-internal sealed partial class HttpEmailTemplateService(
-    IHttpClientFactory httpClientFactory,
-    ILogger<HttpEmailTemplateService> logger) : IEmailTemplateService
+internal sealed partial class HttpEmailTemplateService : IEmailTemplateService
 {
+    /// <summary>
+    /// Shares the <see cref="HttpEmailService.ResiliencePolicyKey"/> — both services call
+    /// the same "mail" microservice, so they share a single keyed <see cref="ResiliencePolicy"/>
+    /// (circuit 5/45s + retry 3/300ms + timeout 10s).
+    /// </summary>
+    public const string ResiliencePolicyKey = HttpEmailService.ResiliencePolicyKey;
+
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<HttpEmailTemplateService> _logger;
+    private readonly ResiliencePolicy _policy;
+
+    public HttpEmailTemplateService(
+        IHttpClientFactory httpClientFactory,
+        ILogger<HttpEmailTemplateService> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
+    {
+        _httpClientFactory = httpClientFactory;
+        _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
+    }
+
     public string Render(string templateName, BrandingContext branding,
                          IReadOnlyDictionary<string, string> variables)
     {
@@ -20,14 +41,17 @@ internal sealed partial class HttpEmailTemplateService(
     private async Task<string> RenderAsync(string templateName, BrandingContext branding,
                                            IReadOnlyDictionary<string, string> variables)
     {
-        using var client = httpClientFactory.CreateClient("mail");
+        using var client = _httpClientFactory.CreateClient("mail");
 
         var request = new RenderTemplateRequest(templateName, branding,
             new Dictionary<string, string>(variables));
 
-        using var response = await client.PostAsJsonAsync(
-            "/api/v1/render-template", request,
-            TemplateJsonContext.Default.RenderTemplateRequest).ConfigureAwait(false);
+        using var response = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt => await client.PostAsJsonAsync(
+                "/api/v1/render-template", request,
+                TemplateJsonContext.Default.RenderTemplateRequest, innerCt).ConfigureAwait(false),
+            CancellationToken.None).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
         {

@@ -1,11 +1,20 @@
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Resilience;
 
 namespace Asterisk.Platform.Channels.Video;
 
 public sealed class VideoConnector : IChannelConnector
 {
+    /// <summary>
+    /// Keyed-service name for the <see cref="ResiliencePolicy"/> that wraps
+    /// <see cref="IVideoTransport"/> session create/end/status calls inside
+    /// <see cref="VideoSessionManager"/>. Registered via <c>AddVideo()</c> with
+    /// circuit 3/60s + retry 2/1s + timeout 30s.
+    /// </summary>
+    public const string ResiliencePolicyKey = "channel.video";
+
     private readonly VideoSessionManager _sessionManager;
 
     public ChannelType Channel => ChannelType.Video;

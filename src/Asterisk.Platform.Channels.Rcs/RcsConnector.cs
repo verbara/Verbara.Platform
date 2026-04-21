@@ -1,6 +1,8 @@
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Channels.Rcs;
 
@@ -12,20 +14,35 @@ namespace Asterisk.Platform.Channels.Rcs;
 /// </summary>
 public sealed class RcsConnector : IChannelConnector
 {
+    /// <summary>
+    /// Keyed-service name for the <see cref="ResiliencePolicy"/> that wraps
+    /// <see cref="IRcsProvider"/> calls (capability/send/status) — the innermost
+    /// network I/O boundary for this connector. Registered via <c>AddRcs()</c>
+    /// with circuit 5/60s + retry 2/500ms + timeout 15s.
+    /// </summary>
+    public const string ResiliencePolicyKey = "channel.rcs";
+
     private readonly IRcsProvider _provider;
+    private readonly ResiliencePolicy _policy;
 
     public ChannelType Channel => ChannelType.Rcs;
 
-    public RcsConnector(IRcsProvider provider)
+    public RcsConnector(
+        IRcsProvider provider,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _provider = provider;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     public async Task<SendResult> SendAsync(OutboundMessage message, CancellationToken ct)
     {
         var recipient = message.To.Address;
 
-        var capability = await _provider.CheckCapabilityAsync(recipient, ct).ConfigureAwait(false);
+        var capability = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt => await _provider.CheckCapabilityAsync(recipient, innerCt).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
         if (!capability.IsRcsEnabled)
             return new SendResult(false, null, "recipient_not_rcs_enabled", "Recipient device does not support RCS.");
 
@@ -33,13 +50,19 @@ public sealed class RcsConnector : IChannelConnector
         if (rcsMessage is null)
             return new SendResult(false, null, "UNSUPPORTED_CONTENT", "Message content could not be mapped to an RCS message type.");
 
-        var result = await _provider.SendMessageAsync(recipient, rcsMessage, ct).ConfigureAwait(false);
+        var result = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt => await _provider.SendMessageAsync(recipient, rcsMessage, innerCt).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
         return new SendResult(result.Success, result.MessageId, result.ErrorCode, null);
     }
 
     public async Task<MessageDeliveryStatus?> GetStatusAsync(string externalMessageId, CancellationToken ct)
     {
-        var status = await _provider.GetStatusAsync(externalMessageId, ct).ConfigureAwait(false);
+        var status = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt => await _provider.GetStatusAsync(externalMessageId, innerCt).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
         return MapStatus(status);
     }
 

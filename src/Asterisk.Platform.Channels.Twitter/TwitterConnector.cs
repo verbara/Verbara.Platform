@@ -3,6 +3,8 @@ using System.Text.Json;
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -16,20 +18,29 @@ namespace Asterisk.Platform.Channels.Twitter;
 /// </summary>
 public sealed class TwitterConnector : IChannelConnector
 {
+    /// <summary>
+    /// Keyed-service name for the <see cref="ResiliencePolicy"/> that wraps Twitter/X HTTP calls.
+    /// Registered via <c>AddTwitter()</c> with circuit 5/60s + retry 2/500ms + timeout 15s.
+    /// </summary>
+    public const string ResiliencePolicyKey = "channel.twitter";
+
     private readonly TwitterOptions _options;
     private readonly HttpClient _httpClient;
     private readonly ILogger<TwitterConnector> _logger;
+    private readonly ResiliencePolicy _policy;
 
     public ChannelType Channel => ChannelType.Twitter;
 
     public TwitterConnector(
         HttpClient httpClient,
         IOptions<TwitterOptions> options,
-        ILogger<TwitterConnector> logger)
+        ILogger<TwitterConnector> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _httpClient = httpClient;
         _options = options.Value;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     public async Task<SendResult> SendAsync(OutboundMessage message, CancellationToken ct)
@@ -91,15 +102,21 @@ public sealed class TwitterConnector : IChannelConnector
     {
         var url = $"{_options.BaseUrl}/{_options.ApiVersion}/dm_conversations/with/{participantId}/messages";
 
-        using var content = new StringContent(json, Encoding.UTF8, "application/json");
-
         _httpClient.DefaultRequestHeaders.Remove("Authorization");
         _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_options.BearerToken}");
 
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.PostAsync(url, content, ct).ConfigureAwait(false);
+            response = await _policy.ExecuteAsync(
+                ResiliencePolicyKey,
+                async innerCt =>
+                {
+                    // StringContent must be rebuilt per attempt — Content is consumed on send.
+                    using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    return await _httpClient.PostAsync(url, content, innerCt).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {

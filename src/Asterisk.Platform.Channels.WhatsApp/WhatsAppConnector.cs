@@ -7,6 +7,8 @@ using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Channels.WhatsApp.Meta;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -19,9 +21,16 @@ namespace Asterisk.Platform.Channels.WhatsApp;
 /// </summary>
 public sealed class WhatsAppConnector : IChannelConnector
 {
+    /// <summary>
+    /// Keyed-service name for the <see cref="ResiliencePolicy"/> that wraps WhatsApp HTTP calls.
+    /// Registered via <c>AddWhatsApp()</c> with circuit 5/60s + retry 2/500ms + timeout 15s.
+    /// </summary>
+    public const string ResiliencePolicyKey = "channel.whatsapp";
+
     private readonly WhatsAppOptions _options;
     private readonly HttpClient _httpClient;
     private readonly ILogger<WhatsAppConnector> _logger;
+    private readonly ResiliencePolicy _policy;
 
     // Tracks last inbound message time per recipient phone number (E.164)
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastCustomerMessage = new();
@@ -31,11 +40,13 @@ public sealed class WhatsAppConnector : IChannelConnector
     public WhatsAppConnector(
         HttpClient httpClient,
         IOptions<WhatsAppOptions> options,
-        ILogger<WhatsAppConnector> logger)
+        ILogger<WhatsAppConnector> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _httpClient = httpClient;
         _options = options.Value;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
 
         _httpClient.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _options.AccessToken);
@@ -182,12 +193,19 @@ public sealed class WhatsAppConnector : IChannelConnector
         var url = $"{_options.BaseUrl}/{_options.ApiVersion}/{_options.PhoneNumberId}/messages";
 
         var json = JsonSerializer.Serialize(request, WhatsAppJsonContext.Default.MetaSendRequest);
-        using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.PostAsync(url, content, ct).ConfigureAwait(false);
+            response = await _policy.ExecuteAsync(
+                ResiliencePolicyKey,
+                async innerCt =>
+                {
+                    // StringContent must be rebuilt per attempt — Content is consumed on send.
+                    using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    return await _httpClient.PostAsync(url, content, innerCt).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {

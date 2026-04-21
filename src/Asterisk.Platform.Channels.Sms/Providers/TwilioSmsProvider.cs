@@ -1,19 +1,32 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace Asterisk.Platform.Channels.Sms.Providers;
 
 public sealed class TwilioSmsProvider : ISmsProvider
 {
+    /// <summary>
+    /// Keyed-service name for the <see cref="ResiliencePolicy"/> that wraps Twilio HTTP calls.
+    /// Registered via <c>AddTwilioResiliencePolicy()</c> with circuit 5/30s + retry 3/200ms + timeout 10s.
+    /// </summary>
+    public const string ResiliencePolicyKey = "channel.twilio-sms";
+
     private readonly HttpClient _client;
     private readonly TwilioOptions _options;
+    private readonly ResiliencePolicy _policy;
 
-    public TwilioSmsProvider(IHttpClientFactory httpClientFactory, IOptions<TwilioOptions> options)
+    public TwilioSmsProvider(
+        IHttpClientFactory httpClientFactory,
+        IOptions<TwilioOptions> options,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _client = httpClientFactory.CreateClient("twilio");
         _options = options.Value;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     public async Task<SmsSendResult> SendAsync(
@@ -21,19 +34,24 @@ public sealed class TwilioSmsProvider : ISmsProvider
     {
         var url = $"https://api.twilio.com/2010-04-01/Accounts/{_options.AccountSid}/Messages.json";
 
-        var content = new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["To"] = recipient,
-            ["From"] = from,
-            ["Body"] = body,
-        });
-
-        var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
-        request.Headers.Authorization = new AuthenticationHeaderValue(
-            "Basic", Convert.ToBase64String(
-                Encoding.UTF8.GetBytes($"{_options.AccountSid}:{_options.AuthToken}")));
-
-        var response = await _client.SendAsync(request, ct);
+        var response = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt =>
+            {
+                // Rebuild HttpRequestMessage per attempt — FormUrlEncodedContent is consumed on send.
+                var content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["To"] = recipient,
+                    ["From"] = from,
+                    ["Body"] = body,
+                });
+                var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+                request.Headers.Authorization = new AuthenticationHeaderValue(
+                    "Basic", Convert.ToBase64String(
+                        Encoding.UTF8.GetBytes($"{_options.AccountSid}:{_options.AuthToken}")));
+                return await _client.SendAsync(request, innerCt).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
         var json = await response.Content.ReadAsStringAsync(ct);
 
         var parsed = JsonSerializer.Deserialize(json, TwilioJsonContext.Default.TwilioMessageResponse);
@@ -54,12 +72,17 @@ public sealed class TwilioSmsProvider : ISmsProvider
     {
         var url = $"https://api.twilio.com/2010-04-01/Accounts/{_options.AccountSid}/Messages/{messageId}.json";
 
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue(
-            "Basic", Convert.ToBase64String(
-                Encoding.UTF8.GetBytes($"{_options.AccountSid}:{_options.AuthToken}")));
-
-        var response = await _client.SendAsync(request, ct);
+        var response = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.Authorization = new AuthenticationHeaderValue(
+                    "Basic", Convert.ToBase64String(
+                        Encoding.UTF8.GetBytes($"{_options.AccountSid}:{_options.AuthToken}")));
+                return await _client.SendAsync(request, innerCt).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
             return SmsDeliveryStatus.Failed;
 
