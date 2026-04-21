@@ -66,26 +66,26 @@ public sealed class JwtTokenServiceTests : IDisposable
     }
 
     [Fact]
-    public void ValidateToken_ShouldReturnPrincipal_WhenTokenIsValid()
+    public async Task ValidateTokenAsync_ShouldReturnPrincipal_WhenTokenIsValid()
     {
         var (token, _) = _sut.GenerateAccessToken(MakeUser());
 
-        var principal = _sut.ValidateToken(token);
+        var principal = await _sut.ValidateTokenAsync(token, CancellationToken.None);
 
         principal.Should().NotBeNull();
         principal!.FindFirst(JwtRegisteredClaimNames.Sub)?.Value.Should().Be("user1");
     }
 
     [Fact]
-    public void ValidateToken_ShouldReturnNull_WhenTokenIsInvalid()
+    public async Task ValidateTokenAsync_ShouldReturnNull_WhenTokenIsInvalid()
     {
-        var result = _sut.ValidateToken("not-a-valid-jwt");
+        var result = await _sut.ValidateTokenAsync("not-a-valid-jwt", CancellationToken.None);
 
         result.Should().BeNull();
     }
 
     [Fact]
-    public void ValidateToken_ShouldReturnNull_WhenTokenSignedByDifferentKey()
+    public async Task ValidateTokenAsync_ShouldReturnNull_WhenTokenSignedByDifferentKey()
     {
         var otherDir = Path.Combine(Path.GetTempPath(), $"jwt-other-{Guid.NewGuid():N}");
         try
@@ -93,7 +93,7 @@ public sealed class JwtTokenServiceTests : IDisposable
             var otherService = new JwtTokenService(otherDir, _dataProtection, new InMemoryJtiRevocationCache());
             var (token, _) = otherService.GenerateAccessToken(MakeUser());
 
-            var result = _sut.ValidateToken(token);
+            var result = await _sut.ValidateTokenAsync(token, CancellationToken.None);
 
             result.Should().BeNull();
         }
@@ -105,12 +105,12 @@ public sealed class JwtTokenServiceTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_ShouldReuseExistingKey_WhenKeyFileExists()
+    public async Task Constructor_ShouldReuseExistingKey_WhenKeyFileExists()
     {
         var secondService = new JwtTokenService(_tempDir, _dataProtection, new InMemoryJtiRevocationCache());
 
         var (token, _) = _sut.GenerateAccessToken(MakeUser());
-        var principal = secondService.ValidateToken(token);
+        var principal = await secondService.ValidateTokenAsync(token, CancellationToken.None);
 
         principal.Should().NotBeNull();
     }

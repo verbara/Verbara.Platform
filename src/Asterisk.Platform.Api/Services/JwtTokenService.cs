@@ -166,9 +166,6 @@ internal sealed class JwtTokenService
         return (token, expiresAt);
     }
 
-    public ClaimsPrincipal? ValidateToken(string token)
-        => ValidateTokenAsync(token, CancellationToken.None).AsTask().GetAwaiter().GetResult();
-
     public async ValueTask<ClaimsPrincipal?> ValidateTokenAsync(string token, CancellationToken ct)
     {
         try
