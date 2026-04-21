@@ -1,5 +1,6 @@
 using Asp.Versioning;
 using Asterisk.Platform.Api.Auth;
+using Microsoft.AspNetCore.DataProtection;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Middleware;
 using Microsoft.AspNetCore.Authorization;
@@ -364,10 +365,16 @@ builder.Services.AddHttpClient("EmailAttachments", c =>
 // ─── Auth Services ──────────────────────────────────────────────────────────
 // PasswordService and MfaService are static — no DI registration needed
 
+// DataProtection must be registered before JwtTokenService so the factory can resolve it
+builder.Services.AddDataProtection();
+builder.Services.AddSingleton<IJtiRevocationCache, InMemoryJtiRevocationCache>();
+
 var jwtKeyDirectory = builder.Configuration["Auth:KeyDirectory"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data");
-var jwtTokenService = new JwtTokenService(jwtKeyDirectory);
-builder.Services.AddSingleton(jwtTokenService);
+builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
+    jwtKeyDirectory,
+    sp.GetRequiredService<IDataProtectionProvider>(),
+    sp.GetRequiredService<IJtiRevocationCache>()));
 builder.Services.AddSingleton<RefreshTokenService>();
 builder.Services.AddSingleton<AuthEventService>();
 builder.Services.AddSingleton<AccountLockoutService>();
@@ -377,7 +384,6 @@ builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredServi
 
 // ─── OIDC SSO Services ──────────────────────────────────────────────────────
 builder.Services.AddHttpClient("oidc");
-builder.Services.AddDataProtection();
 // Transient-retry policy for OIDC token-exchange POST — retry 2 attempts (500ms base),
 // 10s per-attempt timeout, circuit opens after 3 consecutive failures for 120s.
 builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
@@ -603,7 +609,7 @@ if (!string.IsNullOrEmpty(s3Bucket))
 
 // ─── Authentication (JWT + API key dual-scheme) ──────────────────────────────
 
-builder.Services.AddDynamicAuth(jwtTokenService);
+builder.Services.AddDynamicAuth();
 
 builder.Services.AddAuthorization(options =>
 {

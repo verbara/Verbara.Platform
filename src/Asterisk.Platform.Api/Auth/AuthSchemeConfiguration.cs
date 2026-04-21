@@ -11,10 +11,17 @@ internal static class AuthSchemeConfiguration
     public const string JwtScheme = "JwtScheme";
     public const string ApiKeyScheme = "ApiKey";
 
-    public static AuthenticationBuilder AddDynamicAuth(
-        this IServiceCollection services,
-        JwtTokenService jwtTokenService)
+    public static AuthenticationBuilder AddDynamicAuth(this IServiceCollection services)
     {
+        // Wire JWT validation parameters via post-configure so JwtTokenService is resolved
+        // from DI (it requires IDataProtectionProvider, registered as a factory singleton).
+        services.AddOptions<JwtBearerOptions>(JwtScheme)
+            .Configure<JwtTokenService>((options, jwt) =>
+            {
+                options.MapInboundClaims = false;
+                options.TokenValidationParameters = jwt.ValidationParameters;
+            });
+
         return services
             .AddAuthentication(options =>
             {
@@ -47,8 +54,8 @@ internal static class AuthSchemeConfiguration
             })
             .AddJwtBearer(JwtScheme, options =>
             {
-                options.MapInboundClaims = false;
-                options.TokenValidationParameters = jwtTokenService.ValidationParameters;
+                // MapInboundClaims + TokenValidationParameters are set via post-configure above.
+                // Events are wired here.
 
                 options.Events = new JwtBearerEvents
                 {

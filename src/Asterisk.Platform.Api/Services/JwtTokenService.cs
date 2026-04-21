@@ -1,7 +1,10 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text;
+using Asterisk.Platform.Api.Auth;
 using Asterisk.Platform.Identity;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Asterisk.Platform.Api.Services;
@@ -15,21 +18,49 @@ internal sealed class JwtTokenService
     private readonly RsaSecurityKey _signingKey;
     private readonly SigningCredentials _signingCredentials;
     private readonly TokenValidationParameters _validationParameters;
+    private readonly IJtiRevocationCache _revocationCache;
 
-    public JwtTokenService(string dataDirectory)
+    public JwtTokenService(string dataDirectory, IDataProtectionProvider dataProtection, IJtiRevocationCache revocationCache)
     {
+        _revocationCache = revocationCache;
+
         var keyPath = Path.Combine(dataDirectory, "jwt-signing-key.xml");
         var rsa = RSA.Create(2048);
+        var protector = dataProtection.CreateProtector("Asterisk.Platform.Jwt.SigningKey");
 
         if (File.Exists(keyPath))
-            rsa.FromXmlString(File.ReadAllText(keyPath));
+        {
+            var raw = File.ReadAllBytes(keyPath);
+            try
+            {
+                // Try to unprotect (encrypted format written by v1.9.2+)
+                var xmlString = Encoding.UTF8.GetString(protector.Unprotect(raw));
+                rsa.FromXmlString(xmlString);
+            }
+            catch (CryptographicException)
+            {
+                // Legacy plaintext XML — migrate silently on next restart
+                MigrateLegacyKey(rsa, raw, keyPath, protector);
+            }
+            catch (FormatException)
+            {
+                // Corrupt base64 or similar — treat as plaintext
+                MigrateLegacyKey(rsa, raw, keyPath, protector);
+            }
+        }
         else
         {
             Directory.CreateDirectory(dataDirectory);
-            File.WriteAllText(keyPath, rsa.ToXmlString(includePrivateParameters: true));
+            var xmlString = rsa.ToXmlString(includePrivateParameters: true);
+            File.WriteAllBytes(keyPath, protector.Protect(Encoding.UTF8.GetBytes(xmlString)));
         }
 
-        _signingKey = new RsaSecurityKey(rsa) { KeyId = "platform-jwt-key-1" };
+        // Derive kid from public key fingerprint (stable per key, changes on rotation)
+        var publicParams = rsa.ExportParameters(false);
+        var modulusHash = SHA256.HashData(publicParams.Modulus!);
+        var kid = $"platform-jwt-{Convert.ToHexStringLower(modulusHash.AsSpan(0, 8))}";
+
+        _signingKey = new RsaSecurityKey(rsa) { KeyId = kid };
         _signingCredentials = new SigningCredentials(_signingKey, SecurityAlgorithms.RsaSha256);
 
         _validationParameters = new TokenValidationParameters
@@ -49,6 +80,8 @@ internal sealed class JwtTokenService
 
     public TokenValidationParameters ValidationParameters => _validationParameters;
 
+    public string KeyId => _signingKey.KeyId;
+
     public (string Token, DateTimeOffset ExpiresAt) GenerateAccessToken(User user)
         => GenerateAccessToken(user, null);
 
@@ -64,6 +97,7 @@ internal sealed class JwtTokenService
             new(JwtRegisteredClaimNames.Email, user.Email),
             new("name", user.DisplayName),
             new(ClaimTypes.Role, user.Role.ToString()),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 
         // Include granular permissions in the JWT when available
@@ -106,6 +140,7 @@ internal sealed class JwtTokenService
             new("impersonator_id", admin.UserId.Value),
             new("impersonator_tenant", admin.TenantId.Value),
             new("impersonation", "true"),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 
         if (readOnly)
@@ -132,13 +167,32 @@ internal sealed class JwtTokenService
     }
 
     public ClaimsPrincipal? ValidateToken(string token)
+        => ValidateTokenAsync(token, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+
+    public async ValueTask<ClaimsPrincipal?> ValidateTokenAsync(string token, CancellationToken ct)
     {
         try
         {
             var handler = new JwtSecurityTokenHandler();
             var principal = handler.ValidateToken(token, _validationParameters, out _);
+
+            // Check jti revocation
+            var jti = principal.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+            if (jti is not null && await _revocationCache.IsRevokedAsync(jti, ct))
+                return null;
+
             return principal;
         }
         catch { return null; }
+    }
+
+    // ── Private helpers ──────────────────────────────────────────────────────
+
+    private static void MigrateLegacyKey(RSA rsa, byte[] raw, string keyPath, IDataProtector protector)
+    {
+        var xmlString = Encoding.UTF8.GetString(raw);
+        rsa.FromXmlString(xmlString);
+        // Re-write encrypted immediately — silently migrates existing deployments
+        File.WriteAllBytes(keyPath, protector.Protect(Encoding.UTF8.GetBytes(xmlString)));
     }
 }
