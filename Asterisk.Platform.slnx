@@ -60,5 +60,6 @@
     <Project Path="tests/Asterisk.Platform.Storage.InMemory.Tests/Asterisk.Platform.Storage.InMemory.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Storage.Postgres.Tests/Asterisk.Platform.Storage.Postgres.Tests.csproj" />
     <Project Path="tests/Asterisk.Platform.Api.Tests/Asterisk.Platform.Api.Tests.csproj" />
+    <Project Path="tests/Asterisk.Platform.Mail.Tests/Asterisk.Platform.Mail.Tests.csproj" />
   </Folder>
 </Solution>

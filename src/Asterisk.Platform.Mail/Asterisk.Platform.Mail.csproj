@@ -15,6 +15,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Asterisk.Platform.Mail.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Asterisk.Platform.Core\Asterisk.Platform.Core.csproj" />
   </ItemGroup>
 
@@ -27,6 +31,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <PackageReference Include="Asterisk.Sdk.Resilience" />
   </ItemGroup>
 
 </Project>

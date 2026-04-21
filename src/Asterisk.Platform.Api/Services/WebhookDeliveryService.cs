@@ -1,6 +1,8 @@
 using System.Text;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Core.Webhooks;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Api.Services;
 
@@ -10,6 +12,13 @@ namespace Asterisk.Platform.Api.Services;
 /// </summary>
 internal sealed partial class WebhookDeliveryService : BackgroundService
 {
+    /// <summary>
+    /// Keyed-service name for the transient-retry <see cref="ResiliencePolicy"/> that wraps each
+    /// HTTP send attempt. Separate from the user-visible per-subscription
+    /// <see cref="CircuitBreakerPolicy"/>, which persists circuit state on <see cref="WebhookSubscription"/>.
+    /// </summary>
+    public const string ResiliencePolicyKey = "webhook.delivery";
+
     private static readonly int[] BackoffSeconds = [0, 60, 300, 1800, 7200, 18000, 28800, 28800];
     private static readonly TimeSpan RetryPollInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(10);
@@ -19,6 +28,7 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
     private readonly IWebhookSubscriptionStore _subscriptionStore;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly CircuitBreakerPolicy _circuitBreaker;
+    private readonly ResiliencePolicy _policy;
     private readonly IClock _clock;
     private readonly ILogger<WebhookDeliveryService> _logger;
 
@@ -29,7 +39,8 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
         IHttpClientFactory httpClientFactory,
         CircuitBreakerPolicy circuitBreaker,
         IClock clock,
-        ILogger<WebhookDeliveryService> logger)
+        ILogger<WebhookDeliveryService> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _dispatcher = dispatcher;
         _deliveryStore = deliveryStore;
@@ -38,6 +49,7 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
         _circuitBreaker = circuitBreaker;
         _clock = clock;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -124,14 +136,24 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
             var timestamp = now.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
             var signature = WebhookSignatureService.ComputeSignature(timestamp, delivery.Payload, sub.Secret);
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, sub.EndpointUrl);
-            request.Content = new StringContent(delivery.Payload, Encoding.UTF8, "application/json");
-            request.Headers.Add("X-Webhook-Id", delivery.DeliveryId);
-            request.Headers.Add("X-Webhook-Event", delivery.EventType);
-            request.Headers.Add("X-Webhook-Timestamp", timestamp);
-            request.Headers.Add("X-Webhook-Signature", signature);
-
-            using var response = await client.SendAsync(request, ct);
+            // Transient-retry layer: wrap only the HTTP send, leaving the user-visible
+            // 8-attempt BackoffSeconds schedule (scheduled via store) and the per-subscription
+            // CircuitBreakerPolicy untouched. The inner policy protects a single attempt
+            // against transient upstream blips (retry 3/500ms, circuit 5/30s, timeout 10s).
+            // HttpRequestMessage is built per-attempt because Content is consumed on send.
+            using var response = await _policy.ExecuteAsync(
+                ResiliencePolicyKey,
+                async innerCt =>
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Post, sub.EndpointUrl);
+                    request.Content = new StringContent(delivery.Payload, Encoding.UTF8, "application/json");
+                    request.Headers.Add("X-Webhook-Id", delivery.DeliveryId);
+                    request.Headers.Add("X-Webhook-Event", delivery.EventType);
+                    request.Headers.Add("X-Webhook-Timestamp", timestamp);
+                    request.Headers.Add("X-Webhook-Signature", signature);
+                    return await client.SendAsync(request, innerCt).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
             var statusCode = (int)response.StatusCode;
 
             if (response.IsSuccessStatusCode)
@@ -246,6 +268,14 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
         var index = Math.Min(attemptNumber, BackoffSeconds.Length - 1);
         return BackoffSeconds[index];
     }
+
+    /// <summary>
+    /// Test-only entry point into <see cref="DeliverAsync"/>. Exposed via
+    /// <c>InternalsVisibleTo</c> to the API test project so resilience wrapping
+    /// can be asserted end-to-end without starting the BackgroundService loop.
+    /// </summary>
+    internal Task DeliverForTestAsync(WebhookDelivery delivery, CancellationToken ct)
+        => DeliverAsync(delivery, ct);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Circuit breaker opened for subscription {SubscriptionId} after {Failures} consecutive failures")]
     private static partial void LogCircuitOpened(ILogger logger, string subscriptionId, int failures);

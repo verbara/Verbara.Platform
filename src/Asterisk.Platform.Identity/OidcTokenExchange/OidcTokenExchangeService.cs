@@ -3,6 +3,8 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Asterisk.Sdk.Resilience;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 
@@ -10,7 +12,15 @@ namespace Asterisk.Platform.Identity.OidcTokenExchange;
 
 public sealed partial class OidcTokenExchangeService : IOidcTokenExchangeService
 {
+    /// <summary>
+    /// Keyed-service name for the transient-retry <see cref="ResiliencePolicy"/> that wraps
+    /// the OIDC token-endpoint POST. Discovery + JWKS fetches are cached for 24h and are
+    /// not wrapped. JWT validation is deterministic and never retried.
+    /// </summary>
+    public const string ResiliencePolicyKey = "oidc.token-exchange";
+
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ResiliencePolicy _policy;
     private readonly ILogger<OidcTokenExchangeService> _logger;
     private readonly ConcurrentDictionary<string, CachedDiscovery> _discoveryCache = new();
     private readonly ConcurrentDictionary<string, CachedJwks> _jwksCache = new();
@@ -19,10 +29,12 @@ public sealed partial class OidcTokenExchangeService : IOidcTokenExchangeService
 
     public OidcTokenExchangeService(
         IHttpClientFactory httpClientFactory,
-        ILogger<OidcTokenExchangeService> logger)
+        ILogger<OidcTokenExchangeService> logger,
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
     public async Task<OidcTokenResponse> ExchangeCodeAsync(
@@ -33,17 +45,25 @@ public sealed partial class OidcTokenExchangeService : IOidcTokenExchangeService
         var discovery = await GetDiscoveryAsync(authority, ct);
 
         var client = _httpClientFactory.CreateClient("oidc");
-        var content = new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["grant_type"] = "authorization_code",
-            ["code"] = code,
-            ["redirect_uri"] = redirectUri,
-            ["client_id"] = clientId,
-            ["client_secret"] = clientSecret,
-            ["code_verifier"] = codeVerifier,
-        });
 
-        var response = await client.PostAsync(discovery.TokenEndpoint, content, ct);
+        // Transient-retry wraps ONLY the HTTP POST; JWT deserialization + validation below
+        // is deterministic and must not be retried on parse failure.
+        var response = await _policy.ExecuteAsync(
+            ResiliencePolicyKey,
+            async innerCt =>
+            {
+                var content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["grant_type"] = "authorization_code",
+                    ["code"] = code,
+                    ["redirect_uri"] = redirectUri,
+                    ["client_id"] = clientId,
+                    ["client_secret"] = clientSecret,
+                    ["code_verifier"] = codeVerifier,
+                });
+                return await client.PostAsync(discovery.TokenEndpoint, content, innerCt).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
         var json = await response.Content.ReadAsStringAsync(ct);
 
         var tokenResponse = JsonSerializer.Deserialize(json, OidcJsonContext.Default.OidcTokenResponse);

@@ -301,6 +301,16 @@ builder.Services.Configure<Asterisk.Platform.Core.Webhooks.CircuitBreakerOptions
 });
 builder.Services.AddSingleton<Asterisk.Platform.Core.Webhooks.CircuitBreakerPolicy>();
 builder.Services.AddSingleton<WebhookDispatcher>();
+// Transient-retry policy for the HTTP send call inside WebhookDeliveryService.
+// Orthogonal to the per-subscription CircuitBreakerPolicy above (which persists
+// circuit state on the WebhookSubscription entity — a product feature).
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    WebhookDeliveryService.ResiliencePolicyKey,
+    (_, _) => new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 5, openDuration: TimeSpan.FromSeconds(30))
+        .WithRetry(maxAttempts: 3, baseDelay: TimeSpan.FromMilliseconds(500))
+        .WithTimeout(TimeSpan.FromSeconds(10))
+        .Build());
 builder.Services.AddHostedService<WebhookDeliveryService>();
 builder.Services.AddHttpClient("webhooks");
 builder.Services.AddHttpClient("EmailAttachments", c =>
@@ -326,6 +336,15 @@ builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredServi
 // ─── OIDC SSO Services ──────────────────────────────────────────────────────
 builder.Services.AddHttpClient("oidc");
 builder.Services.AddDataProtection();
+// Transient-retry policy for OIDC token-exchange POST — retry 2 attempts (500ms base),
+// 10s per-attempt timeout, circuit opens after 3 consecutive failures for 120s.
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    OidcTokenExchangeService.ResiliencePolicyKey,
+    (_, _) => new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 3, openDuration: TimeSpan.FromSeconds(120))
+        .WithRetry(maxAttempts: 2, baseDelay: TimeSpan.FromMilliseconds(500))
+        .WithTimeout(TimeSpan.FromSeconds(10))
+        .Build());
 builder.Services.AddSingleton<IOidcTokenExchangeService, OidcTokenExchangeService>();
 builder.Services.AddSingleton<IOidcUserProvisioningService, OidcUserProvisioningService>();
 

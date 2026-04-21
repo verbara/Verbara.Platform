@@ -3,6 +3,8 @@ using Asterisk.Platform.Core.Email;
 using Asterisk.Platform.Mail;
 using Asterisk.Platform.Mail.Endpoints;
 using Asterisk.Platform.Mail.Services;
+using Asterisk.Sdk.Resilience;
+using Asterisk.Sdk.Resilience.DependencyInjection;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.IdentityModel.Tokens;
@@ -17,8 +19,20 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
 });
 
+// ── Resilience (MIT primitives from Asterisk.Sdk.Resilience, registers TimeProvider + meter) ──
+builder.Services.AddAsteriskResilience();
+
 // ── SMTP ──
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
+// Transient-retry policy for SMTP send — retry 2 attempts (1s base backoff),
+// 15s per-attempt timeout, circuit opens after 3 consecutive failures for 60s.
+builder.Services.AddKeyedSingleton<ResiliencePolicy>(
+    SmtpSender.ResiliencePolicyKey,
+    (_, _) => new ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 3, openDuration: TimeSpan.FromSeconds(60))
+        .WithRetry(maxAttempts: 2, baseDelay: TimeSpan.FromSeconds(1))
+        .WithTimeout(TimeSpan.FromSeconds(15))
+        .Build());
 builder.Services.AddSingleton<IEmailService, SmtpSender>();
 builder.Services.AddSingleton<IEmailTemplateService, TemplateRenderer>();
 

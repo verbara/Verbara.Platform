@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Asterisk.Platform.Identity.OidcTokenExchange;
+using Asterisk.Sdk.Resilience;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
@@ -96,6 +97,63 @@ public sealed class OidcTokenExchangeServiceTests
 
         result.AccessToken.Should().Be("at-123");
         result.IdToken.Should().Be("id-token-jwt");
+    }
+
+    [Fact]
+    public async Task ExchangeCodeAsync_ShouldRetry_WhenFirstPostThrowsTransientError()
+    {
+        // Regression: the transient-retry ResiliencePolicy must wrap the PostAsync call.
+        // First attempt throws (simulating network blip), second attempt succeeds.
+        var discoveryJson = JsonSerializer.Serialize(new OidcDiscoveryDocument
+        {
+            Issuer = "https://idp.example.com",
+            TokenEndpoint = "https://idp.example.com/oauth/token",
+            JwksUri = "https://idp.example.com/.well-known/jwks.json",
+            AuthorizationEndpoint = "https://idp.example.com/authorize",
+        }, OidcJsonContext.Default.OidcDiscoveryDocument);
+
+        var tokenResponseJson = JsonSerializer.Serialize(new OidcTokenResponse
+        {
+            AccessToken = "at-retry-success",
+            IdToken = "id-token-jwt",
+            TokenType = "Bearer",
+            ExpiresIn = 3600,
+        }, OidcJsonContext.Default.OidcTokenResponse);
+
+        var handler = new FlakyHttpHandler(
+            discoveryResponse: discoveryJson,
+            tokenResponse: tokenResponseJson,
+            failTokenPostCount: 1);
+
+        var factory = new MockHttpClientFactory(handler);
+
+        // Retry 2 attempts / 1ms base delay; no timeout (want retry, not timeout).
+        var policy = new ResiliencePolicyBuilder()
+            .WithRetry(maxAttempts: 2, baseDelay: TimeSpan.FromMilliseconds(1))
+            .Build();
+
+        var service = new OidcTokenExchangeService(
+            factory, NullLogger<OidcTokenExchangeService>.Instance, policy);
+
+        var result = await service.ExchangeCodeAsync(
+            "https://idp.example.com",
+            "auth-code-123",
+            "code-verifier-abc",
+            "https://app.example.com/callback",
+            "client-id",
+            "client-secret",
+            CancellationToken.None);
+
+        result.AccessToken.Should().Be("at-retry-success");
+        handler.TokenPostAttempts.Should().Be(2, "first attempt threw, retry succeeded");
+    }
+
+    [Fact]
+    public void ResiliencePolicyKey_ShouldMatchContractedName()
+    {
+        // Guards against accidental rename — keyed singleton registered in Program.cs
+        // relies on this constant.
+        OidcTokenExchangeService.ResiliencePolicyKey.Should().Be("oidc.token-exchange");
     }
 
     [Fact]
@@ -352,4 +410,49 @@ internal sealed class MockHttpClientFactory : IHttpClientFactory
     public MockHttpClientFactory(HttpMessageHandler handler) => _handler = handler;
 
     public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
+}
+
+/// <summary>
+/// Returns the canned discovery document on GET requests and the canned token response on POST,
+/// but throws <see cref="HttpRequestException"/> for the first <see cref="_failTokenPostCount"/>
+/// token POSTs — used to verify retry wrapping around <c>PostAsync</c>.
+/// </summary>
+internal sealed class FlakyHttpHandler : HttpMessageHandler
+{
+    private readonly string _discoveryResponse;
+    private readonly string _tokenResponse;
+    private readonly int _failTokenPostCount;
+    private int _tokenPostAttempts;
+
+    public FlakyHttpHandler(string discoveryResponse, string tokenResponse, int failTokenPostCount)
+    {
+        _discoveryResponse = discoveryResponse;
+        _tokenResponse = tokenResponse;
+        _failTokenPostCount = failTokenPostCount;
+    }
+
+    public int TokenPostAttempts => _tokenPostAttempts;
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (request.Method == HttpMethod.Get)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(_discoveryResponse, Encoding.UTF8, "application/json"),
+            });
+        }
+
+        var attempt = Interlocked.Increment(ref _tokenPostAttempts);
+        if (attempt <= _failTokenPostCount)
+        {
+            throw new HttpRequestException($"simulated transient failure on attempt {attempt}");
+        }
+
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(_tokenResponse, Encoding.UTF8, "application/json"),
+        });
+    }
 }
