@@ -127,16 +127,27 @@ internal static class WebhookEndpoints
                                 ct);
                         }
                     }
-                    else if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
+                    else if (botResponse.Action == BotResponseAction.TransferToQueue)
                     {
-                        await switchboard.AssignToQueueAsync(
-                            updated.ConversationId,
-                            tid,
-                            botResponse.TargetQueueId.Value,
-                            ct);
+                        if (botResponse.TargetQueueId is null)
+                        {
+#pragma warning disable CA1848 // Use LoggerMessage delegates
+                            logger.LogWarning(
+                                "Bot requested TransferToQueue for conversation {ConversationId} without a target queue; skipping handoff.",
+                                updated.ConversationId.Value);
+#pragma warning restore CA1848
+                        }
+                        else
+                        {
+                            await switchboard.TransferToQueueAsync(
+                                updated.ConversationId,
+                                tid,
+                                botResponse.TargetQueueId.Value,
+                                ct);
 
-                        eventBus.Publish(new ConversationStateChangedEvent(
-                            tid.Value, updated.ConversationId.Value, "Bot", "Queued"));
+                            eventBus.Publish(new ConversationStateChangedEvent(
+                                tid.Value, updated.ConversationId.Value, "Bot", "Queued"));
+                        }
                     }
                     else if (botResponse.Action == BotResponseAction.EndConversation)
                     {

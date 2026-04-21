@@ -112,44 +112,97 @@ public sealed class BotHandoffLogicTests
     // ── TransferToQueue ───────────────────────────────────────────────────────
 
     [Fact]
-    public async Task AssignToQueueAsync_ShouldBeCalled_WhenBotResponseIsTransferToQueue()
+    public async Task TransferToQueueAsync_ShouldBeCalled_WhenBotResponseIsTransferToQueue()
     {
         // Arrange
         var switchboard = Substitute.For<IConversationSwitchboard>();
-        switchboard.AssignToQueueAsync(default, default, default, default)
+        switchboard.TransferToQueueAsync(default, default, default, default)
             .ReturnsForAnyArgs(new OwnershipResult(true, ConversationOwner.ForQueue(QueueId), ConversationState.Queued, null));
 
         var botResponse = new BotResponse(BotResponseAction.TransferToQueue, null, QueueId, null, "Flow handoff");
 
-        // Act — simulate the handoff branch directly
+        // Act — simulate the handoff branch directly (mirrors WebhookEndpoints.cs branch)
         if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
         {
-            await switchboard.AssignToQueueAsync(ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
+            await switchboard.TransferToQueueAsync(ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
         }
 
-        // Assert
-        await switchboard.Received(1).AssignToQueueAsync(
+        // Assert — TransferToQueueAsync drives the Active→Escalated→Queued transition
+        // (AssignToQueueAsync would silently skip the Escalated step).
+        await switchboard.Received(1).TransferToQueueAsync(
             ConvId,
             TestTenant,
             QueueId,
             Arg.Any<CancellationToken>());
+        await switchboard.DidNotReceiveWithAnyArgs().AssignToQueueAsync(default, default, default, default);
     }
 
     [Fact]
-    public async Task AssignToQueueAsync_ShouldNotBeCalled_WhenTransferToQueueHasNullTargetQueueId()
+    public async Task TransferToQueueAsync_ShouldNotBeCalled_WhenTransferToQueueHasNullTargetQueueId()
     {
         // Arrange
         var switchboard = Substitute.For<IConversationSwitchboard>();
         var botResponse = new BotResponse(BotResponseAction.TransferToQueue, null, null, null, null);
 
-        // Act — guard clause: TargetQueueId is null, so AssignToQueue must not be called
+        // Act — guard clause: TargetQueueId is null, so TransferToQueue must not be called
         if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
         {
-            await switchboard.AssignToQueueAsync(ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
+            await switchboard.TransferToQueueAsync(ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
         }
 
         // Assert
-        await switchboard.DidNotReceiveWithAnyArgs().AssignToQueueAsync(default, default, default, default);
+        await switchboard.DidNotReceiveWithAnyArgs().TransferToQueueAsync(default, default, default, default);
+    }
+
+    [Fact]
+    public async Task TransferToQueueAsync_ShouldDriveEscalationTransition_WhenConversationIsActiveAndBotHandsOff()
+    {
+        // Regression for R3 Phase B Sub-A bug #1: WebhookEndpoints previously called
+        // AssignToQueueAsync on bot handoff, skipping the Active→Escalated→Queued transition.
+        // Arrange — a real ConversationSwitchboard against in-memory store so we observe the
+        // actual state transitions (not just mock invocations).
+        var store = new Asterisk.Platform.Storage.InMemory.InMemoryConversationStore();
+        var capacity = Substitute.For<Asterisk.Platform.Queues.Services.IAgentCapacityService>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var eventBus = new PlatformEventBus();
+
+        var conversation = new Conversation
+        {
+            ConversationId = ConvId,
+            TenantId = TestTenant,
+            ContactId = EntityId.From("contact-1"),
+            Channel = ChannelType.WhatsApp,
+            State = ConversationState.Queued,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        conversation.TransitionTo(ConversationState.Offered, DateTimeOffset.UtcNow);
+        conversation.TransitionTo(ConversationState.Active, DateTimeOffset.UtcNow);
+        conversation.Owner = ConversationOwner.ForBot(BotId);
+        await store.SaveAsync(conversation, CancellationToken.None);
+
+        var switchboard = new Asterisk.Platform.Switchboard.ConversationSwitchboard(store, capacity, clock, eventBus);
+        var botResponse = new BotResponse(BotResponseAction.TransferToQueue, null, QueueId, null, "Flow handoff");
+
+        // Act — execute the WebhookEndpoints branch verbatim
+        OwnershipResult? transferResult = null;
+        if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
+        {
+            transferResult = await switchboard.TransferToQueueAsync(
+                ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
+        }
+
+        // Assert — conversation transitioned to Queued and owner is the target queue
+        transferResult.Should().NotBeNull();
+        transferResult!.Success.Should().BeTrue();
+        transferResult.NewState.Should().Be(ConversationState.Queued);
+
+        var reloaded = await store.GetByIdAsync(TestTenant, ConvId, CancellationToken.None);
+        reloaded.Should().NotBeNull();
+        reloaded!.State.Should().Be(ConversationState.Queued);
+        reloaded.Owner.Should().NotBeNull();
+        reloaded.Owner!.Kind.Should().Be(ConversationOwnerKind.Queue);
+        reloaded.Owner.OwnerId.Should().Be(QueueId);
     }
 
     // ── EndConversation ───────────────────────────────────────────────────────
@@ -198,15 +251,15 @@ public sealed class BotHandoffLogicTests
         // Arrange
         var lifecycleService = Substitute.For<IConversationLifecycleService>();
         var switchboard = Substitute.For<IConversationSwitchboard>();
-        switchboard.AssignToQueueAsync(default, default, default, default)
+        switchboard.TransferToQueueAsync(default, default, default, default)
             .ReturnsForAnyArgs(new OwnershipResult(true, ConversationOwner.ForQueue(QueueId), ConversationState.Queued, null));
 
         var botResponse = new BotResponse(BotResponseAction.TransferToQueue, null, QueueId, null, "handoff");
 
-        // Act — TransferToQueue triggers switchboard, not lifecycle close
+        // Act — TransferToQueue triggers switchboard.TransferToQueueAsync, not lifecycle close
         if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
         {
-            await switchboard.AssignToQueueAsync(ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
+            await switchboard.TransferToQueueAsync(ConvId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
         }
         else if (botResponse.Action == BotResponseAction.EndConversation)
         {
@@ -215,7 +268,7 @@ public sealed class BotHandoffLogicTests
 
         // Assert
         await lifecycleService.DidNotReceiveWithAnyArgs().CloseAsync(default!, default, null, default);
-        await switchboard.Received(1).AssignToQueueAsync(ConvId, TestTenant, QueueId, Arg.Any<CancellationToken>());
+        await switchboard.Received(1).TransferToQueueAsync(ConvId, TestTenant, QueueId, Arg.Any<CancellationToken>());
     }
 
     // ── Reply (existing behavior) ─────────────────────────────────────────────
