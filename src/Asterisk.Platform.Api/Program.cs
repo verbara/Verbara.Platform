@@ -137,6 +137,8 @@ if (!string.IsNullOrEmpty(twilioSection["AccountSid"]))
     builder.Services.AddHttpClient("twilio");
     builder.Services.AddSingleton<Asterisk.Platform.Channels.Sms.ISmsProvider,
         Asterisk.Platform.Channels.Sms.Providers.TwilioSmsProvider>();
+    // Transient-retry policy for Twilio HTTP calls (v1.9.1 Frente A).
+    Asterisk.Platform.Channels.Sms.ServiceCollectionExtensions.AddTwilioResiliencePolicy(builder.Services);
 }
 
 // ─── GDPR Services ──────────────────────────────────────────────────────────
@@ -219,6 +221,36 @@ builder.Services.AddProLicenseGuard();
 // Retention: orchestrator (DryRun=true by default — flip off in production)
 builder.Services.AddProRetention();
 
+// ─── Resilience Policies (v1.9.1 — Frente B/E wraps) ────────────────────────
+// flow.http-request: circuit 3/60s + retry 2/500ms + timeout 60s (upper bound).
+// Per-call timeout is sourced from flow config, not policy — see HttpRequestNodeHandler.
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    Asterisk.Platform.Flows.Nodes.HttpRequestNodeHandler.ResiliencePolicyKey,
+    (_, _) => new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 3, openDuration: TimeSpan.FromSeconds(60))
+        .WithRetry(maxAttempts: 2, baseDelay: TimeSpan.FromMilliseconds(500))
+        .WithTimeout(TimeSpan.FromSeconds(60))
+        .Build());
+
+// report.pdf-render: circuit 3/120s + retry 1/1s + timeout 30s.
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    Asterisk.Platform.Api.Services.Reports.HttpPdfReportRenderer.ResiliencePolicyKey,
+    (_, _) => new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 3, openDuration: TimeSpan.FromSeconds(120))
+        .WithRetry(maxAttempts: 1, baseDelay: TimeSpan.FromSeconds(1))
+        .WithTimeout(TimeSpan.FromSeconds(30))
+        .Build());
+
+// storage.s3: circuit 5/60s + retry 3/500ms + timeout 30s. AWS SDK's built-in retry is
+// disabled inside S3MediaStorage (MaxErrorRetry = 0) to avoid double-retry.
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    Asterisk.Platform.Media.S3MediaStorage.ResiliencePolicyKey,
+    (_, _) => new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 5, openDuration: TimeSpan.FromSeconds(60))
+        .WithRetry(maxAttempts: 3, baseDelay: TimeSpan.FromMilliseconds(500))
+        .WithTimeout(TimeSpan.FromSeconds(30))
+        .Build());
+
 // ─── Pro.Routing — Skill Catalog (in-memory, singleton) ─────────────────────
 builder.Services.AddSingleton<SkillCatalogBase>(new InMemorySkillCatalog());
 
@@ -242,6 +274,16 @@ builder.Services.AddHttpClient("mail", c =>
     c.Timeout = TimeSpan.FromSeconds(30);
     c.DefaultRequestHeaders.Add("X-Service-Key", serviceKey);
 });
+// Shared transient-retry policy for the Mail microservice HTTP calls (v1.9.1 Frente A).
+// HttpEmailService (send) and HttpEmailTemplateService (render) both consume this key
+// since they target the same upstream "mail" service.
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    Asterisk.Platform.Api.Services.HttpEmailService.ResiliencePolicyKey,
+    (_, _) => new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 5, openDuration: TimeSpan.FromSeconds(45))
+        .WithRetry(maxAttempts: 3, baseDelay: TimeSpan.FromMilliseconds(300))
+        .WithTimeout(TimeSpan.FromSeconds(10))
+        .Build());
 builder.Services.AddSingleton<Asterisk.Platform.Core.Email.IEmailService,
     Asterisk.Platform.Api.Services.HttpEmailService>();
 builder.Services.AddSingleton<Asterisk.Platform.Core.Email.IEmailTemplateService,
@@ -347,6 +389,67 @@ builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
         .Build());
 builder.Services.AddSingleton<IOidcTokenExchangeService, OidcTokenExchangeService>();
 builder.Services.AddSingleton<IOidcUserProvisioningService, OidcUserProvisioningService>();
+
+// ─── Per-worker resilience policies (v1.9.1 Frente C — 12 BackgroundServices) ────
+// Each keyed policy wraps a single tick of its owning BackgroundService. Circuit-open
+// causes the worker to skip the current tick and retry on the next scheduled tick;
+// the outer `while` loop is NOT wrapped.
+//
+// Shared default budget: circuit 5/60s + retry 2/500ms + timeout 10s.
+// Tighter DB-heavy budget for retention/audit/bot-analytics: circuit 3/120s + retry
+// 1/2s + timeout 20s (allow long-running batch DELETEs).
+// Tighter hourly-cadence budget for dunning: circuit 3/600s + retry 1/5s + timeout 60s.
+static Asterisk.Sdk.Resilience.ResiliencePolicy BuildDefaultWorkerPolicy() =>
+    new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 5, openDuration: TimeSpan.FromSeconds(60))
+        .WithRetry(maxAttempts: 2, baseDelay: TimeSpan.FromMilliseconds(500))
+        .WithTimeout(TimeSpan.FromSeconds(10))
+        .Build();
+static Asterisk.Sdk.Resilience.ResiliencePolicy BuildDbHeavyWorkerPolicy() =>
+    new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 3, openDuration: TimeSpan.FromSeconds(120))
+        .WithRetry(maxAttempts: 1, baseDelay: TimeSpan.FromSeconds(2))
+        .WithTimeout(TimeSpan.FromSeconds(20))
+        .Build();
+static Asterisk.Sdk.Resilience.ResiliencePolicy BuildHourlyWorkerPolicy() =>
+    new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 3, openDuration: TimeSpan.FromSeconds(600))
+        .WithRetry(maxAttempts: 1, baseDelay: TimeSpan.FromSeconds(5))
+        .WithTimeout(TimeSpan.FromSeconds(60))
+        .Build();
+
+// Default-budget workers
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    ConversationTimeoutWorker.ResiliencePolicyKey, (_, _) => BuildDefaultWorkerPolicy());
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    QueueDistributionWorker.ResiliencePolicyKey, (_, _) => BuildDefaultWorkerPolicy());
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    Asterisk.Platform.Api.Services.Reports.ReportSchedulerService.ResiliencePolicyKey,
+    (_, _) => BuildDefaultWorkerPolicy());
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    AsteriskCapacitySyncService.ResiliencePolicyKey, (_, _) => BuildDefaultWorkerPolicy());
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    RealtimeStateBridge.ResiliencePolicyKey, (_, _) => BuildDefaultWorkerPolicy());
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    CampaignMetricsPoller.ResiliencePolicyKey, (_, _) => BuildDefaultWorkerPolicy());
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    AgentAssistBridge.ResiliencePolicyKey, (_, _) => BuildDefaultWorkerPolicy());
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    Asterisk.Platform.Automation.TimerPollingService.ResiliencePolicyKey,
+    (_, _) => BuildDefaultWorkerPolicy());
+
+// DB-heavy workers (long batch DELETEs / bulk inserts)
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    RetentionPurgeService.ResiliencePolicyKey, (_, _) => BuildDbHeavyWorkerPolicy());
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    AuditRetentionService.ResiliencePolicyKey, (_, _) => BuildDbHeavyWorkerPolicy());
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    BotAnalyticsPersistenceService.ResiliencePolicyKey, (_, _) => BuildDbHeavyWorkerPolicy());
+
+// Hourly-cadence worker
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    Asterisk.Platform.Billing.DunningService.ResiliencePolicyKey,
+    (_, _) => BuildHourlyWorkerPolicy());
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
 var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";
@@ -490,8 +593,12 @@ if (!string.IsNullOrEmpty(s3Bucket))
         StringComparison.OrdinalIgnoreCase);
 
     // Replace the FileSystemMediaStorage registered by AddPlatformMedia()
-    builder.Services.AddSingleton<IMediaStorage>(
-        new S3MediaStorage(s3Bucket, s3Endpoint, s3Region, s3ForcePathStyle));
+    builder.Services.AddSingleton<IMediaStorage>(sp =>
+    {
+        var policy = sp.GetKeyedService<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+            Asterisk.Platform.Media.S3MediaStorage.ResiliencePolicyKey);
+        return new S3MediaStorage(s3Bucket, s3Endpoint, s3Region, s3ForcePathStyle, policy);
+    });
 }
 
 // ─── Authentication (JWT + API key dual-scheme) ──────────────────────────────
@@ -527,6 +634,29 @@ builder.Services.AddSingleton<IAuthorizationHandler, PartnerAdminAuthorizationHa
 // ─── Health Checks ───────────────────────────────────────────────────────────
 
 builder.Services.AddSingleton<Asterisk.Platform.Api.Health.IServiceHeartbeat, Asterisk.Platform.Api.Health.ServiceHeartbeat>();
+
+// Frente D (v1.9.1): resilience-state-aware health checks. The observer listens
+// to the Asterisk.Sdk.Resilience meter's circuit.state observable gauge and
+// caches per-policy-key state + timestamp so HealthCheck implementations can
+// distinguish Healthy / Degraded / Unhealthy based on how long a circuit has
+// been open.
+builder.Services.Configure<Asterisk.Platform.Api.Health.PlatformHealthCheckOptions>(_ => { });
+builder.Services.AddSingleton<Asterisk.Platform.Api.Health.ResilienceStateObserver>();
+builder.Services.AddSingleton<Asterisk.Platform.Api.Health.IResilienceStateObserver>(
+    sp => sp.GetRequiredService<Asterisk.Platform.Api.Health.ResilienceStateObserver>());
+builder.Services.AddHostedService(
+    sp => sp.GetRequiredService<Asterisk.Platform.Api.Health.ResilienceStateObserver>());
+
+// Dedicated HealthCheck-owned resilience policy: 2s timeout, no retry, no
+// circuit (we want every probe to run). Surfaces Postgres-under-load as
+// Unhealthy with a clear reason instead of hanging on the outer HealthCheck
+// timeout.
+builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
+    Asterisk.Platform.Api.Health.PostgresHealthCheck.ResiliencePolicyKey,
+    (_, _) => new Asterisk.Sdk.Resilience.ResiliencePolicyBuilder()
+        .WithTimeout(TimeSpan.FromSeconds(2))
+        .Build());
+
 var healthBuilder = builder.Services.AddHealthChecks()
     .AddCheck<Asterisk.Platform.Api.Health.BackgroundServiceHealthCheck>("services", tags: ["ready"])
     .AddCheck<Asterisk.Platform.Api.Health.AsteriskAmiHealthCheck>("asterisk", tags: ["ready"]);
@@ -626,6 +756,7 @@ app.MapHealthChecks("/health");
 app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = r => r.Tags.Contains("ready"),
+    ResponseWriter = Asterisk.Platform.Api.Health.HealthReportJsonWriter.WriteAsync,
 });
 // Prometheus scraping endpoint at /metrics — exposes the full SDK/Pro meter
 // catalog (resilience, licensing, cluster, push, etc.) registered via

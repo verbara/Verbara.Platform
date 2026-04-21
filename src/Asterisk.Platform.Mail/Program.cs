@@ -37,6 +37,15 @@ builder.Services.AddSingleton<IEmailService, SmtpSender>();
 builder.Services.AddSingleton<IEmailTemplateService, TemplateRenderer>();
 
 // ── Microsoft Graph ──
+// Transient-retry policy for Graph mailbox ops — retry 2/500ms, 20s per-attempt timeout,
+// circuit opens after 5 consecutive failures for 60s.
+builder.Services.AddKeyedSingleton<ResiliencePolicy>(
+    GraphMailboxService.ResiliencePolicyKey,
+    (_, _) => new ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 5, openDuration: TimeSpan.FromSeconds(60))
+        .WithRetry(maxAttempts: 2, baseDelay: TimeSpan.FromMilliseconds(500))
+        .WithTimeout(TimeSpan.FromSeconds(20))
+        .Build());
 builder.Services.AddSingleton<GraphMailboxService>();
 builder.Services.AddHttpClient("MicrosoftAuth");
 builder.Services.AddHttpClient("MicrosoftGraph", client =>
@@ -54,6 +63,16 @@ if (!string.IsNullOrEmpty(postgresConn))
 builder.Services.AddSingleton<TokenStore>();
 
 // ── Token refresh background service ──
+// Transient-retry policy for Azure AD token-endpoint POST — retry 3/1s, 15s per-attempt timeout,
+// circuit opens after 3 consecutive failures for 120s. Separate from mail.graph so refresh-path
+// failure modes (clock skew, tenant config drift) do not open the Graph API circuit and vice-versa.
+builder.Services.AddKeyedSingleton<ResiliencePolicy>(
+    TokenRefreshService.ResiliencePolicyKey,
+    (_, _) => new ResiliencePolicyBuilder()
+        .WithCircuitBreaker(threshold: 3, openDuration: TimeSpan.FromSeconds(120))
+        .WithRetry(maxAttempts: 3, baseDelay: TimeSpan.FromSeconds(1))
+        .WithTimeout(TimeSpan.FromSeconds(15))
+        .Build());
 builder.Services.AddHostedService<TokenRefreshService>();
 
 // ── DataProtection for OAuth state cookies ──

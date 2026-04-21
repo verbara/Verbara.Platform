@@ -62,6 +62,7 @@
     <!-- QuestPDF, ScottPlot, MailKit moved to Platform.Renderer and Platform.Mail microservices -->
     <PackageReference Include="NCrontab" />
     <PackageReference Include="Asterisk.Sdk.Hosting" />
+    <PackageReference Include="Asterisk.Sdk.Resilience" />
     <PackageReference Include="Asterisk.Sdk.Pro.EventStore" />
     <PackageReference Include="Asterisk.Sdk.Pro.Analytics" />
     <PackageReference Include="Asterisk.Sdk.Pro.CallAnalytics" />
