@@ -7,6 +7,88 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.9.1] — 2026-04-21 — "Resilience Coverage" (R3b)
+
+Horizontal completion of v1.9.0's Resilience MVP. Every remaining
+external/retriable call-site on the Platform backend now emits to the
+`Asterisk.Sdk.Resilience` Prometheus meter. Zero API surface changes —
+this release ships safely in parallel with R4 Platform.Web.
+
+### Added
+
+- **9 channel connectors** (`channel.{twilio-sms|twitter|instagram|
+  telegram|messenger|whatsapp|video|rcs|email-http}`) now wrap their
+  outbound HttpClient calls with keyed `ResiliencePolicy` instances.
+  Each connector owns a DI extension (`AddXxxResiliencePolicy()`) with
+  per-provider budgets tuned to the provider's SLA.
+- **3 service wrappers:** `flow.http-request` (user-defined flow HTTP
+  node; per-call timeout still sourced from flow config),
+  `report.pdf-render` (PDF renderer microservice), and `mail.graph` +
+  `mail.token-refresh` (Microsoft Graph mailbox + OAuth token refresh
+  in the Mail microservice).
+- **S3 storage wrapper** — `storage.s3` policy covers
+  `S3MediaStorage.UploadAsync/DownloadAsync/DeleteAsync`. AWS SDK's
+  built-in retry is disabled (`MaxErrorRetry = 0`) to prevent
+  double-retry (AWS retry × policy retry = 9+ attempts).
+- **12 BackgroundServices** — `worker.{name}` keyed policies wrap each
+  worker's inner tick work. The outer `while`/timer loop is NOT
+  wrapped — a circuit-open state causes the worker to skip the current
+  tick and retry on the next scheduled tick instead of crashing the
+  host. `CircuitBreakerOpenException` + generic exceptions are caught
+  per-tick. Workers covered: conversation-timeout, queue-distribution,
+  dunning, report-scheduler, bot-analytics-persistence,
+  asterisk-capacity-sync, retention-purge, audit-retention,
+  realtime-state-bridge, campaign-metrics-poller, agent-assist-bridge,
+  timer-polling.
+- **HealthCheck upgrades** — `AsteriskAmiHealthCheck`,
+  `PostgresHealthCheck`, `BackgroundServiceHealthCheck` now consult an
+  `IResilienceStateObserver` (MeterListener-backed singleton that
+  tracks circuit_opened_total + circuit_closed_total counters) and
+  report `Degraded` when a relevant circuit has been open >60s,
+  `Unhealthy` at >300s. Thresholds are configurable via
+  `PlatformHealthCheckOptions`.
+- **`healthcheck.postgres`** — new keyed policy (timeout 2s, no
+  circuit, no retry) wrapping `PostgresHealthCheck`'s test query so
+  DB-under-load surfaces as `Unhealthy` within 2s instead of hanging.
+- **`/health/ready`** — now emits structured JSON via
+  `HealthReportJsonWriter`, including per-policy circuit-state
+  breakdown for operator visibility. Replaces the default plain-text
+  ASP.NET Core response writer.
+- **`docs/operations/resilience-runbook.md`** — operator runbook
+  covering meter instruments, policy-key taxonomy, golden signals,
+  5 troubleshooting scenarios with PromQL queries, and the worker-
+  policies reference table.
+- **`docs/operations/dashboards/resilience-overview.json`** — Grafana
+  starter dashboard (5 panels: open circuits, retry rate, open/close
+  events, timeout firings, circuit-state matrix).
+
+### Changed
+
+- **`RealtimeStateBridge`** — DB sync and AMI `QueuePause` are now
+  wrapped as **independent** policy calls (same key, share circuit
+  aggregation), preserving the v1.9.0 "best-effort" semantic where a
+  DB failure does NOT prevent the AMI call. Previous bundled wrap
+  broke this invariant.
+- **`TokenRefreshService`** — no longer silently-swallows transient
+  exceptions. Logs structured warnings + lets the policy retry; on
+  exhaustion, the policy emits `retry_attempts_total` + the
+  application logs a warning with structured metadata.
+
+### Known limitations (carried forward from v1.9.0)
+
+No changes in v1.9.1. See v1.9.0 §Known limitations — JWT hardening,
+OIDC MFA enforcement, ChangePassword step-up, MFA cache cross-instance
+consistency, Asterisk 23 matrix (still tracked for v1.9.2).
+
+### Metrics
+
+- **1,733 unit tests** across 29 assemblies, 0 failures (baseline 1,699
+  from v1.9.0 + 34 new regression + contract tests for v1.9.1)
+- **0 build warnings / 0 errors** with `TreatWarningsAsErrors=true`
+- 7 commits since v1.9.0
+
+---
+
 ## [1.9.0] — 2026-04-20 — "Secure + Current" (R3)
 
 Cross-repo coordination: consumes **SDK v1.15.0 + Pro v1.10.0-pro**
