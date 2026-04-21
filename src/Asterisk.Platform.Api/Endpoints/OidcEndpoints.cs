@@ -4,6 +4,7 @@ using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Asterisk.Platform.Identity.Mfa;
 using Asterisk.Platform.Identity.OidcTokenExchange;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
@@ -89,6 +90,7 @@ internal static class OidcEndpoints
         [FromServices] IOidcTokenExchangeService tokenExchange,
         [FromServices] IOidcUserProvisioningService provisioning,
         [FromServices] IDataProtectionProvider dataProtection,
+        [FromServices] IMfaPolicyEvaluator mfaEvaluator,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
@@ -168,7 +170,7 @@ internal static class OidcEndpoints
             return Results.Unauthorized();
         }
 
-        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, user, flowState, ip, ua, ct);
+        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, user, flowState, ip, ua, ct);
     }
 
     private static (OidcFlowState? State, IResult? Error) DecryptFlowState(
@@ -199,13 +201,49 @@ internal static class OidcEndpoints
         return (flowState, null);
     }
 
-    private static async Task<IResult> CompleteOidcLoginAsync(
+    // Visibility elevated to internal so Asterisk.Platform.Api.Tests (InternalsVisibleTo)
+    // can directly exercise the MFA gate in unit tests without spinning up WebApplicationFactory.
+    internal static async Task<IResult> CompleteOidcLoginAsync(
         HttpContext context, JwtTokenService jwtService, RefreshTokenService refreshService,
-        AuthEventService authEvents, User user, OidcFlowState flowState,
+        AuthEventService authEvents, IMfaPolicyEvaluator mfaEvaluator, User user, OidcFlowState flowState,
         string? ip, string? ua, CancellationToken ct)
     {
         var tenantId = flowState.TenantId;
 
+        // v1.9.2 Frente C — P0: enforce tenant MFA policy on OIDC callback.
+        // OIDC SSO was previously exempt from MFA policy enforcement that already
+        // applied to password login, API-key login, and refresh. An attacker who
+        // could authenticate via an OIDC provider bypassed the tenant's
+        // required_all / required_for_roles policy entirely.
+        var policyRequiresMfa = await mfaEvaluator.RequiresMfaAsync(tenantId, user.Role, ct);
+
+        // Case A: policy requires MFA + user not enrolled → redirect to enrollment-required fragment.
+        // The frontend intercepts #oidc_mfa_enrollment_required and drives the enrollment wizard.
+        if (policyRequiresMfa && !user.MfaEnabled)
+        {
+            await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginFailure, ip, ua,
+                new Dictionary<string, string> { ["reason"] = "mfa_enrollment_required" }, ct);
+            var enrollReturnUrl = flowState.ReturnUrl ?? "/";
+            return Results.Redirect(
+                $"{enrollReturnUrl}#oidc_mfa_enrollment_required" +
+                $"&tenant_id={Uri.EscapeDataString(tenantId)}" +
+                $"&email={Uri.EscapeDataString(user.Email)}");
+        }
+
+        // Case B: user has MFA enrolled → create pending challenge + redirect.
+        // The frontend intercepts #oidc_mfa_challenge and POSTs to /auth/mfa/verify.
+        if (user.MfaEnabled)
+        {
+            var challengeToken = AuthEndpoints.GenerateMfaChallengeTokenAndStore(
+                user.UserId.Value, tenantId);
+            var challengeReturnUrl = flowState.ReturnUrl ?? "/";
+            return Results.Redirect(
+                $"{challengeReturnUrl}#oidc_mfa_challenge" +
+                $"&challenge_token={Uri.EscapeDataString(challengeToken)}" +
+                $"&tenant_id={Uri.EscapeDataString(tenantId)}");
+        }
+
+        // Case C: no MFA required and user not enrolled → existing token issuance (unchanged).
         IReadOnlySet<string>? permissions = null;
         var resolver = context.RequestServices.GetService<PermissionResolver>();
         if (resolver is not null)
