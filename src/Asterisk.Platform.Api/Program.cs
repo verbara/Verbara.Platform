@@ -30,7 +30,9 @@ using Asterisk.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.EventStore.DependencyInjection;
 using Asterisk.Sdk.Pro.EventStore.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.Analytics.DependencyInjection;
+using Asterisk.Sdk.Pro.Analytics.Live;
 using Asterisk.Sdk.Pro.Analytics.Storage.Postgres.DependencyInjection;
+using Asterisk.Sdk.Pro.Analytics.Storage.Postgres.Live;
 using Asterisk.Sdk.Pro.CallAnalytics.DependencyInjection;
 using Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres.DependencyInjection;
 using Asterisk.Sdk.Pro.AgentAssist.DependencyInjection;
@@ -575,6 +577,18 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     builder.Services.AddAsteriskAnalytics();
     builder.Services.AddProCallAnalytics();
     // TODO: AddProAgentAssist() requires a SpeechRecognizer implementation — skipped until STT provider is configured
+
+    // Pro.Analytics.Live (v1.12.0-pro) — LiveQueueSnapshotWriter hosted service +
+    // Postgres-backed ILiveQueueMetricsProvider for QueueMetricsEndpoints. Uses
+    // the dedicated ASTERISK__ANALYTICS__LIVE__CONNECTION when provided, else
+    // falls back to the shared Analytics connection string (same DB).
+    // KNOWN LIMITATION (R5.1 Task H): writer emits tenant_id="" because Platform
+    // registers Pro.Analytics as process-scope singleton with empty DefaultTenantId.
+    // Per-tenant scope refactor is tracked for R5.2 / future Platform patch.
+    var liveAnalyticsConnectionString = builder.Configuration["ASTERISK__ANALYTICS__LIVE__CONNECTION"]
+        ?? analyticsConnectionString;
+    builder.Services.AddAsteriskProAnalyticsLive();
+    builder.Services.UsePostgresProAnalyticsLive(liveAnalyticsConnectionString);
 
     // AgentAssist Postgres query stores (read-only endpoints for supervisor dashboard)
     builder.Services.AddProAgentAssistPostgres(analyticsConnectionString);

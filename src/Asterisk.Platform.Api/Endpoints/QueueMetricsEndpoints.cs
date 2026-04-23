@@ -2,6 +2,7 @@ using Asterisk.Platform.Api.Middleware;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Queues;
 using Asterisk.Sdk.Pro.Analytics;
+using Asterisk.Sdk.Pro.Analytics.Live;
 using Asterisk.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,6 +10,14 @@ namespace Asterisk.Platform.Api.Endpoints;
 
 internal static class QueueMetricsEndpoints
 {
+    /// <summary>
+    /// Response header set when the live queue metrics provider is either not
+    /// registered or returned null for every queue in the current request.
+    /// Consumed by Platform.Web to render em-dash placeholders in the queue
+    /// metrics table (R5.1 Task H).
+    /// </summary>
+    internal const string MetricsAvailableHeader = "X-Metrics-Available";
+
     public static void MapQueueMetricsEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/operations")
@@ -22,6 +31,7 @@ internal static class QueueMetricsEndpoints
         [FromServices] IQueueStore queueStore,
         [FromServices] IAgentStore agentStore,
         [FromServices] IIntervalSnapshotStore snapshotStore,
+        [FromServices] ILiveQueueMetricsProvider? liveMetrics,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -42,7 +52,20 @@ internal static class QueueMetricsEndpoints
             .GroupBy(s => s.QueueName)
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        var dtos = pagedQueues.Items.Select(q =>
+        // Live queue metrics (Pro.Analytics.Live v1.12.0-pro) — nullable, graceful degrade
+        // when the provider is not registered (e.g., single-node deployments without
+        // Postgres-backed Pro.Analytics.Live). Query per queue using the string tenant
+        // id; see multi-tenant note in the task H commit message for scope caveats.
+        // NOTE (R5.1 Task H known limitation): Platform registers Pro.Analytics as
+        // process-scope singleton with empty DefaultTenantId, so LiveQueueSnapshotWriter
+        // persists rows with tenant_id="". The endpoint therefore passes "" for
+        // tenantId when querying the provider to match the persisted rows. Per-tenant
+        // writer scope is tracked as a follow-up (future Platform patch / R5.2).
+        var liveLookupTenantId = string.Empty;
+        var anyLiveMetricsAvailable = false;
+
+        var dtos = new List<QueueMetricsDto>(pagedQueues.Items.Count);
+        foreach (var q in pagedQueues.Items)
         {
             // Count agents by state (all agents for now — queue membership not tracked at agent level)
             var available = allAgents.Count(a => a.State == AgentState.Available);
@@ -60,18 +83,36 @@ internal static class QueueMetricsEndpoints
                     : 0.0;
             }
 
-            return new QueueMetricsDto(
+            int? waiting = null;
+            double? avgWaitSeconds = null;
+            if (liveMetrics is not null)
+            {
+                var live = await liveMetrics.GetLiveMetricsAsync(liveLookupTenantId, q.Name, ct);
+                if (live is not null)
+                {
+                    waiting = live.CallsWaiting;
+                    avgWaitSeconds = live.AvgWaitSeconds;
+                    anyLiveMetricsAvailable = true;
+                }
+            }
+
+            dtos.Add(new QueueMetricsDto(
                 QueueId: q.QueueId.Value,
                 QueueName: q.Name,
-                Waiting: 0,                  // Requires ARI bridge integration — deferred to v1.0
-                AvgWaitSeconds: 0,           // Requires ARI bridge integration — deferred to v1.0
+                Waiting: waiting,
+                AvgWaitSeconds: avgWaitSeconds,
                 SlaPercent: slaPercent,
                 AgentsAvailable: available,
                 AgentsBusy: busy,
-                AgentsAway: away);
-        }).ToArray();
+                AgentsAway: away));
+        }
 
-        return Results.Ok(dtos);
+        // Signal unavailability either when the provider is unregistered or when
+        // every per-queue lookup returned null (no rows yet in live_queue_metrics).
+        if (liveMetrics is null || !anyLiveMetricsAvailable)
+            context.Response.Headers[MetricsAvailableHeader] = "false";
+
+        return Results.Ok(dtos.ToArray());
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -91,8 +132,8 @@ internal static class QueueMetricsEndpoints
 internal sealed record QueueMetricsDto(
     string QueueId,
     string QueueName,
-    int Waiting,
-    double AvgWaitSeconds,
+    int? Waiting,
+    double? AvgWaitSeconds,
     double SlaPercent,
     int AgentsAvailable,
     int AgentsBusy,

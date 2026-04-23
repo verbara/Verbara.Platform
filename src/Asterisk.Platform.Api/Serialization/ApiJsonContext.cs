@@ -112,6 +112,8 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(LiveStateDto))]
 [JsonSerializable(typeof(List<LiveStateDto>))]
 [JsonSerializable(typeof(CurrentIntervalDto))]
+[JsonSerializable(typeof(QueueMetricsDto))]
+[JsonSerializable(typeof(QueueMetricsDto[]))]
 [JsonSerializable(typeof(TrunkDto))]
 [JsonSerializable(typeof(List<TrunkDto>))]
 [JsonSerializable(typeof(CreateTrunkRequest))]

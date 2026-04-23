@@ -7,6 +7,40 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased] — R5.1 Task H — Live Queue Metrics wiring
+
+### Added
+
+- **`GET /operations/queue-metrics`** now returns real-time `Waiting` +
+  `AvgWaitSeconds` values sourced from the Pro.Analytics.Live
+  `ILiveQueueMetricsProvider` (Asterisk.Sdk.Pro v1.12.0-pro). When the
+  provider is unregistered or has no snapshot for a queue, the fields
+  return `null` (instead of the previous hardcoded `0`) and the response
+  sets `X-Metrics-Available: false` so clients can render placeholder UI.
+- `AddAsteriskProAnalyticsLive()` + `UsePostgresProAnalyticsLive(...)`
+  wired in `Program.cs`. Connection string: new
+  `ASTERISK__ANALYTICS__LIVE__CONNECTION` config key with fallback to the
+  shared Analytics connection string (same DB).
+- `QueueMetricsDto.Waiting` + `QueueMetricsDto.AvgWaitSeconds` are now
+  nullable (`int?` + `double?`). `QueueMetricsDto` + `QueueMetricsDto[]`
+  registered in `ApiJsonContext` for AOT JSON serialization.
+
+### Changed
+
+- Pro pin bumped from `1.11.0-pro` → `1.12.0-pro` across 21
+  `Directory.Packages.props` entries.
+
+### Known limitations
+
+- Platform currently registers `AddAsteriskAnalytics()` as a process-scope
+  singleton with an empty `DefaultTenantId`, so `LiveQueueSnapshotWriter`
+  persists rows with `tenant_id=""`. The endpoint therefore queries the
+  provider with `tenantId=""` so it can read back the rows the writer
+  produced. A per-tenant scope refactor is tracked as a follow-up
+  (future Platform patch / R5.2) and is out of scope for Task H.
+
+---
+
 ## [1.9.3] — 2026-04-21 — Speech Analytics + Compliance Aggregations API
 
 Adds `/api/v1/call-analytics/*` endpoint group with aggregation-focused
