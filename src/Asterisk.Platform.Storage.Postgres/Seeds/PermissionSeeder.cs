@@ -57,6 +57,16 @@ internal static class PermissionSeeder
         yield return P("queues:member:assign", "queues", "member", "assign",
             "Assign or remove queue members",
             ["queues:queue:view"]);
+        // R5.1 Task I — RESTful queue-member endpoints with explicit verbs.
+        yield return P("queues:member:view", "queues", "member", "view",
+            "View queue-member assignments and pause state",
+            ["queues:queue:view"]);
+        yield return P("queues:member:delete", "queues", "member", "delete",
+            "Remove queue-member assignments",
+            ["queues:member:assign", "queues:queue:view"]);
+        yield return P("queues:member:pause", "queues", "member", "pause",
+            "Pause or resume queue members (AMI QueuePause)",
+            ["queues:member:view", "queues:queue:view"]);
 
         // ── users (5) ──
         yield return P("users:user:view", "users", "user", "view",
