@@ -18,6 +18,7 @@ using Asterisk.Platform.Media;
 using Asterisk.Platform.Switchboard;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Identity.OidcTokenExchange;
+using Asterisk.Platform.Identity.Redis.DependencyInjection;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Queues.Services;
 using Asterisk.Sdk.Hosting;
@@ -407,11 +408,26 @@ builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IMfaPolicyEvaluator
     Asterisk.Platform.Identity.Mfa.TenantAuthConfigMfaPolicyEvaluator>();
 
 // ─── MFA / Password-Reset Token Caches ─────────────────────────────────────
-// In-memory implementations — Redis-backed variants deferred to v1.9.3+.
+// Default: in-memory implementations (single-instance safe). When
+// ConnectionStrings:IdentityRedis is set, AddAsteriskPlatformIdentityRedis
+// replaces both registrations with Redis-backed impls so MFA challenge +
+// password-reset tokens survive failover across multiple API instances.
 builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IMfaPendingCache,
     Asterisk.Platform.Identity.Mfa.InMemoryMfaPendingCache>();
 builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IPasswordResetCache,
     Asterisk.Platform.Identity.Mfa.InMemoryPasswordResetCache>();
+
+var identityRedisConn = builder.Configuration.GetConnectionString("IdentityRedis");
+if (!string.IsNullOrWhiteSpace(identityRedisConn))
+{
+    builder.Services.AddAsteriskPlatformIdentityRedis(o =>
+    {
+        o.ConnectionString = identityRedisConn;
+        var prefix = builder.Configuration["Identity:Redis:KeyPrefix"];
+        if (!string.IsNullOrWhiteSpace(prefix))
+            o.KeyPrefix = prefix;
+    });
+}
 
 // ─── OIDC SSO Services ──────────────────────────────────────────────────────
 builder.Services.AddHttpClient("oidc");

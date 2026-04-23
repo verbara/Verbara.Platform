@@ -52,6 +52,11 @@ services:
       Services__Renderer__BaseUrl: http://renderer:5010
       Services__Mail__BaseUrl: http://mail:5020
       Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
+      # Opt-in Redis-backed MFA + password-reset caches. Uncomment to enable —
+      # requires the `identity-redis` profile (or `cluster` profile) to start the
+      # Redis service. Without this variable the Platform falls back to the
+      # in-memory caches (single-instance safe).
+      # ConnectionStrings__IdentityRedis: redis:6379
     volumes:
       - recordings:/recordings
     depends_on:
@@ -147,7 +152,12 @@ services:
   redis:
     image: redis:8-alpine
     restart: unless-stopped
-    profiles: [cluster]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: [cluster, identity-redis]
 
   minio:
     image: minio/minio

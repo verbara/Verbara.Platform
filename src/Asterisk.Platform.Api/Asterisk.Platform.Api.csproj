@@ -22,6 +22,7 @@
 <ItemGroup>
     <ProjectReference Include="..\Asterisk.Platform.Core\Asterisk.Platform.Core.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Identity\Asterisk.Platform.Identity.csproj" />
+    <ProjectReference Include="..\Asterisk.Platform.Identity.Redis\Asterisk.Platform.Identity.Redis.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Conversations\Asterisk.Platform.Conversations.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Queues\Asterisk.Platform.Queues.csproj" />
     <ProjectReference Include="..\Asterisk.Platform.Channels.Core\Asterisk.Platform.Channels.Core.csproj" />
