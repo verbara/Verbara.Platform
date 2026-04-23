@@ -580,12 +580,14 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
 
     // Pro.Analytics.Live (v1.12.0-pro) — LiveQueueSnapshotWriter hosted service +
     // Postgres-backed ILiveQueueMetricsProvider for QueueMetricsEndpoints. Uses
-    // the dedicated ASTERISK__ANALYTICS__LIVE__CONNECTION when provided, else
-    // falls back to the shared Analytics connection string (same DB).
+    // the dedicated "AnalyticsLive" connection string when provided (matches
+    // project convention: ConnectionStrings__AnalyticsLive env var or nested
+    // appsettings "ConnectionStrings:AnalyticsLive"), else falls back to the
+    // shared Analytics connection string (same DB).
     // KNOWN LIMITATION (R5.1 Task H): writer emits tenant_id="" because Platform
     // registers Pro.Analytics as process-scope singleton with empty DefaultTenantId.
     // Per-tenant scope refactor is tracked for R5.2 / future Platform patch.
-    var liveAnalyticsConnectionString = builder.Configuration["ASTERISK__ANALYTICS__LIVE__CONNECTION"]
+    var liveAnalyticsConnectionString = builder.Configuration.GetConnectionString("AnalyticsLive")
         ?? analyticsConnectionString;
     builder.Services.AddAsteriskProAnalyticsLive();
     builder.Services.UsePostgresProAnalyticsLive(liveAnalyticsConnectionString);
