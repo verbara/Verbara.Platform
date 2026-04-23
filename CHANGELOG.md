@@ -7,7 +7,70 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased] — R5.1 Task H + Task L
+## [Unreleased]
+
+_No unreleased changes. Next release staging begins after R5.2 spec approval._
+
+---
+
+## [1.10.0] — 2026-04-22 — R5.1 "Production Readiness + Ops Toolkit"
+
+First release in the R5 Production Readiness Release Train. Ships paired
+with **Asterisk.Sdk.Pro 1.12.0-pro** and **Asterisk.Platform.Web 1.9.0**.
+Closes 4 production blockers discovered in the code audit (stale live
+queue metrics, queue-member management gap, AgentAssist runtime toggle
+gap, single-instance MFA cache). Zero API surface breakage — existing
+clients continue to work without changes. **~1,800 non-Postgres tests
+passing**, 0 warnings.
+
+### Added — Task H (Live Queue Metrics wiring)
+
+- **`GET /operations/queue-metrics`** now returns real-time `Waiting` +
+  `AvgWaitSeconds` values sourced from the Pro.Analytics.Live
+  `ILiveQueueMetricsProvider` (Asterisk.Sdk.Pro v1.12.0-pro). When the
+  provider is unregistered or has no snapshot for a queue, the fields
+  return `null` (instead of the previous hardcoded `0`) and the response
+  sets `X-Metrics-Available: false` so clients can render placeholder UI.
+- `AddAsteriskProAnalyticsLive()` + `UsePostgresProAnalyticsLive(...)`
+  wired in `Program.cs`. Connection string: new
+  `ASTERISK__ANALYTICS__LIVE__CONNECTION` config key with fallback to the
+  shared Analytics connection string (same DB).
+- `QueueMetricsDto.Waiting` + `QueueMetricsDto.AvgWaitSeconds` are now
+  nullable (`int?` + `double?`). `QueueMetricsDto` + `QueueMetricsDto[]`
+  registered in `ApiJsonContext` for AOT JSON serialization.
+
+### Added — Task I (Queue Members RESTful endpoints)
+
+- **`/api/v1/queues/{id}/members`** endpoint group — RESTful nested
+  under queues with `GET` (list), `POST` (add), `DELETE` (remove),
+  `POST /pause` (pause/resume). Legacy `/admin/queue-members/*`
+  returns **308 Permanent Redirect** preserving request body — existing
+  clients keep working without code changes.
+- New permissions: `queues:member:view`, `queues:member:delete`,
+  `queues:member:pause` — seeded into RBAC role templates (fresh tenants
+  only; existing tenants require re-seed — see **Known limitations**).
+- New audit actions: `queue.member.added`, `queue.member.removed`,
+  `queue.member.paused`, `queue.member.resumed`.
+- 21 endpoint tests covering RBAC gating + happy-path + degrade-path +
+  redirect-with-body semantics.
+
+### Added — Task J (AgentAssist runtime feature toggle)
+
+- **`/api/v1/admin/features/agent-assist`** endpoint group with `GET`
+  (status + provider), `PUT` (enable/disable + rotate provider), and
+  protected credential persistence via `IDataProtectionProvider` (MS
+  DataProtection). Credential ciphertext stored in the runtime feature
+  store — never surfaced by `GET`.
+- **Provider whitelist normalization** — provider names normalized
+  (trim + lowercase) before the whitelist check to avoid accidental
+  mismatches. Supported providers: `deepgram`, `whisper`, `azure-whisper`,
+  `google`, `elevenlabs`, `azure-tts`.
+- New permission `features:agent-assist:manage` (seeded into
+  `platform_admin` template; existing tenant rows require re-seed —
+  see **Known limitations**).
+- Platform always registers an `IAgentAssistFeatureToggle` (Pro
+  v1.12.0-pro surface) so the engine short-circuits when disabled.
+- `AgentAssistCredentialsProtector` wraps secrets at rest.
 
 ### Added — Task L (Identity Redis)
 
@@ -38,37 +101,43 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stored-expired short-circuit, key-prefix isolation, and DI replace
   behavior. Spins up `redis:7-alpine` per collection.
 
-### Added — Task H (Live Queue Metrics wiring)
-
-- **`GET /operations/queue-metrics`** now returns real-time `Waiting` +
-  `AvgWaitSeconds` values sourced from the Pro.Analytics.Live
-  `ILiveQueueMetricsProvider` (Asterisk.Sdk.Pro v1.12.0-pro). When the
-  provider is unregistered or has no snapshot for a queue, the fields
-  return `null` (instead of the previous hardcoded `0`) and the response
-  sets `X-Metrics-Available: false` so clients can render placeholder UI.
-- `AddAsteriskProAnalyticsLive()` + `UsePostgresProAnalyticsLive(...)`
-  wired in `Program.cs`. Connection string: new
-  `ASTERISK__ANALYTICS__LIVE__CONNECTION` config key with fallback to the
-  shared Analytics connection string (same DB).
-- `QueueMetricsDto.Waiting` + `QueueMetricsDto.AvgWaitSeconds` are now
-  nullable (`int?` + `double?`). `QueueMetricsDto` + `QueueMetricsDto[]`
-  registered in `ApiJsonContext` for AOT JSON serialization.
-
 ### Changed
 
 - Pro pin bumped from `1.11.0-pro` → `1.12.0-pro` across 21
   `Directory.Packages.props` entries (Task H).
 - `StackExchange.Redis 2.12.14` + `Testcontainers 4.11.0` added to
-  `Directory.Packages.props` for Task L.
+  `Directory.Packages.props` (Task L).
 
 ### Known limitations
 
-- Platform currently registers `AddAsteriskAnalytics()` as a process-scope
-  singleton with an empty `DefaultTenantId`, so `LiveQueueSnapshotWriter`
-  persists rows with `tenant_id=""`. The endpoint therefore queries the
-  provider with `tenantId=""` so it can read back the rows the writer
-  produced. A per-tenant scope refactor is tracked as a follow-up
-  (future Platform patch / R5.2) and is out of scope for Task H.
+- **Multi-tenant Pro.Analytics scope** — Platform currently registers
+  `AddAsteriskAnalytics()` as a process-scope singleton with an empty
+  `DefaultTenantId`, so `LiveQueueSnapshotWriter` persists rows with
+  `tenant_id=""`. The `/operations/queue-metrics` endpoint queries the
+  provider with `tenantId=""` to read back the rows the writer produced.
+  A per-tenant scope refactor is tracked as a **R5.2 ADR + execution**
+  follow-up ("tenant stamping pipeline end-to-end").
+- **RBAC hot-reload for existing tenants** — the new permissions
+  (`queues:member:view/delete/pause` + `features:agent-assist:manage`)
+  only land on fresh seeds via `RoleTemplateSeeder.AllPermissions()`.
+  Existing tenant `platform_admin` rows need re-seed or migration —
+  tracked as a **Platform v1.10 release runbook** entry.
+- **DataProtection keyring persistence in Docker** —
+  `AgentAssistCredentialsProtector` relies on the default DataProtection
+  keyring at `/root/.aspnet/DataProtection-Keys`, which is ephemeral
+  inside containers. Operators must configure `PersistKeysToFileSystem`
+  or `PersistKeysToDbContext` to survive container recreation;
+  documented for **R5.2 ops polish**.
+- **`IJtiRevocationCache` stays in-memory** — Task L covered MFA +
+  password-reset caches. `IJtiRevocationCache` (shipped v1.9.2) remains
+  in-memory; Redis impl deferred to **R5.2 patch** via extension of
+  `Asterisk.Platform.Identity.Redis`.
+- **Platform API AOT publish warnings** — pre-existing IL3050/IL3053
+  warnings surface on `dotnet publish /p:PublishAot=true`
+  (`SignalR.Hub<T>.Clients`, non-generic `JsonStringEnumConverter`,
+  Dapper reflection paths). None are introduced by R5.1; platform
+  continues to ship JIT. Addressed in **R2 / v2-preview1** AOT
+  hardening frente.
 
 ---
 
