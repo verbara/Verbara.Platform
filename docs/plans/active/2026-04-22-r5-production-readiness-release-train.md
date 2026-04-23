@@ -1,7 +1,7 @@
 # R5 — Production Readiness + Value Materialization (Release Train)
 
 **Fecha creación:** 2026-04-22
-**Estado:** Approved (envelope D' + S1 expanded product-final)
+**Estado:** Approved (envelope D' + S1 expanded product-final) — **R5.1 shipped 2026-04-22** (Pro 1.12.0-pro + Platform 1.10.0 + Web 1.9.0; awaiting user push/tag/release approval)
 **Duración estimada:** 10-12 semanas total (~7 sem execution + ~4 sem QA gaps entre releases)
 **Baseline:** SDK 1.15.0 · Pro 1.11.0-pro · Platform 1.9.3 · Web 1.8.0
 
