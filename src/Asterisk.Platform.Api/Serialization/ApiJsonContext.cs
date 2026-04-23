@@ -114,6 +114,10 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(CurrentIntervalDto))]
 [JsonSerializable(typeof(QueueMetricsDto))]
 [JsonSerializable(typeof(QueueMetricsDto[]))]
+// AgentAssist runtime feature toggle (R5.1 Task J)
+[JsonSerializable(typeof(AgentAssistFeatureDto))]
+[JsonSerializable(typeof(AgentAssistFeatureUpdateRequest))]
+[JsonSerializable(typeof(AgentAssistCredentialsDto))]
 [JsonSerializable(typeof(TrunkDto))]
 [JsonSerializable(typeof(List<TrunkDto>))]
 [JsonSerializable(typeof(CreateTrunkRequest))]

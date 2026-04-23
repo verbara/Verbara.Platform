@@ -581,7 +581,26 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     builder.Services.AddAsteriskEventStore();
     builder.Services.AddAsteriskAnalytics();
     builder.Services.AddProCallAnalytics();
-    // TODO: AddProAgentAssist() requires a SpeechRecognizer implementation — skipped until STT provider is configured
+
+    // AgentAssist (R5.1 Task J) — always registered, runtime-managed via IAgentAssistFeatureToggle.
+    // When the toggle reports Enabled=false (default at startup until a supervisor enables
+    // the feature in the admin UI) the engine runs each session in stub mode: no SpeechRecognizer
+    // is resolved, no transcript is produced, and no warning cascade fires — only a single
+    // "[agentassist] disabled via feature toggle" log line per skipped session.
+    //
+    // Credentials provided via the "AgentAssist" config section seed the toggle on first read.
+    // Runtime PUT /admin/features/agent-assist mutates the in-memory state only; clients should
+    // persist long-term config via appsettings so restarts restore the baseline.
+    builder.Services.Configure<Asterisk.Platform.Core.Configuration.AgentAssistOptions>(
+        builder.Configuration.GetSection("AgentAssist"));
+    builder.Services.AddSingleton<Asterisk.Platform.Api.Services.AgentAssist.AgentAssistCredentialsProtector>();
+    builder.Services.AddSingleton<Asterisk.Sdk.Pro.AgentAssist.Features.IAgentAssistFeatureToggle,
+        Asterisk.Platform.Api.Services.AgentAssist.InMemoryAgentAssistFeatureToggle>();
+    builder.Services.AddProAgentAssist(assistBuilder =>
+    {
+        assistBuilder.WithRuntimeFeatureToggle(sp =>
+            sp.GetRequiredService<Asterisk.Sdk.Pro.AgentAssist.Features.IAgentAssistFeatureToggle>());
+    });
 
     // Pro.Analytics.Live (v1.12.0-pro) — LiveQueueSnapshotWriter hosted service +
     // Postgres-backed ILiveQueueMetricsProvider for QueueMetricsEndpoints. Uses
@@ -831,6 +850,7 @@ v1.MapManagementTenantEndpoints();
 v1.MapManagementSystemEndpoints();
 v1.MapManagementClusterEndpoints();
 v1.MapManagementApiKeyEndpoints();
+v1.MapAgentAssistFeatureEndpoints();
 v1.MapSseEndpoints();
 
 // Plan 32C — SignalR PlatformHub for supervisor + presence real-time channels.

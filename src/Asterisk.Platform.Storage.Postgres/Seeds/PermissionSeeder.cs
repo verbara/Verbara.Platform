@@ -243,6 +243,10 @@ internal static class PermissionSeeder
         yield return P("platform:cluster:manage", "platform", "cluster", "manage",
             "Manage cluster nodes, drain, and failover",
             ["system:cluster:manage"]);
+
+        // ── features (platform-level runtime toggles, v1.9.4) ──
+        yield return P("features:agent-assist:manage", "features", "agent-assist", "manage",
+            "Enable/disable AgentAssist at runtime and rotate STT provider credentials");
     }
 
     private static object P(string id, string category, string resource, string action,

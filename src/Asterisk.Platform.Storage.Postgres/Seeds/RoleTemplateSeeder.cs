@@ -139,6 +139,7 @@ internal static class RoleTemplateSeeder
                 "platform:tenant:suspend", "platform:tenant:delete",
                 "platform:tenant:impersonate", "platform:server:manage",
                 "platform:license:manage", "platform:cluster:manage",
+                "features:agent-assist:manage",
             ]));
 
         // ── Api ──
@@ -225,6 +226,7 @@ internal static class RoleTemplateSeeder
             "platform:tenant:suspend", "platform:tenant:delete",
             "platform:tenant:impersonate", "platform:server:manage",
             "platform:license:manage", "platform:cluster:manage",
+            "features:agent-assist:manage",
             "partner:customer:view", "partner:customer:create",
             "partner:customer:manage", "partner:customer:delete",
             "partner:billing:view", "partner:billing:manage",
