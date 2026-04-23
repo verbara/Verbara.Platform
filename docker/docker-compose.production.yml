@@ -76,7 +76,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:8-alpine
+    image: redis:7-alpine
     restart: unless-stopped
     profiles:
       - cluster
