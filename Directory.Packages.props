@@ -84,6 +84,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageVersion Include="StackExchange.Redis" Version="2.12.14" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
@@ -92,6 +96,7 @@
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.5" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
+    <PackageVersion Include="Testcontainers" Version="4.11.0" />
   </ItemGroup>
 
 </Project>

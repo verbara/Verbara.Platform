@@ -1,0 +1,66 @@
+using Asterisk.Platform.Identity.Mfa;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using StackExchange.Redis;
+
+namespace Asterisk.Platform.Identity.Redis.DependencyInjection;
+
+/// <summary>
+/// DI registration extensions for the Redis-backed Identity caches.
+/// </summary>
+public static class IdentityRedisServiceCollectionExtensions
+{
+    /// <summary>
+    /// Registers Redis-backed implementations of <see cref="IMfaPendingCache"/> and
+    /// <see cref="IPasswordResetCache"/>, replacing any previously registered
+    /// implementations (e.g. the in-memory defaults from the Platform.Api
+    /// bootstrap).
+    ///
+    /// Also registers <see cref="IConnectionMultiplexer"/> as a singleton if one is not
+    /// already present in the container, so Redis can be shared with other packages
+    /// (e.g. <c>Asterisk.Sdk.Pro.Cluster.Redis</c>).
+    /// </summary>
+    public static IServiceCollection AddAsteriskPlatformIdentityRedis(
+        this IServiceCollection services,
+        Action<RedisIdentityOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        services.Configure(configure);
+
+        services.TryAddSingleton<IConnectionMultiplexer>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<RedisIdentityOptions>>().Value;
+            if (string.IsNullOrWhiteSpace(options.ConnectionString))
+            {
+                throw new InvalidOperationException(
+                    "RedisIdentityOptions.ConnectionString is required when no " +
+                    "IConnectionMultiplexer has been registered elsewhere in the container.");
+            }
+            return ConnectionMultiplexer.Connect(options.ConnectionString);
+        });
+
+        RemoveExisting<IMfaPendingCache>(services);
+        services.AddSingleton<IMfaPendingCache>(sp => new RedisMfaPendingCache(
+            sp.GetRequiredService<IConnectionMultiplexer>(),
+            sp.GetRequiredService<IOptions<RedisIdentityOptions>>()));
+
+        RemoveExisting<IPasswordResetCache>(services);
+        services.AddSingleton<IPasswordResetCache>(sp => new RedisPasswordResetCache(
+            sp.GetRequiredService<IConnectionMultiplexer>(),
+            sp.GetRequiredService<IOptions<RedisIdentityOptions>>()));
+
+        return services;
+    }
+
+    private static void RemoveExisting<TService>(IServiceCollection services)
+    {
+        for (var i = services.Count - 1; i >= 0; i--)
+        {
+            if (services[i].ServiceType == typeof(TService))
+                services.RemoveAt(i);
+        }
+    }
+}
