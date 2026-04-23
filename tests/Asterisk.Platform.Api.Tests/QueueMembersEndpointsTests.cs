@@ -7,11 +7,13 @@ namespace Asterisk.Platform.Api.Tests;
 /// <summary>
 /// R5.1 Task I — coverage for the new RESTful queue-member endpoints.
 ///
-/// Scenario matrix (spec: 6 routes × 3 scenarios = 18 + 2 redirects + 1 degrade = 21 tests):
+/// Scenario matrix (6 routes × 3 scenarios = 18 + 2 header redirects + 2 redirect-with-body
+/// E2E + 1 degrade = 23 tests):
 ///   * Happy path — authenticated Admin against the expected verb.
 ///   * 401 — unauthenticated request via <see cref="PlatformApiFactory"/>.
 ///   * 403 — authenticated Agent (<see cref="NonAdminAuthenticatedApiFactory"/>) fails AdminOnly.
-///   * 308 redirects preserve method + forward POST / DELETE to nested path.
+///   * 308 redirects preserve method + forward POST / DELETE to nested path
+///     (header-only + auto-redirect E2E companions that re-issue the body/method).
 ///   * Pause/resume without <c>IRealtimeSyncService</c> logs-and-persists (DB-only path).
 /// </summary>
 public sealed class QueueMembersEndpointsTests :
@@ -45,6 +47,71 @@ public sealed class QueueMembersEndpointsTests :
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {AuthenticatedPlatformApiFactory.TestApiKey}");
         client.DefaultRequestHeaders.Add("X-Tenant-Id", AuthenticatedPlatformApiFactory.TestTenantId);
         return client;
+    }
+
+    private HttpClient CreateAutoRedirectingAdminClient()
+    {
+        // Gotcha: Mvc.Testing's built-in RedirectHandler deliberately strips the
+        // Authorization header on every redirect (same-origin or not). We replace it
+        // with a custom DelegatingHandler that follows 307/308 redirects and preserves
+        // Authorization (safe for the in-process test server — all redirects same-origin).
+        var client = _adminFactory.CreateDefaultClient(
+            new PreserveAuthRedirectHandler { MaxRedirects = 3 });
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {AuthenticatedPlatformApiFactory.TestApiKey}");
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", AuthenticatedPlatformApiFactory.TestTenantId);
+        return client;
+    }
+
+    /// <summary>
+    /// Auto-redirect handler that (unlike <see cref="Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler"/>)
+    /// preserves Authorization + custom headers across 308 redirects. Safe for the in-process
+    /// test server where redirects are always same-origin.
+    /// </summary>
+    private sealed class PreserveAuthRedirectHandler : DelegatingHandler
+    {
+        public int MaxRedirects { get; init; } = 5;
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            // Buffer body once (re-readable for method-preserving 307/308 redirects).
+            byte[]? bodyBuffer = null;
+            string? contentType = null;
+            if (request.Content is not null)
+            {
+                bodyBuffer = await request.Content.ReadAsByteArrayAsync(cancellationToken);
+                contentType = request.Content.Headers.ContentType?.ToString();
+            }
+
+            var response = await base.SendAsync(request, cancellationToken);
+            var remaining = MaxRedirects;
+            while (IsMethodPreservingRedirect(response) && remaining-- > 0)
+            {
+                var location = response.Headers.Location
+                    ?? throw new InvalidOperationException("Redirect response missing Location header");
+                var nextUri = location.IsAbsoluteUri ? location : new Uri(request.RequestUri!, location);
+
+                var next = new HttpRequestMessage(request.Method, nextUri);
+                foreach (var h in request.Headers)
+                {
+                    next.Headers.TryAddWithoutValidation(h.Key, h.Value);
+                }
+                if (bodyBuffer is not null)
+                {
+                    var content = new ByteArrayContent(bodyBuffer);
+                    if (contentType is not null)
+                        content.Headers.TryAddWithoutValidation("Content-Type", contentType);
+                    next.Content = content;
+                }
+                response.Dispose();
+                response = await base.SendAsync(next, cancellationToken);
+                request = next;
+            }
+            return response;
+        }
+
+        private static bool IsMethodPreservingRedirect(HttpResponseMessage response) =>
+            response.StatusCode is HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect;
     }
 
     // ─── GET /queues/{queueId}/members ────────────────────────────────────────
@@ -278,6 +345,55 @@ public sealed class QueueMembersEndpointsTests :
         response.StatusCode.Should().Be(HttpStatusCode.PermanentRedirect);
         response.Headers.Location!.ToString()
             .Should().Contain("/api/v1/queues/q1/members/a1");
+    }
+
+    [Fact]
+    public async Task LegacyAddQueueMember_ShouldActuallyCreateMember_WhenAutoRedirectFollowed()
+    {
+        // End-to-end companion of the 308 header-only test: confirms the HttpClient
+        // actually re-issues the POST (method + body preserved per RFC 7538) to the
+        // nested route and creates the membership row.
+        var queueId = await CreateQueueAsync("Legacy Add Auto-Redirect Queue");
+        var agentId = await CreateAgentAsync("Grace Legacy");
+
+        using var client = CreateAutoRedirectingAdminClient();
+        var response = await client.PostAsync(
+            "/api/v1/admin/queue-members",
+            JsonContent.Create(new { queueId, agentId, penalty = 4 }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        dto!["agentId"]!.GetValue<string>().Should().Be(agentId);
+        dto!["queueId"]!.GetValue<string>().Should().Be(queueId);
+        dto!["penalty"]!.GetValue<int>().Should().Be(4);
+
+        // Confirm the row actually landed by querying the nested GET.
+        var listResponse = await _admin.GetAsync($"/api/v1/queues/{queueId}/members");
+        listResponse.EnsureSuccessStatusCode();
+        var list = JsonNode.Parse(await listResponse.Content.ReadAsStringAsync())!.AsArray();
+        list.Should().Contain(item => item!["agentId"]!.GetValue<string>() == agentId);
+    }
+
+    [Fact]
+    public async Task LegacyRemoveQueueMember_ShouldActuallyRemoveMember_WhenAutoRedirectFollowed()
+    {
+        // End-to-end companion of the 308 header-only test for DELETE: confirms the
+        // HttpClient follows the redirect and actually removes the membership row.
+        var queueId = await CreateQueueAsync("Legacy Remove Auto-Redirect Queue");
+        var agentId = await CreateAgentAsync("Hank Legacy");
+        await AddMemberAsync(queueId, agentId);
+
+        using var client = CreateAutoRedirectingAdminClient();
+        var response = await client.DeleteAsync(
+            $"/api/v1/admin/queue-members/{queueId}/{agentId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        // Confirm the row is gone by querying the nested GET.
+        var listResponse = await _admin.GetAsync($"/api/v1/queues/{queueId}/members");
+        listResponse.EnsureSuccessStatusCode();
+        var list = JsonNode.Parse(await listResponse.Content.ReadAsStringAsync())!.AsArray();
+        list.Should().NotContain(item => item!["agentId"]!.GetValue<string>() == agentId);
     }
 
     // ─── Graceful degrade without IRealtimeSyncService ───────────────────────

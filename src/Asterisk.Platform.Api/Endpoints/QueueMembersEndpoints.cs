@@ -283,14 +283,25 @@ internal static partial class QueueMembersEndpoints
         }
 
         var action = paused ? "queue.members.paused" : "queue.members.resumed";
+        // Resume never carries a reason — omit the key entirely so audit metadata stays
+        // meaningful. Pauses include the reason when supplied.
+        var extras = paused && reason is not null
+            ? new (string, string)[]
+              {
+                  ("queueId", queueId), ("agentId", agentId),
+                  ("reason", reason),
+                  ("realtimeSynced", (syncService is not null).ToString().ToLowerInvariant()),
+              }
+            : new (string, string)[]
+              {
+                  ("queueId", queueId), ("agentId", agentId),
+                  ("realtimeSynced", (syncService is not null).ToString().ToLowerInvariant()),
+              };
         await audit.RecordAsync(
             tenantId, category: "config", action: action, severity: "info",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
             targetId: $"{queueId}:{agentId}", targetType: "queue_member",
-            metadata: BuildMetadata(context,
-                ("queueId", queueId), ("agentId", agentId),
-                ("reason", reason ?? string.Empty),
-                ("realtimeSynced", (syncService is not null).ToString().ToLowerInvariant())),
+            metadata: BuildMetadata(context, extras),
             ct: ct);
 
         return Results.Ok(new PauseResultDto(queueId, agentId, paused, reason,
@@ -335,6 +346,20 @@ internal static partial class QueueMembersEndpoints
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
 /// <summary>Projected queue-member row exposed by <see cref="QueueMembersEndpoints"/>.</summary>
+/// <param name="QueueId">Queue identifier.</param>
+/// <param name="AgentId">Agent identifier.</param>
+/// <param name="DisplayName">Agent display name projected for the UI.</param>
+/// <param name="Penalty">Queue penalty (0-10); higher = lower priority.</param>
+/// <param name="IsExcluded">True when the agent is excluded from this queue.</param>
+/// <param name="IsPaused">
+/// Per-queue pause state for the UI badge. BEST-EFFORT: maintained by an in-process
+/// <see cref="QueueMemberPauseTracker"/>, not persisted to the queue_memberships table.
+/// Authoritative pause state lives in Asterisk Realtime's <c>queue_members.paused</c> column.
+/// Multi-instance deploys may see stale values on replicas that didn't originate the
+/// pause. Scheduled for promotion to Postgres/Redis in R2 / R5.2.
+/// </param>
+/// <param name="PauseReason">Optional reason string associated with an active pause.</param>
+/// <param name="Source">Membership source — <c>Manual</c> or <c>Skill</c>.</param>
 public sealed record QueueMemberDto(
     string QueueId,
     string AgentId,
