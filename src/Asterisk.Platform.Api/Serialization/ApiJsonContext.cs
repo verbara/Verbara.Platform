@@ -153,6 +153,9 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(RecordingMetadataDto))]
 // Queue Members
 [JsonSerializable(typeof(AddQueueMemberRequest))]
+[JsonSerializable(typeof(QueueMemberDto))]
+[JsonSerializable(typeof(QueueMemberDto[]))]
+[JsonSerializable(typeof(List<QueueMemberDto>))]
 // Dialer Settings
 [JsonSerializable(typeof(DialerSettingsDto))]
 [JsonSerializable(typeof(UpdateDialerSettingsRequest))]

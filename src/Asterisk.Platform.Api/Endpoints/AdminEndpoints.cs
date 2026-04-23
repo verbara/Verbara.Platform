@@ -28,9 +28,11 @@ internal static class AdminEndpoints
         group.MapPut("/queues/{id}", UpdateQueue);
         group.MapDelete("/queues/{id}", DeleteQueue);
 
-        // Queue Members
-        group.MapPost("/queue-members", AddQueueMember);
-        group.MapDelete("/queue-members/{queueId}/{agentId}", RemoveQueueMember);
+        // Queue Members — legacy endpoints kept as 308 Permanent Redirects
+        // to the RESTful nested routes under /queues/{queueId}/members.
+        // Preserves backward-compat for clients pinned to /admin/queue-members.
+        group.MapPost("/queue-members", RedirectAddQueueMember);
+        group.MapDelete("/queue-members/{queueId}/{agentId}", RedirectRemoveQueueMember);
 
         // Agents
         group.MapGet("/agents", ListAgents);
@@ -322,54 +324,26 @@ internal static class AdminEndpoints
     }
 
     // ─── Queue Members ────────────────────────────────────────────────────────
+    //
+    // The legacy POST/DELETE /admin/queue-members routes are kept as 308 Permanent
+    // Redirects. The canonical RESTful endpoints live in QueueMembersEndpoints.cs
+    // under /queues/{queueId}/members. Body semantics are preserved; clients that
+    // follow redirects (curl -L, HttpClient default) get transparent forwarding.
 
-    private static async Task<IResult> AddQueueMember(
-        HttpContext context, [FromBody] AddQueueMemberRequest body,
-        [FromServices] IQueueStore queueStore, [FromServices] IAgentStore agentStore,
-        [FromServices] IQueueMembershipStore membershipStore, CancellationToken ct)
+    private static IResult RedirectAddQueueMember(
+        HttpContext context, [FromBody] AddQueueMemberRequest body)
     {
-        var tenantId = GetTenantId(context);
-        var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(body.QueueId), ct);
-        var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(body.AgentId), ct);
-        if (queue is null || agent is null) return Results.NotFound();
-
-        await membershipStore.SaveAsync(new QueueMembership
-        {
-            TenantId = tenantId,
-            QueueId = EntityId.From(body.QueueId),
-            AgentId = EntityId.From(body.AgentId),
-            Penalty = body.Penalty ?? 0,
-            Source = MembershipSource.Manual,
-            IsExcluded = false,
-            CreatedAt = DateTimeOffset.UtcNow,
-        }, ct);
-
-        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null)
-        {
-            await syncService.AddQueueMemberAsync(tenantId, queue.Name, agent.AgentId.Value, agent.DisplayName, body.Penalty ?? 0, ct);
-        }
-        return Results.Created($"/admin/queue-members/{body.QueueId}/{body.AgentId}", null);
+        // Route is authenticated (AdminOnly). We have read the body to ensure the
+        // model binder validates it before issuing the redirect, so misrouted bad
+        // requests fail at the redirect target and not in some intermediate proxy.
+        var target = $"/api/v1/queues/{Uri.EscapeDataString(body.QueueId)}/members";
+        return Results.Redirect(target, permanent: true, preserveMethod: true);
     }
 
-    private static async Task<IResult> RemoveQueueMember(
-        string queueId, string agentId, HttpContext context,
-        [FromServices] IQueueStore queueStore, [FromServices] IAgentStore agentStore,
-        [FromServices] IQueueMembershipStore membershipStore, CancellationToken ct)
+    private static IResult RedirectRemoveQueueMember(string queueId, string agentId, HttpContext context)
     {
-        var tenantId = GetTenantId(context);
-        var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(queueId), ct);
-        var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(agentId), ct);
-        if (queue is null || agent is null) return Results.NotFound();
-
-        await membershipStore.DeleteAsync(tenantId, EntityId.From(queueId), EntityId.From(agentId), ct);
-
-        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null)
-        {
-            await syncService.RemoveQueueMemberAsync(tenantId, queue.Name, agent.AgentId.Value, ct);
-        }
-        return Results.NoContent();
+        var target = $"/api/v1/queues/{Uri.EscapeDataString(queueId)}/members/{Uri.EscapeDataString(agentId)}";
+        return Results.Redirect(target, permanent: true, preserveMethod: true);
     }
 
     // ─── Agents ───────────────────────────────────────────────────────────────

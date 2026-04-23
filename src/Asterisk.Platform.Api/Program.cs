@@ -550,6 +550,11 @@ builder.Services.AddHostedService<RealtimeStateBridge>();
 builder.Services.AddSingleton<QueueMembershipService>();
 builder.Services.AddSingleton<IDesiredStateProvider, PlatformDesiredStateProvider>();
 
+// Queue-member pause tracker (ephemeral, per-instance) — backs the IsPaused
+// projection exposed by QueueMembersEndpoints. Authoritative pause state
+// lives in Asterisk Realtime; this is a UI-facing hint only.
+builder.Services.AddSingleton<QueueMemberPauseTracker>();
+
 // Trunk decorator — wraps PostgresTrunkStore with Realtime sync (only when Dialer is configured)
 if (!string.IsNullOrEmpty(dialerConnectionString))
 {
@@ -816,6 +821,7 @@ v1.MapWebhookEndpoints();
 v1.MapConversationEndpoints();
 v1.MapAgentEndpoints();
 v1.MapAdminEndpoints();
+v1.MapQueueMembersEndpoints();
 v1.MapFlowEndpoints();
 v1.MapChannelConfigEndpoints();
 v1.MapContactEndpoints();
