@@ -7,9 +7,38 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased] — R5.1 Task H — Live Queue Metrics wiring
+## [Unreleased] — R5.1 Task H + Task L
 
-### Added
+### Added — Task L (Identity Redis)
+
+- **New package `Asterisk.Platform.Identity.Redis`** ships
+  Redis-backed implementations of `IMfaPendingCache` +
+  `IPasswordResetCache`. Enables horizontally scaled Platform API
+  deployments where MFA challenge tokens and password-reset tokens
+  must survive hops across nodes. Atomic `StringGetDeleteAsync`
+  preserves the single-consumption contract across the fleet.
+- **`AddAsteriskPlatformIdentityRedis(Action<RedisIdentityOptions>)`**
+  DI extension replaces any previously registered in-memory cache
+  singletons with the Redis impls and reuses an existing
+  `IConnectionMultiplexer` if one is already in the container (so the
+  pool can be shared with `Asterisk.Sdk.Pro.Cluster.Redis`).
+- **Program.cs** auto-enables the Redis backplane when
+  `ConnectionStrings:IdentityRedis` is configured. Falls back to the
+  in-memory defaults when unset — zero behavioral change for
+  single-instance deploys.
+- **`docker/docker-compose.full.yml`** — Redis service gains a
+  healthcheck and an `identity-redis` profile (in addition to the
+  existing `cluster` profile) so operators can spin it up independently.
+  The `platform-api` service documents the
+  `ConnectionStrings__IdentityRedis` opt-in env var.
+- **Docs** — `docs/operations/identity-redis.md` walks operators
+  through enabling, verifying, and failure-mode behavior.
+- **Testcontainers IT** — `tests/Asterisk.Platform.Identity.Redis.Tests/`
+  (14 tests) covers put+take roundtrip, TTL expiry, single-consumption,
+  stored-expired short-circuit, key-prefix isolation, and DI replace
+  behavior. Spins up `redis:7-alpine` per collection.
+
+### Added — Task H (Live Queue Metrics wiring)
 
 - **`GET /operations/queue-metrics`** now returns real-time `Waiting` +
   `AvgWaitSeconds` values sourced from the Pro.Analytics.Live
@@ -28,7 +57,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Pro pin bumped from `1.11.0-pro` → `1.12.0-pro` across 21
-  `Directory.Packages.props` entries.
+  `Directory.Packages.props` entries (Task H).
+- `StackExchange.Redis 2.12.14` + `Testcontainers 4.11.0` added to
+  `Directory.Packages.props` for Task L.
 
 ### Known limitations
 
