@@ -25,8 +25,8 @@ internal static class AgentAssistFeatureEndpoints
         var group = app.MapGroup("/admin/features/agent-assist")
             .RequireAuthorization("features:agent-assist:manage");
 
-        group.MapGet("/", GetFeature);
-        group.MapPut("/", UpdateFeature);
+        group.MapGet("", GetFeature);
+        group.MapPut("", UpdateFeature);
     }
 
     private static async Task<IResult> GetFeature(
