@@ -47,19 +47,21 @@ internal static class AgentAssistFeatureEndpoints
         [FromServices] IClock clock,
         CancellationToken ct)
     {
-        // Validate provider when enabling
+        // Validate provider when enabling. Normalize first, then whitelist — ensures
+        // the contract ("state.Provider is always lowercase") matches the check surface.
         string? normalizedProvider = null;
         if (body.Enabled)
         {
-            if (string.IsNullOrWhiteSpace(body.Provider)
-                || !AllowedProviders.Contains(body.Provider))
+            var candidate = body.Provider?.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(candidate)
+                || !AllowedProviders.Contains(candidate))
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
                     ["provider"] = ["Provider must be one of: deepgram, whisper, azure-whisper, google."],
                 });
             }
-            normalizedProvider = body.Provider.Trim().ToLowerInvariant();
+            normalizedProvider = candidate;
 
             // Provider-specific credential requirements
             var creds = body.Credentials ?? new AgentAssistCredentialsDto(null, null);
