@@ -227,6 +227,15 @@ internal static class RoleTemplateSeeder
             "platform:tenant:impersonate", "platform:server:manage",
             "platform:license:manage", "platform:cluster:manage",
             "features:agent-assist:manage",
+            // R5.2 Phase 0 P0.9 — Security Admin + Audit + Impersonation + Retention
+            // permissions seeded ahead of Phase A/B/C feature subagents that consume them.
+            // Per ADR-0002 + ADR-0004 conventions; Web placeholder pages will tighten
+            // their permission gates from existing fallbacks (system:auth:configure etc.)
+            // to these new keys once the features land.
+            "security.mfa.admin", "audit.read", "audit.export",
+            "security.impersonation.manage",
+            "retention.read", "retention.manage",
+            "tenant.settings.write",
             "partner:customer:view", "partner:customer:create",
             "partner:customer:manage", "partner:customer:delete",
             "partner:billing:view", "partner:billing:manage",
