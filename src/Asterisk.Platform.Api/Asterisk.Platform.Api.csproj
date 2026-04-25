@@ -60,6 +60,10 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
     <PackageReference Include="Dapper" />
     <PackageReference Include="Npgsql" />
+    <!-- DataProtection DB-backed keyring (R5.2 P0.8 / ADR-0003) needs EF Core +
+         Npgsql provider for the connection-string registration in Program.cs. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <!-- QuestPDF, ScottPlot, MailKit moved to Platform.Renderer and Platform.Mail microservices -->
     <PackageReference Include="NCrontab" />
     <PackageReference Include="Asterisk.Sdk.Hosting" />

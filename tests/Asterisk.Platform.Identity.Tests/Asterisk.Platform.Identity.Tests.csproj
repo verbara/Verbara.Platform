@@ -16,6 +16,11 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" />
     <PackageReference Include="Asterisk.Sdk.Resilience" />
+    <!-- DataProtection round-trip test (R5.2 P0.8) — InMemory provider lets the
+         test simulate two ServiceProvider lifetimes that share the same DB. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" />
   </ItemGroup>
 
 </Project>

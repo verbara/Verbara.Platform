@@ -17,8 +17,11 @@ using Asterisk.Platform.Audit;
 using Asterisk.Platform.Media;
 using Asterisk.Platform.Switchboard;
 using Asterisk.Platform.Identity;
+using Asterisk.Platform.Identity.DataProtection;
+using Asterisk.Platform.Identity.DependencyInjection;
 using Asterisk.Platform.Identity.OidcTokenExchange;
 using Asterisk.Platform.Identity.Redis.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Asterisk.Platform.Queues;
 using Asterisk.Platform.Queues.Services;
 using Asterisk.Sdk.Hosting;
@@ -383,8 +386,22 @@ builder.Services.AddHttpClient("EmailAttachments", c =>
 // ─── Auth Services ──────────────────────────────────────────────────────────
 // PasswordService and MfaService are static — no DI registration needed
 
-// DataProtection must be registered before JwtTokenService so the factory can resolve it
-builder.Services.AddDataProtection();
+// DataProtection must be registered before JwtTokenService so the factory can resolve it.
+// Per ADR-0003 (R5.2 P0.8): DB-backed via PlatformDataProtectionDbContext. Fail-fast if
+// Postgres connection unavailable rather than silently falling back to ephemeral keys.
+if (string.IsNullOrEmpty(coreConnectionString))
+    throw new InvalidOperationException(
+        "ConnectionStrings:Postgres is required for DataProtection key persistence (ADR-0003). " +
+        "Configure the connection string or use UseEphemeralKeysForTesting() for unit tests.");
+
+builder.Services.AddDbContext<PlatformDataProtectionDbContext>(opt =>
+    opt.UseNpgsql(coreConnectionString));
+builder.Services.AddPlatformDataProtection(opt =>
+{
+    opt.ApplicationName = "Asterisk.Platform";
+    // Default: DB-backed via PlatformDataProtectionDbContext.
+    // Override via opt.UseFileSystem("/path") for single-node deploys with mounted volume.
+});
 builder.Services.AddSingleton<IJtiRevocationCache, InMemoryJtiRevocationCache>();
 
 // AgentAssist runtime feature toggle (R5.1 Task J) — always registered so the admin

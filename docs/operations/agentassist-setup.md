@@ -72,50 +72,62 @@ Tracked in the **Platform v1.10 release runbook** as a required
 migration step before any existing-tenant operator expects to use the
 UI.
 
-## DataProtection keyring persistence (Docker)
+## DataProtection keyring persistence
 
-`AgentAssistCredentialsProtector` relies on ASP.NET's default
-`IDataProtectionProvider`, which by default writes its keyring to
-`/root/.aspnet/DataProtection-Keys` inside the container. That path is
-**ephemeral** — a `docker compose down` + `up` cycle wipes it and every
-stored credential becomes unrecoverable (they won't decrypt against a
-new key).
+> **R5.2 (Platform 1.11.0): DB-backed by default.** Per [ADR-0003], `Program.cs`
+> registers `PlatformDataProtectionDbContext` at startup and ASP.NET Core
+> persists the keyring to the `data_protection_keys` table (migration `018_DataProtectionKeys.sql`).
+> No operator action is required for the default flow — the same keyring is shared
+> across all Platform.Api replicas reading the same database.
+>
+> **Backup procedure (R5.4 §S5.8) MUST include the `data_protection_keys` table.**
+> Losing it makes every encrypted-at-rest credential unrecoverable.
 
-Choose one of:
+### Default — DB-backed (multi-node, recommended)
 
-### Option A — Bind-mount the keyring directory (simple, 1-node)
+Already wired in `Program.cs`:
+
+```csharp
+builder.Services.AddDbContext<PlatformDataProtectionDbContext>(opt =>
+    opt.UseNpgsql(coreConnectionString));
+builder.Services.AddPlatformDataProtection(opt =>
+{
+    opt.ApplicationName = "Asterisk.Platform";
+});
+```
+
+`AgentAssistCredentialsProtector` consumes the resulting `IDataProtectionProvider`
+transparently. Container recycles preserve all encrypted credentials.
+
+### Override — file-system mode (single-node deploys)
+
+If a deploy doesn't have a Postgres connection (rare) or prefers a mounted volume:
+
+```csharp
+builder.Services.AddPlatformDataProtection(opt =>
+{
+    opt.ApplicationName = "Asterisk.Platform";
+    opt.UseFileSystem("/var/lib/asterisk-platform/dataprotection-keys");
+});
+```
+
+Pair with `docker-compose.yml`:
 
 ```yaml
 platform-api:
-  # ...
   volumes:
-    - ./data/dataprotection-keys:/root/.aspnet/DataProtection-Keys
+    - ./data/dataprotection-keys:/var/lib/asterisk-platform/dataprotection-keys
 ```
 
-### Option B — Persist keys via EF (multi-node, recommended)
-
-In `Program.cs` add:
+### Override — ephemeral mode (test/CI only)
 
 ```csharp
-builder.Services
-    .AddDataProtection()
-    .PersistKeysToDbContext<PlatformDbContext>()
-    .SetApplicationName("asterisk-platform-api");
+opt.UseEphemeralKeysForTesting();
 ```
 
-Any node in the cluster reads/writes the same key ring from the
-Platform database. Pair this with `Asterisk.Platform.Identity.Redis`
-(see `identity-redis.md`) so MFA + password-reset tokens also survive
-node hops.
-
-### Option C — Persist to Redis (if `Asterisk.Platform.Identity.Redis` is enabled)
-
-```csharp
-builder.Services
-    .AddDataProtection()
-    .PersistKeysToStackExchangeRedis(redis, "dataprotection-keys")
-    .SetApplicationName("asterisk-platform-api");
-```
+Production callers MUST NOT use this — encrypted credentials are lost on every
+process restart. The DI extension emits a startup warning when this mode is
+selected so misconfigurations are loud in logs.
 
 ## Verification
 
