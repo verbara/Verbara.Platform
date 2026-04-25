@@ -110,13 +110,19 @@ passing**, 0 warnings.
 
 ### Known limitations
 
-- **Multi-tenant Pro.Analytics scope** — Platform currently registers
+> Post-ship triage (2026-04-25) reconciles these against R5.2/R5.3 scope —
+> see `docs/plans/active/2026-04-25-r5.1-post-ship-triage.md`.
+
+- **Multi-tenant Pro.Analytics scope** *(R5.2 P0 execution — upgraded from
+  "follow-up" 2026-04-25)* — Platform currently registers
   `AddAsteriskAnalytics()` as a process-scope singleton with an empty
   `DefaultTenantId`, so `LiveQueueSnapshotWriter` persists rows with
   `tenant_id=""`. The `/operations/queue-metrics` endpoint queries the
   provider with `tenantId=""` to read back the rows the writer produced.
   A per-tenant scope refactor is tracked as a **R5.2 ADR + execution**
-  follow-up ("tenant stamping pipeline end-to-end").
+  follow-up ("tenant stamping pipeline end-to-end"). Triage flagged this
+  as silent multi-tenant data-corruption risk; the elevation makes it a
+  P0 R5.2 execution item rather than a follow-up patch.
 - **RBAC hot-reload for existing tenants** — the new permissions
   (`queues:member:view/delete/pause` + `features:agent-assist:manage`)
   only land on fresh seeds via `RoleTemplateSeeder.AllPermissions()`.
@@ -132,12 +138,13 @@ passing**, 0 warnings.
   password-reset caches. `IJtiRevocationCache` (shipped v1.9.2) remains
   in-memory; Redis impl deferred to **R5.2 patch** via extension of
   `Asterisk.Platform.Identity.Redis`.
-- **Platform API AOT publish warnings** — pre-existing IL3050/IL3053
-  warnings surface on `dotnet publish /p:PublishAot=true`
-  (`SignalR.Hub<T>.Clients`, non-generic `JsonStringEnumConverter`,
-  Dapper reflection paths). None are introduced by R5.1; platform
-  continues to ship JIT. Addressed in **R2 / v2-preview1** AOT
-  hardening frente.
+- **Platform API AOT publish warnings** *(explicit blocker for v2.0-stable —
+  marked 2026-04-25)* — pre-existing IL3050/IL3053 warnings surface on
+  `dotnet publish /p:PublishAot=true` (`SignalR.Hub<T>.Clients`, non-generic
+  `JsonStringEnumConverter`, Dapper reflection paths). None are introduced
+  by R5.1; platform continues to ship JIT. Addressed in **R2 / v2-preview1**
+  AOT hardening frente — this deferral is **not indefinite**: triage
+  promotes it to a hard release blocker for v2.0-stable.
 
 ---
 
