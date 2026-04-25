@@ -1,9 +1,10 @@
 # R5 — Production Readiness + Value Materialization (Release Train)
 
 **Fecha creación:** 2026-04-22
-**Estado:** Approved (envelope D' + S1 expanded product-final) — **R5.1 shipped 2026-04-22** (Pro 1.12.0-pro + Platform 1.10.0 + Web 1.9.0; awaiting user push/tag/release approval)
+**Estado:** Approved (envelope D' + S1 expanded product-final) — **R5.1 shipped 2026-04-23** (Pro 1.12.0-pro + Platform 1.10.0 + Web 1.9.0 — pushed + tagged + GH Releases live)
 **Duración estimada:** 10-12 semanas total (~7 sem execution + ~4 sem QA gaps entre releases)
 **Baseline:** SDK 1.15.0 · Pro 1.11.0-pro · Platform 1.9.3 · Web 1.8.0
+**Post-R5.1 triage:** ver [`2026-04-25-r5.1-post-ship-triage.md`](2026-04-25-r5.1-post-ship-triage.md) — reconciles 13 canonical limitations + 5 R5.2 features (Set A) + 7 R5.2 carry-forwards (Set B) + 9 new items + 7 productization categories. R5.2 brainstorm input.
 
 ### Breakdown de duración
 
