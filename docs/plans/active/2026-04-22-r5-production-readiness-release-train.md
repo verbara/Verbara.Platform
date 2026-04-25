@@ -1,8 +1,8 @@
 # R5 — Production Readiness + Value Materialization (Release Train)
 
-**Fecha creación:** 2026-04-22
+**Fecha creación:** 2026-04-22 · **Last revised:** 2026-04-25 (D-FORCE-2 split applied)
 **Estado:** Approved (envelope D' + S1 expanded product-final) — **R5.1 shipped 2026-04-23** (Pro 1.12.0-pro + Platform 1.10.0 + Web 1.9.0 — pushed + tagged + GH Releases live)
-**Duración estimada:** 10-12 semanas total (~7 sem execution + ~4 sem QA gaps entre releases)
+**Duración estimada:** 15.5-16.5 semanas total (~10.5 sem execution + ~6 sem QA gaps entre releases) — **R5.4 added** per post-ship triage D-FORCE-2 to land production-validation work without inflating R5.3 cadence.
 **Baseline:** SDK 1.15.0 · Pro 1.11.0-pro · Platform 1.9.3 · Web 1.8.0
 **Post-R5.1 triage:** ver [`2026-04-25-r5.1-post-ship-triage.md`](2026-04-25-r5.1-post-ship-triage.md) — reconciles 13 canonical limitations + 5 R5.2 features (Set A) + 7 R5.2 carry-forwards (Set B) + 9 new items + 7 productization categories. R5.2 brainstorm input.
 
@@ -10,12 +10,14 @@
 
 | Fase | Duración | Notas |
 |---|---|---|
-| R5.1 execution | 3-3.5 sem | Phase 0 UI primitives (4-6h) + S1 product-final (1.5-2 sem) + S2 Ops bundle paralelizado (~1 sem) |
+| R5.1 execution | 3-3.5 sem | Phase 0 UI primitives (4-6h) + S1 product-final (1.5-2 sem) + S2 Ops bundle paralelizado (~1 sem) — ✅ shipped 2026-04-23 |
 | QA gap R5.1→R5.2 | 2 sem | Baking en producción/staging, patches si surgen |
-| R5.2 execution | 2 sem | 5 items paralelizables con subagents |
+| R5.2 execution | 2 sem | 12 items (5 new features S3.1-S3.5 + 7 carry-forwards B.1/B.2/B.6/B.7/B.9/B.11/B.12) paralelizables con subagents |
 | QA gap R5.2→R5.3 | 2 sem | Baking |
-| R5.3 execution | 1.5-2 sem | 7 items + R4 closure |
-| **TOTAL** | **10-12 sem** | Con buffers QA reales, no comprimidos |
+| R5.3 execution | 1.5-2 sem | 7 items + R4 closure (Admin Completeness only — production-validation moved to R5.4) |
+| QA gap R5.3→R5.4 | 2 sem | Baking; pen-test scoping happens here |
+| R5.4 execution | 3 sem | 9 items (load tests + SLOs + alerts + pen-test + Getting Started + OpenAPI + capacity + backup/DR + JWT multi-key); calendar-bounded by external pen-test engagement |
+| **TOTAL** | **15.5-16.5 sem** | ~4 meses; con buffers QA reales, no comprimidos |
 
 ---
 
@@ -39,15 +41,16 @@ Estos principios se aplican a **cada item en cada release**. Un item no sale has
 ## Envelope del Release Train
 
 ```
-R5.1 (2.5-3 sem) ─┬─► QA gap 2 sem ─┬─► R5.2 (2 sem) ─┬─► QA gap 2 sem ─┬─► R5.3 (1.5-2 sem)
-"Production +     │                 │  "Security      │                 │  "Admin +
- Ops Toolkit"     │                 │   Admin +       │                 │   R4 Closure"
-                  │                 │   Compliance"   │                 │
-                  ▼                 │                 ▼                 │
-            Pro 1.12.0-pro          │           Pro 1.13.0-pro          │
-            Platform 1.10.0         │           Platform 1.11.0         │
-            Web 1.9.0               │           Web 1.10.0              │
-            (GH Release público)    │           (GH Release público)    │
+R5.1 ──► QA 2 sem ──► R5.2 ──► QA 2 sem ──► R5.3 ──► QA 2 sem ──► R5.4
+"Prod +              "Security              "Admin                "Production
+ Ops"                 Admin +                Completeness +        Validation"
+                      Compliance"           R4 Closure"
+  ▼                     ▼                     ▼                     ▼
+Pro 1.12.0-pro       Pro 1.13.0-pro        Platform 1.12.0       Platform 1.13.0
+Platform 1.10.0      Platform 1.11.0       Web 1.11.0            Pro 1.13.x-pro (if needed)
+Web 1.9.0            Web 1.10.0            (GH Release)          (GH Release)
+(GH Release)         (GH Release)
+   3-3.5 sem           2 sem                 1.5-2 sem             3 sem
 
 Paralelo oportunista (cross-release):
 - R1.5 SDK v1.15.1 "VoiceAi Refresh" (rama paralela, subagent background, ship when ready)
@@ -321,6 +324,88 @@ Periodo de baking. Mismo patrón.
 - ✅ **R4 Track A (SDK 1.15 + Pro 1.10 + Platform 1.9 + Web 1.9) declared COMPLETE en memoria y docs**
 - ✅ GH Releases Platform 1.12.0 + Web 1.11.0
 
+### QA gap post-R5.3 (2 semanas)
+
+Periodo de baking + scoping del pen-test engagement R5.4 (selección vendor, NDA, scope letter, target environment provisioning).
+
+---
+
+## Release 4 — R5.4 "Production Validation"
+
+**Duración:** 3 semanas (calendar-bounded por engagement externo de pen-test, ~1.5 sem efectivo de dev paralelizado en otros frentes).
+**Bumps finales:** Platform 1.13.0 · Pro 1.13.x-pro (si se necesita nuevos meters / dashboards en hardening) · operations docs nuevos.
+**Ship target:** GH Release público "Production-validated platform — load-tested SLAs published, security-audited, day-1 operator can deploy from docs alone".
+**Origen:** D-FORCE-2 del post-ship triage (2026-04-25). Fragmentar evita inflar R5.3 con scope ortogonal y deja un release autónomo dedicado a credibilidad enterprise.
+
+### Scope (9 items, 4 tracks paralelos)
+
+**Track A · Performance & SLOs** *(parallel, ~1 sem)*
+
+**S5.1 · Load test baseline** (M)
+- Suite NBomber (.NET-native, AOT-compatible) cubriendo: JWT issuance/validation throughput · Queue ingestion (1,000 calls/min) · Realtime presence broadcast (3-node cluster, 500 agents) · LiveQueueSnapshotWriter (5 Hz × 100 queues) · AgentAssist session start/STT throughput.
+- Output JSON results + Markdown summary en `docs/operations/load-test-baseline.md`.
+- Reproducible via `scripts/load-test.sh` con docker-compose target.
+- Salidas alimentan **S5.7** (capacity planning) y **S5.2** (SLOs basados en datos reales, no aspirational).
+
+**S5.2 · SLO definitions** (S)
+- Documentar en `docs/operations/slos.md`: availability (99.5% baseline / 99.9% enterprise tier), latency p50/p99 por endpoint crítico, error rate ceiling per service class.
+- Source attribution: cada SLO referencia el meter/counter que lo mide (de los 17 Pro meters + Platform meters existentes).
+- Alert rules de **S5.3** se derivan de estos SLOs.
+
+**S5.3 · Prometheus alert rules baseline** (S)
+- Ship `docs/operations/alerts.yml` con 15-20 reglas pre-configuradas cubriendo todos los ActivitySources + Meters críticos.
+- Severity classification (P0 page on-call, P1 ticket, P2 review).
+- Operator runbook entry corto por cada alert: "what, why, first response".
+
+**Track B · Security & Compliance** *(parallel calendar, ~3 sem por engagement externo)*
+
+**S5.4 · Pen-test engagement + remediation cycle** (L, calendar-bounded)
+- Engagement externo 2-3 sem: scope OWASP Top 10 + multi-tenant isolation + JWT/MFA/impersonation + audit log integrity.
+- Findings → tickets internos por severidad. P0/P1 son blockers de R5.4 ship; P2/P3 pasan a v1.13.x patches.
+- Public-facing security report summary (redacted) — sales asset.
+- Remediation cycle ~0.5 sem dev work post-engagement.
+
+**S5.9 · JWT multi-key rotation completion** (M) — cierra C.1 del triage
+- Finalizar v1.9.2 partial impl: inject multiple validation keys simultáneamente (old + new valid en rolling window).
+- Admin endpoint `POST /management/security/jwt/rotate-key` con audit + observability.
+- Integration con `Asterisk.Platform.Identity.Redis` para cache compartido cluster-wide.
+- Tests: rotation E2E con 2 nodes simulados, zero downtime claim verified.
+
+**Track C · Operator Onboarding & Docs** *(parallel, ~1 sem)*
+
+**S5.5 · Getting Started guide** (M)
+- `docs/getting-started.md` 10-min Docker compose to running tenant.
+- `docs/operations/first-deploy.md` 30-min "first call" walkthrough (PJSIP register + queue assign + agent answer).
+- `docs/operations/first-realistic-demo.md` 1-hour seed demo (multi-tenant + queues + agents + first analytics + AgentAssist live).
+- Smoke verification: nuevo dev clones repo + sigue el guide cold + reporta tiempo real para cada milestone.
+
+**S5.6 · OpenAPI HTML exposure** (S)
+- Wire Swashbuckle en Platform.Api (`/swagger/v1/swagger.json` + UI rendered via Scalar o Redoc — modern UX).
+- Tagged operations + DTO schemas completos.
+- Config: enabled in Development always, opt-in in Production via `Platform__OpenApi__Enabled=true`.
+- Linked from Getting Started.
+
+**S5.7 · Capacity planning baseline** (S) — alimentado por S5.1
+- `docs/operations/capacity-planning.md`: single-node limits (concurrent calls, agents, queues) · 3-node cluster limits · resource sizing (CPU/RAM/disk/network) per scale tier (small/medium/large/XL).
+- Tablas backed by S5.1 load tests, no estimaciones.
+- Recomendaciones de Postgres tuning / Redis sizing por tier.
+
+**Track D · Operational Resilience** *(parallel, ~0.5 sem)*
+
+**S5.8 · Backup/DR runbook** (S)
+- `docs/operations/backup-disaster-recovery.md`: Postgres backup strategy (pg_dump cron + WAL archive + PITR) · Redis snapshot strategy · recovery procedures (full restore vs PITR).
+- Test recovery exercise documentado: chaos test mensual contra staging — restore + verify integrity en <30 min target.
+- Sample scripts/cron entries para cada estrategia.
+
+### Ship criteria R5.4
+
+- ✅ Test counts — Platform ~1,850 (+20), `docs/operations/` +5 nuevos guides (load-test-baseline, slos, alerts, capacity-planning, backup-disaster-recovery), Getting Started + first-deploy + first-realistic-demo guides.
+- ✅ S5.1 load test baseline reproducible: `scripts/load-test.sh` corre y produce JSON + Markdown.
+- ✅ S5.4 pen-test report cerrado (P0/P1 fixed, P2/P3 logged como tickets v1.13.x).
+- ✅ S5.6 `/swagger` accesible en dev + opcional en prod con OpenAPI + DTO schemas completos.
+- ✅ S5.8 chaos test mensual documentado y al menos un exercise corrido en staging.
+- ✅ GH Release Platform 1.13.0 con narrativa marketing "production-validated".
+
 ---
 
 ## R1.5 SDK v1.15.1 "VoiceAi Refresh" (paralelo oportunista)
@@ -422,13 +507,14 @@ Periodo de baking. Mismo patrón.
 
 R5 se declara **COMPLETE** cuando:
 
-1. ✅ R5.1 + R5.2 + R5.3 todos shippeados con GH Releases públicos
-2. ✅ R4 Track A declarada COMPLETE en `docs/roadmap.md` + MEMORY.md
+1. ✅ R5.1 + R5.2 + R5.3 + R5.4 todos shippeados con GH Releases públicos
+2. ✅ R4 Track A declarada COMPLETE en `docs/roadmap.md` + MEMORY.md (cierra en R5.3)
 3. ✅ Full-stack Docker compose demo graba video end-to-end de 10 min cubriendo: multi-tenant login → queue ops → call in progress → supervisor dashboard real metrics → AgentAssist live transcription → admin retention view → audit viewer → MFA enrollment flow → cluster drain demo
 4. ✅ CHANGELOGs consolidados entre repos
 5. ✅ Grafana dashboard "Asterisk Ecosystem Full" exporta con todos los nuevos meters
 6. ✅ Branch `feat/calling-permissions` resuelto (merged o explicitly deprecated via ADR)
 7. ✅ R1.5 SDK VoiceAi Refresh shipped como v1.15.1 (o explicitly deferred via ADR)
+8. ✅ R5.4 production-validation entregables: load-test baseline reproducible + SLOs publicados + pen-test report cerrado + Getting Started smoke verified + OpenAPI expuesto + capacity planning data-backed + backup/DR runbook con exercise mensual
 
 ---
 
