@@ -117,6 +117,18 @@ builder.Services.AddSingleton<ISubscriptionAuthorizer, RbacSubscriptionAuthorize
 // Replace Pro.Push.SignalR's NotImplementedSupervisorCoordinator default with the
 // Platform concrete impl that delegates to AgentAssistSupervisor.
 builder.Services.AddSingleton<ISupervisorCoordinator, PlatformSupervisorCoordinator>();
+// R5.2 P0.6 — cross-tenant subscription validation per ADR-0005.
+// IAgentTenantResolver: Postgres-backed, 5-minute IMemoryCache. Hub method
+// SubscribeToAgentPresenceAsync queries this resolver to validate that the
+// caller's JWT `tid` claim equals the agent's resolved tenant before joining
+// the presence:agent:{agentId} group.
+// IHubAuditSink: bridges hub.cross_tenant_subscription_denied entries into
+// the Platform audit pipeline for SOC operators / SIEM correlation.
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<Asterisk.Sdk.Pro.Push.SignalR.Authz.IAgentTenantResolver,
+    Asterisk.Platform.Api.Authz.CachedAgentTenantResolver>();
+builder.Services.AddSingleton<Asterisk.Sdk.Pro.Push.SignalR.Authz.IHubAuditSink,
+    Asterisk.Platform.Api.Authz.PlatformHubAuditSink>();
 builder.Services.AddPlatformCore();
 builder.Services.AddPlatformConversations();
 builder.Services.AddPlatformChannels();
