@@ -610,7 +610,10 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
 
     // Pro engine registrations — require ICallSessionManager (wired by AddAsteriskSessionsMultiServer)
     builder.Services.AddAsteriskEventStore();
-    builder.Services.AddAsteriskAnalytics();
+    // ADR-0002 / ADR-0004 §"Pro.Analytics": single-tenant deploys must opt in
+    // explicitly. Without WithSingleTenantMode the engine has no DefaultTenantId
+    // and LiveQueueSnapshotWriter rejects events with reason=missing_tenant.
+    builder.Services.AddAsteriskAnalytics().WithSingleTenantMode("default");
     builder.Services.AddProCallAnalytics();
     builder.Services.AddProAgentAssist(assistBuilder =>
     {
