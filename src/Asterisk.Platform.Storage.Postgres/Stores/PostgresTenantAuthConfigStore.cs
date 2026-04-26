@@ -17,7 +17,8 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             "SELECT tenant_id, mfa_policy, mfa_required_roles, password_min_length, password_require_uppercase, " +
             "password_require_number, password_require_special, lockout_threshold, lockout_duration_minutes, " +
             "session_idle_timeout_minutes, session_absolute_timeout_hours, oidc_enabled, oidc_authority, " +
-            "oidc_client_id, oidc_client_secret, oidc_auto_create_users, oidc_default_role, updated_at " +
+            "oidc_client_id, oidc_client_secret, oidc_auto_create_users, oidc_default_role, " +
+            "impersonation_max_concurrent_sessions, impersonation_auto_timeout_minutes, updated_at " +
             "FROM tenant_auth_config WHERE tenant_id = @TenantId",
             new { TenantId = tenantId });
         return row?.ToTenantAuthConfig();
@@ -30,11 +31,13 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             "INSERT INTO tenant_auth_config (tenant_id, mfa_policy, mfa_required_roles, password_min_length, " +
             "password_require_uppercase, password_require_number, password_require_special, lockout_threshold, " +
             "lockout_duration_minutes, session_idle_timeout_minutes, session_absolute_timeout_hours, oidc_enabled, " +
-            "oidc_authority, oidc_client_id, oidc_client_secret, oidc_auto_create_users, oidc_default_role, updated_at) " +
+            "oidc_authority, oidc_client_id, oidc_client_secret, oidc_auto_create_users, oidc_default_role, " +
+            "impersonation_max_concurrent_sessions, impersonation_auto_timeout_minutes, updated_at) " +
             "VALUES (@TenantId, @MfaPolicy, @MfaRequiredRoles, @PasswordMinLength, @PasswordRequireUppercase, " +
             "@PasswordRequireNumber, @PasswordRequireSpecial, @LockoutThreshold, @LockoutDurationMinutes, " +
             "@SessionIdleTimeoutMinutes, @SessionAbsoluteTimeoutHours, @OidcEnabled, @OidcAuthority, " +
-            "@OidcClientId, @OidcClientSecret, @OidcAutoCreateUsers, @OidcDefaultRole, @UpdatedAt) " +
+            "@OidcClientId, @OidcClientSecret, @OidcAutoCreateUsers, @OidcDefaultRole, " +
+            "@ImpersonationMaxConcurrentSessions, @ImpersonationAutoTimeoutMinutes, @UpdatedAt) " +
             "ON CONFLICT (tenant_id) DO UPDATE SET " +
             "  mfa_policy = EXCLUDED.mfa_policy, mfa_required_roles = EXCLUDED.mfa_required_roles, " +
             "  password_min_length = EXCLUDED.password_min_length, password_require_uppercase = EXCLUDED.password_require_uppercase, " +
@@ -44,6 +47,8 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             "  oidc_enabled = EXCLUDED.oidc_enabled, oidc_authority = EXCLUDED.oidc_authority, " +
             "  oidc_client_id = EXCLUDED.oidc_client_id, oidc_client_secret = EXCLUDED.oidc_client_secret, " +
             "  oidc_auto_create_users = EXCLUDED.oidc_auto_create_users, oidc_default_role = EXCLUDED.oidc_default_role, " +
+            "  impersonation_max_concurrent_sessions = EXCLUDED.impersonation_max_concurrent_sessions, " +
+            "  impersonation_auto_timeout_minutes = EXCLUDED.impersonation_auto_timeout_minutes, " +
             "  updated_at = EXCLUDED.updated_at",
             new
             {
@@ -64,6 +69,8 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
                 config.OidcClientSecret,
                 config.OidcAutoCreateUsers,
                 config.OidcDefaultRole,
+                config.ImpersonationMaxConcurrentSessions,
+                config.ImpersonationAutoTimeoutMinutes,
                 config.UpdatedAt,
             });
     }
@@ -87,6 +94,8 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
         public string? oidc_client_secret { get; init; }
         public bool oidc_auto_create_users { get; init; }
         public string oidc_default_role { get; init; } = null!;
+        public int impersonation_max_concurrent_sessions { get; init; } = 3;
+        public int impersonation_auto_timeout_minutes { get; init; } = 240;
         public DateTime? updated_at { get; init; }
 
         public TenantAuthConfig ToTenantAuthConfig() => new()
@@ -108,6 +117,8 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             OidcClientSecret = oidc_client_secret,
             OidcAutoCreateUsers = oidc_auto_create_users,
             OidcDefaultRole = oidc_default_role,
+            ImpersonationMaxConcurrentSessions = impersonation_max_concurrent_sessions,
+            ImpersonationAutoTimeoutMinutes = impersonation_auto_timeout_minutes,
             UpdatedAt = updated_at,
         };
     }

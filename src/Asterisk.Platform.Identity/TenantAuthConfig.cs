@@ -19,6 +19,22 @@ public sealed class TenantAuthConfig
     public string? OidcClientSecret { get; set; }
     public bool OidcAutoCreateUsers { get; set; } = true;
     public string OidcDefaultRole { get; set; } = "Agent";
+
+    /// <summary>
+    /// R5.2 PB.2 / C.7 — maximum number of concurrent impersonation sessions
+    /// allowed for actors operating against this tenant. Default 3 protects
+    /// against an admin token leak fanning out into many shadow tokens.
+    /// </summary>
+    public int ImpersonationMaxConcurrentSessions { get; set; } = 3;
+
+    /// <summary>
+    /// R5.2 PB.2 / C.7 — auto-timeout (minutes) after which an active
+    /// impersonation session is forcibly revoked by the
+    /// <c>ImpersonationSessionTimeoutService</c> sweep. Default 240 (4 hours)
+    /// matches the audit-control window most enterprise SOC2 reviewers expect.
+    /// </summary>
+    public int ImpersonationAutoTimeoutMinutes { get; set; } = 240;
+
     public DateTimeOffset? UpdatedAt { get; set; }
 
     public bool IsMfaRequiredForRole(string role) =>

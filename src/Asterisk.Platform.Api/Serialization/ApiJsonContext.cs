@@ -196,6 +196,10 @@ namespace Asterisk.Platform.Api.Serialization;
 // Impersonation
 [JsonSerializable(typeof(ImpersonateRequest))]
 [JsonSerializable(typeof(ImpersonateResponse))]
+// R5.2 PB.2 — admin impersonation session-management DTOs.
+[JsonSerializable(typeof(ImpersonationSessionDto))]
+[JsonSerializable(typeof(PagedResult<ImpersonationSessionDto>))]
+[JsonSerializable(typeof(RevokeImpersonationSessionRequest))]
 // Management Tenants
 [JsonSerializable(typeof(MgmtTenantDto))]
 [JsonSerializable(typeof(List<MgmtTenantDto>))]

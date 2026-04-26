@@ -126,7 +126,8 @@ internal sealed class JwtTokenService
     }
 
     public (string Token, DateTimeOffset ExpiresAt) GenerateImpersonationToken(
-        User admin, string targetTenantId, IReadOnlySet<string> targetPermissions, bool readOnly = false)
+        User admin, string targetTenantId, IReadOnlySet<string> targetPermissions, bool readOnly = false,
+        string? impersonationSessionId = null)
     {
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.Add(TimeSpan.FromMinutes(30));
@@ -143,6 +144,12 @@ internal sealed class JwtTokenService
             new("impersonation", "true"),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
+
+        // R5.2 PB.2 — when supplied, link the JWT to its admin-visible session
+        // record so the EndImpersonation handler (and any future revoke
+        // workflow gating on the JWT itself) can locate the session.
+        if (!string.IsNullOrEmpty(impersonationSessionId))
+            claims.Add(new Claim("impersonation_session_id", impersonationSessionId));
 
         if (readOnly)
             claims.Add(new Claim("readonly", "true"));

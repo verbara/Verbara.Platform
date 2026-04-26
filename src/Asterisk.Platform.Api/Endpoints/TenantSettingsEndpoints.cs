@@ -56,7 +56,10 @@ internal sealed record AuthSettingsDto(
     string? OidcAuthority,
     string? OidcClientId,
     bool OidcAutoCreateUsers,
-    string OidcDefaultRole);
+    string OidcDefaultRole,
+    // R5.2 PB.2 / C.7 — per-tenant impersonation session policy.
+    int ImpersonationMaxConcurrentSessions,
+    int ImpersonationAutoTimeoutMinutes);
 
 internal sealed record QuotaSettingsDto(
     long? MaxMonthlyVoiceMinutes,
@@ -106,7 +109,10 @@ internal sealed record UpdateAuthSettingsDto(
     string? OidcClientId = null,
     string? OidcClientSecret = null,
     bool? OidcAutoCreateUsers = null,
-    string? OidcDefaultRole = null);
+    string? OidcDefaultRole = null,
+    // R5.2 PB.2 / C.7 — per-tenant impersonation session policy.
+    int? ImpersonationMaxConcurrentSessions = null,
+    int? ImpersonationAutoTimeoutMinutes = null);
 
 internal sealed record UpdateQuotaSettingsDto(
     long? MaxMonthlyVoiceMinutes = null,
@@ -305,7 +311,9 @@ internal static class TenantSettingsEndpoints
                 OidcAuthority: auth.OidcAuthority,
                 OidcClientId: auth.OidcClientId,
                 OidcAutoCreateUsers: auth.OidcAutoCreateUsers,
-                OidcDefaultRole: auth.OidcDefaultRole),
+                OidcDefaultRole: auth.OidcDefaultRole,
+                ImpersonationMaxConcurrentSessions: auth.ImpersonationMaxConcurrentSessions,
+                ImpersonationAutoTimeoutMinutes: auth.ImpersonationAutoTimeoutMinutes),
             Quotas: new QuotaSettingsDto(
                 MaxMonthlyVoiceMinutes: quota.MaxMonthlyVoiceMinutes,
                 MaxMonthlyMessages: quota.MaxMonthlyMessages,
@@ -429,6 +437,13 @@ internal static class TenantSettingsEndpoints
             if (a.OidcClientSecret is not null) auth.OidcClientSecret = a.OidcClientSecret;
             if (a.OidcAutoCreateUsers is not null) auth.OidcAutoCreateUsers = a.OidcAutoCreateUsers.Value;
             if (a.OidcDefaultRole is not null) auth.OidcDefaultRole = a.OidcDefaultRole;
+            // R5.2 PB.2 / C.7 — bound the impersonation knobs to sensible
+            // ranges so a fat-fingered admin can't disable revocation by
+            // setting timeout to int.MaxValue.
+            if (a.ImpersonationMaxConcurrentSessions is { } mcs)
+                auth.ImpersonationMaxConcurrentSessions = Math.Clamp(mcs, 0, 100);
+            if (a.ImpersonationAutoTimeoutMinutes is { } at)
+                auth.ImpersonationAutoTimeoutMinutes = Math.Clamp(at, 0, 7 * 24 * 60); // ≤ 7 days
 
             auth.UpdatedAt = DateTimeOffset.UtcNow;
             await authConfigStore.SaveAsync(auth, ct);

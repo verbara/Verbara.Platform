@@ -454,6 +454,19 @@ builder.Services.AddSingleton<
 builder.Services.AddSingleton<
     Asterisk.Platform.Api.Endpoints.Audit.IAuditQueryService,
     Asterisk.Platform.Api.Endpoints.Audit.DefaultAuditQueryService>();
+
+// R5.2 PB.2 + C.7 — admin impersonation session store + auto-timeout sweep.
+// Default in-memory store (single-process safe); multi-instance Platform
+// deployments swap this for a Redis or Postgres-backed store via override.
+builder.Services.AddSingleton<
+    Asterisk.Platform.Core.Impersonation.IImpersonationSessionStore,
+    Asterisk.Platform.Core.Impersonation.InMemoryImpersonationSessionStore>();
+builder.Services.AddHostedService<
+    Asterisk.Platform.Api.Services.ImpersonationSessionTimeoutService>();
+// TimeProvider is required by the impersonation endpoints + the timeout
+// sweep; register the system clock if no test-time replacement was injected.
+if (!builder.Services.Any(d => d.ServiceType == typeof(TimeProvider)))
+    builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<TenantProvisioningService>();
 builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredService<TenantProvisioningService>());
 
@@ -772,6 +785,16 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy(
         Asterisk.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.ExportPolicy,
         p => p.AddRequirements(new PlatformAdminRequirement("audit.export")));
+
+    // R5.2 PB.2 — impersonation admin surface. Same double-lock pattern as
+    // PA.1 / PB.1: PlatformAdminRequirement combines host/partner-tenant
+    // gating with the seeded `security.impersonation.manage` permission so
+    // only platform admins (or partner admins managing their children) with
+    // the explicit permission can list / revoke active sessions or read
+    // history.
+    options.AddPolicy(
+        Asterisk.Platform.Api.Endpoints.ManagementImpersonationEndpoints.AdminAuthorizationPolicy,
+        p => p.AddRequirements(new PlatformAdminRequirement("security.impersonation.manage")));
 
     // Plan 32C — PlatformHub method-level policies. "Supervisor" is role-based
     // (Supervisor or Admin); "Agent" is role-based for UpdatePresence/RequestHelp;
