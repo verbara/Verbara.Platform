@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Endpoints.Mfa;
+using Asterisk.Platform.Api.Endpoints.Retention;
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Bot;
@@ -222,6 +223,14 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(PagedResult<MfaUserSummary>))]
 [JsonSerializable(typeof(MfaPolicyDto))]
 [JsonSerializable(typeof(UserMeResponseDto))]
+// Retention admin (R5.2 PC.1)
+[JsonSerializable(typeof(RetentionTargetDto))]
+[JsonSerializable(typeof(IReadOnlyList<RetentionTargetDto>))]
+[JsonSerializable(typeof(List<RetentionTargetDto>))]
+[JsonSerializable(typeof(RetentionConfigDto))]
+[JsonSerializable(typeof(RetentionConfigPatchDto))]
+[JsonSerializable(typeof(RetentionRunResultDto))]
+[JsonSerializable(typeof(RetentionRunTargetOutcomeDto))]
 // Management API Keys
 [JsonSerializable(typeof(MgmtApiKeyDto))]
 [JsonSerializable(typeof(List<MgmtApiKeyDto>))]

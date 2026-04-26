@@ -244,6 +244,13 @@ builder.Services.AddProLicenseGuard();
 // Retention: orchestrator (DryRun=true by default — flip off in production)
 builder.Services.AddProRetention();
 
+// R5.2 PC.1 — admin retention surface (in-process tracker + DryRun toggle).
+builder.Services.AddSingleton<Asterisk.Platform.Api.Endpoints.Retention.RetentionAdminState>();
+builder.Services.AddSingleton<Asterisk.Platform.Api.Endpoints.Retention.RetentionExecutionTracker>();
+builder.Services.AddSingleton<
+    Asterisk.Platform.Api.Endpoints.Retention.IRetentionAdminService,
+    Asterisk.Platform.Api.Endpoints.Retention.RetentionAdminService>();
+
 // ─── Resilience Policies (v1.9.1 — Frente B/E wraps) ────────────────────────
 // flow.http-request: circuit 3/60s + retry 2/500ms + timeout 60s (upper bound).
 // Per-call timeout is sourced from flow config, not policy — see HttpRequestNodeHandler.
@@ -796,6 +803,18 @@ builder.Services.AddAuthorization(options =>
         Asterisk.Platform.Api.Endpoints.ManagementImpersonationEndpoints.AdminAuthorizationPolicy,
         p => p.AddRequirements(new PlatformAdminRequirement("security.impersonation.manage")));
 
+    // R5.2 PC.1 — retention admin surface. Same double-lock pattern as
+    // PA.1 / PB.1 / PB.2: PlatformAdminRequirement combines host/partner
+    // tenant gating with the seeded `retention.read` (overview) /
+    // `retention.manage` (DryRun toggle + manual run-now) permissions
+    // (P0.9 commit f20892e).
+    options.AddPolicy(
+        Asterisk.Platform.Api.Endpoints.Retention.RetentionAdminEndpoints.ReadPolicy,
+        p => p.AddRequirements(new PlatformAdminRequirement("retention.read")));
+    options.AddPolicy(
+        Asterisk.Platform.Api.Endpoints.Retention.RetentionAdminEndpoints.ManagePolicy,
+        p => p.AddRequirements(new PlatformAdminRequirement("retention.manage")));
+
     // Plan 32C — PlatformHub method-level policies. "Supervisor" is role-based
     // (Supervisor or Admin); "Agent" is role-based for UpdatePresence/RequestHelp;
     // "PlatformAdmin" is role-based for hub-level administrative methods (distinct
@@ -1012,6 +1031,8 @@ v1.MapRealtimeEndpoints();
 v1.MapAuthAdminEndpoints();
 // R5.2 PA.1 — MFA admin surface (PlatformAdmin + security.mfa.admin permission).
 Asterisk.Platform.Api.Endpoints.Mfa.MfaAdminEndpoints.MapMfaAdminEndpoints(v1);
+// R5.2 PC.1 — retention admin surface (retention.read / retention.manage gated).
+Asterisk.Platform.Api.Endpoints.Retention.RetentionAdminEndpoints.MapRetentionAdminEndpoints(v1);
 v1.MapOidcEndpoints();
 v1.MapRbacEndpoints();
 v1.MapUsersMeEndpoint();
