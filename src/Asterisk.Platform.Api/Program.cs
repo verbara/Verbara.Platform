@@ -133,6 +133,14 @@ builder.Services.AddSingleton<Asterisk.Sdk.Pro.Push.SignalR.Authz.IAgentTenantRe
     Asterisk.Platform.Api.Authz.CachedAgentTenantResolver>();
 builder.Services.AddSingleton<Asterisk.Sdk.Pro.Push.SignalR.Authz.IHubAuditSink,
     Asterisk.Platform.Api.Authz.PlatformHubAuditSink>();
+// R5.2 PC.5 / B.12 — debounced last-used stamp for API keys. Backed by the
+// shared IMemoryCache registered above; ≤ 1 UPDATE per minute per key per
+// process. Fire-and-forget from ApiKeyAuthenticationHandler so auth latency
+// is independent of the database write. (TimeProvider.System is registered
+// elsewhere in Program.cs via TryAddSingleton — we don't double-register.)
+builder.Services.AddSingleton<
+    Asterisk.Platform.Api.Auth.IApiKeyLastUsedStamper,
+    Asterisk.Platform.Api.Auth.ApiKeyLastUsedStamper>();
 builder.Services.AddPlatformCore();
 builder.Services.AddPlatformConversations();
 builder.Services.AddPlatformChannels();

@@ -36,7 +36,7 @@ internal static class ManagementApiKeyEndpoints
             .Where(k => k.KeyType == ApiKeyType.Management)
             .Select(k => new MgmtApiKeyDto(
                 k.KeyId.Value, k.Name, k.IsRevoked,
-                k.ExpiresAt, k.CreatedAt))
+                k.ExpiresAt, k.CreatedAt, k.LastUsedAt))
             .ToList();
 
         return Results.Ok(mgmtKeys);
@@ -183,7 +183,11 @@ internal sealed record MgmtApiKeyDto(
     string Name,
     bool IsRevoked,
     DateTimeOffset? ExpiresAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    // R5.2 PC.5 / B.12 — populated by the auth middleware via
+    // IApiKeyLastUsedStamper (debounced ≤ 1 write/min/key). Null when the
+    // key has never authenticated successfully.
+    DateTimeOffset? LastUsedAt);
 
 internal sealed record CreateMgmtApiKeyRequest(
     string? Name = null,

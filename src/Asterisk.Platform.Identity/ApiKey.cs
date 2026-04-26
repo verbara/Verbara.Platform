@@ -19,6 +19,15 @@ public sealed class ApiKey : ITenantScoped, IAuditable
     public string? UpdatedBy { get; set; }
     public ApiKeyType KeyType { get; init; } = ApiKeyType.Standard;
 
+    /// <summary>
+    /// Timestamp of the most recent successful authentication using this key.
+    /// Stamped by the auth middleware via <see cref="IApiKeyStore.UpdateLastUsedAsync"/>,
+    /// debounced in-process to ≤ 1 write per minute per key (R5.2 PC.5 / B.12).
+    /// <see langword="null"/> when the key has never authenticated successfully —
+    /// the Web admin column renders that case as "Never".
+    /// </summary>
+    public DateTimeOffset? LastUsedAt { get; set; }
+
     public bool IsExpired(DateTimeOffset now) =>
         ExpiresAt.HasValue && now >= ExpiresAt.Value;
 

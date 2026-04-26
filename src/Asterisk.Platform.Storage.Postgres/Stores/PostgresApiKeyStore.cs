@@ -12,7 +12,7 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
     public PostgresApiKeyStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
     private const string SelectColumns =
-        "key_id, tenant_id, key_hash, name, scopes, rate_limit_per_minute, is_revoked, key_type, created_at, updated_at, expires_at, created_by, updated_by, user_id";
+        "key_id, tenant_id, key_hash, name, scopes, rate_limit_per_minute, is_revoked, key_type, created_at, updated_at, expires_at, created_by, updated_by, user_id, last_used_at";
 
     public async Task<ApiKey?> GetByIdAsync(TenantId tenantId, EntityId keyId, CancellationToken ct)
     {
@@ -83,6 +83,17 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
             new { TenantId = tenantId.Value, KeyId = keyId.Value });
     }
 
+    public async Task UpdateLastUsedAsync(EntityId keyId, DateTimeOffset usedAt, CancellationToken ct)
+    {
+        // Tenant-scoped lookup is intentionally skipped: the auth middleware
+        // already resolved the row by hash and the (tenant_id, key_id) pair is
+        // unique. Stamping a global UPDATE keeps the hot path single-statement.
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(
+            "UPDATE api_keys SET last_used_at = @UsedAt WHERE key_id = @KeyId",
+            new { KeyId = keyId.Value, UsedAt = usedAt });
+    }
+
     private sealed class ApiKeyRow
     {
         public string key_id { get; init; } = null!;
@@ -99,6 +110,7 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
         public string? user_id { get; init; }
+        public DateTime? last_used_at { get; init; }
 
         public ApiKey ToApiKey()
         {
@@ -121,6 +133,7 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
                 ExpiresAt = expires_at,
                 CreatedBy = created_by,
                 UpdatedBy = updated_by,
+                LastUsedAt = last_used_at,
             };
         }
     }

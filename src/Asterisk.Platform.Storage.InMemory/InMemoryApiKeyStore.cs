@@ -45,4 +45,21 @@ internal sealed class InMemoryApiKeyStore : IApiKeyStore
 
         return Task.CompletedTask;
     }
+
+    public Task UpdateLastUsedAsync(EntityId keyId, DateTimeOffset usedAt, CancellationToken ct)
+    {
+        // The hot-path matches the Postgres implementation: tenant scope is not
+        // required because (tenant_id, key_id) is unique. The dictionary key is
+        // composite, so we scan the small in-memory map by key_id only.
+        foreach (var kvp in _items)
+        {
+            if (kvp.Key.Item2 == keyId)
+            {
+                kvp.Value.LastUsedAt = usedAt;
+                break;
+            }
+        }
+
+        return Task.CompletedTask;
+    }
 }

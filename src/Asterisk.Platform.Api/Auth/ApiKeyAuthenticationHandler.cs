@@ -13,17 +13,20 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
 {
     private readonly IApiKeyStore _apiKeyStore;
     private readonly IUserStore _userStore;
+    private readonly IApiKeyLastUsedStamper? _lastUsedStamper;
 
     public ApiKeyAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
         IApiKeyStore apiKeyStore,
-        IUserStore userStore)
+        IUserStore userStore,
+        IApiKeyLastUsedStamper? lastUsedStamper = null)
         : base(options, logger, encoder)
     {
         _apiKeyStore = apiKeyStore;
         _userStore = userStore;
+        _lastUsedStamper = lastUsedStamper;
     }
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -81,6 +84,15 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
 
         // Store resolved tenant in HttpContext so middleware can read it
         Context.Items["TenantId"] = new TenantId(apiKey.TenantId.Value);
+
+        // Fire-and-forget stamp of last-used. Debounced in-process so this is
+        // a no-op for callers that re-auth within the debounce window.
+        // Latency-critical: we DO NOT await — auth latency must not depend on
+        // a write to api_keys. (R5.2 PC.5 / B.12)
+        if (_lastUsedStamper is not null)
+        {
+            _ = _lastUsedStamper.StampAsync(apiKey.KeyId, Context.RequestAborted);
+        }
 
         return AuthenticateResult.Success(ticket);
     }
