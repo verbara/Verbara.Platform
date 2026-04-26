@@ -13,6 +13,100 @@ _No unreleased changes._
 
 ---
 
+## [1.12.0] — 2026-04-26 — R5.3 "Admin Completeness + R4 Closure"
+
+Coordinated ship of R5.3 (third release in the R5 Production Readiness
+Release Train) — pairs with **Pro 1.14.0-pro** and **Web 1.11.0**.
+Closes admin completeness scope (S4.1-S4.8) + R5.2 known-debt
+carry-forwards + 7 NEW post-R5.2 audit items + OpenAPI HTML
+exposure (promoted from R5.4 per D-FORCE-3) + 3 ADRs. **R4 Track A
+declared COMPLETE** — closes acceptance criterion #2 of R5 release train.
+Zero breaking API changes.
+
+### Added — endpoints
+
+- `POST /api/v1/management/tenants/{tenantId}/dunning/resume` — mirror of
+  existing `POST /dunning/pause`. Emits audit `billing.dunning.resumed`
+  with category `billing` / severity `info` / actor type `user`. Closes
+  S4.2 backend gap.
+- `GET /openapi/v1.json` (Microsoft.AspNetCore.OpenApi) +
+  `GET /scalar/v1` (Scalar.AspNetCore 2.13.11) — OpenAPI 3.0 spec +
+  modern UI. Always enabled in Development; opt-in production via
+  `Platform__OpenApi__Enabled=true` env var. AOT-friendly path
+  (Microsoft.AspNetCore.OpenApi instead of Swashbuckle to avoid
+  IL2026/IL3050 trim warnings). Closes S4.9 (D.1 promoted from R5.4).
+
+### Added — audit schema normalization (ADR-0006)
+
+- Migration `V021_AuditEntriesNormalize.sql` — promotes 6 fields from
+  JSONB blob to first-class typed columns: `category`, `severity`,
+  `actor_type`, `before_json`, `after_json`, `integrity_hash`. CHECK
+  constraints + indexes per `(tenant_id, severity, occurred_at)` and
+  `(tenant_id, category, occurred_at)`. 3-stage atomic transaction:
+  ADD COLUMN → backfill `details` JSONB → NOT NULL + CHECK + INDEX.
+  Backfill emits `RAISE NOTICE` audit count. Documented batch-rollout
+  pattern for >10M row deploys.
+  - **Note:** ADR-0006 originally specified `V012` slot; slot was
+    occupied (`012_MailSchema.sql`), migration shipped at next-available
+    `V021`. Category enum extended to 13 values to match
+    `DefaultAuditService.InferCategory` production emissions
+    (`warning`, `rbac`, `data_access`, `admin`, `api_key` added to the
+    initial 8). ADR reconciled in commit `d263bfd`.
+- `PostgresAuditStore.cs` writer + reader — INSERT extended with 6 new
+  columns; reader hydrates `AuditEntry.Changes` from `before_json` /
+  `after_json` columns directly. `Metadata` dict still serialized to
+  `details` JSONB blob for backwards compat.
+- 6 IT tests in `AuditEntriesNormalizationTests.cs` verify migration +
+  writer + reader + EXPLAIN index usage.
+
+### Added — Pro consumer wiring
+
+- `CachedAgentTenantResolver` (Platform `Authz/`) now subscribes to
+  `IPushEventBus.OfType<AgentTenantMembershipChangedEvent>()` for
+  lateral cache invalidation. Closes ADR-0005 §"Concerns" 5-min TTL gap
+  (B.3 from R5.2 Set B). Resolver now `IDisposable` to release
+  Rx subscription on shutdown.
+- `PlatformHubAuditSink` (Platform `Authz/`) consumes new
+  `HubAuditEntry.ActorId` field instead of literal `"unknown"`.
+  Closes B.4 from R5.2 Set B — production audit logs now identify
+  the SignalR connection actor via JWT sub claim.
+- 4 Pro health checks registered in `Program.cs` tagged `"ready"`:
+  `presence-heartbeat`, `presence-fanout`, `presence-merge`,
+  `retention`. `PromoteHostedServiceToSingleton<T>` local helper makes
+  IHostedService also resolvable as concrete type (mirrors R5.1
+  pattern from `LiveQueueSnapshotWriter`).
+- `QaDetailDto` extended with `SentimentTimeline` field
+  (`TurnSentimentDto`) mapped from existing
+  `Pro.CallAnalytics.Sentiment.PerTurnScores`. Registered in
+  `ApiJsonContext` for AOT serialization. Closes R4 Ω track per S4.6.
+
+### Test counts post-R5.3
+
+- Platform non-Postgres: 1,080+ unit tests across 30+ DLLs.
+- Platform IT (Postgres): existing baseline + 6 audit migration tests.
+- 0 warnings under `TreatWarningsAsErrors=true`.
+
+### Known limitations
+
+- **NU1902 OpenTelemetry vulnerability** —
+  `Asterisk.Sdk.Pro.OpenTelemetry` pin remains at 1.12.0-pro because
+  cross-repo SDK 1.15.x patch is required to repack the wrapper.
+  Pro.OpenTelemetry has zero Pro dependencies, so version skew is
+  safe (the wrapper consumes only OpenTelemetry packages from SDK).
+  Cross-repo bump (SDK `Asterisk.Sdk.OpenTelemetry` 1.15.1 + Pro
+  `Asterisk.Sdk.Pro.OpenTelemetry` 1.14.x repack) scheduled for R5.4.
+  Platform deployments unaffected at runtime.
+
+### References
+
+- ADR-0001: `docs/decisions/0001-consumer-dual-prong-dependency-pattern.md` (Promoted Accepted 2026-04-26)
+- ADR-0006: `docs/decisions/0006-audit-entries-schema-normalization.md`
+- ADR-0007: `docs/decisions/0007-agent-tenant-resolver-strict-mode-builder.md`
+- R5.3 spec: `docs/plans/active/2026-04-26-r5.3-admin-completeness-r4-closure.md`
+- R5.3 execution plan: `docs/plans/active/2026-04-26-r5.3-execution-plan.md`
+
+---
+
 ## [1.11.0] — 2026-04-26 — R5.2 "Security Admin + Compliance Path"
 
 Coordinated ship of R5.2 (second release in the R5 Production Readiness
