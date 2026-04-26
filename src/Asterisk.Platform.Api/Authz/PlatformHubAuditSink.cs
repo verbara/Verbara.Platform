@@ -59,7 +59,7 @@ public sealed class PlatformHubAuditSink : IHubAuditSink
                 category: Category,
                 action: entry.Action,
                 severity: Severity,
-                actorId: "unknown",
+                actorId: entry.ActorId,
                 actorType: ActorType,
                 targetId: entry.TargetId,
                 targetType: "Agent",
