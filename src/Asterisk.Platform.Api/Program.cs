@@ -388,20 +388,33 @@ builder.Services.AddHttpClient("EmailAttachments", c =>
 
 // DataProtection must be registered before JwtTokenService so the factory can resolve it.
 // Per ADR-0003 (R5.2 P0.8): DB-backed via PlatformDataProtectionDbContext. Fail-fast if
-// Postgres connection unavailable rather than silently falling back to ephemeral keys.
+// Postgres connection unavailable in production environments. Test environments
+// (WebApplicationFactory<Program>) fall back to ephemeral keys so endpoint tests
+// don't require a live Postgres connection just to exercise non-encryption paths.
 if (string.IsNullOrEmpty(coreConnectionString))
-    throw new InvalidOperationException(
-        "ConnectionStrings:Postgres is required for DataProtection key persistence (ADR-0003). " +
-        "Configure the connection string or use UseEphemeralKeysForTesting() for unit tests.");
-
-builder.Services.AddDbContext<PlatformDataProtectionDbContext>(opt =>
-    opt.UseNpgsql(coreConnectionString));
-builder.Services.AddPlatformDataProtection(opt =>
 {
-    opt.ApplicationName = "Asterisk.Platform";
-    // Default: DB-backed via PlatformDataProtectionDbContext.
-    // Override via opt.UseFileSystem("/path") for single-node deploys with mounted volume.
-});
+    if (!builder.Environment.IsEnvironment("Testing"))
+        throw new InvalidOperationException(
+            "ConnectionStrings:Postgres is required for DataProtection key persistence (ADR-0003) " +
+            "in non-Testing environments. Configure the connection string or run under Environment=Testing.");
+
+    builder.Services.AddPlatformDataProtection(opt =>
+    {
+        opt.ApplicationName = "Asterisk.Platform.Testing";
+        opt.UseEphemeralKeysForTesting();
+    });
+}
+else
+{
+    builder.Services.AddDbContext<PlatformDataProtectionDbContext>(opt =>
+        opt.UseNpgsql(coreConnectionString));
+    builder.Services.AddPlatformDataProtection(opt =>
+    {
+        opt.ApplicationName = "Asterisk.Platform";
+        // Default: DB-backed via PlatformDataProtectionDbContext.
+        // Override via opt.UseFileSystem("/path") for single-node deploys with mounted volume.
+    });
+}
 builder.Services.AddSingleton<IJtiRevocationCache, InMemoryJtiRevocationCache>();
 
 // AgentAssist runtime feature toggle (R5.1 Task J) — always registered so the admin
