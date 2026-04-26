@@ -1,18 +1,18 @@
 # R5 — Production Readiness + Value Materialization (Release Train)
 
-**Fecha creación:** 2026-04-22 · **Last revised:** 2026-04-25 (D-FORCE-2 split applied)
-**Estado:** Approved (envelope D' + S1 expanded product-final) — **R5.1 shipped 2026-04-23** (Pro 1.12.0-pro + Platform 1.10.0 + Web 1.9.0 — pushed + tagged + GH Releases live)
+**Fecha creación:** 2026-04-22 · **Last revised:** 2026-04-26 (R5.2 shipped marker)
+**Estado:** Approved (envelope D' + S1 expanded product-final) — **R5.1 shipped 2026-04-23** (Pro 1.12.0-pro + Platform 1.10.0 + Web 1.9.0) · **R5.2 shipped 2026-04-26** (Pro 1.13.0-pro + Platform 1.11.0 + Web 1.10.0 — pushed + tagged + GH Releases live; R5.2 spec/exec-plan/triage moved to `docs/plans/completed/`)
 **Duración estimada:** 15.5-16.5 semanas total (~10.5 sem execution + ~6 sem QA gaps entre releases) — **R5.4 added** per post-ship triage D-FORCE-2 to land production-validation work without inflating R5.3 cadence.
 **Baseline:** SDK 1.15.0 · Pro 1.11.0-pro · Platform 1.9.3 · Web 1.8.0
-**Post-R5.1 triage:** ver [`2026-04-25-r5.1-post-ship-triage.md`](2026-04-25-r5.1-post-ship-triage.md) — reconciles 13 canonical limitations + 5 R5.2 features (Set A) + 7 R5.2 carry-forwards (Set B) + 9 new items + 7 productization categories. R5.2 brainstorm input.
+**Post-R5.1 triage:** ver [`../completed/2026-04-25-r5.1-post-ship-triage.md`](../completed/2026-04-25-r5.1-post-ship-triage.md) — reconciles 13 canonical limitations + 5 R5.2 features (Set A) + 7 R5.2 carry-forwards (Set B) + 9 new items + 7 productization categories. R5.2 spec + execution-plan también en `completed/` post-ship.
 
 ### Breakdown de duración
 
 | Fase | Duración | Notas |
 |---|---|---|
 | R5.1 execution | 3-3.5 sem | Phase 0 UI primitives (4-6h) + S1 product-final (1.5-2 sem) + S2 Ops bundle paralelizado (~1 sem) — ✅ shipped 2026-04-23 |
-| QA gap R5.1→R5.2 | 2 sem | Baking en producción/staging, patches si surgen |
-| R5.2 execution | 2 sem | 12 items (5 new features S3.1-S3.5 + 7 carry-forwards B.1/B.2/B.6/B.7/B.9/B.11/B.12) paralelizables con subagents |
+| QA gap R5.1→R5.2 | 2 sem | Baking en producción/staging — bypassed; R5.2 ejecutada inmediato bajo subagent-driven con FCM batching |
+| R5.2 execution | 2 sem | 12 items (5 new features S3.1-S3.5 + 7 carry-forwards B.1/B.2/B.6/B.7/B.9/B.11/B.12) paralelizables con subagents — ✅ shipped 2026-04-26 |
 | QA gap R5.2→R5.3 | 2 sem | Baking |
 | R5.3 execution | 1.5-2 sem | 7 items + R4 closure (Admin Completeness only — production-validation moved to R5.4) |
 | QA gap R5.3→R5.4 | 2 sem | Baking; pen-test scoping happens here |
