@@ -9,7 +9,143 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_No unreleased changes. Next release staging begins after R5.2 spec approval._
+_No unreleased changes._
+
+---
+
+## [1.11.0] — 2026-04-26 — R5.2 "Security Admin + Compliance Path"
+
+Coordinated ship of R5.2 (second release in the R5 Production Readiness
+Release Train) — pairs with **Pro 1.13.0-pro** and **Web 1.10.0**.
+Closes R4 Frente C (retention admin) + Frente D (audit viewer) + Frente E
+(MFA wizard) and lands the per-tenant tenant-stamping policy execution
+across the Pro packages consumed by Platform.
+
+### Added — admin endpoints (Set A — 5 R5.2 features)
+
+- `MfaAdminEndpoints` (PA.1) — `/management/mfa/users` list/reset/sessions-revoke.
+  Permission `security.mfa.admin`. Audit `mfa.admin.reset` /
+  `mfa.admin.sessions_revoked`. Plus E.2: `MfaPolicy` field on `/users/me`
+  for proactive UI hide of Disable when tenant policy enforces MFA.
+- `MfaEnrollEndpoints` + `ProfileSessionsEndpoints` +
+  `ProfileRecoveryCodesEndpoints` (PA.2) — `/profile/security/mfa/enroll/*` 
+  3-step wizard + `/profile/security/sessions` list/revoke +
+  `/profile/security/recovery-codes/regenerate` with TOTP step-up.
+  New `RecoveryCodeService` with crypto invariants (10 codes × 8 chars
+  Base32, SHA-256+salt hashed, RandomNumberGenerator).
+- `AuditEndpoints` (PB.1) enriched with filter set (action prefix /
+  actor / target / from-to / tenant) + `GET /audit/export?format=csv|json`
+  streaming. Permission `audit.read` / `audit.export`.
+  `X-Audit-Retention-Days` response header.
+- `ImpersonationAdminEndpoints` (PB.2) — `/management/impersonation/sessions/active`
+  list + revoke + history. Permission `security.impersonation.manage`.
+  Plus C.7 expansion: tenant settings `ImpersonationMaxConcurrentSessions`
+  (default 3) + `ImpersonationAutoTimeoutMinutes` (default 240).
+  `ImpersonationSessionTimeoutService : BackgroundService` sweeps every
+  60s and revokes expired sessions with audit
+  `impersonation.session.auto_timeout`.
+- `RetentionAdminEndpoints` (PC.1) — `/management/retention/targets` +
+  `config` + `run-now` + `PATCH config`. DryRun toggle (default safer
+  posture). Permission `retention.read` / `retention.manage`. Audit
+  `retention.manual_triggered` / `retention.dryrun_toggled` /
+  `retention.config_changed`.
+
+### Added — carry-forward tickets (Set B from R5.1 limitations)
+
+- `WithSingleTenantMode("default")` adoption in Program.cs (B.1) —
+  closes R5.1 limitation #1 silent multi-tenant data corruption risk.
+- `RedisJtiRevocationCache` (PA.3 / B.9) in `Asterisk.Platform.Identity.Redis`
+  — completes the v1.9.2 abstraction; `IJtiRevocationCache` +
+  `InMemoryJtiRevocationCache` widened to public in `Asterisk.Platform.Identity`.
+- `MetricsAvailabilityBanner` consumer of `X-Metrics-Available` header
+  (PC.2 / B.2) — Web wallboard surfaces banner when live metrics
+  infrastructure unavailable.
+- `RoleTemplateSeeder.ReseedExistingTenantsAsync` + `tools/RbacReseed`
+  CLI + `scripts/reseed-rbac.sh` (PC.3 / B.7) — re-seed migration tool
+  for existing tenants when `AllPermissions()` grows. Operator runbook
+  in `docs/operations/v1.11-release-runbook.md`.
+- `LicenseInfoDto` extended with `InGrace` + `GracePeriodRemaining` +
+  `Blocked` (PC.4 / B.11) — exposes existing v1.8.0-pro `ILicenseGuard`
+  grace logic via `ComputeGraceState` pure function. No Pro surface change.
+- `ApiKey.LastUsedAt` + `IApiKeyStore.UpdateLastUsedAsync` + debounced
+  auth-middleware stamp (PC.5 / B.12) — replaces `—` placeholder in
+  Web API keys table with real relative timestamps. Migration
+  `020_ApiKeysLastUsedAt.sql`.
+
+### Added — Phase 0 foundation (gates the above)
+
+- ADR-0002 / ADR-0004 / ADR-0005 documenting tenant stamping policy +
+  per-package execution conventions + cross-tenant SignalR validation.
+- `PlatformDataProtectionDbContext` + `AddPlatformDataProtection()`
+  (P0.8 / B.6) — DB-backed default per ADR-0003. Closes R5.1 limitation
+  #5 (ephemeral keyring in Docker). Migration `018_DataProtectionKeys.sql`.
+- `CachedAgentTenantResolver` + `PlatformHubAuditSink` (P0.6) — Platform-side
+  implementations of new `Asterisk.Sdk.Pro.Push.SignalR.Authz` abstractions
+  per ADR-0005. 5-min `IMemoryCache` per-process; lateral invalidation
+  via Pro.Push event documented (event creation deferred).
+- 7 R5.2 RBAC permissions seeded in `RoleTemplateSeeder.AllPermissions()`
+  (P0.9): `security.mfa.admin`, `audit.read`, `audit.export`,
+  `security.impersonation.manage`, `retention.read`, `retention.manage`,
+  `tenant.settings.write`. Existing tenants migrate via PC.3 RbacReseed CLI.
+- `TenantAuthConfig` extended with `ImpersonationMaxConcurrentSessions` +
+  `ImpersonationAutoTimeoutMinutes`. Migration `019_ImpersonationSessionPolicy.sql`.
+
+### Changed
+
+- Auth `Program.cs` DataProtection registration is conditional on
+  Postgres connection string availability + `Environment=Testing`
+  (`9d382f0` hot-patch). Production fail-fast preserved.
+- `NuGet.Config` adds `<clear />` to prevent user-level credentialed
+  sources (e.g., AWS CodeArtifact) from leaking into Platform builds —
+  fixes pre-existing NU1507 conflict with central-package-management.
+
+### Fixed
+
+- 20 pre-existing test failures in `Asterisk.Platform.Api.Tests` resolved
+  by removing stale local `src/Asterisk.Platform.Api/data/jwt-signing-key.xml`
+  (gitignored but persisted across runs from previous WebApplicationFactory
+  hosting; surfaced by P0.8 DataProtection ephemeral mode).
+
+### Test counts post-R5.2
+
+- Platform suite: ~1,058+ unit + integration tests across 30 DLLs (was
+  ~1,800 pre-R5.2 baseline mixed with Postgres tests; current accurate
+  count below).
+- `Asterisk.Platform.Api.Tests`: 801/801 passing.
+- `Asterisk.Platform.Identity.Tests`: 59/59 passing.
+- `Asterisk.Platform.Identity.Redis.Tests`: 19/19 passing (Testcontainers
+  Redis).
+- `Asterisk.Platform.Storage.Postgres.Tests`: 14/14 passing (Testcontainers
+  Postgres — first introduced in PC.3 + extended in PC.5).
+- `Asterisk.Platform.Storage.InMemory.Tests`: 125/125 passing.
+- Zero warnings under `TreatWarningsAsErrors=true` (NU1507 pre-existing
+  resolved by NuGet.Config `<clear />`).
+
+### Known limitations (carried forward to R5.3 or beyond)
+
+- `IAgentTenantResolver` is OPTIONAL on `PlatformHub` ctor — falls back
+  to legacy permissive behavior if not registered. Production deploys
+  MUST register; future Pro consumers should be aware (ADR-0005 §"Concerns").
+- `AgentTenantMembershipChangedEvent` lateral invalidation NOT
+  implemented — cache reaches eventual consistency via 5-min TTL per
+  ADR-0005 §"Consequences" "acceptable" deviation.
+- `HubAuditEntry.actorId="unknown"` — `sub` claim not threaded through
+  yet. Trivial extension when needed.
+- Pre-existing `audit_entries` Postgres schema lacks `severity` /
+  `category` / `before` / `after` columns — DTO surfaces defaults
+  (`info`, `config`, `null`, `null`). Schema widening can land in
+  future migration without breaking endpoints (PB.1 documented).
+
+### References
+
+- ADRs: `docs/decisions/0002-tenant-stamping-pipeline-end-to-end.md`,
+  `0003-dataprotection-key-persistence-strategy.md`,
+  `0004-tenant-stamping-execution-conventions.md`,
+  `0005-cross-tenant-signalr-subscription-validation.md`.
+- R5.2 spec: `docs/plans/active/2026-04-25-r5.2-security-admin-compliance.md`
+- R5.2 execution plan: `docs/plans/active/2026-04-25-r5.2-execution-plan.md`
+- Post-ship triage: `docs/plans/active/2026-04-25-r5.1-post-ship-triage.md`
+- v1.11 release runbook: `docs/operations/v1.11-release-runbook.md`
 
 ---
 
