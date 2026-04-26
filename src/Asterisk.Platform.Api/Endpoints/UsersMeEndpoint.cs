@@ -1,5 +1,7 @@
+using Asterisk.Platform.Api.Endpoints.Mfa;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Asterisk.Platform.Identity.Mfa;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -14,6 +16,7 @@ internal static class UsersMeEndpoint
     private static async Task<IResult> GetCurrentUser(
         HttpContext context,
         [FromServices] IUserStore userStore,
+        [FromServices] IMfaPolicyEvaluator mfaPolicyEvaluator,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -27,7 +30,20 @@ internal static class UsersMeEndpoint
             return Results.Unauthorized();
 
         var user = await userStore.GetByIdAsync(tenantId, EntityId.From(userIdValue), ct);
-        return user is null ? Results.NotFound() : Results.Ok(user);
+        if (user is null)
+            return Results.NotFound();
+
+        var enforced = await mfaPolicyEvaluator.RequiresMfaAsync(
+            tenantId.Value, user.Role, ct);
+
+        // PolicySource captures whether the MFA requirement comes from the
+        // tenant-level policy ("tenant") or the user's own enrollment ("user").
+        // The Web hides "Disable MFA" only when source == "tenant".
+        var policy = new MfaPolicyDto(
+            Enforced: enforced,
+            PolicySource: enforced ? "tenant" : "user");
+
+        return Results.Ok(UserMeResponseDto.FromUser(user, policy));
     }
 
     private static TenantId GetTenantId(HttpContext context)

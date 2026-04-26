@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Asterisk.Platform.Api.Endpoints;
+using Asterisk.Platform.Api.Endpoints.Mfa;
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Bot;
@@ -212,6 +213,11 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(PartnerRevenueSummaryDto))]
 [JsonSerializable(typeof(PartnerRevenueDetailDto))]
 [JsonSerializable(typeof(List<PartnerRevenueDetailDto>))]
+// MFA admin (R5.2 PA.1)
+[JsonSerializable(typeof(MfaUserSummary))]
+[JsonSerializable(typeof(PagedResult<MfaUserSummary>))]
+[JsonSerializable(typeof(MfaPolicyDto))]
+[JsonSerializable(typeof(UserMeResponseDto))]
 // Management API Keys
 [JsonSerializable(typeof(MgmtApiKeyDto))]
 [JsonSerializable(typeof(List<MgmtApiKeyDto>))]

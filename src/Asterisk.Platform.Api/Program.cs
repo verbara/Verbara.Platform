@@ -429,6 +429,10 @@ builder.Services.AddSingleton<RefreshTokenService>();
 builder.Services.AddSingleton<AuthEventService>();
 builder.Services.AddSingleton<AccountLockoutService>();
 builder.Services.AddSingleton<SessionService>();
+// R5.2 PA.1 — MFA admin service backing /management/mfa endpoints.
+builder.Services.AddSingleton<
+    Asterisk.Platform.Api.Endpoints.Mfa.IMfaAdminService,
+    Asterisk.Platform.Api.Endpoints.Mfa.MfaAdminService>();
 builder.Services.AddSingleton<TenantProvisioningService>();
 builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredService<TenantProvisioningService>());
 
@@ -723,6 +727,15 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("PartnerAdminOnly", p =>
         p.AddRequirements(new PartnerAdminRequirement()));
 
+    // R5.2 PA.1 — MFA admin surface. PlatformAdminRequirement combines the
+    // host/partner-tenant gate with the seeded "security.mfa.admin" RBAC
+    // permission so the surface is double-locked: only platform admins (or
+    // partner admins managing their children) with the explicit permission can
+    // list users / reset MFA / revoke sessions.
+    options.AddPolicy(
+        Asterisk.Platform.Api.Endpoints.Mfa.MfaAdminEndpoints.AuthorizationPolicy,
+        p => p.AddRequirements(new PlatformAdminRequirement("security.mfa.admin")));
+
     // Plan 32C — PlatformHub method-level policies. "Supervisor" is role-based
     // (Supervisor or Admin); "Agent" is role-based for UpdatePresence/RequestHelp;
     // "PlatformAdmin" is role-based for hub-level administrative methods (distinct
@@ -929,6 +942,8 @@ v1.MapSurveyEndpoints();
 v1.MapScheduledReportEndpoints();
 v1.MapRealtimeEndpoints();
 v1.MapAuthAdminEndpoints();
+// R5.2 PA.1 — MFA admin surface (PlatformAdmin + security.mfa.admin permission).
+Asterisk.Platform.Api.Endpoints.Mfa.MfaAdminEndpoints.MapMfaAdminEndpoints(v1);
 v1.MapOidcEndpoints();
 v1.MapRbacEndpoints();
 v1.MapUsersMeEndpoint();
