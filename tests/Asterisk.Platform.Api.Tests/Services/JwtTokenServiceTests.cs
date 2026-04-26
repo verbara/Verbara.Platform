@@ -7,6 +7,7 @@ using Asterisk.Platform.Api.Auth;
 using Asterisk.Platform.Api.Services;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Identity;
+using Asterisk.Platform.Identity.Auth;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.IdentityModel.Tokens;
 

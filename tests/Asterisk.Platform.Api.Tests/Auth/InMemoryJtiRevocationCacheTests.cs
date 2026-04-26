@@ -1,4 +1,4 @@
-using Asterisk.Platform.Api.Auth;
+using Asterisk.Platform.Identity.Auth;
 using FluentAssertions;
 
 namespace Asterisk.Platform.Api.Tests.Auth;

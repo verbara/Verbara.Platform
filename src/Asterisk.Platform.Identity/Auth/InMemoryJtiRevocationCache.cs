@@ -1,13 +1,19 @@
 using System.Collections.Concurrent;
 
-namespace Asterisk.Platform.Api.Auth;
+namespace Asterisk.Platform.Identity.Auth;
 
-internal sealed class InMemoryJtiRevocationCache : IJtiRevocationCache
+/// <summary>
+/// In-memory <see cref="IJtiRevocationCache"/> default — single-process safe. For
+/// multi-instance deploys use the Redis-backed implementation in
+/// <c>Asterisk.Platform.Identity.Redis</c>.
+/// </summary>
+public sealed class InMemoryJtiRevocationCache : IJtiRevocationCache
 {
     // Maps jti → absolute expiry time of the original token.
     // Entries whose expiry is in the past are pruned on each lookup (lock-free).
     private readonly ConcurrentDictionary<string, DateTimeOffset> _revoked = new(StringComparer.Ordinal);
 
+    /// <inheritdoc />
     public ValueTask<bool> IsRevokedAsync(string jti, CancellationToken ct)
     {
         if (!_revoked.TryGetValue(jti, out var expiresAt))
@@ -23,6 +29,7 @@ internal sealed class InMemoryJtiRevocationCache : IJtiRevocationCache
         return ValueTask.FromResult(true);
     }
 
+    /// <inheritdoc />
     public ValueTask RevokeAsync(string jti, DateTimeOffset expiresAt, CancellationToken ct)
     {
         // Only store entries that haven't already expired

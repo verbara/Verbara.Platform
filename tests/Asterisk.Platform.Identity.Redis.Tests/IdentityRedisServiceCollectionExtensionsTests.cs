@@ -1,3 +1,4 @@
+using Asterisk.Platform.Identity.Auth;
 using Asterisk.Platform.Identity.Mfa;
 using Asterisk.Platform.Identity.Redis.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,8 +8,9 @@ namespace Asterisk.Platform.Identity.Redis.Tests;
 
 /// <summary>
 /// Tests the opt-in DI extension: it must REPLACE previously registered in-memory
-/// <see cref="IMfaPendingCache"/> / <see cref="IPasswordResetCache"/> singletons with
-/// the Redis-backed implementations and share the same <see cref="IConnectionMultiplexer"/>.
+/// <see cref="IMfaPendingCache"/> / <see cref="IPasswordResetCache"/> /
+/// <see cref="IJtiRevocationCache"/> singletons with the Redis-backed implementations
+/// and share the same <see cref="IConnectionMultiplexer"/>.
 /// </summary>
 [Collection("Redis")]
 public sealed class IdentityRedisServiceCollectionExtensionsTests
@@ -26,6 +28,7 @@ public sealed class IdentityRedisServiceCollectionExtensionsTests
         // Start with in-memory defaults (as Program.cs does)
         services.AddSingleton<IMfaPendingCache, InMemoryMfaPendingCache>();
         services.AddSingleton<IPasswordResetCache, InMemoryPasswordResetCache>();
+        services.AddSingleton<IJtiRevocationCache, InMemoryJtiRevocationCache>();
 
         services.AddAsteriskPlatformIdentityRedis(o =>
         {
@@ -36,9 +39,11 @@ public sealed class IdentityRedisServiceCollectionExtensionsTests
         using var sp = services.BuildServiceProvider();
         var mfa = sp.GetRequiredService<IMfaPendingCache>();
         var reset = sp.GetRequiredService<IPasswordResetCache>();
+        var jti = sp.GetRequiredService<IJtiRevocationCache>();
 
         mfa.Should().BeOfType<RedisMfaPendingCache>();
         reset.Should().BeOfType<RedisPasswordResetCache>();
+        jti.Should().BeOfType<RedisJtiRevocationCache>();
     }
 
     [Fact]

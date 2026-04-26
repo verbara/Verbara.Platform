@@ -1,3 +1,4 @@
+using Asterisk.Platform.Identity.Auth;
 using Asterisk.Platform.Identity.Mfa;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -12,10 +13,10 @@ namespace Asterisk.Platform.Identity.Redis.DependencyInjection;
 public static class IdentityRedisServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers Redis-backed implementations of <see cref="IMfaPendingCache"/> and
-    /// <see cref="IPasswordResetCache"/>, replacing any previously registered
-    /// implementations (e.g. the in-memory defaults from the Platform.Api
-    /// bootstrap).
+    /// Registers Redis-backed implementations of <see cref="IMfaPendingCache"/>,
+    /// <see cref="IPasswordResetCache"/>, and <see cref="IJtiRevocationCache"/>,
+    /// replacing any previously registered implementations (e.g. the in-memory defaults
+    /// from the Platform.Api bootstrap).
     ///
     /// Also registers <see cref="IConnectionMultiplexer"/> as a singleton if one is not
     /// already present in the container, so Redis can be shared with other packages
@@ -49,6 +50,13 @@ public static class IdentityRedisServiceCollectionExtensions
 
         RemoveExisting<IPasswordResetCache>(services);
         services.AddSingleton<IPasswordResetCache>(sp => new RedisPasswordResetCache(
+            sp.GetRequiredService<IConnectionMultiplexer>(),
+            sp.GetRequiredService<IOptions<RedisIdentityOptions>>()));
+
+        // R5.2 PA.3 / B.9 — replace InMemoryJtiRevocationCache so revoked-jti state
+        // survives failover across multiple Platform API instances.
+        RemoveExisting<IJtiRevocationCache>(services);
+        services.AddSingleton<IJtiRevocationCache>(sp => new RedisJtiRevocationCache(
             sp.GetRequiredService<IConnectionMultiplexer>(),
             sp.GetRequiredService<IOptions<RedisIdentityOptions>>()));
 

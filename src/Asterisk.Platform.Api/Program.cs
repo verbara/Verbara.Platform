@@ -1,5 +1,6 @@
 using Asp.Versioning;
 using Asterisk.Platform.Api.Auth;
+using Asterisk.Platform.Identity.Auth;
 using Microsoft.AspNetCore.DataProtection;
 using Asterisk.Platform.Api.Endpoints;
 using Asterisk.Platform.Api.Middleware;
