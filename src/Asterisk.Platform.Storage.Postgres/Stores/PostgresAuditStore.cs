@@ -53,6 +53,91 @@ internal sealed class PostgresAuditStore : IAuditStore
     public async Task<PagedResult<AuditEntry>> SearchAsync(
         TenantId tenantId, AuditQuery query, CancellationToken ct)
     {
+        var (where, parameters) = BuildWhereClause(tenantId, query);
+        var offset = (query.Page - 1) * query.PageSize;
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        var total = await conn.ExecuteScalarAsync<int>(
+            new CommandDefinition($"SELECT COUNT(*) FROM audit_entries WHERE {where}", parameters, cancellationToken: ct));
+
+        parameters.Add("Limit", query.PageSize);
+        parameters.Add("Offset", offset);
+
+        var rows = await conn.QueryAsync<AuditRow>(
+            new CommandDefinition(
+                "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
+                $"FROM audit_entries WHERE {where} ORDER BY occurred_at DESC LIMIT @Limit OFFSET @Offset",
+                parameters,
+                cancellationToken: ct));
+
+        var items = rows.Select(r => r.ToEntry()).ToList();
+        return new PagedResult<AuditEntry>(items, total, query.Page, query.PageSize);
+    }
+
+    public async IAsyncEnumerable<AuditEntry> StreamAsync(
+        TenantId tenantId,
+        AuditQuery query,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        // Page through results in batches so the export endpoint never buffers
+        // the full result set in memory. Batch size 500 balances round-trips vs
+        // peak memory; the writer flushes between batches.
+        const int batchSize = 500;
+        var (where, parameters) = BuildWhereClause(tenantId, query);
+        parameters.Add("Limit", batchSize);
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+
+        var lastOccurredAt = (DateTimeOffset?)null;
+        var lastEntryId = (string?)null;
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            string sql;
+            if (lastOccurredAt is null)
+            {
+                sql =
+                    "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
+                    $"FROM audit_entries WHERE {where} ORDER BY occurred_at DESC, entry_id DESC LIMIT @Limit";
+            }
+            else
+            {
+                // Keyset pagination on (occurred_at DESC, entry_id DESC) — avoids
+                // OFFSET cost growing with result size.
+                parameters.Add("CursorOccurredAt", lastOccurredAt.Value);
+                parameters.Add("CursorEntryId", lastEntryId);
+                sql =
+                    "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
+                    $"FROM audit_entries WHERE {where} AND " +
+                    "(occurred_at < @CursorOccurredAt OR (occurred_at = @CursorOccurredAt AND entry_id < @CursorEntryId)) " +
+                    "ORDER BY occurred_at DESC, entry_id DESC LIMIT @Limit";
+            }
+
+            var rows = (await conn.QueryAsync<AuditRow>(
+                new CommandDefinition(sql, parameters, cancellationToken: ct))).ToList();
+
+            if (rows.Count == 0)
+                yield break;
+
+            foreach (var row in rows)
+            {
+                yield return row.ToEntry();
+            }
+
+            if (rows.Count < batchSize)
+                yield break;
+
+            var last = rows[^1];
+            lastOccurredAt = last.occurred_at;
+            lastEntryId = last.entry_id;
+        }
+    }
+
+    private static (string Where, DynamicParameters Parameters) BuildWhereClause(TenantId tenantId, AuditQuery query)
+    {
         var conditions = new List<string> { "tenant_id = @TenantId" };
         var parameters = new DynamicParameters();
         parameters.Add("TenantId", tenantId.Value);
@@ -62,15 +147,50 @@ internal sealed class PostgresAuditStore : IAuditStore
             conditions.Add("action = @Action");
             parameters.Add("Action", query.Action);
         }
+        if (!string.IsNullOrEmpty(query.ActionPrefix))
+        {
+            conditions.Add("action LIKE @ActionPrefix");
+            // Escape any LIKE wildcards in caller-supplied prefix so "mfa.admin._"
+            // doesn't accidentally widen the match.
+            var escaped = query.ActionPrefix
+                .Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("%", "\\%", StringComparison.Ordinal)
+                .Replace("_", "\\_", StringComparison.Ordinal);
+            parameters.Add("ActionPrefix", escaped + "%");
+        }
         if (!string.IsNullOrEmpty(query.EntityType))
         {
             conditions.Add("entity_type = @EntityType");
             parameters.Add("EntityType", query.EntityType);
         }
+        if (!string.IsNullOrEmpty(query.TargetType))
+        {
+            conditions.Add("entity_type = @TargetType");
+            parameters.Add("TargetType", query.TargetType);
+        }
+        if (!string.IsNullOrEmpty(query.TargetId))
+        {
+            conditions.Add("entity_id = @TargetId");
+            parameters.Add("TargetId", query.TargetId);
+        }
         if (!string.IsNullOrEmpty(query.PerformedBy))
         {
             conditions.Add("performed_by = @PerformedBy");
             parameters.Add("PerformedBy", query.PerformedBy);
+        }
+        if (!string.IsNullOrEmpty(query.ActorId))
+        {
+            conditions.Add("performed_by = @ActorId");
+            parameters.Add("ActorId", query.ActorId);
+        }
+        if (!string.IsNullOrEmpty(query.ActorSearch))
+        {
+            conditions.Add("performed_by ILIKE @ActorSearch");
+            var escaped = query.ActorSearch
+                .Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("%", "\\%", StringComparison.Ordinal)
+                .Replace("_", "\\_", StringComparison.Ordinal);
+            parameters.Add("ActorSearch", "%" + escaped + "%");
         }
         if (query.From.HasValue)
         {
@@ -83,24 +203,7 @@ internal sealed class PostgresAuditStore : IAuditStore
             parameters.Add("To", query.To.Value);
         }
 
-        var where = string.Join(" AND ", conditions);
-        var offset = (query.Page - 1) * query.PageSize;
-
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-
-        var total = await conn.ExecuteScalarAsync<int>(
-            $"SELECT COUNT(*) FROM audit_entries WHERE {where}", parameters);
-
-        parameters.Add("Limit", query.PageSize);
-        parameters.Add("Offset", offset);
-
-        var rows = await conn.QueryAsync<AuditRow>(
-            "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
-            $"FROM audit_entries WHERE {where} ORDER BY occurred_at DESC LIMIT @Limit OFFSET @Offset",
-            parameters);
-
-        var items = rows.Select(r => r.ToEntry()).ToList();
-        return new PagedResult<AuditEntry>(items, total, query.Page, query.PageSize);
+        return (string.Join(" AND ", conditions), parameters);
     }
 
     public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)

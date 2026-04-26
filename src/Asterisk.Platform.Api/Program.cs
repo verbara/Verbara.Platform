@@ -447,6 +447,13 @@ builder.Services.AddSingleton<SessionService>();
 builder.Services.AddSingleton<
     Asterisk.Platform.Api.Endpoints.Mfa.IMfaAdminService,
     Asterisk.Platform.Api.Endpoints.Mfa.MfaAdminService>();
+
+// R5.2 PB.1 — audit log viewer query service backing /admin/audit/events
+// + /admin/audit/export. Wraps IAuditStore with the presentation-layer DTO
+// so the React DataTable can render rows directly without re-shaping.
+builder.Services.AddSingleton<
+    Asterisk.Platform.Api.Endpoints.Audit.IAuditQueryService,
+    Asterisk.Platform.Api.Endpoints.Audit.DefaultAuditQueryService>();
 builder.Services.AddSingleton<TenantProvisioningService>();
 builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredService<TenantProvisioningService>());
 
@@ -754,6 +761,18 @@ builder.Services.AddAuthorization(options =>
         Asterisk.Platform.Api.Endpoints.Mfa.MfaAdminEndpoints.AuthorizationPolicy,
         p => p.AddRequirements(new PlatformAdminRequirement("security.mfa.admin")));
 
+    // R5.2 PB.1 — audit log viewer + export. Two policies so the export surface
+    // can be revoked independently of read access (compliance scenarios where
+    // viewing in-app is fine but mass extract requires extra approval). Both
+    // run through PlatformAdminRequirement (host/partner gate + seeded
+    // dot-notation permission `audit.read` / `audit.export`).
+    options.AddPolicy(
+        Asterisk.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.QueryPolicy,
+        p => p.AddRequirements(new PlatformAdminRequirement("audit.read")));
+    options.AddPolicy(
+        Asterisk.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.ExportPolicy,
+        p => p.AddRequirements(new PlatformAdminRequirement("audit.export")));
+
     // Plan 32C — PlatformHub method-level policies. "Supervisor" is role-based
     // (Supervisor or Admin); "Agent" is role-based for UpdatePresence/RequestHelp;
     // "PlatformAdmin" is role-based for hub-level administrative methods (distinct
@@ -962,6 +981,8 @@ v1.MapAgentAssistEndpoints();
 v1.MapSupervisorEndpoints();
 v1.MapSkillEndpoints();
 v1.MapAuditEndpoints();
+// R5.2 PB.1 — audit log viewer + export (audit.read / audit.export gated).
+Asterisk.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.MapAuditAdminEndpoints(v1);
 v1.MapSurveyEndpoints();
 v1.MapScheduledReportEndpoints();
 v1.MapRealtimeEndpoints();

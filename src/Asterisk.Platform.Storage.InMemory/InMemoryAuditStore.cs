@@ -38,13 +38,8 @@ internal sealed class InMemoryAuditStore : IAuditStore
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        var filtered = GetTenantEntries(tenantId)
-            .Where(e => query.Action == null || string.Equals(e.Action, query.Action, StringComparison.OrdinalIgnoreCase))
-            .Where(e => query.EntityType == null || string.Equals(e.TargetType, query.EntityType, StringComparison.OrdinalIgnoreCase))
-            .Where(e => query.PerformedBy == null || string.Equals(e.ActorId, query.PerformedBy, StringComparison.Ordinal))
-            .Where(e => query.From == null || e.OccurredAt >= query.From)
-            .Where(e => query.To == null || e.OccurredAt <= query.To)
-            .OrderBy(e => e.OccurredAt)
+        var filtered = ApplyFilters(GetTenantEntries(tenantId), query)
+            .OrderByDescending(e => e.OccurredAt)
             .ToList();
 
         var totalCount = filtered.Count;
@@ -53,6 +48,41 @@ internal sealed class InMemoryAuditStore : IAuditStore
 
         return Task.FromResult(new PagedResult<AuditEntry>(items, totalCount, query.Page, query.PageSize));
     }
+
+    public async IAsyncEnumerable<AuditEntry> StreamAsync(
+        TenantId tenantId,
+        AuditQuery query,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var matches = ApplyFilters(GetTenantEntries(tenantId), query)
+            .OrderByDescending(e => e.OccurredAt);
+
+        foreach (var entry in matches)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return entry;
+            await Task.Yield();
+        }
+    }
+
+    private static IEnumerable<AuditEntry> ApplyFilters(IEnumerable<AuditEntry> source, AuditQuery query) =>
+        source
+            .Where(e => query.Action == null || string.Equals(e.Action, query.Action, StringComparison.OrdinalIgnoreCase))
+            .Where(e => query.ActionPrefix == null || e.Action.StartsWith(query.ActionPrefix, StringComparison.OrdinalIgnoreCase))
+            .Where(e => query.EntityType == null || string.Equals(e.TargetType, query.EntityType, StringComparison.OrdinalIgnoreCase))
+            .Where(e => query.TargetType == null || string.Equals(e.TargetType, query.TargetType, StringComparison.OrdinalIgnoreCase))
+            .Where(e => query.TargetId == null || string.Equals(e.TargetId, query.TargetId, StringComparison.Ordinal))
+            .Where(e => query.PerformedBy == null || string.Equals(e.ActorId, query.PerformedBy, StringComparison.Ordinal))
+            .Where(e => query.ActorId == null || string.Equals(e.ActorId, query.ActorId, StringComparison.Ordinal))
+            .Where(e => query.ActorSearch == null
+                || e.ActorId.Contains(query.ActorSearch, StringComparison.OrdinalIgnoreCase))
+            .Where(e => query.Category == null || string.Equals(e.Category, query.Category, StringComparison.OrdinalIgnoreCase))
+            .Where(e => query.Severity == null || string.Equals(e.Severity, query.Severity, StringComparison.OrdinalIgnoreCase))
+            .Where(e => query.CorrelationId == null || e.CorrelationId == query.CorrelationId)
+            .Where(e => query.From == null || e.OccurredAt >= query.From)
+            .Where(e => query.To == null || e.OccurredAt <= query.To);
 
     public Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
