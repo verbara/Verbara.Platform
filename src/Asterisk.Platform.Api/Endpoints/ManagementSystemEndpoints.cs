@@ -6,6 +6,7 @@ using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.Licensing;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -50,7 +51,10 @@ internal static class ManagementSystemEndpoints
         return Results.Ok(new SystemInfoDto(version, hostTenant?.TenantId, hostTenant?.Name ?? "Asterisk Platform", features.GetFeatures()));
     }
 
-    private static IResult GetLicenseInfo([FromServices] ILicenseStatus licenseStatus)
+    private static IResult GetLicenseInfo(
+        [FromServices] ILicenseStatus licenseStatus,
+        [FromServices] IOptions<LicenseOptions> licenseOptions,
+        [FromServices] TimeProvider timeProvider)
     {
         var features = new List<string>();
         foreach (var feature in Enum.GetValues<LicenseFeature>())
@@ -62,6 +66,18 @@ internal static class ManagementSystemEndpoints
             }
         }
 
+        // R5.2 PC.4 / triage limitation #11 — surface grace period state so the
+        // Web admin StatCard can render real grace-window context. Logic mirrors
+        // Asterisk.Sdk.Pro.Licensing.LicenseValidator.Validate exactly:
+        //   GracePeriod result   ⇒ in grace, remaining = ExpiresAt + grace - now
+        //   Expired/Invalid      ⇒ blocked (grace is exhausted or never granted)
+        //   MissingFeature       ⇒ blocked (license loaded but feature bit absent)
+        //   Valid                ⇒ neither in grace nor blocked
+        var (inGrace, gracePeriodRemaining, blocked) = ComputeGraceState(
+            licenseStatus,
+            licenseOptions.Value.GracePeriod,
+            timeProvider.GetUtcNow());
+
         return Results.Ok(new LicenseInfoDto(
             licenseStatus.IsValid,
             licenseStatus.LicenseId,
@@ -70,7 +86,40 @@ internal static class ManagementSystemEndpoints
             licenseStatus.ExpiresAt,
             features,
             licenseStatus.MaxNodes,
-            licenseStatus.LastValidatedAt));
+            licenseStatus.LastValidatedAt,
+            inGrace,
+            gracePeriodRemaining,
+            blocked));
+    }
+
+    // Internal so Endpoints unit tests can exercise the mapping without spinning
+    // a full WebApplicationFactory. Pure function — no DI dependency.
+    internal static (bool InGrace, TimeSpan? GracePeriodRemaining, bool Blocked) ComputeGraceState(
+        ILicenseStatus status,
+        TimeSpan gracePeriod,
+        DateTimeOffset now)
+    {
+        switch (status.LastResult)
+        {
+            case LicenseValidationResult.GracePeriod when status.ExpiresAt is { } expiresAt:
+            {
+                var remaining = (expiresAt + gracePeriod) - now;
+                if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
+                return (InGrace: true, GracePeriodRemaining: remaining, Blocked: false);
+            }
+            case LicenseValidationResult.GracePeriod:
+                // No expiry timestamp loaded (defensive — should not occur in
+                // practice because the tracker only emits GracePeriod alongside
+                // a key with ExpiresAt populated).
+                return (InGrace: true, GracePeriodRemaining: null, Blocked: false);
+            case LicenseValidationResult.Expired
+                or LicenseValidationResult.Invalid
+                or LicenseValidationResult.MissingFeature:
+                return (InGrace: false, GracePeriodRemaining: null, Blocked: true);
+            case LicenseValidationResult.Valid:
+            default:
+                return (InGrace: false, GracePeriodRemaining: null, Blocked: false);
+        }
     }
 
     private static IResult UpdateLicense(
@@ -124,6 +173,11 @@ internal sealed record UpdateLicenseRequest(string LicenseKey);
 internal sealed record SystemSettingsRequest(string PlatformName, string DefaultTimezone, string DefaultLanguage);
 
 internal sealed record SystemInfoDto(string Version, string? HostTenantId, string? PlatformName, IReadOnlyDictionary<string, bool> Features);
+// PC.4 / triage limitation #11 (R5.2): adds InGrace / GracePeriodRemaining / Blocked
+// at the end of the positional record so the wire shape is purely additive — existing
+// JSON consumers ignore unknown fields, and TS clients pick up the new fields when
+// the type definition is regenerated. See ComputeGraceState for the source-of-truth
+// mapping rules.
 internal sealed record LicenseInfoDto(
     bool IsValid,
     string? LicenseId,
@@ -132,5 +186,8 @@ internal sealed record LicenseInfoDto(
     DateTimeOffset? ExpiresAt,
     IReadOnlyList<string> LicensedFeatures,
     int MaxNodes,
-    DateTimeOffset LastValidatedAt);
+    DateTimeOffset LastValidatedAt,
+    bool InGrace,
+    TimeSpan? GracePeriodRemaining,
+    bool Blocked);
 internal sealed record SystemSettingsDto(string PlatformName, string DefaultTimezone, string DefaultLanguage);

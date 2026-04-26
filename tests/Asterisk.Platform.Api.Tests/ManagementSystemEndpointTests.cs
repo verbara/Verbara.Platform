@@ -36,6 +36,26 @@ public sealed class ManagementSystemEndpointTests : IClassFixture<PlatformAdminA
         body.Should().Contain("maxNodes");
     }
 
+    // R5.2 PC.4 / triage limitation #11 — the GET /management/system/license
+    // payload must surface the grace-period state so the Web admin StatCard can
+    // render the real grace window. The PlatformAdminApiFactory removes the
+    // LicenseValidationHostedService (its FullName contains "Asterisk"), so the
+    // tracker keeps its initial Invalid state → blocked=true here. The full
+    // mapping for GracePeriod / Valid / Expired branches lives in the pure-
+    // function tests at Endpoints/ManagementSystemEndpointsTests.
+    [Fact]
+    public async Task License_ShouldExposeGracePeriodFields_PC4()
+    {
+        var response = await _client.GetAsync("/api/management/system/license");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("inGrace");
+        body.Should().Contain("blocked");
+        body.Should().Contain("\"inGrace\":false");
+        body.Should().Contain("\"blocked\":true");
+    }
+
     [Fact]
     public async Task Settings_ShouldPersistRoundTrip()
     {
