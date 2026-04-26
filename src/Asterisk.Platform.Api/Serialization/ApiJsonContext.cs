@@ -107,6 +107,8 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(ComplianceViolationDto[]))]
 [JsonSerializable(typeof(TopicDto))]
 [JsonSerializable(typeof(TopicDto[]))]
+[JsonSerializable(typeof(TurnSentimentDto))]
+[JsonSerializable(typeof(TurnSentimentDto[]))]
 [JsonSerializable(typeof(IntervalDto))]
 [JsonSerializable(typeof(List<IntervalDto>))]
 [JsonSerializable(typeof(AgentIntervalDto))]

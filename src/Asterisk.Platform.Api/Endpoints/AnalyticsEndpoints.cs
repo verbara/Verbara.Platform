@@ -418,6 +418,13 @@ internal static class AnalyticsEndpoints
         var allTopics = result.Topics?.AllTopics.Select(t =>
             new TopicDto(t.TopicName, t.Confidence)).ToArray() ?? [];
 
+        var sentimentTimeline = result.Sentiment?.PerTurnScores?.Select(ts =>
+            new TurnSentimentDto(
+                TurnIndex: ts.TurnIndex,
+                Speaker: ts.Speaker.ToString(),
+                Score: ts.Score,
+                Label: MapSentimentLabel(ts.Label) ?? "Neutral")).ToArray() ?? [];
+
         var dto = new QaDetailDto(
             SessionId: result.SessionId,
             AnalyzedAt: result.AnalyzedAt,
@@ -436,6 +443,7 @@ internal static class AnalyticsEndpoints
             SentimentScore: result.Sentiment?.OverallScore,
             PrimaryTopic: result.Topics?.PrimaryTopic,
             AllTopics: allTopics,
+            SentimentTimeline: sentimentTimeline,
             AgentTalkRatio: result.Metrics.AgentTalkRatio,
             SilenceCount: result.Metrics.SilenceCount,
             InterruptionCount: result.Metrics.InterruptionCount);
@@ -750,9 +758,16 @@ internal sealed record QaDetailDto(
     float? SentimentScore,
     string? PrimaryTopic,
     TopicDto[] AllTopics,
+    TurnSentimentDto[] SentimentTimeline,
     double? AgentTalkRatio,
     int? SilenceCount,
     int? InterruptionCount);
+
+internal sealed record TurnSentimentDto(
+    int TurnIndex,
+    string Speaker,
+    float Score,
+    string Label);
 
 internal sealed record QaCriterionDto(
     string Category,
