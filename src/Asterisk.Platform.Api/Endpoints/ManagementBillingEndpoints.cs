@@ -1,8 +1,10 @@
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Core;
 using Asterisk.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Asterisk.Platform.Api.Endpoints;
@@ -31,6 +33,7 @@ internal static class ManagementBillingEndpoints
             .RequireAuthorization("PlatformAdminOnly");
         dunning.MapGet("/dunning", GetDunning);
         dunning.MapPost("/dunning/pause", PauseDunning);
+        dunning.MapPost("/dunning/resume", ResumeDunning);
 
         // Usage & Quotas (per-tenant)
         var tb = app.MapGroup("/management/tenants/{tenantId}").RequireAuthorization("PlatformAdminOnly");
@@ -292,6 +295,64 @@ internal static class ManagementBillingEndpoints
 
         record.IsPaused = !record.IsPaused;
         await dunningStore.UpsertAsync(record, ct);
+        return Results.Ok(new DunningRecordDto(
+            record.DunningId,
+            record.TenantId,
+            record.InvoiceId,
+            record.CurrentStage.ToString(),
+            record.StartedAt,
+            record.EscalatedAt,
+            record.ResolvedAt,
+            record.IsPaused,
+            record.IsActive));
+    }
+
+    /// <summary>
+    /// R5.3 Phase A — Task A.7. Explicit mirror of <see cref="PauseDunning"/>
+    /// that always clears the paused flag (vs the legacy toggle semantics) and
+    /// emits a <c>billing.dunning.resumed</c> audit entry. Frontend S4.2
+    /// (Phase B B.2) uses this dedicated action to restore dunning processing
+    /// after a hold period.
+    /// </summary>
+    private static async Task<IResult> ResumeDunning(
+        string id,
+        HttpContext context,
+        [FromServices] IDunningStore dunningStore,
+        [FromServices] IAuditService audit,
+        CancellationToken ct)
+    {
+        var record = await dunningStore.GetActiveAsync(id, ct);
+        if (record is null)
+            return Results.NotFound();
+
+        var wasPaused = record.IsPaused;
+        record.IsPaused = false;
+        await dunningStore.UpsertAsync(record, ct);
+
+        var actor = context.User.FindFirst("sub")?.Value
+                    ?? context.User.FindFirst("user_id")?.Value
+                    ?? "system";
+
+        await audit.RecordAsync(
+            new TenantId(id),
+            category: "billing",
+            action: "billing.dunning.resumed",
+            severity: "info",
+            actorId: actor,
+            actorType: "user",
+            targetId: id,
+            targetType: "tenant",
+            changes: new AuditChanges(
+                Before: new { IsPaused = wasPaused },
+                After: new { record.IsPaused }),
+            metadata: new Dictionary<string, string>
+            {
+                ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+                ["dunningId"] = record.DunningId,
+            },
+            ct: ct);
+
         return Results.Ok(new DunningRecordDto(
             record.DunningId,
             record.TenantId,
