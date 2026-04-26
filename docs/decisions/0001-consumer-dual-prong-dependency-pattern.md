@@ -1,7 +1,8 @@
 # ADR-0001: Consumer dual-prong dependency pattern (SDK + Pro direct)
 
-- **Status:** Proposed
+- **Status:** Accepted (promoted from Proposed during R5.3 Phase 0 — empirically validated by R5.2 ship)
 - **Date:** 2026-04-20
+- **Date Accepted:** 2026-04-26
 - **Deciders:** Harold Reina
 - **Related:**
   - PSD v2: `docs/specs/2026-04-19-product-strategy-v2.md` §1.2, §4
@@ -92,9 +93,23 @@ Cuando se agregue nueva dependency en Platform:
 - **Plat.Web consumes SDK direct too:** out of scope — .Web es frontend (TypeScript), no tiene .NET deps.
 - **No documentation (status quo):** rechazado — la confusión persiste.
 
+## Validated by R5.2 ship (2026-04-26)
+
+Pattern empirically validated by Platform 1.11.0 ship. Three production examples:
+
+1. **Platform consumes `Asterisk.Sdk.Pro.Push.SignalR` directly** — typed `IPlatformHubClient` extensions + `PlatformHubAuditSink` consumer of `IHubAuditSink`. Multi-tenant feature requiring Pro enrichment.
+2. **Platform consumes `Asterisk.Sdk.Pro.Analytics` directly** — `AddAsteriskAnalytics().WithSingleTenantMode("default")` per ADR-0004. Multi-tenant feature requiring Pro tenant-stamping conventions.
+3. **Platform consumes `Asterisk.Sdk.Cluster.Primitives` directly** — SDK MIT package (sibling of Pro chain). Single-tenant cluster primitive needing no Pro wrapper. Validates the "depend direct on SDK when no Pro enrichment required" rule.
+
+No alternative pattern (e.g., re-export everything via Pro façade) was needed during R5.2 execution. Pattern is durable and the dependency rule scales — R5.2 added 1 new direct SDK reference (`Asterisk.Sdk.Cluster.Primitives` was indirect via Pro before; now also direct for type-checking convenience) without architectural friction.
+
+R5.3 ADR-0007 (`agent-tenant-resolver-strict-mode-builder`) extends the dual-prong further: `IPlatformHubStrictModePolicy` registered via Pro builder extension but consumed by Platform `Program.cs` health check + DI configuration — clean Pro/Platform boundary preserved.
+
 ## References
 
 - PSD §1.2 identity table, §4 layout
 - Pro CLAUDE.md (will be updated per this ADR)
 - Directory.Packages.props current references
 - ASP.NET Core + EntityFramework Core dual-prong (historical analog)
+- R5.2 ship: Pro 1.13.0-pro + Platform 1.11.0 + Web 1.10.0 (`docs/plans/completed/2026-04-25-r5.2-execution-plan.md`)
+- R5.3 spec §"Set C — C.5": `docs/plans/active/2026-04-26-r5.3-admin-completeness-r4-closure.md`
