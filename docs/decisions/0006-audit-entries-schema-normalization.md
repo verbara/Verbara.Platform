@@ -51,9 +51,11 @@ Result: `Category`, `Severity`, `ActorType`, `Changes`, `IntegrityHash` are **si
 
 ## Decision
 
-**Promote `Category`, `Severity`, `ActorType`, `BeforeJson`, `AfterJson`, `IntegrityHash` to first-class typed columns in `audit_entries` via migration `V012_AuditEntriesNormalize.sql`. Add CHECK constraints + indexes per `(tenant_id, severity, occurred_at)` and `(tenant_id, category, occurred_at)`. Update `PostgresAuditStore` writer + reader to populate and hydrate the new columns. Backwards compat: legacy `Metadata` dict continues to serialize into `details` JSONB.**
+**Promote `Category`, `Severity`, `ActorType`, `BeforeJson`, `AfterJson`, `IntegrityHash` to first-class typed columns in `audit_entries` via migration `021_AuditEntriesNormalize.sql`. Add CHECK constraints + indexes per `(tenant_id, severity, occurred_at)` and `(tenant_id, category, occurred_at)`. Update `PostgresAuditStore` writer + reader to populate and hydrate the new columns. Backwards compat: legacy `Metadata` dict continues to serialize into `details` JSONB.**
 
-### Migration V012 shape
+### Migration V021 shape
+
+> **Note (2026-04-26):** ADR initially specified `V012_AuditEntriesNormalize.sql`. During R5.3 Phase A execution, slot 012 was found already occupied by `012_MailSchema.sql` — migration was placed at the next available slot **V021**. Number is the only delta from the prescribed shape.
 
 3-stage atomic transaction:
 
@@ -62,7 +64,8 @@ Result: `Category`, `Severity`, `ActorType`, `Changes`, `IntegrityHash` are **si
 3. **NOT NULL + CHECK constraints + indexes:**
    - `ALTER COLUMN category SET NOT NULL DEFAULT 'config'` (same for `severity` → `info`, `actor_type` → `system`)
    - `CHECK (severity IN ('info','warn','error','critical'))`
-   - `CHECK (category IN ('auth','billing','config','tenant','security','impersonation','retention','data'))`
+   - `CHECK (category IN ('auth','billing','config','tenant','security','impersonation','retention','data','warning','rbac','data_access','admin','api_key'))`
+     **Note:** the canonical enum was extended during R5.3 Phase A execution (5 additional values: `warning`, `rbac`, `data_access`, `admin`, `api_key`) because `Asterisk.Platform.Audit/DefaultAuditService.InferCategory` already emitted those values in production code. Strict 8-value enum from this ADR's initial draft would have rejected legitimate existing emissions.
    - `CHECK (actor_type IN ('user','system','impersonator','service-account'))`
    - `CREATE INDEX idx_audit_severity ON audit_entries (tenant_id, severity, occurred_at DESC)`
    - `CREATE INDEX idx_audit_category ON audit_entries (tenant_id, category, occurred_at DESC)`
@@ -105,7 +108,7 @@ var parameters = new {
 
 ## Decision space
 
-**(a) Normalize (chosen):** typed columns + CHECK constraints + indexes + writer/reader update. Migration V012.
+**(a) Normalize (chosen):** typed columns + CHECK constraints + indexes + writer/reader update. Migration V021 (originally specified as V012; slot 012 was taken — see migration shape note).
 
 **(b) JSONB-only path:** Add GIN indexes on `details->>'severity'` / `details->>'category'`. No schema change. Rejected because:
 - Query plan is worse than B-tree on typed column (GIN GIN extraction + filter vs hash lookup).
