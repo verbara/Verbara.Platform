@@ -286,6 +286,14 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(RegenerateRecoveryCodesRequest))]
 [JsonSerializable(typeof(RecoveryCodesResponse))]
 [JsonSerializable(typeof(PasswordPolicyDto))]
+// R5.2 PA.2 — Profile-scoped MFA wizard / sessions / recovery-codes.
+[JsonSerializable(typeof(Asterisk.Platform.Api.Endpoints.Profile.MfaEnrollInitResponse))]
+[JsonSerializable(typeof(Asterisk.Platform.Api.Endpoints.Profile.MfaEnrollVerifyRequest))]
+[JsonSerializable(typeof(Asterisk.Platform.Api.Endpoints.Profile.MfaEnrollCompleteRequest))]
+[JsonSerializable(typeof(Asterisk.Platform.Api.Endpoints.Profile.RecoveryCodesPayload))]
+[JsonSerializable(typeof(Asterisk.Platform.Api.Endpoints.Profile.ProfileUserSessionDto))]
+[JsonSerializable(typeof(Asterisk.Platform.Api.Endpoints.Profile.ProfileUserSessionDto[]))]
+[JsonSerializable(typeof(Asterisk.Platform.Api.Endpoints.Profile.ProfileRegenerateRecoveryCodesRequest))]
 // RBAC
 [JsonSerializable(typeof(PermissionGroupDto))]
 [JsonSerializable(typeof(List<PermissionGroupDto>))]

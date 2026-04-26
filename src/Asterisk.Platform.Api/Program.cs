@@ -440,6 +440,10 @@ builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredServi
 builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IMfaPolicyEvaluator,
     Asterisk.Platform.Identity.Mfa.TenantAuthConfigMfaPolicyEvaluator>();
 
+// R5.2 PA.2 — Recovery code generation/hashing for profile-scoped MFA wizard.
+builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IRecoveryCodeService,
+    Asterisk.Platform.Identity.Mfa.RecoveryCodeService>();
+
 // ─── MFA / Password-Reset Token Caches ─────────────────────────────────────
 // Default: in-memory implementations (single-instance safe). When
 // ConnectionStrings:IdentityRedis is set, AddAsteriskPlatformIdentityRedis
@@ -897,6 +901,12 @@ var v1 = app.MapGroup("/api/v{version:apiVersion}")
 // ─── Endpoint mapping ────────────────────────────────────────────────────────
 
 v1.MapAuthEndpoints();
+// R5.2 PA.2 — Profile-scoped end-user MFA wizard + sessions + recovery-codes
+// regenerate routes. Distinct from the legacy /auth/mfa/* surface so the
+// dedicated wizard pages can hit stable URLs without coupling to login flow.
+Asterisk.Platform.Api.Endpoints.Profile.MfaEnrollEndpoints.MapMfaEnrollEndpoints(v1);
+Asterisk.Platform.Api.Endpoints.Profile.ProfileSessionsEndpoints.MapProfileSessionsEndpoints(v1);
+Asterisk.Platform.Api.Endpoints.Profile.ProfileRecoveryCodesEndpoints.MapProfileRecoveryCodesEndpoints(v1);
 v1.MapWebhookEndpoints();
 v1.MapConversationEndpoints();
 v1.MapAgentEndpoints();

@@ -23,6 +23,12 @@ internal sealed class TenantResolutionMiddleware
         "/api/v1/auth/mfa/recovery-codes/regenerate",
         "/api/v1/auth/change-password",
         "/api/v1/auth/sessions/revoke-others",
+        // R5.2 PA.2 — profile-scoped MFA wizard surface mirrors the security
+        // gates of the legacy /auth/mfa surface.
+        "/api/v1/profile/security/mfa/enroll/init",
+        "/api/v1/profile/security/mfa/enroll/verify",
+        "/api/v1/profile/security/mfa/enroll/complete",
+        "/api/v1/profile/security/recovery-codes/regenerate",
     };
 
     public TenantResolutionMiddleware(RequestDelegate next)
