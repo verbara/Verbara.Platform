@@ -1,7 +1,7 @@
 # R5 — Production Readiness + Value Materialization (Release Train)
 
-**Fecha creación:** 2026-04-22 · **Last revised:** 2026-04-26 (R5.2 shipped marker)
-**Estado:** Approved (envelope D' + S1 expanded product-final) — **R5.1 shipped 2026-04-23** (Pro 1.12.0-pro + Platform 1.10.0 + Web 1.9.0) · **R5.2 shipped 2026-04-26** (Pro 1.13.0-pro + Platform 1.11.0 + Web 1.10.0 — pushed + tagged + GH Releases live; R5.2 spec/exec-plan/triage moved to `docs/plans/completed/`)
+**Fecha creación:** 2026-04-22 · **Last revised:** 2026-04-26 (R5.3 in-progress marker)
+**Estado:** Approved (envelope D' + S1 expanded product-final) — **R5.1 shipped 2026-04-23** (Pro 1.12.0-pro + Platform 1.10.0 + Web 1.9.0) · **R5.2 shipped 2026-04-26** (Pro 1.13.0-pro + Platform 1.11.0 + Web 1.10.0) · **R5.3 in-progress 2026-04-26** (target Pro 1.14.0-pro + Platform 1.12.0 + Web 1.11.0; spec at `docs/plans/active/2026-04-26-r5.3-admin-completeness-r4-closure.md` commit `0c8f45a`; execution plan companion in same folder; 4 D-FORCEs resolved via post-R5.2 deep audit including S5.6 OpenAPI HTML promotion to R5.3)
 **Duración estimada:** 15.5-16.5 semanas total (~10.5 sem execution + ~6 sem QA gaps entre releases) — **R5.4 added** per post-ship triage D-FORCE-2 to land production-validation work without inflating R5.3 cadence.
 **Baseline:** SDK 1.15.0 · Pro 1.11.0-pro · Platform 1.9.3 · Web 1.8.0
 **Post-R5.1 triage:** ver [`../completed/2026-04-25-r5.1-post-ship-triage.md`](../completed/2026-04-25-r5.1-post-ship-triage.md) — reconciles 13 canonical limitations + 5 R5.2 features (Set A) + 7 R5.2 carry-forwards (Set B) + 9 new items + 7 productization categories. R5.2 spec + execution-plan también en `completed/` post-ship.
@@ -316,6 +316,14 @@ Periodo de baking. Mismo patrón.
 **S4.8 · Sub-B Web Sync residual** (S-M si cabe, sino deferred a R5.4)
 - Revisar Frente F del R4 skeleton: cases + canned responses + i18n keys residuales
 - Scope guard: si infla R5.3 más allá de 2 sem, punta a R5.4 patch release
+
+**S4.9 · OpenAPI HTML exposure** (S — promoted from R5.4 S5.6 per D-FORCE-3 of post-R5.2 deep audit)
+- Wire Swashbuckle en Platform.Api (`/swagger/v1/swagger.json`) + UI rendered via Scalar.AspNetCore (modern UX, AOT-friendly)
+- Tagged operations + DTO schemas completos
+- Config: enabled in Development always, opt-in in Production via `Platform__OpenApi__Enabled=true`
+- Vende narrative R5.3 mejor: "R4 Closure + Admin Completeness + API discoverability"
+
+**Post-R5.2 triage applied:** R5.3 spec at `docs/plans/active/2026-04-26-r5.3-admin-completeness-r4-closure.md` (commit `0c8f45a`); execution plan at `docs/plans/active/2026-04-26-r5.3-execution-plan.md`. 4 D-FORCEs resolved (D-FORCE-1 `WithStrictMode()` builder per ADR-0007, D-FORCE-2 audit_entries schema normalization per ADR-0006, D-FORCE-3 S5.6 OpenAPI promoted to R5.3 as S4.9, D-FORCE-4 4 Pro health checks). 5 sets of scope: Set A (8 admin items S4.1-S4.8 + S4.9) + Set B (5/6 R5.2 carry-forwards; B.6 NU1902 removed as falsa alarma) + Set C (7 NEW post-R5.2 audit items) + Set D (1 quick-win OpenAPI absorbed as S4.9) + Set E (3 ADRs: 0006, 0007, 0001 promotion).
 
 ### Ship criteria R5.3
 
