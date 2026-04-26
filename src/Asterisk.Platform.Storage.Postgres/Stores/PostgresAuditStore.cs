@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Dapper;
 using Npgsql;
@@ -18,12 +19,17 @@ internal sealed class PostgresAuditStore : IAuditStore
             ? JsonSerializer.Serialize(entry.Metadata, PostgresJson.Ctx.IReadOnlyDictionaryStringString)
             : null;
 
+        var beforeJson = SerializeChange(entry.Changes?.Before);
+        var afterJson = SerializeChange(entry.Changes?.After);
+
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(
             "INSERT INTO audit_entries (entry_id, tenant_id, action, entity_type, entity_id, " +
-            "performed_by, details, occurred_at, impersonator_id) " +
+            "performed_by, details, occurred_at, impersonator_id, " +
+            "category, severity, actor_type, before_json, after_json, integrity_hash) " +
             "VALUES (@EntryId, @TenantId, @Action, @EntityType, @EntityId, " +
-            "@PerformedBy, @Details::jsonb, @OccurredAt, @ImpersonatorId)",
+            "@PerformedBy, @Details::jsonb, @OccurredAt, @ImpersonatorId, " +
+            "@Category, @Severity, @ActorType, @BeforeJson::jsonb, @AfterJson::jsonb, @IntegrityHash)",
             new
             {
                 EntryId = entry.EntryId.Value,
@@ -35,6 +41,12 @@ internal sealed class PostgresAuditStore : IAuditStore
                 Details = metadataJson,
                 entry.OccurredAt,
                 ImpersonatorId = entry.ImpersonatorId,
+                Category = entry.Category,
+                Severity = entry.Severity,
+                ActorType = entry.ActorType,
+                BeforeJson = beforeJson,
+                AfterJson = afterJson,
+                IntegrityHash = entry.IntegrityHash,
             });
     }
 
@@ -43,7 +55,8 @@ internal sealed class PostgresAuditStore : IAuditStore
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<AuditRow>(
-            "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
+            "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
+            "category, severity, actor_type, before_json, after_json, integrity_hash " +
             "FROM audit_entries WHERE tenant_id = @TenantId AND entity_type = @EntityType AND entity_id = @EntityId " +
             "ORDER BY occurred_at",
             new { TenantId = tenantId.Value, EntityType = entityType, EntityId = entityId });
@@ -66,7 +79,8 @@ internal sealed class PostgresAuditStore : IAuditStore
 
         var rows = await conn.QueryAsync<AuditRow>(
             new CommandDefinition(
-                "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
+                "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
+                "category, severity, actor_type, before_json, after_json, integrity_hash " +
                 $"FROM audit_entries WHERE {where} ORDER BY occurred_at DESC LIMIT @Limit OFFSET @Offset",
                 parameters,
                 cancellationToken: ct));
@@ -100,7 +114,8 @@ internal sealed class PostgresAuditStore : IAuditStore
             if (lastOccurredAt is null)
             {
                 sql =
-                    "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
+                    "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
+                    "category, severity, actor_type, before_json, after_json, integrity_hash " +
                     $"FROM audit_entries WHERE {where} ORDER BY occurred_at DESC, entry_id DESC LIMIT @Limit";
             }
             else
@@ -110,7 +125,8 @@ internal sealed class PostgresAuditStore : IAuditStore
                 parameters.Add("CursorOccurredAt", lastOccurredAt.Value);
                 parameters.Add("CursorEntryId", lastEntryId);
                 sql =
-                    "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id " +
+                    "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
+                    "category, severity, actor_type, before_json, after_json, integrity_hash " +
                     $"FROM audit_entries WHERE {where} AND " +
                     "(occurred_at < @CursorOccurredAt OR (occurred_at = @CursorOccurredAt AND entry_id < @CursorEntryId)) " +
                     "ORDER BY occurred_at DESC, entry_id DESC LIMIT @Limit";
@@ -192,6 +208,20 @@ internal sealed class PostgresAuditStore : IAuditStore
                 .Replace("_", "\\_", StringComparison.Ordinal);
             parameters.Add("ActorSearch", "%" + escaped + "%");
         }
+        if (!string.IsNullOrEmpty(query.Category))
+        {
+            // R5.3 A.1 — typed column lookup. Backed by idx_audit_category
+            // (tenant_id, category, occurred_at DESC).
+            conditions.Add("category = @Category");
+            parameters.Add("Category", query.Category);
+        }
+        if (!string.IsNullOrEmpty(query.Severity))
+        {
+            // R5.3 A.1 — typed column lookup. Backed by idx_audit_severity
+            // (tenant_id, severity, occurred_at DESC).
+            conditions.Add("severity = @Severity");
+            parameters.Add("Severity", query.Severity);
+        }
         if (query.From.HasValue)
         {
             conditions.Add("occurred_at >= @From");
@@ -214,6 +244,60 @@ internal sealed class PostgresAuditStore : IAuditStore
             new { TenantId = tenantId.Value, Cutoff = cutoff });
     }
 
+    /// <summary>
+    /// Serialises an arbitrary <c>object?</c> from <see cref="AuditChanges"/>
+    /// (Before / After) into a JSON string suitable for the <c>jsonb</c>
+    /// column. Returns <c>null</c> when the payload is null or already
+    /// serialised as a JSON string.
+    /// </summary>
+    /// <remarks>
+    /// AOT note: <see cref="AuditChanges"/> is contractually <c>object?</c>
+    /// because audit call sites pass arbitrary anonymous types and DTOs.
+    /// We forward to <see cref="JsonSerializer.Serialize(object?, Type, JsonSerializerOptions?)"/>
+    /// with the runtime type. The trim/AOT analyzers warn here because the
+    /// type is not statically known; the suppression is justified: this is
+    /// the documented audit-trail boundary, and the prior implementation
+    /// silently lost 100 % of <c>Changes</c> — any structured persistence is
+    /// strictly better. Pre-serialised strings (already JSON) are passed
+    /// through verbatim.
+    /// </remarks>
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026:RequiresUnreferencedCode",
+        Justification = "Audit-trail boundary — call sites pass arbitrary object?; serialization fallback documented in ADR-0006.")]
+    [UnconditionalSuppressMessage(
+        "AOT",
+        "IL3050:RequiresDynamicCode",
+        Justification = "Audit-trail boundary — call sites pass arbitrary object?; serialization fallback documented in ADR-0006.")]
+    private static string? SerializeChange(object? value)
+    {
+        if (value is null)
+            return null;
+
+        // Pre-serialised JSON string passes through unchanged.
+        if (value is string s)
+            return s;
+
+        try
+        {
+            return JsonSerializer.Serialize(value, value.GetType(), SerializeChangeOptions);
+        }
+        catch (NotSupportedException)
+        {
+            // Type lacks a serializer in trimmed/AOT image — fall back to
+            // ToString() so the audit row still carries a human-readable
+            // breadcrumb instead of silently dropping the change.
+            return JsonSerializer.Serialize(value.ToString(), PostgresJson.Ctx.String);
+        }
+    }
+
+    private static readonly JsonSerializerOptions SerializeChangeOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = false,
+    };
+
     private sealed class AuditRow
     {
         public string entry_id { get; init; } = null!;
@@ -225,6 +309,12 @@ internal sealed class PostgresAuditStore : IAuditStore
         public string? details { get; init; }
         public DateTime occurred_at { get; init; }
         public string? impersonator_id { get; init; }
+        public string? category { get; init; }
+        public string? severity { get; init; }
+        public string? actor_type { get; init; }
+        public string? before_json { get; init; }
+        public string? after_json { get; init; }
+        public string? integrity_hash { get; init; }
 
         public AuditEntry ToEntry()
         {
@@ -234,19 +324,48 @@ internal sealed class PostgresAuditStore : IAuditStore
                 metadata = JsonSerializer.Deserialize(details, PostgresJson.Ctx.IReadOnlyDictionaryStringString);
             }
 
+            // Hydrate Changes from the typed before_json / after_json columns
+            // (R5.3 A.1 / ADR-0006). Pre-R5.3 rows have NULL for both columns
+            // and surface as `Changes = null`. Post-R5.3 rows populate either
+            // or both via SerializeChange() — we round-trip through JsonElement
+            // so the consumer sees a queryable structure rather than an
+            // opaque string.
+            AuditChanges? changes = null;
+            if (!string.IsNullOrEmpty(before_json) || !string.IsNullOrEmpty(after_json))
+            {
+                changes = new AuditChanges(
+                    Before: ParseJsonElement(before_json),
+                    After: ParseJsonElement(after_json));
+            }
+
             return new AuditEntry
             {
                 EntryId = EntityId.From(entry_id),
                 TenantId = new TenantId(tenant_id),
                 Action = action,
+                Category = category ?? "config",
+                Severity = severity ?? "info",
                 ActorId = performed_by ?? "system",
-                ActorType = performed_by is null ? "system" : "user",
+                ActorType = actor_type ?? (performed_by is null ? "system" : "user"),
                 TargetType = entity_type,
                 TargetId = entity_id,
                 Metadata = metadata,
+                Changes = changes,
+                IntegrityHash = integrity_hash,
                 OccurredAt = occurred_at,
                 ImpersonatorId = impersonator_id,
             };
+        }
+
+        private static JsonElement? ParseJsonElement(string? json)
+        {
+            if (string.IsNullOrEmpty(json))
+                return null;
+
+            // JsonDocument is AOT-safe (no reflection); the parsed element is
+            // copied via Clone() so the underlying document can be disposed.
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.Clone();
         }
     }
 }
