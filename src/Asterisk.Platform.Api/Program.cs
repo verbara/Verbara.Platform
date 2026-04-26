@@ -81,6 +81,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Asterisk.Platform.Api.Hubs;
 using Asterisk.Sdk.OpenTelemetry;
 using Asterisk.Sdk.Pro.OpenTelemetry;
+using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -959,7 +960,18 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
 #pragma warning restore IL3050
 });
-builder.Services.AddOpenApi();
+// ─── OpenAPI (R5.3 Phase B Task B.7 / D.1) ───────────────────────────────────
+//
+// Spec generation + Scalar UI is opt-in outside Development to avoid leaking
+// surface in production. Set `Platform__OpenApi__Enabled=true` (env var) or
+// `Platform:OpenApi:Enabled=true` in configuration to enable in Production.
+var openApiEnabled = builder.Environment.IsDevelopment()
+    || builder.Configuration.GetValue<bool>("Platform:OpenApi:Enabled");
+
+if (openApiEnabled)
+{
+    builder.Services.AddOpenApi();
+}
 
 var app = builder.Build();
 
@@ -1005,7 +1017,13 @@ app.UseAuthorization();
 app.UseMiddleware<TenantStatusMiddleware>();
 app.UseMiddleware<LicenseGateMiddleware>();
 
-app.MapOpenApi();
+if (openApiEnabled)
+{
+    // /openapi/v1.json — raw OpenAPI 3.0 spec.
+    app.MapOpenApi();
+    // /scalar/v1 — Scalar UI rendering the spec.
+    app.MapScalarApiReference();
+}
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
