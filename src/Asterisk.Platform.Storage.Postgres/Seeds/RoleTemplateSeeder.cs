@@ -3,8 +3,26 @@ using Npgsql;
 
 namespace Asterisk.Platform.Storage.Postgres.Seeds;
 
-internal static class RoleTemplateSeeder
+/// <summary>
+/// Seeds the eleven canonical RBAC role templates and their permissions, plus the
+/// per-tenant <c>platform_admin</c> permission re-seed used by the
+/// <c>RbacReseed</c> CLI tool to migrate existing tenants when
+/// <see cref="AllPermissions"/> grows.
+/// </summary>
+public static class RoleTemplateSeeder
 {
+    /// <summary>Result of <see cref="ReseedExistingTenantsAsync"/> for a single tenant.</summary>
+    /// <param name="PermissionsAdded">Number of <c>tenant_role_permissions</c> rows inserted.</param>
+    /// <param name="PermissionsRemoved">Number of <c>tenant_role_permissions</c> rows deleted.</param>
+    public sealed record ReseedResult(int PermissionsAdded, int PermissionsRemoved);
+
+    /// <summary>Role id used inside <c>tenant_roles</c> for the platform-admin role.</summary>
+    /// <remarks>
+    /// Matches the <c>template_id</c> seeded by <see cref="GetTemplates"/> and the
+    /// <c>role_id</c> cloned per-tenant by <see cref="RbacMigrationSeeder.MigrateExistingUsersAsync"/>.
+    /// </remarks>
+    public const string PlatformAdminRoleId = "platform_admin";
+
     public static async Task SeedAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
@@ -28,6 +46,116 @@ internal static class RoleTemplateSeeder
             }
         }
     }
+
+    /// <summary>
+    /// Re-aligns the per-tenant <c>platform_admin</c> role's
+    /// <c>tenant_role_permissions</c> rows with the current canonical
+    /// <see cref="AllPermissions"/> list. For each provided tenant id this method
+    /// removes rows whose <c>permission_id</c> is no longer in the canonical list
+    /// and inserts rows for any canonical permission that is currently missing.
+    /// Tenants without a <c>platform_admin</c> role are skipped (returned in the
+    /// dictionary with a zero/zero result for visibility).
+    /// </summary>
+    /// <remarks>
+    /// Used by the <c>tools/RbacReseed</c> CLI to migrate existing tenants when
+    /// the canonical permission catalog expands (e.g. R5.2 P0.9 added 7 new keys
+    /// that fresh tenants pick up via <see cref="SeedAsync"/> + the migration
+    /// seeder, but existing tenants do not). The method is idempotent: a second
+    /// invocation against an already-aligned tenant returns
+    /// <c>PermissionsAdded == 0</c> and <c>PermissionsRemoved == 0</c>.
+    /// Each per-tenant DELETE+INSERT pair runs inside its own transaction so a
+    /// failure on one tenant does not corrupt the others already processed.
+    /// </remarks>
+    public static async Task<IReadOnlyDictionary<string, ReseedResult>> ReseedExistingTenantsAsync(
+        IEnumerable<string> tenantIds,
+        NpgsqlConnection conn,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenantIds);
+        ArgumentNullException.ThrowIfNull(conn);
+
+        var canonical = AllPermissions();
+        var report = new Dictionary<string, ReseedResult>(StringComparer.Ordinal);
+
+        foreach (var tenantId in tenantIds)
+        {
+            if (string.IsNullOrWhiteSpace(tenantId))
+                continue;
+
+            ct.ThrowIfCancellationRequested();
+
+            await using var tx = await conn.BeginTransactionAsync(ct);
+
+            // Confirm the platform_admin role exists for this tenant. If the
+            // tenant has not yet been touched by RbacMigrationSeeder we skip
+            // (operators are expected to run the orchestrator first).
+            const string roleExistsSql =
+                "SELECT 1 FROM tenant_roles " +
+                "WHERE tenant_id = @TenantId AND role_id = @RoleId LIMIT 1";
+
+            var exists = await conn.ExecuteScalarAsync<int?>(
+                new CommandDefinition(
+                    roleExistsSql,
+                    new { TenantId = tenantId, RoleId = PlatformAdminRoleId },
+                    transaction: tx,
+                    cancellationToken: ct));
+
+            if (exists is null)
+            {
+                await tx.CommitAsync(ct);
+                report[tenantId] = new ReseedResult(0, 0);
+                continue;
+            }
+
+            const string deleteSql =
+                "DELETE FROM tenant_role_permissions " +
+                "WHERE tenant_id = @TenantId " +
+                "  AND role_id = @RoleId " +
+                "  AND permission_id <> ALL(@Canonical)";
+
+            var removed = await conn.ExecuteAsync(
+                new CommandDefinition(
+                    deleteSql,
+                    new
+                    {
+                        TenantId = tenantId,
+                        RoleId = PlatformAdminRoleId,
+                        Canonical = canonical,
+                    },
+                    transaction: tx,
+                    cancellationToken: ct));
+
+            const string insertSql =
+                "INSERT INTO tenant_role_permissions (tenant_id, role_id, permission_id) " +
+                "SELECT @TenantId, @RoleId, p " +
+                "FROM unnest(@Canonical::text[]) AS p " +
+                "ON CONFLICT (tenant_id, role_id, permission_id) DO NOTHING";
+
+            var added = await conn.ExecuteAsync(
+                new CommandDefinition(
+                    insertSql,
+                    new
+                    {
+                        TenantId = tenantId,
+                        RoleId = PlatformAdminRoleId,
+                        Canonical = canonical,
+                    },
+                    transaction: tx,
+                    cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+            report[tenantId] = new ReseedResult(added, removed);
+        }
+
+        return report;
+    }
+
+    /// <summary>
+    /// Returns the canonical permission catalog used by the
+    /// <c>platform_admin</c> role template. Exposed publicly so the
+    /// <c>RbacReseed</c> CLI tool can also list / verify the catalog.
+    /// </summary>
+    public static IReadOnlyList<string> GetCanonicalPermissions() => AllPermissions();
 
     private static IEnumerable<(TemplateRow Template, string[] Permissions)> GetTemplates()
     {

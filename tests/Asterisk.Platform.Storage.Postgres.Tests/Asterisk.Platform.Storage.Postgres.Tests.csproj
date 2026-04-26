@@ -11,6 +11,10 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="coverlet.collector" />
+    <!-- R5.2 PC.3 — Testcontainers Postgres for RoleTemplateSeeder.ReseedExistingTenantsAsync coverage. -->
+    <PackageReference Include="Testcontainers" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Dapper" />
   </ItemGroup>
 
 </Project>
