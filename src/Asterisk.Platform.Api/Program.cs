@@ -75,6 +75,9 @@ using Asterisk.Sdk.Push.Authz;
 using Asterisk.Sdk.Pro.Push.SignalR.DependencyInjection;
 using Asterisk.Sdk.Pro.Push.SignalR.Hubs;
 using Asterisk.Sdk.Pro.Push.SignalR.Bridges;
+using Asterisk.Sdk.Pro.Push.SignalR.Presence;
+using Asterisk.Sdk.Pro.Storage.Common.Retention;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Asterisk.Platform.Api.Hubs;
 using Asterisk.Sdk.OpenTelemetry;
 using Asterisk.Sdk.Pro.OpenTelemetry;
@@ -865,13 +868,56 @@ builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
         .WithTimeout(TimeSpan.FromSeconds(2))
         .Build());
 
+// R5.3 A.5.b — promote 4 Pro BackgroundServices to concrete singletons so the
+// IHealthCheck implementations on those classes (added by Pro task A.5,
+// Pro 1.13.0-pro commit 05adeb8) can be resolved by the health-check
+// registry. Pro DI extensions register the services as
+// AddHostedService<T> only (binding T -> IHostedService directly, no
+// concrete singleton); without this swap, AddCheck<T>() below would resolve
+// a *second* instance whose heartbeat never ticks and would always report
+// Unhealthy. The pattern mirrors AnalyticsLiveServiceCollectionExtensions
+// (R5.1 LiveQueueSnapshotWriter): register T as Singleton, then forward
+// IHostedService via factory so both resolve to the same instance.
+PromoteHostedServiceToSingleton<PresenceHeartbeatService>(builder.Services);
+PromoteHostedServiceToSingleton<PresenceFanoutService>(builder.Services);
+PromoteHostedServiceToSingleton<PresenceMergeConsumer>(builder.Services);
+PromoteHostedServiceToSingleton<RetentionService>(builder.Services);
+
 var healthBuilder = builder.Services.AddHealthChecks()
     .AddCheck<Asterisk.Platform.Api.Health.BackgroundServiceHealthCheck>("services", tags: ["ready"])
-    .AddCheck<Asterisk.Platform.Api.Health.AsteriskAmiHealthCheck>("asterisk", tags: ["ready"]);
+    .AddCheck<Asterisk.Platform.Api.Health.AsteriskAmiHealthCheck>("asterisk", tags: ["ready"])
+    // R5.3 A.5.b — Pro 1.13.0-pro health checks (presence + retention).
+    .AddCheck<PresenceHeartbeatService>("presence-heartbeat", tags: ["ready"])
+    .AddCheck<PresenceFanoutService>("presence-fanout", tags: ["ready"])
+    .AddCheck<PresenceMergeConsumer>("presence-merge", tags: ["ready"])
+    .AddCheck<RetentionService>("retention", tags: ["ready"]);
 
 // Only add Postgres health check if NpgsqlDataSource is registered
 if (builder.Services.Any(d => d.ServiceType == typeof(NpgsqlDataSource)))
     healthBuilder.AddCheck<Asterisk.Platform.Api.Health.PostgresHealthCheck>("postgres", tags: ["ready"]);
+
+static void PromoteHostedServiceToSingleton<T>(IServiceCollection services)
+    where T : class, IHostedService
+{
+    // Remove the AddHostedService<T> descriptor (binds T -> IHostedService
+    // directly, no concrete registration).
+    var existing = services.FirstOrDefault(d =>
+        d.ServiceType == typeof(IHostedService) &&
+        d.ImplementationType == typeof(T));
+    if (existing is not null)
+    {
+        services.Remove(existing);
+    }
+
+    // Register T as a concrete singleton (idempotent — TryAdd respects any
+    // prior explicit registration).
+    services.TryAddSingleton<T>();
+
+    // Forward IHostedService via factory so the host resolves the same
+    // singleton instance, ensuring the IHealthCheck consults the running
+    // service's heartbeat.
+    services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<T>());
+}
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
