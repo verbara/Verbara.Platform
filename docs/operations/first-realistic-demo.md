@@ -80,10 +80,17 @@ for ext in 5001 5002; do
         -H "X-Tenant-Id: globex" \
         -d "{\"userId\":\"$UID\",\"email\":\"agent$ext@globex.local\",\"displayName\":\"Globex Agent $ext\",\"role\":\"Agent\",\"password\":\"GlobexAgent2026!\"}"
 
-    curl -sf -X POST http://localhost:5000/api/v1/admin/agents \
+    AGENT=$(curl -sf -X POST http://localhost:5000/api/v1/admin/agents \
         -H "Content-Type: application/json" -H "Authorization: Bearer $GLOBEX_JWT" \
         -H "X-Tenant-Id: globex" \
-        -d "{\"agentId\":\"globex-agent-$ext\",\"userId\":\"$UID\",\"displayName\":\"Globex $ext\",\"extension\":\"$ext\",\"sipPassword\":\"globex$ext\",\"skills\":[\"support\"]}"
+        -d "{\"userId\":\"$UID\",\"displayName\":\"Globex $ext\",\"extension\":\"$ext\",\"sipPassword\":\"globex$ext\"}")
+    AGENT_ID=$(echo "$AGENT" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+    # Skills are managed via PUT /admin/agents/{id} after create
+    curl -sf -X PUT "http://localhost:5000/api/v1/admin/agents/$AGENT_ID" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $GLOBEX_JWT" \
+        -H "X-Tenant-Id: globex" \
+        -d '{"skills":["support"]}'
 done
 
 # Support queue + add both agents
@@ -154,8 +161,9 @@ Now flip the runtime toggle **without restarting**. The R5.1 toggle
 (`IAgentAssistFeatureToggle`) is consulted at session start:
 
 ```bash
-# Disable AgentAssist platform-wide
-curl -sf -X PUT http://localhost:5000/api/v1/admin/agentassist/feature \
+# Disable AgentAssist platform-wide. Endpoint: PUT /api/v1/admin/features/agent-assist
+# Permission: features:agent-assist:manage (Platform Admin role grants it).
+curl -sf -X PUT http://localhost:5000/api/v1/admin/features/agent-assist \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $PLATFORM_JWT" \
     -H "X-Tenant-Id: platform" \
@@ -165,12 +173,13 @@ curl -sf -X PUT http://localhost:5000/api/v1/admin/agentassist/feature \
 docker compose -f docker/docker-compose.full.yml exec -T asterisk \
     asterisk -rx "channel originate Local/4001@default application Playback hello-world"
 
-# Re-enable
-curl -sf -X PUT http://localhost:5000/api/v1/admin/agentassist/feature \
+# Re-enable. When enabling you MUST supply provider + credentials (server validates
+# both — a body of just {"enabled": true} returns 400). Substitute your DEEPGRAM_API_KEY.
+curl -sf -X PUT http://localhost:5000/api/v1/admin/features/agent-assist \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $PLATFORM_JWT" \
     -H "X-Tenant-Id: platform" \
-    -d '{"enabled": true}'
+    -d "{\"enabled\": true, \"provider\": \"deepgram\", \"credentials\": {\"apiKey\": \"$DEEPGRAM_API_KEY\"}}"
 ```
 
 Verify the counter via the Prometheus scrape:
@@ -239,9 +248,13 @@ Skip if running single-node. To enable cluster:
 
 ```bash
 docker compose -f docker/docker-compose.full.yml --profile cluster up -d
-# Scale to 3 platform-api instances on the same Redis backplane:
-docker compose -f docker/docker-compose.full.yml --profile cluster up -d --scale platform-api=3
 ```
+
+> **Scaling caveat.** The bundled compose pins `platform-api` to host port
+> `5000:5000`, so `--scale platform-api=N` will fail with a port collision.
+> For a real multi-node demo, edit the compose file to remove the host port
+> mapping and put a load-balancer in front. Full multi-node walkthrough lives
+> in [cluster-management.md](cluster-management.md).
 
 In Web UI → **Platform Admin → Cluster**, you should see 3 healthy nodes.
 Click a node → **Drain**. The drain coordinator (`Pro.Cluster`) will:
@@ -286,11 +299,13 @@ users.
 
 A few one-liners worth knowing for a polished demo:
 
-- **OpenAPI HTML** (R5.3 quick win): `http://localhost:5000/docs` —
-  rendered, browsable spec.
+- **OpenAPI HTML** (R5.3 quick win): `http://localhost:5000/scalar/v1` —
+  rendered, browsable spec. (The raw OpenAPI 3.0 JSON is at
+  `http://localhost:5000/openapi/v1.json`.)
 - **Grafana** (only if you started with `--profile cluster` and added
   Grafana yourself, or via the demo overlay): see
-  [docs/dashboards/](../dashboards/).
+  [dashboards/](dashboards/) — currently ships
+  `resilience-overview.json` (R3b/v1.9.1).
 - **Revenue dashboard** (R5.3): Web UI → **Platform Admin → Revenue**.
   Shows MRR + per-tenant invoices + dunning state.
 - **Tenant Settings editor** (R5.3): Web UI → **Admin → Tenant Settings**.

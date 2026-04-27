@@ -102,18 +102,24 @@ curl -sf -X POST http://localhost:5000/api/v1/admin/users \
         "password": "AcmeAgent2026!"
     }'
 
-curl -sf -X POST http://localhost:5000/api/v1/admin/agents \
+AGENT=$(curl -sf -X POST http://localhost:5000/api/v1/admin/agents \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ACME_JWT" \
     -H "X-Tenant-Id: acme" \
     -d '{
-        "agentId": "acme-agent-alice",
         "userId": "acme-user-alice",
         "displayName": "Alice",
         "extension": "4001",
-        "sipPassword": "alice4001",
-        "skills": ["sales"]
-    }'
+        "sipPassword": "alice4001"
+    }')
+AGENT_ID=$(echo "$AGENT" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+# Skills are managed via PUT /admin/agents/{id} after create
+curl -sf -X PUT "http://localhost:5000/api/v1/admin/agents/$AGENT_ID" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ACME_JWT" \
+    -H "X-Tenant-Id: acme" \
+    -d '{"skills": ["sales"]}'
 ```
 
 Verify the extension landed in the Realtime tables:
@@ -137,16 +143,18 @@ curl -sf -X POST http://localhost:5000/api/v1/admin/queues \
     -H "X-Tenant-Id: acme" \
     -d '{"name": "Acme Sales", "isActive": true}'
 
-# Re-fetch the queue id (server-assigned)
+# Re-fetch the queue id (server-assigned). ListQueues returns a PagedResult
+# `{items, totalCount, page, pageSize}` and each row has an `id` field.
 QUEUE_ID=$(curl -sf -H "Authorization: Bearer $ACME_JWT" -H "X-Tenant-Id: acme" \
     http://localhost:5000/api/v1/admin/queues \
-    | python3 -c "import sys,json; print(next(q['queueId'] for q in json.load(sys.stdin) if q['name']=='Acme Sales'))")
+    | python3 -c "import sys,json; print(next(q['id'] for q in json.load(sys.stdin)['items'] if q['name']=='Acme Sales'))")
 
-curl -sf -X POST "http://localhost:5000/api/v1/admin/queues/$QUEUE_ID/members" \
+# Queue members live at /queues/{queueId}/members (RESTful, R5.1) — not under /admin
+curl -sf -X POST "http://localhost:5000/api/v1/queues/$QUEUE_ID/members" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ACME_JWT" \
     -H "X-Tenant-Id: acme" \
-    -d '{"agentId": "acme-agent-alice", "penalty": 0}'
+    -d "{\"agentId\": \"$AGENT_ID\", \"penalty\": 0}"
 ```
 
 ---
@@ -255,7 +263,10 @@ range is mapped (it is in the bundled compose file).
 
 ### Agent does not appear in queue
 
-`Pro.Realtime`'s reconciler runs every 30s. To force a sync immediately:
-`docker compose -f docker/docker-compose.full.yml exec -T platform-api curl -sf
--X POST http://localhost:5000/api/v1/admin/realtime/reconcile -H "Authorization: Bearer
-$ACME_JWT" -H "X-Tenant-Id: acme"`. Or just wait 30s.
+`Pro.Realtime`'s reconciler runs every 30s. The simplest remedy is to wait ~30s
+and re-list with
+`curl -sf -H "Authorization: Bearer $ACME_JWT" -H "X-Tenant-Id: acme" "http://localhost:5000/api/v1/queues/$QUEUE_ID/members"`.
+If you need to force an immediate sync, restart the API container —
+`docker compose -f docker/docker-compose.full.yml restart platform-api` — which
+runs the reconciler at startup. (A first-class `POST /admin/realtime/reconcile`
+admin endpoint is on the R5.4 backlog.)
