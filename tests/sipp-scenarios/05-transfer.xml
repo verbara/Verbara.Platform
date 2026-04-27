@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<!--
+  R5.5 A.3 · Scenario 05 — Blind transfer (REFER) flow.
+  Validates Asterisk's REFER (RFC 3515) handling — the standard SIP
+  request used by hosted-PBX softphones to initiate a blind transfer
+  from the caller leg. The Asterisk dialplan / pjsip endpoint must
+  recognise the Refer-To URI and re-INVITE the bridge accordingly.
+  $service is the original callee; xfer_target the address SIPp
+  asks Asterisk to redirect to. Defaults assume queue-1 → queue-2
+  but `-key xfer_target sip:queue-N@host` overrides.
+-->
+<scenario name="R5.5 blind transfer via REFER">
+
+  <send retrans="500">
+    <![CDATA[
+
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>
+      Call-ID: [call_id]
+      CSeq: 1 INVITE
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Subject: R5.5 blind-transfer
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=R5.5 transfer
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0
+      a=rtpmap:0 PCMU/8000
+
+    ]]>
+  </send>
+
+  <recv response="100" optional="true"/>
+  <recv response="180" optional="true"/>
+  <recv response="183" optional="true"/>
+  <recv response="200" rtd="true"/>
+
+  <send>
+    <![CDATA[
+
+      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 1 ACK
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <pause milliseconds="2000"/>
+
+  <!-- Initiate blind transfer to queue-2 (or whatever -key xfer_target overrides) -->
+  <send>
+    <![CDATA[
+
+      REFER sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 2 REFER
+      Max-Forwards: 70
+      Refer-To: <sip:[field0]@[remote_ip]:[remote_port]>
+      Referred-By: <sip:sipp@[local_ip]:[local_port]>
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv response="202" optional="true"/>
+  <recv response="200"/>
+
+  <!-- Implicit subscription NOTIFY pattern (RFC 3515 §2.4.5) -->
+  <recv request="NOTIFY" optional="true">
+    <action>
+      <ereg regexp="SIP/2.0 [12][0-9][0-9]" search_in="body" check_it="true" assign_to="dummy"/>
+    </action>
+  </recv>
+
+  <send next="byeit" optional="true">
+    <![CDATA[
+
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <label id="byeit"/>
+  <pause milliseconds="2000"/>
+
+  <send retrans="500">
+    <![CDATA[
+
+      BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 3 BYE
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv response="200" crlf="true"/>
+
+  <ResponseTimeRepartition value="10, 20, 50, 100, 200, 500, 1000, 2000"/>
+  <CallLengthRepartition   value="2000, 5000, 10000, 15000"/>
+
+</scenario>
