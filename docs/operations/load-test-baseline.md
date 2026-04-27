@@ -34,6 +34,24 @@ NBomber reports:
 - `tests/Asterisk.Platform.LoadTests/load-test-reports/nbomber_report_2026-04-27--15-50-19.{md,csv,html}`
 - Verbose run log (`nbomber-log-*.txt`, ~19 MB) is gitignored.
 
+## Results — R5.5 Phase B-L baseline run #3 (post live-queue URL reconcile + admin token, 2026-04-27)
+
+| Scenario | Target rate | Observed | Outcome |
+|---|---|---|---|
+| `jwt_issuance_validation`   | 2,000 req/s × 2 min | 8827 reqs / 19 s; 1 ok / 8826 fail; ok p99 = 21.97 s | Same saturation as #1 — JWT issuance @ 2 k req/s is well above docker-compose ceiling |
+| `queue_ingestion`           | 17 req/s × 5 min    | 90 reqs / 19 s; 0 ok | Endpoint still 404 (path didn't change) |
+| `presence_broadcast`        | 1,500 vu × 3 min    | 1340 reqs / 19 s; 0 ok | 404 + 5xx |
+| `live_queue_snapshot_write` | 500 req/s × 2 min   | 2362 reqs / 19 s; 0 ok / 2362 fail | URL now `/api/v1/analytics/live/{queue}` with admin token; 404s because no SIP traffic populated the live snapshot store. Stack saturation evident in -101 socket errors. |
+| `agent_assist_session_start`| 50 req/s × 2 min    | 269 reqs / 19 s; 0 ok | 404 + saturation |
+
+`load-test-reports/nbomber_report_2026-04-27--16-02-50.{md,csv,html}`.
+
+**HTTP server meter signals confirmed** (post `b58cf0f`):
+- Smoke load (200× /health): p99 = 22.8 ms. Within v1-provisional 200 ms SLO.
+- Sustained load: meter exposition works, but stack saturates before steady-state metrics stabilize. Real SLO measurement requires Phase C-L lower-rate sweep.
+
+**Pipeline gap on live-queue 404s:** the staging Asterisk has 0 calls in flight, so `LiveQueueSnapshotWriter` (Pro.Analytics.Live R5.1 Task G) never produces a snapshot, and `GET /analytics/live/{queueName}` correctly returns 404. To measure the live-queue read path under realistic conditions, Phase C-L needs SIPp driving inbound calls in parallel.
+
 ## Findings (R5.5 surface)
 
 The first run produced no clean throughput numbers — every scenario was
@@ -102,14 +120,20 @@ measurement reality:
 
 ## Next steps
 
-1. R5.5 follow-up commits to:
-   - Fix the meter exposition gap (`AddMeter("Microsoft.AspNetCore.Hosting")` etc.).
-   - Reconcile the 4 dead-URL scenarios — `live_queue_snapshot_write`
-     mechanical, others require rewrite to drive real signal paths.
-   - Re-run B-L with corrected scenarios for clean baseline.
-2. Phase C-L stress sweep: r=10/50/100/250/500 × 60 s each to identify
-   knee on this hardware.
-3. Phase D-L 24 h soak at the identified safe rate (likely 50-100 req/s).
+1. ✅ Meter exposition gap closed (`b58cf0f`).
+2. ✅ Live-queue scenario URL reconciled to real `/api/v1/analytics/live/{queueName}` (B-L run #3).
+3. **Next**: rewrite the 3 remaining dead-URL scenarios to drive real signal paths:
+   - `queue_ingestion` → SIP-driven via `tests/sipp-scenarios/03-queue-join.xml` once Asterisk PJSIP endpoints are provisioned (Phase B-L SIP-side prep).
+   - `presence_broadcast` → SignalR client (not REST). Defer to Phase C-L if needed.
+   - `agent_assist_session_start` → System-initiated when calls reach AgentAssist queues. Tied to Phase C-L SIPp + AgentAssist provisioning.
+4. **Phase C-L stress sweep**: rather than the all-or-nothing 2 k req/s,
+   ramp r=10/50/100/250/500 req/s × 60 s each on `jwt_issuance_validation`
+   to find the docker-compose ceiling on this hardware. Capture latency
+   percentiles + 5xx rate at each step.
+5. **Phase D-L 24 h soak**: at the safe rate identified by the C-L sweep
+   (likely ≤100 req/s sustained). Pair with SIPp scenario 03 (queue-join)
+   to drive the live-queue meter pipeline + analytics live snapshot store
+   under sustained traffic.
 
 ## Reproducibility
 

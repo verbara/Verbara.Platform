@@ -81,11 +81,22 @@ else
     echo "[load-test] [staging] Ensuring tenants are seeded..."
     "$SCRIPT_DIR/seed-staging.sh" >/dev/null
 
-    echo "[load-test] [staging] Logging in as agent1@${LOADTEST_TENANT}.local..."
-    LOADTEST_TOKEN=$(curl -fsS -X POST "$PLATFORM_API_URL/api/v1/auth/login" \
-        -H "Content-Type: application/json" \
-        -H "X-Tenant-Id: $LOADTEST_TENANT" \
-        -d "{\"email\":\"agent1@${LOADTEST_TENANT}.local\",\"password\":\"Agent2026!\"}" | jq -r '.accessToken // empty')
+    # Most non-JWT scenarios target Admin/SupervisorPlus-gated endpoints
+    # (live analytics, queue admin, ...). Agent-role tokens 403 against
+    # those, so the staging path uses the platform-admin token cached
+    # at docker/.staging-admin-token (set by seed-staging.sh on first
+    # bootstrap). JWT scenario logs in fresh inside its hot path with
+    # the agent1 creds and is unaffected by this choice.
+    if [ -f "$ROOT/docker/.staging-admin-token" ]; then
+        LOADTEST_TOKEN=$(cat "$ROOT/docker/.staging-admin-token")
+        echo "[load-test] [staging] Using cached platform-admin token for admin-gated scenarios."
+    else
+        echo "[load-test] [staging] Falling back to agent1 login (no cached admin token)..."
+        LOADTEST_TOKEN=$(curl -fsS -X POST "$PLATFORM_API_URL/api/v1/auth/login" \
+            -H "Content-Type: application/json" \
+            -H "X-Tenant-Id: $LOADTEST_TENANT" \
+            -d "{\"email\":\"agent1@${LOADTEST_TENANT}.local\",\"password\":\"Agent2026!\"}" | jq -r '.accessToken // empty')
+    fi
 fi
 
 if [ -z "$LOADTEST_TOKEN" ] || [ "$LOADTEST_TOKEN" = "null" ]; then

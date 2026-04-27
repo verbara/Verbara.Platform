@@ -1,9 +1,17 @@
-// LiveQueueWriterScenario — R5.4 S5.1 (R5.5 A.2 amendment — staging tenant + seeded queue range).
+// LiveQueueWriterScenario — R5.4 S5.1 (R5.5 A.2 + B-L #2 amendment — real
+// endpoint reconciled, staging tenant header, SupervisorPlus token via
+// LOADTEST_TOKEN).
+//
 // Target: 500 reads/s for 2 minutes against the live-metrics read endpoint
 // (5 Hz × 100 queues = 500 queries/s). Validates the Pro.Analytics.Live
 // snapshot pipeline end-to-end: PostgresLiveQueueSnapshotStore writes are
 // driven by the running platform, this scenario stresses the read surface
 // + ILiveQueueMetricsProvider hot-path.
+//
+// Real endpoint: GET /api/v1/analytics/live/{queueName} — gated by
+// `SupervisorPlus` policy (RequireRole("Admin", "Supervisor")). The
+// staging-profile load-test wrapper uses the platform-admin token from
+// docker/.staging-admin-token so the policy passes.
 
 using NBomber.Contracts;
 using NBomber.CSharp;
@@ -30,7 +38,7 @@ internal static class LiveQueueWriterScenario
                 var queueIdx = queueIndexBase + (ctx.ScenarioInfo.InstanceNumber % queueRange);
                 var req = Http.CreateRequest(
                         "GET",
-                        $"/api/v1/operations/queues/{queuePrefix}{queueIdx}/live-metrics")
+                        $"/api/v1/analytics/live/{queuePrefix}{queueIdx}")
                     .WithHeader("Authorization", $"Bearer {token}")
                     .WithHeader("X-Tenant-Id", tenant);
                 return await Http.Send(http, req);
