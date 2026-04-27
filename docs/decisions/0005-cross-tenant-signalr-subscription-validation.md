@@ -192,3 +192,34 @@ This produces a security signal that SOC operators / SIEM can alert on: a sustai
 - R5.2 spec §B.15: `docs/plans/active/2026-04-25-r5.2-security-admin-compliance.md`
 - R5.2 execution plan P0.6: `docs/plans/active/2026-04-25-r5.2-execution-plan.md`
 - Wave 2 audit Pro.Push.SignalR section (2026-04-25)
+
+## Update — R5.4 (2026-04-26)
+
+The R5.2 implementation registered `IAgentTenantResolver` as **optional** (no-op
+fallback) for backwards compatibility. R5.4 closes this loop: registration is
+now **required by default**. Consumers must call either:
+
+- `services.WithAgentTenantResolver<TYourResolver>()` — recommended path
+- `services.WithoutAgentTenantResolver()` — explicit opt-out with startup warning
+
+The implicit no-op fallback is removed. Existing consumers that did not register
+a resolver in R5.2/R5.3 will fail at startup with a clear error message
+pointing to this ADR.
+
+This change is breaking-but-safe: the opt-out path preserves legacy behavior,
+giving consumers a one-line migration during the v1.13.x patch window.
+
+The enforcement is implemented as an `IHostedService`
+(`AgentTenantResolverEnforcement`) registered automatically by
+`AddAsteriskProPushSignalR()`. It validates the registration at host startup
+(before any client can connect to the hub), independent of the order in which
+the resolver is registered relative to `AddAsteriskProPushSignalR()` itself.
+
+R5.3 ADR-0007's `WithStrictMode()` opt-in remains relevant for the orthogonal
+**connect-time** failure mode (per-connection check on the hub instance) — it
+is not superseded by this update; the two work in tandem when both are
+configured.
+
+Platform impact: no Program.cs change required because Platform already
+registers `CachedAgentTenantResolver` via `AddSingleton<IAgentTenantResolver,
+CachedAgentTenantResolver>()` since R5.2 P0.6.
