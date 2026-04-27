@@ -15,6 +15,9 @@ TARGET="${TARGET:-re2:asterisk}"
 IFACE="${IFACE:-eth0}"
 RATE="${RATE:-200kbit}"
 
+TC_IMAGE="${TC_IMAGE:-gaiadocker/iproute2}"
+
 echo "[chaos-09] Throttling Asterisk ($TARGET on $IFACE) to $RATE for $DURATION..."
-pumba netem --duration "$DURATION" --interface "$IFACE" rate --rate "$RATE" "$TARGET"
+pumba netem --tc-image "$TC_IMAGE" --duration "$DURATION" --interface "$IFACE" \
+    rate --rate "$RATE" "$TARGET"
 echo "[chaos-09] Bandwidth throttle lifted."

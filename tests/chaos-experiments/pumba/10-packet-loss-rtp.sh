@@ -15,6 +15,9 @@ TARGET="${TARGET:-re2:asterisk}"
 IFACE="${IFACE:-eth0}"
 LOSS_PCT="${LOSS_PCT:-5}"
 
+TC_IMAGE="${TC_IMAGE:-gaiadocker/iproute2}"
+
 echo "[chaos-10] Injecting ${LOSS_PCT}% packet loss on Asterisk ($TARGET on $IFACE) for $DURATION..."
-pumba netem --duration "$DURATION" --interface "$IFACE" loss --percent "$LOSS_PCT" "$TARGET"
+pumba netem --tc-image "$TC_IMAGE" --duration "$DURATION" --interface "$IFACE" \
+    loss --percent "$LOSS_PCT" "$TARGET"
 echo "[chaos-10] Packet loss injection complete."

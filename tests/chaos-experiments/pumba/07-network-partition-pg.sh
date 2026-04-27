@@ -14,6 +14,11 @@ DURATION="${DURATION:-60s}"
 TARGET="${TARGET:-re2:postgres}"
 IFACE="${IFACE:-eth0}"
 
+TC_IMAGE="${TC_IMAGE:-gaiadocker/iproute2}"
+
 echo "[chaos-07] Partitioning Postgres network ($TARGET on $IFACE) for $DURATION..."
-pumba netem --duration "$DURATION" --interface "$IFACE" loss --percent 100 "$TARGET"
+# pumba netem requires `tc` (iproute2) inside the target container; the
+# postgres official image does not ship it. Use a sidecar tc-image instead.
+pumba netem --tc-image "$TC_IMAGE" --duration "$DURATION" --interface "$IFACE" \
+    loss --percent 100 "$TARGET"
 echo "[chaos-07] Partition lifted."

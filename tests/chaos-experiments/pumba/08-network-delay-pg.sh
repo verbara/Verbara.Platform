@@ -14,6 +14,9 @@ TARGET="${TARGET:-re2:postgres}"
 IFACE="${IFACE:-eth0}"
 DELAY_MS="${DELAY_MS:-200}"
 
+TC_IMAGE="${TC_IMAGE:-gaiadocker/iproute2}"
+
 echo "[chaos-08] Injecting ${DELAY_MS}ms latency on Postgres ($TARGET on $IFACE) for $DURATION..."
-pumba netem --duration "$DURATION" --interface "$IFACE" delay --time "$DELAY_MS" "$TARGET"
+pumba netem --tc-image "$TC_IMAGE" --duration "$DURATION" --interface "$IFACE" \
+    delay --time "$DELAY_MS" "$TARGET"
 echo "[chaos-08] Latency injection complete."
