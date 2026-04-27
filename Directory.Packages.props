@@ -38,33 +38,33 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.15.0" />
-    <PackageVersion Include="Asterisk.Sdk.Push" Version="1.15.0" />
-    <PackageVersion Include="Asterisk.Sdk.Resilience" Version="1.15.0" />
-    <PackageVersion Include="Asterisk.Sdk.OpenTelemetry" Version="1.15.0" />
+    <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.15.1" />
+    <PackageVersion Include="Asterisk.Sdk.Push" Version="1.15.1" />
+    <PackageVersion Include="Asterisk.Sdk.Resilience" Version="1.15.1" />
+    <PackageVersion Include="Asterisk.Sdk.OpenTelemetry" Version="1.15.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore.Postgres" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics.Storage.Postgres" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Licensing" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Routing" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime.Storage.Postgres" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster.Storage.Postgres" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.MultiTenant" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Push" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Push.SignalR" Version="1.14.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Storage.Common" Version="1.14.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore.Postgres" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics.Storage.Postgres" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Licensing" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Routing" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime.Storage.Postgres" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster.Storage.Postgres" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.MultiTenant" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Push" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Push.SignalR" Version="1.15.0-pro" />
+    <PackageVersion Include="Asterisk.Sdk.Pro.Storage.Common" Version="1.15.0-pro" />
     <PackageVersion Include="Asterisk.Sdk.Pro.OpenTelemetry" Version="1.12.0-pro" />
   </ItemGroup>
 
