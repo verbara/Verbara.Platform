@@ -13,6 +13,93 @@ _No unreleased changes._
 
 ---
 
+## [1.13.0] — 2026-04-26 — R5.4 "Production Validation"
+
+**Final release of the R5 Production Readiness Release Train.** Coordinated
+ship with **Pro 1.15.0-pro** + **Web 1.12.0**. Production-validated: load test
+infrastructure + SLOs published + internal security audit clean (P0/P1 = 0)
++ JWT multi-key rotation infrastructure (Redis cluster cache) + day-1
+operator Getting Started + capacity planning + backup/DR runbook.
+
+### Added — production-validation infrastructure
+
+- **NBomber load test suite** (`tests/Asterisk.Platform.LoadTests/`) — 5
+  scenarios covering JWT throughput, queue ingestion, presence broadcast,
+  live queue snapshot writer, AgentAssist session start. Reproducible via
+  `scripts/load-test.sh` + `docker/docker-compose.loadtest.yml`. Opt-in
+  (NOT in default slnx).
+- **JWT multi-key rotation infrastructure** — `IJwtKeyRotationService` +
+  `IJwtKeyStore` (`InMemoryJwtKeyStore` + `RedisJwtKeyStore` in
+  `Asterisk.Platform.Identity.Redis`). Endpoint `POST /api/v1/management/security/jwt/rotate-key`
+  (RBAC `security.jwt.rotate`, PlatformAdmin only) + `GET /keys`. Audit
+  `security.jwt.key_rotated`. Rolling grace 24h default. Multi-node
+  zero-downtime rotation verified via Testcontainers Redis IT.
+  *Active issuance integration with `JwtTokenService` deferred to v1.13.x —
+  current behavior preserves R3c v1.9.2 RSA single-key default.*
+- **Suspend reason payload** — `POST /api/v1/partner/customers/{id}/suspend`
+  now requires `{ reason }` body and persists in audit. Closes R5.3 B.3.b.
+- **`PromoteHostedServiceToSingleton<T>` extension** in `Asterisk.Platform.Core/
+  DependencyInjection/HostedServicePromotionExtensions.cs` — extracted from
+  Program.cs inline helper (R5.3 A.5). Idempotent via internal marker
+  sentinel + `[DynamicallyAccessedMembers]` AOT trimming annotation.
+- **2 new ADRs:** ADR-0008 internal-security-audit-baseline · ADR-0009
+  slo-baseline-alert-severity-model.
+- **9 new operations + onboarding docs:**
+  - `docs/operations/load-test-baseline.md` (S5.1 template)
+  - `docs/operations/slos.md` (S5.2 — 31 SLO rows, v1 provisional)
+  - `docs/operations/alerts.yml` + `alerts-runbook.md` (S5.3 — 15 rules: 5 P0 + 5 P1 + 5 P2, promtool PASS)
+  - `docs/operations/capacity-planning.md` (S5.7 — 4 tiers, v1 provisional)
+  - `docs/operations/backup-disaster-recovery.md` + `dr-exercises.md` (S5.8)
+  - `docs/getting-started.md` (10-min path)
+  - `docs/operations/first-deploy.md` (30-min path)
+  - `docs/operations/first-realistic-demo.md` (60-min path)
+- **2 new docs subfolders:**
+  - `docs/security/` — `audit-checklist.md` (permanent) + `internal-audit-2026-04.md` (R5.4 findings: 0 P0 + 1 P1 fixed + 3 P2 + 4 P3)
+  - `docs/operations/onboarding-feedback/` — smoke verification artifacts
+- **5 new operations scripts:** `scripts/{load-test,run-zap-scan,backup-pg,restore-pg,backup-redis}.sh`
+
+### Changed
+
+- **Pro pins bumped to 1.15.0-pro** (consume NU1902 fix via SDK 1.15.1).
+- **SDK direct pins bumped 1.15.0 → 1.15.1** (4 packages: Hosting, Push,
+  Resilience, OpenTelemetry).
+- **MailKit + MimeKit 4.11.0 → 4.16.0** (closes pre-existing GHSA-9j88-vvj5-vhgr
+  + GHSA-g7hc-96xr-gvvx Moderate vulns surfaced during NU1902 cleanup).
+- **`Microsoft.Extensions.Hosting`** added to `Directory.Packages.props`
+  (transitive consumer for Platform.Core + Platform.Core.Tests).
+
+### Tests
+
+- ~1,094+ unit (baseline 1,080 + 14 new: JWT rotation +5 unit + 2 IT, suspend
+  reason +2, hosted service promotion +3, IAgentTenantResolver flip Platform side)
+- 0 warnings, CI green
+- `dotnet list package --vulnerable` clean cross-repo
+
+### Known debt for v1.13.x patch train
+
+- **JWT-001:** `JwtTokenService` integration with `IJwtKeyRotationService`
+  (RSA → symmetric switch + `IssuerSigningKeys` plumbing). Infrastructure
+  ships in 1.13.0, active integration deferred.
+- **AUTH-002 (P2 audit finding):** `?token=` / `?access_token=` query-string
+  JWT extraction is global, not scoped to `/hubs/*` — token leakage via
+  referrer/logs.
+- **CFG-003 (P2 audit finding):** `appsettings.Development.json` ships
+  `admin:admin` + `platform_internal_secret` plaintext.
+- **MFA-007 (P2 audit finding):** `IJtiRevocationCache` /
+  `IMfaPendingCache` defaults are in-memory (Redis package opt-in but
+  no fail-loud guard for production misconfig).
+- **3 meter TBDs flagged in `slos.md`:** per-validation JWT histogram,
+  audit-write histogram, Redis-side `listen_healthy` / JTI hit-rate gauges.
+
+### R5 train acceptance
+
+R5.1 (1.10.0) + R5.2 (1.11.0) + R5.3 (1.12.0) + R5.4 (1.13.0) — **R5 Production
+Readiness Release Train COMPLETE**. R4 Track A previously declared COMPLETE
+in R5.3. ADR-0008 + ADR-0009 gate this release. ADR-0005 amended with
+"Update R5.4" section documenting the IAgentTenantResolver required-by-default flip.
+
+---
+
 ## [1.12.0] — 2026-04-26 — R5.3 "Admin Completeness + R4 Closure"
 
 Coordinated ship of R5.3 (third release in the R5 Production Readiness
