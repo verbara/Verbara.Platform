@@ -99,11 +99,30 @@ public sealed class PartnerCustomerEndpointsTests : IClassFixture<PartnerApiFact
             plan = "Starter",
         });
 
-        var response = await _client.PostAsync($"/api/v1/partner/customers/{customerId}/suspend", null);
+        var response = await _client.PostAsJsonAsync(
+            $"/api/v1/partner/customers/{customerId}/suspend",
+            new { reason = "Non-payment past 90 days" });
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("Suspended");
+    }
+
+    [Fact]
+    public async Task SuspendCustomer_ShouldReturn400_WhenReasonEmpty()
+    {
+        var customerId = "suspend-noreason-" + Guid.NewGuid().ToString("N")[..8];
+        await _client.PostAsJsonAsync("/api/v1/partner/customers", new
+        {
+            tenantId = customerId,
+            name = "Suspend No Reason",
+            plan = "Starter",
+        });
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/v1/partner/customers/{customerId}/suspend",
+            new { reason = "" });
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]
@@ -117,7 +136,9 @@ public sealed class PartnerCustomerEndpointsTests : IClassFixture<PartnerApiFact
             name = "Activate Me",
             plan = "Starter",
         });
-        await _client.PostAsync($"/api/v1/partner/customers/{customerId}/suspend", null);
+        await _client.PostAsJsonAsync(
+            $"/api/v1/partner/customers/{customerId}/suspend",
+            new { reason = "test suspension for activate flow" });
 
         var response = await _client.PostAsync($"/api/v1/partner/customers/{customerId}/activate", null);
         response.StatusCode.Should().Be(HttpStatusCode.OK);

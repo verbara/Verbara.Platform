@@ -213,6 +213,7 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(List<PartnerCustomerDto>))]
 [JsonSerializable(typeof(CreatePartnerCustomerRequest))]
 [JsonSerializable(typeof(UpdatePartnerCustomerRequest))]
+[JsonSerializable(typeof(SuspendCustomerRequest))]
 // Partner Billing
 [JsonSerializable(typeof(PartnerGenerateInvoiceResponse))]
 [JsonSerializable(typeof(PartnerRevenueSnapshotDto))]

@@ -236,6 +236,7 @@ internal static class PartnerCustomerEndpoints
     private static async Task<IResult> SuspendCustomer(
         string customerId,
         HttpContext context,
+        [FromBody] SuspendCustomerRequest body,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IAuditService audit,
         [FromServices] IEnumerable<ITenantLifecycleHandler> lifecycleHandlers,
@@ -249,6 +250,9 @@ internal static class PartnerCustomerEndpoints
         if (callerTenantId is null)
             return Results.Forbid();
 
+        if (string.IsNullOrWhiteSpace(body.Reason))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["Required"] });
+
         var customer = await tenantStore.GetAsync(customerId, ct);
         if (customer is null || customer.ParentTenantId != callerTenantId)
             return Results.NotFound();
@@ -261,11 +265,14 @@ internal static class PartnerCustomerEndpoints
             new TenantId(callerTenantId), category: "admin", action: "partner.customer.suspended", severity: "warning",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
             targetId: customerId, targetType: "tenant",
-            changes: new AuditChanges(Before: new { Status = customer.Status.ToString() }, After: new { Status = "Suspended" }),
+            changes: new AuditChanges(
+                Before: new { Status = customer.Status.ToString() },
+                After: new { Status = "Suspended", Reason = body.Reason }),
             metadata: new Dictionary<string, string>
             {
                 ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 ["endpoint"] = context.Request.Path.Value ?? "",
+                ["reason"] = body.Reason,
             },
             ct: ct);
 
@@ -432,3 +439,5 @@ internal sealed record UpdatePartnerCustomerRequest(
     string? Name = null,
     int? MaxConcurrentChannels = null,
     int? MaxActiveCampaigns = null);
+
+internal sealed record SuspendCustomerRequest(string Reason);
