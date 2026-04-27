@@ -1,0 +1,281 @@
+# Asterisk.Platform — Prometheus alert rules baseline
+# R5.4 Track A · S5.3 · 2026-04-26
+#
+# STATUS: v1 provisional thresholds — derived from architecture estimates, not
+# measured. Refresh after S5.1 baseline run on staging. See
+# alerts-runbook.md "Threshold provenance" for the procedure.
+#
+# 3-tier severity model per ADR-0009:
+#   P0 = page on-call (5 rules)
+#   P1 = ticket within 24h (5 rules)
+#   P2 = review weekly (5 rules)
+#
+# Meter / instrument names track the canonical Pro catalog
+# (Asterisk.Sdk.Pro/docs/architecture.md § "Meter catalog (post-R5.1 Task G — 17 meters)").
+# Prometheus exporter normalises dots to underscores; histograms expose
+# *_bucket / *_sum / *_count series.
+#
+# Validate locally:
+#   docker run --rm -v $(pwd):/etc/prom prom/prometheus:latest \
+#     promtool check rules /etc/prom/alerts.yml
+
+groups:
+  # =====================================================================
+  # P0 — page on-call. Customer impact or imminent platform outage.
+  # =====================================================================
+  - name: platform_p0_critical
+    interval: 30s
+    rules:
+
+      - alert: PlatformApiUnavailable
+        # Source: Platform API /health/ready scrape via blackbox or up{}
+        expr: up{job="platform-api"} == 0
+        for: 2m
+        labels:
+          severity: P0
+          service: platform-api
+        annotations:
+          summary: "Platform API instance {{ $labels.instance }} unreachable"
+          description: "Prometheus has been unable to scrape platform-api on {{ $labels.instance }} for 2 minutes. Customer-facing API is down."
+          runbook_url: "alerts-runbook.md#platformapiunavailable"
+
+      - alert: AuthLoginErrorRateHigh
+        # Source: Platform API HTTP histogram on /auth/login (status_code label)
+        expr: |
+          (
+            sum(rate(http_server_request_duration_seconds_count{route="/auth/login",status_code=~"5.."}[5m]))
+            /
+            sum(rate(http_server_request_duration_seconds_count{route="/auth/login"}[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: P0
+          service: auth
+        annotations:
+          summary: "Login 5xx error rate > 5% over 5min"
+          description: "More than 5% of /auth/login requests are returning 5xx. Identity store or DataProtection key store likely unhealthy."
+          runbook_url: "alerts-runbook.md#authloginerrorratehigh"
+
+      - alert: JwtValidationLatencyP99High
+        # Source: Asterisk.Platform.Auth.JwtKeyRotation · jwt.key.rotation.duration histogram
+        # PROVISIONAL: rotation latency is a proxy for end-to-end signing-key health;
+        # refresh once a per-validation histogram is added in v1.13.x.
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(jwt_key_rotation_duration_bucket[5m]))
+          ) > 500
+        for: 5m
+        labels:
+          severity: P0
+          service: auth
+        annotations:
+          summary: "JWT key rotation latency p99 > 500 ms over 5min"
+          description: "Per ADR-0009 P0 trigger: JWT validation/rotation latency p99 sustained > 500 ms breaks downstream auth handshakes."
+          runbook_url: "alerts-runbook.md#jwtvalidationlatencyp99high"
+
+      - alert: LicenseGuardBlockedHigh
+        # Source: Asterisk.Sdk.Pro.Licensing.Guard · blocked counter (tagged feature, reason)
+        expr: |
+          (
+            sum(rate(blocked_total{job=~".*"}[10m]))
+            /
+            clamp_min(sum(rate(eventstore_events_appended_total[10m])), 1)
+          ) > 0.01
+        for: 10m
+        labels:
+          severity: P0
+          service: licensing
+        annotations:
+          summary: "License guard blocking > 1% of pipeline operations over 10min"
+          description: "License grace period likely expired or feature toggle revoked. Pipelines (EventStore/Analytics/AgentAssist) are silently dropping work."
+          runbook_url: "alerts-runbook.md#licenseguardblockedhigh"
+
+      - alert: RetentionServiceStalled
+        # Source: Asterisk.Sdk.Pro.Storage.Common.Retention · retention.duration_ms histogram
+        # absence of *_count increment over 1h means RetentionService didn't run.
+        expr: |
+          (time() - max(retention_duration_ms_count_created)) > 3600
+          and
+          increase(retention_duration_ms_count[1h]) == 0
+        for: 5m
+        labels:
+          severity: P0
+          service: retention
+        annotations:
+          summary: "RetentionService has not produced any duration samples for > 1h"
+          description: "Per ADR-0009 P0 trigger: nightly retention purge did not execute (cron failed / BackgroundService crashed). Storage growth unbounded."
+          runbook_url: "alerts-runbook.md#retentionservicestalled"
+
+  # =====================================================================
+  # P1 — ticket within 24h. SLO-breach class, no immediate outage.
+  # =====================================================================
+  - name: platform_p1_warning
+    interval: 60s
+    rules:
+
+      - alert: SloBreachQueueIngestion
+        # Source: Asterisk.Sdk.Pro.EventStore · eventstore.persist.duration_ms
+        # SLO target p99 ≤ 200ms (slos.md §2). Breach if sustained 15min.
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(eventstore_persist_duration_ms_bucket[5m]))
+          ) > 200
+        for: 15m
+        labels:
+          severity: P1
+          service: eventstore
+        annotations:
+          summary: "EventStore persist p99 > 200 ms (SLO breach) for 15min"
+          description: "Queue ingestion SLO breach. Postgres pressure or Pro.EventStore subscriber backlog likely; check eventstore_subscriber_inflight gauge."
+          runbook_url: "alerts-runbook.md#slobreachqueueingestion"
+
+      - alert: CircuitBreakerOpen
+        # Source: Asterisk.Sdk.Resilience · circuit.state (2 = Open)
+        expr: max by (key) (circuit_state) == 2
+        for: 5m
+        labels:
+          severity: P1
+          service: resilience
+        annotations:
+          summary: "Resilience circuit '{{ $labels.key }}' open > 5min"
+          description: "A keyed ResiliencePolicy is rejecting all traffic. Downstream dependency (channel / Postgres / external provider) likely down. See resilience-runbook.md for the policy catalogue."
+          runbook_url: "alerts-runbook.md#circuitbreakeropen"
+
+      - alert: PresenceBacklogGrowing
+        # Source: Asterisk.Sdk.Pro.Push.Postgres · push.postgres.backlog gauge
+        # Growing for 15min indicates consumer cannot drain backplane events.
+        expr: |
+          (push_postgres_backlog - push_postgres_backlog offset 15m) > 100
+          and
+          push_postgres_backlog > 500
+        for: 15m
+        labels:
+          severity: P1
+          service: push-backplane
+        annotations:
+          summary: "Push backplane backlog growing for 15min (current {{ $value }})"
+          description: "Pro.Push.Postgres relay cannot keep up with publish rate. Presence merges + cluster bridge events will lag."
+          runbook_url: "alerts-runbook.md#presencebacklogggrowing"
+
+      - alert: AuditWriteLatencyP99High
+        # Source: Platform audit sink (HubAuditEntry persistence). Until a
+        # dedicated histogram lands, proxy via http handler on /admin/audit/*.
+        # TBD: replace with audit_write_duration_ms histogram in v1.13.x.
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(http_server_request_duration_seconds_bucket{route=~"/admin/audit.*"}[5m]))
+          ) > 1
+        for: 15m
+        labels:
+          severity: P1
+          service: audit
+        annotations:
+          summary: "Audit write/read p99 > 1s for 15min (proxy)"
+          description: "Audit pipeline degraded. Compliance evidence may lag. Check IHubAuditSink implementation health."
+          runbook_url: "alerts-runbook.md#auditwritelatencyp99high"
+
+      - alert: HealthCheckUnhealthy
+        # Source: aspnetcore_healthcheck_status gauge (0 = Unhealthy / 1 = Degraded / 2 = Healthy)
+        expr: aspnetcore_healthcheck_status == 0
+        for: 5m
+        labels:
+          severity: P1
+          service: healthcheck
+        annotations:
+          summary: "Health check '{{ $labels.name }}' Unhealthy > 5min"
+          description: "One of the platform health checks (postgres / asterisk-ami / background-service / pro pipelines) is reporting Unhealthy."
+          runbook_url: "alerts-runbook.md#healthcheckunhealthy"
+
+  # =====================================================================
+  # P2 — review weekly. Capacity / hygiene signals.
+  # =====================================================================
+  - name: platform_p2_info
+    interval: 5m
+    rules:
+
+      - alert: PgConnectionPoolHigh
+        # Source: Npgsql · db.client.connections.usage{state=used}
+        expr: |
+          (
+            sum(db_client_connections_usage{state="used"})
+            /
+            sum(db_client_connections_usage{state="max"})
+          ) > 0.8
+        for: 30m
+        labels:
+          severity: P2
+          service: postgres
+        annotations:
+          summary: "Postgres connection pool utilization > 80% sustained 30min"
+          description: "Capacity warning per ADR-0009. Consider pool resize or query optimisation; review slow query alert correlation."
+          runbook_url: "alerts-runbook.md#pgconnectionpoolhigh"
+
+      - alert: SlowQueriesHigh
+        # Source: Npgsql · db.client.commands.duration histogram
+        expr: |
+          (
+            sum(rate(db_client_commands_duration_bucket{le="0.5"}[5m]))
+            /
+            sum(rate(db_client_commands_duration_count[5m]))
+          ) < 0.99
+        for: 30m
+        labels:
+          severity: P2
+          service: postgres
+        annotations:
+          summary: "More than 1% of Postgres queries > 500 ms over 30min"
+          description: "Capacity / index health warning. Review pg_stat_statements + correlate with retention / live queue writer activity."
+          runbook_url: "alerts-runbook.md#slowqueries-high"
+
+      - alert: RetentionDryRunDivergence
+        # Source: Asterisk.Sdk.Pro.Storage.Common.Retention · retention.purged
+        # vs retention.dry_run.would_purge (per-target counters).
+        expr: |
+          abs(
+            sum by (target) (increase(retention_purged_total[1d]))
+            -
+            sum by (target) (increase(retention_dry_run_would_purge_total[1d]))
+          ) > 100
+        for: 1h
+        labels:
+          severity: P2
+          service: retention
+        annotations:
+          summary: "Retention purge counter diverges from dry-run prediction by > 100 rows for target {{ $labels.target }}"
+          description: "Either DryRun policy was flipped without operator awareness, or retention windows are inconsistent between targets. Review IRetentionTarget config."
+          runbook_url: "alerts-runbook.md#retentiondryrundivergence"
+
+      - alert: LiveQueueWriterErrorWindow
+        # Source: Asterisk.Sdk.Pro.Analytics.Live · live_queue.snapshots.write_error
+        # SLO: error rate < 1% (slos.md §4).
+        expr: |
+          (
+            sum(rate(live_queue_snapshots_write_error_total[15m]))
+            /
+            clamp_min(sum(rate(live_queue_snapshots_published_total[15m])), 1)
+          ) > 0.01
+        for: 30m
+        labels:
+          severity: P2
+          service: analytics-live
+        annotations:
+          summary: "Live queue snapshot writer error rate > 1% over 30min"
+          description: "PostgresLiveQueueSnapshotStore upserts failing (timeout / circuit_open / exception). analytics-live-queue-writer health check should reflect."
+          runbook_url: "alerts-runbook.md#livequeuewritererrorwindow"
+
+      - alert: RedisMemoryHigh
+        # Source: redis_exporter · redis_memory_used_bytes / redis_memory_max_bytes
+        expr: |
+          (
+            redis_memory_used_bytes
+            /
+            clamp_min(redis_memory_max_bytes, 1)
+          ) > 0.75
+        for: 1h
+        labels:
+          severity: P2
+          service: redis
+        annotations:
+          summary: "Redis memory utilization > 75% on {{ $labels.instance }} sustained 1h"
+          description: "Capacity warning. JTI revocation cache + presence backplane share Redis; consider TTL tuning or instance resize before maxmemory-policy kicks in."
+          runbook_url: "alerts-runbook.md#redismemoryhigh"
