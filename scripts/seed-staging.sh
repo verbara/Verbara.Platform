@@ -134,22 +134,28 @@ seed_tenant() {
     esac
 
     # 2b. Create users + agents (paired: each agent links to a created user).
+    # Idempotency: pre-fetch the entire existing user list once and look up
+    # by email locally. Avoids hitting `/admin/users?email=` (R5.5 P0 finding
+    # #5: the server-side filter is silently ignored — returns the first
+    # page regardless) and avoids spamming POST /admin/users with duplicates
+    # (R5.5 P0 finding #4: server returns HTTP 500 with the raw Postgres
+    # UNIQUE-constraint message instead of 409 Conflict).
     log "    seeding ${agents} users + agents..."
-    local i ext email user_resp user_id agent_resp
+    local i ext email user_resp user_id agent_resp existing_users_json existing_agents_json
+    existing_users_json=$(curl -s -G "$PLATFORM_API_URL/api/v1/admin/users" \
+        --data-urlencode "pageSize=$((agents + 100))" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -H "X-Tenant-Id: $tenant_id")
+    existing_agents_json=$(curl -s -G "$PLATFORM_API_URL/api/v1/admin/agents" \
+        --data-urlencode "pageSize=$((agents + 100))" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -H "X-Tenant-Id: $tenant_id")
     for i in $(seq 1 "$agents"); do
         ext=$((ext_base + i))
-
-        # Idempotency: check existence first via paginated list to avoid the
-        # current Platform.Api behavior of returning HTTP 500 on duplicate-email
-        # UNIQUE-constraint violations (R5.5 P0 finding #4 — should be 409).
         email="agent${i}@${tenant_id}.local"
-        user_id=$(curl -s -G "$PLATFORM_API_URL/api/v1/admin/users" \
-            --data-urlencode "email=$email" \
-            --data-urlencode "pageSize=1" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" \
-            -H "X-Tenant-Id: $tenant_id" \
-            | jq -r --arg email "$email" \
-                '(.items // []) | map(select(.email==$email)) | (first // {}).id // empty')
+
+        user_id=$(echo "$existing_users_json" | jq -r --arg email "$email" \
+            '(.items // []) | map(select(.email==$email)) | (first // {}).id // empty')
 
         if [ -z "$user_id" ] || [ "$user_id" = "null" ]; then
             user_resp=$(curl -s -X POST "$PLATFORM_API_URL/api/v1/admin/users" \
@@ -166,11 +172,18 @@ seed_tenant() {
             continue
         fi
 
-        agent_resp=$(curl -s -X POST "$PLATFORM_API_URL/api/v1/admin/agents" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" \
-            -H "X-Tenant-Id: $tenant_id" \
-            -H "Content-Type: application/json" \
-            -d "{\"userId\":\"${user_id}\",\"displayName\":\"Agent ${i}\",\"extension\":\"${ext}\",\"sipPassword\":\"sip-${tenant_id}-${i}\"}" || true)
+        # Skip agent create if an agent already exists for this userId in
+        # the pre-fetched snapshot (idempotency for re-runs).
+        local agent_exists
+        agent_exists=$(echo "$existing_agents_json" | jq -r --arg uid "$user_id" \
+            '(.items // []) | map(select(.userId==$uid)) | length' 2>/dev/null || echo 0)
+        if [ "${agent_exists:-0}" = "0" ]; then
+            agent_resp=$(curl -s -X POST "$PLATFORM_API_URL/api/v1/admin/agents" \
+                -H "Authorization: Bearer $ADMIN_TOKEN" \
+                -H "X-Tenant-Id: $tenant_id" \
+                -H "Content-Type: application/json" \
+                -d "{\"userId\":\"${user_id}\",\"displayName\":\"Agent ${i}\",\"extension\":\"${ext}\",\"sipPassword\":\"sip-${tenant_id}-${i}\"}" || true)
+        fi
     done
     log "    ${agents} users + agents done"
 
