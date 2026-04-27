@@ -1,0 +1,168 @@
+# Staging environment
+
+> **R5.5 Production Validation** — this document captures the canonical staging
+> setup used to drive load, chaos, and soak runs that materialize the
+> v1-measured SLO + capacity numbers.
+> Source plan: `docs/plans/active/2026-04-27-r5.5-production-validation-data.md`.
+> Companion execution plan: `docs/plans/active/2026-04-27-r5.5-execution-plan.md`.
+
+The staging environment ships in **two reproducible variants** that share most
+configuration files and seed scripts:
+
+| Variant | Target audience | When to use |
+|---|---|---|
+| **Docker Compose** (Phase 0L) | SMB customer ceiling reference; fast iteration on dev workstation | First pass — validates `getting-started.md` cold-clone path, scripts, seeds. |
+| **K8s local — Talos + Kamailio/RTPEngine SBC** (Phase 0LK) | Enterprise customer reference; production-realism for SIP/RTP at scale | Second pass — validates Helm charts, CloudNativePG operator, Asterisk-on-K8s SBC pattern before cloud spend. |
+
+Both variants run on the same dev workstation in parallel (Hardware fit
+validated 2026-04-27 against AMD Ryzen 9 9900X / 60 GB RAM / 24 threads /
+KVM-libvirt active). Cloud parity (Phase 0C) layers on top once both local
+variants are green.
+
+---
+
+## Hardware baseline (commit machine, captured 2026-04-27)
+
+| Resource | Reading |
+|---|---|
+| CPU | AMD Ryzen 9 9900X — 12 cores / 24 threads, vmx/svm on all 24 |
+| RAM | 60 GB (≥ 35 GB free at idle) |
+| Swap | 68 GB |
+| Disk | `/` 168 GB free · `/home` 507 GB free (NVMe SSD) |
+| Virt | KVM (`kvm_amd` loaded), `/dev/kvm` accessible, `libvirtd` active |
+| Tooling | Docker 29.4 · kubectl 1.35.1 · helm 3.20 · minikube installed |
+| Tooling pending | `kind` (smoke fallback) · `talosctl` (mandatory for 0LK) |
+
+**RAM accounting target** (peak run with both variants up + observability):
+
+| Stack slice | Approx footprint |
+|---|---|
+| Talos cluster (1 control + 3 workers × 2 GB) | ~10 GB |
+| Asterisk + Kamailio/RTPEngine + CloudNativePG cluster | ~6 GB |
+| K8s observability (kube-prometheus-stack + Loki) | ~4 GB |
+| Docker Compose stack (asterisk + platform + postgres + redis + web + …) | ~8 GB |
+| Compose observability side-stack (Prometheus + Grafana + Loki + exporters) | ~3 GB |
+| Test runners (NBomber + SIPp + Pumba) | ~3 GB |
+| **Peak total** | **≈ 34 GB** (leaves ~26 GB margin on 60 GB) |
+
+---
+
+## Docker Compose variant (Phase 0L)
+
+**Setup:**
+
+```bash
+cd /path/to/Asterisk.Platform
+# generate dev-only secrets (gitignored — never commit docker/.env)
+test -f docker/.env || cat <<EOF > docker/.env
+SERVICE_KEY=$(openssl rand -hex 32)
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+AMI_PASSWORD=$(openssl rand -hex 24)
+ARI_PASSWORD=$(openssl rand -hex 24)
+EOF
+
+# 1) bring up the stack
+docker compose -f docker/docker-compose.full.yml up -d --wait
+
+# 2) bring up the observability side-stack
+docker compose -f docker/docker-compose.observability.yml up -d --wait
+```
+
+The observability stack joins the existing `docker_default` external network
+(the project network created by `docker-compose.full.yml`) so Prometheus can
+resolve `platform-api:5000`, `postgres:5432`, etc. by service name.
+
+### Services exposed
+
+| Service | URL | Notes |
+|---|---|---|
+| Web UI | http://localhost:80 | React app — admin login, queue + agent admin |
+| Platform.Api | http://localhost:5000 | OpenAPI: http://localhost:5000/scalar/v1 |
+| Platform.Api `/health` | http://localhost:5000/health | Aggregated readiness probe |
+| Platform.Api `/health/ready` | http://localhost:5000/health/ready | Per-check JSON (registered HCs) |
+| Platform.Api `/metrics` | http://localhost:5000/metrics | OTel prometheus exposition |
+| Asterisk AMI | tcp://localhost:5038 | Configurable via `AMI_PASSWORD` in `.env` |
+| Asterisk ARI | http://localhost:8088 / wss://localhost:8089 | Configurable via `ARI_PASSWORD` |
+| Asterisk SIP | UDP 5060 | RTP `udp/20000-20200` |
+| Postgres | tcp://localhost:5432 | Internal-only — not bound to host by default |
+| Prometheus | http://localhost:9090 | Reads `docs/operations/alerts.yml` as `rule_files` |
+| Grafana | http://localhost:3000 | `admin / r55-staging` (dev-only) |
+| Loki | http://localhost:3100 | Logs ingest, anonymous read for Grafana |
+| Alertmanager | http://localhost:9093 | Console webhook receiver (no real notifier) |
+| node-exporter | http://localhost:9100/metrics | Host CPU/mem/disk/net |
+| blackbox-exporter | http://localhost:9115 | HTTP probes for synthetic monitoring |
+
+### Verification (Phase 0L baseline)
+
+```bash
+# 1) all 6 app + 6 observability containers healthy
+docker compose -f docker/docker-compose.full.yml ps
+docker compose -f docker/docker-compose.observability.yml ps
+
+# 2) Prometheus targets all `up`
+curl -fsS http://localhost:9090/api/v1/targets \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); [print(t['labels']['job'], t['health']) for t in d['data']['activeTargets']]"
+
+# 3) 15 alert rules loaded (5 P0 + 5 P1 + 5 P2 — ADR-0009)
+curl -fsS http://localhost:9090/api/v1/rules \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(len(g['rules']) for g in d['data']['groups']))"
+
+# 4) Grafana dashboard provisioned under R5.5 folder
+curl -fsS -u admin:r55-staging 'http://localhost:3000/api/search?type=dash-db' \
+  | python3 -c "import json,sys; [print(x['title']) for x in json.load(sys.stdin)]"
+
+# 5) Alert smoke test — PlatformApiUnavailable fires + resolves
+docker stop $(docker ps -qf name=platform-api)
+sleep 165   # 2m for: window + scrape margin
+curl -fsSG http://localhost:9090/api/v1/query --data-urlencode 'query=ALERTS{alertname="PlatformApiUnavailable"}'
+docker start $(docker ps -aqf name=platform-api)
+sleep 60
+curl -fsSG http://localhost:9090/api/v1/query --data-urlencode 'query=ALERTS{alertname="PlatformApiUnavailable"}'
+# expect: ALERTS samples=1 firing, then 0 after restart
+```
+
+### Tear-down
+
+```bash
+docker compose -f docker/docker-compose.observability.yml down -v
+docker compose -f docker/docker-compose.full.yml down -v
+```
+
+### P0 findings surfaced during Phase 0L bring-up (2026-04-27)
+
+| Finding | Fix commit | Detail |
+|---|---|---|
+| `DatabaseMigrationService.Rollback` masking real migration errors when Postgres aborts the tx server-side | `b0e6100` | Wrapped `tx.Rollback()` in try/catch — secondary `InvalidOperationException` swallowed so the original SQL error surfaces. |
+| Migration `021_AuditEntriesNormalize.sql` had explicit `BEGIN;` + `COMMIT;` while the C# runner already wraps each migration in its own tx — nested commit triggered `transaction is already completed` on the next Dapper.Execute | `b0e6100` | Removed `BEGIN`/`COMMIT` lines, added comment explaining the C#-side tx wrap. Only migration with this issue per `grep -l "^BEGIN" Migrations/*.sql`. |
+
+Both bugs were R5.3 carry-overs that demo databases hid (already-applied state).
+A fresh Phase 0L bring-up was the first scenario to exercise them.
+
+---
+
+## K8s local variant (Phase 0LK)
+
+> **Status (2026-04-27):** spec'd but not yet executed. Phase 0LK in
+> `docs/plans/active/2026-04-27-r5.5-execution-plan.md` covers the 12 sub-tasks
+> (talosctl prereqs → Talos cluster bootstrap → MetalLB + Cilium + Traefik →
+> CloudNativePG operator + 3-instance cluster → Redis StatefulSet → Asterisk
+> Helm chart → Kamailio + RTPEngine SBC layer → Platform.Api + Web Helm charts
+> → kube-prometheus-stack + Loki + blackbox-exporter → alerts wiring → cold
+> bootstrap reproducibility gate).
+
+This section will be populated when Phase 0LK lands.
+
+---
+
+## Phase 0L verification log
+
+### 2026-04-27
+
+- [x] Hardware baseline documented (above)
+- [x] Docker Compose stack healthy (6/6 containers)
+- [x] Observability stack healthy (6/6 containers)
+- [x] Prometheus 5/5 targets `up` (prometheus, platform-api, node-exporter, 2× blackbox-http probes)
+- [x] 15 alert rules loaded across 3 ADR-0009 severity groups (P0=5, P1=5, P2=5)
+- [x] Grafana dashboard `r55-overview` provisioned, datasources Prometheus + Loki configured
+- [x] Alert smoke test — `PlatformApiUnavailable` fires after 2m down, resolves after restart, propagates to Alertmanager
+- [x] 2 P0 migration runner findings surfaced + fixed (`b0e6100`)
