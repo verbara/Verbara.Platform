@@ -37,7 +37,11 @@ internal static class DatabaseMigrationService
             }
             catch (Exception ex)
             {
-                tx.Rollback();
+                // Postgres aborts the transaction server-side on SQL error;
+                // the client-side Rollback() then throws "transaction has completed".
+                // Swallow that secondary exception so the real migration error surfaces.
+                try { tx.Rollback(); }
+                catch (InvalidOperationException) { /* tx already aborted by server */ }
                 throw new InvalidOperationException(
                     $"Migration '{migration.Name}' failed: {ex.Message}", ex);
             }

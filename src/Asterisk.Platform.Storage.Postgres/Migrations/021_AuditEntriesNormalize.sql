@@ -39,7 +39,10 @@
 --     DROP COLUMN IF EXISTS after_json,
 --     DROP COLUMN IF EXISTS integrity_hash;
 
-BEGIN;
+-- NOTE: no explicit BEGIN/COMMIT — the C# DatabaseMigrationService wraps
+-- each migration in its own transaction. Adding BEGIN/COMMIT here causes
+-- double-wrap and Dapper sees "transaction is already completed" after the
+-- nested COMMIT runs server-side.
 
 -- Stage 1 — additive nullable columns. Idempotent across re-runs.
 ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS category       TEXT  NULL;
@@ -108,5 +111,3 @@ CREATE INDEX IF NOT EXISTS idx_audit_severity
 
 CREATE INDEX IF NOT EXISTS idx_audit_category
     ON audit_entries (tenant_id, category, occurred_at DESC);
-
-COMMIT;
