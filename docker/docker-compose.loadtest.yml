@@ -1,0 +1,63 @@
+# docker-compose.loadtest.yml — R5.4 S5.1 load test stack.
+#
+# Spins up the minimum dependency footprint required to drive the NBomber
+# suite at scripts/load-test.sh: Postgres + Redis + Asterisk + the Platform
+# API in loadtest mode (which seeds a deterministic "loadtest" tenant +
+# user on first boot via Loadtest__SeedTenant=true).
+#
+# Compose file is intentionally separate from docker-compose.full.yml so
+# the loadtest stack stays minimal (no MinIO, no demo seed, no Web UI).
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: asterisk_loadtest
+      POSTGRES_USER: loadtest
+      POSTGRES_PASSWORD: loadtest
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loadtest -d asterisk_loadtest"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  asterisk:
+    image: asterisk:22-loadtest
+    ports:
+      - "5060:5060/udp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  platform-api:
+    image: asterisk-platform-api:loadtest
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Database=asterisk_loadtest;Username=loadtest;Password=loadtest"
+      ConnectionStrings__Redis: "redis:6379"
+      Loadtest__SeedTenant: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      asterisk:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30

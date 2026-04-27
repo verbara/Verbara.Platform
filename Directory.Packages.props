@@ -111,4 +111,12 @@
     <PackageVersion Include="Testcontainers" Version="4.11.0" />
   </ItemGroup>
 
+  <!-- NBomber load test suite (R5.4 S5.1). Consumed only by the opt-in
+       tests/Asterisk.Platform.LoadTests project, which is NOT part of the
+       default slnx and runs exclusively via scripts/load-test.sh. -->
+  <ItemGroup>
+    <PackageVersion Include="NBomber" Version="6.1.0" />
+    <PackageVersion Include="NBomber.Http" Version="6.0.0" />
+  </ItemGroup>
+
 </Project>
