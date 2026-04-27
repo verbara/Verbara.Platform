@@ -14,3 +14,14 @@ modules:
       # /health and /health/ready return 200 when Healthy / 503 when Degraded.
       # During staging the dialer-engine grace window expects 503 to be tolerated.
       valid_status_codes: [200, 503]
+
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+
+  http_2xx_or_redirect:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 201, 204, 301, 302, 303, 307, 308]

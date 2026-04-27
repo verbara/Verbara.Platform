@@ -6,7 +6,7 @@
 # alerts-runbook.md "Threshold provenance" for the procedure.
 #
 # 3-tier severity model per ADR-0009:
-#   P0 = page on-call (5 rules)
+#   P0 = page on-call (6 rules — adds BlackboxJourneyDown in R5.5 A.4)
 #   P1 = ticket within 24h (5 rules)
 #   P2 = review weekly (5 rules)
 #
@@ -105,6 +105,21 @@ groups:
           summary: "RetentionService has not produced any duration samples for > 1h"
           description: "Per ADR-0009 P0 trigger: nightly retention purge did not execute (cron failed / BackgroundService crashed). Storage growth unbounded."
           runbook_url: "alerts-runbook.md#retentionservicestalled"
+
+      - alert: BlackboxJourneyDown
+        # Source: blackbox-exporter probe_success (R5.5 A.4 — extends synthetic
+        # coverage to /health, /health/ready, postgres:5432, asterisk:5038/8088).
+        # 5-min sustained failure on any synthetic path = service unreachable
+        # at network or HTTP layer; pages on-call.
+        expr: probe_success == 0
+        for: 5m
+        labels:
+          severity: P0
+          service: synthetic
+        annotations:
+          summary: "Synthetic check {{ $labels.instance }} failing for >5m (P0)"
+          description: "Per ADR-0009 P0 trigger: blackbox-exporter probe against {{ $labels.instance }} (job {{ $labels.job }}) failing. Either the target service is unreachable or its TCP/HTTP listener has stopped accepting connections."
+          runbook_url: "alerts-runbook.md#blackboxjourneydown"
 
   # =====================================================================
   # P1 — ticket within 24h. SLO-breach class, no immediate outage.

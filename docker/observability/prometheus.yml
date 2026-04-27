@@ -24,14 +24,36 @@ scrape_configs:
     static_configs:
       - targets: [node-exporter:9100]
 
-  - job_name: blackbox-http
+  # Health journeys — accept 200 (Healthy) and 503 (Degraded during dialer-engine
+  # grace window). Without 503-acceptance the alert fires every fresh deploy.
+  - job_name: blackbox-http-health
     metrics_path: /probe
     params:
-      module: [http_2xx]
+      module: [http_health]
     static_configs:
       - targets:
+          - http://platform-api:5000/health
           - http://platform-api:5000/health/ready
-          - http://platform-api:5000/scalar/v1
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # TCP-reachability journeys — confirm the surrounding services answer at the
+  # transport layer even when their HTTP/AMI/ARI surface is auth-gated.
+  - job_name: blackbox-tcp-journeys
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+          - postgres:5432       # Database reachable
+          - asterisk:5038       # AMI listener
+          - asterisk:8088       # ARI HTTP
+          - asterisk:5060       # SIP TCP fallback (if Asterisk binds; UDP-only deploys see this fail)
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
