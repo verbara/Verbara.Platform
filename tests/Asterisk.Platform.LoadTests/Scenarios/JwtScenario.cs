@@ -3,6 +3,7 @@
 // fresh and validates the bearer end-to-end so we measure real issuance +
 // validation cost (not just cached-token lookup).
 
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.FSharp.Core;
 using NBomber.Contracts;
@@ -34,9 +35,8 @@ internal static partial class JwtScenario
         return Scenario.Create("jwt_issuance_validation", async ctx =>
             {
                 var loginReq = Http.CreateRequest("POST", "/api/v1/auth/login")
-                    .WithHeader("Content-Type", "application/json")
                     .WithHeader("X-Tenant-Id", tenant)
-                    .WithBody(new StringContent(loginBody));
+                    .WithBody(new StringContent(loginBody, Encoding.UTF8, "application/json"));
                 var loginResp = await Http.Send(http, loginReq);
 
                 if (!loginResp.IsError &&

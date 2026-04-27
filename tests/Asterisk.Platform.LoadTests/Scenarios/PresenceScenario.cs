@@ -9,6 +9,7 @@
 // the latency / throughput metrics remain valid. Success rate may be low
 // (404 on unknown agentId) — interpret throughput, not success%.
 
+using System.Text;
 using NBomber.Contracts;
 using NBomber.CSharp;
 using NBomber.Http.CSharp;
@@ -29,9 +30,10 @@ internal static class PresenceScenario
                 var req = Http.CreateRequest("POST", $"/api/v1/agents/{agentId}/presence")
                     .WithHeader("Authorization", $"Bearer {token}")
                     .WithHeader("X-Tenant-Id", tenant)
-                    .WithHeader("Content-Type", "application/json")
                     .WithBody(new StringContent(
-                        $$"""{"status":"available","timestamp":"{{DateTimeOffset.UtcNow:O}}"}"""));
+                        $$"""{"status":"available","timestamp":"{{DateTimeOffset.UtcNow:O}}"}""",
+                        Encoding.UTF8,
+                        "application/json"));
                 return await Http.Send(http, req);
             })
             .WithLoadSimulations(

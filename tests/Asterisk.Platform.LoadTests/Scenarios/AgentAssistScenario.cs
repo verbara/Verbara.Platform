@@ -4,6 +4,7 @@
 // toggle path + per-provider ResiliencePolicy + session/queue gauges
 // under sustained spin-up rate.
 
+using System.Text;
 using NBomber.Contracts;
 using NBomber.CSharp;
 using NBomber.Http.CSharp;
@@ -28,9 +29,10 @@ internal static class AgentAssistScenario
                         $"/api/v1/agent-assist/sessions/{sessionId}/start")
                     .WithHeader("Authorization", $"Bearer {token}")
                     .WithHeader("X-Tenant-Id", tenant)
-                    .WithHeader("Content-Type", "application/json")
                     .WithBody(new StringContent(
-                        $$"""{"agentId":"agent-{{ctx.ScenarioInfo.InstanceId}}","queueId":"{{queue}}"}"""));
+                        $$"""{"agentId":"agent-{{ctx.ScenarioInfo.InstanceId}}","queueId":"{{queue}}"}""",
+                        Encoding.UTF8,
+                        "application/json"));
                 return await Http.Send(http, req);
             })
             .WithLoadSimulations(

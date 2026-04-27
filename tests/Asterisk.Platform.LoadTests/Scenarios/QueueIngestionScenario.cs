@@ -3,6 +3,7 @@
 // against POST /api/v1/queues/{id}/calls. Validates Queues.Core ingestion
 // throughput + IRoutingMiddlewareBase chain + push fan-out.
 
+using System.Text;
 using NBomber.Contracts;
 using NBomber.CSharp;
 using NBomber.Http.CSharp;
@@ -26,9 +27,10 @@ internal static class QueueIngestionScenario
                 var req = Http.CreateRequest("POST", $"/api/v1/queues/{queue}/calls")
                     .WithHeader("Authorization", $"Bearer {token}")
                     .WithHeader("X-Tenant-Id", tenant)
-                    .WithHeader("Content-Type", "application/json")
                     .WithBody(new StringContent(
-                        $$"""{"callerId":"{{Guid.NewGuid()}}","priority":1}"""));
+                        $$"""{"callerId":"{{Guid.NewGuid()}}","priority":1}""",
+                        Encoding.UTF8,
+                        "application/json"));
                 return await Http.Send(http, req);
             })
             .WithLoadSimulations(

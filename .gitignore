@@ -17,4 +17,10 @@ docker/asterisk-config/keys/
 docker/.env
 docker/.staging-admin-token
 .codex
+# R5.5 transient run artifacts — verbose logs + raw snapshots (the small
+# .md/.csv/.html NBomber reports under tests/Asterisk.Platform.LoadTests/
+# load-test-reports/ stay tracked when committed deliberately).
+tests/Asterisk.Platform.LoadTests/load-test-reports/nbomber-log-*.txt
+sipp-reports/
+chaos-snapshots/
 .playwright-mcp/
