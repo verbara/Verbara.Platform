@@ -135,28 +135,32 @@ seed_tenant() {
 
     # 2b. Create users + agents (paired: each agent links to a created user).
     log "    seeding ${agents} users + agents..."
-    local i ext user_resp user_id agent_resp
+    local i ext email user_resp user_id agent_resp
     for i in $(seq 1 "$agents"); do
         ext=$((ext_base + i))
 
-        user_resp=$(curl -s -X POST "$PLATFORM_API_URL/api/v1/admin/users" \
+        # Idempotency: check existence first via paginated list to avoid the
+        # current Platform.Api behavior of returning HTTP 500 on duplicate-email
+        # UNIQUE-constraint violations (R5.5 P0 finding #4 — should be 409).
+        email="agent${i}@${tenant_id}.local"
+        user_id=$(curl -s -G "$PLATFORM_API_URL/api/v1/admin/users" \
+            --data-urlencode "email=$email" \
+            --data-urlencode "pageSize=1" \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
             -H "X-Tenant-Id: $tenant_id" \
-            -H "Content-Type: application/json" \
-            -d "{\"email\":\"agent${i}@${tenant_id}.local\",\"displayName\":\"Agent ${i}\",\"role\":\"Agent\",\"password\":\"Agent2026!\"}" || true)
-        # POST /admin/users returns { id, email, displayName, ... } — never `userId` at top-level.
-        user_id=$(echo "$user_resp" | jq -r '.id // empty')
+            | jq -r --arg email "$email" \
+                '(.items // []) | map(select(.email==$email)) | (first // {}).id // empty')
+
         if [ -z "$user_id" ] || [ "$user_id" = "null" ]; then
-            # User likely exists — fall back to paginated list lookup.
-            # GET /admin/users returns { items: [...], totalCount, page, ... }.
-            user_id=$(curl -s -G "$PLATFORM_API_URL/api/v1/admin/users" \
-                --data-urlencode "email=agent${i}@${tenant_id}.local" \
-                --data-urlencode "pageSize=1" \
+            user_resp=$(curl -s -X POST "$PLATFORM_API_URL/api/v1/admin/users" \
                 -H "Authorization: Bearer $ADMIN_TOKEN" \
                 -H "X-Tenant-Id: $tenant_id" \
-                | jq -r --arg email "agent${i}@${tenant_id}.local" \
-                    '(.items // []) | map(select(.email==$email)) | (first // {}).id // empty')
+                -H "Content-Type: application/json" \
+                -d "{\"email\":\"$email\",\"displayName\":\"Agent ${i}\",\"role\":\"Agent\",\"password\":\"Agent2026!\"}" || true)
+            # POST /admin/users returns { id, email, displayName, ... }.
+            user_id=$(echo "$user_resp" | jq -r '.id // empty')
         fi
+
         if [ -z "$user_id" ] || [ "$user_id" = "null" ]; then
             log "    WARN: could not resolve user id for agent${i} (last create resp: ${user_resp:0:200})"
             continue
@@ -170,14 +174,26 @@ seed_tenant() {
     done
     log "    ${agents} users + agents done"
 
-    # 2c. Create queues.
+    # 2c. Create queues. Idempotent — pre-checks existence by name to avoid
+    # 500s on UNIQUE constraint violations (mirrors users path; same R5.5 P0
+    # finding #4).
     log "    seeding ${queues} queues..."
+    local existing_queues queue_name
+    existing_queues=$(curl -s -G "$PLATFORM_API_URL/api/v1/admin/queues" \
+        --data-urlencode "pageSize=$queues" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -H "X-Tenant-Id: $tenant_id" \
+        | jq -r '(.items // []) | map(.name) | join("\n")' 2>/dev/null || true)
     for i in $(seq 1 "$queues"); do
+        queue_name="queue-${i}"
+        if echo "$existing_queues" | grep -qx "$queue_name"; then
+            continue
+        fi
         curl -s -o /dev/null -X POST "$PLATFORM_API_URL/api/v1/admin/queues" \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
             -H "X-Tenant-Id: $tenant_id" \
             -H "Content-Type: application/json" \
-            -d "{\"name\":\"queue-${i}\",\"maxWaiting\":60}" || true
+            -d "{\"name\":\"${queue_name}\",\"maxWaiting\":60}" || true
     done
     log "    ${queues} queues done"
 
