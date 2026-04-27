@@ -1,4 +1,5 @@
 using Asterisk.Platform.Identity.Auth;
+using Asterisk.Platform.Identity.Auth.Jwt;
 using Asterisk.Platform.Identity.Mfa;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -57,6 +58,14 @@ public static class IdentityRedisServiceCollectionExtensions
         // survives failover across multiple Platform API instances.
         RemoveExisting<IJtiRevocationCache>(services);
         services.AddSingleton<IJtiRevocationCache>(sp => new RedisJtiRevocationCache(
+            sp.GetRequiredService<IConnectionMultiplexer>(),
+            sp.GetRequiredService<IOptions<RedisIdentityOptions>>()));
+
+        // R5.4 S5.9 — replace InMemoryJwtKeyStore so the JWT signing-key rotation
+        // pool survives failover and so multiple Platform API nodes share the
+        // same active key + grace-window keys (zero-downtime rotation).
+        RemoveExisting<IJwtKeyStore>(services);
+        services.AddSingleton<IJwtKeyStore>(sp => new RedisJwtKeyStore(
             sp.GetRequiredService<IConnectionMultiplexer>(),
             sp.GetRequiredService<IOptions<RedisIdentityOptions>>()));
 

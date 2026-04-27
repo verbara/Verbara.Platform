@@ -364,6 +364,8 @@ public static class RoleTemplateSeeder
             "security.impersonation.manage",
             "retention.read", "retention.manage",
             "tenant.settings.write",
+            // R5.4 S5.9 — JWT signing-key rotation. Gates POST /api/v1/management/security/jwt/rotate-key.
+            "security.jwt.rotate",
             "partner:customer:view", "partner:customer:create",
             "partner:customer:manage", "partner:customer:delete",
             "partner:billing:view", "partner:billing:manage",

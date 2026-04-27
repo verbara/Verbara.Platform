@@ -247,6 +247,10 @@ internal static class PermissionSeeder
         // ── features (platform-level runtime toggles, v1.9.4) ──
         yield return P("features:agent-assist:manage", "features", "agent-assist", "manage",
             "Enable/disable AgentAssist at runtime and rotate STT provider credentials");
+
+        // ── security (R5.4 S5.9 — JWT signing-key rotation) ──
+        yield return P("security.jwt.rotate", "security", "jwt", "rotate",
+            "Rotate JWT signing keys (issues a new active key + keeps the prior key valid for the grace window)");
     }
 
     private static object P(string id, string category, string resource, string action,

@@ -459,6 +459,24 @@ builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
     jwtKeyDirectory,
     sp.GetRequiredService<IDataProtectionProvider>(),
     sp.GetRequiredService<IJtiRevocationCache>()));
+
+// R5.4 S5.9 — JWT signing-key rotation pool. The store defaults to in-memory
+// (single-process safe) and is replaced by RedisJwtKeyStore via
+// AddAsteriskPlatformIdentityRedis when a clustered deploy registers
+// IConnectionMultiplexer + RedisIdentityOptions. Bound options come from the
+// "Identity:JwtKeyRotation" config section (KeySizeBytes / ActiveDuration /
+// GracePeriod). The active-key consumer surface is the rotation service +
+// the /management/security/jwt/* admin endpoints; JwtTokenService continues
+// to use its RSA key file for issuance until R6 swaps to symmetric keys
+// pulled from this pool.
+builder.Services.Configure<Asterisk.Platform.Identity.Auth.Jwt.JwtKeyRotationOptions>(
+    builder.Configuration.GetSection("Identity:JwtKeyRotation"));
+builder.Services.TryAddSingleton(TimeProvider.System);
+builder.Services.TryAddSingleton<Asterisk.Platform.Identity.Auth.Jwt.IJwtKeyStore,
+    Asterisk.Platform.Identity.Auth.Jwt.InMemoryJwtKeyStore>();
+builder.Services.AddSingleton<Asterisk.Platform.Identity.Auth.Jwt.IJwtKeyRotationService,
+    Asterisk.Platform.Identity.Auth.Jwt.JwtKeyRotationService>();
+
 builder.Services.AddSingleton<RefreshTokenService>();
 builder.Services.AddSingleton<AuthEventService>();
 builder.Services.AddSingleton<AccountLockoutService>();
@@ -828,6 +846,14 @@ builder.Services.AddAuthorization(options =>
         Asterisk.Platform.Api.Endpoints.Retention.RetentionAdminEndpoints.ManagePolicy,
         p => p.AddRequirements(new PlatformAdminRequirement("retention.manage")));
 
+    // R5.4 S5.9 — JWT signing-key rotation surface. Same double-lock pattern
+    // as the R5.2 admin surfaces: PlatformAdminRequirement combines host/partner
+    // tenant gating with the seeded `security.jwt.rotate` permission. Closes
+    // C.1 of post-R5.1 triage (v1.9.2 partial single-key impl).
+    options.AddPolicy(
+        Asterisk.Platform.Api.Endpoints.Security.JwtKeyEndpoints.AuthorizationPolicy,
+        p => p.AddRequirements(new PlatformAdminRequirement("security.jwt.rotate")));
+
     // Plan 32C — PlatformHub method-level policies. "Supervisor" is role-based
     // (Supervisor or Admin); "Agent" is role-based for UpdatePresence/RequestHelp;
     // "PlatformAdmin" is role-based for hub-level administrative methods (distinct
@@ -1084,6 +1110,8 @@ v1.MapAuthAdminEndpoints();
 Asterisk.Platform.Api.Endpoints.Mfa.MfaAdminEndpoints.MapMfaAdminEndpoints(v1);
 // R5.2 PC.1 — retention admin surface (retention.read / retention.manage gated).
 Asterisk.Platform.Api.Endpoints.Retention.RetentionAdminEndpoints.MapRetentionAdminEndpoints(v1);
+// R5.4 S5.9 — JWT signing-key rotation admin surface (security.jwt.rotate gated).
+Asterisk.Platform.Api.Endpoints.Security.JwtKeyEndpoints.MapJwtKeyEndpoints(v1);
 v1.MapOidcEndpoints();
 v1.MapRbacEndpoints();
 v1.MapUsersMeEndpoint();
