@@ -11,6 +11,7 @@ using Asterisk.Platform.Bot;
 using Asterisk.Platform.Channels.Core;
 using Asterisk.Platform.Conversations;
 using Asterisk.Platform.Core;
+using Asterisk.Platform.Core.DependencyInjection;
 using Asterisk.Platform.Routing.Inbound;
 using Asterisk.Platform.Storage.InMemory;
 using Asterisk.Platform.Storage.Postgres;
@@ -879,10 +880,11 @@ builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
 // Unhealthy. The pattern mirrors AnalyticsLiveServiceCollectionExtensions
 // (R5.1 LiveQueueSnapshotWriter): register T as Singleton, then forward
 // IHostedService via factory so both resolve to the same instance.
-PromoteHostedServiceToSingleton<PresenceHeartbeatService>(builder.Services);
-PromoteHostedServiceToSingleton<PresenceFanoutService>(builder.Services);
-PromoteHostedServiceToSingleton<PresenceMergeConsumer>(builder.Services);
-PromoteHostedServiceToSingleton<RetentionService>(builder.Services);
+builder.Services
+    .PromoteHostedServiceToSingleton<PresenceHeartbeatService>()
+    .PromoteHostedServiceToSingleton<PresenceFanoutService>()
+    .PromoteHostedServiceToSingleton<PresenceMergeConsumer>()
+    .PromoteHostedServiceToSingleton<RetentionService>();
 
 var healthBuilder = builder.Services.AddHealthChecks()
     .AddCheck<Asterisk.Platform.Api.Health.BackgroundServiceHealthCheck>("services", tags: ["ready"])
@@ -896,29 +898,6 @@ var healthBuilder = builder.Services.AddHealthChecks()
 // Only add Postgres health check if NpgsqlDataSource is registered
 if (builder.Services.Any(d => d.ServiceType == typeof(NpgsqlDataSource)))
     healthBuilder.AddCheck<Asterisk.Platform.Api.Health.PostgresHealthCheck>("postgres", tags: ["ready"]);
-
-static void PromoteHostedServiceToSingleton<T>(IServiceCollection services)
-    where T : class, IHostedService
-{
-    // Remove the AddHostedService<T> descriptor (binds T -> IHostedService
-    // directly, no concrete registration).
-    var existing = services.FirstOrDefault(d =>
-        d.ServiceType == typeof(IHostedService) &&
-        d.ImplementationType == typeof(T));
-    if (existing is not null)
-    {
-        services.Remove(existing);
-    }
-
-    // Register T as a concrete singleton (idempotent — TryAdd respects any
-    // prior explicit registration).
-    services.TryAddSingleton<T>();
-
-    // Forward IHostedService via factory so the host resolves the same
-    // singleton instance, ensuring the IHealthCheck consults the running
-    // service's heartbeat.
-    services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<T>());
-}
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
