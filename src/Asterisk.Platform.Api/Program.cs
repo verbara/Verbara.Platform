@@ -243,6 +243,15 @@ builder.Services.AddProLicensing(o =>
 builder.Services.AddAsteriskOpenTelemetry(b => b
     .WithAllSources()
     .AddAsteriskProOpenTelemetry()
+    // R5.5 finding: SDK WithAllSources() registers only Asterisk-domain
+    // meters. The standard ASP.NET Core HTTP server + Kestrel + System.Net.Http
+    // meters carry the http_server_request_duration_seconds + http_client_*
+    // histograms that the SLO targets reference. Without these the /metrics
+    // endpoint cannot expose HTTP latency at all.
+    .AddMeter("Microsoft.AspNetCore.Hosting")
+    .AddMeter("Microsoft.AspNetCore.Server.Kestrel")
+    .AddMeter("Microsoft.AspNetCore.Routing")
+    .AddMeter("System.Net.Http")
     .WithPrometheusExporter());
 
 // ─── Pro Hardening — Resilience + LicenseGuard + Retention ──────────────────
