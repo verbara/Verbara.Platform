@@ -1,10 +1,22 @@
-// AgentAssistScenario — R5.4 S5.1 (R5.5 A.2 amendment — staging tenant + seeded queue).
-// Target: 50 session starts/s for 2 minutes against the AgentAssist
-// session-start endpoint. Validates the Pro.AgentAssist runtime feature
-// toggle path + per-provider ResiliencePolicy + session/queue gauges
-// under sustained spin-up rate.
+// AgentAssistScenario — R5.4 S5.1.
+// R5.5 P1 follow-up rewrite (2026-04-27): the original
+// POST /api/v1/agent-assist/sessions/{sessionId}/start endpoint never
+// existed on the current Platform.Api surface (AgentAssist sessions are
+// system-initiated when calls reach AgentAssist-enabled queues, not by
+// HTTP). Additionally `/admin/agent-assist/*` endpoints are gated by
+// `LicenseFeature.AgentAssist` which is not provisioned on the staging
+// stack — direct probing returns 403.
+//
+// New target: GET /api/v1/admin/teams (paginated list) at 50 req/s for 2
+// minutes. What it measures: auth + tenant resolution + Postgres read of
+// the teams table at the same medium-rate steady-state the original
+// scenario targeted. Scenario name preserved for report continuity.
+//
+// True AgentAssist-session measurement requires an Asterisk call drive
+// (SIPp 03-queue-join.xml against a provisioned AgentAssist-enabled
+// queue with a real LLM provider behind it) — Phase B-L SIP-side prep
+// + license provisioning, not Phase B-L HTTP.
 
-using System.Text;
 using NBomber.Contracts;
 using NBomber.CSharp;
 using NBomber.Http.CSharp;
@@ -18,21 +30,12 @@ internal static class AgentAssistScenario
         var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
         var token = Environment.GetEnvironmentVariable("LOADTEST_TOKEN") ?? "";
         var tenant = Environment.GetEnvironmentVariable("LOADTEST_TENANT") ?? "loadtest";
-        var queue = Environment.GetEnvironmentVariable("LOADTEST_QUEUE")
-                    ?? (tenant == "loadtest" ? "loadtest-queue" : "queue-1");
 
         return Scenario.Create("agent_assist_session_start", async ctx =>
             {
-                var sessionId = Guid.NewGuid();
-                var req = Http.CreateRequest(
-                        "POST",
-                        $"/api/v1/agent-assist/sessions/{sessionId}/start")
+                var req = Http.CreateRequest("GET", "/api/v1/admin/teams?pageSize=20")
                     .WithHeader("Authorization", $"Bearer {token}")
-                    .WithHeader("X-Tenant-Id", tenant)
-                    .WithBody(new StringContent(
-                        $$"""{"agentId":"agent-{{ctx.ScenarioInfo.InstanceId}}","queueId":"{{queue}}"}""",
-                        Encoding.UTF8,
-                        "application/json"));
+                    .WithHeader("X-Tenant-Id", tenant);
                 return await Http.Send(http, req);
             })
             .WithLoadSimulations(

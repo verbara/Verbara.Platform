@@ -1,15 +1,22 @@
-// PresenceScenario — R5.4 S5.1 (R5.5 A.2 amendment — staging tenant header).
-// Target: 1,500 concurrent virtual users (3-node cluster × 500 agents) for
-// 3 minutes. Each iteration emits one agent presence heartbeat to validate
-// SignalR fan-out + Pro.Push bus + IAgentTenantResolver lateral cache
-// invalidation under sustained simultaneous-agent pressure.
+// PresenceScenario — R5.4 S5.1.
+// R5.5 P1 follow-up rewrite (2026-04-27): the original POST /api/v1/agents/
+// {agentId}/presence endpoint never existed on the current Platform.Api
+// surface (agent presence is SignalR-driven via PlatformHub, not REST).
+// The scenario was producing 100 % 404s — useless signal under sustained
+// load.
 //
-// Note: agentId is synthesized per-VU and may not match a seeded agent
-// (agent IDs are GUIDs); the API surface still receives the request and
-// the latency / throughput metrics remain valid. Success rate may be low
-// (404 on unknown agentId) — interpret throughput, not success%.
+// New target: GET /api/v1/admin/agents (paginated list) at 1 500 concurrent
+// virtual users for 3 minutes. What it measures: auth + tenant resolution +
+// Postgres read of the agents table + JSON serialization at very high
+// concurrency. The 1 500 VU rate intentionally exceeds the single-instance
+// JWT-throughput knee (50 – 75 req/s sustained per load-test-baseline.md);
+// the scenario is meant to show how a Tier-Large stampede-class load shape
+// behaves on dev-workstation hardware, not to hit a SLO.
+//
+// True presence-fanout measurement requires a dedicated SignalR client
+// load tool (e.g. NBomber WebSocket plugin or @microsoft/signalr-based
+// JS load harness) — Phase C-L follow-up, not Phase B-L HTTP.
 
-using System.Text;
 using NBomber.Contracts;
 using NBomber.CSharp;
 using NBomber.Http.CSharp;
@@ -26,14 +33,9 @@ internal static class PresenceScenario
 
         return Scenario.Create("presence_broadcast", async ctx =>
             {
-                var agentId = $"agent-{ctx.ScenarioInfo.InstanceId}";
-                var req = Http.CreateRequest("POST", $"/api/v1/agents/{agentId}/presence")
+                var req = Http.CreateRequest("GET", "/api/v1/admin/agents?pageSize=20")
                     .WithHeader("Authorization", $"Bearer {token}")
-                    .WithHeader("X-Tenant-Id", tenant)
-                    .WithBody(new StringContent(
-                        $$"""{"status":"available","timestamp":"{{DateTimeOffset.UtcNow:O}}"}""",
-                        Encoding.UTF8,
-                        "application/json"));
+                    .WithHeader("X-Tenant-Id", tenant);
                 return await Http.Send(http, req);
             })
             .WithLoadSimulations(

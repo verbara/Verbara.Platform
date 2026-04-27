@@ -100,6 +100,37 @@ Phase F closure should publish these as the **honest v1-measured ceiling**
 and pair them with the recommended scaling deltas instead of preserving
 the unmeasured aspirational numbers.
 
+## Results — R5.5 Phase B-L baseline run #5 (full suite, real read endpoints, 2026-04-27)
+
+After the R5.5 P1 follow-up rewrote the 3 dead-URL scenarios to hit real
+read endpoints (`GET /admin/queues`, `GET /admin/agents`, `GET /admin/teams`),
+the full 5-scenario suite was re-run at the original design rates with NBomber's
+default parallel execution. **This run is intentionally over the dev-workstation
+knee** — its purpose is validating that the rewrites land on real paths, not
+producing clean per-scenario p99 numbers.
+
+| Scenario | Target rate | OK | Fail | OK % | Notes |
+|---|---|---:|---:|---:|---|
+| `jwt_issuance_validation`   | 2 000 req/s × 2 min | 0      | 8 653 | 0.0 %   | Same saturation pattern as B-L #2/#3 — JWT @ 2 k req/s above knee |
+| `queue_ingestion`           |    17 req/s × 5 min | 14     |    68 | 17.1 %  | New `GET /admin/queues` path returns OK at low rate; remainder lost to concurrent saturation |
+| `presence_broadcast`        | 1 500 VUs × 3 min   | 663    |   234 | 73.9 %  | New `GET /admin/agents` path produces real signal — 663 successful reads, p99 = 19.7 s under sat |
+| `live_queue_snapshot_write` |   500 req/s × 2 min | 0      | 2 374 | 0.0 %   | `/analytics/live` returns 404 (no SIP traffic populates snapshots — by design) |
+| `agent_assist_session_start`|    50 req/s × 2 min | 22     |   211 | 9.4 %   | New `GET /admin/teams` path returns OK at low rate; saturation eats the rest |
+
+**Aggregate finding:** with all 5 scenarios firing in parallel at design rates,
+peak aggregate load ≈ 5 000 req/s — well above the **single-instance knee
+identified in B-L #4 (~75 req/s sustainable)**. The parallel suite is therefore
+a stress-test and saturation-finding tool, not a per-scenario baseline; the
+authoritative per-endpoint numbers come from sequential isolated runs (JWT
+sweep is the first; equivalent sweeps for the other 4 are R5.5 follow-up).
+
+**Why the rewrites still matter** even though full-parallel saturates: with
+real endpoints the OK counts now grow > 0 across all scenarios (663 presence
+reads in 3 min vs the previous 0 ok / 1 473 fail). Sequential runs of the
+rewritten scenarios at sustainable rates would produce clean per-endpoint
+p99 numbers — those land in Phase D-L 24 h soak prep + Phase F dataset
+integration.
+
 ## Findings (R5.5 surface)
 
 The first run produced no clean throughput numbers — every scenario was
