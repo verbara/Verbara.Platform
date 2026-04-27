@@ -52,6 +52,54 @@ NBomber reports:
 
 **Pipeline gap on live-queue 404s:** the staging Asterisk has 0 calls in flight, so `LiveQueueSnapshotWriter` (Pro.Analytics.Live R5.1 Task G) never produces a snapshot, and `GET /analytics/live/{queueName}` correctly returns 404. To measure the live-queue read path under realistic conditions, Phase C-L needs SIPp driving inbound calls in parallel.
 
+## Results — JWT rate sweep (B-L #4, 2026-04-27)
+
+First clean v1-measured datapoint. JWT login + /auth/me round-trip,
+sequential steps × 60 s each, fresh login per iteration. Per-step
+NBomber report under `tests/Asterisk.Platform.LoadTests/load-test-reports/`.
+Repro: `./scripts/jwt-sweep.sh`.
+
+| Rate (req/s) | OK     | Fail   | OK %   | min ms | mean ms | p50 ms | p95 ms  | p99 ms     |
+|--------------|-------:|-------:|-------:|-------:|--------:|-------:|--------:|-----------:|
+| 10           |    600 |      0 | 100.0% |    170 |     175 |    174 |     183 |        189 |
+| 50           |  3 000 |      0 | 100.0% |    176 |     189 |    188 |     201 |        213 |
+| 100          |  6 000 |      0 | 100.0% |    181 |     396 |    389 |     596 |        671 |
+| 250          |  1 804 |  2 226 |  44.8% |  1 016 |  32 753 | 34 668 |  53 805 |  **56 918** ← collapse |
+| 500          |    485 |  7 234 |   6.3% |  4 898 |  29 967 | 32 096 |  45 514 |  46 268 |
+
+### Knee analysis
+
+- **Sustainable JWT login throughput on this hardware = 50–75 req/s.** At 50
+  req/s the p99 latency (213 ms) sits right at the v1-provisional 200 ms
+  SLO line in `slos.md`; the slack disappears beyond that.
+- **At 100 req/s** the stack still serves all requests (6 000 / 6 000 OK,
+  zero 5xx) but p99 jumps to 671 ms — 3.4× over the SLO. This is the
+  "ouch but still alive" zone: throughput holds, latency tail explodes.
+- **At 250 req/s the stack collapses.** OK rate drops to 44.8 %, half the
+  remaining 2 226 requests return HTTP 500 with p99 = 56.9 s. The
+  Postgres connection pool + `EntityFrameworkCoreXmlRepository`
+  DataProtection lookups become the dominant bottleneck at this rate.
+- **At 500 req/s only 6 % of requests survive** with p99 = 46 s — pure
+  saturation territory.
+
+### What this means for v1-measured SLO numbers
+
+The 200 ms p99 target in `slos.md` is **achievable on this single-instance
+docker-compose host up to ~50 req/s**. To approach the R5.4 aspirational
+2 000 req/s target with the same SLO requires:
+
+1. Platform.Api horizontal scaling (≥ 4 replicas to spread auth load).
+2. Postgres connection pool tuning (current default is too small for
+   sustained 200+ req/s of `data_protection_keys` + `users` reads).
+3. DataProtection key ring caching upgrade — the per-request EF Core round-
+   trip on every JWT issuance is the bottleneck at the knee.
+4. Optional: JTI revocation cache promotion to Redis (R5.4 known-debt
+   JWT-001 follow-up; deferred to v1.13.x patch train).
+
+Phase F closure should publish these as the **honest v1-measured ceiling**
+and pair them with the recommended scaling deltas instead of preserving
+the unmeasured aspirational numbers.
+
 ## Findings (R5.5 surface)
 
 The first run produced no clean throughput numbers — every scenario was

@@ -59,9 +59,9 @@ internal static partial class JwtScenario
             })
             .WithLoadSimulations(
                 Simulation.Inject(
-                    rate: 2_000,
+                    rate: int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_RATE"), out var r) ? r : 2_000,
                     interval: TimeSpan.FromSeconds(1),
-                    during: TimeSpan.FromMinutes(2)));
+                    during: TimeSpan.FromSeconds(int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_DURATION_SEC"), out var d) ? d : 120)));
     }
 
     private static string ExtractToken(string responseBody) =>
