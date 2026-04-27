@@ -1,13 +1,20 @@
 # Service-Level Objectives — Asterisk.Platform
 
-**R5.4 Track A · S5.2** · Authored 2026-04-26 · Owner: Platform SRE
+**R5.4 Track A · S5.2** · Authored 2026-04-26 · **R5.5 Phase F refresh 2026-04-27** · Owner: Platform SRE
 
-> **STATUS — v1 provisional (2026-04-26).** Numeric targets in this document are
-> **conservative engineering estimates derived from architecture review + industry
-> benchmarks**, NOT from measured load tests. The S5.1 NBomber suite is shipped
-> (`tests/Asterisk.Platform.LoadTests/`) and `scripts/load-test.sh` is reproducible,
-> but the first authoritative run on staging is pending. Once measured, update each
-> "Target (v1)" column with observed `p99 × 1.2` (per ADR-0009) and remove this banner.
+> **STATUS — v1 partial-measured (2026-04-27).** R5.5 Phase B-L produced the
+> first authoritative measurements for the **Auth + JWT** path (§1 below).
+> Sections 2 – 5 remain v1 **provisional** because the R5.4 NBomber scenarios
+> targeted endpoints that don't exist on the current Platform.Api surface
+> (queue ingestion is SIP-driven, presence is SignalR-driven, agent-assist is
+> system-initiated) — see [`load-test-baseline.md`](load-test-baseline.md)
+> "Findings" + the R5.5 P1 follow-up tracker for the 3 still-pending scenario
+> rewrites. Sections 6 – 8 (storage / Redis / resilience layer) inherit from
+> the R5.4 estimates; the Phase C-L chaos run validated the recovery /
+> resilience targets (see [`chaos-test-report-local.md`](chaos-test-report-local.md))
+> but does not produce continuous-throughput numbers.
+>
+> **Measured datapoints in this document are flagged inline with `🟢 measured`.**
 
 ---
 
@@ -42,18 +49,37 @@ rate alerts (P1) fire at 50% burn over 6h on Enterprise tier.
 
 ## SLO catalogue (v1 provisional)
 
-### 1. Auth + JWT
+### 1. Auth + JWT 🟢 measured
 
-> **TBD: re-baseline post-S5.1 first run on staging** — values below derived from
-> .NET 10 AOT JWT validation benchmarks + `JwtBearerHandler` cold-path estimates.
+> **R5.5 Phase B-L refresh (2026-04-27).** JWT issuance + validation baseline
+> was measured on the docker-compose.full.yml staging stack via
+> `scripts/jwt-sweep.sh` (5 sequential rates × 60 s each on AMD Ryzen 9 9900X /
+> 60 GB / single-instance Platform.Api + Postgres 17). Real ceiling on this
+> hardware is **50 – 75 req/s sustained** for stable p99; beyond 100 req/s the
+> latency tail explodes. Targets below split "measured" (R5.5) from "v1
+> provisional" (still inferred from architecture). See
+> [`load-test-baseline.md`](load-test-baseline.md) for the full sweep.
 
-| Metric | Target (v1 provisional) | Source meter / instrument |
-|---|---|---|
-| JWT validation latency p99 | ≤ 50 ms | `Asterisk.Platform.Auth.JwtKeyRotation` · `jwt.key.rotation.duration` (rotation) + Platform API `/auth/login` request histogram |
-| Login success rate | ≥ 99.5% (excluding bad credentials) | Platform API HTTP histogram, status `2xx` / total on `/auth/*` |
-| Token refresh latency p95 | ≤ 100 ms | Platform API HTTP histogram on `/auth/refresh` |
-| Active validation keys | ≥ 1, ≤ 4 | `Asterisk.Platform.Auth.JwtKeyRotation` · `jwt.keys.active` |
-| MFA challenge generation latency p95 | ≤ 200 ms | Platform API HTTP histogram on `/auth/mfa/*` |
+| Metric | Target | Status | Source meter / instrument |
+|---|---|---|---|
+| Login latency p99 (single-instance, ≤ 50 req/s) | ≤ 250 ms | 🟢 **measured 213 ms** | Platform API HTTP histogram on `/auth/login` (`http_server_request_duration_seconds_bucket`) |
+| Login latency p99 (single-instance, ≤ 100 req/s) | ≤ 700 ms | 🟢 **measured 671 ms** — over-budget vs original ≤ 200 ms target; tail explodes due to per-request DataProtection EF round-trip | same |
+| Login throughput knee (single-instance) | < 250 req/s | 🟢 **measured: collapse at 250 req/s** (44 % success, p99 = 56.9 s); 500 req/s ≈ pure saturation | same |
+| Login success rate (within capacity) | ≥ 99.5 % (excluding bad credentials) | 🟢 measured **100 %** at ≤ 100 req/s | same |
+| `/health` p99 idle | ≤ 50 ms | 🟢 measured **22.8 ms** (200-ping smoke after the HTTP-meter expose fix) | `http_server_request_duration_seconds_bucket{http_route="/health"}` |
+| JWT validation latency p99 (cached key, no DB hit) | ≤ 50 ms | v1 provisional — no isolated test yet | `Asterisk.Platform.Auth.JwtKeyRotation` · `jwt.key.rotation.duration` |
+| Token refresh latency p95 | ≤ 100 ms | v1 provisional | Platform API HTTP histogram on `/auth/refresh` |
+| Active validation keys | ≥ 1, ≤ 4 | v1 provisional | `Asterisk.Platform.Auth.JwtKeyRotation` · `jwt.keys.active` |
+| MFA challenge generation latency p95 | ≤ 200 ms | v1 provisional | Platform API HTTP histogram on `/auth/mfa/*` |
+
+**Bottleneck identified at the knee:** per-request DataProtection
+`EntityFrameworkCoreXmlRepository` round-trip (one Postgres SELECT
+against `data_protection_keys` per JWT issuance). Confirmed by the
+linear latency rise as rate climbs (175 ms at r=10 → 396 ms mean at
+r=100), then the catastrophic flip at r=250 when the connection pool
+fills. **Path to lift the ceiling:** in-memory key-ring cache promotion +
+multi-replica Platform.Api + Postgres pool tuning (each delta tracked as
+v1.13.x patch — JWT-001 in `docs/roadmap.md`).
 
 ### 2. Queue ingestion (call session events)
 
@@ -132,13 +158,17 @@ rate alerts (P1) fire at 50% burn over 6h on Enterprise tier.
 | JTI cache hit rate | ≥ 95% | TBD: meter to add in v1.13.x — currently tracked via `IJtiRevocationCache` logs |
 | Backplane `listen_healthy` | 1 (gauge) | `push.postgres.listen_healthy` (Postgres) — equivalent Redis gauge TBD |
 
-### 8. Resilience layer (cross-cutting)
+### 8. Resilience layer (cross-cutting) 🟢 measured (chaos)
 
-| Metric | Target (v1 provisional) | Source meter / instrument |
-|---|---|---|
-| Circuit breakers in `Open` state | 0 sustained > 5 min | `Asterisk.Sdk.Resilience` · `circuit.state` (value 2 = Open) |
-| Retry attempts rate per policy | < 0.5/s sustained | `retry.attempts` |
-| Per-attempt timeouts | < 1% of attempts | `timeout.fired` |
+| Metric | Target | Status | Source meter / instrument |
+|---|---|---|---|
+| Circuit breakers in `Open` state | 0 sustained > 5 min | 🟢 R5.5 C-L: held during all 10 chaos events; closed cleanly post-recovery | `Asterisk.Sdk.Resilience` · `circuit.state` (value 2 = Open) |
+| Retry attempts rate per policy | < 0.5/s sustained | v1 provisional | `retry.attempts` |
+| Per-attempt timeouts | < 1% of attempts | v1 provisional | `timeout.fired` |
+| Postgres SIGKILL recovery time | ≤ 60 s | 🟢 R5.5 C-L: ~30 s (compose `up -d --wait` gate) | observed via `up{job="platform-api"}` flap |
+| Asterisk SIGKILL recovery time | ≤ 60 s | 🟢 R5.5 C-L: ~30 s | observed via `up{job="asterisk-ami-tcp"}` |
+| Platform.Api SIGKILL recovery time | ≤ 90 s | 🟢 R5.5 C-L: ~60 s (HC stale window included) | observed via `probe_success{instance="…/health"}` |
+| Net-layer chaos recovery (loss/delay/rate) | immediate after lift | 🟢 R5.5 C-L: sub-scrape-window | qdisc-injected via `pumba netem --tc-image gaiadocker/iproute2` |
 
 ---
 

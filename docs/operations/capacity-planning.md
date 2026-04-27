@@ -1,12 +1,15 @@
 # Capacity Planning Baseline — Asterisk.Platform
 
-**R5.4 Track C · S5.7** · Authored 2026-04-26 · Owner: Platform SRE
+**R5.4 Track C · S5.7** · Authored 2026-04-26 · **R5.5 Phase F refresh 2026-04-27** · Owner: Platform SRE
 
-> **STATUS — v1 provisional (2026-04-26).** Numbers below are conservative
-> engineering estimates derived from architecture review + industry benchmarks +
-> the Pro 1.15.0-pro meter catalog. The S5.1 NBomber suite is shipped; the first
-> authoritative run on staging is pending. Refresh per the procedure below once
-> measured baseline data exists.
+> **STATUS — v1 partial-measured (2026-04-27).** R5.5 Phase B-L produced the
+> first JWT throughput ceiling on a single-instance docker-compose dev
+> workstation: **50 – 75 req/s sustainable for stable p99**, with collapse at
+> 250 req/s. Phase C-L Pumba chaos validated the per-service recovery times in
+> [`slos.md`](slos.md) §8. The four sizing tiers below remain inferred from
+> architecture estimates **per node**, but the new "Single-instance measured
+> ceiling" callout below clarifies the throughput floor any sizing decision
+> must clear via horizontal scaling.
 
 ---
 
@@ -46,6 +49,35 @@ particular `SloBreachQueueIngestion` and `PresenceBacklogGrowing` from
 ~25 agents per queue median, .NET 10 AOT throughput benchmarks (roughly 4× CLR
 JIT for cold-path JWT validation), 4-core typical Asterisk node sizing in
 production.
+
+### Single-instance measured ceiling (R5.5 Phase B-L, 2026-04-27) 🟢
+
+A single Platform.Api + Postgres instance on dev hardware (AMD Ryzen 9 9900X /
+60 GB RAM / docker-compose) was measured against `scripts/jwt-sweep.sh`:
+
+| JWT login rate (req/s) | OK %    | p99 ms   | Verdict on this instance |
+|------------------------|---------|---------:|--------------------------|
+| 10                     | 100.0   |     189  | comfortable              |
+| 50                     | 100.0   |     213  | at the SLO line          |
+| 100                    | 100.0   |     671  | tail explodes (3.4× SLO) |
+| 250                    |  44.8   |  56 918  | collapse                 |
+| 500                    |   6.3   |  46 268  | saturation               |
+
+**Key implication for sizing:** the per-tier "Concurrent calls" in the table
+above translates to a JWT issuance rate that one Platform.Api instance can
+NOT sustain alone past **~75 req/s p99 ≤ 250 ms**. A Tier-Medium deployment
+serving 100 agents that re-authenticate every 15 min generates ~7 logins/s
+steady-state — fine on one instance. A Tier-Large deployment averaging 500
+agents at the same cadence generates ~33 logins/s steady-state — also fine,
+**but** a stampede event (mass re-login after a network blip, a device
+firmware push) can spike 5–10× and breaks the 250 req/s knee. **Tier-Large+
+must run ≥ 2 Platform.Api replicas behind an L7 load balancer.**
+
+The **bottleneck identified** is the per-request DataProtection EF round-trip
+to `data_protection_keys` on every JWT issuance. Promoting the key ring to an
+in-memory cache (R5.5 P1 follow-up) should lift the single-instance ceiling
+toward the original 2 000 req/s SLO target — tracked as JWT-001 in
+`docs/roadmap.md`.
 
 ---
 
