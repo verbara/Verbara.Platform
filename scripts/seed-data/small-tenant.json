@@ -1,0 +1,11 @@
+{
+  "tenantId": "small-loadtest",
+  "name": "LoadTest Small (SMB ceiling)",
+  "agents": 25,
+  "queues": 10,
+  "extensionBase": 8000,
+  "metadata": {
+    "loadProfile": "small",
+    "purpose": "R5.5 baseline + stress + 24h soak"
+  }
+}

@@ -15,5 +15,6 @@ TestResults/
 local-nuget-feed/
 docker/asterisk-config/keys/
 docker/.env
+docker/.staging-admin-token
 .codex
 .playwright-mcp/

@@ -1,0 +1,11 @@
+{
+  "tenantId": "medium-loadtest",
+  "name": "LoadTest Medium",
+  "agents": 100,
+  "queues": 50,
+  "extensionBase": 9000,
+  "metadata": {
+    "loadProfile": "medium",
+    "purpose": "R5.5 baseline + stress + 24h soak"
+  }
+}

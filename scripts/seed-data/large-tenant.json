@@ -1,0 +1,11 @@
+{
+  "tenantId": "large-loadtest",
+  "name": "LoadTest Large (Enterprise ceiling)",
+  "agents": 500,
+  "queues": 200,
+  "extensionBase": 10000,
+  "metadata": {
+    "loadProfile": "large",
+    "purpose": "R5.5 baseline + stress + 24h soak"
+  }
+}
