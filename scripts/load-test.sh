@@ -95,8 +95,15 @@ fi
 
 echo "[load-test] Running NBomber suite (Release, profile=$PROFILE)..."
 cd "$ROOT/tests/Asterisk.Platform.LoadTests"
+
+# Pass tenant so all 5 scenarios add X-Tenant-Id + use seeded credentials.
+# Fixture profile exports tenant=loadtest (legacy single-tenant fixture);
+# staging exports the seeded tenant id (default medium-loadtest).
+export_tenant="${LOADTEST_TENANT:-loadtest}"
+
 PLATFORM_API_URL="$PLATFORM_API_URL" \
     LOADTEST_TOKEN="$LOADTEST_TOKEN" \
+    LOADTEST_TENANT="$export_tenant" \
     dotnet run -c Release
 
 echo "[load-test] Reports written to: $(pwd)/load-test-reports/"
