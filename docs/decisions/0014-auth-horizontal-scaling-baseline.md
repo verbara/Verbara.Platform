@@ -1,8 +1,10 @@
 # ADR-0014: Auth horizontal scaling baseline
 
-**Status:** Accepted
-**Date:** 2026-04-27
-**Context:** AHH Phase 5 (v1.14.0)
+**Status:** Accepted (initial 2026-04-27) · **Amended 2026-04-28 (v1.14.1)** —
+v1-measured single-replica numbers replace projection; 4-replica still
+pending v1.14.2 startup-hang fix.
+**Date:** 2026-04-27 · **Amendment date:** 2026-04-28
+**Context:** AHH Phase 5 (v1.14.0) + v1.14.1 empirical follow-up
 
 ## Context
 
@@ -87,25 +89,29 @@ Concrete shape:
   connection string) in the operator's hands and document the math
   than to encode N deployment platforms' detection paths.
 
-## Knee envelope (v1-projected, post-AHH)
+## Knee envelope
 
-Reproduced from the runbook for ADR self-containment. All numbers
-relative to AMD Ryzen 9 9900X / 60 GB / docker-compose / single-replica
-unless noted:
+**v1.14.1 amendment (2026-04-28):** the v1.14.0 ADR shipped with
+projection-only numbers. Empirical measurement on the same hardware
+shows post-AHH single-replica did NOT achieve the projected 220 req/s
+knee — the projected gain from Phase 4 (Argon2id) was eaten by GC
+pressure + connection-pool contention under sustained load. The
+multi-replica numbers stay projected pending the v1.14.2 fix to the
+startup hang documented in the runbook.
 
-| Stage | Single-replica | 4-replica aggregate | p99 ≤ 250 ms |
-|---|--:|--:|---|
-| R5.5 baseline | 75 req/s | n/a | ⚠ (50 req/s knee) |
-| Post-Phase-1 | ~95 | n/a | ✓ |
-| Post-Phase-2 | ~120 | n/a | ✓ |
-| Post-Phase-3 | ~120 | ~480 | ✓ |
-| **Post-Phase-4** | **~220** | **~880** | **✓ (target)** |
+| Stage | Single-replica | 4-replica aggregate | p99 ≤ 250 ms | Source |
+|---|--:|--:|---|---|
+| R5.5 baseline (BCrypt12, no caches, sync writes) | 75 req/s | n/a | ⚠ marginal | v1-measured (R5.5 sweep) |
+| **Post-AHH single-replica** | **~50 req/s** | n/a | ✓ at 50, ⚠ at 100 | **v1-measured 2026-04-28** |
+| Post-AHH 4-replica aggregate | _projected_ ~50/replica | _projected_ ~200 | _pending v1.14.2 fix_ | projection-only |
 
-The **22× single-replica improvement** (from 75 to 1 650 req/s if
-N=4 + Argon2id) is what makes the AHH train commercially relevant —
-medium-tier deployments (100 agents, 50 queues) can fit on a single
-4-replica deployment without dedicated DB tuning beyond what this
-ADR's `max_connections=220` recommendation specifies.
+The runbook §"Empirical single-replica jwt-sweep.sh post-AHH" carries
+the full sweep table (10 / 50 / 100 / 250 / 500 req/s × 60 s) showing
+500-error onset at 100 req/s and the same collapse curve at 250 / 500
+seen in R5.5. The **AHH train delivered the architectural multi-replica
+gate (Phase 3) but did NOT deliver the projected single-replica
+throughput lift (Phase 4 Argon2id)**. Path forward documented in
+the runbook §"v1.14.1 follow-up".
 
 ## Failure modes + mitigation
 

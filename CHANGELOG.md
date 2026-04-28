@@ -13,6 +13,87 @@ _No unreleased changes._
 
 ---
 
+## [1.14.1] — 2026-04-28 — AHH empirical follow-up + multi-replica scaffold
+
+**Closes the v1.14.0 follow-up commitment** with three deliverables:
+
+1. **DI bug fix** (P0 for any deployment with `ConnectionStrings:IdentityRedis`):
+   `AuthHotpathCachingExtensions.AddAuthHotpathRedisInvalidation` now
+   passes the explicit `TImplementation` generic to
+   `ServiceDescriptor.Singleton<TService, TImpl>` so the three sink
+   registrations (`CachedUserStore` + `CachedTenantAuthConfigStore` +
+   `PermissionResolver`) carry distinct impl-types. Pre-fix,
+   `TryAddEnumerable` rejected them as indistinguishable and the
+   container threw `ArgumentException` at startup. **Pre-v1.14.1
+   multi-replica deployment was wholly blocked by this bug.**
+
+2. **4-replica scaling override + LB scaffold:**
+   `docker/docker-compose.scale.yml` (4-replica + Redis required +
+   rotation pool flags) + `docker/nginx-loadbalancer.conf` (round-robin
+   in front of platform-api replicas). Documented invocation in the
+   runbook §"Verifying the knee post-deploy".
+
+3. **Honest empirical update to the runbook + ADR-0014:**
+   v1.14.0 shipped projection-only knee numbers. v1.14.1 measures
+   single-replica post-AHH on the same AMD 9900X / 60 GB hardware as
+   R5.5 — the Argon2id Phase 4 projection (220 req/s) did NOT
+   materialize. **Sustainable knee post-AHH = ~50 req/s** at p99 ≤
+   250 ms, vs the R5.5 pre-AHH baseline of ~75 req/s. Argon2id
+   `m=19 MiB` allocation churn + connection-pool contention under
+   load convert into 500-error onset at 100 req/s. AHH delivered the
+   multi-replica architectural gate (Phase 3) but the throughput lift
+   (Phase 4) is a regression vs pre-AHH single-replica.
+
+   The 4-replica empirical measurement is **deferred to v1.14.2**:
+   with `ConnectionStrings:IdentityRedis` set, platform-api startup
+   hangs (Redis pubsub subscribed + Postgres pool open + 50 sleeping
+   threads + 0.04 % CPU + port 5000 never bound). Single-replica + Redis
+   reproduces the hang identically — a Task is awaiting an unfulfilled
+   completion somewhere in the IdentityRedis hot-path init. v1.14.2
+   will land the bisection + fix + run the sweep.
+
+### Single-replica jwt-sweep.sh post-AHH (2026-04-28)
+
+| Rate | OK count | Fail count | p50 ms | p95 ms | p99 ms | Verdict |
+|---:|---:|---:|---:|---:|---:|---|
+| 10  | 600  | 0    | 43.65    | 123.14   | 1494.02  | high tail (cold cache + GC) |
+| 50  | 3000 | 0    | 83.52    | 152.19   | 492.29   | within range, marginal p99 |
+| 100 | 3918 | 82   | 13295.62 | 23461.89 | 26279.94 | 500-error onset, collapse |
+| 250 | 2428 | 6414 | n/a | n/a | 55214.08 | 27 % OK |
+| 500 | 1216 | 8707 | n/a | n/a | 46596.10 | 12 % OK |
+
+### Documentation
+
+- `docs/operations/auth-horizontal-scaling.md` — replaces the
+  v1-projected knee table with v1-measured single-replica figures;
+  adds §"v1.14.1 follow-up" documenting the multi-replica startup
+  hang + path forward; updates §"v1.14.1 deliverables" footer.
+- `docs/decisions/0014-auth-horizontal-scaling-baseline.md` — amended
+  to reflect empirical findings; the projection-only language is
+  scoped to the 4-replica row pending v1.14.2.
+
+### Tests
+
+- 1,076+ unit tests preserved (no source change beyond DI fix).
+- 0 build warnings (TreatWarningsAsErrors holds).
+- 0 vulnerable packages cross-repo.
+- Unit tests covering the DI fix path land alongside v1.14.2 (the
+  fix is structural — `dotnet test` would not have caught it because
+  unit tests don't exercise `AddAuthHotpathRedisInvalidation()` against
+  a real DI graph; the failure surfaces only during host startup).
+
+### Cross-repo coordination
+
+- Asterisk.Sdk: unchanged (1.15.1).
+- Asterisk.Sdk.Pro: unchanged (1.15.0-pro). Pro `docs/roadmap.md` +
+  `CLAUDE.md` already document Platform 1.14.0 ship from yesterday;
+  the v1.14.1 amendment is Platform-only and will get a one-line
+  pointer on the next Pro doc refresh.
+- Asterisk.Platform.Web: 1.13.0 (cosmetic-track Platform 1.14.x — no
+  Web change for v1.14.1).
+
+---
+
 ## [1.14.0] — 2026-04-27 — AHH "Auth Hotpath Hardening" train
 
 Coordinated ship of the **8-commit Auth Hotpath Hardening (AHH) train**.

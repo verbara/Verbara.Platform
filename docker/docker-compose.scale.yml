@@ -1,0 +1,73 @@
+# docker/docker-compose.scale.yml — 4-replica scaling override.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.full.yml \
+#                  -f docker/docker-compose.scale.yml \
+#                  up -d --wait --scale platform-api=4
+#
+# What this override does, layered on top of docker-compose.full.yml:
+#
+# 1. Removes the platform-api host-port bind. With multiple replicas, the
+#    bind would conflict (only one container can own host:5000). Each
+#    replica still listens on its container-local 5000 — accessed via
+#    the nginx LB.
+# 2. Activates the rotation pool + Redis-backed JWT key store via the
+#    flags `Identity:JwtKeyRotation:UseRotationPool=true` +
+#    `RequireRedisStore=true`. Without these, replicas would generate
+#    per-replica RSA keys → tokens issued by replica A would reject on
+#    replica B.
+# 3. Activates the cross-replica auth cache pubsub via
+#    `ConnectionStrings:IdentityRedis=redis:6379`.
+# 4. Drops the profile gate on the redis service so it runs by default
+#    with this override applied.
+# 5. Adds an nginx round-robin LB owning host:5000 → platform-api:5000.
+#    nginx resolves platform-api at startup, picks up all replica IPs
+#    via Docker embedded DNS, and round-robins requests across them.
+#
+# Pre-flight (per ADR-0012 multi-replica gate):
+#   - DataProtection wired to PlatformDataProtectionDbContext (default).
+#   - Identity Redis caches registered (auto via env above).
+#   - PostgreSQL `max_connections` ≥ replicas × api_pool_max + 20
+#     (default 100; sufficient for the 4×50=200 + 20 headroom this
+#     override needs — see auth-horizontal-scaling.md §"Postgres pool tuning").
+#
+# Verify post-up:
+#   curl -sf http://localhost:5000/health
+#   docker compose -f docker/docker-compose.full.yml \
+#                  -f docker/docker-compose.scale.yml \
+#                  ps platform-api  # expect 4 containers
+
+services:
+  platform-api:
+    # Reset the host-port bind from full.yml (only the nginx-lb owns the host port).
+    ports: !reset []
+    environment:
+      # Inherits all values from full.yml; the keys below are merged in.
+      Identity__JwtKeyRotation__UseRotationPool: "true"
+      Identity__JwtKeyRotation__RequireRedisStore: "true"
+      ConnectionStrings__IdentityRedis: redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    # full.yml gates redis on the `cluster` / `identity-redis` profiles.
+    # Reset that gating so this override turns it on unconditionally.
+    profiles: !reset []
+
+  nginx-lb:
+    image: nginx:alpine
+    ports:
+      - "5000:80"
+    volumes:
+      - ./nginx-loadbalancer.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped

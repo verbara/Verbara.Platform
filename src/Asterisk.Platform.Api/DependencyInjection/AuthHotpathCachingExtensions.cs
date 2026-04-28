@@ -79,11 +79,15 @@ public static class AuthHotpathCachingExtensions
         services.TryAddSingleton<RedisAuthCacheInvalidator>();
 
         // Sinks are resolved by the invalidator constructor (IEnumerable<...>).
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ILocalAuthCacheInvalidationSink>(
+        // The TImplementation generic must differ across calls — otherwise
+        // TryAddEnumerable treats the three registrations as duplicates of
+        // the same impl-type and throws "Implementation type cannot be ...
+        // indistinguishable from other services registered for ...".
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ILocalAuthCacheInvalidationSink, CachedUserStore>(
             sp => sp.GetRequiredService<CachedUserStore>()));
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ILocalAuthCacheInvalidationSink>(
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ILocalAuthCacheInvalidationSink, CachedTenantAuthConfigStore>(
             sp => sp.GetRequiredService<CachedTenantAuthConfigStore>()));
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ILocalAuthCacheInvalidationSink>(
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ILocalAuthCacheInvalidationSink, PermissionResolver>(
             sp => sp.GetRequiredService<PermissionResolver>()));
 
         services.AddHostedService(sp => sp.GetRequiredService<RedisAuthCacheInvalidator>());

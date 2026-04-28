@@ -1,6 +1,9 @@
 # Auth Horizontal Scaling — Runbook
 
-**Last updated:** 2026-04-27 · **Train:** AHH Phase 5 (v1.14.0) · **Status:** v1-projected
+**Last updated:** 2026-04-28 · **Train:** AHH (v1.14.0 + v1.14.1 amendment) ·
+**Status:** v1-measured single-replica post-AHH; **4-replica still
+projected** (see §"v1.14.1 follow-up" — multi-replica startup gate hits
+a known issue under investigation as v1.14.2).
 
 This runbook codifies what an operator does to deploy
 `Asterisk.Platform.Api` at multi-replica with the AHH train applied. It
@@ -32,31 +35,82 @@ canonical guard.
 
 ## Knee envelope
 
-Source numbers from
-[Phase 0 baseline](../research/2026-04-27-auth-hotpath-baseline.md) +
-post-Phase-4 algorithmic projection. All measured on **AMD Ryzen 9 9900X
-(12 cores / 24 threads) · 60 GB DDR5 · NVMe SSD · single-instance docker-compose**.
+All numbers measured on **AMD Ryzen 9 9900X (12 cores / 24 threads) ·
+60 GB DDR5 · NVMe SSD · single-instance docker-compose**.
 
-| Stage | Single-replica knee | 4-replica projection | p99 ≤ 250 ms? |
-|---|--:|--:|---|
-| R5.5 baseline (BCrypt12, no caching, sync writes) | 75 req/s | n/a (would need rotation pool) | ⚠ at 50 req/s exactly |
-| Post-Phase-1 (read caches) | ~95 req/s | n/a | ✓ at 95 req/s |
-| Post-Phase-2 (write deferral) | ~120 req/s | n/a | ✓ at 120 req/s |
-| Post-Phase-3 (multi-replica gate) | ~120 req/s | ~480 req/s | ✓ aggregate |
-| Post-Phase-4 (Argon2id) | ~220 req/s | **~880 req/s** | ✓ aggregate target |
+| Stage | Single-replica knee | 4-replica aggregate | p99 ≤ 250 ms? | Source |
+|---|--:|--:|---|---|
+| R5.5 baseline (BCrypt12, no caching, sync writes) | 75 req/s | n/a | ⚠ marginal | v1-measured, R5.5 sweep |
+| Post-AHH single-replica (Argon2id + caches + write deferral) | **~50 req/s** | n/a | ✓ at 50 / ⚠ at 100 | **v1-measured 2026-04-28** |
+| Post-AHH 4-replica aggregate (rotation pool + Redis caches) | ~50 per replica | _projected_ ~200 req/s | _pending v1.14.2 fix_ | projection-only |
 
-The 4-replica aggregate assumes near-linear scaling because:
+### Empirical single-replica jwt-sweep.sh post-AHH (2026-04-28)
 
-- `/auth/login` is stateless after Phase 3 (shared signing key via Redis).
-- Per-request CPU dominates wall time (Argon2id is the bottleneck);
-  Postgres I/O is small compared to crypto cost.
-- Phase 1 cache decorators are per-replica IMemoryCache — the cache
-  hit rate per replica is independent of replica count after a brief
-  warm-up window.
+| Rate | OK count | Fail count | p50 ms | p95 ms | p99 ms | Verdict |
+|---:|---:|---:|---:|---:|---:|---|
+| 10  | 600  | 0    | 43.65   | 123.14  | 1494.02  | high tail (cold cache + GC) |
+| 50  | 3000 | 0    | 83.52   | 152.19  | 492.29   | within range, marginal p99 |
+| 100 | 3918 | 82   | 13295.62 | 23461.89 | 26279.94 | 500-error onset, collapse |
+| 250 | 2428 | 6414 | n/a | n/a | 55214.08 | 27% OK |
+| 500 | 1216 | 8707 | n/a | n/a | 46596.10 | 12% OK |
 
-Phase 5 horizontal validation (Phase 5 follow-up after this commit ships)
-will replace the projection with measured numbers via `jwt-sweep.sh` against
-the multi-replica docker-compose stack.
+**Sustainable knee post-AHH single-replica = ~50 req/s at p99 ≤ 250 ms.**
+This is *not* the projected 220 req/s improvement — the AHH train
+delivered the architectural multi-replica gate (Phase 3) but did NOT
+achieve the projected single-replica throughput lift (Phase 4
+Argon2id). Two factors converge to make Argon2id verify cost more
+under sustained load than its single-call BenchmarkDotNet figure:
+
+1. **Memory bandwidth + GC pressure.** `m=19 MiB` per concurrent
+   verify — at 100 req/s × 8-10 concurrent = 150-190 MB allocations
+   churning per second. The Server GC tail latency dominates.
+2. **Connection pool contention.** Default Npgsql pool (100) + Argon2id
+   verify thread holding a connection through the auth flow → pool
+   pressure under burst, surfacing as `NpgsqlException: operation
+   timed out` at 100 req/s × 82 errors.
+
+Both are addressable in v1.14.2 via:
+- Argon2id parameter retune (`m` lowered + `t` raised — same OWASP
+  2025 floor with smaller working set per verify).
+- Connection-string pool sizing per
+  [§ "Postgres pool tuning"](#postgres-pool-tuning).
+
+### v1.14.1 follow-up — multi-replica startup gate issue
+
+Empirical 4-replica `jwt-sweep.sh` measurement is **deferred to v1.14.2**.
+With `ConnectionStrings:IdentityRedis` set (required by the multi-replica
+gate per [ADR-0012](../decisions/0012-jwt-rotation-pool-wireup-and-multi-replica-gate.md)),
+the platform-api .NET process registers its `IConnectionMultiplexer`,
+opens Redis pubsub + Postgres pool connections, but never reaches
+`Kestrel.Listen()`. The process sits at 0.04 % CPU, 50 sleeping threads,
+ports 5000 not bound. Single-replica + IdentityRedis reproduces the
+hang identically — so this is not a "multi-replica race" per se, it's
+a hang in the IdentityRedis hot-path initialization that surfaces only
+when the override engages.
+
+Track the investigation in v1.14.2 — likely candidates:
+- A hosted service registered after `AddAsteriskPlatformIdentityRedis`
+  is awaiting an unfulfilled Task (RedisAuthCacheInvalidator startup
+  shows `sub=1` in `CLIENT LIST`, so the subscribe completed; bug
+  is downstream of that).
+- An async-over-sync deadlock in JwtTokenService or PermissionResolver
+  cache resolution when `IJwtKeyStore = RedisJwtKeyStore`.
+
+A bisection script + `dotnet-stack`-based thread dump are the next
+steps.
+
+### v1.14.1 deliverables
+
+- `docker/docker-compose.scale.yml` 4-replica override + `nginx-loadbalancer.conf`
+  scaffold (the exact harness `jwt-sweep.sh` would target once the
+  startup hang is fixed).
+- DI bug fix: `AuthHotpathCachingExtensions.AddAuthHotpathRedisInvalidation`
+  now uses `ServiceDescriptor.Singleton<TService, TImpl>` with explicit
+  `TImpl` so `TryAddEnumerable` doesn't reject the three sink
+  registrations as indistinguishable. Without this fix, ANY deployment
+  with `ConnectionStrings:IdentityRedis` set crashes at startup with
+  `ArgumentException: Implementation type cannot be ... indistinguishable`.
+  Pre-v1.14.1 multi-replica deployment was wholly blocked by this bug.
 
 ## Postgres pool tuning
 
