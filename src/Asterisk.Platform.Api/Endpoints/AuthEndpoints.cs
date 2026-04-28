@@ -74,6 +74,13 @@ internal static class AuthEndpoints
         [FromServices] ITenantAuthConfigStore configStore,
         [FromServices] IMfaPolicyEvaluator mfaPolicyEvaluator,
         [FromServices] IMfaPendingCache mfaCache,
+        // AHH Phase 4 — optional, used only on the on-login Argon2id rehash
+        // path. When the queue is not registered (tests / single-process
+        // bootstrap), the rehash is skipped silently and the legacy BCrypt
+        // hash stays in the user row until the next deploy that wires the
+        // queue. The migration is bounded by the user's login activity, not
+        // calendar time.
+        [FromServices] AuthWriteQueue? authWriteQueue,
         CancellationToken ct)
     {
         // Resolve tenant: body > middleware context (header/subdomain)
@@ -106,6 +113,19 @@ internal static class AuthEndpoints
             await authEvents.LogAsync(rawTenantId!, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
                 new Dictionary<string, string> { ["reason"] = "invalid_password" }, ct);
             return Results.Unauthorized();
+        }
+
+        // AHH Phase 4 — on successful login, if the stored hash is still
+        // legacy BCrypt, recompute it as Argon2id and enqueue the upsert.
+        // The hash is computed synchronously inside the request to avoid
+        // putting the plaintext password on the queue. ~30 ms one-shot per
+        // user; subsequent logins for that user verify Argon2id (~33 ms vs
+        // BCrypt12's ~162 ms — the dominant Phase 4 perf win).
+        if (authWriteQueue is not null && PasswordService.IsBcryptHash(user.PasswordHash))
+        {
+            var newHash = PasswordService.HashPassword(body.Password);
+            authWriteQueue.TryEnqueue(new PasswordRehashCommand(
+                user.TenantId.Value, user.UserId.Value, newHash));
         }
 
         // v1.9.0 P0 — Tenant MFA policy enforcement (Gap 1).

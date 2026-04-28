@@ -173,7 +173,9 @@ internal sealed partial class AuthWriteQueue : BackgroundService
         var authEventStore = scope.ServiceProvider.GetRequiredService<IAuthEventStore>();
 
         // Coalesce user-mutating commands by user. Last-writer-wins for the
-        // LastLoginAt timestamp; ResetLockoutCounters is idempotent.
+        // LastLoginAt timestamp; ResetLockoutCounters is idempotent;
+        // PasswordRehash is last-writer-wins on NewHash (rare to coalesce
+        // since the same user logging in twice in 250 ms is unusual).
         var userMutations = new Dictionary<(string TenantId, string UserId), UserMutation>();
         var logEvents = new List<LogSuccessEventCommand>();
 
@@ -198,6 +200,14 @@ internal sealed partial class AuthWriteQueue : BackgroundService
                     userMutations[key] = existing;
                     break;
                 }
+                case PasswordRehashCommand p:
+                {
+                    var key = (p.TenantId, p.UserId);
+                    var existing = userMutations.TryGetValue(key, out var v) ? v : default;
+                    existing.NewPasswordHash = p.NewHash;
+                    userMutations[key] = existing;
+                    break;
+                }
                 case LogSuccessEventCommand l:
                     logEvents.Add(l);
                     break;
@@ -219,6 +229,8 @@ internal sealed partial class AuthWriteQueue : BackgroundService
                         _failed.Add(1, new KeyValuePair<string, object?>("type", "update_last_login_at"));
                     if (mutation.ResetLockout)
                         _failed.Add(1, new KeyValuePair<string, object?>("type", "reset_lockout_counters"));
+                    if (mutation.NewPasswordHash is not null)
+                        _failed.Add(1, new KeyValuePair<string, object?>("type", "password_rehash"));
                     continue;
                 }
 
@@ -229,6 +241,8 @@ internal sealed partial class AuthWriteQueue : BackgroundService
                     user.FailedLoginAttempts = 0;
                     user.LockedUntil = null;
                 }
+                if (mutation.NewPasswordHash is not null)
+                    user.PasswordHash = mutation.NewPasswordHash;
 
                 await userStore.SaveAsync(user, ct).ConfigureAwait(false);
 
@@ -236,6 +250,8 @@ internal sealed partial class AuthWriteQueue : BackgroundService
                     _processed.Add(1, new KeyValuePair<string, object?>("type", "update_last_login_at"));
                 if (mutation.ResetLockout)
                     _processed.Add(1, new KeyValuePair<string, object?>("type", "reset_lockout_counters"));
+                if (mutation.NewPasswordHash is not null)
+                    _processed.Add(1, new KeyValuePair<string, object?>("type", "password_rehash"));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -243,6 +259,8 @@ internal sealed partial class AuthWriteQueue : BackgroundService
                     _failed.Add(1, new KeyValuePair<string, object?>("type", "update_last_login_at"));
                 if (mutation.ResetLockout)
                     _failed.Add(1, new KeyValuePair<string, object?>("type", "reset_lockout_counters"));
+                if (mutation.NewPasswordHash is not null)
+                    _failed.Add(1, new KeyValuePair<string, object?>("type", "password_rehash"));
                 LogUserMutationFailed(_logger, ex, key.TenantId, key.UserId);
             }
         }
@@ -285,6 +303,7 @@ internal sealed partial class AuthWriteQueue : BackgroundService
         public DateTimeOffset LastLoginAt;
         public bool HasLastLogin;
         public bool ResetLockout;
+        public string? NewPasswordHash;
     }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,

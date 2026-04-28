@@ -499,6 +499,7 @@ public sealed class MfaPolicyEnforcementTests
                 ConfigStore,
                 MfaPolicyEvaluator,
                 MfaPendingCache,
+                authWriteQueue: null, // AHH Phase 4 — null queue → rehash skipped (test path)
                 CancellationToken.None);
 
         public Task<IResult> InvokeApiKeyLoginAsync(ApiKeyLoginRequest body) =>

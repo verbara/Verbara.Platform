@@ -130,6 +130,51 @@ public sealed class AuthWriteQueueTests
     }
 
     [Fact]
+    public async Task Consumer_ShouldUpdatePasswordHash_WhenPasswordRehashCommandEnqueued()
+    {
+        // AHH Phase 4 — the on-login rehash flow enqueues PasswordRehashCommand
+        // after a successful BCrypt verify. The consumer must re-fetch the user,
+        // overwrite PasswordHash, and persist via SaveAsync.
+        var (userStore, _, services) = NewStubStores();
+        using var sut = NewQueue(services: services);
+
+        const string newArgon2idHash = "$argon2id$v=19$m=19456,t=2,p=1$NEW_HASH_PLACEHOLDER";
+        sut.TryEnqueue(new PasswordRehashCommand("t1", "u1", newArgon2idHash));
+
+        await StartAndDrain(sut);
+
+        await userStore.Received(1).SaveAsync(
+            Arg.Is<User>(u => u.PasswordHash == newArgon2idHash),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Consumer_ShouldCoalesceRehashAndLastLogin_WhenSameUserHasBoth()
+    {
+        var (userStore, _, services) = NewStubStores();
+        using var sut = NewQueue(services: services);
+
+        var loginAt = DateTimeOffset.UtcNow;
+        const string newHash = "$argon2id$v=19$m=19456,t=2,p=1$RESH";
+        sut.TryEnqueue(new PasswordRehashCommand("t1", "u1", newHash));
+        sut.TryEnqueue(new UpdateLastLoginAtCommand("t1", "u1", loginAt));
+        sut.TryEnqueue(new ResetLockoutCountersCommand("t1", "u1"));
+
+        await StartAndDrain(sut);
+
+        // Single read + single save covering all three mutations.
+        await userStore.Received(1).GetByIdAsync(
+            Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>());
+        await userStore.Received(1).SaveAsync(
+            Arg.Is<User>(u =>
+                u.PasswordHash == newHash &&
+                u.LastLoginAt == loginAt &&
+                u.FailedLoginAttempts == 0 &&
+                u.LockedUntil == null),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Consumer_ShouldDrainPendingItems_OnGracefulShutdown()
     {
         var (_, authEventStore, services) = NewStubStores();

@@ -54,6 +54,11 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Scalar.AspNetCore" />
     <PackageReference Include="BCrypt.Net-Next" />
+    <!-- AHH Phase 4: Argon2id replaces BCrypt as the canonical password hash.
+         BCrypt.Net-Next stays as a verify-only legacy path so already-hashed
+         passwords keep working across the on-login transparent rehash. See
+         docs/decisions/0013-password-hash-algorithm-migration.md. -->
+    <PackageReference Include="Isopoh.Cryptography.Argon2" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" />
     <PackageReference Include="Otp.NET" />

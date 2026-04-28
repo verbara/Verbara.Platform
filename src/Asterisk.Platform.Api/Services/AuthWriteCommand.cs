@@ -48,3 +48,18 @@ internal sealed record LogSuccessEventCommand(
 {
     public override string TypeName => "log_success_event";
 }
+
+/// <summary>
+/// Defer a <c>users.password_hash</c> upsert. AHH Phase 4 — the login handler
+/// enqueues this command after a successful BCrypt verify so the user's hash
+/// migrates to Argon2id transparently on the next request cycle. The new
+/// hash is computed synchronously inside the request to avoid putting the
+/// plaintext password on a queue.
+/// </summary>
+internal sealed record PasswordRehashCommand(
+    string TenantId,
+    string UserId,
+    string NewHash) : AuthWriteCommand
+{
+    public override string TypeName => "password_rehash";
+}
