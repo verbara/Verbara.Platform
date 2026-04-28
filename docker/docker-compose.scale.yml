@@ -45,6 +45,11 @@ services:
       # Inherits all values from full.yml; the keys below are merged in.
       Identity__JwtKeyRotation__UseRotationPool: "true"
       Identity__JwtKeyRotation__RequireRedisStore: "true"
+      # v1.14.4 (MFA-007) — companion flag covering MFA + password-reset +
+      # JTI revocation caches. Without this guard, multi-replica deploys
+      # could silently fall back to in-memory caches and lose MFA state on
+      # cross-replica request handoff.
+      Identity__RequireRedisIdentityCaches: "true"
       ConnectionStrings__IdentityRedis: redis:6379
       # v1.14.2 — explicit Postgres pool sizing for multi-replica deployments.
       # Default Npgsql pool max=100. With 4 replicas at this default, total

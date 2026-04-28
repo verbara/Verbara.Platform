@@ -594,6 +594,33 @@ builder.Services.AddSingleton<Asterisk.Platform.Identity.Mfa.IPasswordResetCache
     Asterisk.Platform.Identity.Mfa.InMemoryPasswordResetCache>();
 
 var identityRedisConn = builder.Configuration.GetConnectionString("IdentityRedis");
+
+// v1.14.4 (MFA-007 fix) — multi-replica deployments MUST set both
+// `Identity:RequireRedisIdentityCaches=true` and a non-empty
+// `ConnectionStrings:IdentityRedis`. Without Redis-backed
+// IMfaPendingCache + IPasswordResetCache + IJtiRevocationCache, an MFA
+// challenge issued by replica A is invisible to replica B (the user
+// gets 401 on submission); a password-reset email link clicked through
+// to a different replica fails identically. The fail-fast guard makes
+// this misconfiguration surface at startup instead of as silent runtime
+// 401s. The flag defaults to false to preserve single-replica behavior.
+//
+// Note: AHH already has `Identity:JwtKeyRotation:RequireRedisStore` for
+// the JWT key path; this companion flag covers MFA + password-reset +
+// JTI revocation caches that are independent of the rotation pool.
+var requireRedisIdentityCaches =
+    builder.Configuration.GetValue<bool>("Identity:RequireRedisIdentityCaches");
+if (requireRedisIdentityCaches && string.IsNullOrWhiteSpace(identityRedisConn))
+{
+    throw new InvalidOperationException(
+        "Identity:RequireRedisIdentityCaches=true but ConnectionStrings:IdentityRedis is not set. " +
+        "Multi-replica deployments require Redis-backed IMfaPendingCache + IPasswordResetCache + " +
+        "IJtiRevocationCache so MFA challenges and password-reset tokens issued on one replica " +
+        "remain valid when the user's next request lands on a different replica. " +
+        "Set ConnectionStrings:IdentityRedis OR set RequireRedisIdentityCaches=false to acknowledge " +
+        "single-replica operation.");
+}
+
 if (!string.IsNullOrWhiteSpace(identityRedisConn))
 {
     builder.Services.AddAsteriskPlatformIdentityRedis(o =>
@@ -1070,6 +1097,15 @@ if (app.Environment.IsProduction())
         var amiPass = builder.Configuration["Asterisk:Ami:Password"];
         if (string.IsNullOrEmpty(amiUser) || string.IsNullOrEmpty(amiPass))
             configErrors.Add("Asterisk:Ami:Username and Password are required when Ami:Hostname is set");
+        // v1.14.4 (CFG-003 fix) — explicitly reject the appsettings.Development.json
+        // dev values (`admin`/`admin`) so a misconfigured production deploy
+        // doesn't silently inherit them via the development-profile fallback.
+        else if (string.Equals(amiUser, "admin", StringComparison.Ordinal)
+                 && string.Equals(amiPass, "admin", StringComparison.Ordinal))
+            configErrors.Add(
+                "Asterisk:Ami credentials match the appsettings.Development.json " +
+                "fallback (admin/admin) — set via env var or user-secrets before " +
+                "deploying to production");
     }
 
     if (configErrors.Count > 0)

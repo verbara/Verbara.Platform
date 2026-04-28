@@ -13,6 +13,13 @@
     <EnableAotAnalyzer>false</EnableAotAnalyzer>
     <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
     <IsPackable>false</IsPackable>
+    <!-- v1.14.4 (CFG-003 fix) — enables `dotnet user-secrets` for the
+         Development environment so devs don't need plaintext credentials in
+         appsettings.Development.json. Once a user-secret is set, ASP.NET
+         Core's configuration provider chain reads it BEFORE
+         appsettings.Development.json so any literal value in that file is
+         overridden silently in dev. -->
+    <UserSecretsId>asterisk-platform-api-dev</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

@@ -13,6 +13,117 @@ _No unreleased changes._
 
 ---
 
+## [1.14.4] — 2026-04-28 — Known-debt patches: AUTH-002 + CFG-003 + MFA-007
+
+**Closes three v1.13.x known-debt items** that have been on the roadmap
+since R5.5. Pure security/config hardening — no behavior change for
+correctly-configured deployments.
+
+### 1. AUTH-002 — query-string token paths now scoped (security)
+
+**Pre-v1.14.4 behavior**: `?token=…` and `?access_token=…` query-string
+JWTs were honored on **every** endpoint, including admin CRUD and
+domain APIs. This created three exfiltration risks:
+
+- Tokens leak into reverse-proxy / load-balancer access logs.
+- Tokens persist in browser history.
+- Tokens leak to third-party origins via the HTTP `Referer` header.
+
+**v1.14.4 fix**: query-string tokens are now accepted **only** for paths
+that legitimately can't carry an `Authorization` header:
+
+- `/hubs/**` — SignalR hubs (browser WebSocket handshake).
+- `/events/stream**` — SSE (browser `EventSource` doesn't support headers).
+- `/api/v*/recordings/{sessionId}/stream` — `<audio>` element playback.
+
+For all other paths the query-string token is silently ignored and the
+request falls through to API-key authentication. Both call-sites in
+`AuthSchemeConfiguration` (the `ForwardDefaultSelector` and the
+`JwtBearerEvents.OnMessageReceived`) are gated by the new
+`AuthSchemeConfiguration.IsQueryTokenPathAllowed` predicate.
+
+### 2. CFG-003 — Development-only secrets hardened
+
+**Pre-v1.14.4**: `appsettings.Development.json` carried plaintext
+defaults (`Asterisk:Ami:Password = "admin"`, `Services:ServiceKey =
+"platform_internal_secret"`) with no in-band marker that they were
+explicitly dev-only. The Production guard rejected the ServiceKey
+default but didn't catch the AMI dev credentials.
+
+**v1.14.4 fix**:
+
+- `Asterisk.Platform.Api.csproj` declares
+  `<UserSecretsId>asterisk-platform-api-dev</UserSecretsId>` so devs can
+  override these values via `dotnet user-secrets set …` without editing
+  the file (user-secrets provider takes precedence over the JSON file
+  at runtime).
+- `appsettings.Development.json` carries an inline `_README` field
+  explicitly flagging the values as dev-only and pointing at the
+  user-secrets workflow.
+- The Production startup guard now also rejects the dev AMI credentials
+  (`admin`/`admin`) — previously it only checked for empty values.
+
+### 3. MFA-007 — multi-replica MFA fail-loud guard
+
+**Pre-v1.14.4**: when an operator deployed multi-replica without
+`ConnectionStrings:IdentityRedis` set, MFA challenges and password-reset
+tokens fell back to per-replica in-memory caches. Symptoms:
+
+- MFA challenge issued by replica A → user submits 6-digit code → request
+  load-balanced to replica B → 401 (challenge not in B's memory).
+- Password-reset email link → user clicks → request lands on a different
+  replica → token not found.
+
+Previously these failed silently as runtime 401s after the user already
+trusted the email. AHH's existing `Identity:JwtKeyRotation:RequireRedisStore`
+flag covered the JWT key path but not the MFA / password-reset / JTI
+caches.
+
+**v1.14.4 fix**: companion flag `Identity:RequireRedisIdentityCaches`.
+When set to `true`, startup throws `InvalidOperationException` if
+`ConnectionStrings:IdentityRedis` is missing — same fail-fast posture
+as `RequireRedisStore`. Default `false` preserves single-replica
+behavior. `docker/docker-compose.scale.yml` sets this flag to `true`
+alongside the existing rotation-pool flags so the 4-replica template
+template is correct out of the box.
+
+### Files changed
+
+- `src/Asterisk.Platform.Api/Auth/AuthSchemeConfiguration.cs` (path-scoping)
+- `src/Asterisk.Platform.Api/Asterisk.Platform.Api.csproj` (UserSecretsId)
+- `src/Asterisk.Platform.Api/appsettings.Development.json` (_README banner)
+- `src/Asterisk.Platform.Api/Program.cs` (Production AMI guard + RequireRedisIdentityCaches)
+- `docker/docker-compose.scale.yml` (RequireRedisIdentityCaches=true)
+- `tests/Asterisk.Platform.Api.Tests/AuthSchemeConfigurationTests.cs` (new — 21 path-scoping cases)
+
+### Tests
+
+- **877 / 877** Api.Tests passing (was 856 pre-v1.14.4; +21 AUTH-002
+  regression cases).
+- 0 build warnings (TreatWarningsAsErrors holds).
+- 0 vulnerable packages cross-repo.
+
+### Wire compatibility
+
+- AUTH-002 is a tightening; correctly-configured callers (Authorization
+  header on API calls; query-string only on SignalR/SSE/recording-stream
+  paths) see no behavior change. Mis-configured callers that rely on
+  query-string tokens for regular API calls will start receiving 401 —
+  this is the intended security correction.
+- CFG-003 is dev-only; production deployments unaffected unless they
+  inadvertently inherited the AMI dev credentials, in which case startup
+  fails fast (intended).
+- MFA-007 is opt-in via the new flag; existing single-replica deployments
+  see no behavior change.
+
+### Cross-repo coordination
+
+- Asterisk.Sdk: unchanged (1.15.1).
+- Asterisk.Sdk.Pro: unchanged (1.15.0-pro).
+- Asterisk.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
+
+---
+
 ## [1.14.3] — 2026-04-28 — PLATFORMAPI patches: 500→409 on duplicate + ?email= filter
 
 **Closes R5.5 P0 findings #4 and #5** that were workaround-ed in
