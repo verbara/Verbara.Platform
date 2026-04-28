@@ -196,17 +196,23 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AuthWriteQueue>())
 
 // ─── Storage ─────────────────────────────────────────────────────────────────
 // ADR-0015 Phase 1 — wrap every connection string read with
-// ConnectionStringDefaults.ApplyPoolDefaults so the 14 NpgsqlDataSources
-// across Platform.Storage.Postgres + the Pro storage packages inherit
-// SMB-tier pool sizing (Maximum Pool Size=10, Minimum=2, Idle=300) when
-// the operator hasn't specified an explicit value. Operator-set values
-// pass through verbatim. Helper is idempotent so repeated calls are safe
-// (ApplyPoolDefaults reuses the augmented chain in analytics/live).
+// ConnectionStringDefaults.ApplyPoolDefaults so the NpgsqlDataSources across
+// Platform.Storage.Postgres + the Pro storage packages inherit SMB-tier pool
+// sizing (Maximum Pool Size=10, Minimum=2, Idle=300) when the operator hasn't
+// specified an explicit value. Operator-set values pass through verbatim.
+//
+// ADR-0015 Phase 2 — build ONE NpgsqlDataSource per distinct connection string
+// and share it across Platform + every Pro Use*/Add* call. Collapses the
+// 14-pool sprawl identified in R5.5 Phase C-L into 1 pool per distinct conn
+// string. Pro 1.16.0-pro / ADR-0008 supplies the `(NpgsqlDataSource)` overload
+// surface that consumes the shared instances.
 var coreConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Postgres"));
+NpgsqlDataSource? sharedCoreDataSource = null;
 if (!string.IsNullOrEmpty(coreConnectionString))
 {
-    builder.Services.AddPostgresStorage(coreConnectionString);
+    sharedCoreDataSource = new NpgsqlDataSourceBuilder(coreConnectionString).Build();
+    builder.Services.AddPostgresStorage(sharedCoreDataSource);
 
     // Apply Platform SQL migrations eagerly (before Pro EnsureSchemaAsync which references Platform tables)
     Asterisk.Platform.Api.Services.DatabaseMigrationService.ApplyMigrations(coreConnectionString);
@@ -221,6 +227,24 @@ if (!string.IsNullOrEmpty(coreConnectionString))
 else
 {
     builder.Services.AddInMemoryStorage();
+}
+
+// ADR-0015 Phase 2 helper — return the shared core DataSource when the supplied
+// connection string matches the core (most common deployment shape) so all Pro
+// packages share one pool; otherwise build a dedicated DataSource for the
+// distinct connection string (still a single instance per distinct conn string,
+// not per package).
+NpgsqlDataSource? ResolveDataSource(string? candidateConnectionString)
+{
+    if (string.IsNullOrEmpty(candidateConnectionString))
+    {
+        return null;
+    }
+    if (sharedCoreDataSource is not null && string.Equals(candidateConnectionString, coreConnectionString, StringComparison.Ordinal))
+    {
+        return sharedCoreDataSource;
+    }
+    return new NpgsqlDataSourceBuilder(candidateConnectionString).Build();
 }
 
 // ─── AHH Phase 1: Auth Hot-Path Caching ─────────────────────────────────────
@@ -724,7 +748,7 @@ var dialerConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres")) ?? "";
 if (!string.IsNullOrEmpty(dialerConnectionString))
 {
-    builder.Services.UsePostgresDialerStorage(dialerConnectionString);
+    builder.Services.UsePostgresDialerStorage(ResolveDataSource(dialerConnectionString)!);
     builder.Services.AddProDialer(o => { });
     builder.Services.AddDialerRetentionTargets();
     builder.Services.AddHostedService<CampaignMetricsPoller>();
@@ -774,7 +798,7 @@ var clusterConn = ConnectionStringDefaults.ApplyPoolDefaults(
         ?? builder.Configuration.GetConnectionString("Postgres"));
 if (!string.IsNullOrEmpty(clusterConn))
 {
-    builder.Services.UsePostgresClusterTransport(clusterConn);
+    builder.Services.UsePostgresClusterTransport(ResolveDataSource(clusterConn)!);
 }
 
 // ─── Pro.MultiTenant ─────────────────────────────────────────────────────────
@@ -791,7 +815,7 @@ var realtimeConn = ConnectionStringDefaults.ApplyPoolDefaults(
         ?? builder.Configuration.GetConnectionString("Analytics")
         ?? builder.Configuration.GetConnectionString("Postgres")) ?? "";
 if (!string.IsNullOrEmpty(realtimeConn))
-    builder.Services.UsePostgresRealtimeStorage(realtimeConn);
+    builder.Services.UsePostgresRealtimeStorage(ResolveDataSource(realtimeConn)!);
 builder.Services.AddHostedService<RealtimeStateBridge>();
 
 // Queue membership service + desired state provider for reconciler
@@ -822,9 +846,10 @@ var analyticsConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Analytics")) ?? dialerConnectionString;
 if (!string.IsNullOrEmpty(analyticsConnectionString))
 {
-    builder.Services.UsePostgresEventStore(analyticsConnectionString);
-    builder.Services.AddProCallAnalyticsPostgres(analyticsConnectionString);
-    builder.Services.UsePostgresAnalyticsStore(analyticsConnectionString);
+    var analyticsDataSource = ResolveDataSource(analyticsConnectionString)!;
+    builder.Services.UsePostgresEventStore(analyticsDataSource);
+    builder.Services.AddProCallAnalyticsPostgres(analyticsDataSource);
+    builder.Services.UsePostgresAnalyticsStore(analyticsDataSource);
 
     // Pro engine registrations — require ICallSessionManager (wired by AddAsteriskSessionsMultiServer)
     builder.Services.AddAsteriskEventStore();
@@ -851,10 +876,17 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     var liveAnalyticsConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
         builder.Configuration.GetConnectionString("AnalyticsLive")) ?? analyticsConnectionString;
     builder.Services.AddAsteriskProAnalyticsLive();
-    builder.Services.UsePostgresProAnalyticsLive(liveAnalyticsConnectionString);
+    // Reuse analyticsDataSource when AnalyticsLive shares the conn string
+    // (typical), else build a dedicated DataSource for the distinct string.
+    var liveAnalyticsDataSource = string.Equals(
+        liveAnalyticsConnectionString, analyticsConnectionString, StringComparison.Ordinal)
+            ? analyticsDataSource
+            : ResolveDataSource(liveAnalyticsConnectionString)!;
+    builder.Services.UsePostgresProAnalyticsLive(liveAnalyticsDataSource);
 
-    // AgentAssist Postgres query stores (read-only endpoints for supervisor dashboard)
-    builder.Services.AddProAgentAssistPostgres(analyticsConnectionString);
+    // AgentAssist Postgres query stores (read-only endpoints for supervisor dashboard).
+    // Shares analyticsDataSource per ADR-0015 Phase 2.
+    builder.Services.AddProAgentAssistPostgres(analyticsDataSource);
 
     // Pro Retention targets (v1.8.0-pro) — DryRun=true default via AddProRetention
     builder.Services.AddEventStoreRetentionTargets();

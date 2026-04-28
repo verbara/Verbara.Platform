@@ -224,3 +224,40 @@ References:
 - ADR-0015 — npgsql-datasource-sharing-strategy
 - v1.14.5 CHANGELOG entry "ADR-0015 Phase 1 — Postgres pool sprawl mitigation"
 - Pro 1.16.0-pro plan skeleton: `docs/research/archived/2026-04-28-Pro-1.16.0-pro-shared-datasource-skeleton.md`
+
+## Update 2026-04-28 (R5.5 Phase C-L · v1.14.6 / Pro 1.16.0-pro)
+
+ADR-0015 Phase 2 shipped. Pro 1.16.0-pro now exposes
+`Use*Storage(IServiceCollection, NpgsqlDataSource)` overloads on every
+storage entry point, and Platform v1.14.6 builds one shared
+`NpgsqlDataSource` per distinct connection string and threads it through
+all Pro registration sites (`UsePostgresDialerStorage`,
+`UsePostgresClusterTransport`, `UsePostgresRealtimeStorage`,
+`UsePostgresEventStore`, `UsePostgresAnalyticsStore`,
+`UsePostgresProAnalyticsLive`, `AddProAgentAssistPostgres`,
+`AddProCallAnalyticsPostgres`).
+
+**`scale.yml` math is correct again.** With Phase 2 each replica owns
+**1 pool**, not 14:
+
+```
+4 replicas × 1 pool × Maximum Pool Size 50 = 200 conn demand
+                                           + 20 buffer
+                                           = max_connections=220 ✓
+```
+
+The `scale.yml` settings that landed in v1.14.2 (`max_connections=220`,
+`Maximum Pool Size=50` per replica) work as originally designed
+without further amendment.
+
+Phase 2 measured impact: VU=500 p99 dropped 69.5 → 57.06 ms (-18 %),
+VU=1000 p99 dropped 115.97 → ~107 ms (-8 %), VU=1500 p99 dropped
+174.21 → ~154 ms (-12 %). Throughput plateau unchanged at ~11 k RPS
+aggregate. Postgres post-sweep idle conns: 13 (Phase 1) → 13 (Phase 2 —
+same idle baseline; the savings are in active-pool overhead under
+load, not idle).
+
+References for Phase 2:
+- ADR-0015 § "Phase 2 measured impact (2026-04-28)"
+- v1.14.6 CHANGELOG entry
+- Pro 1.16.0-pro CHANGELOG entry + Pro ADR-0008

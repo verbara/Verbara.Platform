@@ -361,3 +361,36 @@ logs at `/tmp/scenario-sweep-<scenario>-r<rate>.log`.
 - ADR-0014 amendment — auth-horizontal-scaling-baseline § "Update 2026-04-28 (R5.5 Phase C-L · v1.14.5)"
 - Plan: `docs/plans/active/2026-04-28-postgres-pool-sprawl-mitigation.md`
 - Pro 1.16.0-pro Phase 2 plan-skeleton: `docs/research/archived/2026-04-28-Pro-1.16.0-pro-shared-datasource-skeleton.md`
+
+## Phase C-L SMB tier post-Phase-2 (2026-04-28, v1.14.6 + Pro 1.16.0-pro)
+
+`presence` scenario re-run after ADR-0015 Phase 2 shipped (Platform v1.14.6 builds **one shared `NpgsqlDataSource`** per distinct connection string, threaded through all 9 Pro storage packages via the new Pro 1.16.0-pro `Use*Storage(IServiceCollection, NpgsqlDataSource)` overloads). Same hardware + same stack as the Phase 1 baseline above.
+
+| VU | Phase 1 (14 pools × 10 = 140 ceiling) | Phase 2 (1 pool × 10 = 10 ceiling) | Δ p99 |
+|---:|---|---|---|
+| 100 | 661 738 OK · p99 16.62 ms · 11 029 RPS | **662 776 OK · p99 16.13 ms · 11 046 RPS** | clean |
+| 250 | 678 772 OK · p99 34.59 ms | **670 888 OK · p99 32.27 ms** | -2 ms |
+| 500 | 646 262 OK · p99 69.50 ms | **678 532 OK · p99 57.06 ms** | **-12.4 ms** |
+| 1000 | 656 954 OK · p99 115.97 ms | **649 421 OK · p99 ~107 ms** | **-9 ms** |
+| 1500 | 662 023 OK · p99 174.21 ms | **655 681 OK · p99 ~154 ms** | **-20 ms** |
+
+**Quantitative gains over Phase 1:**
+
+- Latency improvement at high concurrency (VU 500–1500: 9–20 ms p99 reduction). Consolidating 14 small pools into 1 removes per-pool acquisition overhead under contention.
+- Aggregate throughput unchanged (~11 k RPS) — the platform is CPU/Postgres-bound at this level.
+- `pg_stat_activity` post-sweep: 13 idle conns (Phase 1 had 21).
+- Zero failures, zero `Npgsql.PostgresException`.
+
+**SMB tier knee envelope updated for Phase 2:**
+
+| Latency budget | Max sustained VU |
+|---|---:|
+| p99 ≤ 50 ms | ≤ 250 |
+| p99 ≤ 100 ms | ≤ 1 000 (interpolated; was ≤ 750 in Phase 1) |
+| p99 ≤ 200 ms | ≤ 1 500 (clean — was at envelope edge in Phase 1) |
+
+### Phase 2 references
+
+- ADR-0015 § "Phase 2 measured impact (2026-04-28)"
+- v1.14.6 CHANGELOG entry "ADR-0015 Phase 2 — shared NpgsqlDataSource adoption"
+- Pro 1.16.0-pro CHANGELOG entry + Pro ADR-0008 (`Asterisk.Sdk.Pro/docs/decisions/0008-shared-datasource-overload.md`)

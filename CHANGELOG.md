@@ -13,6 +13,90 @@ _No unreleased changes._
 
 ---
 
+## [1.14.6] — 2026-04-28 — ADR-0015 Phase 2 — Shared `NpgsqlDataSource` adoption (Pro 1.16.0-pro)
+
+**Closes the architectural connection-pool sprawl** identified in R5.5 Phase C-L by collapsing the 14-pool sprawl into **1 shared `NpgsqlDataSource` per distinct connection string** per platform-api instance. Coordinated ship with **Pro 1.16.0-pro** which exposes the `Use*Storage(IServiceCollection, NpgsqlDataSource)` overloads on every storage entry point.
+
+### Pro 1.16.0-pro pin bump
+
+- `Directory.Packages.props` — all 20 `Asterisk.Sdk.Pro.*` pins bumped `1.15.0-pro → 1.16.0-pro`.
+- Local NuGet feed sync: 24 Pro packages packed at 1.16.0-pro.
+
+### Platform.Storage.Postgres `(NpgsqlDataSource)` overload
+
+- New `AddPostgresStorage(IServiceCollection, NpgsqlDataSource)` overload alongside the existing `(string, Action<NpgsqlDataSourceBuilder>?)`. The string overload now delegates to the DataSource form via `new NpgsqlDataSourceBuilder(connectionString).Build()`.
+- All 30+ store registrations stay verbatim — only the DataSource construction path changed.
+
+### Platform.Api `Program.cs` shared-DataSource composition
+
+- `sharedCoreDataSource` built once when `coreConnectionString` is set; passed to `AddPostgresStorage(NpgsqlDataSource)`.
+- New `ResolveDataSource(connStr)` helper returns the shared core DataSource when conn string matches the core; otherwise builds a dedicated DataSource for the distinct conn string. Single instance per distinct conn string, never per package.
+- All 6 Pro `Use*Storage` / `Add*Postgres` call sites updated to the DataSource overload:
+  - `UsePostgresDialerStorage(ResolveDataSource(dialerConnectionString)!)`
+  - `UsePostgresClusterTransport(ResolveDataSource(clusterConn)!)`
+  - `UsePostgresRealtimeStorage(ResolveDataSource(realtimeConn)!)`
+  - `UsePostgresEventStore(analyticsDataSource)` + `AddProCallAnalyticsPostgres(analyticsDataSource)` + `UsePostgresAnalyticsStore(analyticsDataSource)`
+  - `UsePostgresProAnalyticsLive(liveAnalyticsDataSource)` (reuses analytics DS when conn string matches)
+  - `AddProAgentAssistPostgres(analyticsDataSource)`
+
+### Phase 2 measured impact
+
+`presence` scenario, AMD 9900X / 60 GB / `docker-compose.smb.yml`, same ladder:
+
+| VU | Phase 1 (14 pools × 10) | Phase 2 (1 pool × 10) | Δ p99 |
+|---:|---|---|---|
+| 100 | p99 16.62 ms · 11 029 RPS | p99 **16.13 ms** · 11 046 RPS | clean |
+| 250 | p99 34.59 ms | p99 **32.27 ms** | -2 ms |
+| 500 | p99 69.50 ms | p99 **57.06 ms** | **-12.4 ms** |
+| 1000 | p99 115.97 ms | p99 **~107 ms** | **-9 ms** |
+| 1500 | p99 174.21 ms | p99 **~154 ms** | **-20 ms** |
+
+- Latency improvement at high concurrency (VU 500–1500: 9–20 ms p99 reduction).
+- Aggregate throughput unchanged (~11 k RPS) — Postgres-bound, not pool-bound.
+- `pg_stat_activity` post-sweep: 13 idle conns (Phase 1 had 21).
+- Zero failures, zero `Npgsql.PostgresException` across the entire sweep.
+
+**Capacity-planning Postgres tier table refreshed:**
+
+| Tier | Phase 1 `max_connections` | Phase 2 `max_connections` | Δ |
+|---|---:|---:|---:|
+| Small | 200 | **50** | -75 % |
+| Medium | 400 | **120** | -70 % |
+| Large | 600 | **240** | -60 % |
+| XL | 1000 | **400** | -60 % |
+
+### Files changed
+
+- `Directory.Packages.props` (20 Pro pins bumped)
+- `Directory.Build.props` (PackageVersion 1.14.5 → 1.14.6)
+- `src/Asterisk.Platform.Storage.Postgres/ServiceCollectionExtensions.cs` (new `(NpgsqlDataSource)` overload)
+- `src/Asterisk.Platform.Api/Program.cs` (`sharedCoreDataSource` + `ResolveDataSource` helper + 6 wraps to DataSource overloads)
+- `docs/decisions/0015-npgsql-datasource-sharing-strategy.md` (Phase 2 status + measured impact section)
+- `docs/decisions/0014-auth-horizontal-scaling-baseline.md` (Update 2026-04-28 v1.14.6 — `scale.yml` math correct again)
+- `docs/operations/capacity-planning.md` (Postgres tier table refreshed)
+- `docs/operations/load-test-baseline.md` (Phase C-L Phase 2 section)
+- `local-nuget-feed/` (24 Pro 1.16.0-pro packages synced from shared feed)
+
+### Tests
+
+- **882 / 882** Api.Tests passing (no regression from Phase 1 baseline).
+- 0 build warnings (TreatWarningsAsErrors holds).
+- 0 vulnerable packages cross-repo.
+
+### Wire compatibility
+
+- Operators consuming Platform.Api as deployed image: no action required — Phase 2 is internal composition refactor.
+- Custom Pro consumers (third-party hosts using `Use*Storage(string)`): NO CHANGE. Pro 1.16.0-pro preserves the string overload verbatim.
+- `docker-compose.smb.yml` / `production.yml` `max_connections=200` setting STILL applies (no operator-side change required) — Phase 2 just means the actual demand sits comfortably below it (1 pool × 10 = 10 vs 14 × 10 = 140 in Phase 1).
+
+### Cross-repo coordination
+
+- **Asterisk.Sdk: unchanged** (1.15.1).
+- **Asterisk.Sdk.Pro: 1.16.0-pro** (this release pairs with Pro 1.16.0-pro; ADR-0008 describes the new `Use*Storage(NpgsqlDataSource)` overloads).
+- **Asterisk.Platform.Web: unchanged** (1.13.0; cosmetic-tracks 1.14.x).
+
+---
+
 ## [1.14.5] — 2026-04-28 — ADR-0015 Phase 1 — Postgres connection-pool sprawl mitigation
 
 **Closes the architectural connection-pool sprawl exposed by R5.5

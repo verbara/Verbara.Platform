@@ -1,8 +1,8 @@
 # ADR-0015: NpgsqlDataSource sharing strategy across Pro storage packages
 
-**Status:** Accepted (initial Proposed 2026-04-28 → Accepted 2026-04-28 v1.14.5 ship after Phase C-L SMB tier re-measurement)
+**Status:** Accepted · **Phase 1 shipped v1.14.5 (2026-04-28)** · **Phase 2 shipped v1.14.6 + Pro 1.16.0-pro (2026-04-28)**
 **Date:** 2026-04-28
-**Context:** R5.5 Phase C-L `presence` sweep findings + cross-Pro `NpgsqlDataSource.Create()` audit + post-fix re-measurement
+**Context:** R5.5 Phase C-L `presence` sweep findings + cross-Pro `NpgsqlDataSource.Create()` audit + post-Phase-1 re-measurement + post-Phase-2 re-measurement
 
 ## Context
 
@@ -130,3 +130,35 @@ Numbers refresh `capacity-planning.md` § "Small tier" from v1-provisional to v1
 - Pro 1.16.0-pro Phase 2 plan-skeleton: `docs/research/archived/2026-04-28-Pro-1.16.0-pro-shared-datasource-skeleton.md`
 - v1.14.2 CHANGELOG entry "Postgres pool sizing for multi-replica" (the 4-replica math that this ADR corrects)
 - v1.14.5 CHANGELOG entry "ADR-0015 Phase 1 — Postgres pool sprawl mitigation"
+- v1.14.6 CHANGELOG entry "ADR-0015 Phase 2 — shared NpgsqlDataSource adoption (Pro 1.16.0-pro)"
+- Pro ADR-0008 — shared-datasource-overload (Pro repo)
+- Pro 1.16.0-pro CHANGELOG entry
+
+## Phase 2 measured impact (2026-04-28)
+
+`docker-compose.smb.yml` SMB tier stack, AMD Ryzen 9 9900X / 60 GB RAM. `presence` scenario re-run after Pro 1.16.0-pro adoption (Platform v1.14.6 builds one shared `NpgsqlDataSource` and threads it into all 9 Pro `Use*Storage` calls):
+
+| VU | Phase 1 (14 pools × 10) | Phase 2 (1 pool × 10) | Δ p99 |
+|---:|---|---|---|
+| 100 | 661 738 OK · p99 16.62 ms · 11 029 RPS | **662 776 OK · p99 16.13 ms · 11 046 RPS** | clean |
+| 250 | 678 772 OK · p99 34.59 ms | **670 888 OK · p99 32.27 ms** | -2 ms |
+| 500 | 646 262 OK · p99 69.50 ms | **678 532 OK · p99 57.06 ms** | **-12 ms** |
+| 1000 | 656 954 OK · p99 115.97 ms | **649 421 OK · p99 ~107 ms** | **-9 ms** |
+| 1500 | 662 023 OK · p99 174.21 ms | **655 681 OK · p99 ~154 ms** | **-20 ms** |
+
+**Quantitative gains over Phase 1:**
+
+- **Latency at high concurrency improves** (VU 500–1500: 9–20 ms p99 reduction). Consolidating 14 small pools into 1 removes per-pool locking + connection-acquisition overhead under contention.
+- **Aggregate throughput unchanged** (~11 k RPS) — the platform is CPU/Postgres-bound at this level, not pool-bound; reducing pool count doesn't lift the throughput ceiling but does flatten the latency curve.
+- **Postgres `pg_stat_activity` post-sweep: 13 idle client backend conns** (vs ~21 in Phase 1) — direct evidence of fewer DataSources holding connections.
+- **Zero failures across all 5 steps**, zero `Npgsql.PostgresException` entries.
+
+**Knee envelope updated for Phase 2 (latency-defined, throughput plateau ~11 k RPS):**
+
+| Latency budget | Max sustained VU |
+|---|---:|
+| p99 ≤ 50 ms | ≤ 250 |
+| p99 ≤ 100 ms | ≤ 1 000 (interpolated; was ≤ 750 in Phase 1) |
+| p99 ≤ 200 ms | ≤ 1 500 (clean — was at envelope edge in Phase 1) |
+
+**Per-tier `max_connections` requirements drop ~10×** in `capacity-planning.md` § "Postgres" — see v1.14.6 doc patch alongside this ADR for the refreshed table.

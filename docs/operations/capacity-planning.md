@@ -104,17 +104,24 @@ rotation (7d retention by default) + ~100 MB DataProtection key store.
 
 | Tier | CPU | RAM | Disk IOPS | Disk size | Tuning |
 |---|---|---|---|---|---|
-| Small | 2 vCPU | 4 GB | 1k IOPS | 50 GB | `shared_buffers=512MB` · `max_connections=200` · per-data-source `Maximum Pool Size=10` *(ADR-0015 Phase 1)* |
-| Medium | 4 vCPU | 16 GB | 3k IOPS | 200 GB | `shared_buffers=4GB` · `max_connections=400` · per-data-source `Maximum Pool Size=20` · WAL on separate volume |
-| Large | 8 vCPU | 32 GB | 8k IOPS NVMe | 500 GB | `shared_buffers=8GB` · `max_connections=600` · per-data-source `Maximum Pool Size=30` · 1× streaming replica |
-| XL | 16 vCPU | 64 GB | 20k IOPS NVMe | 2 TB | `shared_buffers=16GB` · `max_connections=1000` · per-data-source `Maximum Pool Size=50` · 2× read replicas |
+| Small | 2 vCPU | 4 GB | 1k IOPS | 50 GB | `shared_buffers=512MB` · `max_connections=50` · per-instance `Maximum Pool Size=20` *(ADR-0015 Phase 2)* |
+| Medium | 4 vCPU | 16 GB | 3k IOPS | 200 GB | `shared_buffers=4GB` · `max_connections=120` · per-instance `Maximum Pool Size=50` · WAL on separate volume |
+| Large | 8 vCPU | 32 GB | 8k IOPS NVMe | 500 GB | `shared_buffers=8GB` · `max_connections=240` · per-instance `Maximum Pool Size=100` · 1× streaming replica |
+| XL | 16 vCPU | 64 GB | 20k IOPS NVMe | 2 TB | `shared_buffers=16GB` · `max_connections=400` · per-instance `Maximum Pool Size=150` · 2× read replicas |
 
-> **ADR-0015 sprawl note:** Platform.Api creates ~14 separate
-> `NpgsqlDataSource` instances when all Pro features are active, each
-> with its own connection pool. Per-tier `max_connections` budgets
-> account for this (`14 data sources × Maximum Pool Size + buffer`).
-> Phase 2 (Pro 1.16.0-pro shared `NpgsqlDataSource`) collapses sprawl
-> to 1 pool; once shipped, per-tier `max_connections` can drop ~10×.
+> **ADR-0015 Phase 2 (shipped v1.14.6 + Pro 1.16.0-pro):** Platform.Api
+> now builds **1 shared `NpgsqlDataSource` per distinct connection string**
+> and threads it through all Pro storage packages. Per-tier `max_connections`
+> dropped ~10× from the Phase 1 envelope (Small 200→50, Medium 400→120,
+> Large 600→240, XL 1000→400). Math: `1 instance × Maximum Pool Size +
+> postgres internals (~10) + admin headroom`. Multi-replica deployments
+> (`scale.yml` Enterprise tier) inherit the same simplification: `replicas
+> × Maximum Pool Size + buffer`.
+>
+> The Phase 1 fallback (per-DataSource `Maximum Pool Size=10` via
+> `ConnectionStringDefaults` in Platform.Api) stays in place as a safety
+> net for operators who haven't yet adopted shared-pool registration in
+> custom hosts.
 
 **Rationale:** Sized against the partitioned `session_events` table + JSONB
 write rate from `Asterisk.Sdk.Pro.EventStore` (~200 ms p99 SLO budget per

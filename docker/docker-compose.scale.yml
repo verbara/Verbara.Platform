@@ -31,6 +31,13 @@
 #     (default 100; sufficient for the 4×50=200 + 20 headroom this
 #     override needs — see auth-horizontal-scaling.md §"Postgres pool tuning").
 #
+# ADR-0015 Phase 2 (shipped v1.14.6 + Pro 1.16.0-pro): the "1 pool per
+# replica" assumption above is now CORRECT again. Pre-Phase-2, sprawl
+# meant 14 pools per replica → 4×14×50 = 2 800 demand vs 220 cap (way
+# off). Post-Phase-2, Platform.Api builds 1 shared NpgsqlDataSource per
+# distinct connection string and threads it through all Pro Use*Storage
+# calls → real demand is 4×1×50 = 200 + 20 buffer → matches ADR-0014.
+#
 # Verify post-up:
 #   curl -sf http://localhost:5000/health
 #   docker compose -f docker/docker-compose.full.yml \

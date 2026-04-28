@@ -48,9 +48,33 @@ public static class ServiceCollectionExtensions
         string connectionString,
         Action<NpgsqlDataSourceBuilder>? configureDataSource = null)
     {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrEmpty(connectionString);
+
         var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
         configureDataSource?.Invoke(dataSourceBuilder);
-        services.TryAddSingleton(dataSourceBuilder.Build());
+        return services.AddPostgresStorage(dataSourceBuilder.Build());
+    }
+
+    /// <summary>
+    /// Registers Dapper/Npgsql implementations for all 17 store interfaces backed by
+    /// PostgreSQL using a pre-built <see cref="NpgsqlDataSource"/>. Prefer this overload
+    /// when the host application owns a shared <see cref="NpgsqlDataSource"/> instance
+    /// (ADR-0015 Phase 2): pass the same instance here AND to every Pro
+    /// <c>Use*Storage(IServiceCollection, NpgsqlDataSource)</c> call to collapse the
+    /// 14-pool sprawl into a single connection pool per host instance.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="dataSource">A pre-built <see cref="NpgsqlDataSource"/>; registered as
+    /// the canonical DI singleton via <c>TryAddSingleton</c>.</param>
+    public static IServiceCollection AddPostgresStorage(
+        this IServiceCollection services,
+        NpgsqlDataSource dataSource)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(dataSource);
+
+        services.TryAddSingleton(dataSource);
 
         // Identity — IUserStore + ITenantAuthConfigStore use the AHH Phase 1
         // keyed-decorator pattern: the concrete is registered keyed-as-inner
