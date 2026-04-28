@@ -38,12 +38,23 @@ public static class ServiceCollectionExtensions
     {
         services.TryAddSingleton(NpgsqlDataSource.Create(connectionString));
 
-        // Identity
-        services.AddSingleton<IUserStore, PostgresUserStore>();
+        // Identity — IUserStore + ITenantAuthConfigStore use the AHH Phase 1
+        // keyed-decorator pattern: the concrete is registered keyed-as-inner
+        // (so the Api project's CachedUserStore / CachedTenantAuthConfigStore
+        // decorators can resolve it via IServiceProvider.GetRequiredKeyedService),
+        // and the unkeyed alias points at the same instance until the Api
+        // bootstrap calls AddAuthHotpathCaching() which replaces it with the
+        // decorator. See docs/plans/active/2026-04-27-auth-hotpath-hardening.md
+        // Phase 1 + AuthHotpathCacheKeys.
+        services.AddKeyedSingleton<IUserStore, PostgresUserStore>(AuthHotpathCacheKeys.UserStoreInner);
+        services.AddSingleton<IUserStore>(sp =>
+            sp.GetRequiredKeyedService<IUserStore>(AuthHotpathCacheKeys.UserStoreInner));
         services.AddSingleton<IApiKeyStore, PostgresApiKeyStore>();
         services.AddSingleton<IRefreshTokenStore, PostgresRefreshTokenStore>();
         services.AddSingleton<IAuthEventStore, PostgresAuthEventStore>();
-        services.AddSingleton<ITenantAuthConfigStore, PostgresTenantAuthConfigStore>();
+        services.AddKeyedSingleton<ITenantAuthConfigStore, PostgresTenantAuthConfigStore>(AuthHotpathCacheKeys.TenantAuthConfigStoreInner);
+        services.AddSingleton<ITenantAuthConfigStore>(sp =>
+            sp.GetRequiredKeyedService<ITenantAuthConfigStore>(AuthHotpathCacheKeys.TenantAuthConfigStoreInner));
 
         // Conversations
         services.AddSingleton<IConversationStore, PostgresConversationStore>();

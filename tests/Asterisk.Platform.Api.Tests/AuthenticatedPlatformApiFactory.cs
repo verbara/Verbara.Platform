@@ -112,7 +112,9 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
 
         // ── IUserStore ───────────────────────────────────────────────────────
         // Return an Admin user so AdminOnly and SupervisorPlus policies pass.
-        var userStoreDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IUserStore));
+        // Filter !IsKeyedService — AHH Phase 1 keeps the concrete IUserStore
+        // registered keyed-as-inner so the cache decorator can resolve it.
+        var userStoreDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IUserStore) && !d.IsKeyedService);
         if (userStoreDescriptor is not null) services.Remove(userStoreDescriptor);
 
         var userStore = Substitute.For<IUserStore>();

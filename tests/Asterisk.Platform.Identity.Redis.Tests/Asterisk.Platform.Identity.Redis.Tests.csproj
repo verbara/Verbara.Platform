@@ -15,6 +15,9 @@
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Testcontainers" />
     <PackageReference Include="StackExchange.Redis" />
+    <!-- AHH Phase 1 RedisAuthCacheInvalidator unit tests -->
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
 </Project>

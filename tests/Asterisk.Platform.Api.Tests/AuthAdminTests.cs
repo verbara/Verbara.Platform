@@ -216,7 +216,8 @@ public sealed class AuthAdminSessionListingTests : IClassFixture<AuthAdminSessio
             {
                 // Replace IUserStore substitute from the base factory with one that
                 // also answers GetByIdsAsync for user-a + user-b (but NOT ghost-user).
-                var userStoreDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IUserStore));
+                // AHH Phase 1: filter !IsKeyedService (keyed-as-inner preserved).
+                var userStoreDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IUserStore) && !d.IsKeyedService);
                 if (userStoreDescriptor is not null) services.Remove(userStoreDescriptor);
 
                 var userStore = Substitute.For<IUserStore>();

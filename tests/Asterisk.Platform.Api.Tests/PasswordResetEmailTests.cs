@@ -91,7 +91,8 @@ public sealed class PasswordResetEmailTests
                 var userEntityId = EntityId.From(TestUserId);
                 var tenantId = new TenantId(TestTenantId);
 
-                var userStoreDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IUserStore));
+                // AHH Phase 1: filter !IsKeyedService (keyed-as-inner preserved).
+                var userStoreDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IUserStore) && !d.IsKeyedService);
                 if (userStoreDescriptor is not null) services.Remove(userStoreDescriptor);
 
                 var userStore = Substitute.For<IUserStore>();

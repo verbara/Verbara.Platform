@@ -1,5 +1,6 @@
 using Asp.Versioning;
 using Asterisk.Platform.Api.Auth;
+using Asterisk.Platform.Api.DependencyInjection;
 using Asterisk.Platform.Identity.Auth;
 using Microsoft.AspNetCore.DataProtection;
 using Asterisk.Platform.Api.Endpoints;
@@ -205,6 +206,13 @@ else
 {
     builder.Services.AddInMemoryStorage();
 }
+
+// ─── AHH Phase 1: Auth Hot-Path Caching ─────────────────────────────────────
+// Decorates IUserStore + ITenantAuthConfigStore with IMemoryCache wrappers.
+// Removes 5–10 ms × 2–3 DB round-trips from POST /auth/login on cache hit.
+// Cross-replica invalidation engages later (after AddAsteriskPlatformIdentityRedis).
+// See docs/plans/active/2026-04-27-auth-hotpath-hardening.md Phase 1 + ADR-0010.
+builder.Services.AddAuthHotpathCaching();
 
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 var licenseConfig = builder.Configuration.GetSection("Licensing");
@@ -545,6 +553,10 @@ if (!string.IsNullOrWhiteSpace(identityRedisConn))
         if (!string.IsNullOrWhiteSpace(prefix))
             o.KeyPrefix = prefix;
     });
+    // AHH Phase 1: cluster-wide cache invalidation via Redis pubsub.
+    // Engages only when Redis is configured; in single-instance deploys the
+    // cache decorators rely on local TTL only (60 s default).
+    builder.Services.AddAuthHotpathRedisInvalidation();
 }
 
 // ─── OIDC SSO Services ──────────────────────────────────────────────────────

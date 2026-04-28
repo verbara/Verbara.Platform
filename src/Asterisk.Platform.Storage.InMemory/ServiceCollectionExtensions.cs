@@ -45,13 +45,19 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IWrapUpStore, InMemoryWrapUpStore>();
         services.AddSingleton<ICannedResponseStore, InMemoryCannedResponseStore>();
 
-        // Identity
-        services.AddSingleton<IUserStore, InMemoryUserStore>();
+        // Identity — IUserStore + ITenantAuthConfigStore use the AHH Phase 1
+        // keyed-decorator pattern. Mirrors AddPostgresStorage. See
+        // docs/plans/active/2026-04-27-auth-hotpath-hardening.md Phase 1.
+        services.AddKeyedSingleton<IUserStore, InMemoryUserStore>(AuthHotpathCacheKeys.UserStoreInner);
+        services.AddSingleton<IUserStore>(sp =>
+            sp.GetRequiredKeyedService<IUserStore>(AuthHotpathCacheKeys.UserStoreInner));
         services.AddSingleton<IApiKeyStore, InMemoryApiKeyStore>();
         services.AddSingleton<IServiceAccountStore, InMemoryServiceAccountStore>();
         services.AddSingleton<IRefreshTokenStore, InMemoryRefreshTokenStore>();
         services.AddSingleton<IAuthEventStore, InMemoryAuthEventStore>();
-        services.AddSingleton<ITenantAuthConfigStore, InMemoryTenantAuthConfigStore>();
+        services.AddKeyedSingleton<ITenantAuthConfigStore, InMemoryTenantAuthConfigStore>(AuthHotpathCacheKeys.TenantAuthConfigStoreInner);
+        services.AddSingleton<ITenantAuthConfigStore>(sp =>
+            sp.GetRequiredKeyedService<ITenantAuthConfigStore>(AuthHotpathCacheKeys.TenantAuthConfigStoreInner));
         services.AddSingleton<IPermissionStore, InMemoryPermissionStore>();
         services.AddSingleton<IRoleTemplateStore, InMemoryRoleTemplateStore>();
         services.AddSingleton<ITenantRoleStore, InMemoryTenantRoleStore>();
