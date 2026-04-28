@@ -5,66 +5,116 @@ using System.Text;
 using Asterisk.Platform.Api.Auth;
 using Asterisk.Platform.Identity;
 using Asterisk.Platform.Identity.Auth;
+using Asterisk.Platform.Identity.Auth.Jwt;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Asterisk.Platform.Api.Services;
 
+/// <summary>
+/// Issues + validates Platform JWTs.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Two construction paths coexist:
+/// </para>
+/// <list type="bullet">
+///   <item>
+///     <description><b>File-based RSA</b> (the original constructor) — loads
+///     a single RSA-2048 private key from
+///     <c>{dataDirectory}/jwt-signing-key.xml</c>, encrypted at rest via
+///     DataProtection. Single-process safe; used by tests and any deployment
+///     that has not opted into the rotation pool yet.</description>
+///   </item>
+///   <item>
+///     <description><b>Rotation pool</b> (AHH Phase 3.B) — consumes
+///     <see cref="IJwtKeyRotationService"/>. The active signing entry is
+///     cached for 60 s (<c>Lazy</c>-style with semaphore guard) so we do not
+///     hit Redis on every issuance. Validation uses a multi-key resolver so
+///     tokens issued under prior keys still verify during the grace window.
+///     A migration shim imports the legacy file as an <c>RS256</c> entry on
+///     first boot when the pool is empty + the file exists.</description>
+///   </item>
+/// </list>
+/// <para>
+/// Both paths produce externally identical behavior — same claims, same
+/// <c>kid</c> header convention, same <see cref="ValidateTokenAsync"/>
+/// contract — so endpoints don't care which path is wired.
+/// </para>
+/// </remarks>
 internal sealed class JwtTokenService
 {
     private const string Issuer = "asterisk-platform";
     private const string Audience = "asterisk-platform";
-    private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
+    private const string DataProtectorPurpose = "Asterisk.Platform.Jwt.SigningKey";
+    private const string LegacyKeyFileName = "jwt-signing-key.xml";
+    private const string FileKeyIdPrefix = "platform-jwt-";
 
-    private readonly RsaSecurityKey _signingKey;
-    private readonly SigningCredentials _signingCredentials;
-    private readonly TokenValidationParameters _validationParameters;
+    private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan ImpersonationTokenLifetime = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan ActiveKeyCacheTtl = TimeSpan.FromSeconds(60);
+
     private readonly IJtiRevocationCache _revocationCache;
+
+    // ─── File-based path (R5.4 + earlier; tests; single-process bootstrap) ──
+    private readonly RsaSecurityKey? _fileSigningKey;
+    private readonly SigningCredentials? _fileSigningCredentials;
+    private readonly TokenValidationParameters? _fileValidationParameters;
+
+    // ─── Rotation-pool path (AHH Phase 3.B; production multi-replica) ───────
+    private readonly IJwtKeyRotationService? _rotationService;
+    private readonly TokenValidationParameters? _poolValidationParameters;
+    private readonly Lock _cacheLock;
+    private CachedActive? _cachedActive;
+    private CachedValidationKeys? _cachedValidation;
+
+    // ─── File-based constructor (existing) ──────────────────────────────────
 
     public JwtTokenService(string dataDirectory, IDataProtectionProvider dataProtection, IJtiRevocationCache revocationCache)
     {
+        ArgumentNullException.ThrowIfNull(dataDirectory);
+        ArgumentNullException.ThrowIfNull(dataProtection);
+        ArgumentNullException.ThrowIfNull(revocationCache);
+
         _revocationCache = revocationCache;
+        _cacheLock = new Lock();
 
-        var keyPath = Path.Combine(dataDirectory, "jwt-signing-key.xml");
-        var rsa = RSA.Create(2048);
-        var protector = dataProtection.CreateProtector("Asterisk.Platform.Jwt.SigningKey");
+        var rsa = LoadOrCreateFileBasedKey(dataDirectory, dataProtection);
+        var kid = DeriveKeyIdFromRsa(rsa);
 
-        if (File.Exists(keyPath))
-        {
-            var raw = File.ReadAllBytes(keyPath);
-            try
-            {
-                // Try to unprotect (encrypted format written by v1.9.2+)
-                var xmlString = Encoding.UTF8.GetString(protector.Unprotect(raw));
-                rsa.FromXmlString(xmlString);
-            }
-            catch (CryptographicException)
-            {
-                // Legacy plaintext XML — migrate silently on next restart
-                MigrateLegacyKey(rsa, raw, keyPath, protector);
-            }
-            catch (FormatException)
-            {
-                // Corrupt base64 or similar — treat as plaintext
-                MigrateLegacyKey(rsa, raw, keyPath, protector);
-            }
-        }
-        else
-        {
-            Directory.CreateDirectory(dataDirectory);
-            var xmlString = rsa.ToXmlString(includePrivateParameters: true);
-            File.WriteAllBytes(keyPath, protector.Protect(Encoding.UTF8.GetBytes(xmlString)));
-        }
+        _fileSigningKey = new RsaSecurityKey(rsa) { KeyId = kid };
+        _fileSigningCredentials = new SigningCredentials(_fileSigningKey, SecurityAlgorithms.RsaSha256);
+        _fileValidationParameters = BuildSingleKeyValidationParameters(_fileSigningKey);
+    }
 
-        // Derive kid from public key fingerprint (stable per key, changes on rotation)
-        var publicParams = rsa.ExportParameters(false);
-        var modulusHash = SHA256.HashData(publicParams.Modulus!);
-        var kid = $"platform-jwt-{Convert.ToHexStringLower(modulusHash.AsSpan(0, 8))}";
+    // ─── Rotation-pool constructor (AHH Phase 3.B) ──────────────────────────
 
-        _signingKey = new RsaSecurityKey(rsa) { KeyId = kid };
-        _signingCredentials = new SigningCredentials(_signingKey, SecurityAlgorithms.RsaSha256);
+    /// <summary>
+    /// Construct a JWT service backed by the multi-replica rotation pool.
+    /// The pool is expected to already contain at least one active entry
+    /// when this service first issues a token; if it is empty,
+    /// <see cref="IJwtKeyRotationService.GetActiveSigningKeyAsync"/> auto-
+    /// rotates and produces a fresh <c>HS256</c> entry. To preserve
+    /// validity of already-issued tokens during the cutover from the
+    /// file-based key, register
+    /// <see cref="JwtLegacyKeyMigrationService"/> as a hosted service so
+    /// the legacy file is imported into the pool as an <c>RS256</c> entry
+    /// before any request fires.
+    /// </summary>
+    public JwtTokenService(
+        IJwtKeyRotationService rotationService,
+        IJtiRevocationCache revocationCache)
+    {
+        ArgumentNullException.ThrowIfNull(rotationService);
+        ArgumentNullException.ThrowIfNull(revocationCache);
 
-        _validationParameters = new TokenValidationParameters
+        _revocationCache = revocationCache;
+        _rotationService = rotationService;
+        _cacheLock = new Lock();
+
+        // Validation parameters use a delegate resolver so each call sees the
+        // currently-cached set without re-creating the parameters object.
+        _poolValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidIssuer = Issuer,
@@ -72,22 +122,27 @@ internal sealed class JwtTokenService
             ValidAudience = Audience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = _signingKey,
+            IssuerSigningKeyResolver = (_, _, _, _) => GetCachedValidationKeys(),
             ClockSkew = TimeSpan.FromSeconds(30),
             RoleClaimType = "role",
             NameClaimType = "sub",
         };
     }
 
-    public TokenValidationParameters ValidationParameters => _validationParameters;
+    // ─── Public surface (uniform across both paths) ─────────────────────────
 
-    public string KeyId => _signingKey.KeyId;
+    public TokenValidationParameters ValidationParameters =>
+        _rotationService is not null ? _poolValidationParameters! : _fileValidationParameters!;
+
+    public string KeyId => GetActiveSigningCredentials().Key.KeyId!;
 
     public (string Token, DateTimeOffset ExpiresAt) GenerateAccessToken(User user)
         => GenerateAccessToken(user, null);
 
     public (string Token, DateTimeOffset ExpiresAt) GenerateAccessToken(User user, IReadOnlySet<string>? permissions)
     {
+        ArgumentNullException.ThrowIfNull(user);
+
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.Add(AccessTokenLifetime);
 
@@ -101,7 +156,6 @@ internal sealed class JwtTokenService
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 
-        // Include granular permissions in the JWT when available
         if (permissions is { Count: > 0 })
         {
             foreach (var permission in permissions)
@@ -110,27 +164,19 @@ internal sealed class JwtTokenService
             }
         }
 
-        var descriptor = new SecurityTokenDescriptor
-        {
-            Subject = new ClaimsIdentity(claims),
-            Expires = expiresAt.UtcDateTime,
-            IssuedAt = now.UtcDateTime,
-            Issuer = Issuer,
-            Audience = Audience,
-            SigningCredentials = _signingCredentials,
-        };
-
-        var handler = new JwtSecurityTokenHandler();
-        var token = handler.CreateEncodedJwt(descriptor);
-        return (token, expiresAt);
+        return SignToken(claims, now, expiresAt);
     }
 
     public (string Token, DateTimeOffset ExpiresAt) GenerateImpersonationToken(
         User admin, string targetTenantId, IReadOnlySet<string> targetPermissions, bool readOnly = false,
         string? impersonationSessionId = null)
     {
+        ArgumentNullException.ThrowIfNull(admin);
+        ArgumentNullException.ThrowIfNull(targetTenantId);
+        ArgumentNullException.ThrowIfNull(targetPermissions);
+
         var now = DateTimeOffset.UtcNow;
-        var expiresAt = now.Add(TimeSpan.FromMinutes(30));
+        var expiresAt = now.Add(ImpersonationTokenLifetime);
 
         var claims = new List<Claim>
         {
@@ -146,8 +192,7 @@ internal sealed class JwtTokenService
         };
 
         // R5.2 PB.2 — when supplied, link the JWT to its admin-visible session
-        // record so the EndImpersonation handler (and any future revoke
-        // workflow gating on the JWT itself) can locate the session.
+        // record so EndImpersonation can locate the session.
         if (!string.IsNullOrEmpty(impersonationSessionId))
             claims.Add(new Claim("impersonation_session_id", impersonationSessionId));
 
@@ -159,19 +204,7 @@ internal sealed class JwtTokenService
             claims.Add(new Claim("permissions", permission));
         }
 
-        var descriptor = new SecurityTokenDescriptor
-        {
-            Subject = new ClaimsIdentity(claims),
-            Expires = expiresAt.UtcDateTime,
-            IssuedAt = now.UtcDateTime,
-            Issuer = Issuer,
-            Audience = Audience,
-            SigningCredentials = _signingCredentials,
-        };
-
-        var handler = new JwtSecurityTokenHandler();
-        var token = handler.CreateEncodedJwt(descriptor);
-        return (token, expiresAt);
+        return SignToken(claims, now, expiresAt);
     }
 
     public async ValueTask<ClaimsPrincipal?> ValidateTokenAsync(string token, CancellationToken ct)
@@ -179,25 +212,210 @@ internal sealed class JwtTokenService
         try
         {
             var handler = new JwtSecurityTokenHandler();
-            var principal = handler.ValidateToken(token, _validationParameters, out _);
+            var principal = handler.ValidateToken(token, ValidationParameters, out _);
 
-            // Check jti revocation
             var jti = principal.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
             if (jti is not null && await _revocationCache.IsRevokedAsync(jti, ct))
                 return null;
 
             return principal;
         }
-        catch { return null; }
+        catch
+        {
+            return null;
+        }
     }
 
-    // ── Private helpers ──────────────────────────────────────────────────────
+    // ─── Private — token signing dispatch ───────────────────────────────────
+
+    private (string Token, DateTimeOffset ExpiresAt) SignToken(
+        List<Claim> claims, DateTimeOffset now, DateTimeOffset expiresAt)
+    {
+        var credentials = GetActiveSigningCredentials();
+        var descriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(claims),
+            Expires = expiresAt.UtcDateTime,
+            IssuedAt = now.UtcDateTime,
+            Issuer = Issuer,
+            Audience = Audience,
+            SigningCredentials = credentials,
+        };
+
+        var handler = new JwtSecurityTokenHandler();
+        var token = handler.CreateEncodedJwt(descriptor);
+        return (token, expiresAt);
+    }
+
+    private SigningCredentials GetActiveSigningCredentials()
+    {
+        if (_rotationService is null)
+            return _fileSigningCredentials!;
+
+        var cached = _cachedActive;
+        if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
+            return cached.Credentials;
+
+        lock (_cacheLock)
+        {
+            cached = _cachedActive;
+            if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
+                return cached.Credentials;
+
+            var entry = _rotationService.GetActiveSigningKeyAsync().GetAwaiter().GetResult();
+            var credentials = BuildSigningCredentials(entry);
+            _cachedActive = new CachedActive(entry, credentials, DateTimeOffset.UtcNow);
+            // Validation keys must include this entry — invalidate cache so
+            // the next validation pull picks it up.
+            _cachedValidation = null;
+            return credentials;
+        }
+    }
+
+    private IEnumerable<SecurityKey> GetCachedValidationKeys()
+    {
+        if (_rotationService is null)
+            return [_fileSigningKey!];
+
+        var cached = _cachedValidation;
+        if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
+            return cached.Keys;
+
+        lock (_cacheLock)
+        {
+            cached = _cachedValidation;
+            if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
+                return cached.Keys;
+
+            var entries = _rotationService.GetValidationKeysAsync().GetAwaiter().GetResult();
+            var keys = entries.Select(e => BuildSigningCredentials(e).Key).ToArray();
+            _cachedValidation = new CachedValidationKeys(keys, DateTimeOffset.UtcNow);
+            return keys;
+        }
+    }
+
+    // ─── Private — credential construction per algorithm ────────────────────
+
+    private static SigningCredentials BuildSigningCredentials(JwtKeyEntry entry)
+    {
+        return entry.Algorithm switch
+        {
+            JwtKeyAlgorithm.Hs256 => BuildHmacCredentials(entry),
+            JwtKeyAlgorithm.Rs256 => BuildRsaCredentials(entry),
+            _ => throw new InvalidOperationException(
+                $"Unknown JwtKeyAlgorithm '{entry.Algorithm}' on key '{entry.KeyId}'."),
+        };
+    }
+
+    private static SigningCredentials BuildHmacCredentials(JwtKeyEntry entry)
+    {
+        var bytes = Convert.FromBase64String(entry.Key);
+        var key = new SymmetricSecurityKey(bytes) { KeyId = entry.KeyId };
+        return new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+    }
+
+    private static SigningCredentials BuildRsaCredentials(JwtKeyEntry entry)
+    {
+        var rsa = RSA.Create();
+        try
+        {
+            var pkcs8 = Convert.FromBase64String(entry.Key);
+            rsa.ImportPkcs8PrivateKey(pkcs8, out _);
+        }
+        catch
+        {
+            rsa.Dispose();
+            throw;
+        }
+        var key = new RsaSecurityKey(rsa) { KeyId = entry.KeyId };
+        return new SigningCredentials(key, SecurityAlgorithms.RsaSha256);
+    }
+
+    // ─── Private — file-based key loading (R5.4 + earlier path) ────────────
+
+    private static RSA LoadOrCreateFileBasedKey(string dataDirectory, IDataProtectionProvider dataProtection)
+    {
+        var keyPath = Path.Combine(dataDirectory, LegacyKeyFileName);
+        var rsa = RSA.Create(2048);
+        var protector = dataProtection.CreateProtector(DataProtectorPurpose);
+
+        if (File.Exists(keyPath))
+        {
+            var raw = File.ReadAllBytes(keyPath);
+            try
+            {
+                var xmlString = Encoding.UTF8.GetString(protector.Unprotect(raw));
+                rsa.FromXmlString(xmlString);
+            }
+            catch (CryptographicException)
+            {
+                MigrateLegacyKey(rsa, raw, keyPath, protector);
+            }
+            catch (FormatException)
+            {
+                MigrateLegacyKey(rsa, raw, keyPath, protector);
+            }
+        }
+        else
+        {
+            Directory.CreateDirectory(dataDirectory);
+            var xmlString = rsa.ToXmlString(includePrivateParameters: true);
+            File.WriteAllBytes(keyPath, protector.Protect(Encoding.UTF8.GetBytes(xmlString)));
+        }
+
+        return rsa;
+    }
+
+    private static string DeriveKeyIdFromRsa(RSA rsa)
+    {
+        var publicParams = rsa.ExportParameters(false);
+        var modulusHash = SHA256.HashData(publicParams.Modulus!);
+        return $"{FileKeyIdPrefix}{Convert.ToHexStringLower(modulusHash.AsSpan(0, 8))}";
+    }
+
+    private static TokenValidationParameters BuildSingleKeyValidationParameters(SecurityKey key) => new()
+    {
+        ValidateIssuer = true,
+        ValidIssuer = Issuer,
+        ValidateAudience = true,
+        ValidAudience = Audience,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = key,
+        ClockSkew = TimeSpan.FromSeconds(30),
+        RoleClaimType = "role",
+        NameClaimType = "sub",
+    };
 
     private static void MigrateLegacyKey(RSA rsa, byte[] raw, string keyPath, IDataProtector protector)
     {
         var xmlString = Encoding.UTF8.GetString(raw);
         rsa.FromXmlString(xmlString);
-        // Re-write encrypted immediately — silently migrates existing deployments
         File.WriteAllBytes(keyPath, protector.Protect(Encoding.UTF8.GetBytes(xmlString)));
     }
+
+    // ─── Phase 3.B legacy → rotation-pool migration ────────────────────────
+    // Lives in JwtLegacyKeyMigrationService (separate hosted service) to keep
+    // this class focused on signing + validation. The constants below are
+    // shared with that service.
+
+    internal static string LegacyKeyFilePath(string dataDirectory) =>
+        Path.Combine(dataDirectory, LegacyKeyFileName);
+
+    internal static string DataProtectorPurposeForMigration() => DataProtectorPurpose;
+
+    // Internal-visible factories used by JwtLegacyKeyMigrationService when
+    // building the migrated JwtKeyEntry — keeps key-id derivation in one place.
+    internal static string DeriveKeyIdFromRsaInternal(RSA rsa) => DeriveKeyIdFromRsa(rsa);
+
+    // ─── Cache value records ────────────────────────────────────────────────
+
+    private sealed record CachedActive(
+        JwtKeyEntry Entry,
+        SigningCredentials Credentials,
+        DateTimeOffset CachedAt);
+
+    private sealed record CachedValidationKeys(
+        IReadOnlyList<SecurityKey> Keys,
+        DateTimeOffset CachedAt);
 }
