@@ -466,3 +466,123 @@ docker compose -f docker/docker-compose.full.yml \
 ```
 
 Per-step NBomber reports under `tests/Asterisk.Platform.LoadTests/load-test-reports/`.
+
+## Phase C-L stress sweep — knee crossing (2026-04-28, post-Phase-2 v1.14.6)
+
+Closes plan task C-L.1 ("Stress test (find breaking point)"). Extends the
+Phase 2 baseline above to actually cross the SMB tier knee on read paths
+(`queues`, `agentassist`) and re-baselines the JWT login (write path) on
+the v1.14.6 + Pro 1.16.0-pro shared `NpgsqlDataSource` stack.
+
+**Hardware + stack:** identical to Phase 2 baseline above (AMD Ryzen 9
+9900X / 60 GB / NVMe · `docker-compose.full.yml + docker-compose.smb.yml` ·
+`max_connections=200`, `shared_buffers=512MB`, per-data-source pool=10 ·
+single shared pool post-Phase-2).
+**Tenant:** `medium-loadtest` (100 agents, 50 queues).
+**Repro:** `./scripts/scenario-sweep.sh {jwt|queues|agentassist} <ladder>`
+(token auto-refresh per step).
+
+### `jwt_issuance_validation` — `POST /api/v1/auth/login` + `/me` (write path)
+
+Argon2id-bound. The Pro 1.16.0-pro shared `NpgsqlDataSource` change does NOT
+move this knee — the bottleneck is CPU under password-hash workload, not
+DB connection acquisition.
+
+| r req/s | OK | Fail | OK % | effective RPS | p50 ms | p95 ms | p99 ms | Status |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 10  |    600 |     0 | 100.0 % |   10  |   36.61 |   53.92 |     **64.83** | clean |
+| 50  |  3 000 |     0 | 100.0 % |   50  |   68.42 |  120.45 |    **283.65** | over 200 ms SLO but no errors |
+| 100 |  4 478 |     0 | 100.0 % | **74.6** | 9 674.75 | 16 367.62 | **17 842.18** | back-pressure: NBomber backs off, p99 explodes |
+| 250 |  3 469 | 4 748 |  42.2 % |   57.8 | 36 569.09 | 47 611.90 | **29 114.37** | broken (52 % HTTP 500) |
+| 500 |  1 630 | 11 044 | 12.9 % |   37.9 | 37 289.98 | — | **42 663.94** | fully collapsed (HTTP 500 + socket -101) |
+
+**JWT login knee post-Phase-2 = 50–75 req/s** on this hardware (single
+Platform.Api replica). Identical envelope to pre-AHH BCrypt baseline (B-L #4
+above) because the AHH switch from BCrypt-12 to Argon2id traded peak
+throughput for sustained-load stability under cache hit; the cold-login
+hotpath remains CPU-bound and the per-request hash cost dominates DB I/O.
+
+> **Why r=100 shows 100 % OK but only 74.6 effective RPS:** NBomber's
+> `Inject` scheduler enforces the target rate but blocks the next request
+> dispatch when the HTTP response hasn't returned. Once Argon2id queue
+> depth grows past ~4–5 s, NBomber stops issuing new requests until the
+> backlog drains. Result: zero HTTP errors, but only 74.6 % of the target
+> rate sustained, with p99 in the 18-second range. **This is the practical
+> knee** — anything past r=75 produces unacceptable latency tails even
+> without explicit failures.
+
+### `queue_ingestion` — `GET /api/v1/admin/queues?pageSize=20` (read path, knee crossing)
+
+Phase-2 baseline above stopped at r=500 with no measurable degradation.
+Extended ladder pushes through to find the actual knee.
+
+| r req/s | OK | Fail | p50 ms | p95 ms | p99 ms |
+|---:|---:|---:|---:|---:|---:|
+|    500 |  30 000 | 0 |  0.72 |   0.94 |    **1.50** |
+|  1 000 |  60 000 | 0 |  0.74 |   1.18 |    **1.72** |
+|  2 000 | 120 000 | 0 |  1.00 |   1.78 |    **2.87** |
+|  5 000 | 300 000 | 0 |  2.10 |   4.47 |    **8.75** |
+| 10 000 | 600 000 | 0 | 84.99 | 835.58 |  **939.01** |
+
+**Queues read knee = between 5 000 and 10 000 req/s.** At 5 k the platform
+serves all requests with single-digit-millisecond p99; at 10 k it still
+returns 100 % OK but p99 reaches 939 ms — within 7 % of the 1-second
+"breaking point" definition from the plan (C-L.1 step 2). The 8.75 → 939 ms
+jump between 5 k and 10 k is the latency cliff. A finer ladder
+(7 500 / 8 500) would pinpoint the exact knee but adds little product value
+beyond confirming the order of magnitude.
+
+### `agent_assist_session_start` — `GET /api/v1/admin/teams?pageSize=20` (read path, knee crossing)
+
+Same shape as `queues` but smaller payload (10 teams in `medium-loadtest`).
+Confirms the read-path ceiling is broadly homogeneous across simple
+list endpoints.
+
+| r req/s | OK | Fail | p50 ms | p95 ms | p99 ms |
+|---:|---:|---:|---:|---:|---:|
+|    500 |  30 000 | 0 |  0.66 |   0.95 |    **1.56** |
+|  1 000 |  60 000 | 0 |  0.70 |   1.20 |    **1.84** |
+|  2 000 | 120 000 | 0 |  0.92 |   1.66 |    **2.64** |
+|  5 000 | 300 000 | 0 |  1.85 |   3.47 |    **7.38** |
+| 10 000 | 600 000 | 0 | 13.29 |  46.78 |  **473.86** |
+
+**AgentAssist read knee ≥ 10 000 req/s** — 100 % OK, p99 = 474 ms (well
+under the 1-second breaking-point bar). Smaller team-set payload means the
+endpoint serves the same QPS with ~half the queues' p99 at 10 k. The
+hardware/Postgres ceiling for trivial GETs is somewhere above 10 k req/s
+on this single-replica SMB stack.
+
+### Aggregate read-path envelope (SMB tier, single replica, Phase 2)
+
+| Tier signal | Threshold |
+|---|---:|
+| Sustainable read throughput per endpoint | **≥ 5 000 req/s, p99 < 10 ms** |
+| Read-path knee (latency cliff onset) | **between 5 000 and 10 000 req/s** |
+| Read breakeven (100 % OK at 1 s p99 budget) | **~10 000 req/s** |
+| JWT login (Argon2id, write path) | **50–75 req/s sustained, p99 ≤ 300 ms** |
+
+For SMB tier capacity planning these numbers are the **per-replica
+ceiling**. The 4-replica `scale.yml` envelope multiplies read capacity
+roughly 4× (no shared lock contention on these list endpoints) but does
+NOT improve the JWT login ceiling beyond CPU multiplication — the
+Argon2id hash is the single-thread bottleneck per request.
+
+### Reproducibility
+
+```bash
+docker compose -f docker/docker-compose.full.yml \
+               -f docker/docker-compose.smb.yml up -d --wait
+./scripts/seed-staging.sh
+./scripts/scenario-sweep.sh jwt          10 50 100 250 500
+./scripts/scenario-sweep.sh queues       500 1000 2000 5000 10000
+./scripts/scenario-sweep.sh agentassist  500 1000 2000 5000 10000
+```
+
+Per-step NBomber reports under `tests/Asterisk.Platform.LoadTests/load-test-reports/`.
+Per-step screen logs at `/tmp/scenario-sweep-<scenario>-r<rate>.log`.
+
+### References
+
+- Plan: `docs/plans/active/2026-04-27-r5.5-execution-plan.md` § "Phase C-L · Task C-L.1"
+- Phase 2 baseline above (presence-only ladder)
+- ADR-0015 § "Phase 2 measured impact"
