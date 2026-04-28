@@ -62,6 +62,10 @@ public sealed class JwtKeyRotationService : IJwtKeyRotationService, IDisposable
         {
             KeyId = Guid.NewGuid().ToString("N"),
             Key = Convert.ToBase64String(bytes),
+            // AHH Phase 3 — explicit Hs256 for new rotations. Pre-Phase-3
+            // R5.4 entries didn't carry this field and deserialize with the
+            // same Hs256 default per JwtKeyEntry initializer.
+            Algorithm = JwtKeyAlgorithm.Hs256,
             ActivatedAt = now,
             ExpiresAt = now.Add(_options.ActiveDuration + _options.GracePeriod),
             IsActive = true,

@@ -14,8 +14,23 @@ public sealed record JwtKeyEntry
     /// <summary>Unique key identifier emitted as JWT <c>kid</c> header.</summary>
     public required string KeyId { get; init; }
 
-    /// <summary>Symmetric key material (base64-encoded). Treat as a secret.</summary>
+    /// <summary>
+    /// Key material, base64-encoded. Interpretation depends on
+    /// <see cref="Algorithm"/>:
+    /// <list type="bullet">
+    ///   <item><description><see cref="JwtKeyAlgorithm.Hs256"/> — raw HMAC-SHA256 secret bytes.</description></item>
+    ///   <item><description><see cref="JwtKeyAlgorithm.Rs256"/> — PKCS#8-encoded RSA private key (<c>RSA.ExportPkcs8PrivateKey()</c>).</description></item>
+    /// </list>
+    /// Treat as a secret regardless of algorithm.
+    /// </summary>
     public required string Key { get; init; }
+
+    /// <summary>
+    /// Signing algorithm for this entry. AHH Phase 3 — defaults to
+    /// <see cref="JwtKeyAlgorithm.Hs256"/> so R5.4-era Redis entries (which
+    /// pre-date this field) deserialize correctly.
+    /// </summary>
+    public JwtKeyAlgorithm Algorithm { get; init; } = JwtKeyAlgorithm.Hs256;
 
     /// <summary>UTC timestamp when this key became active (signing).</summary>
     public required DateTimeOffset ActivatedAt { get; init; }
