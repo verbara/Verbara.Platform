@@ -1,0 +1,63 @@
+# docker/docker-compose.smb.yml — SMB tier production-ready stack.
+#
+# This is the canonical "single-instance Platform" deployment for SMB
+# customers (1 platform-api + 1 postgres + 1 asterisk + 1 web + 1
+# renderer + 1 mail). It is the stack that `capacity-planning.md` § "Small
+# tier" promises, with the Postgres + Npgsql tuning required to hold
+# that promise under concurrent burst (ADR-0015 Phase 1 mitigation for
+# the NpgsqlDataSource sprawl).
+#
+# Stack matrix:
+#   docker-compose.full.yml         — dev/loadtest stack (lax tuning)
+#   docker-compose.smb.yml          — SMB tier production-ready (THIS FILE)
+#   docker-compose.production.yml   — alias of smb.yml + .env.production secrets
+#   docker-compose.scale.yml        — Enterprise tier 4-replica overlay
+#   docker-compose.demo.yml         — pre-seeded demo environment
+#
+# Usage:
+#   docker compose -f docker/docker-compose.full.yml \
+#                  -f docker/docker-compose.smb.yml up -d --wait
+#
+# This composes-on-top-of `docker-compose.full.yml`: only the diffs
+# (Postgres tuning + connection-string pool sizing) live here. Layered
+# composition keeps the SMB tier and the dev stack visibly different
+# without duplicating service definitions.
+#
+# Capacity envelope (post-tuning, single platform-api instance):
+#   - Postgres: max_connections=200, shared_buffers=512MB,
+#     effective_cache_size=2GB
+#   - Npgsql per data source: Maximum Pool Size=10, Minimum=2, Idle=300s
+#   - 14 data sources × 10 conns = 140 demand ceiling
+#   - 60 conns headroom for Postgres internals + admin sessions
+#   - See ADR-0015 for the sprawl analysis + Phase 2 architectural fix
+#     (Pro 1.16.0-pro shared NpgsqlDataSource overload)
+#
+# References:
+#   - ADR-0014 (Auth horizontal scaling baseline) — amended 2026-04-28
+#   - ADR-0015 (NpgsqlDataSource sharing strategy)
+#   - docs/operations/capacity-planning.md § "Small tier"
+#   - docs/operations/load-test-baseline.md § "Phase C-L SMB tier"
+
+services:
+  platform-api:
+    environment:
+      # ADR-0015 Phase 1 — explicit pool sizing prevents the 14-DataSource
+      # sprawl from over-subscribing max_connections under concurrent burst.
+      # ConnectionStringDefaults in Program.cs would apply the same defaults
+      # if absent; specifying them here is belt-and-suspenders + makes the
+      # tuning visible in operator-facing config.
+      ConnectionStrings__Postgres: "Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret};Maximum Pool Size=10;Minimum Pool Size=2;Connection Idle Lifetime=300;Pooling=true"
+
+  postgres:
+    # ADR-0015 Phase 1 — bump max_connections to absorb 14 NpgsqlDataSources
+    # × 10 pool size = 140 demand + 60 headroom for postgres internals +
+    # admin sessions. shared_buffers / effective_cache_size sized for SMB
+    # tier hardware (16 GB RAM target per capacity-planning.md § "Small").
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=2GB
