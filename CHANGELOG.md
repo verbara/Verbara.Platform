@@ -13,6 +13,92 @@ _No unreleased changes._
 
 ---
 
+## [1.14.3] — 2026-04-28 — PLATFORMAPI patches: 500→409 on duplicate + ?email= filter
+
+**Closes R5.5 P0 findings #4 and #5** that were workaround-ed in
+`seed-staging.sh` since v1.13.0 ship.
+
+### 1. PLATFORMAPI-500-409 — UNIQUE constraint violations now return HTTP 409
+
+**Pre-v1.14.3 behavior**: `POST /api/v1/admin/users` with an email that
+already exists in the tenant (matching `idx_users_email` UNIQUE on
+`(tenant_id, lower(email))`) bubbled the raw `Npgsql.PostgresException`
+(SqlState 23505) up to ASP.NET's default problem handler → HTTP 500 with
+the raw Postgres constraint name in the response body. Same path for
+`POST /api/v1/admin/queues` if the operator had added a UNIQUE on
+`(tenant_id, name)` to `queue_configs`.
+
+**v1.14.3 fix**: new `EntityAlreadyExistsException` in
+`Asterisk.Platform.Core` carrying the entity kind + conflicting field
+name. `PostgresUserStore.SaveAsync` and `PostgresQueueStore.SaveAsync`
+now catch `PostgresException` with SqlState 23505 and translate to this
+domain exception. The endpoint handlers wrap their `SaveAsync` calls in
+a try/catch and return `Results.Problem(statusCode: 409,
+type: "https://asterisk.platform/errors/entity-already-exists")` —
+RFC-7807 problem details with a stable type URI integrators can match
+against.
+
+`InMemoryUserStore.SaveAsync` mirrors the Postgres `idx_users_email`
+UNIQUE so unit tests exercise the 409 branch end-to-end (the substitute
+in `AuthenticatedPlatformApiFactory` does the same via stateful behavior).
+
+### 2. PLATFORMAPI-EMAIL-FILTER — `GET /admin/users?email=` actually filters
+
+**Pre-v1.14.3 behavior**: `GET /api/v1/admin/users?email=alice@example.com`
+silently dropped the `email` query parameter at the endpoint layer —
+returned the unfiltered first page regardless of the filter. Admin
+tooling (including `seed-staging.sh`) that needed to look up a single
+user by email had to fetch the entire page and scan locally.
+
+**v1.14.3 fix**: extends `IUserStore` with a new
+`ListAsync(TenantId, PagedQuery, string? email, CancellationToken)`
+overload (default impl falls back to the unfiltered overload when email
+is null/whitespace, so any third-party `IUserStore` implementations
+keep compiling). `PostgresUserStore` adds a `lower(email) LIKE
+@EmailPattern` predicate that uses the existing `idx_users_email` index;
+`InMemoryUserStore` mirrors the case-insensitive substring match;
+`CachedUserStore` passes through to the inner store.
+
+The `/admin/users` GET endpoint now accepts `string? email = null` as a
+query parameter and forwards it to the new overload.
+
+### Files changed
+
+- `src/Asterisk.Platform.Core/EntityAlreadyExistsException.cs` (new)
+- `src/Asterisk.Platform.Identity/IUserStore.cs` (new email overload + default impl)
+- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresUserStore.cs` (23505 catch + email overload)
+- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresQueueStore.cs` (23505 catch)
+- `src/Asterisk.Platform.Storage.InMemory/InMemoryUserStore.cs` (email-UNIQUE enforcement + email overload)
+- `src/Asterisk.Platform.Api/Services/CachedUserStore.cs` (email overload pass-through)
+- `src/Asterisk.Platform.Api/Endpoints/AdminEndpoints.cs` (CreateUser + CreateQueue 409 path; ListUsers email param)
+- `tests/Asterisk.Platform.Api.Tests/AdminEndpointTests.cs` (3 regression tests added)
+- `tests/Asterisk.Platform.Api.Tests/AuthenticatedPlatformApiFactory.cs` (substitute now models email UNIQUE + supports new overload)
+- `scripts/seed-staging.sh` (workaround comments updated)
+
+### Tests
+
+- **856 / 856** Api.Tests passing (was 853 pre-v1.14.3; +3 regression tests).
+- 125 / 125 Storage.InMemory.Tests passing.
+- 64 / 64 Identity.Tests passing.
+- 0 build warnings (TreatWarningsAsErrors holds).
+- 0 vulnerable packages cross-repo.
+
+### Wire compatibility
+
+The new ListAsync overload is binary-additive at the IUserStore level —
+the default interface method routes to the unfiltered overload, so
+existing IUserStore implementations and binary-pinned consumers are
+unaffected. The endpoint accepts the new query param as optional;
+existing callers see no behavior change.
+
+### Cross-repo coordination
+
+- Asterisk.Sdk: unchanged (1.15.1).
+- Asterisk.Sdk.Pro: unchanged (1.15.0-pro).
+- Asterisk.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
+
+---
+
 ## [1.14.2] — 2026-04-28 — AHH multi-replica unblocked + Argon2id retune + Postgres pool sizing
 
 **Closes the v1.14.1 known-issue commitment** with three production fixes

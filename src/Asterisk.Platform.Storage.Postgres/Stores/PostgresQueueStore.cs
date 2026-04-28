@@ -55,33 +55,49 @@ internal sealed class PostgresQueueStore : IQueueStore
         var skillsJson = JsonSerializer.Serialize(queue.RequiredSkills, PostgresJson.Ctx.IReadOnlyListString);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
-            "INSERT INTO queue_configs (queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
-            "required_skills, created_at, updated_at, created_by, updated_by) " +
-            "VALUES (@QueueId, @TenantId, @Name, @IsActive, @MaxWaiting, @SlaTargets::jsonb, @OverflowRule::jsonb, " +
-            "@Hours::jsonb, @WrapUp::jsonb, @RequiredSkills::jsonb, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
-            "ON CONFLICT (tenant_id, queue_id) DO UPDATE SET " +
-            "  name = EXCLUDED.name, is_active = EXCLUDED.is_active, max_waiting = EXCLUDED.max_waiting, " +
-            "  sla_targets = EXCLUDED.sla_targets, overflow_rule = EXCLUDED.overflow_rule, hours = EXCLUDED.hours, " +
-            "  wrap_up = EXCLUDED.wrap_up, required_skills = EXCLUDED.required_skills, " +
-            "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-            new
-            {
-                QueueId = queue.QueueId.Value,
-                TenantId = queue.TenantId.Value,
-                queue.Name,
-                queue.IsActive,
-                queue.MaxWaiting,
-                SlaTargets = slaJson,
-                OverflowRule = overflowJson,
-                Hours = hoursJson,
-                WrapUp = wrapUpJson,
-                RequiredSkills = skillsJson,
-                queue.CreatedAt,
-                queue.UpdatedAt,
-                queue.CreatedBy,
-                queue.UpdatedBy,
-            });
+        try
+        {
+            await conn.ExecuteAsync(
+                "INSERT INTO queue_configs (queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
+                "required_skills, created_at, updated_at, created_by, updated_by) " +
+                "VALUES (@QueueId, @TenantId, @Name, @IsActive, @MaxWaiting, @SlaTargets::jsonb, @OverflowRule::jsonb, " +
+                "@Hours::jsonb, @WrapUp::jsonb, @RequiredSkills::jsonb, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
+                "ON CONFLICT (tenant_id, queue_id) DO UPDATE SET " +
+                "  name = EXCLUDED.name, is_active = EXCLUDED.is_active, max_waiting = EXCLUDED.max_waiting, " +
+                "  sla_targets = EXCLUDED.sla_targets, overflow_rule = EXCLUDED.overflow_rule, hours = EXCLUDED.hours, " +
+                "  wrap_up = EXCLUDED.wrap_up, required_skills = EXCLUDED.required_skills, " +
+                "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
+                new
+                {
+                    QueueId = queue.QueueId.Value,
+                    TenantId = queue.TenantId.Value,
+                    queue.Name,
+                    queue.IsActive,
+                    queue.MaxWaiting,
+                    SlaTargets = slaJson,
+                    OverflowRule = overflowJson,
+                    Hours = hoursJson,
+                    WrapUp = wrapUpJson,
+                    RequiredSkills = skillsJson,
+                    queue.CreatedAt,
+                    queue.UpdatedAt,
+                    queue.CreatedBy,
+                    queue.UpdatedBy,
+                });
+        }
+        catch (PostgresException ex) when (ex.SqlState == "23505")
+        {
+            // v1.14.3 (R5.5 P0 finding #4 fix). Defensive translation: even
+            // though the current 001_InitialSchema doesn't put a UNIQUE on
+            // (tenant_id, name) for queue_configs, a downstream migration
+            // or operator-applied DDL could add one. Without this catch,
+            // any future 23505 from this path would 500 with the raw
+            // Postgres constraint name in the response body.
+            var field = ex.ConstraintName?.Contains("name", StringComparison.OrdinalIgnoreCase) == true
+                ? "name"
+                : null;
+            throw new EntityAlreadyExistsException("queue", field, ex);
+        }
     }
 
     public async Task DeleteAsync(TenantId tenantId, EntityId queueId, CancellationToken ct)

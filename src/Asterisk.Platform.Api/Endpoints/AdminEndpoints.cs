@@ -56,10 +56,16 @@ internal static class AdminEndpoints
         [FromServices] IUserStore store,
         int page = 1,
         int pageSize = 25,
+        // v1.14.3 (R5.5 P0 finding #5 fix). Pre-v1.14.3 the `email` query
+        // string was silently dropped — the endpoint accepted it but never
+        // forwarded it to the store. Now passes through to
+        // IUserStore.ListAsync(..., email, ...) for case-insensitive
+        // substring filtering.
+        string? email = null,
         CancellationToken ct = default)
     {
         var tenantId = GetTenantId(context);
-        var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, ct);
+        var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, email, ct);
         var dtos = new PagedResult<UserDto>(
             result.Items.Select(ToUserDto).ToList(),
             result.TotalCount,
@@ -98,7 +104,24 @@ internal static class AdminEndpoints
             PasswordHash = body.Password is not null ? PasswordService.HashPassword(body.Password) : null,
             CreatedAt = clock.UtcNow,
         };
-        await store.SaveAsync(user, ct);
+        try
+        {
+            await store.SaveAsync(user, ct);
+        }
+        catch (EntityAlreadyExistsException ex)
+        {
+            // v1.14.3 (R5.5 P0 finding #4 fix). Pre-v1.14.3, a duplicate
+            // email collided with `idx_users_email` UNIQUE → bubbled out as
+            // PostgresException 23505 → 500 with the raw constraint name.
+            // Now translates to RFC-7807 problem details with HTTP 409.
+            return Results.Problem(
+                title: "User already exists",
+                detail: ex.ConflictingField is not null
+                    ? $"A user with the supplied {ex.ConflictingField} already exists in this tenant."
+                    : "A user with the supplied identifier already exists in this tenant.",
+                statusCode: StatusCodes.Status409Conflict,
+                type: "https://asterisk.platform/errors/entity-already-exists");
+        }
         return Results.Created($"/admin/users/{user.UserId}", ToUserDto(user));
     }
 
@@ -218,7 +241,24 @@ internal static class AdminEndpoints
             } : new WrapUpConfig(),
             CreatedAt = clock.UtcNow,
         };
-        await store.SaveAsync(queue, ct);
+        try
+        {
+            await store.SaveAsync(queue, ct);
+        }
+        catch (EntityAlreadyExistsException ex)
+        {
+            // v1.14.3 (R5.5 P0 finding #4 fix). Defensive translation: any
+            // future UNIQUE on (tenant_id, name) — or any other constraint
+            // the operator might add — surfaces as a 409 instead of leaking
+            // the raw Postgres constraint name in a 500 body.
+            return Results.Problem(
+                title: "Queue already exists",
+                detail: ex.ConflictingField is not null
+                    ? $"A queue with the supplied {ex.ConflictingField} already exists in this tenant."
+                    : "A queue with the supplied identifier already exists in this tenant.",
+                statusCode: StatusCodes.Status409Conflict,
+                type: "https://asterisk.platform/errors/entity-already-exists");
+        }
 
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
         if (syncService is not null)

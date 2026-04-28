@@ -135,11 +135,15 @@ seed_tenant() {
 
     # 2b. Create users + agents (paired: each agent links to a created user).
     # Idempotency: pre-fetch the entire existing user list once and look up
-    # by email locally. Avoids hitting `/admin/users?email=` (R5.5 P0 finding
-    # #5: the server-side filter is silently ignored — returns the first
-    # page regardless) and avoids spamming POST /admin/users with duplicates
-    # (R5.5 P0 finding #4: server returns HTTP 500 with the raw Postgres
-    # UNIQUE-constraint message instead of 409 Conflict).
+    # by email locally — efficient (one HTTP call per tenant rather than
+    # N per-user lookups).
+    #
+    # Platform v1.14.3 fixed both R5.5 P0 findings #4 (POST /admin/users now
+    # returns 409 Conflict on duplicate email instead of 500 with raw
+    # Postgres constraint name) and #5 (GET /admin/users?email= now
+    # case-insensitively substring-matches). The pre-fetch + local lookup
+    # below stays for performance, but downstream tools can also rely on
+    # the ?email= filter for targeted lookups.
     log "    seeding ${agents} users + agents..."
     local i ext email user_resp user_id agent_resp existing_users_json existing_agents_json
     existing_users_json=$(curl -s -G "$PLATFORM_API_URL/api/v1/admin/users" \
@@ -187,9 +191,10 @@ seed_tenant() {
     done
     log "    ${agents} users + agents done"
 
-    # 2c. Create queues. Idempotent — pre-checks existence by name to avoid
-    # 500s on UNIQUE constraint violations (mirrors users path; same R5.5 P0
-    # finding #4).
+    # 2c. Create queues. Idempotent — pre-checks existence by name to skip
+    # the create call when the queue already exists. Platform v1.14.3 fixed
+    # the queue 500→409 finding too (R5.5 P0 #4); the pre-check below stays
+    # for efficiency.
     log "    seeding ${queues} queues..."
     local existing_queues queue_name
     existing_queues=$(curl -s -G "$PLATFORM_API_URL/api/v1/admin/queues" \

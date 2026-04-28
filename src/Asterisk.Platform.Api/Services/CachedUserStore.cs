@@ -105,6 +105,10 @@ internal sealed class CachedUserStore : IUserStore, ILocalAuthCacheInvalidationS
     public Task<PagedResult<User>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
         => _inner.ListAsync(tenantId, query, ct);
 
+    // v1.14.3 — pass-through email-filter overload (R5.5 P0 finding #5 fix).
+    public Task<PagedResult<User>> ListAsync(TenantId tenantId, PagedQuery query, string? email, CancellationToken ct)
+        => _inner.ListAsync(tenantId, query, email, ct);
+
     public Task<IReadOnlyList<User>> GetByIdsAsync(string tenantId, IReadOnlyCollection<string> userIds, CancellationToken ct)
         => _inner.GetByIdsAsync(tenantId, userIds, ct);
 

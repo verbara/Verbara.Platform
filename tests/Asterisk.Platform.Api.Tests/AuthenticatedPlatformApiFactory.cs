@@ -134,10 +134,42 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
         // `result.Items.Select(ToUserDto)`. Default NSubstitute returns null for
         // reference-typed Task<T> results, which was silently breaking ListUsers,
         // AuthTests.GetAdminUsers, and AuthIntegrationTests.ApiKey_ShouldReturn200_OnAdminUsers.
+        // v1.14.3 — track created users in a per-substitute dictionary so:
+        //  (a) the email-filter overload returns matching users, and
+        //  (b) duplicate emails throw EntityAlreadyExistsException so the 409
+        //      branch in AdminEndpoints.CreateUser is exercised.
+        var seenUsers = new System.Collections.Generic.Dictionary<string, User>(StringComparer.OrdinalIgnoreCase);
         userStore.ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
                  .Returns(ci => Task.FromResult(PagedResult<User>.Empty(
                      ((PagedQuery)ci[1]).Page,
                      ((PagedQuery)ci[1]).PageSize)));
+        userStore.ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+                 .Returns(ci =>
+                 {
+                     var query = (PagedQuery)ci[1];
+                     var emailFilter = (string?)ci[2];
+                     IEnumerable<User> pool = seenUsers.Values;
+                     if (!string.IsNullOrWhiteSpace(emailFilter))
+                         pool = pool.Where(u => u.Email is not null
+                             && u.Email.Contains(emailFilter, StringComparison.OrdinalIgnoreCase));
+                     var all = pool.ToList();
+                     var page = all.Skip(query.Offset).Take(query.PageSize).ToList();
+                     return Task.FromResult(new PagedResult<User>(page, all.Count, query.Page, query.PageSize));
+                 });
+        userStore.SaveAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
+                 .Returns(ci =>
+                 {
+                     var u = (User)ci[0];
+                     // Emulate idx_users_email UNIQUE: same email + different user_id ⇒ 409.
+                     if (!string.IsNullOrEmpty(u.Email)
+                         && seenUsers.TryGetValue(u.Email, out var existing)
+                         && existing.UserId != u.UserId)
+                     {
+                         return Task.FromException(new EntityAlreadyExistsException("user", "email"));
+                     }
+                     seenUsers[u.Email ?? Guid.NewGuid().ToString()] = u;
+                     return Task.CompletedTask;
+                 });
         services.AddSingleton(userStore);
     }
 

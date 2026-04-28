@@ -123,6 +123,63 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
+    // ─── v1.14.3 — R5.5 P0 finding #4 + #5 regression coverage ────────────────
+
+    [Fact]
+    public async Task CreateUser_ShouldReturn409_WhenEmailAlreadyExists()
+    {
+        var firstBody = JsonContent.Create(new { email = "duplicate@example.com", displayName = "First", role = 0 });
+        var firstResp = await _client.PostAsync("/api/admin/users", firstBody);
+        firstResp.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        // Same email, different display name → must collide on idx_users_email.
+        var dupBody = JsonContent.Create(new { email = "duplicate@example.com", displayName = "Second", role = 0 });
+        var dupResp = await _client.PostAsync("/api/admin/users", dupBody);
+
+        dupResp.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        // Body should be RFC-7807 problem details with our stable type URI.
+        var problem = JsonNode.Parse(await dupResp.Content.ReadAsStringAsync());
+        problem!["status"]!.GetValue<int>().Should().Be(409);
+        problem["type"]!.GetValue<string>().Should().Be("https://asterisk.platform/errors/entity-already-exists");
+    }
+
+    [Fact]
+    public async Task ListUsers_ShouldFilterByEmail_WhenQueryParamSupplied()
+    {
+        // Seed two users with distinguishable emails.
+        await _client.PostAsync(
+            "/api/admin/users",
+            JsonContent.Create(new { email = "alice@filter.test", displayName = "Alice", role = 0 }));
+        await _client.PostAsync(
+            "/api/admin/users",
+            JsonContent.Create(new { email = "bob@other.test", displayName = "Bob", role = 0 }));
+
+        // Substring match on `alice` should return ONLY alice@filter.test.
+        var response = await _client.GetAsync("/api/admin/users?email=alice");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var page = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var items = page!["items"]!.AsArray();
+        items.Count.Should().Be(1);
+        items[0]!["email"]!.GetValue<string>().Should().Be("alice@filter.test");
+    }
+
+    [Fact]
+    public async Task ListUsers_ShouldFilterCaseInsensitively_WhenQueryParamSupplied()
+    {
+        await _client.PostAsync(
+            "/api/admin/users",
+            JsonContent.Create(new { email = "Charlie@MIXED.test", displayName = "Charlie", role = 0 }));
+
+        // Lowercase needle against mixed-case stored email.
+        var response = await _client.GetAsync("/api/admin/users?email=charlie");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var page = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        page!["items"]!.AsArray().Count.Should().Be(1);
+    }
+
     // ─── Agents ───────────────────────────────────────────────────────────────
 
     [Fact]
