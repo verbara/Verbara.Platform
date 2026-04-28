@@ -48,10 +48,110 @@ public interface ILocalAuthCacheInvalidationSink
 }
 
 /// <summary>
+/// Publish-only side of the auth-cache invalidation pubsub. The cache
+/// decorators (<c>CachedUserStore</c>, <c>CachedTenantAuthConfigStore</c>,
+/// <c>PermissionResolver</c>) depend on this interface — never on the
+/// concrete <see cref="RedisAuthCacheInvalidator"/> — so DI singleton
+/// resolution doesn't form a cycle through the
+/// <see cref="ILocalAuthCacheInvalidationSink"/> sink registrations
+/// (which themselves resolve the decorators). v1.14.2 fix.
+/// </summary>
+public interface IAuthCachePublisher
+{
+    /// <summary>Broadcast a tenant-auth invalidation across the cluster.</summary>
+    Task PublishTenantAuthAsync(string tenantId, CancellationToken ct = default);
+
+    /// <summary>Broadcast a user-by-id / user-by-email invalidation across the cluster.</summary>
+    Task PublishUserAsync(string tenantId, string userId, string? email, CancellationToken ct = default);
+
+    /// <summary>Broadcast a per-user permission-set invalidation across the cluster.</summary>
+    Task PublishPermissionsAsync(string tenantId, string userId, CancellationToken ct = default);
+}
+
+/// <summary>
+/// v1.14.2 — publish-only side of auth cache invalidation. Holds NO
+/// dependency on the sink set, so the cache decorators (which ARE the
+/// sinks) can take a constructor dep on this without forming a singleton
+/// resolution cycle. Pre-v1.14.2, the decorators depended on the
+/// concrete <see cref="RedisAuthCacheInvalidator"/> which itself takes
+/// <c>IEnumerable&lt;ILocalAuthCacheInvalidationSink&gt;</c> in its
+/// constructor → singleton mutex deadlock at startup.
+/// </summary>
+public sealed class RedisAuthCachePublisher : IAuthCachePublisher
+{
+    private const string TypeTenantAuth = "tenant-auth";
+    private const string TypeUser = "user";
+    private const string TypePermissions = "permissions";
+
+    private readonly IConnectionMultiplexer _redis;
+    private readonly string _instanceId;
+
+    /// <summary>The originator id that prefixes every publish payload.</summary>
+    public string InstanceId => _instanceId;
+
+    public RedisAuthCachePublisher(IConnectionMultiplexer redis)
+        : this(redis, Guid.NewGuid().ToString("N"))
+    {
+    }
+
+    /// <summary>Test-friendly constructor allowing a deterministic instance id.</summary>
+    internal RedisAuthCachePublisher(IConnectionMultiplexer redis, string instanceId)
+    {
+        ArgumentNullException.ThrowIfNull(redis);
+        ArgumentNullException.ThrowIfNull(instanceId);
+        _redis = redis;
+        _instanceId = instanceId;
+    }
+
+    public Task PublishTenantAuthAsync(string tenantId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenantId);
+        var payload = $"{_instanceId}|{TypeTenantAuth}|{tenantId}";
+        return PublishRawAsync(payload, ct);
+    }
+
+    public Task PublishUserAsync(string tenantId, string userId, string? email, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenantId);
+        ArgumentNullException.ThrowIfNull(userId);
+        var payload = $"{_instanceId}|{TypeUser}|{tenantId}|{userId}|{email ?? string.Empty}";
+        return PublishRawAsync(payload, ct);
+    }
+
+    public Task PublishPermissionsAsync(string tenantId, string userId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenantId);
+        ArgumentNullException.ThrowIfNull(userId);
+        var payload = $"{_instanceId}|{TypePermissions}|{tenantId}|{userId}";
+        return PublishRawAsync(payload, ct);
+    }
+
+    private async Task PublishRawAsync(string payload, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var subscriber = _redis.GetSubscriber();
+        _ = await subscriber.PublishAsync(
+            RedisChannel.Literal(AuthHotpathCacheKeys.PubSubChannel),
+            payload).ConfigureAwait(false);
+    }
+}
+
+/// <summary>
 /// AHH Phase 1 hosted service that bridges Redis pubsub invalidation messages
 /// to local <see cref="ILocalAuthCacheInvalidationSink"/> sinks.
 /// </summary>
-public sealed partial class RedisAuthCacheInvalidator : IHostedService, IAsyncDisposable
+/// <remarks>
+/// v1.14.2 split: the publish-side surface lives on
+/// <see cref="RedisAuthCachePublisher"/> so decorators can depend on
+/// <see cref="IAuthCachePublisher"/> WITHOUT pulling the sink IEnumerable
+/// resolution into their constructor graph. This class is the
+/// receive-side: subscribes to Redis pubsub + dispatches incoming
+/// messages to the registered sinks. It also implements
+/// <see cref="IAuthCachePublisher"/> for backward compatibility +
+/// internal use, but the recommended publisher dependency is
+/// <see cref="RedisAuthCachePublisher"/>.
+/// </remarks>
+public sealed partial class RedisAuthCacheInvalidator : IHostedService, IAuthCachePublisher, IAsyncDisposable
 {
     private const string TypeTenantAuth = "tenant-auth";
     private const string TypeUser = "user";

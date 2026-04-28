@@ -38,11 +38,21 @@ internal sealed class PasswordService
     /// </remarks>
     public const int LegacyBcryptWorkFactor = 12;
 
-    /// <summary>OWASP-2025 floor: Argon2id m=19 MiB.</summary>
-    private const int Argon2MemoryCostKib = 19 * 1024;
+    /// <summary>
+    /// v1.14.2 retuned: Argon2id m=12 MiB (was 19 MiB).
+    /// OWASP-2025 specifies a parameter CURVE — m=46 MiB / t=1 OR
+    /// m=19 MiB / t=2 OR m=12 MiB / t=3 all target roughly the same total
+    /// work factor. v1.14.0 shipped with m=19 MiB which empirically
+    /// saturates memory bandwidth + GC under sustained load (post-AHH
+    /// single-replica regressed to ~50 req/s vs pre-AHH 75 req/s).
+    /// Lowering m + raising t keeps the OWASP floor while shrinking the
+    /// working-set per concurrent verify so GC pressure is less steep at
+    /// 100+ req/s. See docs/operations/auth-horizontal-scaling.md.
+    /// </summary>
+    private const int Argon2MemoryCostKib = 12 * 1024;
 
-    /// <summary>OWASP-2025 floor: Argon2id t=2.</summary>
-    private const int Argon2TimeCost = 2;
+    /// <summary>v1.14.2 retuned: Argon2id t=3 (was 2). See above.</summary>
+    private const int Argon2TimeCost = 3;
 
     /// <summary>OWASP-2025 floor: Argon2id p=1.</summary>
     private const int Argon2Lanes = 1;

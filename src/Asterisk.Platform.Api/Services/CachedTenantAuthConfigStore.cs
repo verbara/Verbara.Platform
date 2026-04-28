@@ -25,12 +25,12 @@ internal sealed class CachedTenantAuthConfigStore : ITenantAuthConfigStore, ILoc
     private readonly ITenantAuthConfigStore _inner;
     private readonly IMemoryCache _cache;
     private readonly TimeSpan _ttl;
-    private readonly RedisAuthCacheInvalidator? _invalidator;
+    private readonly IAuthCachePublisher? _invalidator;
 
     public CachedTenantAuthConfigStore(
         ITenantAuthConfigStore inner,
         IMemoryCache cache,
-        RedisAuthCacheInvalidator? invalidator = null,
+        IAuthCachePublisher? invalidator = null,
         TimeSpan? ttl = null)
     {
         ArgumentNullException.ThrowIfNull(inner);

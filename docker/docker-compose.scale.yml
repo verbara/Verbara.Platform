@@ -46,9 +46,29 @@ services:
       Identity__JwtKeyRotation__UseRotationPool: "true"
       Identity__JwtKeyRotation__RequireRedisStore: "true"
       ConnectionStrings__IdentityRedis: redis:6379
+      # v1.14.2 — explicit Postgres pool sizing for multi-replica deployments.
+      # Default Npgsql pool max=100. With 4 replicas at this default, total
+      # demand is 400 conns but Postgres default `max_connections=100` denies
+      # most. Setting Maximum Pool Size=50 per replica + max_connections=220
+      # on Postgres (see service postgres below) gives 4×50=200 + 20 admin
+      # headroom. Per ADR-0014 §"Postgres pool tuning".
+      ConnectionStrings__Postgres: "Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret};Maximum Pool Size=50;Minimum Pool Size=10;Connection Idle Lifetime=300;Pooling=true"
     depends_on:
       redis:
         condition: service_healthy
+
+  postgres:
+    # v1.14.2 — bump max_connections to absorb 4 replicas × 50 pool + 20 admin.
+    # postgres:18-alpine default is 100; with 4 replicas pre-bump we'd see
+    # NpgsqlException timeouts under burst (R5.5 100 req/s 82 errors signature).
+    command:
+      - postgres
+      - -c
+      - max_connections=220
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=2GB
 
   redis:
     # full.yml gates redis on the `cluster` / `identity-redis` profiles.

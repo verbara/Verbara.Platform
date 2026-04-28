@@ -13,6 +13,113 @@ _No unreleased changes._
 
 ---
 
+## [1.14.2] — 2026-04-28 — AHH multi-replica unblocked + Argon2id retune + Postgres pool sizing
+
+**Closes the v1.14.1 known-issue commitment** with three production fixes
+that move the multi-replica gate from "documented + scaffolded but
+non-functional" to "**boots + measured**".
+
+### 1. Multi-replica startup hang — root cause + fix
+
+The hang was a **circular DI dependency** between the cache decorators
+(`CachedUserStore` / `CachedTenantAuthConfigStore` / `PermissionResolver`)
+and `RedisAuthCacheInvalidator`. Decorators take the invalidator as a
+constructor dep (to publish invalidations on writes); the invalidator
+takes `IEnumerable<ILocalAuthCacheInvalidationSink>` (which resolves those
+same decorators). Singleton resolution locks on each side → deadlock at
+host startup. The v1.14.1 DI fix made the bug surface as a hang instead
+of an exception (pre-v1.14.1: `TryAddEnumerable` threw at registration;
+post-v1.14.1: registration succeeded but resolution looped).
+
+**v1.14.2 fix** — split the publish-side surface into a new
+`RedisAuthCachePublisher` class (publish-only, no sink dependency). The
+decorators now take `IAuthCachePublisher` which resolves to the publisher
+singleton, NOT the invalidator. Two singletons share only the
+`IConnectionMultiplexer`. **Cycle structurally broken.**
+
+Files: `Asterisk.Platform.Identity.Redis.RedisAuthCacheInvalidator.cs`
+(new `IAuthCachePublisher` interface + new `RedisAuthCachePublisher`
+class), `AuthHotpathCachingExtensions.cs` (registration switched to the
+publisher), 3 decorator constructors changed from
+`RedisAuthCacheInvalidator?` to `IAuthCachePublisher?`.
+
+### 2. Argon2id retuned (m=19 MiB / t=2 → m=12 MiB / t=3)
+
+OWASP-2025 specifies a parameter CURVE — m=46 MiB/t=1 OR m=19 MiB/t=2 OR
+m=12 MiB/t=3 all target roughly the same total work factor. v1.14.0
+shipped m=19 MiB which empirically saturates memory bandwidth + GC under
+sustained load. v1.14.2 lowers `m` and raises `t` to keep the OWASP
+floor while shrinking the working-set per concurrent verify.
+
+**Single-replica empirical impact (50 req/s × 60 s):**
+- p50: 83.5 ms → **71.5 ms** (-15 %)
+- p95: 152.2 ms → **124.4 ms** (-18 %)
+
+**Single-replica empirical impact (100 req/s × 60 s):**
+- OK: 3918 → **4947** (+26 % throughput)
+- p95: 23 462 ms → **9 699 ms** (-58 %)
+
+### 3. Postgres pool sizing for multi-replica
+
+`docker-compose.scale.yml` now sets:
+- `Maximum Pool Size=50` per replica via the connection string (4 × 50 =
+  200 conns total).
+- `max_connections=220` on the postgres container (200 app + 20 admin
+  headroom) per ADR-0014 §"Postgres pool tuning".
+- `shared_buffers=512MB`, `effective_cache_size=2GB` for the staging tier.
+
+Without this, 4 replicas × default pool 100 = 400 conn demand against
+postgres default `max_connections=100` → `NpgsqlException: operation
+timed out` storms (the v1.14.1 100 req/s 82-error signature).
+
+### 4-replica empirical jwt-sweep.sh (post-v1.14.2)
+
+| Rate | OK | Fail | p50 ms | p95 ms | Verdict |
+|---:|---:|---:|---:|---:|---|
+| 10  | 600  | 0    | 37.4   | 73.8   | clean |
+| 50  | 3000 | 0    | 203.4  | 398.3  | 100 % OK |
+| 100 | 3114 | 102  | n/a | n/a | **96.8 % OK** (vs 51 % pre-retune) |
+| 250 | 1490 | 4882 | n/a | n/a | 23 % OK |
+| 500 |  635 | 8334 | n/a | n/a |  7 % OK |
+
+### Honest assessment of horizontal scaling
+
+The **v1.14.0 projection of ~880 req/s 4-replica aggregate did NOT
+materialize**. v1.14.2 multi-replica handles ~50 req/s sustainable (p95
+≤ 400 ms), basically the same as the retuned single-replica. At 100
+req/s, the 4-replica is dramatically more robust (97 % OK vs 82 %
+single-replica), but throughput-wise the bottleneck has shifted from
+per-replica CPU/memory (Argon2id) to:
+
+1. **Postgres write contention** — refresh-token persist + failure-path
+   audit log are synchronous (security invariants) and serialize at the
+   shared DB. 4 replicas don't help here.
+2. **nginx single-thread LB overhead** — adds latency + sync cost.
+
+**Practical guidance**: deploy 4 replicas for **high availability**, NOT
+for proportional throughput. True linear scaling needs Postgres
+read-replica routing + a multi-process LB — out of scope for v1.14.x.
+
+### Tests
+- 1,076+ unit tests preserved; AHH-touched tests 13/13 green.
+- 0 build warnings.
+- 0 vulnerable packages.
+
+### Docs
+- `docs/operations/auth-horizontal-scaling.md` — knee envelope updated
+  with v1.14.2 numbers (single + 4-replica empirical) + root-cause
+  section for the v1.14.1 hang.
+- `docs/decisions/0014-auth-horizontal-scaling-baseline.md` — pending
+  amendment in a follow-up doc patch.
+
+### Cross-repo coordination
+
+- Asterisk.Sdk: unchanged (1.15.1).
+- Asterisk.Sdk.Pro: unchanged (1.15.0-pro).
+- Asterisk.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
+
+---
+
 ## [1.14.1] — 2026-04-28 — AHH empirical follow-up + multi-replica scaffold
 
 **Closes the v1.14.0 follow-up commitment** with three deliverables:

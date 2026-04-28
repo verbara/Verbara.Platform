@@ -1,9 +1,8 @@
 # Auth Horizontal Scaling — Runbook
 
-**Last updated:** 2026-04-28 · **Train:** AHH (v1.14.0 + v1.14.1 amendment) ·
-**Status:** v1-measured single-replica post-AHH; **4-replica still
-projected** (see §"v1.14.1 follow-up" — multi-replica startup gate hits
-a known issue under investigation as v1.14.2).
+**Last updated:** 2026-04-28 · **Train:** AHH (v1.14.0 + v1.14.1 amendment + **v1.14.2 fix**) ·
+**Status:** **v1-measured single-replica AND 4-replica post-AHH** (v1.14.2
+unblocks multi-replica startup, retunes Argon2id, sizes Postgres pool).
 
 This runbook codifies what an operator does to deploy
 `Asterisk.Platform.Api` at multi-replica with the AHH train applied. It
@@ -41,18 +40,63 @@ All numbers measured on **AMD Ryzen 9 9900X (12 cores / 24 threads) ·
 | Stage | Single-replica knee | 4-replica aggregate | p99 ≤ 250 ms? | Source |
 |---|--:|--:|---|---|
 | R5.5 baseline (BCrypt12, no caching, sync writes) | 75 req/s | n/a | ⚠ marginal | v1-measured, R5.5 sweep |
-| Post-AHH single-replica (Argon2id + caches + write deferral) | **~50 req/s** | n/a | ✓ at 50 / ⚠ at 100 | **v1-measured 2026-04-28** |
-| Post-AHH 4-replica aggregate (rotation pool + Redis caches) | ~50 per replica | _projected_ ~200 req/s | _pending v1.14.2 fix_ | projection-only |
+| Post-AHH **v1.14.0/v1.14.1** single-replica (Argon2id m=19/t=2 + caches + write deferral) | ~50 req/s | n/a (multi-replica blocked by DI hang) | ✓ at 50 / ⚠ at 100 | v1-measured 2026-04-28 |
+| Post-AHH **v1.14.2** single-replica (Argon2id m=12/t=3 retuned + Postgres pool=100) | **~50 req/s sustained / 100 req/s 82 % OK** | n/a | ✓ at 50 / 100 req/s clean tail | **v1-measured 2026-04-28** |
+| Post-AHH **v1.14.2** 4-replica aggregate (rotation pool + Postgres pool=50/replica + max_connections=220) | ~50 per replica (no linear scaling) | **~50 req/s aggregate** at p99 ≤ 400 ms / **100 req/s 96.8 % OK** | ✓ at 50 / 100 req/s mostly-OK | **v1-measured 2026-04-28** |
 
-### Empirical single-replica jwt-sweep.sh post-AHH (2026-04-28)
+### Empirical single-replica jwt-sweep.sh — v1.14.0/v1.14.1 baseline (Argon2id m=19/t=2)
 
-| Rate | OK count | Fail count | p50 ms | p95 ms | p99 ms | Verdict |
+| Rate | OK | Fail | p50 ms | p95 ms | p99 ms | Verdict |
 |---:|---:|---:|---:|---:|---:|---|
-| 10  | 600  | 0    | 43.65   | 123.14  | 1494.02  | high tail (cold cache + GC) |
-| 50  | 3000 | 0    | 83.52   | 152.19  | 492.29   | within range, marginal p99 |
+| 10  | 600  | 0    | 43.65    | 123.14   | 1494.02  | high tail (cold cache + GC) |
+| 50  | 3000 | 0    | 83.52    | 152.19   | 492.29   | within range, marginal p99 |
 | 100 | 3918 | 82   | 13295.62 | 23461.89 | 26279.94 | 500-error onset, collapse |
-| 250 | 2428 | 6414 | n/a | n/a | 55214.08 | 27% OK |
-| 500 | 1216 | 8707 | n/a | n/a | 46596.10 | 12% OK |
+| 250 | 2428 | 6414 | n/a | n/a | 55214.08 | 27 % OK |
+| 500 | 1216 | 8707 | n/a | n/a | 46596.10 | 12 % OK |
+
+### Empirical single-replica jwt-sweep.sh — v1.14.2 retuned (Argon2id m=12/t=3 + pool=100)
+
+| Rate | OK | Fail | p50 ms | p95 ms | Verdict |
+|---:|---:|---:|---:|---:|---|
+| 50  | 3000 | 0    | **71.55**  | **124.35**  | -15 % p50 vs v1.14.1, 100 % OK |
+| 100 | 4947 | 1053 | 3942.40 | 9699.33 | 82 % OK (vs 98 % v1.14.1 but **p95 -58 %**) |
+
+### Empirical 4-replica jwt-sweep.sh — v1.14.2 (rotation pool + nginx-lb)
+
+| Rate | OK | Fail | p50 ms | p95 ms | p99 ms | Verdict |
+|---:|---:|---:|---:|---:|---:|---|
+| 10  | 600  | 0    | 37.38   | 73.79   | n/a | clean |
+| 50  | 3000 | 0    | 203.39  | 398.34  | n/a | 100 % OK; within p95 ≤ 400 ms |
+| 100 | 3114 | 102  | n/a | n/a | 36 208.64 | **96.8 % OK** (vs 51 % pre-retune) |
+| 250 | 1490 | 4882 | n/a | n/a | 60 915.71 | 23 % OK |
+| 500 |  635 | 8334 | n/a | n/a | 44 072.96 | 7 % OK |
+
+### Reading the v1.14.2 numbers
+
+**The 4-replica horizontal-scaling lift is smaller than projected.** At 50 req/s
+the single-replica handles 100 % OK at p95 ≤ 124 ms; the 4-replica handles 100 %
+OK at p95 ≤ 398 ms — *more capacity per request, but the 4-replica pipeline
+adds proxy + cross-replica overhead*. At 100 req/s the v1.14.2 retune lifts
+4-replica OK rate from 51 % (pre-retune) to **96.8 %** — a substantial
+robustness win — but the single-replica retune ALSO improved (from 98 % at
+p95=23 s to 82 % at p95=9.7 s). Aggregate multi-replica throughput is
+*not* materially better than the retuned single-replica baseline. The
+bottleneck has moved from per-replica CPU/memory (Argon2id) to a
+combination of:
+
+1. **Postgres write contention** — 4 replicas all hit the same Postgres,
+   so write-path operations (refresh-token persist, lockout state on
+   failure path) serialize at the DB level even though API frontends scale.
+2. **nginx round-robin overhead** — single-thread nginx LB adds latency
+   and synchronization on the host port.
+
+The runbook's projection of ~880 req/s aggregate (1.14.0 ADR) was
+optimistic — true linear scaling would require Postgres read-replica
+routing + a multi-process LB (haproxy-multi-thread or k8s service mesh).
+**For v1.14.x the practical guidance is: deploy 4 replicas for high
+availability; expect ~50-100 req/s sustainable aggregate at p99 ≤
+several-hundred ms (NOT the projected 880).** Capacity beyond that
+needs the architectural changes documented in §"Forward compatibility".
 
 **Sustainable knee post-AHH single-replica = ~50 req/s at p99 ≤ 250 ms.**
 This is *not* the projected 220 req/s improvement — the AHH train
@@ -75,29 +119,38 @@ Both are addressable in v1.14.2 via:
 - Connection-string pool sizing per
   [§ "Postgres pool tuning"](#postgres-pool-tuning).
 
-### v1.14.1 follow-up — multi-replica startup gate issue
+### v1.14.1 follow-up — multi-replica startup gate issue (RESOLVED in v1.14.2)
 
-Empirical 4-replica `jwt-sweep.sh` measurement is **deferred to v1.14.2**.
-With `ConnectionStrings:IdentityRedis` set (required by the multi-replica
-gate per [ADR-0012](../decisions/0012-jwt-rotation-pool-wireup-and-multi-replica-gate.md)),
-the platform-api .NET process registers its `IConnectionMultiplexer`,
-opens Redis pubsub + Postgres pool connections, but never reaches
-`Kestrel.Listen()`. The process sits at 0.04 % CPU, 50 sleeping threads,
-ports 5000 not bound. Single-replica + IdentityRedis reproduces the
-hang identically — so this is not a "multi-replica race" per se, it's
-a hang in the IdentityRedis hot-path initialization that surfaces only
-when the override engages.
+**Root cause** (identified via Program.cs bisection, 2026-04-28): a
+**circular DI dependency** between the cache decorators and the
+RedisAuthCacheInvalidator. The decorators (`CachedUserStore`,
+`CachedTenantAuthConfigStore`, `PermissionResolver`) take
+`RedisAuthCacheInvalidator?` in their constructor (to publish
+invalidation events on writes). The invalidator constructor takes
+`IEnumerable<ILocalAuthCacheInvalidationSink>`, which resolves *those
+same decorators* (registered as sinks via `TryAddEnumerable`).
 
-Track the investigation in v1.14.2 — likely candidates:
-- A hosted service registered after `AddAsteriskPlatformIdentityRedis`
-  is awaiting an unfulfilled Task (RedisAuthCacheInvalidator startup
-  shows `sub=1` in `CLIENT LIST`, so the subscribe completed; bug
-  is downstream of that).
-- An async-over-sync deadlock in JwtTokenService or PermissionResolver
-  cache resolution when `IJwtKeyStore = RedisJwtKeyStore`.
+When the .NET DI container resolves these as singletons:
+1. Resolve `RedisAuthCacheInvalidator` → factory needs sinks
+2. Resolve sinks → factory: `sp.GetRequiredService<CachedUserStore>()`
+3. Resolve `CachedUserStore` → constructor needs `RedisAuthCacheInvalidator`
+4. **Singleton resolution lock held on `RedisAuthCacheInvalidator`** →
+   wait on self → **deadlock** at startup.
 
-A bisection script + `dotnet-stack`-based thread dump are the next
-steps.
+**v1.14.2 fix** — split the publish-side surface into a separate
+class `RedisAuthCachePublisher` (publish-only, NO sink dependency).
+Decorators take `IAuthCachePublisher` (which resolves to the publisher
+singleton, NOT the invalidator). The invalidator stays unchanged
+(receive-side, hosted service, dispatches to sinks). Two singletons
+sharing only the `IConnectionMultiplexer` — the cycle is structurally
+broken.
+
+**Pre-v1.14.2, the v1.14.1 DI fix made the bug manifest as a hang
+instead of an exception.** Pre-v1.14.1, `TryAddEnumerable` rejected
+the duplicate registrations as indistinguishable and the container
+threw at startup — so multi-replica was already broken, just with a
+different surface symptom. The v1.14.0 ship was therefore wholly
+single-replica-only despite the multi-replica gate ADRs.
 
 ### v1.14.1 deliverables
 

@@ -8,12 +8,12 @@ namespace Asterisk.Platform.Api.Services;
 internal sealed class PermissionResolver : ILocalAuthCacheInvalidationSink
 {
     private readonly IUserRoleStore _userRoleStore;
-    private readonly RedisAuthCacheInvalidator? _invalidator;
+    private readonly IAuthCachePublisher? _invalidator;
 
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new();
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
-    public PermissionResolver(IUserRoleStore userRoleStore, RedisAuthCacheInvalidator? invalidator = null)
+    public PermissionResolver(IUserRoleStore userRoleStore, IAuthCachePublisher? invalidator = null)
     {
         _userRoleStore = userRoleStore;
         _invalidator = invalidator;

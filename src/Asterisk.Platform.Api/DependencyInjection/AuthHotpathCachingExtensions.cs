@@ -49,7 +49,7 @@ public static class AuthHotpathCachingExtensions
         services.AddSingleton<CachedUserStore>(sp => new CachedUserStore(
             sp.GetRequiredKeyedService<IUserStore>(AuthHotpathCacheKeys.UserStoreInner),
             sp.GetRequiredService<IMemoryCache>(),
-            sp.GetService<RedisAuthCacheInvalidator>()));
+            sp.GetService<IAuthCachePublisher>()));
         services.AddSingleton<IUserStore>(sp => sp.GetRequiredService<CachedUserStore>());
 
         // Same for ITenantAuthConfigStore.
@@ -57,7 +57,7 @@ public static class AuthHotpathCachingExtensions
         services.AddSingleton<CachedTenantAuthConfigStore>(sp => new CachedTenantAuthConfigStore(
             sp.GetRequiredKeyedService<ITenantAuthConfigStore>(AuthHotpathCacheKeys.TenantAuthConfigStoreInner),
             sp.GetRequiredService<IMemoryCache>(),
-            sp.GetService<RedisAuthCacheInvalidator>()));
+            sp.GetService<IAuthCachePublisher>()));
         services.AddSingleton<ITenantAuthConfigStore>(sp => sp.GetRequiredService<CachedTenantAuthConfigStore>());
 
         return services;
@@ -77,6 +77,19 @@ public static class AuthHotpathCachingExtensions
         // invalidation messages to all sinks. Only one logical instance
         // exists in the container; idempotent.
         services.TryAddSingleton<RedisAuthCacheInvalidator>();
+
+        // v1.14.2 — IAuthCachePublisher resolves to the lightweight
+        // RedisAuthCachePublisher (NO sink dependency), NOT the concrete
+        // RedisAuthCacheInvalidator. The decorators are themselves sinks
+        // (registered below via TryAddEnumerable), and the invalidator
+        // constructor needs IEnumerable<sinks>. Pre-v1.14.2, decorators
+        // took `RedisAuthCacheInvalidator?` directly → singleton
+        // resolution looped through itself (decorator → invalidator →
+        // sinks → decorator) and deadlocked at startup. By making the
+        // publisher a SEPARATE singleton sharing only IConnectionMultiplexer,
+        // the cycle is structurally broken.
+        services.TryAddSingleton<RedisAuthCachePublisher>();
+        services.TryAddSingleton<IAuthCachePublisher>(sp => sp.GetRequiredService<RedisAuthCachePublisher>());
 
         // Sinks are resolved by the invalidator constructor (IEnumerable<...>).
         // The TImplementation generic must differ across calls — otherwise

@@ -41,12 +41,12 @@ internal sealed class CachedUserStore : IUserStore, ILocalAuthCacheInvalidationS
     private readonly IUserStore _inner;
     private readonly IMemoryCache _cache;
     private readonly TimeSpan _ttl;
-    private readonly RedisAuthCacheInvalidator? _invalidator;
+    private readonly IAuthCachePublisher? _invalidator;
 
     public CachedUserStore(
         IUserStore inner,
         IMemoryCache cache,
-        RedisAuthCacheInvalidator? invalidator = null,
+        IAuthCachePublisher? invalidator = null,
         TimeSpan? ttl = null)
     {
         ArgumentNullException.ThrowIfNull(inner);
