@@ -12,6 +12,10 @@
 // `SupervisorPlus` policy (RequireRole("Admin", "Supervisor")). The
 // staging-profile load-test wrapper uses the platform-admin token from
 // docker/.staging-admin-token so the policy passes.
+//
+// R5.5 C-L stress sweep amendment: rate + duration honor LOADTEST_RATE +
+// LOADTEST_DURATION_SEC env vars so scripts/scenario-sweep.sh can drive
+// per-step isolated runs to find the docker-compose knee on this hardware.
 
 using NBomber.Contracts;
 using NBomber.CSharp;
@@ -45,8 +49,8 @@ internal static class LiveQueueWriterScenario
             })
             .WithLoadSimulations(
                 Simulation.Inject(
-                    rate: 500,
+                    rate: int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_RATE"), out var r) ? r : 500,
                     interval: TimeSpan.FromSeconds(1),
-                    during: TimeSpan.FromMinutes(2)));
+                    during: TimeSpan.FromSeconds(int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_DURATION_SEC"), out var d) ? d : 120)));
     }
 }

@@ -13,6 +13,12 @@
 // the scenario is meant to show how a Tier-Large stampede-class load shape
 // behaves on dev-workstation hardware, not to hit a SLO.
 //
+// R5.5 C-L stress sweep amendment: VU count + duration honor LOADTEST_VU +
+// LOADTEST_DURATION_SEC env vars so scripts/scenario-sweep.sh can drive
+// per-step isolated runs across a VU ladder. Note this scenario uses
+// KeepConstant (concurrency-based) NOT Inject (rate-based), so it reads
+// LOADTEST_VU instead of LOADTEST_RATE.
+//
 // True presence-fanout measurement requires a dedicated SignalR client
 // load tool (e.g. NBomber WebSocket plugin or @microsoft/signalr-based
 // JS load harness) — Phase C-L follow-up, not Phase B-L HTTP.
@@ -40,7 +46,7 @@ internal static class PresenceScenario
             })
             .WithLoadSimulations(
                 Simulation.KeepConstant(
-                    copies: 1_500,
-                    during: TimeSpan.FromMinutes(3)));
+                    copies: int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_VU"), out var v) ? v : 1_500,
+                    during: TimeSpan.FromSeconds(int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_DURATION_SEC"), out var d) ? d : 180)));
     }
 }

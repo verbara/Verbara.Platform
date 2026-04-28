@@ -10,6 +10,10 @@
 // (~1 000 reads/min for 5 min). Scenario name preserved for report
 // continuity, even though the behavior is now read-flavored.
 //
+// R5.5 C-L stress sweep amendment: rate + duration honor LOADTEST_RATE +
+// LOADTEST_DURATION_SEC env vars so scripts/scenario-sweep.sh can drive
+// per-step isolated runs to find the docker-compose knee on this hardware.
+//
 // True queue-ingestion measurement requires SIPp driving inbound calls
 // via tests/sipp-scenarios/03-queue-join.xml against a provisioned
 // Asterisk PJSIP endpoint — Phase B-L SIP-side prep, not Phase B-L HTTP.
@@ -37,8 +41,8 @@ internal static class QueueIngestionScenario
             })
             .WithLoadSimulations(
                 Simulation.Inject(
-                    rate: 17,
+                    rate: int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_RATE"), out var r) ? r : 17,
                     interval: TimeSpan.FromSeconds(1),
-                    during: TimeSpan.FromMinutes(5))); // ~1,000 / min
+                    during: TimeSpan.FromSeconds(int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_DURATION_SEC"), out var d) ? d : 300)));
     }
 }

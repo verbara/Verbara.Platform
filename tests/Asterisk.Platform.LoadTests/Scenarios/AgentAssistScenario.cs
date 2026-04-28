@@ -12,6 +12,10 @@
 // the teams table at the same medium-rate steady-state the original
 // scenario targeted. Scenario name preserved for report continuity.
 //
+// R5.5 C-L stress sweep amendment: rate + duration honor LOADTEST_RATE +
+// LOADTEST_DURATION_SEC env vars so scripts/scenario-sweep.sh can drive
+// per-step isolated runs to find the docker-compose knee on this hardware.
+//
 // True AgentAssist-session measurement requires an Asterisk call drive
 // (SIPp 03-queue-join.xml against a provisioned AgentAssist-enabled
 // queue with a real LLM provider behind it) — Phase B-L SIP-side prep
@@ -40,8 +44,8 @@ internal static class AgentAssistScenario
             })
             .WithLoadSimulations(
                 Simulation.Inject(
-                    rate: 50,
+                    rate: int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_RATE"), out var r) ? r : 50,
                     interval: TimeSpan.FromSeconds(1),
-                    during: TimeSpan.FromMinutes(2)));
+                    during: TimeSpan.FromSeconds(int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_DURATION_SEC"), out var d) ? d : 120)));
     }
 }
