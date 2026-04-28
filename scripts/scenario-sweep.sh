@@ -36,6 +36,13 @@
 # - docker-compose.full.yml + docker-compose.observability.yml stacks up
 # - docker/.staging-admin-token populated (run scripts/seed-staging.sh first)
 #
+# Token freshness: the platform admin JWT lifetime is 15 minutes by default,
+# while a full per-scenario sweep runs ~5.5 min and `all-reads` runs ~22 min.
+# To guarantee no Unauthorized noise mid-sweep, this script refreshes the
+# admin token via `/auth/login` BEFORE every step. Cost: one extra POST per
+# step (~50 ms). The refreshed token is rewritten to docker/.staging-admin-
+# token so subsequent invocations stay in sync.
+#
 # Output:
 # - One NBomber report directory per step under
 #   tests/Asterisk.Platform.LoadTests/load-test-reports/
@@ -43,6 +50,8 @@
 #
 # Env knobs:
 #   PLATFORM_API_URL                default http://localhost:5000
+#   ADMIN_EMAIL                     default platform-admin@r55-staging.local
+#   ADMIN_PASSWORD                  default PlatformAdmin2026!
 #   SCENARIO_SWEEP_DURATION_SEC     default 60
 #   SCENARIO_COOLDOWN_SEC           default 5
 
@@ -52,8 +61,32 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 
 PLATFORM_API_URL="${PLATFORM_API_URL:-http://localhost:5000}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-platform-admin@r55-staging.local}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-PlatformAdmin2026!}"
 SWEEP_DURATION="${SCENARIO_SWEEP_DURATION_SEC:-60}"
 COOLDOWN="${SCENARIO_COOLDOWN_SEC:-5}"
+
+# Refresh platform admin JWT via /auth/login. Writes to docker/.staging-admin-
+# token + echoes to stdout. Exits non-zero on login failure.
+refresh_admin_token() {
+    local resp token
+    resp=$(curl -fsS -X POST "$PLATFORM_API_URL/api/v1/auth/login" \
+        -H "Content-Type: application/json" \
+        -H "X-Tenant-Id: platform" \
+        -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" 2>/dev/null) || {
+        echo "[scenario-sweep] FAIL: /auth/login returned non-2xx for $ADMIN_EMAIL." >&2
+        exit 5
+    }
+    token=$(echo "$resp" | jq -r '.accessToken // empty')
+    if [ -z "$token" ] || [ "$token" = "null" ]; then
+        echo "[scenario-sweep] FAIL: /auth/login response missing accessToken." >&2
+        echo "[scenario-sweep]       Body: $resp" >&2
+        exit 6
+    fi
+    printf '%s' "$token" > "$ROOT/docker/.staging-admin-token"
+    chmod 600 "$ROOT/docker/.staging-admin-token"
+    printf '%s' "$token"
+}
 
 usage() {
     grep -E '^# ' "$0" | sed 's/^# //'
@@ -119,19 +152,17 @@ if ! curl -fsS -o /dev/null "$PLATFORM_API_URL/health"; then
     exit 3
 fi
 
-if [ ! -f "$ROOT/docker/.staging-admin-token" ]; then
-    echo "[scenario-sweep] FAIL: docker/.staging-admin-token missing." >&2
-    echo "[scenario-sweep]       Run ./scripts/seed-staging.sh first to bootstrap." >&2
+command -v jq >/dev/null 2>&1 || {
+    echo "[scenario-sweep] FAIL: missing dependency: jq" >&2
     exit 4
-fi
-
-ADMIN_TOKEN=$(cat "$ROOT/docker/.staging-admin-token")
+}
 
 echo "[scenario-sweep] Scenario:     $scenario (mode=$mode)"
 echo "[scenario-sweep] Ladder var:   $ladder_env"
 echo "[scenario-sweep] Ladder:       $ladder"
 echo "[scenario-sweep] Per-step:     ${SWEEP_DURATION}s execution + ${COOLDOWN}s cooldown"
 echo "[scenario-sweep] Target URL:   $PLATFORM_API_URL"
+echo "[scenario-sweep] Admin login:  $ADMIN_EMAIL"
 
 cd "$ROOT/tests/Asterisk.Platform.LoadTests"
 dotnet build -c Release --nologo > /dev/null
@@ -139,6 +170,7 @@ dotnet build -c Release --nologo > /dev/null
 for step in $ladder; do
     echo ""
     echo "[scenario-sweep] === step ${ladder_env}=${step} × ${SWEEP_DURATION}s ==="
+    ADMIN_TOKEN=$(refresh_admin_token)
     log="/tmp/scenario-sweep-${scenario}-r${step}.log"
     env \
         LOADTEST_MODE="$mode" \
@@ -148,7 +180,7 @@ for step in $ladder; do
         PLATFORM_API_URL="$PLATFORM_API_URL" \
         "$ladder_env=$step" \
         dotnet run -c Release --no-build > "$log" 2>&1
-    grep -E "ok count:|fail count:|p99 =|status code|^│ +OK +│|^│ +InternalServerError|^│ +-101" "$log" | head -15 || true
+    grep -E "ok count:|fail count:|p99 =|status code|^│ +Unauthorized|^│ +OK +│|^│ +InternalServerError|^│ +-101" "$log" | head -15 || true
     echo "[scenario-sweep] Step ${ladder_env}=${step} log: $log"
     sleep "$COOLDOWN"
 done
