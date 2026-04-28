@@ -1,8 +1,8 @@
 # ADR-0015: NpgsqlDataSource sharing strategy across Pro storage packages
 
-**Status:** Proposed (initial 2026-04-28; promotion to Accepted gated on Phase D.1 of `docs/plans/active/2026-04-28-postgres-pool-sprawl-mitigation.md`)
+**Status:** Accepted (initial Proposed 2026-04-28 → Accepted 2026-04-28 v1.14.5 ship after Phase C-L SMB tier re-measurement)
 **Date:** 2026-04-28
-**Context:** R5.5 Phase C-L `presence` sweep findings + cross-Pro `NpgsqlDataSource.Create()` audit
+**Context:** R5.5 Phase C-L `presence` sweep findings + cross-Pro `NpgsqlDataSource.Create()` audit + post-fix re-measurement
 
 ## Context
 
@@ -92,10 +92,41 @@ The result is **not a measurement of the platform's true capacity** — it is a 
 - **Pro repo single-DataSource refactor without shared overload** — would force Pro packages into a specific ordering convention (first-registered wins) which is fragile. Additive overload is cleaner.
 - **Document the bug and ship R5.5 with measurement-as-knee** — discards the meaning of capacity-planning.md; the SMB tier numbers would not represent the product, they would represent the bug.
 
+## Phase 1 measured impact (2026-04-28)
+
+`docker-compose.smb.yml` SMB tier stack, AMD Ryzen 9 9900X / 60 GB RAM, NVMe SSD. `presence` scenario (`GET /api/v1/admin/agents`, `KeepConstant(VU)` shape) before vs after Phase 1:
+
+| VU | Pre-fix (sprawl bug) | Post-fix (Phase 1) |
+|---:|---|---|
+| 100 | 111 824 OK / 16 168 fail (87 % OK) · p99 OK 91 ms · ~1 864 RPS aggregate | **661 738 OK / 0 fail** · p99 **16.62 ms** · **11 029 RPS** |
+| 250 | 0 OK / 44 413 Unauthorized (cascade from token-refresh failures triggered by Postgres exhaustion) | **678 772 OK / 0 fail** · p99 **34.59 ms** · 11 312 RPS |
+| 500 | 0 OK / 44 299 Unauthorized | **646 262 OK / 0 fail** · p99 **69.50 ms** · 10 770 RPS |
+| 1000 | 0 OK / 43 249 Unauthorized | **656 954 OK / 0 fail** · p99 **115.97 ms** · 10 949 RPS |
+| 1500 | 0 OK / 37 267 Unauthorized | **662 023 OK / 0 fail** · p99 **174.21 ms** · 11 034 RPS |
+
+**Quantitative gain:**
+
+- Concurrency capacity: from bug-saturation at VU=100 to clean operation through VU=1500 (**15× improvement**).
+- Aggregate throughput: ~1.8 k RPS → ~11 k RPS at the same concurrency level (**6× improvement**).
+- Postgres connection demand under VU=1500: 21 active client conns idle post-sweep (well under `max_connections=200`); peak under load roughly 140 (14 data sources × 10 pool size), all within budget.
+- Zero `Npgsql.PostgresException (53300)` "too many clients already" entries in `platform-api` logs across the entire sweep.
+
+**SMB tier real knee identified (post-fix):** throughput is CPU/Postgres-bound at ~11 k RPS aggregate from VU=100 onward; adding more VUs increases latency without increasing throughput. The product knee is therefore latency-defined:
+
+| Latency budget | SMB tier supported VU |
+|---|---:|
+| p99 ≤ 50 ms | ≤ 250 |
+| p99 ≤ 100 ms | ≤ 750 |
+| p99 ≤ 200 ms | ≤ 1 500 |
+
+Numbers refresh `capacity-planning.md` § "Small tier" from v1-provisional to v1-measured in the v1.14.5 doc patch alongside this ADR.
+
 ## References
 
 - Plan: `docs/plans/active/2026-04-28-postgres-pool-sprawl-mitigation.md`
 - ADR-0014 amendment: `docs/decisions/0014-auth-horizontal-scaling-baseline.md` §"Update 2026-04-28 (R5.5 Phase C-L)"
-- Phase C-L sweep findings: `docs/operations/load-test-baseline.md` §"Phase C-L stress sweep"
+- Phase C-L sweep findings: `docs/operations/load-test-baseline.md` §"Phase C-L SMB tier stress sweep"
 - Pro repo audit: 13 `NpgsqlDataSource.Create()` call sites + 1 in Platform.Storage.Postgres
+- Pro 1.16.0-pro Phase 2 plan-skeleton: `docs/research/archived/2026-04-28-Pro-1.16.0-pro-shared-datasource-skeleton.md`
 - v1.14.2 CHANGELOG entry "Postgres pool sizing for multi-replica" (the 4-replica math that this ADR corrects)
+- v1.14.5 CHANGELOG entry "ADR-0015 Phase 1 — Postgres pool sprawl mitigation"

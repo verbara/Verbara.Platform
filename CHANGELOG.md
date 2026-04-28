@@ -13,6 +13,131 @@ _No unreleased changes._
 
 ---
 
+## [1.14.5] — 2026-04-28 — ADR-0015 Phase 1 — Postgres connection-pool sprawl mitigation
+
+**Closes the architectural connection-pool sprawl exposed by R5.5
+Phase C-L `presence` sweep** — Platform.Api with all Pro features
+active spawns 14 separate `NpgsqlDataSource` instances across the Pro
+storage packages + Platform.Storage.Postgres, each previously
+inheriting Npgsql's default `Maximum Pool Size=100`. Theoretical
+worst-case per-instance demand: 1 400 connections. Real impact
+measured at VU=100 concurrent reads on `docker-compose.full.yml`
+(postgres-alpine default `max_connections=100`): 13 % HTTP 500 with
+`Npgsql.PostgresException (53300): sorry, too many clients already`.
+
+This release ships the Phase 1 mitigation per ADR-0015. Phase 2 (Pro
+1.16.0-pro shared `NpgsqlDataSource` overload) is captured as a
+plan-skeleton and deferred to the Pro repo cycle.
+
+### 1. `ConnectionStringDefaults` helper at composition root
+
+- New `Asterisk.Platform.Api.Services.ConnectionStringDefaults` static
+  helper applies SMB-tier pool sizing — `Maximum Pool Size=10`,
+  `Minimum Pool Size=2`, `Connection Idle Lifetime=300` — to a
+  connection string IF (and only if) the operator did not specify
+  them. Detection is case-insensitive substring match over the raw
+  connection string.
+- `Program.cs` invokes the helper at all 6 connection-string read
+  sites: core (`Postgres`), `Dialer`, `Cluster`, `Realtime`,
+  `Analytics`, `AnalyticsLive`. Operator-specified values pass
+  through verbatim.
+- Math: `14 data sources × 10 pool size = 140` conn demand ceiling
+  per platform-api instance, comfortable under `max_connections=200`
+  shipped in `docker-compose.smb.yml` and `docker-compose.production.yml`.
+
+### 2. `docker-compose.smb.yml` — SMB tier production-ready stack
+
+- New layered overlay representing the canonical SMB tier deployment
+  shape (single platform-api + single postgres + supporting services).
+- Postgres tuning: `max_connections=200`, `shared_buffers=512MB`,
+  `effective_cache_size=2GB` sized for 16 GB RAM SMB tier hardware.
+- Connection string: belt-and-suspenders explicit `Maximum Pool Size=10;
+  Minimum Pool Size=2;Connection Idle Lifetime=300;Pooling=true`.
+- Stack matrix in compose-file headers clarifies:
+  - `full.yml` — dev/loadtest stack (lax tuning)
+  - `smb.yml` — SMB tier production-ready overlay
+  - `production.yml` — SMB tier production-ready (env-file shape)
+  - `scale.yml` — Enterprise tier 4-replica overlay
+
+### 3. `docker-compose.full.yml` + `production.yml` patches
+
+- `full.yml` postgres now ships `max_connections=200` (vs alpine
+  default 100) so dev/loadtest sweeps don't crash on the 14-pool
+  sprawl. Other tunings live in the smb.yml overlay.
+- `production.yml` applies the **full SMB tier tuning** (max_connections
+  200, shared_buffers 512MB, effective_cache_size 2GB) so customers
+  running this directly + .env.production secrets get the correct
+  capacity envelope without needing to layer smb.yml on top.
+
+### Phase C-L SMB tier measured impact (post-fix vs pre-fix)
+
+`presence` scenario (`GET /api/v1/admin/agents`, `KeepConstant(VU)`),
+AMD 9900X / 60 GB / `docker-compose.smb.yml`:
+
+| VU | Pre-fix | Post-fix |
+|---:|---|---|
+| 100 | 111 824 OK / 16 168 fail (87 % OK) · p99 91 ms · ~1 864 RPS | **661 738 OK / 0 fail · p99 16.62 ms · 11 029 RPS** |
+| 250 | 0 OK / 44 413 Unauthorized | 678 772 OK / 0 fail · p99 34.59 ms |
+| 500 | 0 OK / 44 299 Unauthorized | 646 262 OK / 0 fail · p99 69.50 ms |
+| 1000 | 0 OK / 43 249 Unauthorized | 656 954 OK / 0 fail · p99 115.97 ms |
+| 1500 | 0 OK / 37 267 Unauthorized | 662 023 OK / 0 fail · p99 174.21 ms |
+
+- Concurrency capacity: 15× improvement (bug-saturation at VU=100 →
+  clean operation through VU=1500).
+- Aggregate throughput at VU=100: 6× improvement.
+- Postgres `pg_stat_activity` post-sweep: 21 idle client backend conns
+  (well under max_connections=200 cap).
+- Zero `Npgsql.PostgresException (53300)` entries in `platform-api`
+  logs across the entire 22-min sweep.
+
+**SMB tier knee envelope (latency-defined, throughput plateau ~11 k RPS):**
+
+| Latency budget | Max sustained VU |
+|---|---:|
+| p99 ≤ 50 ms | ≤ 250 |
+| p99 ≤ 100 ms | ≤ 750 |
+| p99 ≤ 200 ms | ≤ 1 500 |
+
+### Files changed
+
+- `src/Asterisk.Platform.Api/Services/ConnectionStringDefaults.cs` (new)
+- `src/Asterisk.Platform.Api/Program.cs` (6 wraps)
+- `tests/Asterisk.Platform.Api.Tests/ConnectionStringDefaultsTests.cs` (new — 5 boundary tests)
+- `docker/docker-compose.smb.yml` (new)
+- `docker/docker-compose.full.yml` (max_connections=200)
+- `docker/docker-compose.production.yml` (SMB tier full tuning)
+- `docs/decisions/0015-npgsql-datasource-sharing-strategy.md` (new — Accepted)
+- `docs/decisions/0014-auth-horizontal-scaling-baseline.md` (amendment)
+- `docs/operations/capacity-planning.md` (Postgres tier table refreshed)
+- `docs/operations/load-test-baseline.md` (Phase C-L SMB tier section appended)
+- `docs/research/archived/2026-04-28-Pro-1.16.0-pro-shared-datasource-skeleton.md` (Phase 2 plan-skeleton)
+
+### Tests
+
+- **882 / 882** Api.Tests passing (was 877 pre-v1.14.5; +5
+  ConnectionStringDefaults boundary tests).
+- 0 build warnings (TreatWarningsAsErrors holds).
+- 0 vulnerable packages cross-repo.
+
+### Wire compatibility
+
+- Operator override path preserved verbatim — any deployment that
+  explicitly sets `Maximum Pool Size=N` continues to use that value.
+- Pre-v1.14.5 deployments inherit the new defaults transparently on
+  upgrade; capacity envelope improves rather than regresses.
+- Pro packages unchanged — Phase 2 architectural fix lives in Pro
+  1.16.0-pro (separate plan).
+
+### Cross-repo coordination
+
+- Asterisk.Sdk: unchanged (1.15.1).
+- Asterisk.Sdk.Pro: unchanged (1.15.0-pro). Pro 1.16.0-pro Phase 2
+  plan-skeleton archived at
+  `docs/research/archived/2026-04-28-Pro-1.16.0-pro-shared-datasource-skeleton.md`.
+- Asterisk.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
+
+---
+
 ## [1.14.4] — 2026-04-28 — Known-debt patches: AUTH-002 + CFG-003 + MFA-007
 
 **Closes three v1.13.x known-debt items** that have been on the roadmap

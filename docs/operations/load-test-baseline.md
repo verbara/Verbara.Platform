@@ -237,3 +237,127 @@ measurement reality:
   path on first boot to provision the `loadtest` tenant + user with
   password `loadtest`. Do **not** run the loadtest stack alongside any
   production-shaped data set.
+
+## Phase C-L SMB tier stress sweep (2026-04-28, post-ADR-0015 Phase 1)
+
+The first Phase C-L sweep against `docker-compose.full.yml`
+(`scripts/scenario-sweep.sh all-reads`) revealed a connection-pool
+sprawl bug: 14 separate `NpgsqlDataSource` instances across the Pro
+storage packages over-subscribed `max_connections=100` (postgres-alpine
+default) under VU=100 concurrent reads, producing 13 % HTTP 500
+`Npgsql.PostgresException (53300): sorry, too many clients already`.
+**Per-instance demand vs cap was 14×.** ADR-0015 captures the
+diagnosis + Phase 1 (smart pool defaults at the Platform.Api
+composition root) + Phase 2 (Pro 1.16.0-pro shared `NpgsqlDataSource`
+overload) two-phase mitigation strategy.
+
+The sweep below was re-run after Phase 1 shipped (v1.14.5) on
+`docker-compose.smb.yml` — the SMB tier production-ready stack.
+
+**Hardware:** AMD Ryzen 9 9900X (24 threads), 60 GB RAM, NVMe SSD.
+**Stack:** `docker-compose.full.yml + docker-compose.smb.yml` overlay
+(`max_connections=200`, `shared_buffers=512MB`,
+`effective_cache_size=2GB`, per-data-source `Maximum Pool Size=10`).
+**Tenant:** `medium-loadtest` (50 agents, 50 queues — sourced via
+`scripts/seed-staging.sh`).
+**Reproducibility:** `./scripts/scenario-sweep.sh all-reads` (token
+auto-refreshed per step via `/auth/login`).
+
+### `queues` — `GET /api/v1/admin/queues?pageSize=20`
+
+Knee NOT crossed at the sweep's top step (500 req/s sustainable with
+sub-2 ms p99). Real ceiling needs a higher ladder run (1k / 2k / 5k);
+out of scope for this baseline (the read endpoint is non-critical-path).
+
+| r req/s | OK | Fail | p50 ms | p95 ms | p99 ms |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 600 | 0 | 1.22 | 2.06 | 2.81 |
+| 50 | 3 000 | 0 | 0.86 | 1.52 | 1.99 |
+| 100 | 6 000 | 0 | 0.81 | 1.26 | 1.98 |
+| 250 | 15 000 | 0 | 0.76 | 1.17 | 1.85 |
+| 500 | 30 000 | 0 | 0.74 | 1.00 | 1.59 |
+
+### `livequeue` — `GET /api/v1/analytics/live/{queueName}`
+
+100 % `NotFound` in all 5 steps. **By design:** no SIP traffic populates
+the snapshots, so `ILiveQueueMetricsProvider` returns nothing for the
+queried queue → endpoint returns 404. Latency is real (not a rebound)
+because auth + tenant + DB read all execute. **This scenario requires a
+SIPp companion driving inbound calls** to produce a meaningful signal —
+out of scope for HTTP-only sweeps. Tracked as a Phase D-L follow-up.
+
+### `agentassist` — `GET /api/v1/admin/teams?pageSize=20`
+
+Knee NOT crossed at 500 req/s (same shape as `queues`).
+
+| r req/s | OK | Fail | p50 ms | p95 ms | p99 ms |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 600 | 0 | 1.04 | 1.74 | 2.08 |
+| 50 | 3 000 | 0 | 0.80 | 1.41 | 1.86 |
+| 100 | 6 000 | 0 | 0.77 | 1.11 | 1.71 |
+| 250 | 15 000 | 0 | 0.70 | 1.04 | 1.64 |
+| 500 | 30 000 | 0 | 0.67 | 1.15 | 1.61 |
+
+### `presence` — `GET /api/v1/admin/agents?pageSize=20` (VU shape)
+
+The scenario that originally exposed the sprawl bug. Post-fix:
+**zero failures across the entire VU=100 → 1 500 ladder**, and
+aggregate throughput levels off at ~11 k req/s from VU=100 onward (the
+platform's CPU/Postgres-bound ceiling). The knee is therefore latency-
+defined, not throughput-defined: more VUs queue against the constant
+throughput ceiling and see proportionally higher p99.
+
+| VU | OK | Fail | p50 ms | p95 ms | **p99 ms** | RPS aggregate |
+|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 661 738 | 0 | 8.63 | 12.08 | **16.62** | 11 029 |
+| 250 | 678 772 | 0 | 21.49 | 28.00 | **34.59** | 11 312 |
+| 500 | 646 262 | 0 | 44.80 | 59.42 | **69.50** | 10 770 |
+| 1000 | 656 954 | 0 | 89.86 | 105.86 | **115.97** | 10 949 |
+| 1500 | 662 023 | 0 | 132.86 | 156.42 | **174.21** | 11 034 |
+
+**SMB tier knee envelope (latency-defined):**
+
+| Latency budget | Max sustained VU |
+|---|---:|
+| p99 ≤ 50 ms | ≤ 250 |
+| p99 ≤ 100 ms | ≤ 750 (interpolated between VU=500 and VU=1000) |
+| p99 ≤ 200 ms | ≤ 1 500 |
+
+Beyond VU=1500 the sweep would continue producing OK responses with
+linearly-growing p99; the practical knee for product positioning is
+**VU=1000** (p99=116 ms, well within 250 ms typical SLO budget).
+
+### Pre-fix vs post-fix comparison (presence, same hardware, same ladder)
+
+| VU | Pre-fix | Post-fix |
+|---:|---|---|
+| 100 | 111 824 OK / 16 168 fail (87 % OK) · p99 OK 91 ms · ~1 864 RPS | 661 738 OK / 0 fail · p99 16.62 ms · 11 029 RPS |
+| 250 | 0 OK / 44 413 Unauthorized | 678 772 OK / 0 fail · p99 34.59 ms |
+| 500 | 0 OK / 44 299 Unauthorized | 646 262 OK / 0 fail · p99 69.50 ms |
+| 1000 | 0 OK / 43 249 Unauthorized | 656 954 OK / 0 fail · p99 115.97 ms |
+| 1500 | 0 OK / 37 267 Unauthorized | 662 023 OK / 0 fail · p99 174.21 ms |
+
+- Concurrency capacity: **15× improvement** (bug-saturation at VU=100 → clean operation through VU=1500).
+- Aggregate throughput at VU=100: **6× improvement** (1 864 RPS → 11 029 RPS).
+- Postgres `pg_stat_activity` post-sweep: 21 client backend connections (well under `max_connections=200` cap).
+- Zero `Npgsql.PostgresException (53300)` entries in `platform-api` logs across the entire 22-min sweep.
+
+### Reproducibility
+
+```bash
+docker compose -f docker/docker-compose.full.yml \
+               -f docker/docker-compose.smb.yml up -d --wait
+./scripts/seed-staging.sh
+./scripts/scenario-sweep.sh all-reads
+```
+
+Per-step NBomber reports under
+`tests/Asterisk.Platform.LoadTests/load-test-reports/`. Per-step screen
+logs at `/tmp/scenario-sweep-<scenario>-r<rate>.log`.
+
+### References
+
+- ADR-0015 — npgsql-datasource-sharing-strategy
+- ADR-0014 amendment — auth-horizontal-scaling-baseline § "Update 2026-04-28 (R5.5 Phase C-L · v1.14.5)"
+- Plan: `docs/plans/active/2026-04-28-postgres-pool-sprawl-mitigation.md`
+- Pro 1.16.0-pro Phase 2 plan-skeleton: `docs/research/archived/2026-04-28-Pro-1.16.0-pro-shared-datasource-skeleton.md`

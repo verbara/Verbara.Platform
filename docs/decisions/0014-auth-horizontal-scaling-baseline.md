@@ -2,9 +2,11 @@
 
 **Status:** Accepted (initial 2026-04-27) · **Amended 2026-04-28 (v1.14.1)** —
 v1-measured single-replica numbers replace projection; 4-replica still
-pending v1.14.2 startup-hang fix.
-**Date:** 2026-04-27 · **Amendment date:** 2026-04-28
-**Context:** AHH Phase 5 (v1.14.0) + v1.14.1 empirical follow-up
+pending v1.14.2 startup-hang fix. · **Further amended 2026-04-28 (v1.14.5)**
+— "1 pool per replica" math corrected; ADR-0015 captures the
+14-NpgsqlDataSource sprawl pattern revealed by R5.5 Phase C-L.
+**Date:** 2026-04-27 · **Amendments:** 2026-04-28 (v1.14.1, v1.14.5)
+**Context:** AHH Phase 5 (v1.14.0) + v1.14.1 empirical follow-up + v1.14.5 sprawl mitigation
 
 ## Context
 
@@ -166,3 +168,59 @@ the runbook §"v1.14.1 follow-up".
   this ADR points operators at.
 - `docs/operations/capacity-planning.md` — the broader capacity model;
   this ADR's auth knee envelope feeds it.
+
+## Update 2026-04-28 (R5.5 Phase C-L · v1.14.5)
+
+The "Postgres pool tuning" prescription in this ADR's `scale.yml`
+configuration assumed **1 connection pool per replica** — math:
+`4 replicas × Maximum Pool Size 50 = 200 conn demand vs
+max_connections=220`. **That assumption is incorrect.**
+
+R5.5 Phase C-L `presence` sweep (`KeepConstant(VU=100)` against
+`docker-compose.full.yml`) exposed 13 % HTTP 500 with
+`Npgsql.PostgresException (53300): sorry, too many clients already`.
+Audit revealed **14 separate `NpgsqlDataSource.Create()` call sites**
+across the Pro storage packages + Platform.Storage.Postgres, each
+defaulting to `Maximum Pool Size=100`. Real per-instance demand is
+therefore `14 × Maximum Pool Size` — for `scale.yml`'s 4-replica
+deployment, `4 × 14 × 50 = 2 800` conn demand, far above
+`max_connections=220`.
+
+**Remediation strategy** (ADR-0015):
+
+- **Phase 1 (v1.14.5, this release):** `ConnectionStringDefaults`
+  helper at the Platform.Api composition root caps per-pool size at 10
+  when the operator didn't override. Per-instance demand becomes
+  `14 × 10 = 140` for SMB tier (single replica), comfortable under
+  `max_connections=200` shipped in `docker-compose.smb.yml` /
+  `production.yml`. **Multi-replica deployments using `scale.yml` need
+  a follow-up amendment** to either bump `max_connections=600` or wait
+  for Pro 1.16.0-pro Phase 2.
+- **Phase 2 (Pro 1.16.0-pro, separate plan):** Pro packages gain a
+  `Use*Storage(IServiceCollection, NpgsqlDataSource)` overload.
+  Platform.Api builds **one shared `NpgsqlDataSource`** and passes it
+  to all Pro `Use*` calls — sprawl collapses to `1 × Maximum Pool Size`
+  per replica. The original `scale.yml` math (1 pool per replica) holds
+  again post-Phase 2, this time for the right architectural reason.
+
+**Status of `scale.yml` per this amendment:** the file's existing
+`Maximum Pool Size=50` per replica continues to apply (it overrides the
+Phase 1 Platform.Api default), but the sprawl means Phase 1 alone is
+insufficient for 4-replica clean operation under high concurrent
+burst. Two follow-up paths, in priority order:
+
+1. **Bump `max_connections=600` in `scale.yml`** — covers the worst-case
+   `4 × 14 × 50 = 2 800` demand only if it materialises (idle pools
+   stay near `Minimum Pool Size`); empirically the steady-state demand
+   is dominated by hot-path stores (auth, agents, queues), so 600
+   should be sufficient with 100 + 100 buffer for postgres + admin.
+   Out of scope for v1.14.5 (no scale.yml re-measurement run); track
+   in next sprint.
+2. **Wait for Pro 1.16.0-pro** — Phase 2 makes scale.yml's original
+   `4 × 50 = 200 + 20 buffer` math correct again.
+
+References:
+
+- ADR-0015 — npgsql-datasource-sharing-strategy
+- v1.14.5 CHANGELOG entry "ADR-0015 Phase 1 — Postgres pool sprawl mitigation"
+- Pro 1.16.0-pro plan skeleton: `docs/research/archived/2026-04-28-Pro-1.16.0-pro-shared-datasource-skeleton.md`
