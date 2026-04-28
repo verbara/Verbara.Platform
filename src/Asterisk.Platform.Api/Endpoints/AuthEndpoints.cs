@@ -880,9 +880,12 @@ internal static class AuthEndpoints
         AuthEventService authEvents,
         CancellationToken ct)
     {
+        // AHH Phase 2 — these two writes used to be synchronous round-trips
+        // to Postgres. They now route through AuthWriteQueue so the request
+        // returns ~10–20 ms sooner. Failure-path audit logs (above) stay
+        // synchronous per ADR-0011.
         await lockoutService.ResetAttemptsAsync(user, ct);
-
-        user.LastLoginAt = DateTimeOffset.UtcNow;
+        await lockoutService.EnqueueLastLoginAtUpdateAsync(user, DateTimeOffset.UtcNow, ct);
 
         // Resolve granular permissions for JWT (best-effort, falls back to no permissions)
         IReadOnlySet<string>? permissions = null;
@@ -917,8 +920,10 @@ internal static class AuthEndpoints
 
         SetRefreshCookie(context, rawRefreshToken);
 
-        await authEvents.LogAsync(user.TenantId.Value, user.UserId.Value,
-            AuthEventTypes.LoginSuccess, ip, ua, null, ct);
+        // AHH Phase 2 — success-path AuthEvent is deferred. Failure-path
+        // events still go through the synchronous LogAsync above.
+        authEvents.EnqueueLogSuccess(user.TenantId.Value, user.UserId.Value,
+            AuthEventTypes.LoginSuccess, ip, ua);
 
         // Resolve features for the response
         var featureRegistry = context.RequestServices.GetService<IFeatureRegistry>();

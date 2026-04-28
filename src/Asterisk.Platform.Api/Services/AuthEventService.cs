@@ -8,8 +8,13 @@ namespace Asterisk.Platform.Api.Services;
 internal sealed class AuthEventService
 {
     private readonly IAuthEventStore _store;
+    private readonly AuthWriteQueue? _queue;
 
-    public AuthEventService(IAuthEventStore store) => _store = store;
+    public AuthEventService(IAuthEventStore store, AuthWriteQueue? queue = null)
+    {
+        _store = store;
+        _queue = queue;
+    }
 
     public async Task LogAsync(
         string tenantId,
@@ -35,6 +40,42 @@ internal sealed class AuthEventService
         };
 
         await _store.SaveAsync(authEvent, ct);
+    }
+
+    /// <summary>
+    /// AHH Phase 2 — defer a success-path auth event to the
+    /// <see cref="AuthWriteQueue"/>. Returns immediately. Callers MUST NOT
+    /// use this for failure-path events (LoginFailure, Lockout, etc.) — those
+    /// stay synchronous via <see cref="LogAsync"/> per the audit-completeness
+    /// invariant in ADR-0011.
+    /// </summary>
+    /// <returns>
+    /// <c>true</c> when the command was accepted by the queue; <c>false</c>
+    /// when the bounded channel was full (drop counted via the
+    /// <c>auth.write.dropped</c> meter). Most callers can safely ignore the
+    /// return value — the meter + log line surface saturation to ops.
+    /// </returns>
+    public bool EnqueueLogSuccess(
+        string tenantId,
+        string userId,
+        string eventType,
+        string? ipAddress,
+        string? userAgent)
+    {
+        ArgumentNullException.ThrowIfNull(tenantId);
+        ArgumentNullException.ThrowIfNull(userId);
+        ArgumentNullException.ThrowIfNull(eventType);
+
+        if (_queue is null)
+        {
+            // Single-process tests / DI configurations without the queue
+            // bootstrapped fall back to fire-and-forget sync log so behavior
+            // stays observable. Production registers AuthWriteQueue.
+            _ = LogAsync(tenantId, userId, eventType, ipAddress, userAgent, null, CancellationToken.None);
+            return true;
+        }
+
+        return _queue.TryEnqueue(new LogSuccessEventCommand(tenantId, userId, eventType, ipAddress, userAgent));
     }
 
     public Task<PagedResult<AuthEvent>> ListByTenantAsync(

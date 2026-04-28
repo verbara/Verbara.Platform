@@ -186,6 +186,14 @@ builder.Services.AddKeyedSingleton<IGdprExportFormatter, CsvGdprExportFormatter>
 builder.Services.AddHostedService<RetentionPurgeService>();
 builder.Services.AddHostedService<AuditRetentionService>();
 
+// AHH Phase 2: deferred-write queue for the login success path.
+// AccountLockoutService.ResetAttemptsAsync, EnqueueLastLoginAtUpdateAsync,
+// and AuthEventService.EnqueueLogSuccess all route through this BackgroundService
+// so the request critical path doesn't pay 3 sync DB round-trips per login.
+// Failure-path audit logs stay sync per ADR-0011. See Phase 2 plan section.
+builder.Services.AddSingleton<AuthWriteQueue>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AuthWriteQueue>());
+
 // ─── Storage ─────────────────────────────────────────────────────────────────
 var coreConnectionString = builder.Configuration.GetConnectionString("Postgres");
 if (!string.IsNullOrEmpty(coreConnectionString))
