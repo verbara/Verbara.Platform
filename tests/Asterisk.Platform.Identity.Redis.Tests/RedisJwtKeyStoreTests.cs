@@ -141,6 +141,62 @@ public sealed class RedisJwtKeyStoreTests
         all.Select(e => e.KeyId).Should().Contain([k1.KeyId, k2.KeyId]);
     }
 
+    [Fact]
+    public async Task UpsertAsync_ShouldDemotePriorActive_WhenNewActiveKeyArrives()
+    {
+        // AHH Phase 3.C — verify the CAS upsert demotes the prior active
+        // entry's IsActive flag in the JSON blob (not just flips the active
+        // pointer). Pre-Phase-3.C, both entries persisted with IsActive=true
+        // and only the pointer disambiguated; that left GetAllAsync returning
+        // a confusing N×IsActive=true view across rotations.
+        var store = CreateStore();
+
+        var firstActive = MakeKey(isActive: true, expiresIn: TimeSpan.FromHours(1));
+        var secondActive = MakeKey(isActive: true, expiresIn: TimeSpan.FromHours(1));
+
+        await store.UpsertAsync(firstActive, CancellationToken.None);
+        await store.UpsertAsync(secondActive, CancellationToken.None);
+
+        var all = await store.GetAllAsync(CancellationToken.None);
+        all.Should().HaveCount(2);
+
+        var demoted = all.Single(e => e.KeyId == firstActive.KeyId);
+        demoted.IsActive.Should().BeFalse(because: "the first active entry must be demoted when a second active entry is upserted");
+
+        var current = all.Single(e => e.KeyId == secondActive.KeyId);
+        current.IsActive.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpsertAsync_ShouldProduceSingleActive_WhenTwoReplicasRotateConcurrently()
+    {
+        // AHH Phase 3.C — simulates two Platform API replicas calling
+        // RotateAsync at the same instant. Without CAS the prior implementation
+        // would let both writes land, leaving two entries with IsActive=true
+        // in their JSON. With CAS, exactly one wins; the other either retries
+        // and observes the winner OR cleanly fails on condition.
+        var sharedPrefix = $"concurrent:{Guid.NewGuid():N}:identity:";
+        var replicaA = CreateStore(sharedPrefix);
+        var replicaB = CreateStore(sharedPrefix);
+
+        var aEntry = MakeKey(isActive: true, expiresIn: TimeSpan.FromMinutes(30));
+        var bEntry = MakeKey(isActive: true, expiresIn: TimeSpan.FromMinutes(30));
+
+        // Fire both concurrently. CAS retries up to 5× — both should converge
+        // to a successful state (no exception, valid pool).
+        await Task.WhenAll(
+            replicaA.UpsertAsync(aEntry, CancellationToken.None),
+            replicaB.UpsertAsync(bEntry, CancellationToken.None));
+
+        var all = await replicaA.GetAllAsync(CancellationToken.None);
+        all.Count(e => e.IsActive).Should().Be(1,
+            because: "exactly one active entry must remain after concurrent rotation");
+
+        var active = await replicaA.GetActiveAsync(CancellationToken.None);
+        active.Should().NotBeNull();
+        active!.KeyId.Should().BeOneOf(aEntry.KeyId, bEntry.KeyId);
+    }
+
     private static JwtKeyEntry MakeKey(bool isActive, TimeSpan expiresIn) => new()
     {
         KeyId = $"jwt-{Guid.NewGuid():N}",

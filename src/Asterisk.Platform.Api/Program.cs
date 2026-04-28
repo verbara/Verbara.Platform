@@ -480,10 +480,52 @@ builder.Services.AddSingleton<Asterisk.Sdk.Pro.AgentAssist.Features.IAgentAssist
 
 var jwtKeyDirectory = builder.Configuration["Auth:KeyDirectory"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data");
-builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
-    jwtKeyDirectory,
-    sp.GetRequiredService<IDataProtectionProvider>(),
-    sp.GetRequiredService<IJtiRevocationCache>()));
+
+// AHH Phase 3.D — JwtTokenService construction depends on whether the
+// deployment opts into the multi-replica rotation pool.
+//
+//   Identity:JwtKeyRotation:UseRotationPool = true   → pool path
+//                                              false  → file path (default)
+//   Identity:JwtKeyRotation:RequireRedisStore = true  → fail-fast at startup
+//                                              if ConnectionStrings:IdentityRedis is missing
+//                                              (production multi-replica safety net)
+//
+// See docs/decisions/0012-jwt-rotation-pool-wireup-and-multi-replica-gate.md.
+var useRotationPool = builder.Configuration.GetValue<bool>("Identity:JwtKeyRotation:UseRotationPool");
+var requireRedisStore = builder.Configuration.GetValue<bool>("Identity:JwtKeyRotation:RequireRedisStore");
+
+if (useRotationPool && requireRedisStore && string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("IdentityRedis")))
+{
+    throw new InvalidOperationException(
+        "Identity:JwtKeyRotation:RequireRedisStore=true but ConnectionStrings:IdentityRedis is not set. " +
+        "Multi-replica deployments require a Redis-backed IJwtKeyStore so the JWT signing key is shared across replicas; " +
+        "without it, tokens issued by one replica are rejected by every other replica. " +
+        "Set ConnectionStrings:IdentityRedis OR set RequireRedisStore=false to acknowledge single-replica operation.");
+}
+
+if (useRotationPool)
+{
+    builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
+        sp.GetRequiredService<Asterisk.Platform.Identity.Auth.Jwt.IJwtKeyRotationService>(),
+        sp.GetRequiredService<IJtiRevocationCache>()));
+
+    // Idempotent legacy-file → rotation-pool migration. Runs once at startup
+    // before the first request so already-issued (file-RSA-signed) tokens
+    // continue validating after the cutover.
+    builder.Services.AddHostedService(sp => new JwtLegacyKeyMigrationService(
+        sp.GetRequiredService<Asterisk.Platform.Identity.Auth.Jwt.IJwtKeyStore>(),
+        sp.GetRequiredService<IDataProtectionProvider>(),
+        jwtKeyDirectory,
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JwtLegacyKeyMigrationService>>()));
+}
+else
+{
+    // Single-replica file-based path (R5.4 + earlier behavior).
+    builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
+        jwtKeyDirectory,
+        sp.GetRequiredService<IDataProtectionProvider>(),
+        sp.GetRequiredService<IJtiRevocationCache>()));
+}
 
 // R5.4 S5.9 — JWT signing-key rotation pool. The store defaults to in-memory
 // (single-process safe) and is replaced by RedisJwtKeyStore via

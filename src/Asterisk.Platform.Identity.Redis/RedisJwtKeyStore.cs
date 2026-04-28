@@ -98,6 +98,24 @@ public sealed class RedisJwtKeyStore : IJwtKeyStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// AHH Phase 3.C — atomic upsert via Redis transaction with optimistic
+    /// concurrency control. The previous implementation issued the entry
+    /// write and the active-pointer update as two independent Redis ops, so
+    /// concurrent <c>RotateAsync</c> calls on different replicas could each
+    /// "win" the active flag (last-writer-wins on the pointer; both entries
+    /// persisting with <c>IsActive=true</c> in their JSON blobs). This
+    /// version:
+    /// <list type="number">
+    ///   <item>Reads the current active pointer.</item>
+    ///   <item>Builds a transaction with a <c>StringEqual</c> condition on
+    ///         that pointer (CAS — committed only if the pointer hasn't moved).</item>
+    ///   <item>Writes the new entry, updates the pointer, and demotes the
+    ///         previously-active entry's JSON (<c>IsActive=false</c>) atomically.</item>
+    ///   <item>On condition failure, retries up to 5 times. After exhaustion
+    ///         throws <see cref="InvalidOperationException"/>.</item>
+    /// </list>
+    /// </remarks>
     public async Task UpsertAsync(JwtKeyEntry entry, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -108,12 +126,71 @@ public sealed class RedisJwtKeyStore : IJwtKeyStore
         var ttl = entry.ExpiresAt - DateTimeOffset.UtcNow;
 
         if (ttl <= TimeSpan.Zero)
-            return; // Already-expired entry — don't store an orphan key (Redis would still write with no TTL otherwise).
+            return; // Already-expired entry — don't store an orphan key.
 
-        await db.StringSetAsync(EntryKey(entry.KeyId), json, ttl).ConfigureAwait(false);
+        // Non-active upsert is a single-key write — the CAS dance below only
+        // matters when changing the active pointer. Short-circuit for clarity.
+        if (!entry.IsActive)
+        {
+            await db.StringSetAsync(EntryKey(entry.KeyId), json, ttl).ConfigureAwait(false);
+            return;
+        }
 
-        if (entry.IsActive)
-            await db.StringSetAsync(ActivePointerKey, entry.KeyId, ttl).ConfigureAwait(false);
+        const int MaxAttempts = 5;
+        for (var attempt = 0; attempt < MaxAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var prevActiveKid = await db.StringGetAsync(ActivePointerKey).ConfigureAwait(false);
+
+            // If a previously-active entry exists and isn't us, demote its
+            // JSON blob so GetAllAsync sees a consistent IsActive flag.
+            string? prevDemotedJson = null;
+            TimeSpan prevDemotedTtl = default;
+            if (!prevActiveKid.IsNullOrEmpty && (string)prevActiveKid! != entry.KeyId)
+            {
+                var prevEntryJson = await db.StringGetAsync(EntryKey(prevActiveKid!)).ConfigureAwait(false);
+                if (!prevEntryJson.IsNullOrEmpty)
+                {
+                    var prevEntry = JsonSerializer.Deserialize(
+                        (string)prevEntryJson!,
+                        IdentityJsonContext.Default.JwtKeyEntry);
+                    if (prevEntry is not null && prevEntry.IsActive)
+                    {
+                        var demoted = prevEntry with { IsActive = false };
+                        prevDemotedTtl = demoted.ExpiresAt - DateTimeOffset.UtcNow;
+                        if (prevDemotedTtl > TimeSpan.Zero)
+                        {
+                            prevDemotedJson = JsonSerializer.Serialize(
+                                demoted,
+                                IdentityJsonContext.Default.JwtKeyEntry);
+                        }
+                    }
+                }
+            }
+
+            // Transaction with CAS: the active pointer must still be what we
+            // observed when we started, OR not exist at all.
+            var tx = db.CreateTransaction();
+            tx.AddCondition(prevActiveKid.IsNullOrEmpty
+                ? Condition.KeyNotExists(ActivePointerKey)
+                : Condition.StringEqual(ActivePointerKey, prevActiveKid));
+
+            _ = tx.StringSetAsync(EntryKey(entry.KeyId), json, ttl);
+            _ = tx.StringSetAsync(ActivePointerKey, entry.KeyId, ttl);
+            if (prevDemotedJson is not null)
+                _ = tx.StringSetAsync(EntryKey((string)prevActiveKid!), prevDemotedJson, prevDemotedTtl);
+
+            var committed = await tx.ExecuteAsync().ConfigureAwait(false);
+            if (committed)
+                return;
+
+            // Backoff lightly so concurrent rotators don't tightspin against each other.
+            await Task.Delay(TimeSpan.FromMilliseconds(20 * (attempt + 1)), ct).ConfigureAwait(false);
+        }
+
+        throw new InvalidOperationException(
+            $"RedisJwtKeyStore.UpsertAsync exhausted {MaxAttempts} CAS retries for keyId='{entry.KeyId}'.");
     }
 
     /// <inheritdoc />
