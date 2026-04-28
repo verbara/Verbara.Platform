@@ -120,4 +120,15 @@
     <PackageVersion Include="NBomber.Http" Version="6.0.0" />
   </ItemGroup>
 
+  <!-- Auth Hotpath Hardening (AHH) Phase 0 evidence stack. Consumed by the
+       opt-in tests/Asterisk.Platform.Benchmarks project (BenchmarkDotNet, JIT)
+       and tests/Asterisk.Platform.Api.Aot.Probe (AOT publish probe for the
+       Argon2id candidate library). Neither project ships in the slnx; both
+       run exclusively via scripts/profiling/. See
+       docs/plans/active/2026-04-27-auth-hotpath-hardening.md Phase 0. -->
+  <ItemGroup>
+    <PackageVersion Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageVersion Include="Isopoh.Cryptography.Argon2" Version="2.0.0" />
+  </ItemGroup>
+
 </Project>

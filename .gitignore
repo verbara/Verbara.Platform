@@ -24,3 +24,7 @@ tests/Asterisk.Platform.LoadTests/load-test-reports/nbomber-log-*.txt
 sipp-reports/
 chaos-snapshots/
 .playwright-mcp/
+# AHH Phase 0 BenchmarkDotNet output (re-creatable via
+# scripts/profiling/run-benchmarks.sh; the canonical numbers live in
+# docs/research/2026-04-27-auth-hotpath-baseline.md).
+BenchmarkDotNet.Artifacts/
