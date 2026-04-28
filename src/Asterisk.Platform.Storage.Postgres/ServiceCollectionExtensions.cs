@@ -34,9 +34,23 @@ public static class ServiceCollectionExtensions
     /// Registers Dapper/Npgsql implementations for all 17 store interfaces backed by PostgreSQL.
     /// Creates a singleton <see cref="NpgsqlDataSource"/> from the supplied connection string.
     /// </summary>
-    public static IServiceCollection AddPostgresStorage(this IServiceCollection services, string connectionString)
+    /// <param name="services">The service collection.</param>
+    /// <param name="connectionString">PostgreSQL connection string.</param>
+    /// <param name="configureDataSource">
+    /// Optional hook for advanced <see cref="NpgsqlDataSourceBuilder"/> configuration —
+    /// tracing, name translation, type mappings, etc. AHH Phase 5: pool sizing
+    /// is set via connection-string parameters (<c>Maximum Pool Size</c>,
+    /// <c>Minimum Pool Size</c>, <c>Connection Idle Lifetime</c>); see the
+    /// auth horizontal-scaling runbook for recommended values per knee tier.
+    /// </param>
+    public static IServiceCollection AddPostgresStorage(
+        this IServiceCollection services,
+        string connectionString,
+        Action<NpgsqlDataSourceBuilder>? configureDataSource = null)
     {
-        services.TryAddSingleton(NpgsqlDataSource.Create(connectionString));
+        var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+        configureDataSource?.Invoke(dataSourceBuilder);
+        services.TryAddSingleton(dataSourceBuilder.Build());
 
         // Identity — IUserStore + ITenantAuthConfigStore use the AHH Phase 1
         // keyed-decorator pattern: the concrete is registered keyed-as-inner
