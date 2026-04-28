@@ -1,3 +1,21 @@
+# docker/docker-compose.production.yml — SMB tier production-ready stack.
+#
+# Same shape as docker-compose.smb.yml (single platform-api + single
+# postgres + ancillary services) but reads its environment from
+# .env.production instead of compose-inline values. Use this for actual
+# customer deployments; use smb.yml for pre-production validation against
+# a known config.
+#
+# Capacity envelope: see ADR-0015 + docs/operations/capacity-planning.md
+# § "Small tier". 14 NpgsqlDataSources × 10 pool size = 140 conn demand
+# ceiling per platform-api instance, comfortable under max_connections=200.
+#
+# Operators MUST set the following in .env.production:
+#   - ConnectionStrings__Postgres with Maximum Pool Size=10 (or
+#     accept the ConnectionStringDefaults fallback in Program.cs)
+#   - POSTGRES_PASSWORD (rotate from default)
+#   - SERVICE_KEY (rotate from default)
+
 services:
   platform-api:
     build:
@@ -62,6 +80,18 @@ services:
 
   postgres:
     image: postgres:18-alpine
+    # ADR-0015 Phase 1 — SMB tier tuning. 14 NpgsqlDataSources × 10 pool
+    # size = 140 demand ceiling, 60 headroom for postgres internals +
+    # admin. shared_buffers / effective_cache_size sized for 16 GB RAM
+    # SMB tier hardware (capacity-planning.md § "Small").
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=2GB
     volumes:
       - pgdata:/var/lib/postgresql/data
     environment:

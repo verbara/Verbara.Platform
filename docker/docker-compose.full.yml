@@ -136,6 +136,18 @@ services:
 
   postgres:
     image: postgres:18-alpine
+    # ADR-0015 — bump max_connections=200 (vs alpine default 100) to keep
+    # the dev/loadtest stack stable when Platform.Api spins up 14 separate
+    # NpgsqlDataSources sharing this Postgres. This file is the dev/loadtest
+    # stack — for the SMB tier production-ready stack with full pool
+    # sizing in the connection string, layer docker-compose.smb.yml on top:
+    #
+    #   docker compose -f docker/docker-compose.full.yml \
+    #                  -f docker/docker-compose.smb.yml up -d --wait
+    command:
+      - postgres
+      - -c
+      - max_connections=200
     volumes:
       - pgdata:/var/lib/postgresql/data
     environment:
