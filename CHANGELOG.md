@@ -13,6 +13,235 @@ _No unreleased changes._
 
 ---
 
+## [1.14.0] — 2026-04-27 — AHH "Auth Hotpath Hardening" train
+
+Coordinated ship of the **8-commit Auth Hotpath Hardening (AHH) train**.
+Closes the multi-replica deployment gap identified in R5.5 + lifts the
+`/auth/login` throughput knee from 75 req/s (R5.5 measured) toward
+**~220 req/s single-replica** and **~880 req/s 4-replica aggregate**
+(post-Phase-4 projection; v1-measured confirmation in v1.14.1 follow-up).
+
+The train is design-staged across 5 numbered phases (8 atomic commits)
+so reviewers can inspect each step in isolation:
+
+- Phase 0 (`f7e9b3e`) — profiling baseline + AOT-validated Argon2id candidate
+- Phase 1 (`50f676d`) — hot-read caching with Redis pubsub invalidation
+- Phase 2 (`4357d79`) — write-path deferral via AuthWriteQueue
+- Phase 3.A (`109fd98`) — JwtKeyEntry algorithm discriminator
+- Phase 3.B (`96189ca`) — JwtTokenService consumes rotation pool
+- Phase 3.C+D (`fe58d28`) — RedisJwtKeyStore CAS + Program.cs wiring
+- Phase 4 (`1c30580`) — Argon2id migration with on-login transparent rehash
+- Phase 5 (`1228ee2`) — horizontal scaling baseline + runbook + ADR-0014
+
+### Added — multi-replica gate (Phase 3, ADR-0012)
+
+- **`JwtTokenService` rotation-pool path** — second constructor takes
+  `IJwtKeyRotationService` instead of file-based RSA. Active signing
+  entry cached for 60 s with sync `lock` (no `SemaphoreSlim` so the
+  class stays non-disposable). Validation uses
+  `TokenValidationParameters.IssuerSigningKeyResolver` so tokens
+  signed by the rotation predecessor still verify during the grace
+  window. `BuildSigningCredentials` dispatches by
+  `JwtKeyEntry.Algorithm` (HS256 → `SymmetricSecurityKey`; RS256 →
+  `RsaSecurityKey` from PKCS#8). The legacy file-based constructor
+  is preserved for tests + single-replica bootstraps.
+- **`JwtLegacyKeyMigrationService`** (`IHostedService`) — runs once
+  at startup. If the rotation pool is empty AND `jwt-signing-key.xml`
+  exists, decrypts via DataProtection and imports as an active RS256
+  entry with 30-day expiration. Idempotent under multi-replica race
+  via the underlying `IJwtKeyStore.UpsertAsync` CAS. Failures are
+  non-fatal — the rotation service auto-bootstraps a fresh HS256
+  entry on first `GetActiveSigningKeyAsync()`.
+- **`JwtKeyAlgorithm`** enum (`Hs256 = 0` default for R5.4 backward
+  compat, `Rs256 = 1`) + `JwtKeyEntry.Algorithm` field with default
+  `Hs256` so existing Redis JSON entries deserialize unchanged.
+- **`RedisJwtKeyStore.UpsertAsync` CAS rewrite** — Redis transaction
+  with `Condition.StringEqual` on the active pointer, atomically
+  writes new entry + updates pointer + demotes prior active entry's
+  JSON `IsActive` flag. Up to 5 retries on condition failure with
+  linear backoff. Closes a latent R5.4 bug where concurrent
+  `RotateAsync` left two `IsActive=true` entries in `GetAllAsync`.
+- **`Identity:JwtKeyRotation:UseRotationPool`** + `RequireRedisStore`
+  config flags. Default `false` preserves R5.4 behavior. Setting
+  `RequireRedisStore=true` without `ConnectionStrings:IdentityRedis`
+  fails fast at startup config-parse time — loud broken-config at
+  deployment time instead of silent breakage during traffic.
+
+### Added — hot-read caching (Phase 1, ADR-0010)
+
+- **`CachedTenantAuthConfigStore`** + **`CachedUserStore`** decorators
+  in `src/Asterisk.Platform.Api/Services/`. `IMemoryCache`-backed,
+  60 s TTL, per-tenant key isolation. `CachedUserStore` co-populates
+  by-id and by-email indexes on miss so `/login` + `/auth/me` share
+  cache hits. Trust boundary documented: `PasswordHash` may live in
+  `IMemoryCache` (in-process) but never crosses Redis.
+- **`AuthHotpathCacheKeys`** constants in `Asterisk.Platform.Identity` —
+  keyed-DI service keys (`UserStoreInner`,
+  `TenantAuthConfigStoreInner`) + Redis pubsub channel
+  (`asterisk:auth:invalidate`).
+- **`Storage.Postgres` + `Storage.InMemory`** register stores via
+  `AddKeyedSingleton(<…>Inner)` plus an unkeyed alias. The Api
+  bootstrap replaces the alias with the cache decorator; the keyed
+  inner stays for the decorator to resolve.
+- **`RedisAuthCacheInvalidator`** (`IHostedService` in
+  `Asterisk.Platform.Identity.Redis`) subscribes to
+  `asterisk:auth:invalidate` and dispatches messages to local
+  `ILocalAuthCacheInvalidationSink` instances (the cache decorators
+  + `PermissionResolver`). Self-suppresses own publishes via
+  originator-id prefix. Wire format: pipe-delimited UTF-8
+  (`tenant-auth | user | permissions` types).
+- **`PermissionResolver`** publishes on `InvalidateUser` so role
+  grants propagate cross-replica within a network round-trip
+  instead of waiting up to 5 minutes for the local TTL.
+- **`AddAuthHotpathCaching`** + `AddAuthHotpathRedisInvalidation`
+  DI extensions. Always-on caching; pubsub engages when Redis is
+  configured.
+
+### Added — write-path deferral (Phase 2, ADR-0011)
+
+- **`AuthWriteQueue`** (`BackgroundService` +
+  `Channel<AuthWriteCommand>` bounded 4096,
+  `BoundedChannelFullMode.Wait` so producer-side `TryWrite` returns
+  false on saturation). 64-item batches, 250 ms flush interval.
+  Coalesces user-mutating commands by `(tenantId, userId)` so
+  multiple commands for the same user yield one DB read + one
+  DB write per batch. Graceful shutdown drains pending items.
+- **`AuthWriteCommand`** records: `UpdateLastLoginAtCommand`,
+  `ResetLockoutCountersCommand`, `LogSuccessEventCommand`,
+  `PasswordRehashCommand` (Phase 4).
+- **New meter** `Asterisk.Platform.Auth.WriteQueue` —
+  `auth.write.{enqueued, dropped, processed, failed}` counters
+  with `type` dimension. Exposed via `/metrics` automatically.
+- **`AuthEventService.EnqueueLogSuccess`** + **`AccountLockoutService.EnqueueLastLoginAtUpdateAsync`** —
+  the success-path login flow defers `users.last_login_at`
+  upsert + `users.failed_login_attempts` reset + `auth_events`
+  insert. **Failure-path** `LogAsync` stays strictly synchronous so
+  attackers fishing credentials cannot outpace the audit log.
+  **Refresh-token persistence** stays synchronous (a token shipped
+  without persisted backing is a security hole).
+
+### Added — Argon2id migration (Phase 4, ADR-0013)
+
+- **`PasswordService` rewrite** — `HashPassword` always emits
+  Argon2id at OWASP-2025 floor parameters
+  (m=19 MiB, t=2, p=1, hashLength=32, salt 16 bytes via
+  `RandomNumberGenerator`). `VerifyPassword` dispatches by hash
+  prefix: `$argon2id$…` → `Argon2.Verify`, otherwise BCrypt verify
+  (legacy `$2a$/$2b$` hashes). Catches
+  `BCrypt.Net.SaltParseException` to return `false` on malformed
+  input rather than leak shape via exception type.
+- **`PasswordService.IsBcryptHash`** discriminator (public) so the
+  login handler decides whether to enqueue a rehash.
+- **`PasswordRehashCommand`** rides the AuthWriteQueue. The new
+  Argon2id hash is computed synchronously inside the request before
+  enqueue so plaintext never lives on the queue. ~30 ms one-shot
+  per migrating user; subsequent logins use Argon2id verify
+  (~33 ms vs BCrypt12's ~162 ms — the dominant Phase 4 perf win).
+- **`Isopoh.Cryptography.Argon2 2.0.0`** PackageReference. Phase 0
+  validated AOT-clean (zero IL trim/AOT warnings under
+  `PublishAot=true`, 2.07 MB native binary).
+
+### Added — horizontal scaling (Phase 5, ADR-0014)
+
+- **`AddPostgresStorage` ergonomic hook** — optional
+  `Action<NpgsqlDataSourceBuilder>` parameter for advanced Npgsql
+  configuration (tracing, type mapping, instrumentation). Pool
+  sizing stays in connection string per Npgsql convention.
+- **`docs/operations/auth-horizontal-scaling.md`** — operational
+  runbook with pre-flight checklist (multi-replica gate),
+  post-Phase-4 knee envelope, recommended Postgres pool sizing
+  per tier (single-replica vs 4-replica), `postgresql.conf` tuning
+  template (max_connections, shared_buffers, effective_cache_size)
+  for AMD 9900X / 60 GB host class, "what NOT to do" §
+  (pgBouncer transaction-pool deliberately rejected — breaks
+  Pro.Push `LISTEN/NOTIFY`), and a verify-the-knee script outline.
+
+### Added — observability + benchmarks
+
+- **`tests/Asterisk.Platform.Benchmarks`** (Phase 0, opt-in BDN, NOT
+  in slnx) — 5 BenchmarkDotNet benchmarks isolating BCrypt12,
+  Argon2id-OWASP, JWT RSA-2048 sign, and end-to-end composites.
+- **`tests/Asterisk.Platform.Api.Aot.Probe`** — strict
+  `PublishAot=true` gate over the Argon2id candidate library.
+  Asserts zero IL warnings + successful native runtime roundtrip.
+- **`scripts/profiling/`** — three reproducible runners:
+  `run-benchmarks.sh`, `aot-probe-publish.sh`,
+  `dotnet-trace-login.sh`.
+
+### Added — research + design
+
+- **`docs/research/2026-04-27-auth-hotpath-baseline.md`** — Phase 0
+  evidence document. BCrypt12 measured 162 ms / verify (99.9 % of
+  crypto wall time); Argon2id m=19 MiB t=2 p=1 measured 33 ms / verify
+  (4.9× faster); knee model recovered exactly under single-axis CPU
+  hypothesis. Phase 0 gate cleared on all axes.
+- **5 new ADRs** (Phase 3 + 4 + 5 covered):
+  - ADR-0010 — auth-hotpath-cache-decorators (Phase 1)
+  - ADR-0011 — auth-write-deferral (Phase 2)
+  - ADR-0012 — jwt-rotation-pool-wireup-and-multi-replica-gate (Phase 3)
+  - ADR-0013 — password-hash-algorithm-migration (Phase 4)
+  - ADR-0014 — auth-horizontal-scaling-baseline (Phase 5)
+
+### Knee envelope (v1-projected, post-AHH)
+
+| Stage | Single-replica | 4-replica aggregate | p99 ≤ 250 ms |
+|---|--:|--:|---|
+| R5.5 baseline (BCrypt12, no caching, sync writes) | 75 req/s | n/a | ⚠ at 50 req/s |
+| Post-Phase-1 (read caches) | ~95 req/s | n/a | ✓ |
+| Post-Phase-2 (write deferral) | ~120 req/s | n/a | ✓ |
+| Post-Phase-3 (multi-replica gate) | ~120 req/s | ~480 req/s | ✓ |
+| **Post-Phase-4 (Argon2id)** | **~220 req/s** | **~880 req/s** | **✓ target** |
+
+22× single-replica improvement (75 → 1 650 req/s if 4 replicas + Argon2id).
+
+### Test counts post-AHH
+
+- **Api.Tests**: 853/853 PASS (846 baseline + 7 new — PasswordService
+  Argon2id/legacy + AuthWriteQueue rehash) — **2 new test files**
+  (`JwtTokenServiceRotationTests`, `AuthWriteQueueTests`).
+- **Identity.Redis.Tests**: 34/34 PASS (32 baseline + 2 new CAS
+  concurrency tests).
+- **Identity.Tests**: 64/64 PASS (unchanged).
+- **Storage.InMemory.Tests**: 125/125 PASS (unchanged — keyed
+  registration is non-breaking).
+- **Storage.Postgres.Tests**: existing IT baseline preserved.
+- **Total cross-Platform**: 1,076+/1,076+ PASS, 0 warnings under
+  `TreatWarningsAsErrors=true`, 0 vulnerable packages.
+
+### Configuration surface (operator-side)
+
+```jsonc
+{
+  "Identity": {
+    "JwtKeyRotation": {
+      "UseRotationPool": true,        // Phase 3.D — opt-in
+      "RequireRedisStore": true        // production multi-replica safety net
+    }
+  },
+  "ConnectionStrings": {
+    "IdentityRedis": "redis:6379",     // ADR-0012 prerequisite
+    "Postgres": "Host=…;Maximum Pool Size=50;Minimum Pool Size=10;Connection Idle Lifetime=300"
+  }
+}
+```
+
+When `UseRotationPool=false` (default), R5.4 file-based behavior is
+preserved verbatim. Existing deployments upgrade transparently.
+
+### Pending follow-ups (v1.14.1)
+
+- Empirical 4-replica measurement against docker-compose 4-replica
+  stack via `jwt-sweep.sh`. Replaces v1-projected knee envelope
+  numbers in `docs/operations/auth-horizontal-scaling.md` +
+  ADR-0014 with v1-measured.
+- `MultiReplicaSmokeTests` Testcontainers integration covering full
+  WebApplicationFactory cross-replica auth handshake.
+- Cross-repo coordination for memory + roadmap.md updates in
+  `Asterisk.Sdk.Pro` (Pro.OpenTelemetry already at 1.15.0-pro;
+  no Pro source change required for v1.14.0).
+
+---
+
 ## [1.13.0] — 2026-04-26 — R5.4 "Production Validation"
 
 **Final release of the R5 Production Readiness Release Train.** Coordinated
