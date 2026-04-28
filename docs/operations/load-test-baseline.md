@@ -394,3 +394,75 @@ logs at `/tmp/scenario-sweep-<scenario>-r<rate>.log`.
 - ADR-0015 § "Phase 2 measured impact (2026-04-28)"
 - v1.14.6 CHANGELOG entry "ADR-0015 Phase 2 — shared NpgsqlDataSource adoption"
 - Pro 1.16.0-pro CHANGELOG entry + Pro ADR-0008 (`Asterisk.Sdk.Pro/docs/decisions/0008-shared-datasource-overload.md`)
+
+## Phase C-L tuning experiment (2026-04-28, NOT shipped)
+
+After Phase 2 v1.14.6 stabilized the baseline at `max_connections=200`, `shared_buffers=512MB`, `effective_cache_size=2GB`, an opportunistic Postgres tuning experiment was conducted to evaluate whether more aggressive parameters would improve the SMB tier knee envelope. The hardware (AMD Ryzen 9 9900X / 60 GB / NVMe) easily affords more aggressive tuning, so the natural question was: do those parameters help?
+
+### Two configurations tested
+
+**Aggressive tuning** (configurations a developer might pick from a Postgres tuning blog):
+- `shared_buffers=4GB` (8× baseline)
+- `effective_cache_size=24GB` (12× baseline)
+- `work_mem=32MB` (8× default 4MB)
+- `maintenance_work_mem=512MB` (8× default 64MB)
+- `random_page_cost=1.1` (NVMe-correct, was 4)
+- `effective_io_concurrency=200` (NVMe async parallel)
+- `max_parallel_workers=16` + `max_parallel_workers_per_gather=4` (24-core utilization)
+- `max_wal_size=4GB` + `checkpoint_completion_target=0.9`
+- `wal_compression=on`
+
+**Defensible minimum** (subset that should be neutral or positive):
+- `shared_buffers=4GB`, `effective_cache_size=24GB`, `maintenance_work_mem=512MB`, `random_page_cost=1.1`, `effective_io_concurrency=200`, `max_wal_size=4GB`, `checkpoint_completion_target=0.9`
+- Rolled back to defaults: `work_mem`, `max_parallel_workers*`, `wal_compression`
+
+### Results — `presence` sweep (3-way comparison)
+
+| VU | Phase 2 baseline | Aggressive | Defensible minimum |
+|---:|:---:|:---:|:---:|
+| 100 | **p99 16.13 ms / 11 046 RPS** | p99 16.34 ms / 10 916 RPS | p99 16.25 ms / 11 185 RPS |
+| 250 | **p99 32.27 ms / 11 312 RPS** | p99 34.24 ms / 10 966 RPS | p99 34.91 ms / 10 708 RPS |
+| 500 | **p99 57.06 ms / 10 770 RPS** | p99 60.48 ms / 10 830 RPS | p99 60.61 ms / 10 717 RPS |
+| 1000 | **p99 115.97 ms / 10 949 RPS** | p99 122.62 ms / 10 489 RPS | p99 118.40 ms / 10 423 RPS |
+| 1500 | **p99 174.21 ms / 11 034 RPS** | p99 180.35 ms / 10 455 RPS | p99 178.18 ms / 10 351 RPS |
+
+**Both tuned configurations regressed slightly vs the Phase 2 baseline** (1-7 ms p99, ~1-6 % depending on VU level). The defensible-minimum set was marginally better than aggressive but still worse than untuned baseline.
+
+### Why the tuning didn't help (and slightly hurt)
+
+The benchmark scenarios (`presence`, `queues`, `agentassist`) are **single-row PK lookups** returning small JSON payloads. Specifically:
+
+- **`shared_buffers=4GB` vs 512MB** — the working set for these queries is ~10MB. The remaining 4GB of buffers sits cold; the buffer manager (clock-sweep eviction) must scan more entries on every page acquisition, adding marginal per-query overhead.
+- **`work_mem=32MB`** — never exercised. PK lookups don't sort or hash. Net cost: zero benefit, slight planner evaluation overhead.
+- **`max_parallel_workers=16` + `max_parallel_workers_per_gather=4`** — never triggered. Single-row lookups fall below the cost threshold for parallelization. Net cost: planner has to evaluate "should I parallelize?" on every query (a few µs × 11 000 QPS = noticeable).
+- **`random_page_cost=1.1`** — correct for NVMe, but irrelevant when pages are already in cache (the planner doesn't choose seek paths for cached PK lookups).
+- **`wal_compression=on`** — only matters for write paths. Reads pay zero. Adds CPU on writes, which the benchmark doesn't exercise.
+- **`effective_cache_size=24GB`** — planner-only hint, zero runtime cost. But also zero benefit for already-cached small queries.
+
+### Decision
+
+**Reverted both `docker-compose.smb.yml` and `docker-compose.production.yml` to the v1.14.5 baseline** (`max_connections=200`, `shared_buffers=512MB`, `effective_cache_size=2GB`). No version bump — v1.14.6 SMB tier capacity envelope holds as published.
+
+### When the aggressive tuning would help
+
+The experiment doesn't say "Postgres tuning is useless" — it says **"Postgres tuning targeting analytical workloads is useless on a benchmark of single-row PK reads."** Operators with the following workload profiles SHOULD apply the aggressive tuning:
+
+- **Heavy `audit_entries` aggregations** (audit dashboards, compliance reports) — `work_mem=32MB` + `max_parallel_workers_per_gather=4` accelerate sort + parallel scan
+- **Large multi-tenant retention runs** (nightly VACUUM + reindex) — `maintenance_work_mem=512MB` is the right call
+- **Bulk `session_events` ingest** under sustained write load — `wal_compression=on` + `max_wal_size=4GB` reduce checkpoint thrash
+- **Cross-tenant analytics scans** (Pro.Analytics intervals over months of data) — `shared_buffers=4GB` + `effective_cache_size=24GB` hit cache across the larger working set
+
+Operators on smaller hardware (8 GB RAM) should NOT copy the tuning: `shared_buffers=4GB` would starve the rest of the host. See compose-file header comments for downscale guidance.
+
+### Reproducibility
+
+```bash
+# Apply aggressive tuning (revert via git checkout):
+# Edit docker/docker-compose.smb.yml postgres command per § "Aggressive tuning" above
+docker compose -f docker/docker-compose.full.yml \
+               -f docker/docker-compose.smb.yml up -d --wait
+./scripts/seed-staging.sh
+./scripts/scenario-sweep.sh presence
+```
+
+Per-step NBomber reports under `tests/Asterisk.Platform.LoadTests/load-test-reports/`.
