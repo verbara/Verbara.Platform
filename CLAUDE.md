@@ -10,7 +10,7 @@ Project context for Claude Code working on **Asterisk.Platform** — the API hos
 
 Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes SDK (MIT) and Pro packages via NuGet — versions pinned in `Directory.Packages.props`.
 
-**NativeAOT (`IsAotCompatible=true`), `/api/v1/` (URL-segment versioning), 59 endpoint groups (14 with feature gates).** Current version in `Directory.Build.props`; package list under `src/`.
+**NativeAOT (`IsAotCompatible=true`), `/api/v1/` (URL-segment versioning), 70 endpoint groups (14 with feature gates).** Current version in `Directory.Build.props`; package list under `src/`.
 
 **Package layers** (purpose-grouped; one DI extension per package):
 
@@ -44,7 +44,7 @@ dotnet run
 
 ### Platform.Api -- Composition Root
 
-`Program.cs` registers all platform packages + Pro packages (Dialer, EventStore, Analytics, CallAnalytics, AgentAssist, Realtime, Cluster, MultiTenant, Licensing), configures dual-scheme auth, RBAC, rate limiting, CORS, health checks, and maps 59 endpoint groups.
+`Program.cs` registers all platform packages + Pro packages (Dialer, EventStore, Analytics, CallAnalytics, AgentAssist, Realtime, Cluster, MultiTenant, Licensing), configures dual-scheme auth, RBAC, rate limiting, CORS, health checks, and maps 70 endpoint groups.
 
 Storage.InMemory provides drop-in defaults. PostgreSQL storage activates via connection strings (`Dialer`, `Analytics`, `Realtime`, or fallback `Postgres`).
 
