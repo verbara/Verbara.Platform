@@ -195,7 +195,15 @@ builder.Services.AddSingleton<AuthWriteQueue>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AuthWriteQueue>());
 
 // ─── Storage ─────────────────────────────────────────────────────────────────
-var coreConnectionString = builder.Configuration.GetConnectionString("Postgres");
+// ADR-0015 Phase 1 — wrap every connection string read with
+// ConnectionStringDefaults.ApplyPoolDefaults so the 14 NpgsqlDataSources
+// across Platform.Storage.Postgres + the Pro storage packages inherit
+// SMB-tier pool sizing (Maximum Pool Size=10, Minimum=2, Idle=300) when
+// the operator hasn't specified an explicit value. Operator-set values
+// pass through verbatim. Helper is idempotent so repeated calls are safe
+// (ApplyPoolDefaults reuses the augmented chain in analytics/live).
+var coreConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
+    builder.Configuration.GetConnectionString("Postgres"));
 if (!string.IsNullOrEmpty(coreConnectionString))
 {
     builder.Services.AddPostgresStorage(coreConnectionString);
@@ -712,7 +720,8 @@ builder.Services.AddKeyedSingleton<Asterisk.Sdk.Resilience.ResiliencePolicy>(
     (_, _) => BuildHourlyWorkerPolicy());
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
-var dialerConnectionString = builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres") ?? "";
+var dialerConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
+    builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres")) ?? "";
 if (!string.IsNullOrEmpty(dialerConnectionString))
 {
     builder.Services.UsePostgresDialerStorage(dialerConnectionString);
@@ -760,8 +769,9 @@ builder.Services.AddAsteriskCluster(c =>
         c.InitialNodes["primary"] = nodeOptions;
     }
 });
-var clusterConn = builder.Configuration.GetConnectionString("Cluster")
-    ?? builder.Configuration.GetConnectionString("Postgres");
+var clusterConn = ConnectionStringDefaults.ApplyPoolDefaults(
+    builder.Configuration.GetConnectionString("Cluster")
+        ?? builder.Configuration.GetConnectionString("Postgres"));
 if (!string.IsNullOrEmpty(clusterConn))
 {
     builder.Services.UsePostgresClusterTransport(clusterConn);
@@ -776,10 +786,10 @@ builder.Services.AddAsteriskRealtime(o =>
     o.ReconcilerIntervalSeconds = 60;
     o.EnableAgentPresenceTracking = false;
 });
-var realtimeConn = builder.Configuration.GetConnectionString("Realtime")
-    ?? builder.Configuration.GetConnectionString("Analytics")
-    ?? builder.Configuration.GetConnectionString("Postgres")
-    ?? "";
+var realtimeConn = ConnectionStringDefaults.ApplyPoolDefaults(
+    builder.Configuration.GetConnectionString("Realtime")
+        ?? builder.Configuration.GetConnectionString("Analytics")
+        ?? builder.Configuration.GetConnectionString("Postgres")) ?? "";
 if (!string.IsNullOrEmpty(realtimeConn))
     builder.Services.UsePostgresRealtimeStorage(realtimeConn);
 builder.Services.AddHostedService<RealtimeStateBridge>();
@@ -808,7 +818,8 @@ else
 }
 
 // ─── Pro EventStore + Analytics + CallAnalytics (engines + Postgres stores) ──
-var analyticsConnectionString = builder.Configuration.GetConnectionString("Analytics") ?? dialerConnectionString;
+var analyticsConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
+    builder.Configuration.GetConnectionString("Analytics")) ?? dialerConnectionString;
 if (!string.IsNullOrEmpty(analyticsConnectionString))
 {
     builder.Services.UsePostgresEventStore(analyticsConnectionString);
@@ -837,8 +848,8 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     // KNOWN LIMITATION (R5.1 Task H): writer emits tenant_id="" because Platform
     // registers Pro.Analytics as process-scope singleton with empty DefaultTenantId.
     // Per-tenant scope refactor is tracked for R5.2 / future Platform patch.
-    var liveAnalyticsConnectionString = builder.Configuration.GetConnectionString("AnalyticsLive")
-        ?? analyticsConnectionString;
+    var liveAnalyticsConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
+        builder.Configuration.GetConnectionString("AnalyticsLive")) ?? analyticsConnectionString;
     builder.Services.AddAsteriskProAnalyticsLive();
     builder.Services.UsePostgresProAnalyticsLive(liveAnalyticsConnectionString);
 
