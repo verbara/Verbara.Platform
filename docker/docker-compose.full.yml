@@ -136,10 +136,11 @@ services:
 
   postgres:
     image: postgres:18-alpine
-    # ADR-0015 — bump max_connections=200 (vs alpine default 100) to keep
-    # the dev/loadtest stack stable when Platform.Api spins up 14 separate
-    # NpgsqlDataSources sharing this Postgres. This file is the dev/loadtest
-    # stack — for the SMB tier production-ready stack with full pool
+    # ADR-0015 — bump max_connections=200 (vs alpine default 100) to give
+    # the dev/loadtest stack headroom. Post-Phase-2 (Pro 1.16.0-pro shared
+    # NpgsqlDataSource), Platform.Api opens ONE pool not 14, so real demand
+    # is ~10 conns; the dev stack keeps 200 for parity with smb.yml + ad-hoc
+    # tooling. For the SMB tier production-ready stack with explicit pool
     # sizing in the connection string, layer docker-compose.smb.yml on top:
     #
     #   docker compose -f docker/docker-compose.full.yml \

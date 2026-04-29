@@ -6,9 +6,11 @@
 # customer deployments; use smb.yml for pre-production validation against
 # a known config.
 #
-# Capacity envelope: see ADR-0015 + docs/operations/capacity-planning.md
-# § "Small tier". 14 NpgsqlDataSources × 10 pool size = 140 conn demand
-# ceiling per platform-api instance, comfortable under max_connections=200.
+# Capacity envelope: see ADR-0015 Phase 2 + docs/operations/capacity-planning.md
+# § "Small tier". Post-Phase-2 (Platform v1.14.6 + Pro 1.16.0-pro shared
+# NpgsqlDataSource overload), all stores share ONE pool per platform-api
+# instance — real demand is 1 × 10 = 10 conns + ancillary. max_connections=200
+# is intentional operator headroom (capacity-planning.md tier minimum is 50).
 #
 # Operators MUST set the following in .env.production:
 #   - ConnectionStrings__Postgres with Maximum Pool Size=10 (or
@@ -80,10 +82,11 @@ services:
 
   postgres:
     image: postgres:18-alpine
-    # ADR-0015 Phase 1 — SMB tier tuning. 14 NpgsqlDataSources × 10 pool
-    # size = 140 demand ceiling, 60 headroom for postgres internals +
-    # admin. shared_buffers / effective_cache_size sized for 16 GB RAM
-    # SMB tier hardware (capacity-planning.md § "Small").
+    # ADR-0015 Phase 2 — SMB tier production tuning. With the shared
+    # NpgsqlDataSource overload (Pro 1.16.0-pro, v1.14.6), platform-api
+    # demand collapses to ~10 conns; max_connections=200 is operator
+    # headroom (tier minimum is 50 per capacity-planning.md § "Small").
+    # shared_buffers / effective_cache_size sized for 16 GB RAM SMB tier.
     command:
       - postgres
       - -c

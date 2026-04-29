@@ -23,14 +23,16 @@
 # composition keeps the SMB tier and the dev stack visibly different
 # without duplicating service definitions.
 #
-# Capacity envelope (post-tuning, single platform-api instance):
+# Capacity envelope (post-Phase-2, single platform-api instance):
 #   - Postgres: max_connections=200, shared_buffers=512MB,
 #     effective_cache_size=2GB
-#   - Npgsql per data source: Maximum Pool Size=10, Minimum=2, Idle=300s
-#   - 14 data sources × 10 conns = 140 demand ceiling
-#   - 60 conns headroom for Postgres internals + admin sessions
-#   - See ADR-0015 for the sprawl analysis + Phase 2 architectural fix
-#     (Pro 1.16.0-pro shared NpgsqlDataSource overload)
+#   - Npgsql shared pool: Maximum Pool Size=10, Minimum=2, Idle=300s
+#   - 1 shared NpgsqlDataSource × 10 conns = ~10 conn demand (post-Phase-2)
+#   - max_connections=200 is operator headroom: capacity-planning.md tier
+#     minimum drops to 50 post-Phase-2; 200 absorbs ad-hoc psql sessions,
+#     migrations, and replication slots without retuning
+#   - See ADR-0015 for Phase 1 (per-pool sizing, kept as safety net) +
+#     Phase 2 (Pro 1.16.0-pro shared NpgsqlDataSource — current state)
 #
 # References:
 #   - ADR-0014 (Auth horizontal scaling baseline) — amended 2026-04-28
@@ -41,18 +43,22 @@
 services:
   platform-api:
     environment:
-      # ADR-0015 Phase 1 — explicit pool sizing prevents the 14-DataSource
-      # sprawl from over-subscribing max_connections under concurrent burst.
-      # ConnectionStringDefaults in Program.cs would apply the same defaults
-      # if absent; specifying them here is belt-and-suspenders + makes the
-      # tuning visible in operator-facing config.
+      # ADR-0015 Phase 2 — explicit pool sizing on the shared NpgsqlDataSource
+      # (Pro 1.16.0-pro overload, v1.14.6). Phase 1's per-pool sprawl is
+      # eliminated; this connection string now drives ONE pool serving all
+      # 14 stores. ConnectionStringDefaults in Program.cs would apply the
+      # same defaults if absent — specifying here is belt-and-suspenders
+      # + makes the tuning visible in operator-facing config.
       ConnectionStrings__Postgres: "Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret};Maximum Pool Size=10;Minimum Pool Size=2;Connection Idle Lifetime=300;Pooling=true"
 
   postgres:
-    # ADR-0015 Phase 1 — bump max_connections to absorb 14 NpgsqlDataSources
-    # × 10 pool size = 140 demand + 60 headroom for postgres internals +
-    # admin sessions. shared_buffers / effective_cache_size sized for SMB
-    # tier hardware (16 GB RAM target per capacity-planning.md § "Small").
+    # ADR-0015 Phase 2 — max_connections=200 is operator headroom over the
+    # post-Phase-2 demand (1 shared pool × 10 = ~10 conns per platform-api).
+    # capacity-planning.md tier minimum dropped from 200 → 50 with the
+    # shared NpgsqlDataSource overload; 200 is retained to absorb ad-hoc
+    # psql sessions, migrations, and replication without retuning.
+    # shared_buffers / effective_cache_size sized for SMB tier hardware
+    # (16 GB RAM target per capacity-planning.md § "Small").
     command:
       - postgres
       - -c

@@ -3,30 +3,33 @@ using Npgsql;
 namespace Asterisk.Platform.Api.Services;
 
 /// <summary>
-/// ADR-0015 Phase 1 mitigation: applies sane SMB-tier <c>Maximum Pool Size</c>,
-/// <c>Minimum Pool Size</c>, and <c>Connection Idle Lifetime</c> defaults to
-/// PostgreSQL connection strings if (and only if) the operator did not specify
-/// them.
+/// ADR-0015 pool-sizing safety net: applies sane SMB-tier
+/// <c>Maximum Pool Size</c>, <c>Minimum Pool Size</c>, and
+/// <c>Connection Idle Lifetime</c> defaults to PostgreSQL connection strings
+/// if (and only if) the operator did not specify them.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each <see cref="NpgsqlDataSource"/> across Platform.Storage.Postgres + the
-/// Pro storage packages parses the same connection-string keywords. Without
-/// explicit operator override, Npgsql defaults each pool to
-/// <c>Maximum Pool Size=100</c>; with ~14 known data sources sharing a single
-/// connection string in a typical SMB deployment, theoretical worst-case
-/// demand from one platform-api instance is 1 400 connections — enough to
-/// blow past <c>max_connections=100</c> (postgres-alpine default) under any
-/// concurrent burst.
+/// Phase 2 (Platform v1.14.6 + Pro 1.16.0-pro shared
+/// <see cref="NpgsqlDataSource"/> overload) collapses the historical
+/// 14-DataSource sprawl into ONE shared pool per platform-api instance —
+/// real Postgres demand is now ~10 conns + ancillary, not 14 × 10 = 140.
+/// This helper still runs because it preserves the Phase 1 safety net for
+/// the per-pool case: operators running unpatched stacks, custom Pro
+/// builds, or Platform.Storage.Postgres without the shared overload still
+/// get sane defaults instead of Npgsql's library default
+/// <c>Maximum Pool Size=100</c>, which would blow past the SMB tier
+/// <c>max_connections</c> ceiling under concurrent burst.
 /// </para>
 /// <para>
-/// Phase 1 (this helper) caps demand at 14 × 10 = 140 connections per
-/// instance, comfortable under the SMB tier <c>max_connections=200</c>
+/// In the post-Phase-2 default path (the SMB tier compose stacks ship with
+/// the shared pool), the values applied here cap the single shared pool at
+/// 10 conns — comfortable under the SMB tier <c>max_connections=200</c>
 /// shipped in <c>docker-compose.smb.yml</c> and
-/// <c>docker-compose.production.yml</c>. Phase 2 (Pro 1.16.0-pro shared
-/// <see cref="NpgsqlDataSource"/> overload) eliminates the sprawl entirely
-/// — when that ships, Phase 1 stays in place as a safety net for operators
-/// who haven't tuned their connection string explicitly.
+/// <c>docker-compose.production.yml</c>. The minimum required
+/// <c>max_connections</c> per tier dropped 60–75% post-Phase-2 (see
+/// <c>docs/operations/capacity-planning.md</c> § "Small / Medium / Large
+/// / XL"); compose stacks retain the higher value as operator headroom.
 /// </para>
 /// <para>
 /// Operator override is preserved: any deployment that explicitly sets
@@ -38,15 +41,18 @@ namespace Asterisk.Platform.Api.Services;
 internal static class ConnectionStringDefaults
 {
     /// <summary>
-    /// Default per-data-source <c>Maximum Pool Size</c>. 14 known data sources
-    /// × 10 = 140 connection demand ceiling per platform-api instance.
+    /// Default per-data-source <c>Maximum Pool Size</c>. Post-Phase-2 the
+    /// shared pool caps at 10 conns per platform-api instance; pre-Phase-2
+    /// (per-pool path) the same 10 keeps total demand at 14 × 10 = 140
+    /// under the SMB tier <c>max_connections</c> ceiling.
     /// </summary>
     public const int DefaultMaximumPoolSize = 10;
 
     /// <summary>
     /// Default per-data-source <c>Minimum Pool Size</c>. Keeps a small warm
-    /// pool to avoid cold-start latency on the auth hot path; small enough
-    /// that 14 idle data sources only pin 28 connections total.
+    /// pool to avoid cold-start latency on the auth hot path. Post-Phase-2
+    /// the single shared pool pins ~2 conns idle; pre-Phase-2 (per-pool)
+    /// 14 idle pools pin 28 conns total — still well under tier ceiling.
     /// </summary>
     public const int DefaultMinimumPoolSize = 2;
 
