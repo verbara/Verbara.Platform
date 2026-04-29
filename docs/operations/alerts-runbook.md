@@ -105,6 +105,28 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 
 ---
 
+### NodeDiskSpaceLow
+
+**What:** `node_filesystem_avail_bytes / node_filesystem_size_bytes` for `mountpoint="/"` (excluding tmpfs/overlay) drops below 10% sustained 5min.
+
+**Why:** Every stateful service shares the host root fs (Postgres data, Redis AOF, Prometheus TSDB, Loki chunks, Docker overlay/build cache). Sustained low-space → Postgres checkpointer cannot write WAL/checkpoint files → `PANIC: could not write to file ... No space left on device` → crash loop. Postgres `pg_isready` healthcheck reports "healthy" because the listener stays up while the postmaster cycles — this alert is the only signal you'll get before silent data plane outage.
+
+**Origin:** R5.5 D-L incident 2026-04-28 — Docker build cache silently grew to 107 GB over 15 days of CI rebuilds, driving root fs to 100% during a 50-min smoke soak. Postgres entered crash loop; Platform.Api login returned `57P03 recovery mode` after 5 successful soak steps.
+
+**First response:**
+- Run `df -h /` to confirm.
+- Run `docker system df` — top suspect ranking: build cache > unused images > orphan volumes.
+- Run `docker builder prune -f` (recovers build cache; non-destructive — does not touch images, containers, or named volumes).
+- If still tight, `docker image prune -a -f` (removes images with no running container; will require re-pull).
+- Verify `/etc/docker/daemon.json` has builder GC cap configured:
+  ```json
+  { "builder": { "gc": { "enabled": true, "defaultKeepStorage": "20GB" } } }
+  ```
+- If cap missing, apply it + `sudo systemctl restart docker` (containers with `restart: unless-stopped` auto-recover; observability stack needs `docker compose up -d` since its restart policy is `no`).
+- Check Postgres logs (`docker logs docker-postgres-1 --tail 50`) for `PANIC ... No space left on device` — if present, file follow-up to verify checkpointer recovered cleanly.
+
+---
+
 ## P1 — ticket within 24h
 
 ### SloBreachQueueIngestion

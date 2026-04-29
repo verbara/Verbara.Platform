@@ -121,6 +121,33 @@ groups:
           description: "Per ADR-0009 P0 trigger: blackbox-exporter probe against {{ $labels.instance }} (job {{ $labels.job }}) failing. Either the target service is unreachable or its TCP/HTTP listener has stopped accepting connections."
           runbook_url: "alerts-runbook.md#blackboxjourneydown"
 
+      - alert: NodeDiskSpaceLow
+        # Source: node-exporter node_filesystem_avail_bytes / _size_bytes.
+        # Filtered to real backing devices ($mountpoint=/) — the host root fs
+        # where Docker overlay layers, build cache, and named volumes (Postgres,
+        # Redis, Prometheus TSDB, Loki chunks) all live. R5.5 D-L incident
+        # 2026-04-28: build cache silently grew to 107 GB → root fs hit 100 %
+        # → Postgres checkpointer PANIC ("could not write to file
+        # pg_logical/replorigin_checkpoint.tmp: No space left on device") →
+        # crash loop. Postgres healthcheck (pg_isready TCP probe) reported
+        # "healthy" throughout because the listener stayed up while the
+        # postmaster cycled. P0 because every stateful service shares the
+        # same fs and a full disk → silent data plane outage.
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+            /
+            node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+          ) < 0.10
+        for: 5m
+        labels:
+          severity: P0
+          service: host
+        annotations:
+          summary: "Host disk free < 10% on {{ $labels.instance }} (P0)"
+          description: "node-exporter reports < 10% free on root filesystem. Postgres / Redis / Prometheus / Loki all share this volume; sustained low-space → checkpoint failures → crash loop. Run `docker builder prune -f` (build cache top suspect) and `docker image prune -a` if needed. Verify Docker `daemon.json` builder.gc.defaultKeepStorage cap is set."
+          runbook_url: "alerts-runbook.md#nodediskspacelow"
+
   # =====================================================================
   # P1 — ticket within 24h. SLO-breach class, no immediate outage.
   # =====================================================================
