@@ -116,13 +116,34 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 **First response:**
 - Run `df -h /` to confirm.
 - Run `docker system df` — top suspect ranking: build cache > unused images > orphan volumes.
-- Run `docker builder prune -f` (recovers build cache; non-destructive — does not touch images, containers, or named volumes).
-- If still tight, `docker image prune -a -f` (removes images with no running container; will require re-pull).
-- Verify `/etc/docker/daemon.json` has builder GC cap configured:
-  ```json
-  { "builder": { "gc": { "enabled": true, "defaultKeepStorage": "20GB" } } }
+- **CHECK CONTAINER LOGS FIRST.** `docker system df` does NOT count `/var/lib/docker/containers/*/*-json.log`. Under sustained high RPS, a single chatty container (e.g. `platform-api` at 11 k req/s) with default INFO-level logging fills root fs in 2-5 hours. Inspect via privileged probe (no sudo needed):
+  ```bash
+  docker run --rm --privileged -v /var/lib/docker:/host_docker:ro alpine:3.19 \
+    sh -c 'find /host_docker/containers -name "*-json.log" -exec du -sh {} + | sort -hr | head -5'
   ```
-- If cap missing, apply it + `sudo systemctl restart docker` (containers with `restart: unless-stopped` auto-recover; observability stack needs `docker compose up -d` since its restart policy is `no`).
+- If a container log is multi-GB, truncate it without restarting the container (privileged probe has write access):
+  ```bash
+  docker run --rm --privileged -v /var/lib/docker:/host_docker alpine:3.19 \
+    truncate -s 0 /host_docker/containers/<container-id>/<container-id>-json.log
+  ```
+  Truncation reclaims disk immediately; the container keeps writing to the (now-empty) file. No process restart needed.
+- After log triage, run `docker builder prune -f` (recovers build cache; non-destructive — does not touch images, containers, or named volumes).
+- If still tight, `docker image prune -a -f` (removes images with no running container; will require re-pull).
+- Verify `/etc/docker/daemon.json` has BOTH log rotation AND builder GC cap configured:
+  ```json
+  {
+    "log-driver": "json-file",
+    "log-opts": { "max-size": "100m", "max-file": "5" },
+    "builder": { "gc": { "enabled": true, "defaultKeepStorage": "20GB" } }
+  }
+  ```
+  Without `log-opts`, Docker writes container logs to JSON files with no size limit — a single high-RPS container can fill the disk between checkpoints.
+- If config missing or incomplete, apply it + `sudo systemctl restart docker` (containers with `restart: unless-stopped` auto-recover; observability stack needs `docker compose up -d` since its restart policy is `no`). Existing containers inherit the new daemon defaults at startup; verify with a probe:
+  ```bash
+  docker run --rm -d --name probe alpine:3.19 sh -c 'while true; do echo x; sleep 1; done'
+  docker inspect probe --format '{{json .HostConfig.LogConfig}}'  # should show max-size + max-file
+  docker stop probe
+  ```
 - Check Postgres logs (`docker logs docker-postgres-1 --tail 50`) for `PANIC ... No space left on device` — if present, file follow-up to verify checkpointer recovered cleanly.
 
 ---
