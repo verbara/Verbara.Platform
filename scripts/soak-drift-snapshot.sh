@@ -27,6 +27,11 @@
 #   nohup ./scripts/soak-drift-snapshot.sh \
 #     > /tmp/soak-drift-snapshot.log 2>&1 & disown
 #
+# Default output:
+#   tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-<DATE>.csv
+#   (NOT load-test-reports/ — NBomber wipes that directory at the start of
+#   every run, which would delete drift rows between snapshots.)
+#
 # References:
 #   - docs/plans/active/2026-04-27-r5.5-execution-plan.md § D-L.2
 #   - Companion of scripts/soak-log-watchdog.sh (disk-fill guard)
@@ -36,7 +41,7 @@ set -euo pipefail
 PROM_URL="${PROM_URL:-http://localhost:9090}"
 INTERVAL_SEC=3600
 ONCE=0
-DEFAULT_OUTPUT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tests/Asterisk.Platform.LoadTests/load-test-reports/soak-drift-$(date '+%Y-%m-%d').csv"
+DEFAULT_OUTPUT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-$(date '+%Y-%m-%d').csv"
 OUTPUT="$DEFAULT_OUTPUT"
 
 while [ $# -gt 0 ]; do
