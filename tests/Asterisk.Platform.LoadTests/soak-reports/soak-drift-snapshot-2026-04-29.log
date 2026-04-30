@@ -1,0 +1,45 @@
+[2026-04-29 08:09:42 -0500] drift-snapshot start: interval=3600s output=/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+[2026-04-29 08:09:44 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T08:09:44-05:00,422.70,724.73,113.40,12,74.02,10043,501,221,57
+[2026-04-29 09:09:46 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T09:09:46-05:00,428.60,751.19,115.70,12,68.66,10811,501,221,62
+[2026-04-29 10:09:48 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T10:09:48-05:00,443.90,711.19,115.00,12,70.51,10945,501,221,63
+[2026-04-29 11:09:49 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T11:09:49-05:00,448.00,723.50,114.80,12,69.99,10880,501,221,67
+[2026-04-29 12:09:51 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T12:09:51-05:00,448.90,759.35,116.20,13,70.27,11082,501,209,75
+[2026-04-29 13:09:54 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T13:09:54-05:00,449.50,738.86,118.00,13,71.24,10864,501,215,80
+[2026-04-29 14:09:55 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T14:09:55-05:00,453.10,743.72,115.10,12,70.17,10816,501,215,73
+[2026-04-29 15:09:57 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T15:09:57-05:00,460.50,758.95,117.90,13,70.05,11013,501,215,77
+[2026-04-29 16:09:59 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T16:09:59-05:00,433.00,748.47,101.80,13,70.18,11179,501,216,85
+[2026-04-29 17:10:01 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T17:10:01-05:00,429.80,684.31,102.70,13,69.65,11132,501,216,90
+[2026-04-29 18:10:02 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T18:10:02-05:00,427.20,761.62,107.00,13,68.00,11304,501,217,78
+[2026-04-29 19:10:04 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T19:10:04-05:00,429.40,766.62,108.50,13,68.96,11272,501,217,83
+[2026-04-29 20:10:06 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T20:10:06-05:00,438.50,774.51,105.70,12,69.19,11204,501,218,91
+[2026-04-29 21:10:07 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T21:10:07-05:00,434.00,742.69,108.80,13,72.35,10655,501,213,95
+[2026-04-29 22:10:09 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T22:10:09-05:00,433.70,776.03,108.40,13,61.21,11546,501,214,85
+[2026-04-29 23:10:11 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-29T23:10:11-05:00,435.60,745.86,108.60,13,64.55,10061,501,214,90
+[2026-04-30 00:10:12 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-30T00:10:12-05:00,433.00,755.51,109.00,13,62.18,10016,501,215,97
+[2026-04-30 01:10:14 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-30T01:10:14-05:00,433.40,768.73,108.50,13,62.73,11635,501,216,102
+[2026-04-30 02:10:16 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-30T02:10:16-05:00,428.60,742.59,110.60,13,63.49,11515,501,217,91
+[2026-04-30 03:10:18 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-30T03:10:18-05:00,433.80,761.49,106.90,12,62.36,11496,501,218,96
+[2026-04-30 04:10:20 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-30T04:10:20-05:00,431.90,748.76,108.70,13,64.75,11299,501,218,104
+[2026-04-30 05:10:21 -0500] drift snapshot → /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv
+          2026-04-30T05:10:21-05:00,424.10,0.18,87.47,6,4.95,0,1,216,109
