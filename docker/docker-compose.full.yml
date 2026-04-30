@@ -1,3 +1,14 @@
+# Default container log rotation. Without this Docker's `json-file` driver
+# never rotates, and a sustained-load run (the R5.5 D-L 24h soak measured
+# ~150 GB/h on platform-api alone) fills `/var/lib/docker` and degrades the
+# host. Anchored once and applied per-service so a host without a properly
+# configured `/etc/docker/daemon.json` still gets rotation.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "100m"
+    max-file: "5"
+
 services:
   asterisk:
     build:
@@ -5,6 +16,7 @@ services:
       dockerfile: Dockerfile.asterisk
       args:
         ASTERISK_VERSION: ${ASTERISK_VERSION:-22}
+    logging: *default-logging
     environment:
       EXTERNAL_IP: ${EXTERNAL_IP:-}
     volumes:
@@ -33,6 +45,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+    logging: *default-logging
     ports:
       - "5000:5000"
     environment:
@@ -80,6 +93,7 @@ services:
     build:
       context: ..
       dockerfile: src/Asterisk.Platform.Renderer/Dockerfile.renderer
+    logging: *default-logging
     environment:
       ASPNETCORE_URLS: http://+:5010
       Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
@@ -99,6 +113,7 @@ services:
     build:
       context: ..
       dockerfile: src/Asterisk.Platform.Mail/Dockerfile.mail
+    logging: *default-logging
     environment:
       ASPNETCORE_URLS: http://+:5020
       ConnectionStrings__Postgres: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret}
@@ -127,6 +142,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_DEFAULT_TENANT_ID: platform
+    logging: *default-logging
     ports:
       - "80:80"
     depends_on:
@@ -136,6 +152,7 @@ services:
 
   postgres:
     image: postgres:18-alpine
+    logging: *default-logging
     # ADR-0015 — bump max_connections=200 (vs alpine default 100) to give
     # the dev/loadtest stack headroom. Post-Phase-2 (Pro 1.16.0-pro shared
     # NpgsqlDataSource), Platform.Api opens ONE pool not 14, so real demand
@@ -164,6 +181,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    logging: *default-logging
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -174,6 +192,7 @@ services:
 
   minio:
     image: minio/minio
+    logging: *default-logging
     command: server /data --console-address ":9001"
     volumes: [miniodata:/data]
     environment:
