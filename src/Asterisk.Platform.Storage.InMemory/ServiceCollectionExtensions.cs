@@ -58,6 +58,9 @@ public static class ServiceCollectionExtensions
         services.AddKeyedSingleton<ITenantAuthConfigStore, InMemoryTenantAuthConfigStore>(AuthHotpathCacheKeys.TenantAuthConfigStoreInner);
         services.AddSingleton<ITenantAuthConfigStore>(sp =>
             sp.GetRequiredKeyedService<ITenantAuthConfigStore>(AuthHotpathCacheKeys.TenantAuthConfigStoreInner));
+        services.AddKeyedSingleton<ITenantIpAllowlistStore, InMemoryTenantIpAllowlistStore>(AuthHotpathCacheKeys.IpAllowlistStoreInner);
+        services.AddSingleton<ITenantIpAllowlistStore>(sp =>
+            sp.GetRequiredKeyedService<ITenantIpAllowlistStore>(AuthHotpathCacheKeys.IpAllowlistStoreInner));
         services.AddSingleton<IPermissionStore, InMemoryPermissionStore>();
         services.AddSingleton<IRoleTemplateStore, InMemoryRoleTemplateStore>();
         services.AddSingleton<ITenantRoleStore, InMemoryTenantRoleStore>();

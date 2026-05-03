@@ -254,6 +254,27 @@ NpgsqlDataSource? ResolveDataSource(string? candidateConnectionString)
 // See docs/plans/active/2026-04-27-auth-hotpath-hardening.md Phase 1 + ADR-0010.
 builder.Services.AddAuthHotpathCaching();
 
+// ─── IP Allowlist caching ─────────────────────────────────────────────────────
+// IMemoryCache decorator over ITenantIpAllowlistStore. Mirrors the AHH pattern;
+// cross-replica invalidation is not wired because allowlist mutations are
+// operator-driven (rare) and 60s staleness is acceptable per the spec.
+builder.Services.AddSingleton<CachedTenantIpAllowlistStore>(sp => new CachedTenantIpAllowlistStore(
+    sp.GetRequiredKeyedService<ITenantIpAllowlistStore>(AuthHotpathCacheKeys.IpAllowlistStoreInner),
+    sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>()));
+{
+    // Replace the unkeyed alias (direct keyed delegate, registered by
+    // AddPostgresStorage / AddInMemoryStorage) with the cache decorator.
+    for (var i = builder.Services.Count - 1; i >= 0; i--)
+    {
+        var d = builder.Services[i];
+        if (d.ServiceType == typeof(ITenantIpAllowlistStore) && !d.IsKeyedService)
+            builder.Services.RemoveAt(i);
+    }
+}
+builder.Services.AddSingleton<ITenantIpAllowlistStore>(sp =>
+    sp.GetRequiredService<CachedTenantIpAllowlistStore>());
+builder.Services.AddSingleton<IIpAllowlistEvaluator, DefaultIpAllowlistEvaluator>();
+
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 var licenseConfig = builder.Configuration.GetSection("Licensing");
 var licensePath = licenseConfig["FilePath"] ?? "./license.lic";
@@ -1158,6 +1179,33 @@ if (app.Environment.IsProduction())
 
 // ─── Middleware pipeline ──────────────────────────────────────────────────────
 
+// Trust X-Forwarded-For from configured upstream proxies. Default empty →
+// no header trust → RemoteIpAddress is the raw socket peer (no behaviour
+// change for existing single-node deploys). See spec §4.5.
+{
+    var trustedProxiesSection = builder.Configuration.GetSection("ForwardedHeaders:TrustedProxies");
+    var trustedProxies = trustedProxiesSection.GetChildren()
+        .Select(c => c.Value)
+        .Where(v => !string.IsNullOrEmpty(v))
+        .Cast<string>()
+        .ToArray();
+    if (trustedProxies.Length > 0)
+    {
+        var fwdOptions = new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions
+        {
+            ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                              | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto,
+        };
+        fwdOptions.KnownIPNetworks.Clear();
+        fwdOptions.KnownProxies.Clear();
+        foreach (var cidr in trustedProxies)
+        {
+            fwdOptions.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(cidr));
+        }
+        app.UseForwardedHeaders(fwdOptions);
+    }
+}
+
 app.UseWebSockets();
 app.UseStaticFiles();
 app.UseMiddleware<VersionRedirectMiddleware>();
@@ -1171,6 +1219,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<TenantStatusMiddleware>();
 app.UseMiddleware<LicenseGateMiddleware>();
+app.UseMiddleware<IpAllowlistMiddleware>();
 
 if (openApiEnabled)
 {

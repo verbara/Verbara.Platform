@@ -20,6 +20,9 @@ public static class AuthHotpathCacheKeys
     /// <summary>Keyed registration of the concrete <see cref="ITenantAuthConfigStore"/> implementation.</summary>
     public const string TenantAuthConfigStoreInner = "auth.hotpath.tenant-auth-config-store-inner";
 
+    /// <summary>Keyed registration of the concrete <see cref="ITenantIpAllowlistStore"/> implementation.</summary>
+    public const string IpAllowlistStoreInner = "auth.hotpath.ip-allowlist-store-inner";
+
     /// <summary>Redis pubsub channel name carrying invalidation messages between replicas.</summary>
     public const string PubSubChannel = "asterisk:auth:invalidate";
 }

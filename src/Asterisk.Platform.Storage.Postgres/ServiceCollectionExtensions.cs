@@ -93,6 +93,9 @@ public static class ServiceCollectionExtensions
         services.AddKeyedSingleton<ITenantAuthConfigStore, PostgresTenantAuthConfigStore>(AuthHotpathCacheKeys.TenantAuthConfigStoreInner);
         services.AddSingleton<ITenantAuthConfigStore>(sp =>
             sp.GetRequiredKeyedService<ITenantAuthConfigStore>(AuthHotpathCacheKeys.TenantAuthConfigStoreInner));
+        services.AddKeyedSingleton<ITenantIpAllowlistStore, PostgresTenantIpAllowlistStore>(AuthHotpathCacheKeys.IpAllowlistStoreInner);
+        services.AddSingleton<ITenantIpAllowlistStore>(sp =>
+            sp.GetRequiredKeyedService<ITenantIpAllowlistStore>(AuthHotpathCacheKeys.IpAllowlistStoreInner));
 
         // Conversations
         services.AddSingleton<IConversationStore, PostgresConversationStore>();
