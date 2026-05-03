@@ -400,7 +400,13 @@ public sealed class IpAllowlistEntry
     public required string Cidr { get; init; }
     public string? Description { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
-    public Guid? CreatedByUserId { get; init; }
+    /// <summary>
+    /// User ID of the actor who added the entry. Stored as TEXT (no FK to
+    /// users) to match this repo's convention — users PK is composite
+    /// (tenant_id, user_id) and other audit-bearing tables (refresh_tokens,
+    /// role_assignments) likewise store user_id TEXT without FK.
+    /// </summary>
+    public string? CreatedByUserId { get; init; }
 }
 ```
 
@@ -424,7 +430,7 @@ public interface ITenantIpAllowlistStore
         string tenantId,
         string cidr,
         string? description,
-        Guid? createdByUserId,
+        string? createdByUserId,
         CancellationToken ct);
 
     Task<bool> RemoveAsync(string tenantId, Guid entryId, CancellationToken ct);
@@ -664,7 +670,7 @@ public sealed class InMemoryTenantIpAllowlistStore : ITenantIpAllowlistStore
         string tenantId,
         string cidr,
         string? description,
-        Guid? createdByUserId,
+        string? createdByUserId,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
@@ -863,7 +869,7 @@ internal sealed class PostgresTenantIpAllowlistStore : ITenantIpAllowlistStore
         string tenantId,
         string cidr,
         string? description,
-        Guid? createdByUserId,
+        string? createdByUserId,
         CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -911,7 +917,7 @@ internal sealed class PostgresTenantIpAllowlistStore : ITenantIpAllowlistStore
         public string cidr { get; init; } = null!;
         public string? description { get; init; }
         public DateTimeOffset created_at { get; init; }
-        public Guid? created_by_user_id { get; init; }
+        public string? created_by_user_id { get; init; }
 
         public IpAllowlistEntry ToEntry() => new()
         {
@@ -1082,7 +1088,7 @@ internal sealed class CachedTenantIpAllowlistStore : ITenantIpAllowlistStore
         string tenantId,
         string cidr,
         string? description,
-        Guid? createdByUserId,
+        string? createdByUserId,
         CancellationToken ct)
     {
         var entry = await _inner.AddAsync(tenantId, cidr, description, createdByUserId, ct);
@@ -1739,9 +1745,7 @@ internal static class ManagementTenantIpAllowlistEndpoints
             return Results.BadRequest(new ErrorResponse("ip_allowlist_invalid_cidr"));
         }
 
-        Guid? actorId = null;
-        if (Guid.TryParse(httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var parsedActor))
-            actorId = parsedActor;
+        var actorId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         var entry = await store.AddAsync(tenantId, request.Cidr, request.Description, actorId, ct);
 
