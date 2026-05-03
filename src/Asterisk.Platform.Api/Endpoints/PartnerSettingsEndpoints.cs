@@ -75,9 +75,13 @@ internal static class PartnerSettingsEndpoints
         // Partners can only update Operational and Auth settings — strip everything else
         var sanitized = body with { Plan = null, Quotas = null, RateLimitTier = null, AddOns = null };
 
-        await TenantSettingsEndpoints.ApplyUpdates(
+        var actorName = context.User.Identity?.Name ?? "unknown";
+        var error = await TenantSettingsEndpoints.ApplyUpdates(
             callerTenantId, sanitized, tenantStore, authConfigStore, quotaStore, retentionStore,
-            tierCache, featureGateCache, addOnStore, brandingStore, ct);
+            tierCache, featureGateCache, addOnStore, brandingStore, ct,
+            context.RequestServices, actorName);
+        if (error is not null)
+            return error;
 
         var dto = await TenantSettingsEndpoints.BuildSettingsDto(
             callerTenantId, tenantStore, authConfigStore, quotaStore, retentionStore,

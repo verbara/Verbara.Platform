@@ -385,8 +385,12 @@ internal static class PartnerCustomerEndpoints
                 return Results.BadRequest(new ErrorResponse($"Customer plan '{requestedPlan}' exceeds partner plan '{partner.GetPlan()}'."));
         }
 
-        await TenantSettingsEndpoints.ApplyUpdates(customerId, sanitized, tenantStore, authConfigStore,
-            quotaStore, retentionStore, tierCache, featureGateCache, addOnStore, brandingStore, ct);
+        var actorName = context.User.Identity?.Name ?? "unknown";
+        var error = await TenantSettingsEndpoints.ApplyUpdates(customerId, sanitized, tenantStore, authConfigStore,
+            quotaStore, retentionStore, tierCache, featureGateCache, addOnStore, brandingStore, ct,
+            context.RequestServices, actorName);
+        if (error is not null)
+            return error;
 
         var dto = await TenantSettingsEndpoints.BuildSettingsDto(customerId, tenantStore, authConfigStore,
             quotaStore, retentionStore, addOnStore, dunningStore, featureGateService, brandingStore, ct);

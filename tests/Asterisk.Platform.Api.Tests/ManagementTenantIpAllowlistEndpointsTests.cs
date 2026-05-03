@@ -130,6 +130,70 @@ public sealed class ManagementTenantIpAllowlistEndpointsTests
     }
 
     [Fact]
+    public async Task EnableAllowlist_ShouldReturn400_WhenNoEntries()
+    {
+        // Arrange — empty allowlist store, no entries for the tenant
+        var store = new InMemoryTenantIpAllowlistStore();
+        var authConfig = new InMemoryTenantAuthConfigStore();
+        await authConfig.SaveAsync(new TenantAuthConfig { TenantId = TenantId, IpAllowlistEnabled = false }, default);
+
+        var requestBody = new UpdateTenantSettingsRequest(
+            Auth: new UpdateAuthSettingsDto(IpAllowlistEnabled: true));
+
+        // Build a minimal service provider with the required services
+        var services = new ServiceCollection();
+        services.AddSingleton<ITenantIpAllowlistStore>(store);
+        services.AddSingleton<IAuditService>(new NoopAuditService());
+        var sp = services.BuildServiceProvider();
+
+        // Act — invoke ApplyUpdates directly (focused §4.1 validation test)
+        var result = await TenantSettingsEndpoints.ApplyUpdates(
+            tenantId: TenantId,
+            body: requestBody,
+            tenantStore: new InMemoryTenantStore(),
+            authConfigStore: authConfig,
+            quotaStore: new InMemoryTenantQuotaStore(),
+            retentionStore: new InMemoryTenantRetentionPolicyStore(),
+            tierCache: null,
+            featureGateCache: null,
+            addOnStore: null,
+            brandingStore: null,
+            ct: default,
+            sp: sp,
+            actorName: "test-actor");
+
+        // Assert — ApplyUpdates returns non-null IResult (the 400) when §4.1 is violated
+        result.Should().NotBeNull();
+
+        // Verify the result is a 400 with the expected error code by executing via a test host
+        using var host = new HostBuilder()
+            .ConfigureWebHost(webHost =>
+            {
+                webHost
+                    .UseTestServer()
+                    .ConfigureServices(services => services.AddRouting())
+                    .Configure(app =>
+                    {
+                        app.UseRouting();
+                        app.UseEndpoints(e =>
+                        {
+                            e.MapGet("/test", async ctx =>
+                            {
+                                await result!.ExecuteAsync(ctx);
+                            });
+                        });
+                    });
+            })
+            .Build();
+        await host.StartAsync();
+        var response = await host.GetTestClient().GetAsync("/test");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        responseBody.Should().Contain("ip_allowlist_enable_requires_entries");
+    }
+
+    [Fact]
     public async Task Delete_ShouldReturn400_WhenLastEntryAndEnabled()
     {
         var store = new InMemoryTenantIpAllowlistStore();

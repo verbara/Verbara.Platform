@@ -1,11 +1,13 @@
 using Asterisk.Platform.Api.Endpoints.Shared;
 using Asterisk.Platform.Api.Services;
+using Asterisk.Platform.Audit;
 using Asterisk.Platform.Billing;
 using Asterisk.Platform.Core;
 using Asterisk.Platform.Core.Branding;
 using Asterisk.Platform.Identity;
 using Asterisk.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Asterisk.Platform.Api.Endpoints;
 
@@ -59,7 +61,9 @@ internal sealed record AuthSettingsDto(
     string OidcDefaultRole,
     // R5.2 PB.2 / C.7 — per-tenant impersonation session policy.
     int ImpersonationMaxConcurrentSessions,
-    int ImpersonationAutoTimeoutMinutes);
+    int ImpersonationAutoTimeoutMinutes,
+    // §4.1 IP allowlist toggle
+    bool IpAllowlistEnabled);
 
 internal sealed record QuotaSettingsDto(
     long? MaxMonthlyVoiceMinutes,
@@ -112,7 +116,9 @@ internal sealed record UpdateAuthSettingsDto(
     string? OidcDefaultRole = null,
     // R5.2 PB.2 / C.7 — per-tenant impersonation session policy.
     int? ImpersonationMaxConcurrentSessions = null,
-    int? ImpersonationAutoTimeoutMinutes = null);
+    int? ImpersonationAutoTimeoutMinutes = null,
+    // §4.1 IP allowlist toggle
+    bool? IpAllowlistEnabled = null);
 
 internal sealed record UpdateQuotaSettingsDto(
     long? MaxMonthlyVoiceMinutes = null,
@@ -210,8 +216,12 @@ internal static class TenantSettingsEndpoints
         // AdminOnly cannot write quotas, rateLimitTier, plan, or addOns — strip them
         var sanitized = body with { Quotas = null, RateLimitTier = null, Plan = null, AddOns = null };
 
-        await ApplyUpdates(tenantId, sanitized, tenantStore, authConfigStore, quotaStore, retentionStore,
-            tierCache, featureGateCache, addOnStore, brandingStore, ct);
+        var actorName = context.User.Identity?.Name ?? "unknown";
+        var error = await ApplyUpdates(tenantId, sanitized, tenantStore, authConfigStore, quotaStore, retentionStore,
+            tierCache, featureGateCache, addOnStore, brandingStore, ct,
+            context.RequestServices, actorName);
+        if (error is not null)
+            return error;
 
         var dto = await BuildSettingsDto(tenantId, tenantStore, authConfigStore, quotaStore, retentionStore,
             addOnStore, dunningStore, featureGateService, brandingStore, ct);
@@ -313,7 +323,8 @@ internal static class TenantSettingsEndpoints
                 OidcAutoCreateUsers: auth.OidcAutoCreateUsers,
                 OidcDefaultRole: auth.OidcDefaultRole,
                 ImpersonationMaxConcurrentSessions: auth.ImpersonationMaxConcurrentSessions,
-                ImpersonationAutoTimeoutMinutes: auth.ImpersonationAutoTimeoutMinutes),
+                ImpersonationAutoTimeoutMinutes: auth.ImpersonationAutoTimeoutMinutes,
+                IpAllowlistEnabled: auth.IpAllowlistEnabled),
             Quotas: new QuotaSettingsDto(
                 MaxMonthlyVoiceMinutes: quota.MaxMonthlyVoiceMinutes,
                 MaxMonthlyMessages: quota.MaxMonthlyMessages,
@@ -338,7 +349,7 @@ internal static class TenantSettingsEndpoints
             Branding: brandingDto);
     }
 
-    internal static async Task ApplyUpdates(
+    internal static async Task<IResult?> ApplyUpdates(
         string tenantId,
         UpdateTenantSettingsRequest body,
         ITenantStore tenantStore,
@@ -349,7 +360,9 @@ internal static class TenantSettingsEndpoints
         FeatureGateCache? featureGateCache,
         ITenantAddOnStore? addOnStore,
         ITenantBrandingStore? brandingStore,
-        CancellationToken ct)
+        CancellationToken ct,
+        IServiceProvider? sp = null,
+        string actorName = "unknown")
     {
         if (body.Operational is not null || body.RateLimitTier is not null || body.Plan is not null)
         {
@@ -371,7 +384,7 @@ internal static class TenantSettingsEndpoints
                     {
                         var parent = await tenantStore.GetAsync(tenant.ParentTenantId, ct);
                         if (parent is not null && parent.GetPlan() < newPlan)
-                            return; // Silently skip — validation should be done at endpoint level
+                            return null; // Silently skip — validation should be done at endpoint level
                     }
 
                     newMetadata["Plan"] = newPlan.ToString();
@@ -444,6 +457,31 @@ internal static class TenantSettingsEndpoints
                 auth.ImpersonationMaxConcurrentSessions = Math.Clamp(mcs, 0, 100);
             if (a.ImpersonationAutoTimeoutMinutes is { } at)
                 auth.ImpersonationAutoTimeoutMinutes = Math.Clamp(at, 0, 7 * 24 * 60); // ≤ 7 days
+
+            // §4.1 IP allowlist toggle — cannot enable an empty allowlist
+            if (a.IpAllowlistEnabled is { } ipAllowlistEnabled)
+            {
+                var ipAllowlistStore = sp?.GetService(typeof(ITenantIpAllowlistStore)) as ITenantIpAllowlistStore;
+                if (ipAllowlistEnabled && ipAllowlistStore is not null)
+                {
+                    var count = await ipAllowlistStore.CountAsync(tenantId, ct);
+                    if (count == 0)
+                        return Results.BadRequest(new ErrorResponse("ip_allowlist_enable_requires_entries"));
+                }
+                auth.IpAllowlistEnabled = ipAllowlistEnabled;
+                var audit = sp?.GetService(typeof(IAuditService)) as IAuditService;
+                if (audit is not null)
+                {
+                    await audit.RecordAsync(
+                        tenantId: new TenantId(tenantId),
+                        category: "auth",
+                        action: ipAllowlistEnabled ? "auth.ip_allowlist.enabled" : "auth.ip_allowlist.disabled",
+                        severity: ipAllowlistEnabled ? "info" : "warning",
+                        actorId: actorName,
+                        actorType: "user",
+                        ct: ct);
+                }
+            }
 
             auth.UpdatedAt = DateTimeOffset.UtcNow;
             await authConfigStore.SaveAsync(auth, ct);
@@ -528,6 +566,8 @@ internal static class TenantSettingsEndpoints
         // Invalidate feature cache after plan/add-on changes
         if (body.Plan is not null || body.AddOns is not null)
             featureGateCache?.Remove(tenantId);
+
+        return null;
     }
 
     /// <summary>

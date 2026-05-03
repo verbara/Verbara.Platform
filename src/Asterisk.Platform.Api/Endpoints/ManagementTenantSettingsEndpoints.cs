@@ -49,6 +49,7 @@ internal static class ManagementTenantSettingsEndpoints
 
     private static async Task<IResult> UpdateSettings(
         string id,
+        HttpContext context,
         [FromBody] ManagementUpdateTenantSettingsRequest body,
         [FromServices] ITenantStore tenantStore,
         [FromServices] ITenantAuthConfigStore authConfigStore,
@@ -76,9 +77,13 @@ internal static class ManagementTenantSettingsEndpoints
             Plan: body.Plan,
             AddOns: body.AddOns);
 
-        await TenantSettingsEndpoints.ApplyUpdates(
+        var actorName = context.User.Identity?.Name ?? "unknown";
+        var error = await TenantSettingsEndpoints.ApplyUpdates(
             id, baseRequest, tenantStore, authConfigStore, quotaStore, retentionStore,
-            tierCache, featureGateCache, addOnStore, brandingStore, ct);
+            tierCache, featureGateCache, addOnStore, brandingStore, ct,
+            context.RequestServices, actorName);
+        if (error is not null)
+            return error;
 
         // Apply management branding (includes Subdomain)
         if (body.Branding is not null)
