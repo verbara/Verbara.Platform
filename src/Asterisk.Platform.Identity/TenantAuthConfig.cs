@@ -35,6 +35,15 @@ public sealed class TenantAuthConfig
     /// </summary>
     public int ImpersonationAutoTimeoutMinutes { get; set; } = 240;
 
+    /// <summary>
+    /// v1.3.0 IP Allowlist — when true, requests from IPs not matching any
+    /// row in tenant_ip_allowlist are rejected with 403. When false, the
+    /// allowlist is dormant regardless of the entries that may exist.
+    /// Cannot be flipped to true while the entry list is empty.
+    /// See docs/specs/2026-05-02-ip-allowlist-design.md §4.
+    /// </summary>
+    public bool IpAllowlistEnabled { get; set; }
+
     public DateTimeOffset? UpdatedAt { get; set; }
 
     public bool IsMfaRequiredForRole(string role) =>
