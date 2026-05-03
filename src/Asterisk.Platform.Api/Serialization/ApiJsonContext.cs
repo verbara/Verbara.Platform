@@ -403,6 +403,10 @@ namespace Asterisk.Platform.Api.Serialization;
 [JsonSerializable(typeof(ChecklistItemDto))]
 [JsonSerializable(typeof(List<ChecklistItemDto>))]
 [JsonSerializable(typeof(ApplyTemplateRequest))]
+// IP Allowlist management
+[JsonSerializable(typeof(IpAllowlistEntryDto))]
+[JsonSerializable(typeof(IpAllowlistListResponse))]
+[JsonSerializable(typeof(AddIpAllowlistEntryRequest))]
 // AOT: ProblemDetails, Email, Reports
 [JsonSerializable(typeof(ProblemDetails))]
 [JsonSerializable(typeof(EmailMessage))]
