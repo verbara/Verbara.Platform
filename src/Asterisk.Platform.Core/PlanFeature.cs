@@ -15,4 +15,5 @@ public enum PlanFeature
     KnowledgeBase,
     Recordings,
     RecordingTranscription,
+    IpAllowlist,
 }
