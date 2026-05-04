@@ -142,15 +142,93 @@ A fresh Phase 0L bring-up was the first scenario to exercise them.
 
 ## K8s local variant (Phase 0LK)
 
-> **Status (2026-04-27):** spec'd but not yet executed. Phase 0LK in
-> `docs/plans/active/2026-04-27-r5.5-execution-plan.md` covers the 12 sub-tasks
-> (talosctl prereqs → Talos cluster bootstrap → MetalLB + Cilium + Traefik →
-> CloudNativePG operator + 3-instance cluster → Redis StatefulSet → Asterisk
-> Helm chart → Kamailio + RTPEngine SBC layer → Platform.Api + Web Helm charts
-> → kube-prometheus-stack + Loki + blackbox-exporter → alerts wiring → cold
-> bootstrap reproducibility gate).
+> **Status (2026-05-04):** cluster provisioned, all Helm charts and manifests
+> committed. Pending: VM cold-bootstrap test + observability verification
+> (VMs currently off).
 
-This section will be populated when Phase 0LK lands.
+### Stack
+
+| Layer | Component | Version |
+|-------|-----------|---------|
+| OS | Talos Linux (immutable) | 1.13.0 |
+| K8s | Kubernetes | 1.36.0 |
+| CNI | Cilium eBPF (replaces kube-proxy, MetalLB, Traefik) | 1.19.3 |
+| LB | Cilium LB-IPAM + L2 announcements | (built-in) |
+| Ingress | Cilium Gateway API v1.3.0 | (built-in) |
+| Storage | Rancher local-path-provisioner | 0.0.30 |
+| DB | CloudNativePG operator → Postgres 17 (3-instance HA) | CNPG 1.25.0 |
+| DB pool | PgBouncer (CNPG Pooler CR, transaction mode) | (managed) |
+| Cache | Redis 8 (StatefulSet, AOF persistence) | 8-alpine |
+| PBX | Asterisk (StatefulSet, 2 replicas, anti-affinity) | 22 |
+| SBC | Kamailio (DaemonSet, hostNetwork) | 5.8.8 |
+| Media | RTPEngine (DaemonSet, hostNetwork) | fonoster/latest |
+| API | Platform.Api (Deployment, HPA 2→8) | 1.14.6 |
+| Web | Platform.Web (Deployment, nginx) | 1.15.5 |
+| Monitoring | kube-prometheus-stack (Prometheus + Grafana + Alertmanager) | chart 84.5.0 |
+| Logs | Loki (SingleBinary, 7d retention) | chart 6.55.0 |
+| Probes | blackbox-exporter (7 targets) | chart 11.9.2 |
+| Alerts | PrometheusRule CRD (17 rules: 7 P0 + 5 P1 + 5 P2) | — |
+
+### Topology
+
+| Node | IP | Role | RAM | vCPU | Disk |
+|------|-----|------|-----|------|------|
+| talos-cp1 | 192.168.122.10 | Control Plane | 4 GB | 2 | 20 GB |
+| talos-w1 | 192.168.122.11 | Worker | 4 GB | 4 | 40 GB |
+| talos-w2 | 192.168.122.12 | Worker | 4 GB | 4 | 40 GB |
+| talos-w3 | 192.168.122.13 | Worker | 4 GB | 4 | 40 GB |
+
+**Network:** libvirt `default` NAT on `192.168.122.0/24` with static DHCP reservations.
+**LB IP pool:** `192.168.122.200/28` (Cilium L2 announcements).
+**K8s API:** `https://192.168.122.10:6443`
+
+### Namespaces
+
+| Namespace | Contents |
+|-----------|----------|
+| `r55-data` | Postgres 3-HA + PgBouncer pooler + Redis |
+| `r55-asterisk` | Asterisk StatefulSet + Kamailio DaemonSet + RTPEngine DaemonSet |
+| `r55-platform` | Platform.Api Deployment + Web Deployment + Ingress |
+| `monitoring` | kube-prometheus-stack + Loki + blackbox-exporter + PrometheusRule |
+| `local-path-storage` | Rancher local-path-provisioner |
+
+### Bootstrap
+
+```bash
+scripts/k8s-up.sh
+```
+
+### Tear-down
+
+```bash
+scripts/k8s-down.sh --confirm
+```
+
+### Services exposed (via Cilium Gateway / port-forward)
+
+| Service | Access | Notes |
+|---------|--------|-------|
+| Platform.Api | `api.r55.local` via Ingress | Health: `/health`, `/health/ready` |
+| Web UI | `r55.local` via Ingress | nginx proxies `/api/` to platform-api:5000 |
+| Grafana | `grafana.r55.local` via Ingress | `admin / r55-staging` |
+| Prometheus | `kubectl -n monitoring port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090` | |
+| Asterisk SIP | hostNetwork on workers (UDP 5060) | Via Kamailio dispatcher |
+| RTP media | hostNetwork on workers (UDP 10000-10500) | Via RTPEngine |
+
+### Helm charts
+
+| Chart | Path | Key resources |
+|-------|------|---------------|
+| `asterisk` | `infra/k8s/helm/asterisk/` | StatefulSet, 2 DaemonSets, ConfigMaps, Services |
+| `platform` | `infra/k8s/helm/platform/` | Deployment ×2, HPA, Secrets, Ingress |
+| observability | `infra/k8s/helm/observability/` | Values for 3 community charts + install.sh |
+
+### Key architecture decisions
+
+- **Cilium replaces 5 components** (Flannel, kube-proxy, MetalLB, Traefik, network observability) — see `infra/k8s/talos/README.md`.
+- **PodSecurity `privileged`** label required on `r55-data`, `r55-asterisk`, `local-path-storage` namespaces (K8s 1.36 enforces "baseline" by default; local-path helper pods need hostPath, Kamailio/RTPEngine need hostNetwork).
+- **Kamailio dispatches to ClusterIP** service `asterisk-sip` (not headless pod DNS) — resolves at config-load time, initContainer waits for DNS.
+- **PgBouncer pooler** (CNPG Pooler CR) sits between API and Postgres — reduces failover window from 5-30s to 2-5s.
 
 ---
 
