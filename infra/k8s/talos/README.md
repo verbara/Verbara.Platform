@@ -2,6 +2,16 @@
 
 Local Talos K8s cluster for R5.5 production-realism validation.
 
+## Stack
+
+- **OS:** Talos Linux v1.13.0 (immutable, production-grade)
+- **K8s:** v1.36.0
+- **CNI:** Cilium 1.19.3 (eBPF, kube-proxy replacement, native routing)
+- **LB:** Cilium LB-IPAM with L2 announcements (replaces MetalLB)
+- **Ingress:** Cilium Gateway API v1.3.0 (replaces Traefik)
+- **Observability:** Hubble (flow visibility, DNS, policy verdicts)
+- **No kube-proxy** — Cilium eBPF replaces it entirely
+
 ## Cluster Layout
 
 | Node | IP | Role | RAM | vCPU | Disk |
@@ -12,8 +22,9 @@ Local Talos K8s cluster for R5.5 production-realism validation.
 | talos-w3 | 192.168.122.13 | Worker | 4 GB | 4 | 40 GB |
 
 **Network:** libvirt `default` NAT on `192.168.122.0/24` with static DHCP reservations.
-**MetalLB range:** `192.168.122.200-210` (for LoadBalancer services).
+**LB IP Pool:** `192.168.122.200/28` (Cilium L2 announcements for LoadBalancer services).
 **K8s API:** `https://192.168.122.10:6443`
+**Gateway:** `http://192.168.122.192` (Cilium Gateway API, HTTP/HTTPS)
 
 ## Prerequisites
 
@@ -26,37 +37,65 @@ Local Talos K8s cluster for R5.5 production-realism validation.
 ## Quick Start
 
 ```bash
-# Bootstrap from scratch (~10 min)
+# Bootstrap from scratch (~15 min)
 scripts/k8s-up.sh
 
-# Tear down (destroys VMs + network reservations)
-scripts/k8s-down.sh
+# Tear down (destroys VMs + disks)
+scripts/k8s-down.sh --confirm
 ```
 
-## Manual Bootstrap
+## Architecture Decision
+
+Cilium was chosen over Flannel+MetalLB+Traefik based on deep analysis
+(see docs/decisions/ for ADR). Cilium consolidates 5 components into 1:
+
+| Replaced Component | Cilium Feature |
+|---------------------|---------------|
+| Flannel (CNI) | Cilium eBPF dataplane (53% lower p99 latency) |
+| kube-proxy | eBPF kube-proxy replacement (O(1) vs O(n)) |
+| MetalLB | LB-IPAM + L2 announcements |
+| Traefik | Gateway API (HTTPRoute, TLSRoute) |
+| Network observability | Hubble (flows, DNS, policy verdicts) |
+
+Additional capabilities not available with Flannel stack:
+- NetworkPolicy enforcement (L3/L4/L7, DNS-aware)
+- Host Firewall (CiliumClusterwideNetworkPolicy for hostNetwork pods)
+- Bandwidth manager (EDT + eBPF)
+- Native routing (no VXLAN overhead for RTP/SIP traffic)
+
+## Talos Machine Config
+
+Key Talos config for Cilium (applied via `patches/cilium-cni.yaml`):
+
+```yaml
+cluster:
+  network:
+    cni:
+      name: none    # Cilium installed post-bootstrap via Helm
+  proxy:
+    disabled: true  # Cilium replaces kube-proxy
+```
+
+## Useful Commands
 
 ```bash
 export TALOSCONFIG=$(pwd)/infra/k8s/talos/talosconfig
-
-# Apply configs (after VMs boot from ISO)
-talosctl apply-config --insecure --nodes 192.168.122.10 --file infra/k8s/talos/controlplane.yaml
-talosctl apply-config --insecure --nodes 192.168.122.11 --file infra/k8s/talos/worker.yaml
-talosctl apply-config --insecure --nodes 192.168.122.12 --file infra/k8s/talos/worker.yaml
-talosctl apply-config --insecure --nodes 192.168.122.13 --file infra/k8s/talos/worker.yaml
-
-# Bootstrap (once CP is installed and running)
-talosctl bootstrap --nodes 192.168.122.10
-
-# Get kubeconfig
-talosctl kubeconfig --nodes 192.168.122.10 -f ~/.kube/config-talos
 export KUBECONFIG=~/.kube/config-talos
 
-# Verify
-kubectl get nodes
+# Cluster health
+kubectl get nodes -o wide
+kubectl -n kube-system exec ds/cilium -- cilium status
+
+# Hubble flow observability
+kubectl -n kube-system exec ds/cilium -- hubble observe --last 20
+
+# Hubble UI (browser)
+kubectl -n kube-system port-forward svc/hubble-ui 12000:80
+# Open http://localhost:12000
+
+# Gateway status
+kubectl get gateways,httproutes
+
+# L2 announcement leases
+kubectl get leases -n kube-system | grep l2
 ```
-
-## Talos Version
-
-- Talos: v1.13.0
-- Kubernetes: v1.36.0
-- ISO: `talos-metal-amd64-v1.13.0.iso`

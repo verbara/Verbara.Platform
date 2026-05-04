@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TALOS_DIR="$REPO_ROOT/infra/k8s/talos"
+MANIFESTS_DIR="$REPO_ROOT/infra/k8s/manifests"
 TALOSCONFIG="$TALOS_DIR/talosconfig"
 KUBECONFIG_PATH="$HOME/.kube/config-talos"
 IMG_DIR="/media/Data/Qemu-Img"
@@ -23,11 +24,15 @@ VM_RAM=(4096 4096 4096 4096)
 VM_VCPUS=(2 4 4 4)
 VM_DISK_SIZE=("20G" "40G" "40G" "40G")
 
+CILIUM_VERSION="1.19.3"
+GATEWAY_API_VERSION="v1.3.0"
+
 echo "=== Asterisk Platform — Talos K8s Cluster Bootstrap ==="
+echo "    Talos v1.13.0 · K8s 1.36.0 · Cilium $CILIUM_VERSION (eBPF)"
 echo ""
 
 # --- Step 1: Ensure libvirt network ---
-echo "[1/7] Checking libvirt network..."
+echo "[1/9] Checking libvirt network..."
 if ! $VIRSH net-info default &>/dev/null; then
     echo "  ERROR: libvirt 'default' network not found. Create it first."
     exit 1
@@ -50,7 +55,7 @@ done
 echo "  Network ready."
 
 # --- Step 2: Check ISO ---
-echo "[2/7] Checking Talos ISO..."
+echo "[2/9] Checking Talos ISO..."
 if [[ ! -f "$ISO" ]]; then
     echo "  Downloading Talos v1.13.0 metal ISO..."
     wget -q --show-progress -O "$ISO" \
@@ -59,7 +64,7 @@ fi
 echo "  ISO: $ISO"
 
 # --- Step 3: Create VMs ---
-echo "[3/7] Creating VMs..."
+echo "[3/9] Creating VMs..."
 for i in "${!VM_NAMES[@]}"; do
     name="${VM_NAMES[$i]}"
     disk="$IMG_DIR/${name}.qcow2"
@@ -93,7 +98,7 @@ for i in "${!VM_NAMES[@]}"; do
 done
 
 # --- Step 4: Wait for DHCP leases ---
-echo "[4/7] Waiting for all VMs to get DHCP leases..."
+echo "[4/9] Waiting for all VMs to get DHCP leases..."
 for ip in "${ALL_IPS[@]}"; do
     until $VIRSH net-dhcp-leases default 2>/dev/null | grep -q "$ip"; do
         sleep 3
@@ -101,8 +106,8 @@ for ip in "${ALL_IPS[@]}"; do
     echo "  $ip — lease acquired"
 done
 
-# --- Step 5: Apply Talos configs ---
-echo "[5/7] Applying Talos machine configs..."
+# --- Step 5: Apply Talos configs (cni:none + proxy:disabled for Cilium) ---
+echo "[5/9] Applying Talos machine configs..."
 export TALOSCONFIG
 
 talosctl apply-config --insecure --nodes "$CP_IP" --file "$TALOS_DIR/controlplane.yaml"
@@ -113,20 +118,49 @@ for ip in "${WORKER_IPS[@]}"; do
     echo "  Worker $ip config applied."
 done
 
-# --- Step 6: Bootstrap ---
-echo "[6/7] Waiting for control plane to be ready for bootstrap..."
+# --- Step 6: Bootstrap etcd ---
+echo "[6/9] Waiting for control plane to be ready for bootstrap..."
 until talosctl --nodes "$CP_IP" get machinestatus &>/dev/null; do
     sleep 5
 done
 echo "  Control plane responding. Bootstrapping etcd..."
 talosctl bootstrap --nodes "$CP_IP"
 
-# --- Step 7: Get kubeconfig + wait for nodes ---
-echo "[7/7] Getting kubeconfig and waiting for nodes..."
-talosctl kubeconfig --nodes "$CP_IP" --force -f "$KUBECONFIG_PATH"
+# --- Step 7: Get kubeconfig ---
+echo "[7/9] Getting kubeconfig..."
+until talosctl kubeconfig --nodes "$CP_IP" --force -f "$KUBECONFIG_PATH" 2>/dev/null; do
+    sleep 5
+done
 export KUBECONFIG="$KUBECONFIG_PATH"
 
-echo "  Waiting for all 4 nodes to be Ready..."
+echo "  Waiting for K8s API server..."
+until kubectl get nodes &>/dev/null; do
+    sleep 5
+done
+
+# --- Step 8: Install Cilium (CNI + kube-proxy replacement + LB-IPAM + Gateway API + Hubble) ---
+echo "[8/9] Installing Cilium $CILIUM_VERSION..."
+helm repo add cilium https://helm.cilium.io/ --force-update &>/dev/null
+
+echo "  Installing Gateway API CRDs ${GATEWAY_API_VERSION}..."
+for crd in gatewayclasses gateways httproutes referencegrants grpcroutes; do
+    kubectl apply -f "https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/${GATEWAY_API_VERSION}/config/crd/standard/gateway.networking.k8s.io_${crd}.yaml" &>/dev/null
+done
+
+echo "  Installing Cilium Helm chart..."
+helm install cilium cilium/cilium --version "$CILIUM_VERSION" \
+    --namespace kube-system \
+    --values "$MANIFESTS_DIR/cilium-values.yaml" \
+    --wait --timeout 5m
+
+echo "  Applying Cilium LB IP Pool + L2 announcements..."
+kubectl apply -f "$MANIFESTS_DIR/cilium-lb-pool.yaml"
+
+echo "  Applying Gateway resources..."
+kubectl apply -f "$MANIFESTS_DIR/cilium-gateway.yaml"
+
+# --- Step 9: Wait for all nodes Ready ---
+echo "[9/9] Waiting for all 4 nodes to be Ready..."
 until kubectl get nodes --no-headers 2>/dev/null | grep -v "NotReady" | grep -c "Ready" | grep -q "4"; do
     sleep 5
 done
@@ -134,6 +168,12 @@ done
 echo ""
 echo "=== Cluster Ready ==="
 kubectl get nodes -o wide
+echo ""
+echo "Cilium status:"
+kubectl -n kube-system exec ds/cilium -- cilium status --brief 2>/dev/null || true
+echo ""
+echo "Gateway:"
+kubectl get gateways 2>/dev/null || true
 echo ""
 echo "export TALOSCONFIG=$TALOSCONFIG"
 echo "export KUBECONFIG=$KUBECONFIG_PATH"
