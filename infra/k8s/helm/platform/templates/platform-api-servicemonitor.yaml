@@ -1,0 +1,17 @@
+{{- if .Values.api.prometheus.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: platform-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform.apiLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+{{- end }}

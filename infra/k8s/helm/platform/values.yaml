@@ -1,0 +1,57 @@
+namespace: r55-platform
+
+api:
+  image:
+    repository: asterisk-platform/api
+    tag: "1.14.6"
+  replicas: 2
+  port: 5000
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCpuPercent: 70
+  postgres:
+    host: postgres-pooler.r55-data.svc.cluster.local
+    port: 5432
+    database: asterisk_platform
+    user: platform
+    passwordSecret: platform-pg-credentials
+    passwordKey: password
+  redis:
+    host: redis-0.redis.r55-data.svc.cluster.local
+    port: 6379
+  jwt:
+    issuer: r55-staging
+    audience: r55-staging
+    keySecret: jwt-signing-key
+    keyField: key
+  prometheus:
+    enabled: false
+
+web:
+  image:
+    repository: asterisk-platform/web
+    tag: "1.15.5"
+  replicas: 1
+  port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+ingress:
+  enabled: true
+  hostnameApi: api.r55.local
+  hostnameWeb: r55.local
+  tlsEnabled: false
