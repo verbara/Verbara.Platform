@@ -142,9 +142,10 @@ A fresh Phase 0L bring-up was the first scenario to exercise them.
 
 ## K8s local variant (Phase 0LK)
 
-> **Status (2026-05-04):** cluster provisioned, all Helm charts and manifests
-> committed. Pending: VM cold-bootstrap test + observability verification
-> (VMs currently off).
+> **Status (2026-05-04):** cluster provisioned, all Helm charts + manifests
+> committed, production hardening sprint shipped (PDBs, NetworkPolicies,
+> SecurityContexts, ResourceQuotas, probes). Pending: VM cold-bootstrap
+> test + live deployment verification (VMs currently off).
 
 ### Stack
 
@@ -192,6 +193,24 @@ A fresh Phase 0L bring-up was the first scenario to exercise them.
 | `monitoring` | kube-prometheus-stack + Loki + blackbox-exporter + PrometheusRule |
 | `local-path-storage` | Rancher local-path-provisioner |
 
+### Security hardening (shipped 2026-05-04)
+
+| Feature | Scope | Detail |
+|---------|-------|--------|
+| PodDisruptionBudgets | Asterisk + Platform API | `minAvailable: 1` — protects during node drain/upgrades |
+| NetworkPolicies | 17 policies, 4 namespaces | Default-deny ingress + service-level whitelists; standard `networking.k8s.io/v1` |
+| ResourceQuotas | r55-data, r55-asterisk, r55-platform | Per-namespace CPU/memory/pod caps with headroom for HPA |
+| SecurityContext | All workloads | `runAsNonRoot`, `seccompProfile: RuntimeDefault`, `allowPrivilegeEscalation: false` |
+| Pod anti-affinity | Platform API | Soft scheduling spread across nodes (compatible with HPA) |
+| Init containers | Platform API | `wait-for-postgres` DNS check prevents crash loops on cold start |
+| Health probes | Kamailio, RTPEngine, Redis | Liveness + startup probes added (was missing); RTPEngine readiness added |
+| CloudNativePG backup | Documented | barman/S3 config ready to uncomment when object store available |
+
+**Known limitations:**
+- Kamailio + RTPEngine use `hostNetwork: true` — NetworkPolicies do NOT apply to these pods
+- `local-path-provisioner` does not support VolumeSnapshots — CNPG backup needs S3/MinIO
+- Staging secrets hardcoded in templates (tagged `r55-staging-only-change-prod`) — production requires external secret management
+
 ### Bootstrap
 
 ```bash
@@ -229,6 +248,8 @@ scripts/k8s-down.sh --confirm
 - **PodSecurity `privileged`** label required on `r55-data`, `r55-asterisk`, `local-path-storage` namespaces (K8s 1.36 enforces "baseline" by default; local-path helper pods need hostPath, Kamailio/RTPEngine need hostNetwork).
 - **Kamailio dispatches to ClusterIP** service `asterisk-sip` (not headless pod DNS) — resolves at config-load time, initContainer waits for DNS.
 - **PgBouncer pooler** (CNPG Pooler CR) sits between API and Postgres — reduces failover window from 5-30s to 2-5s.
+- **Production hardening sprint** (2026-05-04): PDBs, 17 NetworkPolicies, ResourceQuotas, SecurityContexts, probes — see § "Security hardening" above.
+- **docker-compose.production.yml** logging rotation + resource limits applied — closes the disk-fill prevention gap for SMB tier production.
 
 ---
 
