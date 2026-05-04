@@ -1,0 +1,53 @@
+config:
+  modules:
+    http_2xx:
+      prober: http
+      timeout: 5s
+      http:
+        preferred_ip_protocol: ip4
+        valid_status_codes: [200, 201, 204]
+
+    http_health:
+      prober: http
+      timeout: 5s
+      http:
+        preferred_ip_protocol: ip4
+        valid_status_codes: [200, 503]
+
+    tcp_connect:
+      prober: tcp
+      timeout: 5s
+
+    http_2xx_or_redirect:
+      prober: http
+      timeout: 5s
+      http:
+        preferred_ip_protocol: ip4
+        valid_status_codes: [200, 201, 204, 301, 302, 303, 307, 308]
+
+serviceMonitor:
+  enabled: true
+  defaults:
+    interval: 30s
+  targets:
+    - name: platform-api-health
+      url: http://platform-api.r55-platform.svc:5000/health/ready
+      module: http_health
+    - name: platform-api-liveness
+      url: http://platform-api.r55-platform.svc:5000/health
+      module: http_health
+    - name: web-frontend
+      url: http://web.r55-platform.svc:80/
+      module: http_2xx
+    - name: postgres-tcp
+      url: postgres-pooler.r55-data.svc:5432
+      module: tcp_connect
+    - name: redis-tcp
+      url: redis-0.redis.r55-data.svc:6379
+      module: tcp_connect
+    - name: asterisk-ami
+      url: asterisk-sip.r55-asterisk.svc:5038
+      module: tcp_connect
+    - name: asterisk-ari
+      url: asterisk-sip.r55-asterisk.svc:8088
+      module: tcp_connect
