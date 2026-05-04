@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: r55-data
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-app-credentials
+  namespace: r55-data
+type: kubernetes.io/basic-auth
+stringData:
+  username: platform
+  password: r55-staging-only-change-prod
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: r55-data
+spec:
+  instances: 3
+  primaryUpdateStrategy: unsupervised
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: 512MB
+      work_mem: 16MB
+      log_min_duration_statement: "500"
+  bootstrap:
+    initdb:
+      database: asterisk_platform
+      owner: platform
+      secret:
+        name: postgres-app-credentials
+  storage:
+    size: 20Gi
+    storageClass: local-path
+  monitoring:
+    enablePodMonitor: true
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
