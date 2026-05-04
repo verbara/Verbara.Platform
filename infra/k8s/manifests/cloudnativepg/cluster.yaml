@@ -48,3 +48,24 @@ spec:
     limits:
       cpu: "1"
       memory: 2Gi
+  # -- Backup configuration --
+  # Local staging: local-path-provisioner does NOT support VolumeSnapshots,
+  # so backup requires an S3-compatible object store (MinIO, AWS S3, etc.).
+  # Uncomment and configure when object store is available:
+  #
+  # backup:
+  #   barmanObjectStore:
+  #     destinationPath: s3://cnpg-backups/postgres
+  #     endpointURL: http://minio.r55-data.svc.cluster.local:9000
+  #     s3Credentials:
+  #       accessKeyId:
+  #         name: cnpg-s3-credentials
+  #         key: ACCESS_KEY_ID
+  #       secretAccessKey:
+  #         name: cnpg-s3-credentials
+  #         key: SECRET_ACCESS_KEY
+  #     wal:
+  #       compression: gzip
+  #     data:
+  #       compression: gzip
+  #   retentionPolicy: "7d"

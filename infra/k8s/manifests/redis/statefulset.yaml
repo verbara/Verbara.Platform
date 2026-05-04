@@ -30,12 +30,22 @@ spec:
       containers:
         - name: redis
           image: redis:8-alpine
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
           args: ["--appendonly", "yes", "--save", "900", "1"]
           ports:
             - containerPort: 6379
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               memory: 256Mi
@@ -48,6 +58,15 @@ spec:
               command: [redis-cli, PING]
             initialDelaySeconds: 5
             periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: [redis-cli, PING]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: data

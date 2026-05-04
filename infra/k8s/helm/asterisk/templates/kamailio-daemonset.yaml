@@ -61,6 +61,24 @@ spec:
                 - "kamcmd dispatcher.list > /dev/null 2>&1"
             initialDelaySeconds: 10
             periodSeconds: 15
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "kamcmd dispatcher.list > /dev/null 2>&1"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "kamcmd dispatcher.list > /dev/null 2>&1"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
       volumes:
         - name: config
           configMap:

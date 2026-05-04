@@ -49,3 +49,29 @@ spec:
             limits:
               cpu: "2"
               memory: 1Gi
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "echo 'd 3' | nc -u -w1 127.0.0.1 22222 | grep -q 'result'"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "echo 'd 3' | nc -u -w1 127.0.0.1 22222 | grep -q 'result'"
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "echo 'd 3' | nc -u -w1 127.0.0.1 22222 | grep -q 'result'"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30

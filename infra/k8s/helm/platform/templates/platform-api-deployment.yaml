@@ -24,10 +24,39 @@ spec:
         prometheus.io/port: "{{ .Values.api.port }}"
         prometheus.io/path: "/metrics"
     spec:
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values: [platform-api]
+                topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for postgres-pooler.r55-data.svc.cluster.local..."
+              until nslookup postgres-pooler.r55-data.svc.cluster.local > /dev/null 2>&1; do
+                sleep 3
+              done
+              echo "Postgres pooler DNS resolved"
       containers:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - name: http
               containerPort: {{ .Values.api.port }}

@@ -32,6 +32,10 @@ spec:
       containers:
         - name: asterisk
           image: "{{ .Values.asterisk.image.repository }}:{{ .Values.asterisk.image.tag }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
           command: ["asterisk", "-fpvvv"]
           ports:
             - name: sip

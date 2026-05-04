@@ -1,0 +1,382 @@
+# =============================================================================
+# NetworkPolicy manifests for Asterisk Platform K8s deployment (R5.5)
+#
+# CNI: Cilium (supports standard K8s NetworkPolicy natively)
+# Namespaces: r55-data, r55-asterisk, r55-platform, monitoring, local-path-storage
+#
+# Notes:
+#   - Kamailio and RTPEngine run with hostNetwork: true — NetworkPolicies
+#     do NOT apply to hostNetwork pods (they bypass kube-proxy entirely).
+#   - Uses kubernetes.io/metadata.name labels (built-in since K8s 1.22)
+#     for namespaceSelector matching.
+#   - All policies use standard networking.k8s.io/v1 (portable across CNIs).
+# =============================================================================
+
+# =============================================================================
+# r55-data namespace
+# =============================================================================
+
+# 1. Default deny all ingress in r55-data
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: r55-data
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 2. Allow Postgres pooler access from r55-asterisk and r55-platform
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-from-workloads
+  namespace: r55-data
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/poolerName: postgres-pooler
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: r55-asterisk
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: r55-platform
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# 3. Allow Redis access from r55-platform only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-from-platform
+  namespace: r55-data
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: r55-platform
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# 4. Allow Prometheus scrapes from monitoring namespace
+#    Targets: CloudNativePG PodMonitor (5432 metrics), PgBouncer pooler,
+#    Redis exporter (if sidecar added), and any future exporters.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrapes
+  namespace: r55-data
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 9187  # postgres_exporter sidecar (if present)
+---
+# 5. Allow CloudNativePG internal replication and operator traffic
+#    CNPG pods need to communicate with each other (streaming replication,
+#    pg_rewind) and the CNPG operator needs to reach them for management.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cnpg-internal
+  namespace: r55-data
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    # Intra-cluster replication (postgres pods talking to each other)
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # CNPG operator (runs in its own namespace, typically cnpg-system)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8000  # CNPG status/webhook port
+---
+# 6. Allow pooler pods to reach the Postgres cluster they front
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-pooler-to-postgres
+  namespace: r55-data
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/poolerName: postgres-pooler
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# =============================================================================
+# r55-asterisk namespace
+# =============================================================================
+
+# 7. Default deny all ingress in r55-asterisk
+#    Note: Kamailio and RTPEngine use hostNetwork: true, so they are NOT
+#    affected by NetworkPolicies — traffic goes directly via the host stack.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: r55-asterisk
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 8. Allow AMI + ARI access from r55-platform (Platform API -> Asterisk)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ami-ari-from-platform
+  namespace: r55-asterisk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asterisk
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: r55-platform
+      ports:
+        - protocol: TCP
+          port: 5038  # AMI
+        - protocol: TCP
+          port: 8088  # ARI (HTTP/WebSocket)
+---
+# 9. Allow Prometheus scrapes on Asterisk metrics port from monitoring
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrapes
+  namespace: r55-asterisk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asterisk
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9080  # Asterisk Prometheus exporter
+---
+# 10. Allow Asterisk pods to talk to each other (clustering, RTP relay)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-asterisk-internal
+  namespace: r55-asterisk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asterisk
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: asterisk
+      ports:
+        - protocol: TCP
+          port: 5038  # AMI (inter-node)
+        - protocol: TCP
+          port: 8088  # ARI (inter-node)
+        - protocol: TCP
+          port: 4569  # IAX2 (inter-Asterisk trunking)
+        - protocol: UDP
+          port: 4569  # IAX2 (UDP)
+---
+# 11. Allow blackbox-exporter probes from monitoring (TCP connect checks)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-blackbox-from-monitoring
+  namespace: r55-asterisk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asterisk
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 5038  # blackbox tcp_connect: asterisk-ami
+        - protocol: TCP
+          port: 8088  # blackbox tcp_connect: asterisk-ari
+
+---
+# =============================================================================
+# r55-platform namespace
+# =============================================================================
+
+# 12. Default deny all ingress in r55-platform
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: r55-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 13. Allow ingress to Platform API on port 5000
+#    Source is "any" — the ingress controller (Cilium Gateway or nginx)
+#    may run in any namespace, and external LoadBalancer traffic arrives
+#    from outside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-ingress
+  namespace: r55-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: platform-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 5000
+---
+# 14. Allow ingress to Web frontend on port 80
+#    Same rationale as API — ingress controller or LB from any source.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-ingress
+  namespace: r55-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: web
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 80
+---
+# 15. Allow Prometheus scrapes from monitoring namespace on API metrics
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrapes
+  namespace: r55-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: platform-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 5000  # /metrics endpoint on same port
+---
+# 16. Allow blackbox-exporter health probes from monitoring
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-blackbox-from-monitoring
+  namespace: r55-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 5000  # health/ready, health/live endpoints
+        - protocol: TCP
+          port: 80    # web frontend probe
+
+---
+# =============================================================================
+# monitoring namespace
+# =============================================================================
+
+# 17. Allow all ingress in monitoring namespace
+#    Prometheus, Grafana, Loki, Alertmanager, and blackbox-exporter all need
+#    broad intra-namespace communication and receive scraped data / alerts
+#    from other namespaces. Lock down per-service in a future hardening pass.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-all-ingress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - {}
