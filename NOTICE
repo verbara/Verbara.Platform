@@ -1,0 +1,24 @@
+Verbara Platform
+Copyright 2026-present Harol A. Reina H. and Verbara Contributors
+
+This product is part of the Verbara open-core ecosystem:
+
+  - Verbara Sdk           — MIT License (telephony primitives)
+  - Verbara Sdk Pro       — Commercial License (enterprise overlays)
+  - Verbara Platform      — Apache License 2.0 (this repository, full backend application)
+  - Verbara Web           — Apache License 2.0 (frontend UI)
+
+This product runtime-requires Verbara Sdk Pro for production use. Pro
+features are gated by ECDSA-validated license keys (see `Pro.Licensing`).
+A valid Pro license is required to enable multi-tenant isolation,
+advanced analytics, cluster mode, and licensed plan features.
+
+This product includes software developed by various contributors and
+incorporates open-source components. See the respective `.csproj` files
+under `src/` and `Directory.Packages.props` for the full dependency
+list and their upstream licenses.
+
+For commercial licensing inquiries:  licensing@verbara.io
+For security disclosure:              security@verbara.io
+For legal inquiries:                  legal@verbara.io
+General contact:                      hello@verbara.io

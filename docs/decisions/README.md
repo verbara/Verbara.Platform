@@ -48,4 +48,4 @@ The decision, stated in one or two sentences.
 
 ## Catalog
 
-<!-- Add one line per ADR as they are created -->
+- [ADR-0016](0016-license-and-rebrand-to-verbara.md) — License (Apache 2.0) + rebrand to **Verbara** (Accepted, 2026-05-03)
