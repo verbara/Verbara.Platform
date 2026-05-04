@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: rtpengine
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: rtpengine
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rtpengine
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rtpengine
+    spec:
+      hostNetwork: {{ .Values.rtpengine.hostNetwork }}
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      containers:
+        - name: rtpengine
+          image: "{{ .Values.rtpengine.image.repository }}:{{ .Values.rtpengine.image.tag }}"
+          env:
+            - name: RTPENGINE_PUBLIC_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: RTPENGINE_PORT_MIN
+              value: "{{ .Values.rtpengine.rtpPortMin }}"
+            - name: RTPENGINE_PORT_MAX
+              value: "{{ .Values.rtpengine.rtpPortMax }}"
+            - name: RTPENGINE_BIND_NG_PORT
+              value: "{{ .Values.rtpengine.ngPort }}"
+            - name: RTPENGINE_LOG_LEVEL
+              value: "5"
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN", "SYS_NICE"]
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi

@@ -1,0 +1,16 @@
+{{- if .Values.asterisk.prometheus.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: asterisk
+  namespace: {{ .Values.namespace }}
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: asterisk
+  endpoints:
+    - port: prom
+      interval: 15s
+{{- end }}

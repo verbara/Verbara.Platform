@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: asterisk-sip
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "asterisk.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: asterisk
+  ports:
+    - name: sip
+      port: 5060
+      protocol: UDP
+    - name: ami
+      port: 5038
+    - name: ari
+      port: 8088

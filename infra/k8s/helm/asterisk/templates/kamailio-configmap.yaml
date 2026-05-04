@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kamailio-config
+  namespace: {{ .Values.namespace }}
+data:
+  kamailio.cfg: |
+    #!KAMAILIO
+
+    debug=2
+    log_stderror=yes
+    log_facility=LOG_LOCAL0
+    fork=yes
+    children=4
+    listen=udp:0.0.0.0:{{ .Values.kamailio.sipPort }}
+
+    loadmodule "tm.so"
+    loadmodule "tmx.so"
+    loadmodule "rr.so"
+    loadmodule "sl.so"
+    loadmodule "maxfwd.so"
+    loadmodule "dispatcher.so"
+    loadmodule "rtpengine.so"
+    loadmodule "siputils.so"
+    loadmodule "textops.so"
+    loadmodule "pv.so"
+    loadmodule "xlog.so"
+    loadmodule "sanity.so"
+    loadmodule "ctl.so"
+    loadmodule "jsonrpcs.so"
+
+    modparam("dispatcher", "list_file", "/etc/kamailio/dispatcher.list")
+    modparam("dispatcher", "ds_ping_interval", 30)
+    modparam("dispatcher", "ds_probing_mode", 1)
+    modparam("dispatcher", "flags", 2)
+    modparam("dispatcher", "ds_hash_size", 4)
+    modparam("rtpengine", "rtpengine_sock", "udp:127.0.0.1:22222")
+    modparam("jsonrpcs", "transport", 6)
+
+    request_route {
+      if (!mf_process_maxfwd_header("10")) {
+        sl_send_reply("483", "Too Many Hops");
+        exit;
+      }
+      if (!sanity_check("1511", "7")) {
+        xlog("L_WARN", "Malformed SIP from $si:$sp\n");
+        exit;
+      }
+      if (is_method("REGISTER")) {
+        sl_send_reply("404", "Not Here");
+        exit;
+      }
+      if (has_totag()) {
+        route(WITHIN_DLG);
+        exit;
+      }
+      record_route();
+      if (is_method("INVITE")) {
+        if (!ds_select_dst("1", "10")) {
+          sl_send_reply("503", "No backend Asterisk available");
+          exit;
+        }
+        rtpengine_manage("replace-origin replace-session-connection");
+        t_on_reply("MANAGE_REPLY");
+        t_on_failure("MANAGE_FAILURE");
+      }
+      if (!t_relay()) {
+        sl_reply_error();
+        exit;
+      }
+    }
+
+    onreply_route[MANAGE_REPLY] {
+      if (status =~ "(180)|(183)|(2[0-9][0-9])") {
+        rtpengine_manage("replace-origin replace-session-connection");
+      }
+    }
+
+    failure_route[MANAGE_FAILURE] {
+      if (t_is_canceled()) exit;
+      if (t_check_status("(5[0-9][0-9])|(408)")) {
+        xlog("L_ERR", "Backend failed, trying next\n");
+        if (ds_next_dst()) {
+          rtpengine_manage("replace-origin replace-session-connection");
+          t_on_reply("MANAGE_REPLY");
+          t_on_failure("MANAGE_FAILURE");
+          t_relay();
+          exit;
+        }
+      }
+    }
+
+    route[WITHIN_DLG] {
+      if (loose_route()) {
+        if (is_method("BYE")) {
+          rtpengine_delete();
+        } else if (is_method("INVITE|UPDATE")) {
+          rtpengine_manage("replace-origin replace-session-connection");
+        }
+        if (!t_relay()) {
+          sl_reply_error();
+          exit;
+        }
+      }
+    }
+
+  dispatcher.list: |
+    # setid destination flags priority attrs
+    # Uses ClusterIP service (stable DNS) — per-pod stickiness via alg=10 call-id hash at service level
+    1 sip:asterisk-sip.{{ .Values.namespace }}.svc.cluster.local:5060 0 0

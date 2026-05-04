@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asterisk-config
+  namespace: {{ .Values.namespace }}
+data:
+  pjsip.conf: |
+    [global]
+    type=global
+    user_agent=Asterisk-R55-K8s
+
+    [system]
+    type=system
+    timer_t1=500
+
+    [transport-udp]
+    type=transport
+    protocol=udp
+    bind=0.0.0.0:5060
+
+  extensions.conf: |
+    [from-internal]
+    exten => _X.,1,NoOp(Internal call from ${CALLERID(all)})
+    same => n,Answer()
+    same => n,Playback(hello-world)
+    same => n,Hangup()
+
+  modules.conf: |
+    [modules]
+    autoload=yes
+    noload => chan_sip.so

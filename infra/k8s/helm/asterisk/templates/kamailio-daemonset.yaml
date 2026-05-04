@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kamailio
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kamailio
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kamailio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kamailio
+    spec:
+      hostNetwork: {{ .Values.kamailio.hostNetwork }}
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      initContainers:
+        - name: wait-for-asterisk-dns
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for asterisk-sip.{{ .Values.namespace }}.svc.cluster.local to resolve..."
+              until nslookup asterisk-sip.{{ .Values.namespace }}.svc.cluster.local > /dev/null 2>&1; do
+                sleep 3
+              done
+              echo "DNS resolved"
+      containers:
+        - name: kamailio
+          image: "{{ .Values.kamailio.image.repository }}:{{ .Values.kamailio.image.tag }}"
+          args: ["-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg"]
+          ports:
+            - name: sip
+              containerPort: {{ .Values.kamailio.sipPort }}
+              protocol: UDP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kamailio
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "kamcmd dispatcher.list > /dev/null 2>&1"
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap:
+            name: kamailio-config

@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: asterisk
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "asterisk.labels" . | nindent 4 }}
+spec:
+  serviceName: asterisk
+  replicas: {{ .Values.asterisk.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: asterisk
+  template:
+    metadata:
+      labels:
+        {{- include "asterisk.labels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.asterisk.prometheus.port }}"
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.asterisk.terminationGracePeriodSeconds }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values: [asterisk]
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: asterisk
+          image: "{{ .Values.asterisk.image.repository }}:{{ .Values.asterisk.image.tag }}"
+          command: ["asterisk", "-fpvvv"]
+          ports:
+            - name: sip
+              containerPort: 5060
+              protocol: UDP
+            - name: ami
+              containerPort: 5038
+            - name: ari
+              containerPort: 8088
+            - name: prom
+              containerPort: {{ .Values.asterisk.prometheus.port }}
+          env:
+            - name: PG_HOST
+              value: {{ .Values.asterisk.postgres.host }}
+            - name: PG_PORT
+              value: "{{ .Values.asterisk.postgres.port }}"
+            - name: PG_DATABASE
+              value: {{ .Values.asterisk.postgres.database }}
+            - name: PG_USER
+              value: {{ .Values.asterisk.postgres.user }}
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.asterisk.postgres.passwordSecret }}
+                  key: {{ .Values.asterisk.postgres.passwordKey }}
+          resources:
+            requests:
+              cpu: {{ .Values.asterisk.resources.requests.cpu }}
+              memory: {{ .Values.asterisk.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.asterisk.resources.limits.cpu }}
+              memory: {{ .Values.asterisk.resources.limits.memory }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/asterisk/pjsip.conf
+              subPath: pjsip.conf
+            - name: config
+              mountPath: /etc/asterisk/extensions.conf
+              subPath: extensions.conf
+            - name: config
+              mountPath: /etc/asterisk/modules.conf
+              subPath: modules.conf
+            - name: voicemail
+              mountPath: /var/spool/asterisk/voicemail
+            - name: recordings
+              mountPath: /var/spool/asterisk/monitor
+          readinessProbe:
+            exec:
+              command: ["asterisk", "-rx", "core show version"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["asterisk", "-rx", "core show version"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap:
+            name: asterisk-config
+  volumeClaimTemplates:
+    - metadata:
+        name: voicemail
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: {{ .Values.asterisk.storage.voicemailSize }}
+    - metadata:
+        name: recordings
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: {{ .Values.asterisk.storage.recordingsSize }}

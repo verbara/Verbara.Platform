@@ -1,0 +1,44 @@
+namespace: r55-asterisk
+
+asterisk:
+  image:
+    repository: andrius/asterisk
+    tag: "22"
+  replicas: 2
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  postgres:
+    host: postgres-pooler.r55-data.svc.cluster.local
+    port: 5432
+    database: asterisk_platform
+    user: platform
+    passwordSecret: asterisk-pg-credentials
+    passwordKey: password
+  storage:
+    voicemailSize: 5Gi
+    recordingsSize: 10Gi
+  prometheus:
+    enabled: true
+    port: 9080
+  terminationGracePeriodSeconds: 3600
+
+kamailio:
+  image:
+    repository: ghcr.io/kamailio/kamailio
+    tag: "5.8.8-bookworm"
+  hostNetwork: true
+  sipPort: 5060
+
+rtpengine:
+  image:
+    repository: fonoster/rtpengine
+    tag: "latest"
+  hostNetwork: true
+  rtpPortMin: 10000
+  rtpPortMax: 10500
+  ngPort: 22222
