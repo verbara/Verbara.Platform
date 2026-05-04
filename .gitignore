@@ -10,6 +10,7 @@ obj/
 TestResults/
 .worktrees/
 .claude/
+.project-memory/
 .superpowers/
 **/data/jwt-signing-key.xml
 local-nuget-feed/
@@ -28,3 +29,8 @@ chaos-snapshots/
 # scripts/profiling/run-benchmarks.sh; the canonical numbers live in
 # docs/research/2026-04-27-auth-hotpath-baseline.md).
 BenchmarkDotNet.Artifacts/
+# Talos machine configs contain cluster secrets (PKI, tokens, etcd certs).
+# Only patches, README, and scripts are tracked.
+infra/k8s/talos/controlplane.yaml
+infra/k8s/talos/worker.yaml
+infra/k8s/talos/talosconfig
