@@ -17,7 +17,7 @@ the end of this guide you will have:
 
 ## Step 1 — Create a child tenant
 
-Tenants in Asterisk.Platform are hierarchical. The host (`platform`) tenant
+Tenants in Verbara.Platform are hierarchical. The host (`platform`) tenant
 owns customer tenants. Use the Management API key to create one:
 
 ```bash

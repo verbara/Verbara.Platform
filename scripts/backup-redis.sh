@@ -2,7 +2,7 @@
 # backup-redis.sh — Trigger Redis BGSAVE, copy dump.rdb, optional S3 upload.
 #
 # Cron usage (host crontab):
-#   */15 * * * *  /opt/asterisk-platform/scripts/backup-redis.sh >> /var/log/asterisk-platform/backup-redis.log 2>&1
+#   */15 * * * *  /opt/verbara-platform/scripts/backup-redis.sh >> /var/log/verbara-platform/backup-redis.log 2>&1
 #
 # Env vars (all optional):
 #   REDIS_HOST          default: localhost

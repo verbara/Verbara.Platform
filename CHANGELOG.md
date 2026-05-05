@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **Asterisk.Platform** are documented here.
+All notable changes to **Verbara.Platform** are documented here.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) ·
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -19,7 +19,7 @@ _No unreleased changes._
 
 ### Pro 1.16.0-pro pin bump
 
-- `Directory.Packages.props` — all 20 `Asterisk.Sdk.Pro.*` pins bumped `1.15.0-pro → 1.16.0-pro`.
+- `Directory.Packages.props` — all 20 `Verbara.Sdk.Pro.*` pins bumped `1.15.0-pro → 1.16.0-pro`.
 - Local NuGet feed sync: 24 Pro packages packed at 1.16.0-pro.
 
 ### Platform.Storage.Postgres `(NpgsqlDataSource)` overload
@@ -69,8 +69,8 @@ _No unreleased changes._
 
 - `Directory.Packages.props` (20 Pro pins bumped)
 - `Directory.Build.props` (PackageVersion 1.14.5 → 1.14.6)
-- `src/Asterisk.Platform.Storage.Postgres/ServiceCollectionExtensions.cs` (new `(NpgsqlDataSource)` overload)
-- `src/Asterisk.Platform.Api/Program.cs` (`sharedCoreDataSource` + `ResolveDataSource` helper + 6 wraps to DataSource overloads)
+- `src/Verbara.Platform.Storage.Postgres/ServiceCollectionExtensions.cs` (new `(NpgsqlDataSource)` overload)
+- `src/Verbara.Platform.Api/Program.cs` (`sharedCoreDataSource` + `ResolveDataSource` helper + 6 wraps to DataSource overloads)
 - `docs/decisions/0015-npgsql-datasource-sharing-strategy.md` (Phase 2 status + measured impact section)
 - `docs/decisions/0014-auth-horizontal-scaling-baseline.md` (Update 2026-04-28 v1.14.6 — `scale.yml` math correct again)
 - `docs/operations/capacity-planning.md` (Postgres tier table refreshed)
@@ -91,9 +91,9 @@ _No unreleased changes._
 
 ### Cross-repo coordination
 
-- **Asterisk.Sdk: unchanged** (1.15.1).
-- **Asterisk.Sdk.Pro: 1.16.0-pro** (this release pairs with Pro 1.16.0-pro; ADR-0008 describes the new `Use*Storage(NpgsqlDataSource)` overloads).
-- **Asterisk.Platform.Web: unchanged** (1.13.0; cosmetic-tracks 1.14.x).
+- **Verbara.Sdk: unchanged** (1.15.1).
+- **Verbara.Sdk.Pro: 1.16.0-pro** (this release pairs with Pro 1.16.0-pro; ADR-0008 describes the new `Use*Storage(NpgsqlDataSource)` overloads).
+- **Verbara.Platform.Web: unchanged** (1.13.0; cosmetic-tracks 1.14.x).
 
 ---
 
@@ -115,7 +115,7 @@ plan-skeleton and deferred to the Pro repo cycle.
 
 ### 1. `ConnectionStringDefaults` helper at composition root
 
-- New `Asterisk.Platform.Api.Services.ConnectionStringDefaults` static
+- New `Verbara.Platform.Api.Services.ConnectionStringDefaults` static
   helper applies SMB-tier pool sizing — `Maximum Pool Size=10`,
   `Minimum Pool Size=2`, `Connection Idle Lifetime=300` — to a
   connection string IF (and only if) the operator did not specify
@@ -184,9 +184,9 @@ AMD 9900X / 60 GB / `docker-compose.smb.yml`:
 
 ### Files changed
 
-- `src/Asterisk.Platform.Api/Services/ConnectionStringDefaults.cs` (new)
-- `src/Asterisk.Platform.Api/Program.cs` (6 wraps)
-- `tests/Asterisk.Platform.Api.Tests/ConnectionStringDefaultsTests.cs` (new — 5 boundary tests)
+- `src/Verbara.Platform.Api/Services/ConnectionStringDefaults.cs` (new)
+- `src/Verbara.Platform.Api/Program.cs` (6 wraps)
+- `tests/Verbara.Platform.Api.Tests/ConnectionStringDefaultsTests.cs` (new — 5 boundary tests)
 - `docker/docker-compose.smb.yml` (new)
 - `docker/docker-compose.full.yml` (max_connections=200)
 - `docker/docker-compose.production.yml` (SMB tier full tuning)
@@ -214,11 +214,11 @@ AMD 9900X / 60 GB / `docker-compose.smb.yml`:
 
 ### Cross-repo coordination
 
-- Asterisk.Sdk: unchanged (1.15.1).
-- Asterisk.Sdk.Pro: unchanged (1.15.0-pro). Pro 1.16.0-pro Phase 2
+- Verbara.Sdk: unchanged (1.15.1).
+- Verbara.Sdk.Pro: unchanged (1.15.0-pro). Pro 1.16.0-pro Phase 2
   plan-skeleton archived at
   `docs/research/archived/2026-04-28-Pro-1.16.0-pro-shared-datasource-skeleton.md`.
-- Asterisk.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
+- Verbara.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
 
 ---
 
@@ -261,8 +261,8 @@ default but didn't catch the AMI dev credentials.
 
 **v1.14.4 fix**:
 
-- `Asterisk.Platform.Api.csproj` declares
-  `<UserSecretsId>asterisk-platform-api-dev</UserSecretsId>` so devs can
+- `Verbara.Platform.Api.csproj` declares
+  `<UserSecretsId>verbara-platform-api-dev</UserSecretsId>` so devs can
   override these values via `dotnet user-secrets set …` without editing
   the file (user-secrets provider takes precedence over the JSON file
   at runtime).
@@ -298,12 +298,12 @@ template is correct out of the box.
 
 ### Files changed
 
-- `src/Asterisk.Platform.Api/Auth/AuthSchemeConfiguration.cs` (path-scoping)
-- `src/Asterisk.Platform.Api/Asterisk.Platform.Api.csproj` (UserSecretsId)
-- `src/Asterisk.Platform.Api/appsettings.Development.json` (_README banner)
-- `src/Asterisk.Platform.Api/Program.cs` (Production AMI guard + RequireRedisIdentityCaches)
+- `src/Verbara.Platform.Api/Auth/AuthSchemeConfiguration.cs` (path-scoping)
+- `src/Verbara.Platform.Api/Verbara.Platform.Api.csproj` (UserSecretsId)
+- `src/Verbara.Platform.Api/appsettings.Development.json` (_README banner)
+- `src/Verbara.Platform.Api/Program.cs` (Production AMI guard + RequireRedisIdentityCaches)
 - `docker/docker-compose.scale.yml` (RequireRedisIdentityCaches=true)
-- `tests/Asterisk.Platform.Api.Tests/AuthSchemeConfigurationTests.cs` (new — 21 path-scoping cases)
+- `tests/Verbara.Platform.Api.Tests/AuthSchemeConfigurationTests.cs` (new — 21 path-scoping cases)
 
 ### Tests
 
@@ -327,9 +327,9 @@ template is correct out of the box.
 
 ### Cross-repo coordination
 
-- Asterisk.Sdk: unchanged (1.15.1).
-- Asterisk.Sdk.Pro: unchanged (1.15.0-pro).
-- Asterisk.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
+- Verbara.Sdk: unchanged (1.15.1).
+- Verbara.Sdk.Pro: unchanged (1.15.0-pro).
+- Verbara.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
 
 ---
 
@@ -349,7 +349,7 @@ the raw Postgres constraint name in the response body. Same path for
 `(tenant_id, name)` to `queue_configs`.
 
 **v1.14.3 fix**: new `EntityAlreadyExistsException` in
-`Asterisk.Platform.Core` carrying the entity kind + conflicting field
+`Verbara.Platform.Core` carrying the entity kind + conflicting field
 name. `PostgresUserStore.SaveAsync` and `PostgresQueueStore.SaveAsync`
 now catch `PostgresException` with SqlState 23505 and translate to this
 domain exception. The endpoint handlers wrap their `SaveAsync` calls in
@@ -384,15 +384,15 @@ query parameter and forwards it to the new overload.
 
 ### Files changed
 
-- `src/Asterisk.Platform.Core/EntityAlreadyExistsException.cs` (new)
-- `src/Asterisk.Platform.Identity/IUserStore.cs` (new email overload + default impl)
-- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresUserStore.cs` (23505 catch + email overload)
-- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresQueueStore.cs` (23505 catch)
-- `src/Asterisk.Platform.Storage.InMemory/InMemoryUserStore.cs` (email-UNIQUE enforcement + email overload)
-- `src/Asterisk.Platform.Api/Services/CachedUserStore.cs` (email overload pass-through)
-- `src/Asterisk.Platform.Api/Endpoints/AdminEndpoints.cs` (CreateUser + CreateQueue 409 path; ListUsers email param)
-- `tests/Asterisk.Platform.Api.Tests/AdminEndpointTests.cs` (3 regression tests added)
-- `tests/Asterisk.Platform.Api.Tests/AuthenticatedPlatformApiFactory.cs` (substitute now models email UNIQUE + supports new overload)
+- `src/Verbara.Platform.Core/EntityAlreadyExistsException.cs` (new)
+- `src/Verbara.Platform.Identity/IUserStore.cs` (new email overload + default impl)
+- `src/Verbara.Platform.Storage.Postgres/Stores/PostgresUserStore.cs` (23505 catch + email overload)
+- `src/Verbara.Platform.Storage.Postgres/Stores/PostgresQueueStore.cs` (23505 catch)
+- `src/Verbara.Platform.Storage.InMemory/InMemoryUserStore.cs` (email-UNIQUE enforcement + email overload)
+- `src/Verbara.Platform.Api/Services/CachedUserStore.cs` (email overload pass-through)
+- `src/Verbara.Platform.Api/Endpoints/AdminEndpoints.cs` (CreateUser + CreateQueue 409 path; ListUsers email param)
+- `tests/Verbara.Platform.Api.Tests/AdminEndpointTests.cs` (3 regression tests added)
+- `tests/Verbara.Platform.Api.Tests/AuthenticatedPlatformApiFactory.cs` (substitute now models email UNIQUE + supports new overload)
 - `scripts/seed-staging.sh` (workaround comments updated)
 
 ### Tests
@@ -413,9 +413,9 @@ existing callers see no behavior change.
 
 ### Cross-repo coordination
 
-- Asterisk.Sdk: unchanged (1.15.1).
-- Asterisk.Sdk.Pro: unchanged (1.15.0-pro).
-- Asterisk.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
+- Verbara.Sdk: unchanged (1.15.1).
+- Verbara.Sdk.Pro: unchanged (1.15.0-pro).
+- Verbara.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
 
 ---
 
@@ -443,7 +443,7 @@ decorators now take `IAuthCachePublisher` which resolves to the publisher
 singleton, NOT the invalidator. Two singletons share only the
 `IConnectionMultiplexer`. **Cycle structurally broken.**
 
-Files: `Asterisk.Platform.Identity.Redis.RedisAuthCacheInvalidator.cs`
+Files: `Verbara.Platform.Identity.Redis.RedisAuthCacheInvalidator.cs`
 (new `IAuthCachePublisher` interface + new `RedisAuthCachePublisher`
 class), `AuthHotpathCachingExtensions.cs` (registration switched to the
 publisher), 3 decorator constructors changed from
@@ -520,9 +520,9 @@ read-replica routing + a multi-process LB — out of scope for v1.14.x.
 
 ### Cross-repo coordination
 
-- Asterisk.Sdk: unchanged (1.15.1).
-- Asterisk.Sdk.Pro: unchanged (1.15.0-pro).
-- Asterisk.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
+- Verbara.Sdk: unchanged (1.15.1).
+- Verbara.Sdk.Pro: unchanged (1.15.0-pro).
+- Verbara.Platform.Web: unchanged (1.13.0; cosmetic-tracks 1.14.x).
 
 ---
 
@@ -597,12 +597,12 @@ read-replica routing + a multi-process LB — out of scope for v1.14.x.
 
 ### Cross-repo coordination
 
-- Asterisk.Sdk: unchanged (1.15.1).
-- Asterisk.Sdk.Pro: unchanged (1.15.0-pro). Pro `docs/roadmap.md` +
+- Verbara.Sdk: unchanged (1.15.1).
+- Verbara.Sdk.Pro: unchanged (1.15.0-pro). Pro `docs/roadmap.md` +
   `CLAUDE.md` already document Platform 1.14.0 ship from yesterday;
   the v1.14.1 amendment is Platform-only and will get a one-line
   pointer on the next Pro doc refresh.
-- Asterisk.Platform.Web: 1.13.0 (cosmetic-track Platform 1.14.x — no
+- Verbara.Platform.Web: 1.13.0 (cosmetic-track Platform 1.14.x — no
   Web change for v1.14.1).
 
 ---
@@ -664,12 +664,12 @@ so reviewers can inspect each step in isolation:
 ### Added — hot-read caching (Phase 1, ADR-0010)
 
 - **`CachedTenantAuthConfigStore`** + **`CachedUserStore`** decorators
-  in `src/Asterisk.Platform.Api/Services/`. `IMemoryCache`-backed,
+  in `src/Verbara.Platform.Api/Services/`. `IMemoryCache`-backed,
   60 s TTL, per-tenant key isolation. `CachedUserStore` co-populates
   by-id and by-email indexes on miss so `/login` + `/auth/me` share
   cache hits. Trust boundary documented: `PasswordHash` may live in
   `IMemoryCache` (in-process) but never crosses Redis.
-- **`AuthHotpathCacheKeys`** constants in `Asterisk.Platform.Identity` —
+- **`AuthHotpathCacheKeys`** constants in `Verbara.Platform.Identity` —
   keyed-DI service keys (`UserStoreInner`,
   `TenantAuthConfigStoreInner`) + Redis pubsub channel
   (`asterisk:auth:invalidate`).
@@ -678,7 +678,7 @@ so reviewers can inspect each step in isolation:
   bootstrap replaces the alias with the cache decorator; the keyed
   inner stays for the decorator to resolve.
 - **`RedisAuthCacheInvalidator`** (`IHostedService` in
-  `Asterisk.Platform.Identity.Redis`) subscribes to
+  `Verbara.Platform.Identity.Redis`) subscribes to
   `asterisk:auth:invalidate` and dispatches messages to local
   `ILocalAuthCacheInvalidationSink` instances (the cache decorators
   + `PermissionResolver`). Self-suppresses own publishes via
@@ -703,7 +703,7 @@ so reviewers can inspect each step in isolation:
 - **`AuthWriteCommand`** records: `UpdateLastLoginAtCommand`,
   `ResetLockoutCountersCommand`, `LogSuccessEventCommand`,
   `PasswordRehashCommand` (Phase 4).
-- **New meter** `Asterisk.Platform.Auth.WriteQueue` —
+- **New meter** `Verbara.Platform.Auth.WriteQueue` —
   `auth.write.{enqueued, dropped, processed, failed}` counters
   with `type` dimension. Exposed via `/metrics` automatically.
 - **`AuthEventService.EnqueueLogSuccess`** + **`AccountLockoutService.EnqueueLastLoginAtUpdateAsync`** —
@@ -752,10 +752,10 @@ so reviewers can inspect each step in isolation:
 
 ### Added — observability + benchmarks
 
-- **`tests/Asterisk.Platform.Benchmarks`** (Phase 0, opt-in BDN, NOT
+- **`tests/Verbara.Platform.Benchmarks`** (Phase 0, opt-in BDN, NOT
   in slnx) — 5 BenchmarkDotNet benchmarks isolating BCrypt12,
   Argon2id-OWASP, JWT RSA-2048 sign, and end-to-end composites.
-- **`tests/Asterisk.Platform.Api.Aot.Probe`** — strict
+- **`tests/Verbara.Platform.Api.Aot.Probe`** — strict
   `PublishAot=true` gate over the Argon2id candidate library.
   Asserts zero IL warnings + successful native runtime roundtrip.
 - **`scripts/profiling/`** — three reproducible runners:
@@ -831,7 +831,7 @@ preserved verbatim. Existing deployments upgrade transparently.
 - `MultiReplicaSmokeTests` Testcontainers integration covering full
   WebApplicationFactory cross-replica auth handshake.
 - Cross-repo coordination for memory + roadmap.md updates in
-  `Asterisk.Sdk.Pro` (Pro.OpenTelemetry already at 1.15.0-pro;
+  `Verbara.Sdk.Pro` (Pro.OpenTelemetry already at 1.15.0-pro;
   no Pro source change required for v1.14.0).
 
 ---
@@ -846,14 +846,14 @@ operator Getting Started + capacity planning + backup/DR runbook.
 
 ### Added — production-validation infrastructure
 
-- **NBomber load test suite** (`tests/Asterisk.Platform.LoadTests/`) — 5
+- **NBomber load test suite** (`tests/Verbara.Platform.LoadTests/`) — 5
   scenarios covering JWT throughput, queue ingestion, presence broadcast,
   live queue snapshot writer, AgentAssist session start. Reproducible via
   `scripts/load-test.sh` + `docker/docker-compose.loadtest.yml`. Opt-in
   (NOT in default slnx).
 - **JWT multi-key rotation infrastructure** — `IJwtKeyRotationService` +
   `IJwtKeyStore` (`InMemoryJwtKeyStore` + `RedisJwtKeyStore` in
-  `Asterisk.Platform.Identity.Redis`). Endpoint `POST /api/v1/management/security/jwt/rotate-key`
+  `Verbara.Platform.Identity.Redis`). Endpoint `POST /api/v1/management/security/jwt/rotate-key`
   (RBAC `security.jwt.rotate`, PlatformAdmin only) + `GET /keys`. Audit
   `security.jwt.key_rotated`. Rolling grace 24h default. Multi-node
   zero-downtime rotation verified via Testcontainers Redis IT.
@@ -861,7 +861,7 @@ operator Getting Started + capacity planning + backup/DR runbook.
   current behavior preserves R3c v1.9.2 RSA single-key default.*
 - **Suspend reason payload** — `POST /api/v1/partner/customers/{id}/suspend`
   now requires `{ reason }` body and persists in audit. Closes R5.3 B.3.b.
-- **`PromoteHostedServiceToSingleton<T>` extension** in `Asterisk.Platform.Core/
+- **`PromoteHostedServiceToSingleton<T>` extension** in `Verbara.Platform.Core/
   DependencyInjection/HostedServicePromotionExtensions.cs` — extracted from
   Program.cs inline helper (R5.3 A.5). Idempotent via internal marker
   sentinel + `[DynamicallyAccessedMembers]` AOT trimming annotation.
@@ -999,12 +999,12 @@ Zero breaking API changes.
 ### Known limitations
 
 - **NU1902 OpenTelemetry vulnerability** —
-  `Asterisk.Sdk.Pro.OpenTelemetry` pin remains at 1.12.0-pro because
+  `Verbara.Sdk.Pro.OpenTelemetry` pin remains at 1.12.0-pro because
   cross-repo SDK 1.15.x patch is required to repack the wrapper.
   Pro.OpenTelemetry has zero Pro dependencies, so version skew is
   safe (the wrapper consumes only OpenTelemetry packages from SDK).
-  Cross-repo bump (SDK `Asterisk.Sdk.OpenTelemetry` 1.15.1 + Pro
-  `Asterisk.Sdk.Pro.OpenTelemetry` 1.14.x repack) scheduled for R5.4.
+  Cross-repo bump (SDK `Verbara.Sdk.OpenTelemetry` 1.15.1 + Pro
+  `Verbara.Sdk.Pro.OpenTelemetry` 1.14.x repack) scheduled for R5.4.
   Platform deployments unaffected at runtime.
 
 ### References
@@ -1058,9 +1058,9 @@ across the Pro packages consumed by Platform.
 
 - `WithSingleTenantMode("default")` adoption in Program.cs (B.1) —
   closes R5.1 limitation #1 silent multi-tenant data corruption risk.
-- `RedisJtiRevocationCache` (PA.3 / B.9) in `Asterisk.Platform.Identity.Redis`
+- `RedisJtiRevocationCache` (PA.3 / B.9) in `Verbara.Platform.Identity.Redis`
   — completes the v1.9.2 abstraction; `IJtiRevocationCache` +
-  `InMemoryJtiRevocationCache` widened to public in `Asterisk.Platform.Identity`.
+  `InMemoryJtiRevocationCache` widened to public in `Verbara.Platform.Identity`.
 - `MetricsAvailabilityBanner` consumer of `X-Metrics-Available` header
   (PC.2 / B.2) — Web wallboard surfaces banner when live metrics
   infrastructure unavailable.
@@ -1084,7 +1084,7 @@ across the Pro packages consumed by Platform.
   (P0.8 / B.6) — DB-backed default per ADR-0003. Closes R5.1 limitation
   #5 (ephemeral keyring in Docker). Migration `018_DataProtectionKeys.sql`.
 - `CachedAgentTenantResolver` + `PlatformHubAuditSink` (P0.6) — Platform-side
-  implementations of new `Asterisk.Sdk.Pro.Push.SignalR.Authz` abstractions
+  implementations of new `Verbara.Sdk.Pro.Push.SignalR.Authz` abstractions
   per ADR-0005. 5-min `IMemoryCache` per-process; lateral invalidation
   via Pro.Push event documented (event creation deferred).
 - 7 R5.2 RBAC permissions seeded in `RoleTemplateSeeder.AllPermissions()`
@@ -1105,8 +1105,8 @@ across the Pro packages consumed by Platform.
 
 ### Fixed
 
-- 20 pre-existing test failures in `Asterisk.Platform.Api.Tests` resolved
-  by removing stale local `src/Asterisk.Platform.Api/data/jwt-signing-key.xml`
+- 20 pre-existing test failures in `Verbara.Platform.Api.Tests` resolved
+  by removing stale local `src/Verbara.Platform.Api/data/jwt-signing-key.xml`
   (gitignored but persisted across runs from previous WebApplicationFactory
   hosting; surfaced by P0.8 DataProtection ephemeral mode).
 
@@ -1115,13 +1115,13 @@ across the Pro packages consumed by Platform.
 - Platform suite: ~1,058+ unit + integration tests across 30 DLLs (was
   ~1,800 pre-R5.2 baseline mixed with Postgres tests; current accurate
   count below).
-- `Asterisk.Platform.Api.Tests`: 801/801 passing.
-- `Asterisk.Platform.Identity.Tests`: 59/59 passing.
-- `Asterisk.Platform.Identity.Redis.Tests`: 19/19 passing (Testcontainers
+- `Verbara.Platform.Api.Tests`: 801/801 passing.
+- `Verbara.Platform.Identity.Tests`: 59/59 passing.
+- `Verbara.Platform.Identity.Redis.Tests`: 19/19 passing (Testcontainers
   Redis).
-- `Asterisk.Platform.Storage.Postgres.Tests`: 14/14 passing (Testcontainers
+- `Verbara.Platform.Storage.Postgres.Tests`: 14/14 passing (Testcontainers
   Postgres — first introduced in PC.3 + extended in PC.5).
-- `Asterisk.Platform.Storage.InMemory.Tests`: 125/125 passing.
+- `Verbara.Platform.Storage.InMemory.Tests`: 125/125 passing.
 - Zero warnings under `TreatWarningsAsErrors=true` (NU1507 pre-existing
   resolved by NuGet.Config `<clear />`).
 
@@ -1156,7 +1156,7 @@ across the Pro packages consumed by Platform.
 ## [1.10.0] — 2026-04-22 — R5.1 "Production Readiness + Ops Toolkit"
 
 First release in the R5 Production Readiness Release Train. Ships paired
-with **Asterisk.Sdk.Pro 1.12.0-pro** and **Asterisk.Platform.Web 1.9.0**.
+with **Verbara.Sdk.Pro 1.12.0-pro** and **Verbara.Platform.Web 1.9.0**.
 Closes 4 production blockers discovered in the code audit (stale live
 queue metrics, queue-member management gap, AgentAssist runtime toggle
 gap, single-instance MFA cache). Zero API surface breakage — existing
@@ -1167,7 +1167,7 @@ passing**, 0 warnings.
 
 - **`GET /operations/queue-metrics`** now returns real-time `Waiting` +
   `AvgWaitSeconds` values sourced from the Pro.Analytics.Live
-  `ILiveQueueMetricsProvider` (Asterisk.Sdk.Pro v1.12.0-pro). When the
+  `ILiveQueueMetricsProvider` (Verbara.Sdk.Pro v1.12.0-pro). When the
   provider is unregistered or has no snapshot for a queue, the fields
   return `null` (instead of the previous hardcoded `0`) and the response
   sets `X-Metrics-Available: false` so clients can render placeholder UI.
@@ -1214,7 +1214,7 @@ passing**, 0 warnings.
 
 ### Added — Task L (Identity Redis)
 
-- **New package `Asterisk.Platform.Identity.Redis`** ships
+- **New package `Verbara.Platform.Identity.Redis`** ships
   Redis-backed implementations of `IMfaPendingCache` +
   `IPasswordResetCache`. Enables horizontally scaled Platform API
   deployments where MFA challenge tokens and password-reset tokens
@@ -1224,7 +1224,7 @@ passing**, 0 warnings.
   DI extension replaces any previously registered in-memory cache
   singletons with the Redis impls and reuses an existing
   `IConnectionMultiplexer` if one is already in the container (so the
-  pool can be shared with `Asterisk.Sdk.Pro.Cluster.Redis`).
+  pool can be shared with `Verbara.Sdk.Pro.Cluster.Redis`).
 - **Program.cs** auto-enables the Redis backplane when
   `ConnectionStrings:IdentityRedis` is configured. Falls back to the
   in-memory defaults when unset — zero behavioral change for
@@ -1236,7 +1236,7 @@ passing**, 0 warnings.
   `ConnectionStrings__IdentityRedis` opt-in env var.
 - **Docs** — `docs/operations/identity-redis.md` walks operators
   through enabling, verifying, and failure-mode behavior.
-- **Testcontainers IT** — `tests/Asterisk.Platform.Identity.Redis.Tests/`
+- **Testcontainers IT** — `tests/Verbara.Platform.Identity.Redis.Tests/`
   (14 tests) covers put+take roundtrip, TTL expiry, single-consumption,
   stored-expired short-circuit, key-prefix isolation, and DI replace
   behavior. Spins up `redis:7-alpine` per collection.
@@ -1277,7 +1277,7 @@ passing**, 0 warnings.
 - **`IJtiRevocationCache` stays in-memory** — Task L covered MFA +
   password-reset caches. `IJtiRevocationCache` (shipped v1.9.2) remains
   in-memory; Redis impl deferred to **R5.2 patch** via extension of
-  `Asterisk.Platform.Identity.Redis`.
+  `Verbara.Platform.Identity.Redis`.
 - **Platform API AOT publish warnings** *(explicit blocker for v2.0-stable —
   marked 2026-04-25)* — pre-existing IL3050/IL3053 warnings surface on
   `dotnet publish /p:PublishAot=true` (`SignalR.Hub<T>.Clients`, non-generic
@@ -1371,18 +1371,18 @@ breakage — ships safely in parallel with R4 Platform.Web.
 ### Changed
 
 - **`IMfaPolicyEvaluator`** extracted from `AuthEndpoints`'
-  private static helper. Now lives in `Asterisk.Platform.Identity.Mfa`
+  private static helper. Now lives in `Verbara.Platform.Identity.Mfa`
   and is injected into `AuthEndpoints.Login`, `AuthEndpoints.Refresh`,
   `AuthEndpoints.ApiKeyLogin`, and `OidcEndpoints.OidcCallback`.
   Behavior identical to v1.9.0 / v1.9.1 — this is a pure refactor that
   opens the extension point for policy overrides.
 - **`IMfaPendingCache` + `IPasswordResetCache`** extracted from the
   static `ConcurrentDictionary` fields in `AuthEndpoints`. In-memory
-  implementations in `Asterisk.Platform.Identity.Mfa` preserve the
+  implementations in `Verbara.Platform.Identity.Mfa` preserve the
   previous semantics; `TakeAsync` atomically removes-and-returns.
   `MfaPendingEntry` and `PasswordResetEntry` records move from
-  `internal` in `Asterisk.Platform.Api` to `public` in
-  `Asterisk.Platform.Identity.Mfa`.
+  `internal` in `Verbara.Platform.Api` to `public` in
+  `Verbara.Platform.Identity.Mfa`.
 
 ### Added
 
@@ -1395,7 +1395,7 @@ breakage — ships safely in parallel with R4 Platform.Web.
   `ASTERISK_VERSION=23 docker compose -f docker/docker-compose.full.yml build asterisk`.
 - **Interface contract tests** for `InMemoryMfaPendingCache`,
   `InMemoryPasswordResetCache`, and `InMemoryJtiRevocationCache` in
-  `Asterisk.Platform.Identity.Tests` and `Asterisk.Platform.Api.Tests`.
+  `Verbara.Platform.Identity.Tests` and `Verbara.Platform.Api.Tests`.
 
 ### Known limitations / deferred
 
@@ -1422,7 +1422,7 @@ breakage — ships safely in parallel with R4 Platform.Web.
 
 Horizontal completion of v1.9.0's Resilience MVP. Every remaining
 external/retriable call-site on the Platform backend now emits to the
-`Asterisk.Sdk.Resilience` Prometheus meter. Zero API surface changes —
+`Verbara.Sdk.Resilience` Prometheus meter. Zero API surface changes —
 this release ships safely in parallel with R4 Platform.Web.
 
 ### Added
@@ -1538,7 +1538,7 @@ primitives.
 - **OpenTelemetry wiring.** `AddAsteriskOpenTelemetry(...)` +
   `AddAsteriskProOpenTelemetry()` + `WithPrometheusExporter()` now
   registered in `Program.cs`. Enrols the full SDK + Pro meter catalog
-  (15 SDK meters including the new `Asterisk.Sdk.Resilience` + 15 Pro
+  (15 SDK meters including the new `Verbara.Sdk.Resilience` + 15 Pro
   meters) and activity sources. `/metrics` endpoint is now a real
   Prometheus scraping endpoint (was a JSON stub).
 - **T27 event bridges** (Pro 1.8.0-pro opt-ins): cluster / conversation
@@ -1548,7 +1548,7 @@ primitives.
   50ms conversation / 200ms agent) and captures `Activity.Current` for
   W3C trace propagation.
 - **Resilience MVP** — three critical external call-sites now use
-  `Asterisk.Sdk.Resilience` keyed policies (pattern matches Pro engine
+  `Verbara.Sdk.Resilience` keyed policies (pattern matches Pro engine
   precedent):
   - `WebhookDeliveryService` → policy `webhook.delivery` (circuit 5/30s,
     retry 3/500ms, timeout 10s). Wraps per-attempt `HttpClient.SendAsync`
@@ -1559,7 +1559,7 @@ primitives.
     `oidc.token-exchange` (circuit 3/120s, retry 2/500ms, timeout 10s).
     Wraps the token endpoint `PostAsync` only; JWT validation + caching
     intentionally unwrapped.
-- New `Asterisk.Platform.Mail.Tests` project (SmtpSender coverage).
+- New `Verbara.Platform.Mail.Tests` project (SmtpSender coverage).
 
 ### Changed
 
@@ -1573,14 +1573,14 @@ primitives.
   supervisor UX.
 - **Dependencies**: SDK pinned from `1.11.1` to `1.15.0`; Pro pinned from
   `1.8.1-pro` to `1.10.0-pro` (21 refs). Added explicit
-  `Asterisk.Sdk.Resilience` + `Asterisk.Sdk.OpenTelemetry` +
-  `Asterisk.Sdk.Pro.OpenTelemetry` pins (previously transitive).
+  `Verbara.Sdk.Resilience` + `Verbara.Sdk.OpenTelemetry` +
+  `Verbara.Sdk.Pro.OpenTelemetry` pins (previously transitive).
 
 ### Removed
 
-- `Asterisk.Sdk.Pro.Resilience` reference. Package was sunset in Pro
-  `1.9.0-pro` via ADR-0029 (migration to MIT `Asterisk.Sdk.Resilience`).
-  `Program.cs` now uses `Asterisk.Sdk.Resilience.DependencyInjection`
+- `Verbara.Sdk.Pro.Resilience` reference. Package was sunset in Pro
+  `1.9.0-pro` via ADR-0029 (migration to MIT `Verbara.Sdk.Resilience`).
+  `Program.cs` now uses `Verbara.Sdk.Resilience.DependencyInjection`
   and `AddAsteriskResilience()`.
 
 ### Internal / tests

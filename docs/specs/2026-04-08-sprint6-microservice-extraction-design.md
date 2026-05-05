@@ -8,8 +8,8 @@ Platform.Api has `IsAotCompatible=false` because of QuestPDF, ScottPlot, and Mai
 
 Extract into 2 standalone microservices within the monorepo:
 
-1. **Asterisk.Platform.Renderer** — Stateless PDF/CSV rendering (QuestPDF + ScottPlot)
-2. **Asterisk.Platform.Mail** — SMTP sending (MailKit) + Microsoft 365 Graph API integration
+1. **Verbara.Platform.Renderer** — Stateless PDF/CSV rendering (QuestPDF + ScottPlot)
+2. **Verbara.Platform.Mail** — SMTP sending (MailKit) + Microsoft 365 Graph API integration
 
 Platform.Api calls both via `IHttpClientFactory` named clients. After extraction, Platform.Api becomes NativeAOT-publishable.
 

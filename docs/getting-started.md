@@ -1,4 +1,4 @@
-# Getting Started — Asterisk.Platform (10 minutes)
+# Getting Started — Verbara.Platform (10 minutes)
 
 This guide takes you from a blank machine to a running Platform tenant you
 can log into. It is the shortest supported path. Once you have completed
@@ -33,8 +33,8 @@ for an end-to-end multi-tenant tour (~1 hour).
 ## Step 1 — Clone the repo
 
 ```bash
-git clone https://github.com/Harol-Reina/Asterisk.Platform.git
-cd Asterisk.Platform
+git clone https://github.com/verbara/Verbara.Platform.git
+cd Verbara.Platform
 ```
 
 ---
@@ -43,11 +43,11 @@ cd Asterisk.Platform
 
 The bundled `docker-compose.full.yml` brings up Asterisk, Platform API,
 Renderer (`:5010`, internal), Mail (`:5020`, internal), Web UI, and Postgres.
-The Web UI is built from the sibling `Asterisk.Platform.Web` repo, so this
-expects it cloned next to `Asterisk.Platform/` (`../Asterisk.Platform.Web`).
+The Web UI is built from the sibling `Verbara.Platform.Web` repo, so this
+expects it cloned next to `Verbara.Platform/` (`../Verbara.Platform.Web`).
 
 ```bash
-git clone https://github.com/Harol-Reina/Asterisk.Platform.Web.git ../Asterisk.Platform.Web
+git clone https://github.com/verbara/Verbara.Platform.Web.git ../Verbara.Platform.Web
 
 docker compose -f docker/docker-compose.full.yml up -d
 ```
@@ -88,7 +88,7 @@ SETUP=$(curl -sf -X POST http://localhost:5000/api/v1/setup \
         "email": "platform@admin.local",
         "password": "PlatformAdmin2026!",
         "displayName": "Platform Admin",
-        "platformName": "Asterisk Platform"
+        "platformName": "Verbara Platform"
     }')
 
 echo "$SETUP" | python3 -m json.tool

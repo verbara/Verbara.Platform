@@ -1,10 +1,10 @@
-# Roadmap — Asterisk.Platform + Asterisk.Platform.Web
+# Roadmap — Verbara.Platform + Verbara.Platform.Web
 
 **Última actualización:** 2026-04-19 · **Baselines actuales:** Platform `1.8.1` · Platform.Web `1.8.0`
 
-> **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Asterisk.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
+> **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
-Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/docs/roadmap.md`.
+Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/Data/Source/Verbara/Verbara.Sdk.Pro/docs/roadmap.md`.
 
 ---
 
@@ -27,7 +27,7 @@ Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/
 
 **Platform.Web** sigue la misma numeración; los hitos principales coinciden 1:1 con Platform.
 
-[Releases GitHub](https://github.com/Harol-Reina/Asterisk.Platform/releases) · [Releases Web](https://github.com/Harol-Reina/Asterisk.Platform.Web/releases)
+[Releases GitHub](https://github.com/verbara/Verbara.Platform/releases) · [Releases Web](https://github.com/verbara/Verbara.Platform.Web/releases)
 
 ---
 

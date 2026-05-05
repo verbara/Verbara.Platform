@@ -1,4 +1,4 @@
-# Service-Level Objectives — Asterisk.Platform
+# Service-Level Objectives — Verbara.Platform
 
 **R5.4 Track A · S5.2** · Authored 2026-04-26 · **R5.5 Phase F refresh 2026-04-27** · Owner: Platform SRE
 
@@ -20,7 +20,7 @@
 
 ## Why these SLOs exist
 
-Per [ADR-0009](../decisions/0009-slo-baseline-alert-severity-model.md), Asterisk.Platform
+Per [ADR-0009](../decisions/0009-slo-baseline-alert-severity-model.md), Verbara.Platform
 publishes canonical SLOs so:
 
 - Operators can distinguish "degraded but in-budget" from "violation" without
@@ -67,9 +67,9 @@ rate alerts (P1) fire at 50% burn over 6h on Enterprise tier.
 | Login throughput knee (single-instance) | < 250 req/s | 🟢 **measured: collapse at 250 req/s** (44 % success, p99 = 56.9 s); 500 req/s ≈ pure saturation | same |
 | Login success rate (within capacity) | ≥ 99.5 % (excluding bad credentials) | 🟢 measured **100 %** at ≤ 100 req/s | same |
 | `/health` p99 idle | ≤ 50 ms | 🟢 measured **22.8 ms** (200-ping smoke after the HTTP-meter expose fix) | `http_server_request_duration_seconds_bucket{http_route="/health"}` |
-| JWT validation latency p99 (cached key, no DB hit) | ≤ 50 ms | v1 provisional — no isolated test yet | `Asterisk.Platform.Auth.JwtKeyRotation` · `jwt.key.rotation.duration` |
+| JWT validation latency p99 (cached key, no DB hit) | ≤ 50 ms | v1 provisional — no isolated test yet | `Verbara.Platform.Auth.JwtKeyRotation` · `jwt.key.rotation.duration` |
 | Token refresh latency p95 | ≤ 100 ms | v1 provisional | Platform API HTTP histogram on `/auth/refresh` |
-| Active validation keys | ≥ 1, ≤ 4 | v1 provisional | `Asterisk.Platform.Auth.JwtKeyRotation` · `jwt.keys.active` |
+| Active validation keys | ≥ 1, ≤ 4 | v1 provisional | `Verbara.Platform.Auth.JwtKeyRotation` · `jwt.keys.active` |
 | MFA challenge generation latency p95 | ≤ 200 ms | v1 provisional | Platform API HTTP histogram on `/auth/mfa/*` |
 
 **Bottleneck identified at the knee:** per-request DataProtection
@@ -88,7 +88,7 @@ v1.13.x patch — JWT-001 in `docs/roadmap.md`).
 
 | Metric | Target (v1 provisional) | Source meter / instrument |
 |---|---|---|
-| Event append latency p99 | ≤ 200 ms | `Asterisk.Sdk.Pro.EventStore` · `eventstore.persist.duration_ms` |
+| Event append latency p99 | ≤ 200 ms | `Verbara.Sdk.Pro.EventStore` · `eventstore.persist.duration_ms` |
 | Events appended success rate | ≥ 99.9% | `eventstore.events.appended` / (`eventstore.events.appended` + `eventstore.events.skipped`) |
 | Projection lag p95 | ≤ 5 s | `eventstore.projection.lag_ms` |
 | Subscriber inflight (saturation) | < 100 | `eventstore.subscriber.inflight` (gauge) |
@@ -100,10 +100,10 @@ v1.13.x patch — JWT-001 in `docs/roadmap.md`).
 
 | Metric | Target (v1 provisional) | Source meter / instrument |
 |---|---|---|
-| Hub connection open success rate | ≥ 99.5% | `Asterisk.Sdk.Pro.Push.SignalR` · `hub.connections.opened` vs `hub.connections.closed` (clean) |
+| Hub connection open success rate | ≥ 99.5% | `Verbara.Sdk.Pro.Push.SignalR` · `hub.connections.opened` vs `hub.connections.closed` (clean) |
 | Presence merge end-to-end latency p95 | ≤ 1 s | `presence.merges.applied` rate vs `presence.heartbeats.published` lag |
 | Presence broadcast fanout p99 | ≤ 500 ms | `presence.broadcasts.fanout` (per-message duration if instrumented; otherwise observed via histogram) |
-| Push relay backlog | < 1000 events | `Asterisk.Sdk.Pro.Push.Postgres` · `push.postgres.backlog` |
+| Push relay backlog | < 1000 events | `Verbara.Sdk.Pro.Push.Postgres` · `push.postgres.backlog` |
 | Push backplane availability | ≥ 99.9% | `push.postgres.listen_healthy` (gauge: 1=healthy) |
 
 ### 4. Live queue snapshot writer (Pro.Analytics.Live, R5.1 Task G)
@@ -113,7 +113,7 @@ v1.13.x patch — JWT-001 in `docs/roadmap.md`).
 
 | Metric | Target (v1 provisional) | Source meter / instrument |
 |---|---|---|
-| Snapshot write latency p99 | ≤ 50 ms | `Asterisk.Sdk.Pro.Analytics.Live` · `live_queue.snapshots.write_duration_ms` |
+| Snapshot write latency p99 | ≤ 50 ms | `Verbara.Sdk.Pro.Analytics.Live` · `live_queue.snapshots.write_duration_ms` |
 | Write error rate | < 1% | `live_queue.snapshots.write_error` / `live_queue.snapshots.published` |
 | Writer inflight (saturation) | < 50 | `live_queue.writer.inflight` (gauge) |
 | Throttle ratio (expected) | 80–95% suppressed | `live_queue.snapshots.throttled` / total emissions |
@@ -143,7 +143,7 @@ v1.13.x patch — JWT-001 in `docs/roadmap.md`).
 | Connection pool utilization | < 80% | Npgsql `db.client.connections.usage` |
 | Postgres health check | `Healthy` | `BackgroundServiceHealthCheck` + `PostgresHealthCheck` |
 | Slow query rate (>500 ms) | < 1% of total | Npgsql `db.client.commands.duration` p99 |
-| Retention purge duration | < 30 min per nightly run | `Asterisk.Sdk.Pro.Storage.Common.Retention` · `retention.duration_ms` |
+| Retention purge duration | < 30 min per nightly run | `Verbara.Sdk.Pro.Storage.Common.Retention` · `retention.duration_ms` |
 | Retention rows purged (sanity) | matches dry-run prediction ±10% | `retention.purged` vs `retention.dry_run.would_purge` |
 
 ### 7. Storage — Redis (Identity + cache)
@@ -162,7 +162,7 @@ v1.13.x patch — JWT-001 in `docs/roadmap.md`).
 
 | Metric | Target | Status | Source meter / instrument |
 |---|---|---|---|
-| Circuit breakers in `Open` state | 0 sustained > 5 min | 🟢 R5.5 C-L: held during all 10 chaos events; closed cleanly post-recovery | `Asterisk.Sdk.Resilience` · `circuit.state` (value 2 = Open) |
+| Circuit breakers in `Open` state | 0 sustained > 5 min | 🟢 R5.5 C-L: held during all 10 chaos events; closed cleanly post-recovery | `Verbara.Sdk.Resilience` · `circuit.state` (value 2 = Open) |
 | Retry attempts rate per policy | < 0.5/s sustained | v1 provisional | `retry.attempts` |
 | Per-attempt timeouts | < 1% of attempts | v1 provisional | `timeout.fired` |
 | Postgres SIGKILL recovery time | ≤ 60 s | 🟢 R5.5 C-L: ~30 s (compose `up -d --wait` gate) | observed via `up{job="platform-api"}` flap |
@@ -234,4 +234,4 @@ rerunning `promtool check rules`.
 - [`alerts.yml`](alerts.yml) — Prometheus alert rules derived from these SLOs
 - [`alerts-runbook.md`](alerts-runbook.md) — Per-alert what / why / first response
 - [`resilience-runbook.md`](resilience-runbook.md) — Resilience meter golden signals
-- Asterisk.Sdk.Pro `docs/architecture.md` § "Meter catalog" — full instrument inventory
+- Verbara.Sdk.Pro `docs/architecture.md` § "Meter catalog" — full instrument inventory

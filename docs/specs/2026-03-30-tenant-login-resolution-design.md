@@ -1,7 +1,7 @@
 # Tenant Login Resolution — Design Spec
 
 **Date:** 2026-03-30
-**Scope:** Asterisk.Platform (backend) + Asterisk.Platform.Web (frontend) + demo scripts
+**Scope:** Verbara.Platform (backend) + Verbara.Platform.Web (frontend) + demo scripts
 **Goal:** Make login work across all clients (frontend, demo scripts, API) by resolving tenant from multiple sources with a clear priority chain.
 
 ## Problem Statement
@@ -58,7 +58,7 @@ The resolved tenant goes into `X-Tenant-Id` header on the login fetch call and a
 
 ### 1. Backend: Login Endpoint Fallback (Platform)
 
-**File:** `src/Asterisk.Platform.Api/Endpoints/AuthEndpoints.cs`
+**File:** `src/Verbara.Platform.Api/Endpoints/AuthEndpoints.cs`
 
 Current (line 61-64):
 ```csharp
@@ -87,7 +87,7 @@ Same pattern applies to `ForgotPassword` (line 309).
 
 ### 2. Backend: Subdomain Resolution in Middleware (Platform)
 
-**File:** `src/Asterisk.Platform.Api/Middleware/TenantResolutionMiddleware.cs`
+**File:** `src/Verbara.Platform.Api/Middleware/TenantResolutionMiddleware.cs`
 
 Add subdomain extraction between webhook and header checks:
 
@@ -111,7 +111,7 @@ This is a no-op in current deployments (localhost, direct IP) but activates auto
 
 ### 3. Backend: LoginRequest DTO (Platform)
 
-**File:** `src/Asterisk.Platform.Api/Endpoints/AuthEndpoints.cs` line 535
+**File:** `src/Verbara.Platform.Api/Endpoints/AuthEndpoints.cs` line 535
 
 Make TenantId nullable in the record:
 

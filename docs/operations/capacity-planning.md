@@ -1,4 +1,4 @@
-# Capacity Planning Baseline — Asterisk.Platform
+# Capacity Planning Baseline — Verbara.Platform
 
 **R5.4 Track C · S5.7** · Authored 2026-04-26 · **R5.5 Phase F refresh 2026-04-27** · Owner: Platform SRE
 
@@ -124,8 +124,8 @@ rotation (7d retention by default) + ~100 MB DataProtection key store.
 > custom hosts.
 
 **Rationale:** Sized against the partitioned `session_events` table + JSONB
-write rate from `Asterisk.Sdk.Pro.EventStore` (~200 ms p99 SLO budget per
-[`slos.md`](slos.md) §2). Retention purges (`Asterisk.Sdk.Pro.Storage.Common.Retention`)
+write rate from `Verbara.Sdk.Pro.EventStore` (~200 ms p99 SLO budget per
+[`slos.md`](slos.md) §2). Retention purges (`Verbara.Sdk.Pro.Storage.Common.Retention`)
 keep storage growth bounded but require IOPS headroom during the nightly 2am UTC
 cron window.
 
@@ -138,7 +138,7 @@ cron window.
 | Large | 2 vCPU | 4 GB | Sentinel quorum of 3 recommended |
 | XL | 4 vCPU | 16 GB | Redis Cluster mode (≥ 3 shards × 3 replicas) |
 
-**Rationale:** JTI revocation cache (R5.1 `Asterisk.Platform.Identity.Redis`) +
+**Rationale:** JTI revocation cache (R5.1 `Verbara.Platform.Identity.Redis`) +
 Pro.Push.Redis backplane share the same instance. Memory dominated by:
 ~150 bytes per revoked-JTI entry × MFA session count, plus presence merges in
 flight. `RedisMemoryHigh` P2 alert from [`alerts.yml`](alerts.yml) fires at 75%
@@ -180,7 +180,7 @@ adds ~5% overhead above raw call payload.
 The following are **expected first-saturation points** based on the architecture
 review and the Pro 1.14.0-pro meter catalog. None has been confirmed under load
 — each is **(provisional pending S5.1 run)** and will be replaced with the
-actual observed bottleneck once `tests/Asterisk.Platform.LoadTests/` runs on
+actual observed bottleneck once `tests/Verbara.Platform.LoadTests/` runs on
 staging hardware.
 
 ### 1. JWT validation throughput **(provisional pending S5.1 run)**
@@ -188,7 +188,7 @@ staging hardware.
 **Expected symptom:** Single-node Platform.Api becomes CPU-bound around the
 `jwt_issuance_validation` scenario's 2,000 req/s target. The
 `AuthLoginErrorRateHigh` (P0) and `JwtValidationLatencyP99High` (P0) alerts in
-[`alerts.yml`](alerts.yml) would trip first. The `Asterisk.Platform.Auth.JwtKeyRotation`
+[`alerts.yml`](alerts.yml) would trip first. The `Verbara.Platform.Auth.JwtKeyRotation`
 meter (`jwt.key.rotation.duration` proxy histogram) is the leading indicator.
 
 **Mitigation already in place:** R5.1 Identity.Redis package exposes a
@@ -206,14 +206,14 @@ saturation typically arrives ~70% CPU.
 reads/s + writer coalescing at ~5 Hz per `(tenantId, queueName)`),
 `PostgresLiveQueueSnapshotStore.UpsertAsync` will compete with `Pro.EventStore`
 for Postgres connection pool slots at the **Large** tier. Watch
-`Asterisk.Sdk.Pro.Analytics.Live` · `live_queue.snapshots.write_duration_ms`
+`Verbara.Sdk.Pro.Analytics.Live` · `live_queue.snapshots.write_duration_ms`
 p99 vs the `LiveQueueWriterErrorWindow` (P2) alert threshold. The
 `live_queue.writer.inflight` gauge climbing past 50 indicates the
 ResiliencePolicy circuit is approaching open.
 
 **Mitigation already in place:** `analytics.live-queue-writer` ResiliencePolicy
 (circuit 5/30s + retry 3/100ms + timeout 5s) per
-`Asterisk.Sdk.Pro/docs/architecture.md` § "Pro.Analytics live queue metrics
+`Verbara.Sdk.Pro/docs/architecture.md` § "Pro.Analytics live queue metrics
 pipeline".
 
 **Scaling path:** at the **Large** tier and above, configure a **dedicated
@@ -225,8 +225,8 @@ purges + live queue writer don't contend.
 
 **Expected symptom:** The `presence_broadcast` NBomber scenario sustains 1,500
 virtual users — at a 3-node cluster, that's ~500 connections per node + cross-
-node CRDT merges. `Asterisk.Sdk.Pro.Push.SignalR` · `presence.broadcasts.fanout`
-duration will widen, and `Asterisk.Sdk.Pro.Push.Postgres` · `push.postgres.backlog`
+node CRDT merges. `Verbara.Sdk.Pro.Push.SignalR` · `presence.broadcasts.fanout`
+duration will widen, and `Verbara.Sdk.Pro.Push.Postgres` · `push.postgres.backlog`
 will accumulate if the Postgres backplane is the bottleneck. The
 `PresenceBacklogGrowing` (P1) alert fires at backlog > 500 with positive growth
 over 15min.
@@ -236,7 +236,7 @@ over 15min.
 
 **Scaling path:** above the **Medium** tier, **switch from
 Pro.Cluster.Storage.Postgres to Redis Cluster mode for the push backplane**
-(`Asterisk.Sdk.Pro.Push.Redis`) — Postgres LISTEN/NOTIFY caps around 1k
+(`Verbara.Sdk.Pro.Push.Redis`) — Postgres LISTEN/NOTIFY caps around 1k
 notifications/sec per channel and Redis pub/sub scales horizontally with
 cluster shards.
 
@@ -293,9 +293,9 @@ incorporate them once measured data and roadmap commitments justify the work.
 - **Auto-scaling triggers (HPA / Karpenter)** — currently all scaling is
   operator-driven. Containerisation in `docker/docker-compose.full.yml` is the
   baseline; Kubernetes Helm charts deferred per
-  `Asterisk.Sdk/CLAUDE.md` (R5+ k8s scope).
+  `Verbara.Sdk/CLAUDE.md` (R5+ k8s scope).
 - **Workforce Management capacity** — Pro.WorkforceManagement deferred to 2.0.0-pro
-  per `Asterisk.Sdk.Pro/docs/roadmap.md`; will require revisiting CPU/RAM
+  per `Verbara.Sdk.Pro/docs/roadmap.md`; will require revisiting CPU/RAM
   estimates for the forecasting workload (TensorFlow.NET or SQL window functions).
 - **AgentAssist external-provider cost ceiling** — STT/LLM calls dominate p95
   latency budget per [`slos.md`](slos.md) §5; capacity v2 should model
@@ -339,5 +339,5 @@ requires updating the `slos.md` "v2 enterprise (aspirational)" section and the
 - [`alerts-runbook.md`](alerts-runbook.md) — Per-alert what / why / first response
 - [`resilience-runbook.md`](resilience-runbook.md) — Resilience meter golden signals
 - [`backup-disaster-recovery.md`](backup-disaster-recovery.md) — Backup + DR runbook
-- Asterisk.Sdk.Pro `docs/architecture.md` § "Meter catalog" — full instrument inventory
-- Asterisk.Sdk.Pro `docs/roadmap.md` — feature deferrals (1.9.x / 2.0.0-pro / R6)
+- Verbara.Sdk.Pro `docs/architecture.md` § "Meter catalog" — full instrument inventory
+- Verbara.Sdk.Pro `docs/roadmap.md` — feature deferrals (1.9.x / 2.0.0-pro / R6)

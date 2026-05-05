@@ -14,13 +14,13 @@ git clone https://github.com/<your-username>/verbara-platform.git
 cd verbara-platform
 
 # 2. Build (.NET 10 SDK required)
-dotnet build Asterisk.Platform.slnx
+dotnet build Verbara.Platform.slnx
 
 # 3. Run all tests
-dotnet test Asterisk.Platform.slnx
+dotnet test Verbara.Platform.slnx
 
 # 4. Run the API host locally
-cd src/Asterisk.Platform.Api
+cd src/Verbara.Platform.Api
 dotnet run
 # → API on http://localhost:5000
 
@@ -62,11 +62,11 @@ Larger features (multi-week) require a `docs/specs/<YYYY-MM-DD>-<topic>.md` prop
    - `fix: handle queue overflow when capacity is zero`
    - `docs: clarify multi-tenant resolver flow`
    - `refactor:`, `test:`, `chore:`, `perf:` are also accepted.
-3. **Write tests** when changing behavior. xUnit + FluentAssertions for unit tests. Integration tests under `tests/Asterisk.Platform.Api.Tests/` use a real PostgreSQL via Testcontainers — **do not mock the database** (we got burned in the past by mock-vs-prod divergence).
+3. **Write tests** when changing behavior. xUnit + FluentAssertions for unit tests. Integration tests under `tests/Verbara.Platform.Api.Tests/` use a real PostgreSQL via Testcontainers — **do not mock the database** (we got burned in the past by mock-vs-prod divergence).
 4. **Run locally before pushing:**
    ```bash
-   dotnet build Asterisk.Platform.slnx -c Release  # TreatWarningsAsErrors=true is enforced
-   dotnet test Asterisk.Platform.slnx               # all tests must pass
+   dotnet build Verbara.Platform.slnx -c Release  # TreatWarningsAsErrors=true is enforced
+   dotnet test Verbara.Platform.slnx               # all tests must pass
    ```
 5. **Open a PR** against `main` with:
    - A summary of what changed and why.

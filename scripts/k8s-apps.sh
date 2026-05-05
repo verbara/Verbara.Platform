@@ -9,7 +9,7 @@ INFRA="$REPO_ROOT/infra/k8s"
 KUBECONFIG_PATH="${KUBECONFIG:-$HOME/.kube/config-talos}"
 export KUBECONFIG="$KUBECONFIG_PATH"
 
-echo "=== Asterisk Platform — K8s Application Stack ==="
+echo "=== Verbara Platform — K8s Application Stack ==="
 echo "    KUBECONFIG: $KUBECONFIG_PATH"
 echo ""
 

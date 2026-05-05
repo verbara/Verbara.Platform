@@ -44,8 +44,8 @@ namespace Verbara.Platform.Api.Services;
 /// </remarks>
 internal sealed class JwtTokenService
 {
-    private const string Issuer = "asterisk-platform";
-    private const string Audience = "asterisk-platform";
+    private const string Issuer = "verbara-platform";
+    private const string Audience = "verbara-platform";
     private const string DataProtectorPurpose = "Verbara.Platform.Jwt.SigningKey";
     private const string LegacyKeyFileName = "jwt-signing-key.xml";
     private const string FileKeyIdPrefix = "platform-jwt-";

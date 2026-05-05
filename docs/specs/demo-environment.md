@@ -1,4 +1,4 @@
-# Demo Environment — Asterisk Platform
+# Demo Environment — Verbara Platform
 
 > **Last updated:** 2026-03-31
 > **IMPORTANT:** This document MUST be updated whenever any file under `docker/demo/` is modified.
@@ -126,7 +126,7 @@ chmod +x demo-reset.sh
 | Grafana | admin | demo |
 | Grafana (anonymous) | — | — (Viewer access) |
 | AMI | platform | platform_demo |
-| ARI | asterisk-platform | platform_demo |
+| ARI | verbara-platform | platform_demo |
 
 ---
 
@@ -298,7 +298,7 @@ Dial from any registered extension to test outbound call handling:
 | `ConnectionStrings__Dialer` | Host=postgres;... | Dialer campaign storage |
 | `Asterisk__Ami__Hostname` | asterisk | AMI connection |
 | `Asterisk__Ari__BaseUrl` | http://asterisk:8088 | ARI connection |
-| `Asterisk__Ari__Application` | asterisk-platform | ARI Stasis app name |
+| `Asterisk__Ari__Application` | verbara-platform | ARI Stasis app name |
 | `Redis__ConnectionString` | redis:6379 | Session/cache |
 
 ---

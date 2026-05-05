@@ -3,7 +3,7 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "Prometheus datasource scraping Asterisk.Platform /metrics",
+      "description": "Prometheus datasource scraping Verbara.Platform /metrics",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
@@ -25,7 +25,7 @@
       }
     ]
   },
-  "description": "Asterisk.Platform — Asterisk.Sdk.Resilience meter overview. Import this JSON in Grafana → Dashboards → Import. Requires a Prometheus datasource scraping the Platform API /metrics endpoint.",
+  "description": "Verbara.Platform — Verbara.Sdk.Resilience meter overview. Import this JSON in Grafana → Dashboards → Import. Requires a Prometheus datasource scraping the Platform API /metrics endpoint.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -449,8 +449,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Asterisk.Platform — Resilience Overview",
-  "uid": "asterisk-platform-resilience",
+  "title": "Verbara.Platform — Resilience Overview",
+  "uid": "verbara-platform-resilience",
   "version": 1,
   "weekStart": ""
 }

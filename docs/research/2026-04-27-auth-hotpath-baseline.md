@@ -20,8 +20,8 @@ far exceeding the ≥60% threshold.
 - **Hardware**: AMD Ryzen 9 9900X (12 cores / 24 threads · AVX-512F+CD+BW+DQ+VL+VBMI · AES + BMI1 + BMI2 + FMA + LZCNT + PCLMUL + POPCNT + AvxVnni · VectorSize=256) · 60 GB DDR5 · NVMe SSD · Linux 6.12.74 (Debian 13).
 - **Runtime**: .NET 10.0.6 (10.0.626.17701) · X64 RyuJIT · Concurrent Workstation GC.
 - **BenchmarkDotNet**: v0.14.0.
-- **Bench source**: [`tests/Asterisk.Platform.Benchmarks/AuthHotPathBench.cs`](../../tests/Asterisk.Platform.Benchmarks/AuthHotPathBench.cs).
-- **AOT probe source**: [`tests/Asterisk.Platform.Api.Aot.Probe/Program.cs`](../../tests/Asterisk.Platform.Api.Aot.Probe/Program.cs).
+- **Bench source**: [`tests/Verbara.Platform.Benchmarks/AuthHotPathBench.cs`](../../tests/Verbara.Platform.Benchmarks/AuthHotPathBench.cs).
+- **AOT probe source**: [`tests/Verbara.Platform.Aot.Probe/Program.cs`](../../tests/Verbara.Platform.Aot.Probe/Program.cs).
 - **Repro**:
   - `./scripts/profiling/run-benchmarks.sh` — executes the benchmarks below.
   - `./scripts/profiling/aot-probe-publish.sh` — exercises the AOT publish gate.
@@ -39,7 +39,7 @@ in favor of the libsodium P/Invoke fallback.
 | Property | Value |
 |---|---|
 | Library | `Isopoh.Cryptography.Argon2 2.0.0` |
-| Probe project | `tests/Asterisk.Platform.Api.Aot.Probe` |
+| Probe project | `tests/Verbara.Platform.Aot.Probe` |
 | Publish command | `dotnet publish -c Release -p:PublishAot=true …` |
 | Publish exit code | `0` |
 | `IL2xxx` / `IL3xxx` warnings | **0** |
@@ -128,7 +128,7 @@ i.e. no GC stalls polluting variance), but the production footprint
 needs explicit attention:
 
 - **Production deployment must use Server GC** (`<ServerGarbageCollection>true</ServerGarbageCollection>`
-  in the `Asterisk.Platform.Api.csproj`). Confirm before Phase 4 ship.
+  in the `Verbara.Platform.Api.csproj`). Confirm before Phase 4 ship.
 - **Recommend monitoring** `dotnet_collection_count_total{generation="2"}` —
   if Gen2 collection rate climbs >0.5/sec under sustained load, retune
   Argon2id parameters (drop memory cost to 12 MiB, raise time cost to 3) or
@@ -147,7 +147,7 @@ These notes flow into ADR-0013 in Phase 4.
 `JwtRsaSign_Issue` measures the cost of `JwtSecurityTokenHandler.CreateEncodedJwt`
 with a cached `SigningCredentials` carrying RSA-2048 keys — exactly the live
 hot path in
-[`src/Asterisk.Platform.Api/Services/JwtTokenService.cs:120`](../../src/Asterisk.Platform.Api/Services/JwtTokenService.cs#L120).
+[`src/Verbara.Platform.Api/Services/JwtTokenService.cs:120`](../../src/Verbara.Platform.Api/Services/JwtTokenService.cs#L120).
 At 167 µs per call, the **per-replica throughput ceiling for JWT signing
 alone, on a single core, is ~6,000 ops/sec**, i.e. JWT signing on this
 hardware reaches 80× the entire stack's measured knee before becoming a
@@ -187,7 +187,7 @@ The `dotnet-trace-login.sh` script in `scripts/profiling/` is authored and
 executable, but the flame-graph capture against the live docker-compose
 stack is **deferred** for Phase 0:
 
-- `Asterisk.Platform.Api` runs inside the `docker-platform-api-1` container.
+- `Verbara.Platform.Api` runs inside the `docker-platform-api-1` container.
 - `dotnet-trace` attaches via the Diagnostic IPC pipe, which lives at
   `/tmp/dotnet-diagnostic-<pid>` inside the container. The
   `docker/docker-compose.full.yml` does not currently bind-mount that path

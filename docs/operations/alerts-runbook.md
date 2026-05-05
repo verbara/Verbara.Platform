@@ -1,4 +1,4 @@
-# Alerts Runbook — Asterisk.Platform
+# Alerts Runbook — Verbara.Platform
 
 **R5.4 Track A · S5.3** · Authored 2026-04-26 · Audience: On-call operators + SRE
 
@@ -23,7 +23,7 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 > All thresholds in `alerts.yml` are **v1 provisional estimates** derived from
 > architecture review + .NET 10 AOT benchmarks + standard CCaaS industry
 > ranges. **They have NOT been validated against measured load tests** — the
-> S5.1 NBomber suite is shipped (`tests/Asterisk.Platform.LoadTests/`) but the
+> S5.1 NBomber suite is shipped (`tests/Verbara.Platform.LoadTests/`) but the
 > first authoritative run on staging is pending.
 >
 > Confidence in these thresholds will increase after:
@@ -80,7 +80,7 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 
 ### LicenseGuardBlockedHigh
 
-**What:** `Asterisk.Sdk.Pro.Licensing.Guard.blocked_total` rate / pipeline-events rate > 1% over 10 min.
+**What:** `Verbara.Sdk.Pro.Licensing.Guard.blocked_total` rate / pipeline-events rate > 1% over 10 min.
 
 **Why:** License grace period expired (7d default per `Pro.Licensing` v1.8.0), feature toggle revoked, or `ILicenseGuard` itself is misconfigured. Pipelines (EventStore / Analytics / AgentAssist) silently drop work — no errors visible to API callers.
 
@@ -164,7 +164,7 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 
 ### CircuitBreakerOpen
 
-**What:** Any keyed `Asterisk.Sdk.Resilience.circuit.state` value 2 (Open) for ≥ 5 min.
+**What:** Any keyed `Verbara.Sdk.Resilience.circuit.state` value 2 (Open) for ≥ 5 min.
 
 **Why:** A downstream dependency is failing repeatedly and the policy is now rejecting all traffic to give it room to recover.
 

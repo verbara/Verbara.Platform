@@ -1,6 +1,6 @@
 # v1.5.0 "Production Ready" Design Spec
 
-**Goal:** Make Asterisk.Platform sellable to Partners by fixing critical bugs, completing the agent workspace, enabling WebChat demos, implementing real report templates, hardening for production deployment, and expanding with Twilio SMS + Cases API.
+**Goal:** Make Verbara.Platform sellable to Partners by fixing critical bugs, completing the agent workspace, enabling WebChat demos, implementing real report templates, hardening for production deployment, and expanding with Twilio SMS + Cases API.
 
 **Version:** 1.5.0
 **Date:** 2026-04-09
@@ -69,7 +69,7 @@ else if (botResponse.Action == BotResponseAction.EndConversation)
 }
 ```
 
-**Files:** `src/Asterisk.Platform.Api/Endpoints/WebhookEndpoints.cs`
+**Files:** `src/Verbara.Platform.Api/Endpoints/WebhookEndpoints.cs`
 **Tests:** 3 tests — handoff routes to queue, end closes conversation, reply still works
 
 ### A.2: Hold/Unhold Endpoints
@@ -84,9 +84,9 @@ else if (botResponse.Action == BotResponseAction.EndConversation)
 **Switchboard changes:** Add `HoldAsync(tenantId, conversationId, agentId, ct)` and `UnholdAsync(tenantId, conversationId, agentId, ct)` methods to `IConversationSwitchboard` and `ConversationSwitchboard`. Both validate ownership, call state machine transition, save, and publish events.
 
 **Files:**
-- `src/Asterisk.Platform.Switchboard/IConversationSwitchboard.cs` — add 2 methods
-- `src/Asterisk.Platform.Switchboard/ConversationSwitchboard.cs` — implement
-- `src/Asterisk.Platform.Api/Endpoints/ConversationEndpoints.cs` — add 2 routes
+- `src/Verbara.Platform.Switchboard/IConversationSwitchboard.cs` — add 2 methods
+- `src/Verbara.Platform.Switchboard/ConversationSwitchboard.cs` — implement
+- `src/Verbara.Platform.Api/Endpoints/ConversationEndpoints.cs` — add 2 routes
 
 **Tests:** 4 tests — hold succeeds, unhold succeeds, hold from wrong state fails, non-owner cannot hold
 
@@ -107,7 +107,7 @@ else if (botResponse.Action == BotResponseAction.EndConversation)
 
 **Request DTO:** `CreateConversationRequest(string ContactId, string Channel, string? InitialMessage)`
 
-**Files:** `src/Asterisk.Platform.Api/Endpoints/ConversationEndpoints.cs`
+**Files:** `src/Verbara.Platform.Api/Endpoints/ConversationEndpoints.cs`
 **Tests:** 3 tests — creates conversation, creates with initial message, reuses existing conversation
 
 ### A.4: Error Handling Expansion
@@ -135,7 +135,7 @@ Add to ProblemDetails response:
 
 Convert `#pragma disable CA1848` to proper `[LoggerMessage]` delegates.
 
-**Files:** `src/Asterisk.Platform.Api/Middleware/ErrorHandlingMiddleware.cs`
+**Files:** `src/Verbara.Platform.Api/Middleware/ErrorHandlingMiddleware.cs`
 **Tests:** 5 tests — PlatformException maps to 400 with code, ArgumentException maps to 400, OperationCanceledException maps to 499, traceId present, unknown exception maps to 500
 
 ---
@@ -192,10 +192,10 @@ public sealed class WebSocketWebChatTransport : IWebChatTransport
 **AOT serialization:** `WebChatJsonContext` with `[JsonSerializable]` for all WebSocket message types.
 
 **Files:**
-- `src/Asterisk.Platform.Channels.WebChat/WebSocketWebChatTransport.cs` — new
-- `src/Asterisk.Platform.Channels.WebChat/WebChatWsMessage.cs` — new (message envelope)
-- `src/Asterisk.Platform.Channels.WebChat/WebChatJsonContext.cs` — new (AOT context)
-- `src/Asterisk.Platform.Channels.WebChat/ServiceCollectionExtensions.cs` — register transport
+- `src/Verbara.Platform.Channels.WebChat/WebSocketWebChatTransport.cs` — new
+- `src/Verbara.Platform.Channels.WebChat/WebChatWsMessage.cs` — new (message envelope)
+- `src/Verbara.Platform.Channels.WebChat/WebChatJsonContext.cs` — new (AOT context)
+- `src/Verbara.Platform.Channels.WebChat/ServiceCollectionExtensions.cs` — register transport
 
 **Tests:** 4 tests — send to connected client, send to disconnected is no-op, disconnect closes socket, register/unregister lifecycle
 
@@ -217,8 +217,8 @@ public sealed class WebSocketWebChatTransport : IWebChatTransport
 **Inbound flow:** WebSocket message → parse → `InboundMessage` construction → `IInboundMessagePipeline.ProcessAsync()` → same routing as all other channels.
 
 **Files:**
-- `src/Asterisk.Platform.Api/Endpoints/WebChatEndpoints.cs` — new
-- `src/Asterisk.Platform.Api/Program.cs` — map WebChat endpoints + WebSocket middleware
+- `src/Verbara.Platform.Api/Endpoints/WebChatEndpoints.cs` — new
+- `src/Verbara.Platform.Api/Program.cs` — map WebChat endpoints + WebSocket middleware
 
 **Tests:** 5 tests — session creation, message through pipeline, REST fallback, invalid session rejected, tenant validation
 
@@ -251,9 +251,9 @@ public sealed class WebSocketWebChatTransport : IWebChatTransport
 **Served by Platform.Api:** Static file middleware serves `webchat-widget.js` from `/webchat/widget.js` path.
 
 **Files:**
-- `src/Asterisk.Platform.Api/wwwroot/webchat/widget.js` — new
-- `src/Asterisk.Platform.Api/wwwroot/webchat/widget.css` — new
-- `src/Asterisk.Platform.Api/Program.cs` — add `UseStaticFiles()` for wwwroot
+- `src/Verbara.Platform.Api/wwwroot/webchat/widget.js` — new
+- `src/Verbara.Platform.Api/wwwroot/webchat/widget.css` — new
+- `src/Verbara.Platform.Api/Program.cs` — add `UseStaticFiles()` for wwwroot
 
 **Tests:** Manual testing + 3 E2E tests in Platform.Web (widget loads, sends message, receives reply)
 
@@ -328,12 +328,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS ix_canned_responses_shortcut
 **Frontend (Platform.Web):** Replace hardcoded array in `canned-responses.tsx` with `useCannedResponses(query)` hook that calls `GET /canned-responses?q={query}`.
 
 **Files:**
-- `src/Asterisk.Platform.Conversations/CannedResponse.cs` — new model
-- `src/Asterisk.Platform.Conversations/ICannedResponseStore.cs` — new interface
-- `src/Asterisk.Platform.Storage.InMemory/InMemoryCannedResponseStore.cs` — new
-- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresCannedResponseStore.cs` — new
-- `src/Asterisk.Platform.Storage.Postgres/Migrations/014_CannedResponsesBotAnalytics.sql` — new
-- `src/Asterisk.Platform.Api/Endpoints/CannedResponseEndpoints.cs` — new (admin + agent)
+- `src/Verbara.Platform.Conversations/CannedResponse.cs` — new model
+- `src/Verbara.Platform.Conversations/ICannedResponseStore.cs` — new interface
+- `src/Verbara.Platform.Storage.InMemory/InMemoryCannedResponseStore.cs` — new
+- `src/Verbara.Platform.Storage.Postgres/Stores/PostgresCannedResponseStore.cs` — new
+- `src/Verbara.Platform.Storage.Postgres/Migrations/014_CannedResponsesBotAnalytics.sql` — new
+- `src/Verbara.Platform.Api/Endpoints/CannedResponseEndpoints.cs` — new (admin + agent)
 - Platform.Web: `src/core/api/hooks/use-canned-responses.ts` — new hook
 - Platform.Web: `src/agent/conversation/canned-responses.tsx` — update to use hook
 
@@ -375,7 +375,7 @@ POST /supervisor/conversations/{id}/note
 **Auth:** All endpoints require `SupervisorPlus` authorization policy.
 
 **Files:**
-- `src/Asterisk.Platform.Api/Endpoints/SupervisorEndpoints.cs` — add 5 new endpoints
+- `src/Verbara.Platform.Api/Endpoints/SupervisorEndpoints.cs` — add 5 new endpoints
 
 **Tests:** 6 tests — list conversations filtered, view messages, takeover transfers ownership, force close works, coaching note not sent to customer, auth enforced
 
@@ -435,9 +435,9 @@ private async Task<ReportData> BuildReportData(ScheduledReport report, string pr
 ```
 
 **Files:**
-- `src/Asterisk.Platform.Core/Reports/IReportDataBuilder.cs` — new
-- `src/Asterisk.Platform.Api/Services/Reports/ReportDataBuilderRegistry.cs` — new
-- `src/Asterisk.Platform.Api/Services/Reports/ReportSchedulerService.cs` — update BuildReportData
+- `src/Verbara.Platform.Core/Reports/IReportDataBuilder.cs` — new
+- `src/Verbara.Platform.Api/Services/Reports/ReportDataBuilderRegistry.cs` — new
+- `src/Verbara.Platform.Api/Services/Reports/ReportSchedulerService.cs` — update BuildReportData
 
 **Tests:** 2 tests — unknown type throws, delegates to correct builder
 
@@ -458,7 +458,7 @@ private async Task<ReportData> BuildReportData(ScheduledReport report, string pr
 
 **Summary:** Totals and averages across all agents.
 
-**Files:** `src/Asterisk.Platform.Api/Services/Reports/AgentPerformanceReportBuilder.cs`
+**Files:** `src/Verbara.Platform.Api/Services/Reports/AgentPerformanceReportBuilder.cs`
 **Tests:** 2 tests — generates rows per agent, empty data returns empty rows with zeroed summary
 
 ### D.3: Queue Analytics Report Builder
@@ -478,7 +478,7 @@ private async Task<ReportData> BuildReportData(ScheduledReport report, string pr
 
 **Summary:** Totals across all queues.
 
-**Files:** `src/Asterisk.Platform.Api/Services/Reports/QueueAnalyticsReportBuilder.cs`
+**Files:** `src/Verbara.Platform.Api/Services/Reports/QueueAnalyticsReportBuilder.cs`
 **Tests:** 2 tests — generates rows per queue, summary calculates weighted SLA
 
 ### D.4: Conversation Summary Report Builder
@@ -497,7 +497,7 @@ private async Task<ReportData> BuildReportData(ScheduledReport report, string pr
 
 **Summary:** Totals across all channels.
 
-**Files:** `src/Asterisk.Platform.Api/Services/Reports/ConversationSummaryReportBuilder.cs`
+**Files:** `src/Verbara.Platform.Api/Services/Reports/ConversationSummaryReportBuilder.cs`
 **Tests:** 2 tests — generates rows per channel, handles no-data gracefully
 
 ### D.5: Report Type Validation
@@ -506,7 +506,7 @@ When creating a `ScheduledReport` via API (`POST /admin/reports`), validate that
 
 **Valid types:** `"agent_performance"`, `"queue_analytics"`, `"conversation_summary"`
 
-**Files:** `src/Asterisk.Platform.Api/Endpoints/ScheduledReportEndpoints.cs` — add validation
+**Files:** `src/Verbara.Platform.Api/Endpoints/ScheduledReportEndpoints.cs` — add validation
 **Tests:** 1 test — invalid type returns 400 with list of valid types
 
 ### D.6: Bot Analytics Aggregation
@@ -562,13 +562,13 @@ CREATE INDEX IF NOT EXISTS ix_bot_analytics_tenant_date
 ```
 
 **Files:**
-- `src/Asterisk.Platform.Bot/BotAnalyticsRecord.cs` — new
-- `src/Asterisk.Platform.Bot/BotAnalyticsSummary.cs` — new
-- `src/Asterisk.Platform.Bot/IBotAnalyticsStore.cs` — new
-- `src/Asterisk.Platform.Storage.InMemory/InMemoryBotAnalyticsStore.cs` — new
-- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresBotAnalyticsStore.cs` — new
-- `src/Asterisk.Platform.Api/Services/BotAnalyticsPersistenceService.cs` — new
-- `src/Asterisk.Platform.Api/Endpoints/AnalyticsEndpoints.cs` — add bot analytics endpoint
+- `src/Verbara.Platform.Bot/BotAnalyticsRecord.cs` — new
+- `src/Verbara.Platform.Bot/BotAnalyticsSummary.cs` — new
+- `src/Verbara.Platform.Bot/IBotAnalyticsStore.cs` — new
+- `src/Verbara.Platform.Storage.InMemory/InMemoryBotAnalyticsStore.cs` — new
+- `src/Verbara.Platform.Storage.Postgres/Stores/PostgresBotAnalyticsStore.cs` — new
+- `src/Verbara.Platform.Api/Services/BotAnalyticsPersistenceService.cs` — new
+- `src/Verbara.Platform.Api/Endpoints/AnalyticsEndpoints.cs` — add bot analytics endpoint
 
 **Tests:** 4 tests — record event, summary calculates rates, empty period returns zeroes, tenant isolation
 
@@ -630,12 +630,12 @@ app.MapHealthChecks("/health/ready", new() { Predicate = r => r.Tags.Contains("r
 Only register PostgresHealthCheck if Postgres connection string is configured.
 
 **Files:**
-- `src/Asterisk.Platform.Api/Health/PostgresHealthCheck.cs` — new
-- `src/Asterisk.Platform.Api/Health/BackgroundServiceHealthCheck.cs` — new
-- `src/Asterisk.Platform.Api/Health/AsteriskAmiHealthCheck.cs` — new
-- `src/Asterisk.Platform.Api/Health/IServiceHeartbeat.cs` — new interface
-- `src/Asterisk.Platform.Api/Health/ServiceHeartbeat.cs` — new implementation
-- `src/Asterisk.Platform.Api/Program.cs` — update health check registration
+- `src/Verbara.Platform.Api/Health/PostgresHealthCheck.cs` — new
+- `src/Verbara.Platform.Api/Health/BackgroundServiceHealthCheck.cs` — new
+- `src/Verbara.Platform.Api/Health/AsteriskAmiHealthCheck.cs` — new
+- `src/Verbara.Platform.Api/Health/IServiceHeartbeat.cs` — new interface
+- `src/Verbara.Platform.Api/Health/ServiceHeartbeat.cs` — new implementation
+- `src/Verbara.Platform.Api/Program.cs` — update health check registration
 - Background services (QueueDistributionWorker, ConversationTimeoutWorker, etc.) — add `RecordTick()` calls
 
 **Tests:** 4 tests — postgres healthy, postgres unhealthy, service heartbeat timeout, liveness always 200
@@ -686,7 +686,7 @@ public sealed class DatabaseMigrationService : IHostedService
 }
 ```
 
-**Migration files:** Embedded as assembly resources in `Asterisk.Platform.Storage.Postgres`. Read via `Assembly.GetManifestResourceStream()`.
+**Migration files:** Embedded as assembly resources in `Verbara.Platform.Storage.Postgres`. Read via `Assembly.GetManifestResourceStream()`.
 
 **Startup order:** Runs BEFORE other hosted services (registered with `IHostedService` priority or explicit startup ordering).
 
@@ -695,9 +695,9 @@ public sealed class DatabaseMigrationService : IHostedService
 **Only runs when Postgres is configured.** InMemory-only deployments skip entirely.
 
 **Files:**
-- `src/Asterisk.Platform.Storage.Postgres/DatabaseMigrationService.cs` — new
-- `src/Asterisk.Platform.Storage.Postgres/Asterisk.Platform.Storage.Postgres.csproj` — embed SQL files as resources
-- `src/Asterisk.Platform.Api/Program.cs` — register migration service (before other hosted services)
+- `src/Verbara.Platform.Storage.Postgres/DatabaseMigrationService.cs` — new
+- `src/Verbara.Platform.Storage.Postgres/Verbara.Platform.Storage.Postgres.csproj` — embed SQL files as resources
+- `src/Verbara.Platform.Api/Program.cs` — register migration service (before other hosted services)
 
 **Tests:** 3 tests — applies new migrations, skips applied, fails on bad SQL
 
@@ -732,9 +732,9 @@ if (app.Environment.IsProduction())
 ```
 
 **Files:**
-- `src/Asterisk.Platform.Api/Program.cs` — add validation block
-- `src/Asterisk.Platform.Api/appsettings.json` — remove AMI default credentials
-- `src/Asterisk.Platform.Api/appsettings.Development.json` — move defaults here
+- `src/Verbara.Platform.Api/Program.cs` — add validation block
+- `src/Verbara.Platform.Api/appsettings.json` — remove AMI default credentials
+- `src/Verbara.Platform.Api/appsettings.Development.json` — move defaults here
 
 **Tests:** 3 tests — production fails without service key, development allows defaults, missing CORS in production fails
 
@@ -756,9 +756,9 @@ if (app.Environment.IsProduction())
 4. Add `README` section documenting required environment variables for production
 
 **Files:**
-- `src/Asterisk.Platform.Api/appsettings.json` — remove secrets
-- `src/Asterisk.Platform.Api/appsettings.Development.json` — add dev defaults
-- `src/Asterisk.Platform.Api/Program.cs` — remove hardcoded fallbacks
+- `src/Verbara.Platform.Api/appsettings.json` — remove secrets
+- `src/Verbara.Platform.Api/appsettings.Development.json` — add dev defaults
+- `src/Verbara.Platform.Api/Program.cs` — remove hardcoded fallbacks
 
 **Tests:** No automated tests — verified by E.3 config validation tests
 
@@ -812,9 +812,9 @@ public sealed class TwilioOptions
 ```
 
 **Files:**
-- `src/Asterisk.Platform.Channels.Sms/Providers/TwilioSmsProvider.cs` — new
-- `src/Asterisk.Platform.Channels.Sms/Providers/TwilioOptions.cs` — new
-- `src/Asterisk.Platform.Channels.Sms/Providers/TwilioJsonContext.cs` — new (AOT)
+- `src/Verbara.Platform.Channels.Sms/Providers/TwilioSmsProvider.cs` — new
+- `src/Verbara.Platform.Channels.Sms/Providers/TwilioOptions.cs` — new
+- `src/Verbara.Platform.Channels.Sms/Providers/TwilioJsonContext.cs` — new (AOT)
 
 **Tests:** 3 tests — send succeeds with mock HTTP, send fails maps error, get status parses response
 
@@ -837,8 +837,8 @@ Twilio sends inbound messages as `application/x-www-form-urlencoded` POST with f
 **Return:** `WebhookResult.NewMessage` with parsed `InboundMessage`.
 
 **Files:**
-- `src/Asterisk.Platform.Channels.Sms/SmsWebhookHandler.cs` — extend with inbound parsing
-- `src/Asterisk.Platform.Channels.Sms/Providers/TwilioSignatureValidator.cs` — new
+- `src/Verbara.Platform.Channels.Sms/SmsWebhookHandler.cs` — extend with inbound parsing
+- `src/Verbara.Platform.Channels.Sms/Providers/TwilioSignatureValidator.cs` — new
 
 **Tests:** 4 tests — inbound text parsed, inbound with media creates blocks, HMAC validates, status update still works
 
@@ -862,7 +862,7 @@ if (!string.IsNullOrEmpty(twilioSection["AccountSid"]))
 
 If not configured, SMS remains without a provider (existing behavior — `SmsConnector.SendAsync` will fail gracefully when no `ISmsProvider` is registered).
 
-**Files:** `src/Asterisk.Platform.Api/Program.cs`
+**Files:** `src/Verbara.Platform.Api/Program.cs`
 **Tests:** 1 test — SMS works without Twilio configured (graceful failure)
 
 ### F.4: Cases API
@@ -902,9 +902,9 @@ group.MapPost("/{id}/conversations/{conversationId}", LinkConversation);
 - `CaseDto` — serializable response
 
 **Files:**
-- `src/Asterisk.Platform.Api/Endpoints/CaseEndpoints.cs` — new
-- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresCaseStore.cs` — new
-- `src/Asterisk.Platform.Storage.Postgres/Migrations/014_CannedResponsesBotAnalytics.sql` — add cases columns if needed
+- `src/Verbara.Platform.Api/Endpoints/CaseEndpoints.cs` — new
+- `src/Verbara.Platform.Storage.Postgres/Stores/PostgresCaseStore.cs` — new
+- `src/Verbara.Platform.Storage.Postgres/Migrations/014_CannedResponsesBotAnalytics.sql` — add cases columns if needed
 
 **Tests:** 6 tests — create case, list with filters, get by id, update status, link conversation, tenant isolation
 

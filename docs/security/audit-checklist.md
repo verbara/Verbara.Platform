@@ -62,22 +62,22 @@ Covers v1.9.2 hardening (jti, DataProtection wrap, fingerprint kid, kill `?token
 | 3.1 | JWT signature verified server-side; algorithm pinned (no `alg:none`); issuer + audience validated. | Read `JwtTokenService.cs` + `JwtBearerOptions` setup. | `ValidateIssuerSigningKey=true`, `ValidateIssuer=true`, `ValidateAudience=true`, `ValidAlgorithms` set. |
 | 3.2 | JWT `jti` enforced for refresh-token revocation; revocation cache is durable (not in-process only). | Read `IJtiRevocationCache` impl; verify Redis backing or DB persistence in production wiring. | Revocation survives restart. In-memory acceptable only for dev; prod must use Redis/DB. |
 | 3.3 | `?token=` query-string acceptance is killed (token only via `Authorization: Bearer`). | Grep `MessageReceived` event handler in JWT bearer setup. | No `Query["token"]` extraction outside SignalR hub-specific path; SignalR variant scoped to `/hubs/*` only. |
-| 3.4 | MFA enrollment + verification audited; bypass on lost-device requires admin recovery + audit. | Read `Asterisk.Platform.Identity/Mfa/`. Sample `MfaEnrollAsync`, `VerifyAsync`, `RecoverAsync`. | Every state transition emits audit; recovery requires elevated role. |
-| 3.5 | Impersonation creates new short-lived token bound to actor + impersonated user; `actor_id` claim preserved. | Read `Asterisk.Platform.Core/Impersonation/`. Verify `IImpersonationService.StartAsync` + `StopAsync`. | Actor-id claim persists across all impersonated requests; audit emits `impersonation.start` + `.stop`. |
+| 3.4 | MFA enrollment + verification audited; bypass on lost-device requires admin recovery + audit. | Read `Verbara.Platform.Identity/Mfa/`. Sample `MfaEnrollAsync`, `VerifyAsync`, `RecoverAsync`. | Every state transition emits audit; recovery requires elevated role. |
+| 3.5 | Impersonation creates new short-lived token bound to actor + impersonated user; `actor_id` claim preserved. | Read `Verbara.Platform.Core/Impersonation/`. Verify `IImpersonationService.StartAsync` + `StopAsync`. | Actor-id claim persists across all impersonated requests; audit emits `impersonation.start` + `.stop`. |
 | 3.6 | Impersonation audit log captures: actor, target, tenant, reason, timestamp, IP. | Read `ImpersonationAuditEntry` schema + emission point. | All 6 fields present. Tampering protection via append-only constraint (Scope 4). |
 
 ---
 
 ## Scope 4 — Audit log integrity
 
-Covers `Asterisk.Platform.Audit` package + DB storage layer.
+Covers `Verbara.Platform.Audit` package + DB storage layer.
 
 | ID | Item | Method | Pass criterion |
 |---|---|---|---|
 | 4.1 | Audit writer is append-only (no UPDATE / DELETE on `audit_entries` from app code). | Grep `audit_entries` in code; verify only INSERT statements. DB role for app should not have UPDATE/DELETE on audit. | Zero UPDATE/DELETE on `audit_entries` in app SQL. DB grants verified per env. |
 | 4.2 | Timestamps server-sourced via `IClock`; client-supplied timestamps rejected. | Read `IAuditService.AppendAsync` impl; verify `_clock.UtcNow` used, not `entry.Timestamp ?? _clock.UtcNow`. | `Timestamp` always overwritten server-side. |
 | 4.3 | Sensitive fields redacted (passwords, tokens, secrets never serialized into `payload` JSON). | Sample 5 emission sites; check for raw secret keys in payload. | No `password`, `secret`, `token`, `apiKey` raw fields in any emission payload. |
-| 4.4 | Audit emission failure does not silently drop event (logged + retried OR fail loud). | Read `IAuditService.AppendAsync` error path. | Failure logs `Asterisk.Platform.Audit.write_failed` counter + warns; no swallow. |
+| 4.4 | Audit emission failure does not silently drop event (logged + retried OR fail loud). | Read `IAuditService.AppendAsync` error path. | Failure logs `Verbara.Platform.Audit.write_failed` counter + warns; no swallow. |
 | 4.5 | Audit query API enforces `PlatformAdmin` for cross-tenant + `TenantAdmin` for own-tenant. | Read `AuditEndpoints.cs`. | Both policies enforced; downgrade attempt returns 403. |
 
 ---

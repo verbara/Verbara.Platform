@@ -1,5 +1,5 @@
 # =============================================================================
-# NetworkPolicy manifests for Asterisk Platform K8s deployment (R5.5)
+# NetworkPolicy manifests for Verbara Platform K8s deployment (R5.5)
 #
 # CNI: Cilium (supports standard K8s NetworkPolicy natively)
 # Namespaces: r55-data, r55-asterisk, r55-platform, monitoring, local-path-storage

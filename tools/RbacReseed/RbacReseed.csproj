@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <RootNamespace>Asterisk.Platform.Tools.RbacReseed</RootNamespace>
+    <RootNamespace>Verbara.Platform.Tools.RbacReseed</RootNamespace>
     <Description>R5.2 PC.3 (B.7) — Re-seed the platform_admin role permissions for existing tenants when the canonical RBAC catalog grows.</Description>
     <IsPackable>false</IsPackable>
     <IsAotCompatible>false</IsAotCompatible>
@@ -13,7 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Asterisk.Platform.Storage.Postgres\Asterisk.Platform.Storage.Postgres.csproj" />
+    <ProjectReference Include="..\..\src\Verbara.Platform.Storage.Postgres\Verbara.Platform.Storage.Postgres.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -59,8 +59,8 @@ public class AuthHotPathBench
             ]),
             Expires = now.AddMinutes(15),
             IssuedAt = now,
-            Issuer = "asterisk-platform",
-            Audience = "asterisk-platform",
+            Issuer = "verbara-platform",
+            Audience = "verbara-platform",
             SigningCredentials = _signingCredentials,
         };
     }

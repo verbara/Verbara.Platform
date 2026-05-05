@@ -5,7 +5,7 @@
 unblocks multi-replica startup, retunes Argon2id, sizes Postgres pool).
 
 This runbook codifies what an operator does to deploy
-`Asterisk.Platform.Api` at multi-replica with the AHH train applied. It
+`Verbara.Platform.Api` at multi-replica with the AHH train applied. It
 combines the multi-replica gate from
 [ADR-0012](../decisions/0012-jwt-rotation-pool-wireup-and-multi-replica-gate.md)
 with the post-Phase-4 throughput envelope projected from the Phase 0
@@ -24,7 +24,7 @@ Before flipping the deployment to N>1 replicas:
       `IMfaPendingCache`, `IPasswordResetCache` (verified by `AddAsteriskPlatformIdentityRedis`)
 - [ ] `RedisAuthCacheInvalidator` listening on `asterisk:auth:invalidate` (ADR-0010)
 - [ ] AuthWriteQueue registered as `IHostedService` (ADR-0011)
-- [ ] Server GC enabled in `Asterisk.Platform.Api.csproj`:
+- [ ] Server GC enabled in `Verbara.Platform.Api.csproj`:
       `<ServerGarbageCollection>true</ServerGarbageCollection>` (ADR-0013 §"Memory pressure")
 - [ ] PostgreSQL `max_connections` ≥ `replicas × api_pool_max + 20`
 
@@ -203,8 +203,8 @@ For other host classes scale the absolute values proportionally; the 25 % /
 ## What to NOT do
 
 - **Do not run pgBouncer in transaction-pool mode.** It breaks
-  `LISTEN/NOTIFY`, which `Asterisk.Sdk.Pro.Cluster.Storage.Postgres`
-  and `Asterisk.Sdk.Pro.Push` rely on. Session-pool mode preserves
+  `LISTEN/NOTIFY`, which `Verbara.Sdk.Pro.Cluster.Storage.Postgres`
+  and `Verbara.Sdk.Pro.Push` rely on. Session-pool mode preserves
   `LISTEN/NOTIFY` but loses most of pgBouncer's win. Skip pgBouncer
   until those Pro packages refactor away from `LISTEN/NOTIFY`, or
   until measured demand shows the current Npgsql pool is the

@@ -141,7 +141,7 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
         // Body should be RFC-7807 problem details with our stable type URI.
         var problem = JsonNode.Parse(await dupResp.Content.ReadAsStringAsync());
         problem!["status"]!.GetValue<int>().Should().Be(409);
-        problem["type"]!.GetValue<string>().Should().Be("https://asterisk.platform/errors/entity-already-exists");
+        problem["type"]!.GetValue<string>().Should().Be("https://verbara.platform/errors/entity-already-exists");
     }
 
     [Fact]

@@ -72,9 +72,9 @@ foreach (var handler in lifecycleHandlers)
 ### 1.3 Changes
 
 **Files:**
-- Create: `src/Asterisk.Platform.Api/Middleware/TenantStatusMiddleware.cs`
-- Modify: `src/Asterisk.Platform.Api/Endpoints/ManagementTenantEndpoints.cs` — inject + invoke lifecycle handlers
-- Modify: `src/Asterisk.Platform.Api/Program.cs` — register middleware after auth
+- Create: `src/Verbara.Platform.Api/Middleware/TenantStatusMiddleware.cs`
+- Modify: `src/Verbara.Platform.Api/Endpoints/ManagementTenantEndpoints.cs` — inject + invoke lifecycle handlers
+- Modify: `src/Verbara.Platform.Api/Program.cs` — register middleware after auth
 
 ## Deliverable 2: TenantSettings Facade
 
@@ -227,14 +227,14 @@ PUT /management/tenants/{id}/settings (PlatformAdminOnly)
 ### 2.6 Changes
 
 **Files:**
-- Create: `src/Asterisk.Platform.Core/TenantExtensions.cs` — `GetRateLimitTier()` extension
-- Create: `src/Asterisk.Platform.Api/Services/TenantTierCache.cs`
-- Create: `src/Asterisk.Platform.Api/Endpoints/TenantSettingsEndpoints.cs` — AdminOnly facade
-- Create: `src/Asterisk.Platform.Api/Endpoints/ManagementTenantSettingsEndpoints.cs` — PlatformAdminOnly facade
-- Modify: `src/Asterisk.Platform.Api/Middleware/TenantRateLimitPolicy.cs` — read from TenantTierCache
-- Modify: `src/Asterisk.Platform.Api/Middleware/RateLimitHeadersMiddleware.cs` — read from TenantTierCache
-- Modify: `src/Asterisk.Platform.Api/Serialization/ApiJsonContext.cs` — register new DTOs
-- Modify: `src/Asterisk.Platform.Api/Program.cs` — register TenantTierCache, map new endpoint groups
+- Create: `src/Verbara.Platform.Core/TenantExtensions.cs` — `GetRateLimitTier()` extension
+- Create: `src/Verbara.Platform.Api/Services/TenantTierCache.cs`
+- Create: `src/Verbara.Platform.Api/Endpoints/TenantSettingsEndpoints.cs` — AdminOnly facade
+- Create: `src/Verbara.Platform.Api/Endpoints/ManagementTenantSettingsEndpoints.cs` — PlatformAdminOnly facade
+- Modify: `src/Verbara.Platform.Api/Middleware/TenantRateLimitPolicy.cs` — read from TenantTierCache
+- Modify: `src/Verbara.Platform.Api/Middleware/RateLimitHeadersMiddleware.cs` — read from TenantTierCache
+- Modify: `src/Verbara.Platform.Api/Serialization/ApiJsonContext.cs` — register new DTOs
+- Modify: `src/Verbara.Platform.Api/Program.cs` — register TenantTierCache, map new endpoint groups
 
 ## Non-Goals
 
@@ -283,8 +283,8 @@ PUT /management/tenants/{id}/settings (PlatformAdminOnly)
 ### Build Verification
 
 ```sh
-cd /media/Data/Source/Verbara/Asterisk.Platform
-dotnet build Asterisk.Platform.slnx && dotnet test Asterisk.Platform.slnx
+cd /media/Data/Source/Verbara/Verbara.Platform
+dotnet build Verbara.Platform.slnx && dotnet test Verbara.Platform.slnx
 ```
 
 ## Repo Impact

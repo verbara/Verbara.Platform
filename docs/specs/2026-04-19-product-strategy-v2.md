@@ -3,13 +3,13 @@
 - **Status:** Complete draft (§1-§11 completas, pending user approval + ADR stubs subordinados)
 - **Date:** 2026-04-19
 - **Owners:** Harold Reina
-- **Scope:** cross-repo (`Asterisk.Sdk` MIT · `Asterisk.Sdk.Pro` commercial · `Asterisk.Platform` + `Asterisk.Platform.Web` host)
+- **Scope:** cross-repo (`Verbara.Sdk` MIT · `Verbara.Sdk.Pro` commercial · `Verbara.Platform` + `Verbara.Platform.Web` host)
 - **Related:**
   - Análisis técnico de alineación (plan file): `/home/orion75/.claude/plans/antes-de-continuar-quiero-quizzical-gizmo.md`
   - Re-auditoría v1.13.0: mismo plan file §13
-  - ADR-0001 (Pro 1.11 adoption): `Asterisk.Sdk.Pro/docs/decisions/0001-sdk-1.11-adoption.md`
-  - ADR-0002 (Pro hardening baseline): `Asterisk.Sdk.Pro/docs/decisions/0002-production-hardening-baseline.md`
-  - ADR-0025 SDK (Push NATS subscribe + loop prevention): `Asterisk.Sdk/docs/decisions/0025-push-nats-subscribe-and-loop-prevention.md`
+  - ADR-0001 (Pro 1.11 adoption): `Verbara.Sdk.Pro/docs/decisions/0001-sdk-1.11-adoption.md`
+  - ADR-0002 (Pro hardening baseline): `Verbara.Sdk.Pro/docs/decisions/0002-production-hardening-baseline.md`
+  - ADR-0025 SDK (Push NATS subscribe + loop prevention): `Verbara.Sdk/docs/decisions/0025-push-nats-subscribe-and-loop-prevention.md`
   - Roadmaps: Platform `docs/roadmap.md`, Pro `docs/roadmap.md`, SDK `docs/roadmap.md`
 
 ---
@@ -39,20 +39,20 @@ Sin este documento, decisiones individuales se toman con información parcial y 
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Asterisk.Platform.Web (React 19, 1.8.0)                                  │
+│ Verbara.Platform.Web (React 19, 1.8.0)                                  │
 │   — SaaS UI omnichannel contact center                                   │
 └──────────────────────────────────────────────────────────────────────────┘
         ▲ HTTP + SignalR
         │
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Asterisk.Platform (commercial, 30 pkgs, 1.8.1)                          │
+│ Verbara.Platform (commercial, 30 pkgs, 1.8.1)                          │
 │   — API host (59 endpoint groups), Identity, Billing, 11 channels,       │
 │     Conversations, Flows, Bot, KB, Surveys, Automation, Audit, Media     │
 └──────────────────────────────────────────────────────────────────────────┘
         ▲ PackageReference × 21 Pro (1.8.1-pro) + 2 Sdk directos (1.11.1)
         │
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Asterisk.Sdk.Pro (commercial, 25 pkgs, 1.8.1-pro)                       │
+│ Verbara.Sdk.Pro (commercial, 25 pkgs, 1.8.1-pro)                       │
 │   — Enterprise extensions: Dialer, Cluster, EventStore, Analytics,      │
 │     CallAnalytics, AgentAssist, Licensing, MultiTenant, Routing,        │
 │     Realtime, Push (SignalR hub + bridges), Resilience, Retention       │
@@ -60,7 +60,7 @@ Sin este documento, decisiones individuales se toman con información parcial y 
         ▲ PackageReference × ~14 SDK (1.11.1 pinned internally)
         │
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Asterisk.Sdk (MIT base, 24 pkgs, 1.13.0)                                │
+│ Verbara.Sdk (MIT base, 24 pkgs, 1.13.0)                                │
 │   — Telecom wrappers (Ami/Agi/Ari/Config) + Runtime (Live/Sessions/     │
 │     Activities/Hosting) + Event Fabric (Push + SSE/Webhooks/NATS)       │
 │     + AI Layer (Audio/VoiceAi + 7 STT + 4 TTS + OpenAiRealtime)         │
@@ -87,18 +87,18 @@ Sin este documento, decisiones individuales se toman con información parcial y 
 
 ### 1.4 Smells de layering
 
-**Smell 1 — SDK evolucionando a micro-platform.** Arrastra `StackExchange.Redis`, `Npgsql`, `Microsoft.AspNetCore.*`, `NATS.Client.*` en un MIT "SDK". Consumidor de `Asterisk.Sdk.Ami` obtiene transitivamente todo esto.
+**Smell 1 — SDK evolucionando a micro-platform.** Arrastra `StackExchange.Redis`, `Npgsql`, `Microsoft.AspNetCore.*`, `NATS.Client.*` en un MIT "SDK". Consumidor de `Verbara.Sdk.Ami` obtiene transitivamente todo esto.
 
 **Smell 2 — Pro ownea primitives no-comerciales.** `Pro.Resilience` (circuit breaker + retry + timeout) es infra genérica; `Pro.Storage.Common.Retention` tiene abstracciones que podrían ser base. Inversion de ownership: SDK retries siguen open-coded, MIT users no pueden usar primitives.
 
 **Smell 3 — Pro conoce vocabulario de Platform.** `Pro.Push.SignalR/Bridges/ConversationStatePushBridge.cs` + `ConversationAssignedEvent` + `ConversationTransferredEvent` — "Conversation" es concepto de Platform, no de Pro. Upward leak.
 
-**Smell 4 — Platform bypass Pro.** `Platform.Core.csproj` referencia `Asterisk.Sdk.Push` directo; `Platform.Api.csproj` referencia `Asterisk.Sdk.Hosting` directo. 2-pronged dependency — OK arquitectónicamente, contradice la narrativa strict-ladder.
+**Smell 4 — Platform bypass Pro.** `Platform.Core.csproj` referencia `Verbara.Sdk.Push` directo; `Platform.Api.csproj` referencia `Verbara.Sdk.Hosting` directo. 2-pronged dependency — OK arquitectónicamente, contradice la narrativa strict-ladder.
 
 ### 1.5 Estado de distribución
 
 - **Feed local primary:** 139+ nupkg, 48 unique IDs (SDK + Pro). SDK 1.13.0 packed hoy (24 paquetes nuevos).
-- **Feed stale** en `/Asterisk.Platform/local-nuget-feed/`: 171 nupkg congelados en SDK 1.5.x + Pro 1.0.x-pro. Directorio huérfano (`NuGet.Config` no lo consume). Bajo riesgo, pero ruido.
+- **Feed stale** en `/Verbara.Platform/local-nuget-feed/`: 171 nupkg congelados en SDK 1.5.x + Pro 1.0.x-pro. Directorio huérfano (`NuGet.Config` no lo consume). Bajo riesgo, pero ruido.
 - **Versionado:** SDK 1.13.0 HEAD · Pro 1.8.1-pro (pinea SDK 1.11.1) · Platform 1.8.1 (pinea Pro 1.8.1-pro). Platform al día tras bump hoy.
 - **CI coordination manual:** SDK publica via tag a nuget.org. Pro override nuget.config para usar nuget.org. **Platform sin `.github/`** — sin CI. Sin dependency-bump bot cross-repo.
 - **Disciplina breaking changes:** degrada descendente — SDK full (PackageValidation + PublicApiAnalyzers + BannedApiAnalyzers + Shipped.txt); Pro parcial (solo PublicApiAnalyzers); Platform cero analyzers.
@@ -248,7 +248,7 @@ HashiCorp BSL (2023) y Redis SSPL (2024) generaron forks (OpenTofu, Valkey) que 
 
 ### 4.1 Decisión
 
-**Drop "SDK" framing. Rebrand narrativa a "Asterisk Runtime for .NET".** Mantener nombre del paquete NuGet (`Asterisk.Sdk.*`) por continuidad SEO + PublicAPI + PackageValidation baseline.
+**Drop "SDK" framing. Rebrand narrativa a "Asterisk Runtime for .NET".** Mantener nombre del paquete NuGet (`Verbara.Sdk.*`) por continuidad SEO + PublicAPI + PackageValidation baseline.
 
 ### 4.2 Justificación
 
@@ -258,9 +258,9 @@ HashiCorp BSL (2023) y Redis SSPL (2024) generaron forks (OpenTofu, Valkey) que 
 - `asterisk-java` (Java reference) — explícitamente dice "library", honesto con su forma.
 - `Twilio .NET SDK`, `Vonage .NET SDK` — REST clients a cloud APIs. Passive.
 
-**Asterisk.Sdk envía algo categóricamente distinto:** 24 paquetes, 13 `BackgroundService`/`IHostedService`, 2 aggregate roots, in-memory broker, persistence drivers, SSE HTTP endpoints, Voice AI pipeline. Esto es **framework/runtime** — matching la descripción interna en CLAUDE.md.
+**Verbara.Sdk envía algo categóricamente distinto:** 24 paquetes, 13 `BackgroundService`/`IHostedService`, 2 aggregate roots, in-memory broker, persistence drivers, SSE HTTP endpoints, Voice AI pipeline. Esto es **framework/runtime** — matching la descripción interna en CLAUDE.md.
 
-**Naming "SDK" fuerza comparación contra AsterNET (legacy) y Sufficit (library)** — comparación apples-to-oranges donde Asterisk.Sdk parece overweight. Renombrar ubica el producto en **espacio competitivo vacío** (no hay .NET runtime para Asterisk comparable) — frente a `asterisk-java` como feature-parity yardstick.
+**Naming "SDK" fuerza comparación contra AsterNET (legacy) y Sufficit (library)** — comparación apples-to-oranges donde Verbara.Sdk parece overweight. Renombrar ubica el producto en **espacio competitivo vacío** (no hay .NET runtime para Asterisk comparable) — frente a `asterisk-java` como feature-parity yardstick.
 
 **Microsoft Agent Framework 1.0 (abril 2026) legitimó "framework" en .NET.** El término tiene vigencia actual.
 
@@ -268,28 +268,28 @@ HashiCorp BSL (2023) y Redis SSPL (2024) generaron forks (OpenTofu, Valkey) que 
 
 | Repo | Nombre público | Package ID (sin cambio) | Competencia directa |
 |---|---|---|---|
-| `Asterisk.Sdk` | **Asterisk Runtime for .NET** | `Asterisk.Sdk.*` (24 pkgs) | asterisk-java (Java), espacio vacío .NET |
-| `Asterisk.Sdk.Pro` | **Asterisk Enterprise Runtime** (o "Runtime Pro") | `Asterisk.Sdk.Pro.*` (25 pkgs) | MiRTA PBX, Wazo-as-platform, FusionPBX commercial |
-| `Asterisk.Platform` | **Asterisk Contact Center** (open-core CCaaS) | `Asterisk.Platform.*` (30 pkgs) | VICIdial (legacy voice), Chatwoot (digital), Wazo UCaaS, 3CX |
-| `Asterisk.Platform.Web` | **Asterisk Contact Center Web** | React/TypeScript | idem (frontend del anterior) |
+| `Verbara.Sdk` | **Asterisk Runtime for .NET** | `Verbara.Sdk.*` (24 pkgs) | asterisk-java (Java), espacio vacío .NET |
+| `Verbara.Sdk.Pro` | **Asterisk Enterprise Runtime** (o "Runtime Pro") | `Verbara.Sdk.Pro.*` (25 pkgs) | MiRTA PBX, Wazo-as-platform, FusionPBX commercial |
+| `Verbara.Platform` | **Asterisk Contact Center** (open-core CCaaS) | `Verbara.Platform.*` (30 pkgs) | VICIdial (legacy voice), Chatwoot (digital), Wazo UCaaS, 3CX |
+| `Verbara.Platform.Web` | **Asterisk Contact Center Web** | React/TypeScript | idem (frontend del anterior) |
 
 ### 4.4 Cambios concretos — rebrand checklist (10 puntos)
 
-**Package IDs NO cambian** (`Asterisk.Sdk.*` estable — SEO + PublicAPI + PackageValidation baseline). **Nombre repo GitHub NO cambia** (URL estable, breaking sería catastrófico). Solo cambia narrativa pública + metadata.
+**Package IDs NO cambian** (`Verbara.Sdk.*` estable — SEO + PublicAPI + PackageValidation baseline). **Nombre repo GitHub NO cambia** (URL estable, breaking sería catastrófico). Solo cambia narrativa pública + metadata.
 
-1. **`Asterisk.Sdk/README.md` línea 3 + hero section:** "The modern .NET SDK for Asterisk PBX..." → "**Asterisk Runtime for .NET** — BackgroundService-native event fabric, ARI/AMI/Realtime, VoiceAI-ready, AOT-friendly."
-2. **`Asterisk.Sdk/CLAUDE.md` §Project Overview:** "Asterisk.Sdk is a .NET 10 Native AOT SDK..." → "Asterisk Runtime for .NET — framework en .NET 10 Native AOT para Asterisk PBX...".
-3. **`Asterisk.Sdk/Directory.Build.props`:**
-   - `<Product>Asterisk.Sdk</Product>` → `<Product>Asterisk Runtime for .NET</Product>`.
+1. **`Verbara.Sdk/README.md` línea 3 + hero section:** "The modern .NET SDK for Asterisk PBX..." → "**Asterisk Runtime for .NET** — BackgroundService-native event fabric, ARI/AMI/Realtime, VoiceAI-ready, AOT-friendly."
+2. **`Verbara.Sdk/CLAUDE.md` §Project Overview:** "Verbara.Sdk is a .NET 10 Native AOT SDK..." → "Asterisk Runtime for .NET — framework en .NET 10 Native AOT para Asterisk PBX...".
+3. **`Verbara.Sdk/Directory.Build.props`:**
+   - `<Product>Verbara.Sdk</Product>` → `<Product>Asterisk Runtime for .NET</Product>`.
    - `<PackageTags>asterisk;ami;agi;ari;voip;pbx;telephony;native-aot;sdk</PackageTags>` → `asterisk;ami;agi;ari;voip;pbx;telephony;native-aot;runtime;framework`.
-4. **Cada `src/*/Asterisk.Sdk.*.csproj` (24 files):** `<Description>` individual re-redactada. Patrón: "Asterisk Runtime for .NET — [domain]: ..."
+4. **Cada `src/*/Verbara.Sdk.*.csproj` (24 files):** `<Description>` individual re-redactada. Patrón: "Asterisk Runtime for .NET — [domain]: ..."
 5. **`docs/README-commercial.md` + `docs/README-technical.md`:** actualización de narrativa y tagline.
 6. **`Examples/**/README.md` (22 example apps):** descripciones cortas ajustadas al nuevo framing.
 7. **NuGet.org descriptions:** automático via `<Description>` en csproj. Re-publish en siguiente minor release (v2.0.0-preview1).
 8. **GitHub repo topics:** quitar `sdk`, agregar `framework`, `runtime`, `native-aot-framework`. Ajustar About section.
 9. **Documentation site** (si/cuando exista): tagline + landing page.
-10. **`Asterisk.Sdk.Pro/Directory.Build.props` + README:** "Pro" sigue como brand. Descripción: "Enterprise Runtime for Asterisk — multi-tenant, cluster, compliance, licensing, enterprise AI."
-11. **`Asterisk.Platform/README.md`:** "Asterisk Contact Center — open-core omnichannel platform."
+10. **`Verbara.Sdk.Pro/Directory.Build.props` + README:** "Pro" sigue como brand. Descripción: "Enterprise Runtime for Asterisk — multi-tenant, cluster, compliance, licensing, enterprise AI."
+11. **`Verbara.Platform/README.md`:** "Asterisk Contact Center — open-core omnichannel platform."
 12. **Stewardship pledge:** ADR-0027 (SDK) + ADR Pro referenciándolo. Texto público: "Primitives stay MIT. Forever."
 
 **Ejecución:** single PR cross-repo en Mes 5 (v2.0.0-preview1). Todos los cambios coordinados para evitar narrativa inconsistente durante ventana de transición.
@@ -331,7 +331,7 @@ Decisiones:
 - **Platform CI setup** — `.github/workflows/ci.yml` (build + test) en Platform. Sin release workflow (Platform no se distribuye por NuGet, solo Docker image).
 - **Pro publish.yml** — replicar pattern del SDK (tag-triggered a nuget.org), eliminando manual step.
 - **Dependency bot cross-repo** — Renovate preferred (soporta multi-repo + `PackageVersion` Central Package Management). Config: SDK release → auto-PR a Pro; Pro release → auto-PR a Platform. Manual merge.
-- **Feed stale** — borrar `/Asterisk.Platform/local-nuget-feed/` o mover a `docs/archived/feed/` para evitar accidental resolution.
+- **Feed stale** — borrar `/Verbara.Platform/local-nuget-feed/` o mover a `docs/archived/feed/` para evitar accidental resolution.
 - **Meta-packages deferred** — no incluir en v2.0. Evaluar en v2.1+ si hay demanda.
 
 ### 5.3 Release coordination
@@ -405,7 +405,7 @@ Para sustentar claims publicados:
 - **NATS bidirectional throughput + reconnect behavior**.
 - **VoiceAi E2E latency** (STT → pipeline → TTS) with provider variations.
 - **Sessions store Postgres roundtrip** under load.
-- Shipped como benchmark suite en `Tests/Asterisk.Sdk.Benchmarks/` + resultados publicados en release notes.
+- Shipped como benchmark suite en `Tests/Verbara.Sdk.Benchmarks/` + resultados publicados en release notes.
 
 **Target v2.0:** benchmark suite completo antes de publicar SLOs formales.
 
@@ -484,9 +484,9 @@ Para sustentar claims publicados:
 - **ADR-0034 SDK:** "ISessionInterceptor — contract público reemplaza `InternalsVisibleTo Pro.Cluster` en Sessions.csproj".
 
 **Code migration (primitives):**
-- Ship `Asterisk.Sdk.Resilience` MIT. Pro.Resilience → type-forward + re-export.
-- Ship `Asterisk.Sdk.EventLog` abstractions MIT (`IEventLog`, append + read). Pro.EventStore hereda + extiende a `IEventStore` completo.
-- Ship `Asterisk.Sdk.Retention` base abstractions MIT (`IRetentionTarget`, `RetentionService` base). Pro retention keeps specific policies + **meter re-emit durante ventana** (`Asterisk.Sdk.Pro.Storage.Common.Retention` + `Asterisk.Sdk.Retention` ambos activos v2.0-v2.1 para no romper dashboards).
+- Ship `Verbara.Sdk.Resilience` MIT. Pro.Resilience → type-forward + re-export.
+- Ship `Verbara.Sdk.EventLog` abstractions MIT (`IEventLog`, append + read). Pro.EventStore hereda + extiende a `IEventStore` completo.
+- Ship `Verbara.Sdk.Retention` base abstractions MIT (`IRetentionTarget`, `RetentionService` base). Pro retention keeps specific policies + **meter re-emit durante ventana** (`Verbara.Sdk.Pro.Storage.Common.Retention` + `Verbara.Sdk.Retention` ambos activos v2.0-v2.1 para no romper dashboards).
 - SDK adopciones: AmiConnection + AriLoggingHandler + WebhookDeliveryService usan Resilience primitive (eliminando open-coded retry).
 - `PushEventMetadata` → adapter a `CloudEvent` (envelope canónico). RemotePushEvent refactor a CloudEvent con `OriginalEventType` + `data`.
 
@@ -496,7 +496,7 @@ Para sustentar claims publicados:
 - **U — Pro.OpenTelemetry adopta `AsteriskSemanticConventions`** (dependiente de Pro bump SDK 1.13, ya posible post-bump). 2h aditivo.
 
 **Mes 3 (julio 2026) — Cluster + observability + naming cleanup:**
-- Ship `Asterisk.Sdk.Cluster.Primitives` (`INodeRegistry`, `IMembershipProvider`, `IClusterTransport`).
+- Ship `Verbara.Sdk.Cluster.Primitives` (`INodeRegistry`, `IMembershipProvider`, `IClusterTransport`).
 - `PushActivitySource` + `PushMetrics` adoptan `AsteriskSemanticConventions` (tenant.id, call.id, event.id tags — business correlation).
 - **Dual `AudioSocketServer` rename** (en Ari → `AriAudioSocketListener`). **Type-forward window abierto**. (Desacoplado de Pro bump Mes 4 para evitar doble churn.)
 - Platform CI setup (`.github/workflows/ci.yml`).
@@ -524,7 +524,7 @@ Para sustentar claims publicados:
 - **SDK v2.0.0 stable.** Primera LTS declarada (soporte 12 meses post-v3.0).
 - Pro v2.0.0-pro compatible.
 - Platform v2.0 compatible. CI funcional.
-- Feed stale en `/Asterisk.Platform/local-nuget-feed/` archivado.
+- Feed stale en `/Verbara.Platform/local-nuget-feed/` archivado.
 - Public stewardship pledge publicado.
 - Release notes con competitive positioning (§8 narrativa).
 - CloudEvents spec compliance announced.

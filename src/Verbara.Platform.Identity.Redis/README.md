@@ -1,4 +1,4 @@
-# Asterisk.Platform.Identity.Redis
+# Verbara.Platform.Identity.Redis
 
 Redis-backed implementations of `IMfaPendingCache` and `IPasswordResetCache`
 for multi-instance Platform API deployments.
@@ -32,7 +32,7 @@ The `AddAsteriskPlatformIdentityRedis` extension is an opt-in override — it
 replaces any existing `IMfaPendingCache` + `IPasswordResetCache` registrations
 and registers a singleton `IConnectionMultiplexer` if one is not already
 present (so it shares the pool with other Redis-backed packages such as
-`Asterisk.Sdk.Pro.Cluster.Redis`).
+`Verbara.Sdk.Pro.Cluster.Redis`).
 
 ## Key schema
 

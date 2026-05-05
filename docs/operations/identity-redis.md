@@ -1,6 +1,6 @@
 # Operations — Identity Redis (MFA + Password-Reset Caches)
 
-**Package:** `Asterisk.Platform.Identity.Redis` (v1.9.3, R5.1 Task L) ·
+**Package:** `Verbara.Platform.Identity.Redis` (v1.9.3, R5.1 Task L) ·
 **Interfaces:** `IMfaPendingCache`, `IPasswordResetCache` ·
 **Backplane:** Redis (StackExchange.Redis 2.12.14).
 
@@ -21,7 +21,7 @@ safe and zero-ops.
 In a horizontally scaled deploy (load balancer + N Platform API pods) a token
 issued by pod A cannot be verified by pod B, so MFA and password-reset flows
 silently fail on any follow-up request that hits a different pod.
-`Asterisk.Platform.Identity.Redis` stores the tokens in Redis with atomic
+`Verbara.Platform.Identity.Redis` stores the tokens in Redis with atomic
 `StringGetDeleteAsync` so the `TakeAsync` contract (single-consumption)
 continues to hold across the fleet.
 
@@ -95,7 +95,7 @@ expired entry.
 
 If the Platform process already registers an `IConnectionMultiplexer` (for
 example through `AddAsteriskClusterRedis(...)` from
-`Asterisk.Sdk.Pro.Cluster.Redis`), `AddAsteriskPlatformIdentityRedis` reuses
+`Verbara.Sdk.Pro.Cluster.Redis`), `AddAsteriskPlatformIdentityRedis` reuses
 it instead of opening a second connection pool. Just make sure both
 registrations point at the same endpoint.
 
@@ -114,7 +114,7 @@ registrations point at the same endpoint.
 ## Tests
 
 Testcontainers-backed integration tests live in
-`tests/Asterisk.Platform.Identity.Redis.Tests/`. They spin up a throw-away
+`tests/Verbara.Platform.Identity.Redis.Tests/`. They spin up a throw-away
 `redis:7-alpine` container per test class and cover: put+take roundtrip,
 single-consumption, stored-expired short-circuit, TTL eviction, key-prefix
 isolation, and the DI replace behavior.
@@ -122,7 +122,7 @@ isolation, and the DI replace behavior.
 Run locally (requires Docker):
 
 ```sh
-dotnet test tests/Asterisk.Platform.Identity.Redis.Tests/
+dotnet test tests/Verbara.Platform.Identity.Redis.Tests/
 ```
 
 ## Related

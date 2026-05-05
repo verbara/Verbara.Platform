@@ -6,8 +6,8 @@
 
 **Stack under test:**
 
-- Asterisk.Platform v1.14.6 (ADR-0015 Phase 2 — shared `NpgsqlDataSource`).
-- Asterisk.Sdk.Pro 1.16.0-pro (ADR-0008 shared `NpgsqlDataSource` overload across 9 storage packages).
+- Verbara.Platform v1.14.6 (ADR-0015 Phase 2 — shared `NpgsqlDataSource`).
+- Verbara.Sdk.Pro 1.16.0-pro (ADR-0008 shared `NpgsqlDataSource` overload across 9 storage packages).
 - `docker/docker-compose.smb.yml` SMB tier (Postgres 18 alpine, `max_connections=200`, `shared_buffers=512MB`, `effective_cache_size=2GB`; Redis 8 alpine; 4 ASP.NET Core replicas not used — single platform-api container).
 - 12 containers up (6 app + 6 r55-obs: Prometheus, Grafana, Loki, Alertmanager, node-exporter, blackbox-exporter).
 
@@ -20,12 +20,12 @@
 Driver: `scripts/scenario-sweep.sh presence` looping **144 steps × 600 s @ VU = 500** (= 24 h calendar-time; admin JWT refreshed every step against the 15-min token TTL).
 
 Scenario: `presence_broadcast` against `GET /api/v1/admin/agents` (read-only NBomber scenario from
-`tests/Asterisk.Platform.LoadTests/Scenarios/PresenceBroadcastScenarios.cs`). HTTP-only — SIPp companion (`03-queue-join`) deferred to a Phase D-L.5 follow-up; first iteration validates the harness + isolates drift to the API layer.
+`tests/Verbara.Platform.LoadTests/Scenarios/PresenceBroadcastScenarios.cs`). HTTP-only — SIPp companion (`03-queue-join`) deferred to a Phase D-L.5 follow-up; first iteration validates the harness + isolates drift to the API layer.
 
 Operational guards (running for the full 24 h):
 
 - `scripts/soak-log-watchdog.sh --threshold-gb 5 --interval-sec 300` — truncates any container's `*-json.log` over 5 GB every 5 min (Layer 2 of the disk-fill unblock; see `docs/operations/alerts-runbook.md` § NodeDiskSpaceLow).
-- `scripts/soak-drift-snapshot.sh` — appends a CSV row every hour to `tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv` (api_rss_mb, api_cpu_pct, pg_rss_mb, pg_conns, p99_ms, rps, kestrel_conns, disk_free_gb, prom_tsdb_mb).
+- `scripts/soak-drift-snapshot.sh` — appends a CSV row every hour to `tests/Verbara.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv` (api_rss_mb, api_cpu_pct, pg_rss_mb, pg_conns, p99_ms, rps, kestrel_conns, disk_free_gb, prom_tsdb_mb).
 
 Synthetic monitoring + Grafana dashboards from Phase 0L active throughout (Phase E-L verification deliverable). NodeDiskSpaceLow P0 alert (commit `8042d7d`) armed as safety net — never fired.
 
@@ -91,7 +91,7 @@ This is operationally acceptable as defense-in-depth, but Layer 3 (architectural
 
 ## What this validates
 
-1. **Asterisk.Platform v1.14.6 read-path can sustain ~11 k req/s × 24 h with zero failures and p99 stable under 100 ms** — independent confirmation of the Phase 2 SMB tier knee envelope measured in Phase C-L.
+1. **Verbara.Platform v1.14.6 read-path can sustain ~11 k req/s × 24 h with zero failures and p99 stable under 100 ms** — independent confirmation of the Phase 2 SMB tier knee envelope measured in Phase C-L.
 2. **No memory leak** detectable in Platform.Api or Postgres after 24 h of continuous traffic.
 3. **ADR-0015 Phase 2 single-pool architecture holds in real time** — connection count never exceeded 13. The Postgres-side `max_connections=200` setting in `docker-compose.smb.yml` provides ~15× operator headroom.
 4. **Phase 0L observability stack** (Prometheus, Loki, Alertmanager, blackbox-exporter, NodeDiskSpaceLow alert) is production-grade for 24h+ continuous operation.
@@ -110,11 +110,11 @@ This is operationally acceptable as defense-in-depth, but Layer 3 (architectural
 ## Closure actions
 
 - ✅ Background guards killed (PIDs 80573 + 448988).
-- ✅ Drift CSV preserved at `tests/Asterisk.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv`.
-- ✅ Driver + watchdog + drift logs archived to `tests/Asterisk.Platform.LoadTests/soak-reports/` with explanatory `README.md`.
+- ✅ Drift CSV preserved at `tests/Verbara.Platform.LoadTests/soak-reports/soak-drift-2026-04-29.csv`.
+- ✅ Driver + watchdog + drift logs archived to `tests/Verbara.Platform.LoadTests/soak-reports/` with explanatory `README.md`.
 - ✅ Plan `docs/plans/active/2026-04-27-r5.5-execution-plan.md` Phase D-L tasks marked done.
 - ✅ Memory `project_dl_soak_24h_pass.md` created with run details.
-- ✅ Final NBomber session report committed at `tests/Asterisk.Platform.LoadTests/load-test-reports/nbomber_report_2026-04-30--10-02-52.{md,csv,html}` (~350 KB total — within the repo's existing convention; per-step `nbomber-log-*.txt` files remain gitignored).
+- ✅ Final NBomber session report committed at `tests/Verbara.Platform.LoadTests/load-test-reports/nbomber_report_2026-04-30--10-02-52.{md,csv,html}` (~350 KB total — within the repo's existing convention; per-step `nbomber-log-*.txt` files remain gitignored).
 - ⏳ Layer 3 architectural fix (`/etc/docker/daemon.json` log rotation) — track as next operational hardening before D-LK / D-C soaks.
 
 ---
@@ -125,5 +125,5 @@ This is operationally acceptable as defense-in-depth, but Layer 3 (architectural
 - Disk-fill unblock saga: `docs/operations/alerts-runbook.md` § NodeDiskSpaceLow (commits `8042d7d` + `6146534`).
 - Phase 2 architecture: `docs/decisions/0015-postgres-pool-sprawl-mitigation.md` Phase 2 + Pro `docs/decisions/0008-shared-npgsqldatasource-overload.md`.
 - Phase C-L baseline (Phase 2 SMB tier): `docs/operations/load-test-baseline.md` § "Phase C-L SMB tier post-Phase-2".
-- Driver script: `scripts/scenario-sweep.sh` + scenario `tests/Asterisk.Platform.LoadTests/Scenarios/PresenceBroadcastScenarios.cs`.
+- Driver script: `scripts/scenario-sweep.sh` + scenario `tests/Verbara.Platform.LoadTests/Scenarios/PresenceBroadcastScenarios.cs`.
 - Operational guards: `scripts/soak-log-watchdog.sh` + `scripts/soak-drift-snapshot.sh`.

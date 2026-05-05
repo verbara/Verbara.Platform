@@ -1,7 +1,7 @@
 # Backup & Disaster Recovery Runbook
 
 **Audience:** SRE / on-call operator (assumed unfamiliar with the codebase).
-**Scope:** Asterisk.Platform stack — Postgres (single primary, optional WAL archive to S3), Redis (RDB + AOF), Platform.Api (HA via Pro.Cluster nodes — see R5.1 ship notes), Asterisk PBX nodes.
+**Scope:** Verbara.Platform stack — Postgres (single primary, optional WAL archive to S3), Redis (RDB + AOF), Platform.Api (HA via Pro.Cluster nodes — see R5.1 ship notes), Asterisk PBX nodes.
 **SLO:** Recovery Time Objective (RTO) **30 min**, Recovery Point Objective (RPO) **5 min** (PITR enabled) / **15 min** (Redis RDB).
 
 This runbook covers:
@@ -59,7 +59,7 @@ If WAL archive is **not** configured, drop to **24h RPO** (daily full only) and 
 Run via cron (host crontab or k8s `CronJob`):
 
 ```cron
-0 2 * * *  /opt/asterisk-platform/scripts/backup-pg.sh >> /var/log/asterisk-platform/backup-pg.log 2>&1
+0 2 * * *  /opt/verbara-platform/scripts/backup-pg.sh >> /var/log/verbara-platform/backup-pg.log 2>&1
 ```
 
 The script:
@@ -92,7 +92,7 @@ Verify daily: `ls -lh /var/backups/pg/*.dump | tail -3` should show file from pa
    ```
 3. **Stop Platform.Api** (and any other writer) so no client writes during restore:
    ```bash
-   systemctl stop asterisk-platform-api
+   systemctl stop verbara-platform-api
    # or in k8s: kubectl scale deployment/platform-api --replicas=0
    ```
 4. **Run restore script:**
@@ -111,7 +111,7 @@ Verify daily: `ls -lh /var/backups/pg/*.dump | tail -3` should show file from pa
    ```
 6. **Re-point Platform.Api** at new host (update `ConnectionStrings__Default`) and restart:
    ```bash
-   systemctl start asterisk-platform-api
+   systemctl start verbara-platform-api
    curl -fsS http://localhost:8080/health/ready  # must be 200
    ```
 7. **Smoke-test:** log in as a known user, list tenants, place a test call. Confirm CDR row appears in `completed_sessions`.
@@ -184,7 +184,7 @@ With both enabled, Redis on restart prefers AOF (more recent). RDB is the snapsh
 Cron entry:
 
 ```cron
-*/15 * * * *  /opt/asterisk-platform/scripts/backup-redis.sh >> /var/log/asterisk-platform/backup-redis.log 2>&1
+*/15 * * * *  /opt/verbara-platform/scripts/backup-redis.sh >> /var/log/verbara-platform/backup-redis.log 2>&1
 ```
 
 The script triggers `BGSAVE`, waits for `LASTSAVE` timestamp to advance (confirms snapshot completed), copies `dump.rdb` (Docker variant via `docker cp` or local variant via `cp`), and optionally uploads to S3.
@@ -211,7 +211,7 @@ The Identity.Redis JTI cache (R5.1) tracks revoked JWTs. **A restored Redis from
 
 **Mitigation after Redis restore:**
 
-1. **Force-rotate the JWT signing key** (via `Asterisk.Platform.Identity` admin endpoint or config secret rotation). All existing JWTs become invalid; users must re-authenticate. This is the strongest mitigation.
+1. **Force-rotate the JWT signing key** (via `Verbara.Platform.Identity` admin endpoint or config secret rotation). All existing JWTs become invalid; users must re-authenticate. This is the strongest mitigation.
 2. **Or lower JWT TTL temporarily** to 5 min for the next 24h to bound exposure window. Less disruptive but partial.
 3. **Audit the JTI table in Postgres** (if persisted) — any JTI explicitly revoked in `auth_token_revocations` should be re-pushed into Redis on startup. This is an existing startup-warmup hook in Identity.Redis (R5.1 spec).
 
@@ -241,7 +241,7 @@ Document in the DR exercise log which mitigation was chosen.
 
 1. Confirm via `kubectl get pods -l app=platform-api` (or `systemctl status` per host).
 2. Cluster routing (Pro.Cluster, R5.1 hardening) should already drain traffic from the bad node automatically. Verify via Grafana `cluster.node.healthy` gauge.
-3. Restart the failed node: `kubectl rollout restart deployment/platform-api` for the affected pod, or `systemctl restart asterisk-platform-api` on host.
+3. Restart the failed node: `kubectl rollout restart deployment/platform-api` for the affected pod, or `systemctl restart verbara-platform-api` on host.
 4. Confirm node rejoins: `cluster.node.healthy{node_id="X"}=1` within 60s.
 5. **No data restore needed** — node failover is stateless because all persistent state lives in Postgres + Redis.
 

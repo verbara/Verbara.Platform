@@ -1,14 +1,14 @@
-# Asterisk.Platform — Resilience Runbook
+# Verbara.Platform — Resilience Runbook
 
-**Audience:** On-call operators + SRE. **Scope:** Operating, interpreting, and troubleshooting the `Asterisk.Sdk.Resilience` meter exposed by Platform API at `/metrics`.
+**Audience:** On-call operators + SRE. **Scope:** Operating, interpreting, and troubleshooting the `Verbara.Sdk.Resilience` meter exposed by Platform API at `/metrics`.
 
-Baseline of keyed policies and their budgets is in [`../../src/Asterisk.Platform.Api/Program.cs`](../../src/Asterisk.Platform.Api/Program.cs) (and per-package DI extensions for channel connectors / workers). This runbook stays deliberately provider-neutral — the same PromQL queries work against any OTLP → Prometheus backend.
+Baseline of keyed policies and their budgets is in [`../../src/Verbara.Platform.Api/Program.cs`](../../src/Verbara.Platform.Api/Program.cs) (and per-package DI extensions for channel connectors / workers). This runbook stays deliberately provider-neutral — the same PromQL queries work against any OTLP → Prometheus backend.
 
 ---
 
 ## What the meter emits
 
-Every keyed `ResiliencePolicy` registered in Platform emits to the **`Asterisk.Sdk.Resilience`** meter with the following instruments:
+Every keyed `ResiliencePolicy` registered in Platform emits to the **`Verbara.Sdk.Resilience`** meter with the following instruments:
 
 | Instrument | Type | Labels |
 |---|---|---|

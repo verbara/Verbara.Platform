@@ -2,7 +2,7 @@
 # backup-pg.sh — Daily Postgres backup with optional S3 upload + 30-day local retention.
 #
 # Cron usage (host crontab):
-#   0 2 * * *  /opt/asterisk-platform/scripts/backup-pg.sh >> /var/log/asterisk-platform/backup-pg.log 2>&1
+#   0 2 * * *  /opt/verbara-platform/scripts/backup-pg.sh >> /var/log/verbara-platform/backup-pg.log 2>&1
 #
 # Env vars (all optional):
 #   PG_HOST     default: localhost

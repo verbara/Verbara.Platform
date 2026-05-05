@@ -188,8 +188,8 @@ public sealed class JwtTokenServiceRotationTests
             Subject = new System.Security.Claims.ClaimsIdentity(
                 [new System.Security.Claims.Claim(JwtRegisteredClaimNames.Sub, "evil-user")]),
             Expires = DateTime.UtcNow.AddMinutes(15),
-            Issuer = "asterisk-platform",
-            Audience = "asterisk-platform",
+            Issuer = "verbara-platform",
+            Audience = "verbara-platform",
             SigningCredentials = foreignCreds,
         };
         var foreignToken = new JwtSecurityTokenHandler().CreateEncodedJwt(descriptor);

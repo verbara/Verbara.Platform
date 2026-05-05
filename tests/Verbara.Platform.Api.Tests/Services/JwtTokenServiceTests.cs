@@ -58,8 +58,8 @@ public sealed class JwtTokenServiceTests : IDisposable
         var handler = new JwtSecurityTokenHandler();
         var jwt = handler.ReadJwtToken(token);
 
-        jwt.Issuer.Should().Be("asterisk-platform");
-        jwt.Audiences.Should().Contain("asterisk-platform");
+        jwt.Issuer.Should().Be("verbara-platform");
+        jwt.Audiences.Should().Contain("verbara-platform");
         jwt.Claims.Should().Contain(c => c.Type == JwtRegisteredClaimNames.Sub && c.Value == "user1");
         jwt.Claims.Should().Contain(c => c.Type == "tid" && c.Value == "t1");
         jwt.Claims.Should().Contain(c => c.Type == JwtRegisteredClaimNames.Email && c.Value == "admin@example.com");

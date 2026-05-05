@@ -6,7 +6,7 @@
 
 ## Problem Statement
 
-Asterisk.Platform has 27 packages, 1,068 tests, 3-tier multi-tenancy, cluster management, and rich CDR/analytics. But it **cannot be monetized as SaaS** because it lacks metering, billing, quota enforcement, and per-tenant observability. The consumption data already exists in CDR, messages, media, and dialer tables — what's missing is the accumulation layer, rate cards, quota enforcement, and management UI.
+Verbara.Platform has 27 packages, 1,068 tests, 3-tier multi-tenancy, cluster management, and rich CDR/analytics. But it **cannot be monetized as SaaS** because it lacks metering, billing, quota enforcement, and per-tenant observability. The consumption data already exists in CDR, messages, media, and dialer tables — what's missing is the accumulation layer, rate cards, quota enforcement, and management UI.
 
 ### Market Context
 
@@ -55,7 +55,7 @@ Asterisk.Platform has 27 packages, 1,068 tests, 3-tier multi-tenancy, cluster ma
 
 ## Architecture
 
-### New Package: `Asterisk.Platform.Billing`
+### New Package: `Verbara.Platform.Billing`
 
 Follows established convention: feature package with store interfaces, DI extension `AddPlatformBilling()`, InMemory + Postgres implementations in storage packages.
 
@@ -327,7 +327,7 @@ GET    /api/analytics/dashboard?tenantId=            — Filter dashboard by ten
 
 ### Sub-project A: Metering Engine + Quota Enforcement (Foundation)
 
-- New package `Asterisk.Platform.Billing` (models, enums, interfaces, services)
+- New package `Verbara.Platform.Billing` (models, enums, interfaces, services)
 - `IUsageRecordStore` — InMemory + Postgres implementations
 - `IMeteringService` + `IQuotaEnforcementService` — default implementations
 - Metering hooks (voice, messages, media, dialer, agent hours)

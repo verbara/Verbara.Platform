@@ -2,7 +2,7 @@
 
 > **Date:** 2026-03-31
 > **Scope:** Sprint 1 — Platform Admin (host tenant) + Login
-> **Location:** `Asterisk.Platform.Web/tests/e2e/`
+> **Location:** `Verbara.Platform.Web/tests/e2e/`
 > **Approach:** Playwright in the frontend repo, tests against running demo environment
 
 ## Overview
@@ -26,7 +26,7 @@ The demo environment must be running (`docker/demo/demo-reset.sh`). Playwright d
 ## Project Structure
 
 ```
-Asterisk.Platform.Web/
+Verbara.Platform.Web/
 ├── tests/
 │   └── e2e/
 │       ├── playwright.config.ts          # Base config: baseURL, projects, timeouts

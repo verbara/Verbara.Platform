@@ -4,7 +4,7 @@
 
 **Execution order:** A → B → C → D (quick-wins first, largest subsystem last).
 
-**Repos affected:** Asterisk.Platform (all 4), Asterisk.Sdk.Pro (sub-project A only — new ILicenseStatus interface).
+**Repos affected:** Verbara.Platform (all 4), Verbara.Sdk.Pro (sub-project A only — new ILicenseStatus interface).
 
 ---
 
@@ -18,7 +18,7 @@
 
 Two changes: (1) activate licensing in Program.cs with environment-aware defaults, (2) add a periodic re-validation hosted service that updates a queryable license status singleton.
 
-**SDK Pro changes (Asterisk.Sdk.Pro.Licensing):** ILicenseStatus interface, LicenseStatusTracker implementation, LicenseRevalidationService hosted service, LicenseOptions.RevalidationInterval property. Requires pack + restore cycle.
+**SDK Pro changes (Verbara.Sdk.Pro.Licensing):** ILicenseStatus interface, LicenseStatusTracker implementation, LicenseRevalidationService hosted service, LicenseOptions.RevalidationInterval property. Requires pack + restore cycle.
 
 **Platform changes:** Program.cs licensing config, management endpoint DTO enrichment. No new Platform files beyond endpoint changes.
 

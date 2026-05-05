@@ -140,7 +140,7 @@ services:
 
   web:
     build:
-      context: ../../Asterisk.Platform.Web
+      context: ../../Verbara.Platform.Web
       dockerfile: Dockerfile
       args:
         VITE_DEFAULT_TENANT_ID: platform

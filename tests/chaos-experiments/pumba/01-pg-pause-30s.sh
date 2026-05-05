@@ -2,7 +2,7 @@
 # R5.5 A.5 · Experiment 01 — Pause Postgres for 30 s.
 #
 # Validates: connection-pool recovery + retry budget on the platform-api
-# `Asterisk.Sdk.Resilience` keyed policies. Auth queries should retry +
+# `Verbara.Sdk.Resilience` keyed policies. Auth queries should retry +
 # eventually succeed once Postgres unfreezes; long-running queries
 # (analytics, audit) should drop their pool slot via timeout.
 #

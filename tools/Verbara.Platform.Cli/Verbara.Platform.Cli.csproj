@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Description>CLI tool for Asterisk.Platform database setup, migrations, and health checks</Description>
+    <Description>CLI tool for Verbara.Platform database setup, migrations, and health checks</Description>
     <IsPackable>false</IsPackable>
     <IsAotCompatible>false</IsAotCompatible>
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
@@ -12,11 +12,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Asterisk.Platform.Storage.Postgres\Asterisk.Platform.Storage.Postgres.csproj" />
+    <ProjectReference Include="..\..\src\Verbara.Platform.Storage.Postgres\Verbara.Platform.Storage.Postgres.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\..\src\Asterisk.Platform.Storage.Postgres\Migrations\*.sql">
+    <EmbeddedResource Include="..\..\src\Verbara.Platform.Storage.Postgres\Migrations\*.sql">
       <LogicalName>Migrations\%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>

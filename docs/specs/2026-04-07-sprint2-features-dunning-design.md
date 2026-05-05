@@ -227,20 +227,20 @@ When assigning a plan to a Customer tenant via management settings:
 
 **Files:**
 - **Sdk.Pro** (no changes for feature flags — only for dunning, see §2)
-- Create: `src/Asterisk.Platform.Core/TenantPlan.cs`
-- Create: `src/Asterisk.Platform.Core/PlanFeature.cs`
-- Create: `src/Asterisk.Platform.Core/PlanDefinition.cs`
-- Create: `src/Asterisk.Platform.Core/TenantAddOn.cs`
-- Create: `src/Asterisk.Platform.Core/ITenantAddOnStore.cs`
-- Create: `src/Asterisk.Platform.Core/IFeatureGateService.cs`
-- Modify: `src/Asterisk.Platform.Core/TenantExtensions.cs` — add GetPlan/SetPlan
-- Create: `src/Asterisk.Platform.Api/Services/FeatureGateCache.cs`
-- Create: `src/Asterisk.Platform.Api/Services/DefaultFeatureGateService.cs`
-- Create: `src/Asterisk.Platform.Api/Filters/PlanFeatureFilterExtensions.cs`
-- Modify: `src/Asterisk.Platform.Api/Middleware/TenantStatusMiddleware.cs` — populate FeatureGateCache
-- Modify: `src/Asterisk.Platform.Api/Program.cs` — register services, apply filters to endpoint groups
-- Create: `src/Asterisk.Platform.Storage.InMemory/InMemoryTenantAddOnStore.cs`
-- Modify: `src/Asterisk.Platform.Storage.InMemory/ServiceCollectionExtensions.cs`
+- Create: `src/Verbara.Platform.Core/TenantPlan.cs`
+- Create: `src/Verbara.Platform.Core/PlanFeature.cs`
+- Create: `src/Verbara.Platform.Core/PlanDefinition.cs`
+- Create: `src/Verbara.Platform.Core/TenantAddOn.cs`
+- Create: `src/Verbara.Platform.Core/ITenantAddOnStore.cs`
+- Create: `src/Verbara.Platform.Core/IFeatureGateService.cs`
+- Modify: `src/Verbara.Platform.Core/TenantExtensions.cs` — add GetPlan/SetPlan
+- Create: `src/Verbara.Platform.Api/Services/FeatureGateCache.cs`
+- Create: `src/Verbara.Platform.Api/Services/DefaultFeatureGateService.cs`
+- Create: `src/Verbara.Platform.Api/Filters/PlanFeatureFilterExtensions.cs`
+- Modify: `src/Verbara.Platform.Api/Middleware/TenantStatusMiddleware.cs` — populate FeatureGateCache
+- Modify: `src/Verbara.Platform.Api/Program.cs` — register services, apply filters to endpoint groups
+- Create: `src/Verbara.Platform.Storage.InMemory/InMemoryTenantAddOnStore.cs`
+- Modify: `src/Verbara.Platform.Storage.InMemory/ServiceCollectionExtensions.cs`
 
 ## Deliverable 2: Billing-Lifecycle Dunning
 
@@ -406,19 +406,19 @@ Added to `ManagementBillingEndpoints`:
 ### 2.10 Changes
 
 **Files:**
-- Modify: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/TenantStatus.cs` — add Warning, Degraded, PendingDeletion
-- Create: `src/Asterisk.Platform.Billing/PaymentStatus.cs`
-- Create: `src/Asterisk.Platform.Billing/DunningConfig.cs`
-- Create: `src/Asterisk.Platform.Billing/DunningRecord.cs`
-- Create: `src/Asterisk.Platform.Billing/IDunningStore.cs`
-- Create: `src/Asterisk.Platform.Billing/DunningService.cs`
-- Modify: `src/Asterisk.Platform.Billing/Invoice.cs` — add PaymentStatus property + DueDate
-- Modify: `src/Asterisk.Platform.Api/Middleware/TenantStatusMiddleware.cs` — handle Warning, Degraded, PendingDeletion
-- Modify: `src/Asterisk.Platform.Api/Endpoints/ManagementBillingEndpoints.cs` — dunning endpoints + invoice payment resolution
-- Create: `src/Asterisk.Platform.Storage.InMemory/InMemoryDunningStore.cs`
-- Modify: `src/Asterisk.Platform.Storage.InMemory/ServiceCollectionExtensions.cs`
-- Modify: `src/Asterisk.Platform.Api/Serialization/ApiJsonContext.cs` — register new DTOs
-- Modify: `src/Asterisk.Platform.Api/Program.cs` — register DunningService, DunningConfig
+- Modify: `/media/Data/Source/Verbara/Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.MultiTenant/TenantStatus.cs` — add Warning, Degraded, PendingDeletion
+- Create: `src/Verbara.Platform.Billing/PaymentStatus.cs`
+- Create: `src/Verbara.Platform.Billing/DunningConfig.cs`
+- Create: `src/Verbara.Platform.Billing/DunningRecord.cs`
+- Create: `src/Verbara.Platform.Billing/IDunningStore.cs`
+- Create: `src/Verbara.Platform.Billing/DunningService.cs`
+- Modify: `src/Verbara.Platform.Billing/Invoice.cs` — add PaymentStatus property + DueDate
+- Modify: `src/Verbara.Platform.Api/Middleware/TenantStatusMiddleware.cs` — handle Warning, Degraded, PendingDeletion
+- Modify: `src/Verbara.Platform.Api/Endpoints/ManagementBillingEndpoints.cs` — dunning endpoints + invoice payment resolution
+- Create: `src/Verbara.Platform.Storage.InMemory/InMemoryDunningStore.cs`
+- Modify: `src/Verbara.Platform.Storage.InMemory/ServiceCollectionExtensions.cs`
+- Modify: `src/Verbara.Platform.Api/Serialization/ApiJsonContext.cs` — register new DTOs
+- Modify: `src/Verbara.Platform.Api/Program.cs` — register DunningService, DunningConfig
 
 ## Deliverable 3: TenantSettings Facade Expansion
 
@@ -549,14 +549,14 @@ When PlatformAdmin sets add-ons via management settings PUT:
 
 ```sh
 # Sdk.Pro (TenantStatus enum change)
-cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Verbara.Sdk.Pro
 dotnet build && dotnet test
 dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/
 
 # Platform
-cd /media/Data/Source/Verbara/Asterisk.Platform
+cd /media/Data/Source/Verbara/Verbara.Platform
 rm -rf ~/.nuget/packages/asterisk.sdk.pro*
-dotnet restore && dotnet build Asterisk.Platform.slnx && dotnet test Asterisk.Platform.slnx
+dotnet restore && dotnet build Verbara.Platform.slnx && dotnet test Verbara.Platform.slnx
 ```
 
 ## Repo Impact

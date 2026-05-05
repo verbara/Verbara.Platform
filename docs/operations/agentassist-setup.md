@@ -6,12 +6,12 @@ v1.12.0-pro (R5.1 Task J).
 
 ## What the runtime toggle does
 
-`Asterisk.Sdk.Pro.AgentAssist` exposes `IAgentAssistFeatureToggle`, a
+`Verbara.Sdk.Pro.AgentAssist` exposes `IAgentAssistFeatureToggle`, a
 consumer-supplied gate that the `AgentAssistEngine` consults at the
 start of every call session. When the toggle returns `false`, the
 engine:
 
-1. Emits `agentassist.session.skipped` counter (`Asterisk.Sdk.Pro.AgentAssist` meter).
+1. Emits `agentassist.session.skipped` counter (`Verbara.Sdk.Pro.AgentAssist` meter).
 2. Returns immediately — no provider is started, no tokens are consumed,
    no audio snoop is opened.
 
@@ -92,7 +92,7 @@ builder.Services.AddDbContext<PlatformDataProtectionDbContext>(opt =>
     opt.UseNpgsql(coreConnectionString));
 builder.Services.AddPlatformDataProtection(opt =>
 {
-    opt.ApplicationName = "Asterisk.Platform";
+    opt.ApplicationName = "Verbara.Platform";
 });
 ```
 
@@ -106,8 +106,8 @@ If a deploy doesn't have a Postgres connection (rare) or prefers a mounted volum
 ```csharp
 builder.Services.AddPlatformDataProtection(opt =>
 {
-    opt.ApplicationName = "Asterisk.Platform";
-    opt.UseFileSystem("/var/lib/asterisk-platform/dataprotection-keys");
+    opt.ApplicationName = "Verbara.Platform";
+    opt.UseFileSystem("/var/lib/verbara-platform/dataprotection-keys");
 });
 ```
 
@@ -116,7 +116,7 @@ Pair with `docker-compose.yml`:
 ```yaml
 platform-api:
   volumes:
-    - ./data/dataprotection-keys:/var/lib/asterisk-platform/dataprotection-keys
+    - ./data/dataprotection-keys:/var/lib/verbara-platform/dataprotection-keys
 ```
 
 ### Override — ephemeral mode (test/CI only)
@@ -142,7 +142,7 @@ selected so misconfigurations are loud in logs.
 
 ## Metrics to watch
 
-All under meter `Asterisk.Sdk.Pro.AgentAssist`:
+All under meter `Verbara.Sdk.Pro.AgentAssist`:
 
 - `agentassist.session.started` — sessions that passed the toggle.
 - `agentassist.session.skipped` — sessions rejected by the toggle.

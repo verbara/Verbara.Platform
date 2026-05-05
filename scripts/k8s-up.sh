@@ -27,7 +27,7 @@ VM_DISK_SIZE=("20G" "40G" "40G" "40G")
 CILIUM_VERSION="1.19.3"
 GATEWAY_API_VERSION="v1.3.0"
 
-echo "=== Asterisk Platform — Talos K8s Cluster Bootstrap ==="
+echo "=== Verbara Platform — Talos K8s Cluster Bootstrap ==="
 echo "    Talos v1.13.0 · K8s 1.36.0 · Cilium $CILIUM_VERSION (eBPF)"
 echo ""
 

@@ -2,10 +2,10 @@
 // gap when the canonical permission catalog grows: fresh tenants pick up new
 // permissions automatically via RoleTemplateSeeder + RbacMigrationSeeder, but
 // existing tenants need this tool to re-align their tenant_role_permissions.
-using Asterisk.Platform.Storage.Postgres.Seeds;
+using Verbara.Platform.Storage.Postgres.Seeds;
 using Npgsql;
 
-namespace Asterisk.Platform.Tools.RbacReseed;
+namespace Verbara.Platform.Tools.RbacReseed;
 
 internal static class Program
 {
@@ -59,7 +59,7 @@ internal static class Program
         }
 
         Console.WriteLine();
-        Console.WriteLine("Asterisk.Platform — RBAC platform_admin re-seed");
+        Console.WriteLine("Verbara.Platform — RBAC platform_admin re-seed");
         Console.WriteLine("===============================================");
         Console.WriteLine($"Canonical permission count: {RoleTemplateSeeder.GetCanonicalPermissions().Count}");
         Console.WriteLine();
@@ -92,7 +92,7 @@ internal static class Program
 
     private static async Task<IReadOnlyList<string>> ListActiveTenantsAsync(NpgsqlConnection conn)
     {
-        // status = 0 → Active (matches Asterisk.Sdk.Pro.MultiTenant.TenantStatus.Active)
+        // status = 0 → Active (matches Verbara.Sdk.Pro.MultiTenant.TenantStatus.Active)
         const string sql = "SELECT tenant_id FROM tenants WHERE status = 0 ORDER BY tenant_id";
         var ids = new List<string>();
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -135,7 +135,7 @@ internal static class Program
     private static void PrintUsage()
     {
         Console.WriteLine("""
-            Asterisk.Platform — RBAC re-seed CLI
+            Verbara.Platform — RBAC re-seed CLI
 
             Re-aligns the per-tenant `platform_admin` role permissions with the
             current canonical permission catalog declared in

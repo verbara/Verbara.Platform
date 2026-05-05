@@ -1,7 +1,7 @@
 # Plan 24: Bug Fixes & Warnings
 
 **Date:** 2026-03-30
-**Scope:** Asterisk.Platform + Asterisk.Sdk (two repos)
+**Scope:** Verbara.Platform + Verbara.Sdk (two repos)
 **Goal:** Fix 3 runtime bugs and eliminate all compiler warnings
 
 ## Context
@@ -23,7 +23,7 @@ The Postgres storage registers all four (lines 86-90 in `Storage.Postgres/Servic
 
 ### Fix
 
-Move the 4 in-memory implementations from `tests/Asterisk.Platform.Api.Tests/InMemoryRbacStores.cs` to individual files in `src/Asterisk.Platform.Storage.InMemory/`:
+Move the 4 in-memory implementations from `tests/Verbara.Platform.Api.Tests/InMemoryRbacStores.cs` to individual files in `src/Verbara.Platform.Storage.InMemory/`:
 
 | New File | Interface | Source (test lines) |
 |----------|-----------|-------------------|
@@ -44,25 +44,25 @@ Update tests to import from the storage package instead of maintaining local dup
 
 ## Bug #1: AGI/ARI Health Returns 503
 
-### Root Cause (in Asterisk.Sdk)
+### Root Cause (in Verbara.Sdk)
 
-In `Asterisk.Sdk.Hosting/ServiceCollectionExtensions.cs`:
+In `Verbara.Sdk.Hosting/ServiceCollectionExtensions.cs`:
 
-1. **AGI**: `AgiHostedService` exists (`Asterisk.Sdk.Agi/Hosting/AgiHostedService.cs`) but is never registered. The AGI server stays in `Stopped` state.
+1. **AGI**: `AgiHostedService` exists (`Verbara.Sdk.Agi/Hosting/AgiHostedService.cs`) but is never registered. The AGI server stays in `Stopped` state.
 2. **ARI**: No hosted service exists. `AriClient` starts in `Initial` state and `ConnectAsync()` is never called. The health check reports `Unhealthy` for any state other than `Connected`.
 3. **AMI works** because `AmiConnectionHostedService` is registered (line 73) and calls `ConnectAsync()` on startup.
 
-### Fix (Asterisk.Sdk repo)
+### Fix (Verbara.Sdk repo)
 
 **AGI** — Register the existing hosted service in `AddAsterisk()`:
 ```csharp
 // After line 66 (AGI health check registration)
-services.AddSingleton<IHostedService, Asterisk.Sdk.Agi.Hosting.AgiHostedService>();
+services.AddSingleton<IHostedService, Verbara.Sdk.Agi.Hosting.AgiHostedService>();
 ```
 
 **ARI** — Create `AriConnectionHostedService` following the `AmiConnectionHostedService` pattern:
 ```csharp
-// File: src/Asterisk.Sdk.Hosting/AriConnectionHostedService.cs
+// File: src/Verbara.Sdk.Hosting/AriConnectionHostedService.cs
 public sealed class AriConnectionHostedService(IAriClient client) : IHostedService
 {
     public async Task StartAsync(CancellationToken ct) =>
@@ -107,7 +107,7 @@ No code changes. Document in demo scripts that login requires `tenantId` in body
 
 ### CA1822 — Instance Methods That Can Be Static (9 warnings)
 
-All in `src/Asterisk.Platform.Api/Services/`:
+All in `src/Verbara.Platform.Api/Services/`:
 
 | Service | Methods | Action |
 |---------|---------|--------|
@@ -119,13 +119,13 @@ These services are registered as singletons via DI. Making methods static does n
 
 ### CA2012 — ValueTask Not Awaited (1 warning)
 
-In `tests/Asterisk.Platform.Api.Tests/RealtimeStateBridgeTests.cs` line 113: false positive from NSubstitute's `.Returns()` mock setup creating a `ValueTask`. The ValueTask is consumed when the mocked method is called in production code.
+In `tests/Verbara.Platform.Api.Tests/RealtimeStateBridgeTests.cs` line 113: false positive from NSubstitute's `.Returns()` mock setup creating a `ValueTask`. The ValueTask is consumed when the mocked method is called in production code.
 
 **Action:** Suppress with `#pragma warning disable CA2012` around the mock setup.
 
 ### TreatWarningsAsErrors
 
-Both `Asterisk.Platform.Api.csproj` and `Asterisk.Platform.Api.Tests.csproj` override `Directory.Build.props` with `TreatWarningsAsErrors=false`. After resolving all warnings, remove this override so they inherit `true` from the global config.
+Both `Verbara.Platform.Api.csproj` and `Verbara.Platform.Api.Tests.csproj` override `Directory.Build.props` with `TreatWarningsAsErrors=false`. After resolving all warnings, remove this override so they inherit `true` from the global config.
 
 ### Verification
 

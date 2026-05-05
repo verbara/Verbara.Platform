@@ -807,7 +807,7 @@ builder.Services.AddVerbaraCluster(c =>
                 BaseUrl = ariBaseUrl,
                 Username = ariSection["Username"] ?? "",
                 Password = ariSection["Password"] ?? "",
-                Application = ariSection["Application"] ?? "asterisk-platform",
+                Application = ariSection["Application"] ?? "verbara-platform",
             };
         }
 

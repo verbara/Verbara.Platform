@@ -21,7 +21,7 @@
 **P2 status:** 3 findings tracked as v1.13.x tickets.
 **P3 status:** 4 informational — tracked as next-quarter improvements.
 
-> A separate **out-of-scope** observation surfaced during the audit (R5.4 in-flight work, not a security finding): the new file `src/Asterisk.Platform.Core/DependencyInjection/HostedServicePromotionExtensions.cs` (uncommitted, from a concurrent Phase A subagent) currently fails to build with `IL2091` (trimming/AOT analyzer). Reported under "Coordinator escalation" below — **NOT** a security defect; build hygiene only.
+> A separate **out-of-scope** observation surfaced during the audit (R5.4 in-flight work, not a security finding): the new file `src/Verbara.Platform.Core/DependencyInjection/HostedServicePromotionExtensions.cs` (uncommitted, from a concurrent Phase A subagent) currently fails to build with `IL2091` (trimming/AOT analyzer). Reported under "Coordinator escalation" below — **NOT** a security defect; build hygiene only.
 
 ---
 
@@ -32,16 +32,16 @@
 **Severity:** P1 (blocks ship per R5.4 ship criterion "vulnerable list clean cross-repo")
 **Scope:** OWASP Top 10 (A.06 Vulnerable Components)
 **Discovered by:** Phase A.6 NU1902 cleanup checkpoint (pre-existing, not introduced by R5.4)
-**Affected:** `src/Asterisk.Platform.Mail/Asterisk.Platform.Mail.csproj` + `tests/Asterisk.Platform.Mail.Tests/Asterisk.Platform.Mail.Tests.csproj`
+**Affected:** `src/Verbara.Platform.Mail/Verbara.Platform.Mail.csproj` + `tests/Verbara.Platform.Mail.Tests/Verbara.Platform.Mail.Tests.csproj`
 **Advisories:**
 - `GHSA-9j88-vvj5-vhgr` — MailKit 4.11.0 Moderate
 - `GHSA-g7hc-96xr-gvvx` — MimeKit 4.11.0 Moderate (transitive)
 
 **Repro (pre-fix):**
 ```bash
-cd /media/Data/Source/Verbara/Asterisk.Platform
+cd /media/Data/Source/Verbara/Verbara.Platform
 dotnet list package --vulnerable --include-transitive 2>&1 | grep -A 3 "MailKit\|MimeKit"
-# Project `Asterisk.Platform.Mail` has the following vulnerable packages
+# Project `Verbara.Platform.Mail` has the following vulnerable packages
 #    [net10.0]:
 #    Top-level Package      Requested   Resolved   Severity   Advisory URL
 #    > MailKit              4.11.0      4.11.0     Moderate   https://github.com/advisories/GHSA-9j88-vvj5-vhgr
@@ -49,16 +49,16 @@ dotnet list package --vulnerable --include-transitive 2>&1 | grep -A 3 "MailKit\
 #    > MimeKit               4.11.0     Moderate   https://github.com/advisories/GHSA-g7hc-96xr-gvvx
 ```
 
-**Fix applied:** Bumped `MailKit` and `MimeKit` `4.11.0 → 4.16.0` in `Directory.Packages.props` (latest stable on NuGet at audit date). Restore + verification clean for both `Asterisk.Platform.Mail` and `Asterisk.Platform.Mail.Tests`. MimeKit tracks MailKit, both bumped together as the transitive pin is also direct here. No breaking changes between 4.11 and 4.16 (point releases on the same 4.x line; MailKit/MimeKit follow strict additive minor cadence). Mail project's compile + restore unchanged after bump.
+**Fix applied:** Bumped `MailKit` and `MimeKit` `4.11.0 → 4.16.0` in `Directory.Packages.props` (latest stable on NuGet at audit date). Restore + verification clean for both `Verbara.Platform.Mail` and `Verbara.Platform.Mail.Tests`. MimeKit tracks MailKit, both bumped together as the transitive pin is also direct here. No breaking changes between 4.11 and 4.16 (point releases on the same 4.x line; MailKit/MimeKit follow strict additive minor cadence). Mail project's compile + restore unchanged after bump.
 
 The bump was captured in concurrent R5.4 commit `7a39685` (`refactor(hosting): extract PromoteHostedServiceToSingleton<T> to Platform.Core extension (R5.4 E.4)`) which combined the audit-driven MailKit fix with that subagent's hosted-service refactor. The audit had staged the same change locally; the concurrent commit landed first, so the audit confirms the fix is on `main` rather than re-committing it.
 
 **Verification (post-fix):**
 ```bash
-dotnet list src/Asterisk.Platform.Mail/Asterisk.Platform.Mail.csproj package --vulnerable --include-transitive
-# The given project `Asterisk.Platform.Mail` has no vulnerable packages given the current sources.
-dotnet list tests/Asterisk.Platform.Mail.Tests/Asterisk.Platform.Mail.Tests.csproj package --vulnerable --include-transitive
-# The given project `Asterisk.Platform.Mail.Tests` has no vulnerable packages given the current sources.
+dotnet list src/Verbara.Platform.Mail/Verbara.Platform.Mail.csproj package --vulnerable --include-transitive
+# The given project `Verbara.Platform.Mail` has no vulnerable packages given the current sources.
+dotnet list tests/Verbara.Platform.Mail.Tests/Verbara.Platform.Mail.Tests.csproj package --vulnerable --include-transitive
+# The given project `Verbara.Platform.Mail.Tests` has no vulnerable packages given the current sources.
 ```
 
 **Status:** FIXED inline (this audit run). No follow-up ticket needed.
@@ -69,7 +69,7 @@ dotnet list tests/Asterisk.Platform.Mail.Tests/Asterisk.Platform.Mail.Tests.cspr
 
 **Severity:** P2 (defense-in-depth gap; not a known exploit path)
 **Scope:** Scope 1 (A.02 Cryptographic / A.07 Auth Failures) + Scope 3 (item 3.3)
-**Affected:** `src/Asterisk.Platform.Api/Auth/AuthSchemeConfiguration.cs:62-99`
+**Affected:** `src/Verbara.Platform.Api/Auth/AuthSchemeConfiguration.cs:62-99`
 
 **Observation:** The `JwtBearerEvents.OnMessageReceived` handler accepts JWTs from `?token=` and `?access_token=` query parameters on **every authenticated request**, not only on the SignalR hub paths. The current implementation:
 
@@ -112,7 +112,7 @@ Drop the `?token=` legacy SSE-endpoint extraction entirely if no shipped SSE end
 
 **Severity:** P2 (defense-in-depth; dev-only file but ships in container images)
 **Scope:** Scope 1 (A.05 Security Misconfiguration) + Scope 5 (item 5.3)
-**Affected:** `src/Asterisk.Platform.Api/appsettings.Development.json`
+**Affected:** `src/Verbara.Platform.Api/appsettings.Development.json`
 
 **Observation:**
 ```json
@@ -159,9 +159,9 @@ The Development variant ships placeholder secrets `admin:admin` (AMI) + `platfor
 **Scope:** Scope 2 (item 2.2)
 
 **Observation:** R5.2 added `CHECK (tenant_id <> '')` migrations across 5 Pro packages (V003 EventStore, V002 CallAnalytics, V006 LiveQueueSnapshots, plus AgentAssist + Push.SignalR). Verified files exist:
-- `Asterisk.Sdk.Pro.EventStore.Postgres/Migrations/V003__events_completed_tenant_check.sql`
-- `Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres/Migrations/V002__callanalytics_tenant_check.sql`
-- `Asterisk.Sdk.Pro.Analytics.Storage.Postgres/Migrations/V006__live_queue_snapshots_tenant_check.sql`
+- `Verbara.Sdk.Pro.EventStore.Postgres/Migrations/V003__events_completed_tenant_check.sql`
+- `Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres/Migrations/V002__callanalytics_tenant_check.sql`
+- `Verbara.Sdk.Pro.Analytics.Storage.Postgres/Migrations/V006__live_queue_snapshots_tenant_check.sql`
 
 The 3 `analytics_interval_snapshots` tables (Pro.Analytics interval reporter — see roadmap) were not surfaced in the migration grep. Possibly they have constraints from earlier migrations or are still untyped.
 
@@ -196,16 +196,16 @@ The observed gap (P3): there is no DB-level constraint or trigger preventing UPD
 
 ### AUDIT-2026-04-MFA-007 — MFA pending-cache + JTI revocation are in-process by default in Identity (P2, Scope 3)
 
-**Severity:** P2 (defense-in-depth gap; mitigated by R5.1 `Asterisk.Platform.Identity.Redis` opt-in package)
+**Severity:** P2 (defense-in-depth gap; mitigated by R5.1 `Verbara.Platform.Identity.Redis` opt-in package)
 **Scope:** Scope 3 (item 3.2 + item 3.4)
 
-**Observation:** `IMfaPendingCache`, `IPasswordResetCache`, `IJtiRevocationCache` defaults shipping in `Asterisk.Platform.Identity` are in-memory (`InMemoryMfaPendingCache.cs` etc.). The R5.1 release added `Asterisk.Platform.Identity.Redis` to satisfy the production-cluster requirement (durable revocation across pods + fan-out across hosts), but the **default** wiring still is in-memory. A consumer who never opts into Redis loses revocation/MFA-step-up state on restart and across replicas.
+**Observation:** `IMfaPendingCache`, `IPasswordResetCache`, `IJtiRevocationCache` defaults shipping in `Verbara.Platform.Identity` are in-memory (`InMemoryMfaPendingCache.cs` etc.). The R5.1 release added `Verbara.Platform.Identity.Redis` to satisfy the production-cluster requirement (durable revocation across pods + fan-out across hosts), but the **default** wiring still is in-memory. A consumer who never opts into Redis loses revocation/MFA-step-up state on restart and across replicas.
 
 The audit-checklist item 3.2 says: "Revocation survives restart. In-memory acceptable only for dev; prod must use Redis/DB." — currently the burden is on the operator to read docs + opt in. No fail-loud guard rejects an in-memory cache when running in production.
 
 **Recommended fix (v1.13.x ticket):**
 - Add a startup health check `identity-cache-durable` that emits Degraded when `IJtiRevocationCache` resolves to the in-memory implementation AND `ASPNETCORE_ENVIRONMENT == "Production"`.
-- Document the recommendation prominently in `Asterisk.Platform.Identity` README.
+- Document the recommendation prominently in `Verbara.Platform.Identity` README.
 - Long-term: consider making the Redis package the default (with in-memory as a `WithInMemoryCachesForTesting()` opt-out), inverting the safe default.
 
 **Status:** PENDING — track as v1.13.x ticket "MFA-007: fail-loud when JTI/MFA caches are in-memory in production". Does not block R5.4 ship — Redis package exists; operators on multi-pod deploys are expected to opt in.
@@ -230,7 +230,7 @@ The audit-checklist item 3.2 says: "Revocation survives restart. In-memory accep
 
 ## Out-of-scope coordinator note (RESOLVED)
 
-During the audit window, a transient build break (IL2091) was observed in the WIP file `src/Asterisk.Platform.Core/DependencyInjection/HostedServicePromotionExtensions.cs` introduced by a concurrent Phase A subagent. The audit verified via `git stash` that the error was not introduced by the MailKit bump. The concurrent commit `7a39685` landed the fix (added `[DynamicallyAccessedMembers]` annotation) and also picked up the MailKit/MimeKit bump. No further action.
+During the audit window, a transient build break (IL2091) was observed in the WIP file `src/Verbara.Platform.Core/DependencyInjection/HostedServicePromotionExtensions.cs` introduced by a concurrent Phase A subagent. The audit verified via `git stash` that the error was not introduced by the MailKit bump. The concurrent commit `7a39685` landed the fix (added `[DynamicallyAccessedMembers]` annotation) and also picked up the MailKit/MimeKit bump. No further action.
 
 ---
 

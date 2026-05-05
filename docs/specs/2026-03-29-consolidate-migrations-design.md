@@ -67,7 +67,7 @@ Merge all 7 migrations into a single `001_InitialSchema.sql` that creates the fi
 - Application code (stores, endpoints, DI registration)
 - Pro packages and their `EnsureSchemaAsync()` mechanism
 - RBAC seeders (`PermissionSeeder`, `RoleTemplateSeeder`, `RbacMigrationSeeder`)
-- CLI tool code (`tools/Asterisk.Platform.Cli/Program.cs`)
+- CLI tool code (`tools/Verbara.Platform.Cli/Program.cs`)
 - Docker compose files
 - Tests
 

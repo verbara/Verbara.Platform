@@ -19,7 +19,7 @@
          Core's configuration provider chain reads it BEFORE
          appsettings.Development.json so any literal value in that file is
          overridden silently in dev. -->
-    <UserSecretsId>asterisk-platform-api-dev</UserSecretsId>
+    <UserSecretsId>verbara-platform-api-dev</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

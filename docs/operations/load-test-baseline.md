@@ -14,10 +14,10 @@
 
 ## Suite
 
-NBomber 6.1.0 (`tests/Asterisk.Platform.LoadTests/`). Five scenarios run
+NBomber 6.1.0 (`tests/Verbara.Platform.LoadTests/`). Five scenarios run
 sequentially against the loadtest stack defined by
 `docker/docker-compose.loadtest.yml`. The opt-in project is **not** part of
-`Asterisk.Platform.slnx` and is invoked exclusively through the wrapper
+`Verbara.Platform.slnx` and is invoked exclusively through the wrapper
 script `scripts/load-test.sh`.
 
 ## Results — R5.5 Phase B-L baseline run (2026-04-27)
@@ -31,7 +31,7 @@ script `scripts/load-test.sh`.
 | `agent_assist_session_start`| 50 req/s × 2 min    | 241 reqs / 18 s; 0 ok / 241 fail | Endpoint `POST /api/v1/agent-assist/sessions/{id}/start` does not exist (404) | 159 -101 · 30 InternalServerError · 52 NotFound |
 
 NBomber reports:
-- `tests/Asterisk.Platform.LoadTests/load-test-reports/nbomber_report_2026-04-27--15-50-19.{md,csv,html}`
+- `tests/Verbara.Platform.LoadTests/load-test-reports/nbomber_report_2026-04-27--15-50-19.{md,csv,html}`
 - Verbose run log (`nbomber-log-*.txt`, ~19 MB) is gitignored.
 
 ## Results — R5.5 Phase B-L baseline run #3 (post live-queue URL reconcile + admin token, 2026-04-27)
@@ -56,7 +56,7 @@ NBomber reports:
 
 First clean v1-measured datapoint. JWT login + /auth/me round-trip,
 sequential steps × 60 s each, fresh login per iteration. Per-step
-NBomber report under `tests/Asterisk.Platform.LoadTests/load-test-reports/`.
+NBomber report under `tests/Verbara.Platform.LoadTests/load-test-reports/`.
 Repro: `./scripts/jwt-sweep.sh`.
 
 | Rate (req/s) | OK     | Fail   | OK %   | min ms | mean ms | p50 ms | p95 ms  | p99 ms     |
@@ -176,7 +176,7 @@ measurement reality:
    p99 latency which therefore has **no measurable signal** in the
    current `/metrics` exposition. NBomber's client-side latency
    measurement is the only available signal. Fix: extend
-   `Asterisk.Sdk.OpenTelemetry.WithAllSources()` to register
+   `Verbara.Sdk.OpenTelemetry.WithAllSources()` to register
    `Microsoft.AspNetCore.Hosting`, `Microsoft.AspNetCore.Server.Kestrel`,
    `System.Net.Http`. Tracked separately.
 
@@ -225,13 +225,13 @@ measurement reality:
    NBomber, and tears the stack down. Set `LOADTEST_KEEP=1` to leave the
    stack running for follow-up exploration.
 4. Reports for each run are preserved under
-   `tests/Asterisk.Platform.LoadTests/load-test-reports/<timestamp>/`.
+   `tests/Verbara.Platform.LoadTests/load-test-reports/<timestamp>/`.
    Commit only the report directory you want to baseline against.
 
 ## Notes
 
 - The first run requires images `asterisk:22-loadtest` and
-  `asterisk-platform-api:loadtest` to be built locally; the corresponding
+  `verbara-platform-api:loadtest` to be built locally; the corresponding
   Dockerfiles + tagging script ship as part of S5.1 follow-up.
 - `Loadtest__SeedTenant=true` triggers the platform API's loadtest seed
   path on first boot to provision the `loadtest` tenant + user with
@@ -352,7 +352,7 @@ docker compose -f docker/docker-compose.full.yml \
 ```
 
 Per-step NBomber reports under
-`tests/Asterisk.Platform.LoadTests/load-test-reports/`. Per-step screen
+`tests/Verbara.Platform.LoadTests/load-test-reports/`. Per-step screen
 logs at `/tmp/scenario-sweep-<scenario>-r<rate>.log`.
 
 ### References
@@ -393,7 +393,7 @@ logs at `/tmp/scenario-sweep-<scenario>-r<rate>.log`.
 
 - ADR-0015 § "Phase 2 measured impact (2026-04-28)"
 - v1.14.6 CHANGELOG entry "ADR-0015 Phase 2 — shared NpgsqlDataSource adoption"
-- Pro 1.16.0-pro CHANGELOG entry + Pro ADR-0008 (`Asterisk.Sdk.Pro/docs/decisions/0008-shared-datasource-overload.md`)
+- Pro 1.16.0-pro CHANGELOG entry + Pro ADR-0008 (`Verbara.Sdk.Pro/docs/decisions/0008-shared-datasource-overload.md`)
 
 ## Phase C-L tuning experiment (2026-04-28, NOT shipped)
 
@@ -465,7 +465,7 @@ docker compose -f docker/docker-compose.full.yml \
 ./scripts/scenario-sweep.sh presence
 ```
 
-Per-step NBomber reports under `tests/Asterisk.Platform.LoadTests/load-test-reports/`.
+Per-step NBomber reports under `tests/Verbara.Platform.LoadTests/load-test-reports/`.
 
 ## Phase C-L stress sweep — knee crossing (2026-04-28, post-Phase-2 v1.14.6)
 
@@ -578,7 +578,7 @@ docker compose -f docker/docker-compose.full.yml \
 ./scripts/scenario-sweep.sh agentassist  500 1000 2000 5000 10000
 ```
 
-Per-step NBomber reports under `tests/Asterisk.Platform.LoadTests/load-test-reports/`.
+Per-step NBomber reports under `tests/Verbara.Platform.LoadTests/load-test-reports/`.
 Per-step screen logs at `/tmp/scenario-sweep-<scenario>-r<rate>.log`.
 
 ### References

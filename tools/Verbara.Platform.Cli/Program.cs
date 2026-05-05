@@ -30,7 +30,7 @@ return command switch
 
 static async Task<int> RunMigrateAsync(string connectionString)
 {
-    Console.WriteLine("Asterisk.Platform — Database Migration");
+    Console.WriteLine("Verbara.Platform — Database Migration");
     Console.WriteLine("======================================");
 
     await using var dataSource = NpgsqlDataSource.Create(connectionString);
@@ -49,48 +49,49 @@ static async Task<int> RunMigrateAsync(string connectionString)
         return 0;
     }
 
-    int ran = 0;
+    int appliedCount = 0;
     foreach (var (name, sql) in migrations)
     {
         if (applied.Contains(name))
         {
-            Console.WriteLine($"  SKIP  {name} (already applied)");
+            Console.WriteLine($"  {name} ... already applied");
             continue;
         }
 
-        Console.Write($"  RUN   {name} ... ");
+        Console.Write($"  {name} ... ");
+
+        await using var conn = await dataSource.OpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
         try
         {
-            await using var conn = await dataSource.OpenConnectionAsync();
-            await using var tx = await conn.BeginTransactionAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = sql;
-            await cmd.ExecuteNonQueryAsync();
+            await using var execCmd = conn.CreateCommand();
+            execCmd.Transaction = tx;
+            execCmd.CommandText = sql;
+            await execCmd.ExecuteNonQueryAsync();
 
             await using var trackCmd = conn.CreateCommand();
             trackCmd.Transaction = tx;
-            trackCmd.CommandText = "INSERT INTO _migrations (name, applied_at) VALUES ($1, now())";
+            trackCmd.CommandText =
+                "INSERT INTO _migrations (name, applied_at) VALUES ($1, NOW())";
             trackCmd.Parameters.AddWithValue(name);
             await trackCmd.ExecuteNonQueryAsync();
 
             await tx.CommitAsync();
-            Console.WriteLine("OK");
-            ran++;
+            Console.WriteLine("applied");
+            appliedCount++;
         }
         catch (Exception ex)
         {
-            Console.WriteLine("FAILED");
-            Console.Error.WriteLine($"ERROR: {ex.Message}");
+            await tx.RollbackAsync();
+            Console.Error.WriteLine($"FAILED ({ex.Message})");
             return 1;
         }
     }
 
-    if (ran == 0)
-        Console.WriteLine("Database is already up to date.");
-    else
-        Console.WriteLine($"\nApplied {ran} migration(s) successfully.");
-
+    Console.WriteLine();
+    Console.WriteLine(appliedCount == 0
+        ? "Database is up to date."
+        : $"Applied {appliedCount} migration(s).");
     return 0;
 }
 
@@ -100,7 +101,7 @@ static async Task<int> RunMigrateAsync(string connectionString)
 
 static async Task<int> RunDoctorAsync(string connectionString)
 {
-    Console.WriteLine("Asterisk.Platform — Database Health Check");
+    Console.WriteLine("Verbara.Platform — Database Health Check");
     Console.WriteLine("=========================================");
 
     var expectedTables = new[]
@@ -310,17 +311,17 @@ static int UnknownCommand(string command)
 static void PrintUsage()
 {
     Console.WriteLine("""
-        Asterisk.Platform CLI
+        Verbara.Platform CLI
 
         Usage:
-          asterisk-platform <command> --connection <connection-string>
+          verbara-platform <command> --connection <connection-string>
 
         Commands:
           migrate    Apply pending database migrations
           doctor     Check database connectivity and schema health
 
         Examples:
-          dotnet run --project tools/Asterisk.Platform.Cli -- migrate --connection "Host=localhost;Database=platform"
-          dotnet run --project tools/Asterisk.Platform.Cli -- doctor  --connection "Host=localhost;Database=platform"
+          dotnet run --project tools/Verbara.Platform.Cli -- migrate --connection "Host=localhost;Database=platform"
+          dotnet run --project tools/Verbara.Platform.Cli -- doctor  --connection "Host=localhost;Database=platform"
         """);
 }

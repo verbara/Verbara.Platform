@@ -1,4 +1,4 @@
-# Asterisk.Platform — Prometheus alert rules baseline
+# Verbara.Platform — Prometheus alert rules baseline
 # R5.4 Track A · S5.3 · 2026-04-26
 #
 # STATUS: v1 provisional thresholds — derived from architecture estimates, not
@@ -11,7 +11,7 @@
 #   P2 = review weekly (5 rules)
 #
 # Meter / instrument names track the canonical Pro catalog
-# (Asterisk.Sdk.Pro/docs/architecture.md § "Meter catalog (post-R5.1 Task G — 17 meters)").
+# (Verbara.Sdk.Pro/docs/architecture.md § "Meter catalog (post-R5.1 Task G — 17 meters)").
 # Prometheus exporter normalises dots to underscores; histograms expose
 # *_bucket / *_sum / *_count series.
 #
@@ -57,7 +57,7 @@ groups:
           runbook_url: "alerts-runbook.md#authloginerrorratehigh"
 
       - alert: JwtValidationLatencyP99High
-        # Source: Asterisk.Platform.Auth.JwtKeyRotation · jwt.key.rotation.duration histogram
+        # Source: Verbara.Platform.Auth.JwtKeyRotation · jwt.key.rotation.duration histogram
         # PROVISIONAL: rotation latency is a proxy for end-to-end signing-key health;
         # refresh once a per-validation histogram is added in v1.13.x.
         expr: |
@@ -74,7 +74,7 @@ groups:
           runbook_url: "alerts-runbook.md#jwtvalidationlatencyp99high"
 
       - alert: LicenseGuardBlockedHigh
-        # Source: Asterisk.Sdk.Pro.Licensing.Guard · blocked counter (tagged feature, reason)
+        # Source: Verbara.Sdk.Pro.Licensing.Guard · blocked counter (tagged feature, reason)
         expr: |
           (
             sum(rate(blocked_total{job=~".*"}[10m]))
@@ -91,7 +91,7 @@ groups:
           runbook_url: "alerts-runbook.md#licenseguardblockedhigh"
 
       - alert: RetentionServiceStalled
-        # Source: Asterisk.Sdk.Pro.Storage.Common.Retention · retention.duration_ms histogram
+        # Source: Verbara.Sdk.Pro.Storage.Common.Retention · retention.duration_ms histogram
         # absence of *_count increment over 1h means RetentionService didn't run.
         expr: |
           (time() - max(retention_duration_ms_count_created)) > 3600
@@ -156,7 +156,7 @@ groups:
     rules:
 
       - alert: SloBreachQueueIngestion
-        # Source: Asterisk.Sdk.Pro.EventStore · eventstore.persist.duration_ms
+        # Source: Verbara.Sdk.Pro.EventStore · eventstore.persist.duration_ms
         # SLO target p99 ≤ 200ms (slos.md §2). Breach if sustained 15min.
         expr: |
           histogram_quantile(0.99,
@@ -172,7 +172,7 @@ groups:
           runbook_url: "alerts-runbook.md#slobreachqueueingestion"
 
       - alert: CircuitBreakerOpen
-        # Source: Asterisk.Sdk.Resilience · circuit.state (2 = Open)
+        # Source: Verbara.Sdk.Resilience · circuit.state (2 = Open)
         expr: max by (key) (circuit_state) == 2
         for: 5m
         labels:
@@ -184,7 +184,7 @@ groups:
           runbook_url: "alerts-runbook.md#circuitbreakeropen"
 
       - alert: PresenceBacklogGrowing
-        # Source: Asterisk.Sdk.Pro.Push.Postgres · push.postgres.backlog gauge
+        # Source: Verbara.Sdk.Pro.Push.Postgres · push.postgres.backlog gauge
         # Growing for 15min indicates consumer cannot drain backplane events.
         expr: |
           (push_postgres_backlog - push_postgres_backlog offset 15m) > 100
@@ -270,7 +270,7 @@ groups:
           runbook_url: "alerts-runbook.md#slowqueries-high"
 
       - alert: RetentionDryRunDivergence
-        # Source: Asterisk.Sdk.Pro.Storage.Common.Retention · retention.purged
+        # Source: Verbara.Sdk.Pro.Storage.Common.Retention · retention.purged
         # vs retention.dry_run.would_purge (per-target counters).
         expr: |
           abs(
@@ -288,7 +288,7 @@ groups:
           runbook_url: "alerts-runbook.md#retentiondryrundivergence"
 
       - alert: LiveQueueWriterErrorWindow
-        # Source: Asterisk.Sdk.Pro.Analytics.Live · live_queue.snapshots.write_error
+        # Source: Verbara.Sdk.Pro.Analytics.Live · live_queue.snapshots.write_error
         # SLO: error rate < 1% (slos.md §4).
         expr: |
           (

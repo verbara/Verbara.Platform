@@ -120,7 +120,7 @@ internal static class AdminEndpoints
                     ? $"A user with the supplied {ex.ConflictingField} already exists in this tenant."
                     : "A user with the supplied identifier already exists in this tenant.",
                 statusCode: StatusCodes.Status409Conflict,
-                type: "https://asterisk.platform/errors/entity-already-exists");
+                type: "https://verbara.platform/errors/entity-already-exists");
         }
         return Results.Created($"/admin/users/{user.UserId}", ToUserDto(user));
     }
@@ -257,7 +257,7 @@ internal static class AdminEndpoints
                     ? $"A queue with the supplied {ex.ConflictingField} already exists in this tenant."
                     : "A queue with the supplied identifier already exists in this tenant.",
                 statusCode: StatusCodes.Status409Conflict,
-                type: "https://asterisk.platform/errors/entity-already-exists");
+                type: "https://verbara.platform/errors/entity-already-exists");
         }
 
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();

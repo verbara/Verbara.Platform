@@ -57,7 +57,7 @@ Background service that monitors queues for pending digital conversations and of
 
 #### 1. QueueDistributionWorker : BackgroundService
 
-**Location:** `src/Asterisk.Platform.Api/Services/QueueDistributionWorker.cs`
+**Location:** `src/Verbara.Platform.Api/Services/QueueDistributionWorker.cs`
 
 **Dependencies:**
 - `IConversationStore` — query queued conversations
@@ -82,7 +82,7 @@ Background service that monitors queues for pending digital conversations and of
 
 #### 2. ConversationTimeoutWorker : BackgroundService
 
-**Location:** `src/Asterisk.Platform.Api/Services/ConversationTimeoutWorker.cs`
+**Location:** `src/Verbara.Platform.Api/Services/ConversationTimeoutWorker.cs`
 
 **Dependencies:** `IConversationStore`, `IConversationSwitchboard`, `PlatformEventBus`, `IClock`
 
@@ -156,10 +156,10 @@ AMI listener that synchronizes voice call events with the unified capacity track
 
 #### 1. AsteriskCapacitySyncService : BackgroundService
 
-**Location:** `src/Asterisk.Platform.Api/Services/AsteriskCapacitySyncService.cs`
+**Location:** `src/Verbara.Platform.Api/Services/AsteriskCapacitySyncService.cs`
 
 **Dependencies:**
-- `IAmiClient` (from Asterisk.Sdk) — AMI event subscription + actions
+- `IAmiClient` (from Verbara.Sdk) — AMI event subscription + actions
 - `IAgentCapacityService` — update capacity on voice events
 - `IAgentStore` — resolve agent by extension
 - `IQueueMembershipStore` — get agent's queue memberships
@@ -254,7 +254,7 @@ CREATE INDEX idx_tenant_add_ons_tenant ON tenant_add_ons(tenant_id);
 
 #### 2. PostgresDunningStore
 
-**Location:** `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresDunningStore.cs`
+**Location:** `src/Verbara.Platform.Storage.Postgres/Stores/PostgresDunningStore.cs`
 
 Implements `IDunningStore` with Dapper. Row type: `DunningRecordRow` (class-based `{get; init;}`).
 
@@ -267,7 +267,7 @@ Implements `IDunningStore` with Dapper. Row type: `DunningRecordRow` (class-base
 
 #### 3. PostgresTenantAddOnStore
 
-**Location:** `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresTenantAddOnStore.cs`
+**Location:** `src/Verbara.Platform.Storage.Postgres/Stores/PostgresTenantAddOnStore.cs`
 
 Implements `ITenantAddOnStore` with Dapper. Row type: `TenantAddOnRow` (class-based `{get; init;}`).
 
@@ -299,7 +299,7 @@ Persist agent capacity state to survive restarts and enable reconciliation.
 
 #### 1. IAgentCapacityStore (new interface)
 
-**Location:** `src/Asterisk.Platform.Queues/Services/IAgentCapacityStore.cs`
+**Location:** `src/Verbara.Platform.Queues/Services/IAgentCapacityStore.cs`
 
 ```csharp
 public interface IAgentCapacityStore
@@ -325,7 +325,7 @@ public sealed class AgentCapacityRecord
 
 #### 2. PersistentAgentCapacityService
 
-**Location:** `src/Asterisk.Platform.Queues/Services/PersistentAgentCapacityService.cs`
+**Location:** `src/Verbara.Platform.Queues/Services/PersistentAgentCapacityService.cs`
 
 Wraps `InMemoryAgentCapacityService` + writes through to `IAgentCapacityStore` on every Reserve/Release. On startup, reconciles from store.
 
@@ -372,7 +372,7 @@ Fix `EmailConnector.AddUrlAttachment()` to download the actual resource instead 
 ### Current Broken Code
 
 ```csharp
-// src/Asterisk.Platform.Channels.Email/EmailConnector.cs:140-145
+// src/Verbara.Platform.Channels.Email/EmailConnector.cs:140-145
 private static void AddUrlAttachment(MailMessage mail, string url, string fileName, string mimeType)
 {
     var data = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(url)); // BUG: stores URL text
@@ -502,7 +502,7 @@ The `ConversationTimeoutWorker` handles all three timeout scenarios:
 
 Add `MaxWaitSeconds` property to `Queue` model (nullable int, default null = use global default).
 
-**Location:** `src/Asterisk.Platform.Queues/Queue.cs`
+**Location:** `src/Verbara.Platform.Queues/Queue.cs`
 
 ```csharp
 public int? MaxWaitSeconds { get; set; }
@@ -618,34 +618,34 @@ Add agent availability state toggle to the Agent Workspace in Platform.Web.
 ## Files Modified (Estimated)
 
 ### New Files (~15)
-- `src/Asterisk.Platform.Api/Services/QueueDistributionWorker.cs`
-- `src/Asterisk.Platform.Api/Services/ConversationTimeoutWorker.cs`
-- `src/Asterisk.Platform.Api/Services/AsteriskCapacitySyncService.cs`
-- `src/Asterisk.Platform.Api/Services/DistributionOptions.cs`
-- `src/Asterisk.Platform.Queues/Services/IAgentCapacityStore.cs`
-- `src/Asterisk.Platform.Queues/Services/AgentCapacityRecord.cs`
-- `src/Asterisk.Platform.Queues/Services/PersistentAgentCapacityService.cs`
-- `src/Asterisk.Platform.Storage.InMemory/InMemoryAgentCapacityStore.cs`
-- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresAgentCapacityStore.cs`
-- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresDunningStore.cs`
-- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresTenantAddOnStore.cs`
-- `src/Asterisk.Platform.Storage.Postgres/Migrations/013_DunningAddOnsCapacity.sql`
+- `src/Verbara.Platform.Api/Services/QueueDistributionWorker.cs`
+- `src/Verbara.Platform.Api/Services/ConversationTimeoutWorker.cs`
+- `src/Verbara.Platform.Api/Services/AsteriskCapacitySyncService.cs`
+- `src/Verbara.Platform.Api/Services/DistributionOptions.cs`
+- `src/Verbara.Platform.Queues/Services/IAgentCapacityStore.cs`
+- `src/Verbara.Platform.Queues/Services/AgentCapacityRecord.cs`
+- `src/Verbara.Platform.Queues/Services/PersistentAgentCapacityService.cs`
+- `src/Verbara.Platform.Storage.InMemory/InMemoryAgentCapacityStore.cs`
+- `src/Verbara.Platform.Storage.Postgres/Stores/PostgresAgentCapacityStore.cs`
+- `src/Verbara.Platform.Storage.Postgres/Stores/PostgresDunningStore.cs`
+- `src/Verbara.Platform.Storage.Postgres/Stores/PostgresTenantAddOnStore.cs`
+- `src/Verbara.Platform.Storage.Postgres/Migrations/013_DunningAddOnsCapacity.sql`
 - Event records (2-3 new files in Platform.Core/Events or Platform.Conversations/Events)
 
 ### Modified Files (~15)
-- `src/Asterisk.Platform.Conversations/IConversationStore.cs` — 2 new methods
-- `src/Asterisk.Platform.Storage.InMemory/InMemoryConversationStore.cs` — implement new methods
-- `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresConversationStore.cs` — implement new methods
-- `src/Asterisk.Platform.Switchboard/ConversationSwitchboard.cs` — inject + publish EventBus
-- `src/Asterisk.Platform.Api/Endpoints/WebhookEndpoints.cs` — publish events after pipeline
-- `src/Asterisk.Platform.Api/Services/DefaultConversationService.cs` — publish message events
-- `src/Asterisk.Platform.Queues/IAgentStore.cs` — GetByExtensionAsync
-- `src/Asterisk.Platform.Queues/Services/InMemoryAgentCapacityService.cs` — publish capacity events
-- `src/Asterisk.Platform.Channels.Email/EmailConnector.cs` — download attachments
-- `src/Asterisk.Platform.Api/Program.cs` — register new services
-- `src/Asterisk.Platform.Storage.InMemory/InMemoryStorageExtensions.cs` — register new stores
-- `src/Asterisk.Platform.Storage.Postgres/PostgresStorageExtensions.cs` — register new stores
-- `src/Asterisk.Platform.Api/ApiJsonContext.cs` — register new DTOs for AOT
+- `src/Verbara.Platform.Conversations/IConversationStore.cs` — 2 new methods
+- `src/Verbara.Platform.Storage.InMemory/InMemoryConversationStore.cs` — implement new methods
+- `src/Verbara.Platform.Storage.Postgres/Stores/PostgresConversationStore.cs` — implement new methods
+- `src/Verbara.Platform.Switchboard/ConversationSwitchboard.cs` — inject + publish EventBus
+- `src/Verbara.Platform.Api/Endpoints/WebhookEndpoints.cs` — publish events after pipeline
+- `src/Verbara.Platform.Api/Services/DefaultConversationService.cs` — publish message events
+- `src/Verbara.Platform.Queues/IAgentStore.cs` — GetByExtensionAsync
+- `src/Verbara.Platform.Queues/Services/InMemoryAgentCapacityService.cs` — publish capacity events
+- `src/Verbara.Platform.Channels.Email/EmailConnector.cs` — download attachments
+- `src/Verbara.Platform.Api/Program.cs` — register new services
+- `src/Verbara.Platform.Storage.InMemory/InMemoryStorageExtensions.cs` — register new stores
+- `src/Verbara.Platform.Storage.Postgres/PostgresStorageExtensions.cs` — register new stores
+- `src/Verbara.Platform.Api/ApiJsonContext.cs` — register new DTOs for AOT
 
 ---
 

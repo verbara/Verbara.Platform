@@ -34,7 +34,7 @@ Replace `InMemoryClusterTransport` with PostgreSQL-backed persistence so multipl
 
 ### New File
 
-`Asterisk.Sdk.Pro.Cluster/Transport/PostgresClusterTransport.cs`
+`Verbara.Sdk.Pro.Cluster/Transport/PostgresClusterTransport.cs`
 
 ### Schema
 
@@ -151,7 +151,7 @@ Expose runtime cluster node CRUD and drain lifecycle operations via PlatformAdmi
 
 ### SDK Change: UpdateNodeAsync
 
-**File:** `Asterisk.Sdk.Pro.Cluster/ClusterManager.cs`
+**File:** `Verbara.Sdk.Pro.Cluster/ClusterManager.cs`
 
 New public method:
 ```csharp
@@ -166,7 +166,7 @@ public async ValueTask UpdateNodeAsync(
 
 Updates in-memory `ClusterNode` properties + persists via transport. No AMI reconnection needed — routing parameters only.
 
-**File:** `Asterisk.Sdk.Pro.Cluster/Transport/ClusterTransportBase.cs`
+**File:** `Verbara.Sdk.Pro.Cluster/Transport/ClusterTransportBase.cs`
 
 New abstract method:
 ```csharp
@@ -593,7 +593,7 @@ Register all new DTOs in `ApiJsonContext.cs`:
 
 ### Verification
 
-After refactor: `grep -r "new {" src/Asterisk.Platform.Api/Endpoints/` returns **0 results** (excluding legitimate object initializers like `new Dictionary<string,string> { ... }`).
+After refactor: `grep -r "new {" src/Verbara.Platform.Api/Endpoints/` returns **0 results** (excluding legitimate object initializers like `new Dictionary<string,string> { ... }`).
 
 ---
 
@@ -617,7 +617,7 @@ After refactor: `grep -r "new {" src/Asterisk.Platform.Api/Endpoints/` returns *
 ### NuGet Rebuild Cycle (Sub-projects A + B)
 
 SDK Pro changes require:
-1. Implement in `Asterisk.Sdk.Pro.Cluster`
+1. Implement in `Verbara.Sdk.Pro.Cluster`
 2. `dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/`
 3. `rm -rf ~/.nuget/packages/asterisk.sdk.pro.cluster*/`
 4. `dotnet restore` in Platform
@@ -635,7 +635,7 @@ SDK Pro changes require:
 
 ### Files Modified Summary
 
-**SDK Pro (Asterisk.Sdk.Pro.Cluster):**
+**SDK Pro (Verbara.Sdk.Pro.Cluster):**
 - New: `PostgresClusterTransport.cs`, `NodeUpdate.cs`
 - Modified: `ClusterManager.cs`, `ClusterTransportBase.cs`, `InMemoryClusterTransport.cs`, DI extension
 

@@ -4,7 +4,7 @@
 
 **Track:** First feature in the v1.3.0 Web roadmap follow-on (alongside SAML SSO and Compliance Reporting, both deferred to subsequent specs).
 
-**Repos affected:** Asterisk.Platform only (Identity, Storage.Postgres, Storage.InMemory, Api, Core, Audit). No SDK / Sdk.Pro changes.
+**Repos affected:** Verbara.Platform only (Identity, Storage.Postgres, Storage.InMemory, Api, Core, Audit). No SDK / Sdk.Pro changes.
 
 **Pinned dependencies:** SDK 1.15.1, Sdk.Pro 1.16.0-pro (no bump needed for this work).
 
@@ -59,7 +59,7 @@ ALTER TABLE tenant_auth_config
     ADD COLUMN ip_allowlist_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ```
 
-The existing `TenantAuthConfig` record (in `Asterisk.Platform.Identity/TenantAuthConfig.cs`) gains:
+The existing `TenantAuthConfig` record (in `Verbara.Platform.Identity/TenantAuthConfig.cs`) gains:
 
 ```csharp
 public bool IpAllowlistEnabled { get; set; }
@@ -174,7 +174,7 @@ public sealed record AddIpAllowlistEntryRequest(string Cidr, string? Description
 
 ### §3.6. Plan gate
 
-**`PlanFeature.cs`** in `Asterisk.Platform.Core/`:
+**`PlanFeature.cs`** in `Verbara.Platform.Core/`:
 
 ```csharp
 public enum PlanFeature
@@ -307,7 +307,7 @@ The repo's NBomber `LoadTests` project gets a new opt-in scenario `IpAllowlistEn
 - ❌ Time-windowed entries ("only weekdays 9-5").
 - ❌ Geo-based allowlist (country code).
 - ❌ Self-service deactivation flow ("send rescue email link to bypass") — operationally complex; the `PlatformAdmin` bypass is sufficient.
-- ❌ Web UI design — this spec is API-only. The Asterisk.Platform.Web admin page (under `src/admin/security/ip-allowlist/`) is a separate sub-project tracked in the Web repo's roadmap and built once these endpoints ship.
+- ❌ Web UI design — this spec is API-only. The Verbara.Platform.Web admin page (under `src/admin/security/ip-allowlist/`) is a separate sub-project tracked in the Web repo's roadmap and built once these endpoints ship.
 - ❌ Bulk import (CSV upload of entries) — single-entry POST is enough for v1; bulk is a v1.3.x add-on if real demand surfaces.
 
 ---

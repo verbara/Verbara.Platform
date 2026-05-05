@@ -11,7 +11,7 @@ source "$ENV_FILE"
 set +a
 
 echo "============================================"
-echo "  Asterisk Platform — Demo Reset"
+echo "  Verbara Platform — Demo Reset"
 echo "============================================"
 echo ""
 
@@ -83,7 +83,7 @@ SETUP_RESPONSE=$(curl -sf -X POST "$API_BASE/api/v1/setup" \
         "email": "platform@admin.local",
         "password": "PlatformAdmin2026!",
         "displayName": "Platform Admin",
-        "platformName": "Asterisk Platform"
+        "platformName": "Verbara Platform"
     }' 2>/dev/null || echo '{"error":"setup failed or already initialized"}')
 MGMT_KEY=$(echo "$SETUP_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('managementApiKey',''))" 2>/dev/null || echo "")
 if [ -n "$MGMT_KEY" ]; then

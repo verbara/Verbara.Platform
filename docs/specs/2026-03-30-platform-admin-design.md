@@ -284,7 +284,7 @@ The `PlatformAdminAuthorizationHandler` recognizes `key_type=management` as full
 
 | File | Purpose |
 |---|---|
-| `Asterisk.Sdk.Pro.MultiTenant/TenantType.cs` | `TenantType` enum (Platform, Partner, Customer) |
+| `Verbara.Sdk.Pro.MultiTenant/TenantType.cs` | `TenantType` enum (Platform, Partner, Customer) |
 | `Platform.Identity/ApiKeyType.cs` | `ApiKeyType` enum (Standard, Management) — alongside `ApiKey.cs` |
 | `Platform.Api/Auth/PlatformAdminRequirement.cs` | Authorization requirement |
 | `Platform.Api/Auth/PlatformAdminAuthorizationHandler.cs` | Authorization handler |
@@ -301,8 +301,8 @@ The `PlatformAdminAuthorizationHandler` recognizes `key_type=management` as full
 
 | File | Change |
 |---|---|
-| `Asterisk.Sdk.Pro.MultiTenant/Tenant.cs` | Add `ParentTenantId`, `Type` fields |
-| `Asterisk.Sdk.Pro.MultiTenant/ITenantStore.cs` | Add `GetHostTenantAsync`, `GetChildrenAsync` |
+| `Verbara.Sdk.Pro.MultiTenant/Tenant.cs` | Add `ParentTenantId`, `Type` fields |
+| `Verbara.Sdk.Pro.MultiTenant/ITenantStore.cs` | Add `GetHostTenantAsync`, `GetChildrenAsync` |
 | `Platform.Identity/ApiKey.cs` | Add `KeyType` field |
 | `Platform.Api/Auth/ApiKeyAuthenticationHandler.cs` | Management key branch |
 | `Platform.Api/Program.cs` | Register `PlatformAdminOnly` policy + handler, map new endpoints |

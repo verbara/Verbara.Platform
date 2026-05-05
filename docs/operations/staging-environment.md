@@ -52,7 +52,7 @@ variants are green.
 **Setup:**
 
 ```bash
-cd /path/to/Asterisk.Platform
+cd /path/to/Verbara.Platform
 # generate dev-only secrets (gitignored — never commit docker/.env)
 test -f docker/.env || cat <<EOF > docker/.env
 SERVICE_KEY=$(openssl rand -hex 32)

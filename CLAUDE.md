@@ -4,7 +4,7 @@ Project context for Claude Code working on **Verbara.Platform** — the API host
 
 > **This repo is the authoritative workstream for Platform + Platform.Web.** Plans, specs, ADRs, and research that touch either the API **or** the React frontend are authored under this repo's `docs/` tree. `Verbara.Platform.Web` remains a separate git repo for frontend source, but its own `docs/` is secondary — open new plans here. Decision recorded 2026-04-19 (feedback memory `feedback_platform_web_consolidation.md`).
 
-> **Do not append completed-work narrative to this file.** Milestone/sprint/plan write-ups belong in `~/.claude/projects/-media-Data-Source-Verbara-Asterisk-Platform/memory/` (indexed by `MEMORY.md`). Only evergreen context — what the codebase IS, not what it WAS — lives here.
+> **Do not append completed-work narrative to this file.** Milestone/sprint/plan write-ups belong in `~/.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/` (indexed by `MEMORY.md`). Only evergreen context — what the codebase IS, not what it WAS — lives here.
 
 ## Project Overview
 

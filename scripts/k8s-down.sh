@@ -6,7 +6,7 @@ IMG_DIR="/media/Data/Qemu-Img"
 VM_NAMES=("talos-cp1" "talos-w1" "talos-w2" "talos-w3")
 KUBECONFIG_PATH="$HOME/.kube/config-talos"
 
-echo "=== Asterisk Platform — Talos K8s Cluster Teardown ==="
+echo "=== Verbara Platform — Talos K8s Cluster Teardown ==="
 
 if [[ "${1:-}" != "--confirm" ]]; then
     echo ""
