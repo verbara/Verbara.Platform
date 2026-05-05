@@ -20,12 +20,13 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Authors>Asterisk.Sdk Contributors</Authors>
-    <Company>Asterisk.Sdk</Company>
-    <Product>Asterisk.Platform</Product>
+    <Authors>Verbara Contributors</Authors>
+    <Company>Verbara</Company>
+    <Product>Verbara.Platform</Product>
     <RepositoryType>git</RepositoryType>
-    <PackageTags>asterisk;platform;contact-center;omnichannel;native-aot</PackageTags>
-    <PackageVersion>1.15.0</PackageVersion>
+    <RepositoryUrl>https://github.com/verbara/verbara-platform</RepositoryUrl>
+    <PackageTags>verbara;platform;contact-center;omnichannel;native-aot</PackageTags>
+    <PackageVersion>2.0.0</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('src'))">

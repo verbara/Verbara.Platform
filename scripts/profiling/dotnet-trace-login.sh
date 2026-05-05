@@ -23,7 +23,7 @@
 #   PLATFORM_API_URL     default http://localhost:5000
 #   TRACE_DURATION_SEC   default 30
 #   TRACE_LOGIN_RATE     default 50  (req/s; matches measured knee)
-#   TRACE_PROCESS_NAME   default Asterisk.Platform.Api  (dotnet-trace --name)
+#   TRACE_PROCESS_NAME   default Verbara.Platform.Api  (dotnet-trace --name)
 
 set -euo pipefail
 
@@ -33,7 +33,7 @@ ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 PLATFORM_API_URL="${PLATFORM_API_URL:-http://localhost:5000}"
 DURATION="${TRACE_DURATION_SEC:-30}"
 RATE="${TRACE_LOGIN_RATE:-50}"
-PROCESS_NAME="${TRACE_PROCESS_NAME:-Asterisk.Platform.Api}"
+PROCESS_NAME="${TRACE_PROCESS_NAME:-Verbara.Platform.Api}"
 
 if ! command -v dotnet-trace >/dev/null 2>&1; then
     echo "[dotnet-trace-login] FAIL: dotnet-trace not in PATH." >&2
@@ -76,7 +76,7 @@ echo "[dotnet-trace-login] nettrace: $NETTRACE"
 # Collect in background, drive the load loop, then wait for collect to finish.
 dotnet-trace collect \
     --process-id "$PID" \
-    --providers Microsoft-DotNETCore-SampleProfiler,Microsoft-AspNetCore-Server-Kestrel,Asterisk.Platform.Auth.JwtKeyRotation \
+    --providers Microsoft-DotNETCore-SampleProfiler,Microsoft-AspNetCore-Server-Kestrel,Verbara.Platform.Auth.JwtKeyRotation \
     --duration "00:00:${DURATION}" \
     --output "$NETTRACE" \
     --format Speedscope &

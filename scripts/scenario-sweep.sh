@@ -5,7 +5,7 @@
 # at a ladder of increasing rates (or VU counts for the VU-shaped Presence
 # scenario), one rate per dotnet run, with a cooldown between steps. Each
 # step produces its own NBomber report under
-# tests/Asterisk.Platform.LoadTests/load-test-reports/.
+# tests/Verbara.Platform.LoadTests/load-test-reports/.
 #
 # Why per-scenario sweeps:
 # - The R5.4 default suite runs all 5 scenarios in parallel at design rates,
@@ -45,7 +45,7 @@
 #
 # Output:
 # - One NBomber report directory per step under
-#   tests/Asterisk.Platform.LoadTests/load-test-reports/
+#   tests/Verbara.Platform.LoadTests/load-test-reports/
 # - Per-step screen log at /tmp/scenario-sweep-<scenario>-r<rate>.log
 #
 # Env knobs:
@@ -164,7 +164,7 @@ echo "[scenario-sweep] Per-step:     ${SWEEP_DURATION}s execution + ${COOLDOWN}s
 echo "[scenario-sweep] Target URL:   $PLATFORM_API_URL"
 echo "[scenario-sweep] Admin login:  $ADMIN_EMAIL"
 
-cd "$ROOT/tests/Asterisk.Platform.LoadTests"
+cd "$ROOT/tests/Verbara.Platform.LoadTests"
 dotnet build -c Release --nologo > /dev/null
 
 for step in $ladder; do
@@ -187,4 +187,4 @@ done
 
 echo ""
 echo "[scenario-sweep] DONE. Per-step logs in /tmp/scenario-sweep-${scenario}-*.log."
-echo "[scenario-sweep] NBomber reports under tests/Asterisk.Platform.LoadTests/load-test-reports/."
+echo "[scenario-sweep] NBomber reports under tests/Verbara.Platform.LoadTests/load-test-reports/."

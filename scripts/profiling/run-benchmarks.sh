@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/profiling/run-benchmarks.sh — AHH Phase 0 evidence runner.
 #
-# Runs BenchmarkDotNet against tests/Asterisk.Platform.Benchmarks (opt-in,
+# Runs BenchmarkDotNet against tests/Verbara.Platform.Benchmarks (opt-in,
 # NOT in the slnx). Captures the BCrypt12 vs Argon2id-OWASP comparison +
 # JWT-RSA sign cost + composite end-to-end estimate per AHH Phase 0.
 #
@@ -42,7 +42,7 @@ echo "[run-benchmarks] Filter: $BENCH_FILTER"
 [ -n "$BENCH_JOB" ] && echo "[run-benchmarks] Job: $BENCH_JOB"
 echo "[run-benchmarks] Building Release..."
 
-dotnet build tests/Asterisk.Platform.Benchmarks/Asterisk.Platform.Benchmarks.csproj \
+dotnet build tests/Verbara.Platform.Benchmarks/Verbara.Platform.Benchmarks.csproj \
     -c Release \
     --nologo \
     --verbosity minimal
@@ -50,7 +50,7 @@ dotnet build tests/Asterisk.Platform.Benchmarks/Asterisk.Platform.Benchmarks.csp
 echo "[run-benchmarks] Running..."
 
 dotnet run \
-    --project tests/Asterisk.Platform.Benchmarks/Asterisk.Platform.Benchmarks.csproj \
+    --project tests/Verbara.Platform.Benchmarks/Verbara.Platform.Benchmarks.csproj \
     -c Release \
     --no-build \
     -- \

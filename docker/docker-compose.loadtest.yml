@@ -12,13 +12,13 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: asterisk_loadtest
+      POSTGRES_DB: verbara_loadtest
       POSTGRES_USER: loadtest
       POSTGRES_PASSWORD: loadtest
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U loadtest -d asterisk_loadtest"]
+      test: ["CMD-SHELL", "pg_isready -U loadtest -d verbara_loadtest"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -42,9 +42,9 @@ services:
         condition: service_healthy
 
   platform-api:
-    image: asterisk-platform-api:loadtest
+    image: verbara-platform-api:loadtest
     environment:
-      ConnectionStrings__Postgres: "Host=postgres;Database=asterisk_loadtest;Username=loadtest;Password=loadtest"
+      ConnectionStrings__Postgres: "Host=postgres;Database=verbara_loadtest;Username=loadtest;Password=loadtest"
       ConnectionStrings__Redis: "redis:6379"
       Loadtest__SeedTenant: "true"
     ports:

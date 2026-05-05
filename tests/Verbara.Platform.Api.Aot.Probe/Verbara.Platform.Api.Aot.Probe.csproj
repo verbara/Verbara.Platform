@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Verbara.Platform.Api.Aot.Probe (AHH Phase 0)
+
+    OPT-IN AOT-publish probe. NOT included in Verbara.Platform.slnx — the
+    probe exercises the Argon2id candidate library (Isopoh.Cryptography.Argon2)
+    under PublishAot=true and asserts zero trim/AOT warnings. Run via
+    scripts/profiling/aot-probe-publish.sh; output is captured into
+    docs/research/2026-04-XX-auth-hotpath-baseline.md as the gating evidence
+    for Phase 4 (Argon2id migration).
+
+    If this probe emits any trim or AOT warning, the Phase 4 candidate library
+    is rejected and the research doc must specify the libsodium P/Invoke
+    fallback before Phase 4 begins.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Verbara.Platform.Api.Aot.Probe</RootNamespace>
+    <AssemblyName>Verbara.Platform.Api.Aot.Probe</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Override Directory.Build.props tests/ defaults: this project IS
+         AOT-validated and is NOT an xunit IsTestProject. -->
+    <IsTestProject>false</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Strict AOT/trim analysis: any warning fails the publish. -->
+    <PublishAot>true</PublishAot>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <!-- Reset NoWarn — Directory.Build.props inherits nothing problematic
+         here; we want every IL-level warning surfaced. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Isopoh.Cryptography.Argon2" />
+  </ItemGroup>
+
+</Project>

@@ -32,7 +32,7 @@ spec:
       log_min_duration_statement: "500"
   bootstrap:
     initdb:
-      database: asterisk_platform
+      database: verbara
       owner: platform
       secret:
         name: postgres-app-credentials

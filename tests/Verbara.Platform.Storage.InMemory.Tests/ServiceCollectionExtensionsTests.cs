@@ -1,0 +1,85 @@
+using Verbara.Platform.Audit;
+using Verbara.Platform.Automation;
+using Verbara.Platform.Bot;
+using Verbara.Platform.Channels.Core;
+using Verbara.Platform.Conversations;
+using Verbara.Platform.Conversations.Stores;
+using Verbara.Platform.Flows;
+using Verbara.Platform.Identity;
+using Verbara.Platform.KnowledgeBase;
+using Verbara.Platform.Media;
+using Verbara.Platform.Queues;
+using Verbara.Platform.Storage.InMemory;
+using Verbara.Platform.Surveys;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Verbara.Platform.Storage.InMemory.Tests;
+
+public sealed class ServiceCollectionExtensionsTests
+{
+    [Fact]
+    public void AddInMemoryStorage_ShouldRegisterAllStoreInterfaces()
+    {
+        var services = new ServiceCollection();
+        services.AddInMemoryStorage();
+        var provider = services.BuildServiceProvider();
+
+        // Conversations
+        provider.GetService<IConversationStore>().Should().NotBeNull();
+        provider.GetService<IMessageStore>().Should().NotBeNull();
+        provider.GetService<IContactStore>().Should().NotBeNull();
+        provider.GetService<ICaseStore>().Should().NotBeNull();
+
+        // Identity
+        provider.GetService<IUserStore>().Should().NotBeNull();
+        provider.GetService<IApiKeyStore>().Should().NotBeNull();
+        provider.GetService<IServiceAccountStore>().Should().NotBeNull();
+
+        // Queues
+        provider.GetService<IQueueStore>().Should().NotBeNull();
+        provider.GetService<IAgentStore>().Should().NotBeNull();
+        provider.GetService<ITeamStore>().Should().NotBeNull();
+
+        // Channels
+        provider.GetService<ITenantChannelConfigStore>().Should().NotBeNull();
+
+        // Flows
+        provider.GetService<IFlowStore>().Should().NotBeNull();
+        provider.GetService<IFlowExecutionStore>().Should().NotBeNull();
+
+        // Bot
+        provider.GetService<IBotConfigStore>().Should().NotBeNull();
+
+        // KnowledgeBase
+        provider.GetService<IArticleStore>().Should().NotBeNull();
+
+        // Surveys
+        provider.GetService<ISurveyStore>().Should().NotBeNull();
+        provider.GetService<ISurveyResponseStore>().Should().NotBeNull();
+
+        // Automation
+        provider.GetService<ITimerStore>().Should().NotBeNull();
+        provider.GetService<IAutomationRuleStore>().Should().NotBeNull();
+        provider.GetService<IAutomationExecutionLogStore>().Should().NotBeNull();
+
+        // Audit
+        provider.GetService<IAuditStore>().Should().NotBeNull();
+
+        // Media
+        provider.GetService<IMediaStore>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AddInMemoryStorage_ShouldRegisterStoresAsSingletons()
+    {
+        var services = new ServiceCollection();
+        services.AddInMemoryStorage();
+        var provider = services.BuildServiceProvider();
+
+        var store1 = provider.GetRequiredService<IConversationStore>();
+        var store2 = provider.GetRequiredService<IConversationStore>();
+
+        store1.Should().BeSameAs(store2);
+    }
+}
