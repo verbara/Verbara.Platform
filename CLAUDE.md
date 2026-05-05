@@ -1,14 +1,14 @@
 # CLAUDE.md
 
-Project context for Claude Code working on **Asterisk.Platform** — the API host and composition root for an omnichannel contact-center built on .NET 10 Native AOT. Read top-to-bottom for architecture; jump to **Critical Gotchas** for non-obvious pitfalls before editing code.
+Project context for Claude Code working on **Verbara.Platform** — the API host and composition root for an omnichannel contact-center built on .NET 10 Native AOT. Read top-to-bottom for architecture; jump to **Critical Gotchas** for non-obvious pitfalls before editing code.
 
-> **This repo is the authoritative workstream for Platform + Platform.Web.** Plans, specs, ADRs, and research that touch either the API **or** the React frontend are authored under this repo's `docs/` tree. `Asterisk.Platform.Web` remains a separate git repo for frontend source, but its own `docs/` is secondary — open new plans here. Decision recorded 2026-04-19 (feedback memory `feedback_platform_web_consolidation.md`).
+> **This repo is the authoritative workstream for Platform + Platform.Web.** Plans, specs, ADRs, and research that touch either the API **or** the React frontend are authored under this repo's `docs/` tree. `Verbara.Platform.Web` remains a separate git repo for frontend source, but its own `docs/` is secondary — open new plans here. Decision recorded 2026-04-19 (feedback memory `feedback_platform_web_consolidation.md`).
 
 > **Do not append completed-work narrative to this file.** Milestone/sprint/plan write-ups belong in `~/.claude/projects/-media-Data-Source-IPcom-Asterisk-Platform/memory/` (indexed by `MEMORY.md`). Only evergreen context — what the codebase IS, not what it WAS — lives here.
 
 ## Project Overview
 
-Asterisk.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes SDK (MIT) and Pro packages via NuGet — versions pinned in `Directory.Packages.props`.
+Verbara.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes SDK (MIT) and Pro packages via NuGet — versions pinned in `Directory.Packages.props`.
 
 **NativeAOT (`IsAotCompatible=true`), `/api/v1/` (URL-segment versioning), 70 endpoint groups (14 with feature gates).** Current version in `Directory.Build.props`; package list under `src/`.
 
@@ -25,10 +25,10 @@ Asterisk.Platform is the API host and composition root for the omnichannel conta
 ## Build & Test
 
 ```sh
-dotnet build Asterisk.Platform.slnx
-dotnet test Asterisk.Platform.slnx               # all tests
-dotnet test Asterisk.Platform.slnx -v q          # quiet
-dotnet test tests/Asterisk.Platform.Api.Tests/   # single project
+dotnet build Verbara.Platform.slnx
+dotnet test Verbara.Platform.slnx               # all tests
+dotnet test Verbara.Platform.slnx -v q          # quiet
+dotnet test tests/Verbara.Platform.Api.Tests/   # single project
 ```
 
 ## Running the Platform
@@ -36,7 +36,7 @@ dotnet test tests/Asterisk.Platform.Api.Tests/   # single project
 Platform.Api is the composition root and executable host.
 
 ```sh
-cd src/Asterisk.Platform.Api
+cd src/Verbara.Platform.Api
 dotnet run
 ```
 
@@ -82,11 +82,11 @@ ErrorHandling -> CORS -> RateLimiter -> TenantResolution -> Authentication -> Au
 
 ### Endpoint Inventory
 
-All endpoints in `src/Asterisk.Platform.Api/Endpoints/` (file-per-group). Routes versioned under `/api/v1/` (Asp.Versioning.Http, URL-segment). Legacy `/api/` redirects for backward compat.
+All endpoints in `src/Verbara.Platform.Api/Endpoints/` (file-per-group). Routes versioned under `/api/v1/` (Asp.Versioning.Http, URL-segment). Legacy `/api/` redirects for backward compat.
 
 **Categories:** Auth (incl. OIDC, RBAC, AuthAdmin) · Omnichannel (Webhook, Conversation, ChannelConfig, Contact, SSE, WebChat) · Agent (Agent, Supervisor, Skill, UsersMe) · Admin (Admin, Audit, ScheduledReport, TenantSettings) · Management (Tenant/Settings/System/Cluster/ApiKey/Billing/Impersonation/Webhook + Setup) · GDPR · Outbound Webhooks (Subscription, EventType) · Dialer (Campaign, CallAttempt, DncList, CallerIdPool, HolidayCalendar, Settings, Trunk, OutboundRoute) · Analytics (incl. Live + QueueMetrics) · AI/Bot (Bot, KnowledgeBase, AgentAssist, Flow) · Media (incl. Recording) · Realtime + Cluster · Partner (Customer/Billing/Revenue/Settings) · Branding (public) · Notifications · Onboarding · Misc (CannedResponse, Case, Disposition, Survey).
 
-`ls src/Asterisk.Platform.Api/Endpoints/` for the authoritative file list.
+`ls src/Verbara.Platform.Api/Endpoints/` for the authoritative file list.
 
 ### Pro Package Integration
 
@@ -98,7 +98,7 @@ Pro.EventStore + Pro.EventStore.Postgres            -- Event sourcing, CDR
 Pro.Analytics + Pro.Analytics.Storage.Postgres      -- Real-time metrics
 Pro.CallAnalytics + Pro.CallAnalytics.Storage.Postgres -- Post-call AI
 Pro.AgentAssist + Pro.AgentAssist.Storage.Postgres  -- Live agent assist
-Pro.Realtime + Pro.Realtime.Storage.Postgres        -- Asterisk Realtime DB
+Pro.Realtime + Pro.Realtime.Storage.Postgres        -- Asterisk PBX Realtime DB
 Pro.Cluster + Pro.Cluster.Storage.Postgres          -- Multi-server clustering
 Pro.MultiTenant / Pro.Routing / Pro.Licensing       -- Tenant isolation, skill routing, license enforcement
 ```
@@ -106,7 +106,7 @@ Pro.MultiTenant / Pro.Routing / Pro.Licensing       -- Tenant isolation, skill r
 ## Docker Deployment
 
 ```sh
-docker compose -f docker/docker-compose.full.yml up          # Full stack (Asterisk 22 + API + Web + Postgres 18 + Redis 8 + MinIO)
+docker compose -f docker/docker-compose.full.yml up          # Full stack (Asterisk 22 PBX + API + Web + Postgres 18 + Redis 8 + MinIO)
 docker compose -f docker/docker-compose.production.yml up    # Production (no dev seeds, external DB)
 docker compose -f docker/demo/docker-compose.demo.yml up     # Demo (pre-seeded, simulated PSTN)
 docker compose up                                             # Dev (root-level, API only)
@@ -118,13 +118,13 @@ docker compose up                                             # Dev (root-level,
 
 Order in `Program.cs`:
 
-1. **SDK:** `AddAsterisk(Configuration)` (AMI + ARI), `AddAsteriskSessions()`
+1. **SDK:** `AddVerbara(Configuration)` (AMI + ARI), `AddVerbaraSessions()`
 2. **Platform core:** one `AddPlatform*()` per package (Core, Conversations, Channels, InboundRouting, Switchboard, Bot, Audit, Media, KnowledgeBase, Surveys, Billing) + cross-cutting: `AddPlatformRateLimiting` (per-tenant tiers), `AddPlatformScheduledReports` (NCrontab + Renderer + Mail), `AddPlatformApiVersioning` (`/api/v1`)
 3. **Storage:** `AddInMemoryStorage()` by default; `AddPostgresStorage(connString)` when configured
-4. **Pro (conditional on connection strings):** Dialer (`UsePostgresDialerStorage` + `AddProDialer`), Realtime (`AddAsteriskRealtime` + `UsePostgresRealtimeStorage`), EventStore (`UsePostgresEventStore` + `AddAsteriskEventStore`), Analytics, CallAnalytics, AgentAssist, Cluster (`AddAsteriskCluster` + `UsePostgresClusterTransport`), MultiTenant, Licensing
+4. **Pro (conditional on connection strings):** Dialer (`UsePostgresDialerStorage` + `AddProDialer`), Realtime (`AddVerbaraRealtime` + `UsePostgresRealtimeStorage`), EventStore (`UsePostgresEventStore` + `AddVerbaraEventStore`), Analytics, CallAnalytics, AgentAssist, Cluster (`AddVerbaraCluster` + `UsePostgresClusterTransport`), MultiTenant, Licensing
 5. **Auth:** `AddDynamicAuth(jwtTokenService)` + singleton `PermissionResolver` + `PermissionAuthorizationHandler` + `PermissionPolicyProvider`
 
-Exact lines live in `src/Asterisk.Platform.Api/Program.cs` — this section only reflects the ordering rules.
+Exact lines live in `src/Verbara.Platform.Api/Program.cs` — this section only reflects the ordering rules.
 
 ## Code Conventions
 
