@@ -180,11 +180,10 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
     /// </summary>
     internal static void StubVerbaraHostedServices(IServiceCollection services)
     {
-        // Remove Asterisk-specific hosted services that try to connect to a real server.
-        // We identify them by their implementation type to avoid removing framework-level services.
         var hostedServices = services
             .Where(d => d.ServiceType == typeof(IHostedService) &&
                         (d.ImplementationType?.FullName?.Contains("Asterisk") == true ||
+                         d.ImplementationType?.FullName?.Contains("Verbara") == true ||
                          d.ImplementationFactory is not null))
             .ToList();
         foreach (var d in hostedServices)

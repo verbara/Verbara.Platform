@@ -44,20 +44,23 @@ public sealed class VersioningTests : IClassFixture<PlatformApiFactory>
     [Fact]
     public async Task UnversionedRequest_ShouldReachSameEndpoint_AsVersionedRequest()
     {
-        var unversioned = await _client.PostAsJsonAsync("/api/setup", new
-        {
-            email = "rewrite-check@example.com",
-            password = "RewriteCheck2026!",
-        });
-
+        // Both calls use the same email; the SECOND must see the tenant the first created → 409.
+        // This proves both routes hit the same handler (same InMemory store).
         var versioned = await _client.PostAsJsonAsync("/api/v1/setup", new
         {
             email = "rewrite-check@example.com",
             password = "RewriteCheck2026!",
         });
 
-        // Both should hit the same handler; status codes must be identical
-        unversioned.StatusCode.Should().Be(versioned.StatusCode,
+        var unversioned = await _client.PostAsJsonAsync("/api/setup", new
+        {
+            email = "rewrite-check@example.com",
+            password = "RewriteCheck2026!",
+        });
+
+        // First call creates (201 or 409 if prior test ran); second must match or be 409.
+        ((int)versioned.StatusCode).Should().BeOneOf(201, 409);
+        unversioned.StatusCode.Should().Be(HttpStatusCode.Conflict,
             "unversioned URL rewrite must route to the same endpoint as the versioned URL");
     }
 

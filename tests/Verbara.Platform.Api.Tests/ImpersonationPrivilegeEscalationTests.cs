@@ -54,6 +54,7 @@ public sealed class ImpersonationPrivilegeEscalationTests
         // partner-alpha admin tries to impersonate customer-bravo (sibling, NOT descendant).
         var client = _factory.CreateClientFor(HierarchyImpersonationFactory.PartnerAlphaKey);
         var before = _factory.AuthEventCountByTenant(HierarchyImpersonationFactory.PartnerAlphaTenantId);
+        var targetBefore = _factory.AuthEventCountByTenant(HierarchyImpersonationFactory.CustomerBravoTenantId);
 
         var response = await client.PostAsJsonAsync(
             "/api/management/impersonate",
@@ -72,8 +73,11 @@ public sealed class ImpersonationPrivilegeEscalationTests
             e => e.EventType == AuthEventTypes.ImpersonationPrivilegeEscalationAttempted,
             because: "rejected attempts must be auditable in the caller tenant");
 
+        // Only check events added AFTER this test started (other tests may have
+        // legitimately accessed customer-bravo via the platform admin path).
         var targetEntries = _factory.GetAuthEvents(HierarchyImpersonationFactory.CustomerBravoTenantId);
-        targetEntries.Should().NotContain(
+        var newTargetEntries = targetEntries.Skip(targetBefore).ToList();
+        newTargetEntries.Should().NotContain(
             e => e.EventType == AuthEventTypes.ImpersonationTargetAccessed,
             because: "no access was granted; target must not see a target.accessed entry");
 
