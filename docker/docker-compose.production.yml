@@ -109,7 +109,7 @@ services:
       - -c
       - effective_cache_size=2GB
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     environment:
       POSTGRES_DB: verbara
       POSTGRES_USER: platform

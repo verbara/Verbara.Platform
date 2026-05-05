@@ -2,7 +2,7 @@ services:
   postgres:
     image: postgres:18-alpine
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
       - ./sql:/demo-sql:ro
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-verbara}
@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -30,6 +30,8 @@ services:
       dockerfile: Dockerfile.asterisk
     environment:
       - EXTERNAL_IP=${EXTERNAL_IP:-}
+      - AMI_PASSWORD=${AMI_PASSWORD:-platform_secret}
+      - ARI_PASSWORD=${ARI_PASSWORD:-platform_secret}
     ports:
       - "5038:5038"
       - "5060:5060/udp"

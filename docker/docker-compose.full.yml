@@ -19,6 +19,8 @@ services:
     logging: *default-logging
     environment:
       EXTERNAL_IP: ${EXTERNAL_IP:-}
+      AMI_PASSWORD: ${AMI_PASSWORD:-platform_secret}
+      ARI_PASSWORD: ${ARI_PASSWORD:-platform_secret}
     volumes:
       - ./asterisk-config:/etc/asterisk
       - recordings:/var/spool/asterisk/recording
@@ -167,7 +169,7 @@ services:
       - -c
       - max_connections=200
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     environment:
       POSTGRES_DB: verbara
       POSTGRES_USER: platform
@@ -180,7 +182,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     logging: *default-logging
     restart: unless-stopped
     healthcheck:
