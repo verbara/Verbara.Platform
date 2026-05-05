@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Redis-backed implementations of IMfaPendingCache and IPasswordResetCache for Verbara.Platform.Identity. Enables horizontal scale-out of MFA challenge tokens + password-reset tokens across multiple Platform API instances. AOT-safe (source-generated JSON only).</Description>
+    <PackageTags>asterisk;platform;identity;mfa;redis;native-aot</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- New package - no baseline published yet; skip binary compatibility check -->
+    <EnablePackageValidation>false</EnablePackageValidation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Verbara.Platform.Identity.Redis.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Verbara.Platform.Identity\Verbara.Platform.Identity.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <!-- AHH Phase 1: RedisAuthCacheInvalidator runs as IHostedService. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+
+</Project>

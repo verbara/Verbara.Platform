@@ -19,6 +19,8 @@ services:
     logging: *default-logging
     environment:
       EXTERNAL_IP: ${EXTERNAL_IP:-}
+      AMI_PASSWORD: ${AMI_PASSWORD:-platform_secret}
+      ARI_PASSWORD: ${ARI_PASSWORD:-platform_secret}
     volumes:
       - ./asterisk-config:/etc/asterisk
       - recordings:/var/spool/asterisk/recording
@@ -50,15 +52,15 @@ services:
       - "5000:5000"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__Postgres: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret}
+      ConnectionStrings__Postgres: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret}
       Asterisk__Ami__Hostname: asterisk
       Asterisk__Ami__Port: "5038"
       Asterisk__Ami__Username: platform
       Asterisk__Ami__Password: ${AMI_PASSWORD:-platform_secret}
       Asterisk__Ari__BaseUrl: http://asterisk:8088
-      Asterisk__Ari__Username: asterisk-platform
+      Asterisk__Ari__Username: verbara
       Asterisk__Ari__Password: ${ARI_PASSWORD:-asterisk_ari_secret}
-      Asterisk__Ari__Application: asterisk-platform
+      Asterisk__Ari__Application: verbara
       Recordings__BasePath: /recordings
       Licensing__EnforcementMode: Disabled
       CORS_ORIGINS: http://localhost
@@ -92,7 +94,7 @@ services:
   renderer:
     build:
       context: ..
-      dockerfile: src/Asterisk.Platform.Renderer/Dockerfile.renderer
+      dockerfile: src/Verbara.Platform.Renderer/Dockerfile.renderer
     logging: *default-logging
     environment:
       ASPNETCORE_URLS: http://+:5010
@@ -112,11 +114,11 @@ services:
   mail:
     build:
       context: ..
-      dockerfile: src/Asterisk.Platform.Mail/Dockerfile.mail
+      dockerfile: src/Verbara.Platform.Mail/Dockerfile.mail
     logging: *default-logging
     environment:
       ASPNETCORE_URLS: http://+:5020
-      ConnectionStrings__Postgres: Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret}
+      ConnectionStrings__Postgres: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret}
       Smtp__Host: ${SMTP_HOST:-localhost}
       Smtp__Port: ${SMTP_PORT:-587}
       Smtp__UseTls: ${SMTP_USE_TLS:-false}
@@ -167,9 +169,9 @@ services:
       - -c
       - max_connections=200
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     environment:
-      POSTGRES_DB: platform
+      POSTGRES_DB: verbara
       POSTGRES_USER: platform
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_secret}
     healthcheck:
@@ -180,7 +182,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     logging: *default-logging
     restart: unless-stopped
     healthcheck:

@@ -23,7 +23,7 @@
     <PackageVersion Include="Dapper" Version="2.1.72" />
   </ItemGroup>
 
-  <!-- EF Core stack consumed exclusively by Asterisk.Platform.Identity DataProtection
+  <!-- EF Core stack consumed exclusively by Verbara.Platform.Identity DataProtection
        integration (R5.2 P0.8 / ADR-0003). Versions match the .NET 10 SDK band already
        in use elsewhere in the repo. -->
   <ItemGroup>
@@ -39,34 +39,34 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.15.1" />
-    <PackageVersion Include="Asterisk.Sdk.Push" Version="1.15.1" />
-    <PackageVersion Include="Asterisk.Sdk.Resilience" Version="1.15.1" />
-    <PackageVersion Include="Asterisk.Sdk.OpenTelemetry" Version="1.15.1" />
+    <PackageVersion Include="Verbara.Sdk.Hosting" Version="2.0.0" />
+    <PackageVersion Include="Verbara.Sdk.Push" Version="2.0.0" />
+    <PackageVersion Include="Verbara.Sdk.Resilience" Version="2.0.0" />
+    <PackageVersion Include="Verbara.Sdk.OpenTelemetry" Version="2.0.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Dialer.Storage.Postgres" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.EventStore.Postgres" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Analytics.Storage.Postgres" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Licensing" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.AgentAssist.Storage.Postgres" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Routing" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Realtime.Storage.Postgres" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Cluster.Storage.Postgres" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.MultiTenant" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Push" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Push.SignalR" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.Storage.Common" Version="1.16.0-pro" />
-    <PackageVersion Include="Asterisk.Sdk.Pro.OpenTelemetry" Version="1.12.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.EventStore" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Analytics" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Dialer" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Dialer.Storage.Postgres" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.EventStore.Postgres" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Analytics.Storage.Postgres" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Licensing" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist.Storage.Postgres" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Routing" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Realtime" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Realtime.Storage.Postgres" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Cluster" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Cluster.Storage.Postgres" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.MultiTenant" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Push" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Push.SignalR" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Storage.Common" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.OpenTelemetry" Version="2.0.0-pro" />
   </ItemGroup>
 
   <ItemGroup>
@@ -113,7 +113,7 @@
   </ItemGroup>
 
   <!-- NBomber load test suite (R5.4 S5.1). Consumed only by the opt-in
-       tests/Asterisk.Platform.LoadTests project, which is NOT part of the
+       tests/Verbara.Platform.LoadTests project, which is NOT part of the
        default slnx and runs exclusively via scripts/load-test.sh. -->
   <ItemGroup>
     <PackageVersion Include="NBomber" Version="6.1.0" />
@@ -121,8 +121,8 @@
   </ItemGroup>
 
   <!-- Auth Hotpath Hardening (AHH) Phase 0 evidence stack. Consumed by the
-       opt-in tests/Asterisk.Platform.Benchmarks project (BenchmarkDotNet, JIT)
-       and tests/Asterisk.Platform.Api.Aot.Probe (AOT publish probe for the
+       opt-in tests/Verbara.Platform.Benchmarks project (BenchmarkDotNet, JIT)
+       and tests/Verbara.Platform.Api.Aot.Probe (AOT publish probe for the
        Argon2id candidate library). Neither project ships in the slnx; both
        run exclusively via scripts/profiling/. See
        docs/plans/active/2026-04-27-auth-hotpath-hardening.md Phase 0. -->

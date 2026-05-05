@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/profiling/aot-probe-publish.sh — AHH Phase 0 AOT validation gate.
 #
-# Publishes tests/Asterisk.Platform.Api.Aot.Probe with PublishAot=true and
+# Publishes tests/Verbara.Platform.Api.Aot.Probe with PublishAot=true and
 # asserts ZERO IL2xxx / IL3xxx trim/AOT warnings. If any warning is emitted,
 # the candidate Argon2id library (Isopoh.Cryptography.Argon2) is rejected
 # and Phase 4 must pivot to the libsodium P/Invoke fallback documented in
@@ -9,7 +9,7 @@
 #
 # Output:
 # - Native binary at:
-#     tests/Asterisk.Platform.Api.Aot.Probe/bin/Release/net10.0/<rid>/publish/
+#     tests/Verbara.Platform.Api.Aot.Probe/bin/Release/net10.0/<rid>/publish/
 # - Full publish log echoed to stdout (capture for the research doc).
 #
 # Exit codes:
@@ -25,7 +25,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
-PROBE_DIR="$ROOT/tests/Asterisk.Platform.Api.Aot.Probe"
+PROBE_DIR="$ROOT/tests/Verbara.Platform.Api.Aot.Probe"
 LOG="/tmp/aot-probe-publish.log"
 
 cd "$ROOT"
@@ -39,7 +39,7 @@ echo "[aot-probe] Publishing $PROBE_DIR with PublishAot=true ..."
 echo "[aot-probe] Full log: $LOG"
 
 set +e
-dotnet publish "$PROBE_DIR/Asterisk.Platform.Api.Aot.Probe.csproj" \
+dotnet publish "$PROBE_DIR/Verbara.Platform.Api.Aot.Probe.csproj" \
     -c Release \
     -p:PublishAot=true \
     --nologo \
@@ -71,7 +71,7 @@ if [ -z "$PUBLISH_DIR" ] || [ ! -d "$PUBLISH_DIR" ]; then
     exit 2
 fi
 
-BIN="$PUBLISH_DIR/Asterisk.Platform.Api.Aot.Probe"
+BIN="$PUBLISH_DIR/Verbara.Platform.Api.Aot.Probe"
 if [ ! -x "$BIN" ]; then
     echo "[aot-probe] FAIL: native binary missing or not executable at $BIN." >&2
     exit 2

@@ -64,7 +64,7 @@ services:
       # most. Setting Maximum Pool Size=50 per replica + max_connections=220
       # on Postgres (see service postgres below) gives 4×50=200 + 20 admin
       # headroom. Per ADR-0014 §"Postgres pool tuning".
-      ConnectionStrings__Postgres: "Host=postgres;Database=platform;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret};Maximum Pool Size=50;Minimum Pool Size=10;Connection Idle Lifetime=300;Pooling=true"
+      ConnectionStrings__Postgres: "Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret};Maximum Pool Size=50;Minimum Pool Size=10;Connection Idle Lifetime=300;Pooling=true"
     depends_on:
       redis:
         condition: service_healthy

@@ -57,7 +57,7 @@ services:
   renderer:
     build:
       context: ..
-      dockerfile: src/Asterisk.Platform.Renderer/Dockerfile.renderer
+      dockerfile: src/Verbara.Platform.Renderer/Dockerfile.renderer
     env_file:
       - .env.production
     restart: unless-stopped
@@ -75,7 +75,7 @@ services:
   mail:
     build:
       context: ..
-      dockerfile: src/Asterisk.Platform.Mail/Dockerfile.mail
+      dockerfile: src/Verbara.Platform.Mail/Dockerfile.mail
     env_file:
       - .env.production
     depends_on:
@@ -109,9 +109,9 @@ services:
       - -c
       - effective_cache_size=2GB
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     environment:
-      POSTGRES_DB: platform
+      POSTGRES_DB: verbara
       POSTGRES_USER: platform
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_secret}
     healthcheck:

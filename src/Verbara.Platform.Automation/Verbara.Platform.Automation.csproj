@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Automation rules engine — trigger evaluation, condition matching, action execution, persistent timers, and loop protection for Verbara.Platform</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Verbara.Platform.Automation.Tests" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Verbara.Platform.Core\Verbara.Platform.Core.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Conversations\Verbara.Platform.Conversations.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Switchboard\Verbara.Platform.Switchboard.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Queues\Verbara.Platform.Queues.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Verbara.Sdk.Resilience" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+  </ItemGroup>
+
+</Project>

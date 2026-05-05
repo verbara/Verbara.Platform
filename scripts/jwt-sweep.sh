@@ -13,7 +13,7 @@
 #
 # Output:
 # - One NBomber report directory per step under
-#   tests/Asterisk.Platform.LoadTests/load-test-reports/.
+#   tests/Verbara.Platform.LoadTests/load-test-reports/.
 # - Per-step screen log at /tmp/jwt-sweep-r<rate>.log.
 #
 # Env knobs:
@@ -49,7 +49,7 @@ echo "[jwt-sweep] Sweep rates: $SWEEP_RATES (req/s)"
 echo "[jwt-sweep] Per-step duration: ${SWEEP_DURATION}s"
 echo "[jwt-sweep] Target URL: $PLATFORM_API_URL"
 
-cd "$ROOT/tests/Asterisk.Platform.LoadTests"
+cd "$ROOT/tests/Verbara.Platform.LoadTests"
 dotnet build -c Release --nologo > /dev/null
 
 for rate in $SWEEP_RATES; do
@@ -69,4 +69,4 @@ done
 
 echo ""
 echo "[jwt-sweep] DONE. Per-step logs in /tmp/jwt-sweep-r{rate}.log."
-echo "[jwt-sweep] NBomber reports under tests/Asterisk.Platform.LoadTests/load-test-reports/."
+echo "[jwt-sweep] NBomber reports under tests/Verbara.Platform.LoadTests/load-test-reports/."

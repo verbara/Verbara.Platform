@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Conversation ownership lifecycle — assign, offer, accept, reject, transfer, and bot handoff for Verbara.Platform</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Verbara.Platform.Switchboard.Tests" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Verbara.Platform.Core\Verbara.Platform.Core.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Conversations\Verbara.Platform.Conversations.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Queues\Verbara.Platform.Queues.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Channels.Core\Verbara.Platform.Channels.Core.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Routing.Inbound\Verbara.Platform.Routing.Inbound.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+
+</Project>

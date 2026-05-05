@@ -2,6 +2,19 @@
 PJSIP_CONF="/etc/asterisk/pjsip.conf"
 RTP_CONF="/etc/asterisk/rtp.conf"
 
+MANAGER_CONF="/etc/asterisk/manager.conf"
+ARI_CONF="/etc/asterisk/ari.conf"
+
+# Inject AMI/ARI passwords from environment so .env secrets propagate into Asterisk
+if [ -n "$AMI_PASSWORD" ] && [ -f "$MANAGER_CONF" ]; then
+    sed -i "s/^secret = .*/secret = $AMI_PASSWORD/" "$MANAGER_CONF"
+    echo "[entrypoint] AMI password injected from environment"
+fi
+if [ -n "$ARI_PASSWORD" ] && [ -f "$ARI_CONF" ]; then
+    sed -i "s/^password = .*/password = $ARI_PASSWORD/" "$ARI_CONF"
+    echo "[entrypoint] ARI password injected from environment"
+fi
+
 if [ -n "$EXTERNAL_IP" ] && [ -f "$PJSIP_CONF" ]; then
     # Replace ${EXTERNAL_IP} placeholder with actual IP
     cp "$PJSIP_CONF" /tmp/_pjsip_tmp

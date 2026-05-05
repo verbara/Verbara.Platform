@@ -15,7 +15,7 @@ asterisk:
   postgres:
     host: postgres-pooler.r55-data.svc.cluster.local
     port: 5432
-    database: asterisk_platform
+    database: verbara
     user: platform
     passwordSecret: asterisk-pg-credentials
     passwordKey: password

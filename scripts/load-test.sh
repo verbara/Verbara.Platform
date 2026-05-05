@@ -20,7 +20,7 @@
 #     tenant + benefits from /metrics + Prometheus scrape.
 #
 # Reports land in:
-#   tests/Asterisk.Platform.LoadTests/load-test-reports/<timestamp>/
+#   tests/Verbara.Platform.LoadTests/load-test-reports/<timestamp>/
 #
 # Other env knobs:
 #   LOADTEST_KEEP=1                — fixture profile only; leave stack up.
@@ -105,7 +105,7 @@ if [ -z "$LOADTEST_TOKEN" ] || [ "$LOADTEST_TOKEN" = "null" ]; then
 fi
 
 echo "[load-test] Running NBomber suite (Release, profile=$PROFILE)..."
-cd "$ROOT/tests/Asterisk.Platform.LoadTests"
+cd "$ROOT/tests/Verbara.Platform.LoadTests"
 
 # Pass tenant so all 5 scenarios add X-Tenant-Id + use seeded credentials.
 # Fixture profile exports tenant=loadtest (legacy single-tenant fixture);

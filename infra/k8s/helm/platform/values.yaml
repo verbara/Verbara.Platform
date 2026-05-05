@@ -2,7 +2,7 @@ namespace: r55-platform
 
 api:
   image:
-    repository: 192.168.122.1:5050/asterisk-platform/api
+    repository: 192.168.122.1:5050/verbara-platform/api
     tag: "1.14.6"
   replicas: 2
   port: 5000
@@ -21,7 +21,7 @@ api:
   postgres:
     host: postgres-pooler.r55-data.svc.cluster.local
     port: 5432
-    database: asterisk_platform
+    database: verbara
     user: platform
     passwordSecret: platform-pg-credentials
     passwordKey: password
@@ -43,9 +43,9 @@ api:
       password: r55-staging-only-change-prod
     ari:
       baseUrl: http://asterisk-ari.r55-asterisk.svc.cluster.local:8088
-      username: asterisk-platform
+      username: verbara
       password: r55-staging-only-change-prod
-      application: asterisk-platform
+      application: verbara
   licensing:
     enforcementMode: Disabled
   prometheus:
@@ -53,7 +53,7 @@ api:
 
 web:
   image:
-    repository: 192.168.122.1:5050/asterisk-platform/web
+    repository: 192.168.122.1:5050/verbara-platform/web
     tag: "1.15.5"
   replicas: 1
   port: 80

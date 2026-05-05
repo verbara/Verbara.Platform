@@ -1,0 +1,341 @@
+using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Conversations;
+using Verbara.Platform.Conversations.Services;
+using Verbara.Platform.Conversations.Stores;
+using Verbara.Platform.Core;
+using Verbara.Platform.Switchboard;
+using Verbara.Sdk.Pro.Dialer.Campaign;
+using Verbara.Sdk.Pro.Dialer.Dispositions;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Verbara.Platform.Api.Endpoints;
+
+internal static class ConversationEndpoints
+{
+    public static void MapConversationEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/conversations").RequireAuthorization("Authenticated");
+
+        group.MapGet("/", ListConversations);
+        group.MapGet("/{id}", GetConversation);
+        group.MapGet("/{id}/messages", GetMessages);
+        group.MapPost("/{id}/messages", SendMessage);
+        group.MapPost("/{id}/accept", AcceptConversation);
+        group.MapPost("/{id}/reject", RejectConversation);
+        group.MapPost("/{id}/transfer", TransferConversation);
+        group.MapPost("/{id}/close", CloseConversation);
+        group.MapPost("/{id}/wrapup", WrapUpConversation);
+        group.MapPost("/{id}/hold", HoldConversation);
+        group.MapPost("/{id}/unhold", UnholdConversation);
+        group.MapPost("/", CreateConversation);
+    }
+
+    private static async Task<IResult> ListConversations(
+        HttpContext context,
+        [FromServices] IConversationStore store,
+        ConversationState? state,
+        string? queueId,
+        string? agentId,
+        int page = 1,
+        int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var query = new ConversationQuery
+        {
+            State = state,
+            AssignedAgentId = agentId is not null ? EntityId.From(agentId) : null,
+            Page = page,
+            PageSize = pageSize,
+        };
+
+        var result = await store.ListAsync(tenantId, query, ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> GetConversation(
+        string id,
+        HttpContext context,
+        [FromServices] IConversationStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var conversation = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        return conversation is null ? Results.NotFound() : Results.Ok(conversation);
+    }
+
+    private static async Task<IResult> GetMessages(
+        string id,
+        HttpContext context,
+        [FromServices] IMessageStore store,
+        int limit = 50,
+        int offset = 0,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var messages = await store.GetConversationMessagesAsync(tenantId, EntityId.From(id), limit, offset, ct);
+        return Results.Ok(messages);
+    }
+
+    private static async Task<IResult> SendMessage(
+        string id,
+        HttpContext context,
+        [FromBody] SendMessageRequest body,
+        IConversationService conversationService,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+
+        var envelope = new MessageEnvelope(
+        [
+            new TextBlock(body.Text),
+        ]);
+
+        var message = await conversationService.SendMessageAsync(
+            EntityId.From(id),
+            tenantId,
+            envelope,
+            agentId,
+            ConversationOwnerKind.Agent,
+            ct);
+
+        return Results.Ok(message);
+    }
+
+    private static async Task<IResult> AcceptConversation(
+        string id,
+        HttpContext context,
+        IConversationSwitchboard switchboard,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+        var result = await switchboard.AcceptAsync(EntityId.From(id), tenantId, agentId, ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> RejectConversation(
+        string id,
+        HttpContext context,
+        IConversationSwitchboard switchboard,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+        var result = await switchboard.RejectAsync(EntityId.From(id), tenantId, agentId, ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> TransferConversation(
+        string id,
+        HttpContext context,
+        IConversationSwitchboard switchboard,
+        [FromBody] TransferRequest body,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        OwnershipResult result;
+
+        if (body.TargetQueueId is not null)
+            result = await switchboard.TransferToQueueAsync(EntityId.From(id), tenantId, EntityId.From(body.TargetQueueId), ct);
+        else if (body.TargetAgentId is not null)
+            result = await switchboard.TransferToAgentAsync(EntityId.From(id), tenantId, EntityId.From(body.TargetAgentId), ct);
+        else
+            return Results.BadRequest(new ErrorResponse("Either targetQueueId or targetAgentId must be specified"));
+
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> CloseConversation(
+        string id,
+        HttpContext context,
+        [FromServices] IConversationStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var conversation = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return Results.NotFound();
+
+        conversation.TransitionTo(ConversationState.Closed);
+        await store.SaveAsync(conversation, ct);
+        return Results.Ok(conversation);
+    }
+
+    private static async Task<IResult> WrapUpConversation(
+        string id,
+        HttpContext context,
+        [FromServices] IConversationStore conversationStore,
+        [FromServices] IWrapUpStore wrapUpStore,
+        CampaignStoreBase campaignStore,
+        DispositionCodeStoreBase dispositionCodeStore,
+        PlatformEventBus eventBus,
+        [FromBody] WrapUpRequest? body,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+        var conversationId = EntityId.From(id);
+
+        var conversation = await conversationStore.GetByIdAsync(tenantId, conversationId, ct);
+        if (conversation is null)
+            return Results.NotFound();
+
+        try
+        {
+            conversation.TransitionTo(ConversationState.WrapUp);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new ErrorResponse(ex.Message));
+        }
+
+        await conversationStore.SaveAsync(conversation, ct);
+
+        var record = new WrapUpRecord
+        {
+            TenantId = tenantId,
+            ConversationId = conversationId,
+            AgentId = agentId,
+            DispositionId = body?.DispositionId is not null ? EntityId.From(body.DispositionId) : EntityId.New(),
+            Notes = body?.Notes,
+            Duration = TimeSpan.Zero,
+            CompletedAt = DateTimeOffset.UtcNow,
+        };
+
+        await wrapUpStore.SaveAsync(record, ct);
+
+        // ─── Campaign Disposition Bridge ─────────────────────────────────
+        // If this is a campaign call, update the SDK call attempt + schedule callback
+        if (body?.CampaignDispositionId is { } campaignDispoId)
+        {
+            var meta = conversation.Metadata;
+            if (meta.TryGetValue("callAttemptId", out var attemptIdStr) &&
+                long.TryParse(attemptIdStr, out var callAttemptId))
+            {
+                var tenantStr = tenantId.Value;
+
+                // Update call attempt with disposition
+                await campaignStore.UpdateCallAttemptDispositionAsync(
+                    tenantStr, callAttemptId, campaignDispoId, body.Notes, ct);
+
+                // Check if callback needs scheduling
+                if (meta.TryGetValue("campaignId", out var campIdStr) &&
+                    long.TryParse(campIdStr, out var campaignId) &&
+                    meta.TryGetValue("contactId", out var contactIdStr) &&
+                    long.TryParse(contactIdStr, out var contactId))
+                {
+                    // Fetch disposition to check TriggerCallback flag
+                    var dispositions = await dispositionCodeStore.ListByCampaignAsync(tenantStr, campaignId, ct);
+                    var dispo = dispositions.FirstOrDefault(d => d.Id == campaignDispoId);
+
+                    if (dispo?.TriggerCallback == true && body.CallbackDate is { } cbDate &&
+                        DateTimeOffset.TryParse(cbDate, out var scheduledAt))
+                    {
+                        var agentSubId = context.User.FindFirst("sub")?.Value ?? "";
+                        await campaignStore.SaveCallbackAsync(
+                            tenantStr, campaignId, contactId, scheduledAt, agentSubId, ct);
+                    }
+
+                    // Publish SSE event
+                    eventBus.Publish(new CampaignDispositionSubmittedEvent(
+                        tenantStr, campaignId, dispo?.Code ?? "",
+                        context.User.FindFirst("sub")?.Value ?? ""));
+                }
+            }
+        }
+
+        return Results.Ok(record);
+    }
+
+    private static async Task<IResult> CreateConversation(
+        HttpContext context,
+        [FromBody] CreateConversationRequest body,
+        IConversationService conversationService,
+        [FromServices] IContactStore contactStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+
+        if (!Enum.TryParse<ChannelType>(body.Channel, ignoreCase: true, out var channelType))
+            return Results.BadRequest(new ErrorResponse($"Unknown channel: {body.Channel}"));
+
+        var contactId = EntityId.From(body.ContactId);
+
+        var contact = await contactStore.GetByIdAsync(tenantId, contactId, ct);
+        if (contact is null)
+            return Results.NotFound(new ErrorResponse("Contact not found"));
+
+        var conversation = await conversationService.GetOrCreateForContactAsync(
+            tenantId, contactId, channelType, ct);
+
+        if (body.InitialMessage is not null)
+        {
+            var envelope = new MessageEnvelope([new TextBlock(body.InitialMessage)]);
+            await conversationService.SendMessageAsync(
+                conversation.ConversationId, tenantId, envelope,
+                agentId, ConversationOwnerKind.Agent, ct);
+        }
+
+        return Results.Created($"/conversations/{conversation.ConversationId.Value}", conversation);
+    }
+
+    private static async Task<IResult> HoldConversation(
+        string id,
+        HttpContext context,
+        IConversationSwitchboard switchboard,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+        var result = await switchboard.HoldAsync(EntityId.From(id), tenantId, agentId, ct);
+
+        return result.Success
+            ? Results.Ok(result)
+            : Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot hold conversation"));
+    }
+
+    private static async Task<IResult> UnholdConversation(
+        string id,
+        HttpContext context,
+        IConversationSwitchboard switchboard,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agentId = GetCurrentAgentId(context);
+        var result = await switchboard.UnholdAsync(EntityId.From(id), tenantId, agentId, ct);
+
+        return result.Success
+            ? Results.Ok(result)
+            : Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot unhold conversation"));
+    }
+
+    private static TenantId GetTenantId(HttpContext context)
+    {
+        if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
+            return tid;
+
+        throw new InvalidOperationException("Tenant ID not resolved");
+    }
+
+    private static EntityId GetCurrentAgentId(HttpContext context)
+    {
+        var nameId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        return nameId is not null ? EntityId.From(nameId) : EntityId.New();
+    }
+}
+
+internal sealed record SendMessageRequest(string Text);
+internal sealed record TransferRequest(string? TargetQueueId, string? TargetAgentId);
+internal sealed record WrapUpRequest(
+    string? DispositionId = null,
+    string? Notes = null,
+    long? CampaignDispositionId = null,
+    string? CallbackDate = null,
+    string? CallbackPhone = null);
+internal sealed record CreateConversationRequest(
+    string ContactId,
+    string Channel,
+    string? InitialMessage = null);
