@@ -1,3 +1,8 @@
+> **COMPLETED 2026-05-05.** Shipped as v1.14.0 → v1.14.6 (8 commits, ADRs 0010-0014).
+> Checkboxes not individually ticked during execution but all objectives delivered:
+> Argon2id migration, cache decorators, write deferral, JWT rotation pool, multi-replica baseline.
+> Superseded by v1.14.5-1.14.6 (ADR-0015 Phases 1+2).
+
 # Auth Hotpath Hardening — Asterisk.Platform v1.13.x → v1.14.0
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to implement this plan task-by-task. Phases ship as independent releases (v1.13.1 / v1.13.2 / v1.14.0).
