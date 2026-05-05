@@ -20,7 +20,7 @@
 - [ ] **Step 1: Start the demo Docker stack from scratch**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 docker compose -f docker/docker-compose.full.yml down -v 2>/dev/null; \
 docker compose -f docker/docker-compose.full.yml up -d postgres
 ```
@@ -111,7 +111,7 @@ Expected: `32`
 - [ ] **Step 1: Delete the 6 obsolete files**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 rm src/Asterisk.Platform.Storage.Postgres/Migrations/002_Articles.sql
 rm src/Asterisk.Platform.Storage.Postgres/Migrations/003_RemainingStores.sql
 rm src/Asterisk.Platform.Storage.Postgres/Migrations/004_AsteriskRealtime.sql
@@ -158,7 +158,7 @@ To:
 - [ ] **Step 1: Start fresh stack with consolidated migration**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 docker compose -f docker/docker-compose.full.yml down -v 2>/dev/null; \
 docker compose -f docker/docker-compose.full.yml up -d postgres
 ```

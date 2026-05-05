@@ -382,8 +382,8 @@ git commit -m "test: add impersonation endpoint and JWT tests"
 ### Task 6: Frontend — Impersonation hook and auth store
 
 **Files:**
-- Create: `/media/Data/Source/IPcom/Asterisk.Platform.Web/src/core/api/hooks/use-impersonation.ts`
-- Modify: `/media/Data/Source/IPcom/Asterisk.Platform.Web/src/core/auth/auth-store.ts`
+- Create: `/media/Data/Source/Verbara/Asterisk.Platform.Web/src/core/api/hooks/use-impersonation.ts`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Platform.Web/src/core/auth/auth-store.ts`
 
 - [ ] **Step 1: Create use-impersonation.ts**
 
@@ -494,7 +494,7 @@ endImpersonation: () => {
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform.Web
+cd /media/Data/Source/Verbara/Asterisk.Platform.Web
 git add src/core/api/hooks/use-impersonation.ts src/core/auth/auth-store.ts
 git commit -m "feat: add impersonation hook and auth store state management"
 ```
@@ -504,8 +504,8 @@ git commit -m "feat: add impersonation hook and auth store state management"
 ### Task 7: Frontend — Impersonation banner + tenant page integration
 
 **Files:**
-- Create: `/media/Data/Source/IPcom/Asterisk.Platform.Web/src/core/auth/impersonation-banner.tsx`
-- Modify: `/media/Data/Source/IPcom/Asterisk.Platform.Web/src/admin/sidebar.tsx` (or layout wrapper to include banner)
+- Create: `/media/Data/Source/Verbara/Asterisk.Platform.Web/src/core/auth/impersonation-banner.tsx`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Platform.Web/src/admin/sidebar.tsx` (or layout wrapper to include banner)
 
 - [ ] **Step 1: Create ImpersonationBanner.tsx**
 
@@ -585,7 +585,7 @@ import { ImpersonationBanner } from '../core/auth/impersonation-banner';
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform.Web
+cd /media/Data/Source/Verbara/Asterisk.Platform.Web
 git add src/core/auth/impersonation-banner.tsx
 git commit -m "feat: add ImpersonationBanner with countdown timer and end button"
 ```

@@ -90,7 +90,7 @@ Conectar todo + validar regresión — puede paralelizarse una vez Pilar 2 compl
 
 - **C5 — Release prep (0.5d)**
   - Bump `Directory.Build.props` → `1.6.0`.
-  - Pack: `dotnet pack -c Release -o /media/Data/Source/IPcom/local-nuget-feed/`.
+  - Pack: `dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/`.
   - Clear cache en consumers: `rm -rf ~/.nuget/packages/asterisk.sdk*/1.6.0*/`.
   - Release notes + GitHub release draft + `project_v160_release.md` en SDK memory.
 

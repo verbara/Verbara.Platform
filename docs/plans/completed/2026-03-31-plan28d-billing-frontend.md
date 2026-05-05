@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 19, TypeScript, TanStack Query 5, TanStack Table 8, React Hook Form 7 + Zod 4, TailwindCSS v4, Lucide React icons, date-fns 4, Recharts 3 (usage charts), shadcn/ui v4 (`@base-ui/react`, NOT Radix)
 
-**Working directory:** `/media/Data/Source/IPcom/Asterisk.Platform.Web/`
+**Working directory:** `/media/Data/Source/Verbara/Asterisk.Platform.Web/`
 
 ---
 
@@ -397,7 +397,7 @@ export function useUpdateQuota() {
 
 - [ ] **Step 2: Verify TypeScript compiles**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
 Expected: No errors related to `use-billing.ts`
 
 - [ ] **Step 3: Commit**
@@ -537,7 +537,7 @@ export default function QuotasPage() {
 
 - [ ] **Step 4: Verify build compiles**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
 Expected: No errors
 
 - [ ] **Step 5: Commit**
@@ -986,7 +986,7 @@ export default function RateCardsPage() {
 
 - [ ] **Step 3: Verify build compiles**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
 Expected: No errors
 
 - [ ] **Step 4: Commit**
@@ -1290,7 +1290,7 @@ export default function InvoicesPage() {
 
 - [ ] **Step 2: Verify build compiles**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
 Expected: No errors
 
 - [ ] **Step 3: Commit**
@@ -1509,7 +1509,7 @@ export default function UsagePage() {
 
 - [ ] **Step 2: Verify build compiles**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
 Expected: No errors
 
 - [ ] **Step 3: Commit**
@@ -1834,7 +1834,7 @@ export default function QuotasPage() {
 
 - [ ] **Step 2: Verify build compiles**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npx tsc --noEmit --pretty 2>&1 | head -30`
 Expected: No errors
 
 - [ ] **Step 3: Commit**
@@ -1854,12 +1854,12 @@ git commit -m "feat(billing): add quotas page with status display, progress bars
 
 - [ ] **Step 1: Run full type check**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npx tsc --noEmit --pretty`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npx tsc --noEmit --pretty`
 Expected: 0 errors
 
 - [ ] **Step 2: Run lint**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npm run lint 2>&1 | tail -10`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npm run lint 2>&1 | tail -10`
 Expected: No critical errors
 
 - [ ] **Step 3: Verify file count**

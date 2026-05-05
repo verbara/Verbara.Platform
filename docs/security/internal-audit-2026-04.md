@@ -39,7 +39,7 @@
 
 **Repro (pre-fix):**
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet list package --vulnerable --include-transitive 2>&1 | grep -A 3 "MailKit\|MimeKit"
 # Project `Asterisk.Platform.Mail` has the following vulnerable packages
 #    [net10.0]:

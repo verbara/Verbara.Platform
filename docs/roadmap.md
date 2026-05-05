@@ -4,7 +4,7 @@
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Asterisk.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
-Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/docs/roadmap.md`.
+Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/docs/roadmap.md`.
 
 ---
 

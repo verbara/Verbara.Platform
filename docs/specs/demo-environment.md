@@ -135,7 +135,7 @@ chmod +x demo-reset.sh
 | Step | Action | Details |
 |------|--------|---------|
 | 1/11 | Clean up | `docker compose down -v --remove-orphans` |
-| 2/11 | Copy NuGet feed | Pro packages from `/media/Data/Source/IPcom/local-nuget-feed/` |
+| 2/11 | Copy NuGet feed | Pro packages from `/media/Data/Source/Verbara/local-nuget-feed/` |
 | 3/11 | Build images | `docker compose build --quiet` |
 | 4/11 | Start Postgres | Wait for `pg_isready` |
 | 5/11 | Start all services | `docker compose up -d` |

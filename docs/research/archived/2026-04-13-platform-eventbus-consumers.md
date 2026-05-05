@@ -9,7 +9,7 @@
 
 ## Publishers
 
-All paths are relative to `/media/Data/Source/IPcom/Asterisk.Platform/`.
+All paths are relative to `/media/Data/Source/Verbara/Asterisk.Platform/`.
 
 | File | Line | Event | Tenant source | User / target source |
 |------|------|-------|---------------|----------------------|

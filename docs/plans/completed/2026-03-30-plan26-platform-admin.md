@@ -63,13 +63,13 @@
 ## Task 1: TenantType Enum + Tenant Model Extension (SDK)
 
 **Files:**
-- Create: `src/Asterisk.Sdk.Pro.MultiTenant/TenantType.cs` (in `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/`)
-- Modify: `src/Asterisk.Sdk.Pro.MultiTenant/Tenant.cs` (in `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/`)
-- Modify: `src/Asterisk.Sdk.Pro.MultiTenant/ITenantStore.cs` (in `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/`)
+- Create: `src/Asterisk.Sdk.Pro.MultiTenant/TenantType.cs` (in `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/`)
+- Modify: `src/Asterisk.Sdk.Pro.MultiTenant/Tenant.cs` (in `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/`)
+- Modify: `src/Asterisk.Sdk.Pro.MultiTenant/ITenantStore.cs` (in `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/`)
 
 - [x] **Step 1: Create TenantType enum**
 
-Create `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/TenantType.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/TenantType.cs`:
 
 ```csharp
 namespace Asterisk.Sdk.Pro.MultiTenant;
@@ -90,7 +90,7 @@ public enum TenantType
 
 - [x] **Step 2: Add ParentTenantId and Type to Tenant model**
 
-In `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/Tenant.cs`, add two properties after `UpdatedAt`:
+In `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/Tenant.cs`, add two properties after `UpdatedAt`:
 
 ```csharp
     /// <summary>Gets or sets the UTC timestamp of the last update.</summary>
@@ -105,7 +105,7 @@ In `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/T
 
 - [x] **Step 3: Add new methods to ITenantStore**
 
-In `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/ITenantStore.cs`, add after `UpdateStatusAsync`:
+In `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/ITenantStore.cs`, add after `UpdateStatusAsync`:
 
 ```csharp
     /// <summary>Returns the single Platform (host) tenant, or <see langword="null"/> if not yet created.</summary>
@@ -117,13 +117,13 @@ In `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/I
 
 - [x] **Step 4: Build SDK to verify compilation**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/`
 Expected: Build succeeded (2 new members on interface will break implementations — expected, fixed in Task 2)
 
 - [x] **Step 5: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
 git add src/Asterisk.Sdk.Pro.MultiTenant/TenantType.cs src/Asterisk.Sdk.Pro.MultiTenant/Tenant.cs src/Asterisk.Sdk.Pro.MultiTenant/ITenantStore.cs
 git commit -m "feat(multi-tenant): add TenantType enum, ParentTenantId, and hierarchy methods to ITenantStore"
 ```
@@ -138,7 +138,7 @@ git commit -m "feat(multi-tenant): add TenantType enum, ParentTenantId, and hier
 
 - [x] **Step 1: Create InMemoryTenantStore**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Storage.InMemory/InMemoryTenantStore.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Storage.InMemory/InMemoryTenantStore.cs`:
 
 ```csharp
 using System.Collections.Concurrent;
@@ -230,7 +230,7 @@ public sealed class InMemoryTenantStore : ITenantStore
 
 - [x] **Step 2: Register InMemoryTenantStore in DI**
 
-In `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Storage.InMemory/ServiceCollectionExtensions.cs`, add using and registration. After the `// Audit` section (line 77), before `// Media`:
+In `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Storage.InMemory/ServiceCollectionExtensions.cs`, add using and registration. After the `// Audit` section (line 77), before `// Media`:
 
 Add to usings:
 ```csharp
@@ -249,13 +249,13 @@ The `if` guard ensures that if a Postgres implementation was already registered,
 
 - [x] **Step 3: Build Platform to verify**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Platform/Asterisk.Platform.slnx`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Platform/Asterisk.Platform.slnx`
 Expected: Build succeeded
 
 - [x] **Step 4: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Storage.InMemory/InMemoryTenantStore.cs src/Asterisk.Platform.Storage.InMemory/ServiceCollectionExtensions.cs
 git commit -m "feat(storage): add InMemoryTenantStore with hierarchy validation"
 ```
@@ -270,7 +270,7 @@ git commit -m "feat(storage): add InMemoryTenantStore with hierarchy validation"
 
 - [x] **Step 1: Create ApiKeyType enum**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Identity/ApiKeyType.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Identity/ApiKeyType.cs`:
 
 ```csharp
 namespace Asterisk.Platform.Identity;
@@ -288,7 +288,7 @@ public enum ApiKeyType
 
 - [x] **Step 2: Add KeyType to ApiKey**
 
-In `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Identity/ApiKey.cs`, add after `public string? UpdatedBy { get; set; }`:
+In `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Identity/ApiKey.cs`, add after `public string? UpdatedBy { get; set; }`:
 
 ```csharp
     public ApiKeyType KeyType { get; init; } = ApiKeyType.Standard;
@@ -296,13 +296,13 @@ In `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Identity/Ap
 
 - [x] **Step 3: Build to verify**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Platform/Asterisk.Platform.slnx`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Platform/Asterisk.Platform.slnx`
 Expected: Build succeeded
 
 - [x] **Step 4: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Identity/ApiKeyType.cs src/Asterisk.Platform.Identity/ApiKey.cs
 git commit -m "feat(identity): add ApiKeyType enum and KeyType property to ApiKey"
 ```
@@ -317,7 +317,7 @@ git commit -m "feat(identity): add ApiKeyType enum and KeyType property to ApiKe
 
 - [x] **Step 1: Create PlatformAdminRequirement**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Auth/PlatformAdminRequirement.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Auth/PlatformAdminRequirement.cs`:
 
 ```csharp
 using Microsoft.AspNetCore.Authorization;
@@ -337,7 +337,7 @@ internal sealed class PlatformAdminRequirement : IAuthorizationRequirement
 
 - [x] **Step 2: Create PlatformAdminAuthorizationHandler**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Auth/PlatformAdminAuthorizationHandler.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Auth/PlatformAdminAuthorizationHandler.cs`:
 
 ```csharp
 using System.Security.Claims;
@@ -441,13 +441,13 @@ internal sealed class PlatformAdminAuthorizationHandler : AuthorizationHandler<P
 
 - [x] **Step 3: Build to verify**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/`
 Expected: Build succeeded
 
 - [x] **Step 4: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Api/Auth/PlatformAdminRequirement.cs src/Asterisk.Platform.Api/Auth/PlatformAdminAuthorizationHandler.cs
 git commit -m "feat(auth): add PlatformAdminOnly authorization requirement and handler"
 ```
@@ -461,7 +461,7 @@ git commit -m "feat(auth): add PlatformAdminOnly authorization requirement and h
 
 - [x] **Step 1: Add management key claims branch**
 
-In `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Auth/ApiKeyAuthenticationHandler.cs`, add the `using` for `ApiKeyType`:
+In `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Auth/ApiKeyAuthenticationHandler.cs`, add the `using` for `ApiKeyType`:
 
 The file already imports `Asterisk.Platform.Identity`, so `ApiKeyType` is accessible.
 
@@ -501,13 +501,13 @@ With:
 
 - [x] **Step 2: Build to verify**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/`
 Expected: Build succeeded
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Api/Auth/ApiKeyAuthenticationHandler.cs
 git commit -m "feat(auth): add management API key claims in ApiKeyAuthenticationHandler"
 ```
@@ -522,7 +522,7 @@ git commit -m "feat(auth): add management API key claims in ApiKeyAuthentication
 
 - [x] **Step 1: Add platform permissions to PermissionSeeder**
 
-In `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Storage.Postgres/Seeds/PermissionSeeder.cs`, add after the `// ── callanalytics (2) ──` section (after line 191, before the closing `}`):
+In `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Storage.Postgres/Seeds/PermissionSeeder.cs`, add after the `// ── callanalytics (2) ──` section (after line 191, before the closing `}`):
 
 ```csharp
         // ── platform (8) ──
@@ -549,7 +549,7 @@ In `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Storage.Pos
 
 - [x] **Step 2: Add platform_admin role template + update AllPermissions**
 
-In `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Storage.Postgres/Seeds/RoleTemplateSeeder.cs`:
+In `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Storage.Postgres/Seeds/RoleTemplateSeeder.cs`:
 
 First, add the 8 platform permissions to the `AllPermissions()` method. At the end of the array (after `"callanalytics:analysis:view", "callanalytics:config:manage",`), add:
 
@@ -594,13 +594,13 @@ With:
 
 - [x] **Step 3: Build to verify**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Platform/Asterisk.Platform.slnx`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Platform/Asterisk.Platform.slnx`
 Expected: Build succeeded
 
 - [x] **Step 4: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Storage.Postgres/Seeds/PermissionSeeder.cs src/Asterisk.Platform.Storage.Postgres/Seeds/RoleTemplateSeeder.cs
 git commit -m "feat(rbac): add 8 platform:* permissions and platform_admin role template"
 ```
@@ -614,7 +614,7 @@ git commit -m "feat(rbac): add 8 platform:* permissions and platform_admin role 
 
 - [x] **Step 1: Create SetupEndpoints**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/SetupEndpoints.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/SetupEndpoints.cs`:
 
 ```csharp
 using System.Security.Cryptography;
@@ -746,13 +746,13 @@ internal sealed record SetupResponse(
 
 - [x] **Step 2: Build to verify**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/`
 Expected: Build succeeded
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Api/Endpoints/SetupEndpoints.cs
 git commit -m "feat(api): add POST /api/setup endpoint for first-boot platform initialization"
 ```
@@ -767,7 +767,7 @@ git commit -m "feat(api): add POST /api/setup endpoint for first-boot platform i
 
 - [x] **Step 1: Create ManagementTenantEndpoints**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementTenantEndpoints.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementTenantEndpoints.cs`:
 
 ```csharp
 using Asterisk.Sdk.Pro.MultiTenant;
@@ -992,18 +992,18 @@ internal sealed record UpdateMgmtTenantRequest(
 - [x] **Step 2: Delete TenantEndpoints.cs**
 
 ```bash
-rm /media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/TenantEndpoints.cs
+rm /media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/TenantEndpoints.cs
 ```
 
 - [x] **Step 3: Build to verify**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/`
 Expected: Build fails — `MapTenantEndpoints` not found in Program.cs (expected, fixed in Task 11)
 
 - [x] **Step 4: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Api/Endpoints/ManagementTenantEndpoints.cs
 git rm src/Asterisk.Platform.Api/Endpoints/TenantEndpoints.cs
 git commit -m "feat(api): replace TenantEndpoints with ManagementTenantEndpoints under /api/management/"
@@ -1019,7 +1019,7 @@ git commit -m "feat(api): replace TenantEndpoints with ManagementTenantEndpoints
 
 - [x] **Step 1: Create ManagementSystemEndpoints**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementSystemEndpoints.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementSystemEndpoints.cs`:
 
 ```csharp
 using System.Collections.Concurrent;
@@ -1130,13 +1130,13 @@ internal sealed record SystemSettingsRequest(string PlatformName, string Default
 - [x] **Step 2: Delete SystemEndpoints.cs**
 
 ```bash
-rm /media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/SystemEndpoints.cs
+rm /media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/SystemEndpoints.cs
 ```
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Api/Endpoints/ManagementSystemEndpoints.cs
 git rm src/Asterisk.Platform.Api/Endpoints/SystemEndpoints.cs
 git commit -m "feat(api): replace SystemEndpoints with ManagementSystemEndpoints under /api/management/"
@@ -1152,7 +1152,7 @@ git commit -m "feat(api): replace SystemEndpoints with ManagementSystemEndpoints
 
 - [x] **Step 1: Create ManagementClusterEndpoints**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementClusterEndpoints.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementClusterEndpoints.cs`:
 
 ```csharp
 using Asterisk.Sdk.Pro.Cluster;
@@ -1277,13 +1277,13 @@ internal sealed record MgmtDrainStatusDto(
 - [x] **Step 2: Delete ClusterEndpoints.cs**
 
 ```bash
-rm /media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ClusterEndpoints.cs
+rm /media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ClusterEndpoints.cs
 ```
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Api/Endpoints/ManagementClusterEndpoints.cs
 git rm src/Asterisk.Platform.Api/Endpoints/ClusterEndpoints.cs
 git commit -m "feat(api): replace ClusterEndpoints with ManagementClusterEndpoints under /api/management/"
@@ -1298,7 +1298,7 @@ git commit -m "feat(api): replace ClusterEndpoints with ManagementClusterEndpoin
 
 - [x] **Step 1: Create ManagementApiKeyEndpoints**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementApiKeyEndpoints.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementApiKeyEndpoints.cs`:
 
 ```csharp
 using System.Security.Cryptography;
@@ -1463,7 +1463,7 @@ internal sealed record CreateMgmtApiKeyResponse(
 - [x] **Step 2: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Api/Endpoints/ManagementApiKeyEndpoints.cs
 git commit -m "feat(api): add Management API Key CRUD endpoints under /api/management/api-keys"
 ```
@@ -1533,13 +1533,13 @@ Remove the old `app.MapSystemEndpoints();`, `app.MapClusterEndpoints();`, and `a
 
 - [x] **Step 4: Build the entire solution**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Platform/Asterisk.Platform.slnx`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Platform/Asterisk.Platform.slnx`
 Expected: Build succeeded
 
 - [x] **Step 5: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Api/Program.cs
 git commit -m "feat(api): wire PlatformAdminOnly policy, handler, and Management endpoints in Program.cs"
 ```
@@ -1553,7 +1553,7 @@ git commit -m "feat(api): wire PlatformAdminOnly policy, handler, and Management
 
 - [x] **Step 1: Create PlatformAdminApiFactory**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/PlatformAdminApiFactory.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/PlatformAdminApiFactory.cs`:
 
 ```csharp
 using System.Security.Cryptography;
@@ -1663,13 +1663,13 @@ public sealed class PlatformAdminApiFactory : WebApplicationFactory<Program>
 
 - [x] **Step 2: Build tests**
 
-Run: `dotnet build /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/`
+Run: `dotnet build /media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/`
 Expected: Build succeeded
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add tests/Asterisk.Platform.Api.Tests/PlatformAdminApiFactory.cs
 git commit -m "test: add PlatformAdminApiFactory with host tenant and management key seeding"
 ```
@@ -1683,7 +1683,7 @@ git commit -m "test: add PlatformAdminApiFactory with host tenant and management
 
 - [x] **Step 1: Create SetupEndpointTests**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/SetupEndpointTests.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/SetupEndpointTests.cs`:
 
 ```csharp
 using System.Net;
@@ -1761,13 +1761,13 @@ public sealed class SetupEndpointTests : IClassFixture<PlatformApiFactory>
 
 - [x] **Step 2: Run setup tests**
 
-Run: `dotnet test /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ --filter "FullyQualifiedName~SetupEndpointTests" -v q`
+Run: `dotnet test /media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ --filter "FullyQualifiedName~SetupEndpointTests" -v q`
 Expected: 3 tests passed
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add tests/Asterisk.Platform.Api.Tests/SetupEndpointTests.cs
 git commit -m "test: add setup endpoint tests (create host tenant, 409 conflict, validation)"
 ```
@@ -1781,7 +1781,7 @@ git commit -m "test: add setup endpoint tests (create host tenant, 409 conflict,
 
 - [x] **Step 1: Create ManagementTenantEndpointTests**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ManagementTenantEndpointTests.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ManagementTenantEndpointTests.cs`:
 
 ```csharp
 using System.Net;
@@ -1911,13 +1911,13 @@ public sealed class ManagementTenantEndpointTests : IClassFixture<PlatformAdminA
 
 - [x] **Step 2: Run tests**
 
-Run: `dotnet test /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ --filter "FullyQualifiedName~ManagementTenantEndpointTests" -v q`
+Run: `dotnet test /media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ --filter "FullyQualifiedName~ManagementTenantEndpointTests" -v q`
 Expected: 7 tests passed
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add tests/Asterisk.Platform.Api.Tests/ManagementTenantEndpointTests.cs
 git commit -m "test: add management tenant endpoint tests (CRUD, hierarchy, auth)"
 ```
@@ -1933,7 +1933,7 @@ git commit -m "test: add management tenant endpoint tests (CRUD, hierarchy, auth
 
 - [x] **Step 1: Create ManagementSystemEndpointTests**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ManagementSystemEndpointTests.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ManagementSystemEndpointTests.cs`:
 
 ```csharp
 using System.Net;
@@ -1994,7 +1994,7 @@ public sealed class ManagementSystemEndpointTests : IClassFixture<PlatformAdminA
 
 - [x] **Step 2: Create ManagementClusterEndpointTests**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ManagementClusterEndpointTests.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ManagementClusterEndpointTests.cs`:
 
 ```csharp
 using System.Net;
@@ -2032,7 +2032,7 @@ public sealed class ManagementClusterEndpointTests : IClassFixture<PlatformAdmin
 
 - [x] **Step 3: Create ManagementApiKeyEndpointTests**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ManagementApiKeyEndpointTests.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ManagementApiKeyEndpointTests.cs`:
 
 ```csharp
 using System.Net;
@@ -2096,13 +2096,13 @@ public sealed class ManagementApiKeyEndpointTests : IClassFixture<PlatformAdminA
 
 - [x] **Step 4: Run all new tests**
 
-Run: `dotnet test /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ --filter "FullyQualifiedName~Management" -v q`
+Run: `dotnet test /media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ --filter "FullyQualifiedName~Management" -v q`
 Expected: All tests passed
 
 - [x] **Step 5: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add tests/Asterisk.Platform.Api.Tests/ManagementSystemEndpointTests.cs tests/Asterisk.Platform.Api.Tests/ManagementClusterEndpointTests.cs tests/Asterisk.Platform.Api.Tests/ManagementApiKeyEndpointTests.cs
 git commit -m "test: add management system, cluster, and API key endpoint tests"
 ```
@@ -2116,7 +2116,7 @@ git commit -m "test: add management system, cluster, and API key endpoint tests"
 
 - [x] **Step 1: Create PlatformAdminAuthorizationTests**
 
-Create `/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/PlatformAdminAuthorizationTests.cs`:
+Create `/media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/PlatformAdminAuthorizationTests.cs`:
 
 ```csharp
 using System.Net;
@@ -2162,13 +2162,13 @@ public sealed class PlatformAdminAuthorizationTests : IClassFixture<PlatformAdmi
 
 - [x] **Step 2: Run auth tests**
 
-Run: `dotnet test /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ --filter "FullyQualifiedName~PlatformAdminAuthorizationTests" -v q`
+Run: `dotnet test /media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/ --filter "FullyQualifiedName~PlatformAdminAuthorizationTests" -v q`
 Expected: 3 tests passed
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add tests/Asterisk.Platform.Api.Tests/PlatformAdminAuthorizationTests.cs
 git commit -m "test: add platform admin authorization tests (management key, anonymous, standard key)"
 ```
@@ -2182,7 +2182,7 @@ git commit -m "test: add platform admin authorization tests (management key, ano
 
 - [x] **Step 1: Update SystemInfoFeatureTests route**
 
-In `/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/SystemInfoFeatureTests.cs`, the test calls `/api/admin/system/info` which no longer exists. The system info endpoint is now at `/api/management/system/info` and requires `PlatformAdminOnly`.
+In `/media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/SystemInfoFeatureTests.cs`, the test calls `/api/admin/system/info` which no longer exists. The system info endpoint is now at `/api/management/system/info` and requires `PlatformAdminOnly`.
 
 Replace the entire file:
 
@@ -2216,13 +2216,13 @@ public sealed class SystemInfoFeatureTests : IClassFixture<PlatformAdminApiFacto
 
 - [x] **Step 2: Run ALL tests**
 
-Run: `dotnet test /media/Data/Source/IPcom/Asterisk.Platform/Asterisk.Platform.slnx -v q`
+Run: `dotnet test /media/Data/Source/Verbara/Asterisk.Platform/Asterisk.Platform.slnx -v q`
 Expected: All tests pass (existing 1036 + ~25 new)
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add tests/Asterisk.Platform.Api.Tests/SystemInfoFeatureTests.cs
 git commit -m "fix(test): update SystemInfoFeatureTests to use /api/management/ route"
 ```
@@ -2272,13 +2272,13 @@ Host tenant identity + Management API:
 
 - [x] **Step 3: Run full test suite**
 
-Run: `dotnet test /media/Data/Source/IPcom/Asterisk.Platform/Asterisk.Platform.slnx -v q`
+Run: `dotnet test /media/Data/Source/Verbara/Asterisk.Platform/Asterisk.Platform.slnx -v q`
 Expected: All tests pass, 0 warnings
 
 - [x] **Step 4: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add CLAUDE.md
 git commit -m "docs: update CLAUDE.md with Plan 26 platform admin and updated endpoint inventory"
 ```

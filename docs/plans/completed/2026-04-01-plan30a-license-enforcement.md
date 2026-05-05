@@ -17,7 +17,7 @@
 ### Task 1: Add ILicenseStatus interface to SDK Pro Licensing
 
 **Files:**
-- Create: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/ILicenseStatus.cs`
+- Create: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/ILicenseStatus.cs`
 
 - [ ] **Step 1: Create ILicenseStatus.cs**
 
@@ -62,7 +62,7 @@ public interface ILicenseStatus
 ### Task 2: Add LicenseStatusTracker implementation to SDK Pro Licensing
 
 **Files:**
-- Create: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseStatusTracker.cs`
+- Create: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseStatusTracker.cs`
 
 - [ ] **Step 1: Create LicenseStatusTracker.cs**
 
@@ -164,11 +164,11 @@ public sealed class LicenseStatusTracker : ILicenseStatus
 ### Task 3: Add RevalidationInterval to LicenseOptions
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseOptions.cs`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseOptions.cs`
 
 - [ ] **Step 1: Add RevalidationInterval property**
 
-In `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseOptions.cs`, replace the entire file:
+In `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseOptions.cs`, replace the entire file:
 
 ```csharp
 namespace Asterisk.Sdk.Pro.Licensing;
@@ -200,7 +200,7 @@ public enum EnforcementMode
 ### Task 4: Add LicenseRevalidationService hosted service
 
 **Files:**
-- Create: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseRevalidationService.cs`
+- Create: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseRevalidationService.cs`
 
 - [ ] **Step 1: Create LicenseRevalidationService.cs**
 
@@ -346,7 +346,7 @@ public sealed partial class LicenseRevalidationService : IHostedService, IDispos
 ### Task 5: Update LicenseValidationHostedService to update LicenseStatusTracker
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseValidationHostedService.cs`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/LicenseValidationHostedService.cs`
 
 - [ ] **Step 1: Replace entire LicenseValidationHostedService.cs**
 
@@ -478,7 +478,7 @@ public sealed partial class LicenseValidationHostedService : IHostedService
 ### Task 6: Update DI registration in SDK Pro Licensing
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/DependencyInjection/LicensingServiceCollectionExtensions.cs`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.Licensing/DependencyInjection/LicensingServiceCollectionExtensions.cs`
 
 - [ ] **Step 1: Replace entire LicensingServiceCollectionExtensions.cs**
 
@@ -533,9 +533,9 @@ public static class LicensingServiceCollectionExtensions
 ### Task 7: Update SDK Pro Licensing tests for LicenseStatusTracker
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/tests/Asterisk.Sdk.Pro.Licensing.Tests/LicenseValidationHostedServiceTests.cs`
-- Create: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/tests/Asterisk.Sdk.Pro.Licensing.Tests/LicenseStatusTrackerTests.cs`
-- Create: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/tests/Asterisk.Sdk.Pro.Licensing.Tests/LicenseRevalidationServiceTests.cs`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/tests/Asterisk.Sdk.Pro.Licensing.Tests/LicenseValidationHostedServiceTests.cs`
+- Create: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/tests/Asterisk.Sdk.Pro.Licensing.Tests/LicenseStatusTrackerTests.cs`
+- Create: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/tests/Asterisk.Sdk.Pro.Licensing.Tests/LicenseRevalidationServiceTests.cs`
 
 - [ ] **Step 1: Create LicenseStatusTrackerTests.cs**
 
@@ -925,7 +925,7 @@ public sealed class LicenseValidationHostedServiceTests : IDisposable
 - [ ] **Step 1: Build SDK Pro Licensing**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
 dotnet build src/Asterisk.Sdk.Pro.Licensing/
 ```
 
@@ -934,7 +934,7 @@ Expected: Build succeeds, 0 warnings.
 - [ ] **Step 2: Run SDK Pro Licensing tests**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
 dotnet test tests/Asterisk.Sdk.Pro.Licensing.Tests/ -v q
 ```
 
@@ -947,8 +947,8 @@ Expected: All tests pass (existing 4 + new 9 = 13 tests).
 - [ ] **Step 1: Pack SDK Pro to local NuGet feed**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
-dotnet pack -c Release -o /media/Data/Source/IPcom/local-nuget-feed/
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
+dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/
 ```
 
 Expected: All 19 .nupkg files produced.
@@ -957,7 +957,7 @@ Expected: All 19 .nupkg files produced.
 
 ```bash
 rm -rf ~/.nuget/packages/asterisk.sdk.pro*/
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet restore Asterisk.Platform.slnx
 ```
 
@@ -966,7 +966,7 @@ Expected: Restore succeeds with new Pro.Licensing package version.
 - [ ] **Step 3: Verify Platform still builds**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet build Asterisk.Platform.slnx
 ```
 
@@ -977,7 +977,7 @@ Expected: Build succeeds. Compilation errors expected in Platform.Api due to `Li
 ### Task 10: Update Platform.Api Program.cs licensing configuration
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Program.cs`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Program.cs`
 
 - [ ] **Step 1: Replace the Pro.Licensing section (lines 78-80)**
 
@@ -1025,8 +1025,8 @@ builder.Services.AddProLicensing(o =>
 ### Task 11: Update ManagementSystemEndpoints license endpoint and DTOs
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementSystemEndpoints.cs`
-- Modify: `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Serialization/ApiJsonContext.cs`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementSystemEndpoints.cs`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Serialization/ApiJsonContext.cs`
 
 - [ ] **Step 1: Update ManagementSystemEndpoints.cs**
 
@@ -1096,7 +1096,7 @@ Verify by searching: the line `[JsonSerializable(typeof(LicenseInfoDto))]` is al
 ### Task 12: Update SystemInfoDto version
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementSystemEndpoints.cs`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/ManagementSystemEndpoints.cs`
 
 - [ ] **Step 1: Update version string in GetSystemInfo**
 
@@ -1115,12 +1115,12 @@ return Results.Ok(new SystemInfoDto("1.3.0", hostTenant?.TenantId, hostTenant?.N
 ### Task 13: Add Platform tests for license endpoint enrichment
 
 **Files:**
-- Create: `/media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/Endpoints/ManagementSystemEndpointsTests.cs`
+- Create: `/media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/Endpoints/ManagementSystemEndpointsTests.cs`
 
 - [ ] **Step 1: Check if test directory exists**
 
 ```bash
-ls /media/Data/Source/IPcom/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/Endpoints/
+ls /media/Data/Source/Verbara/Asterisk.Platform/tests/Asterisk.Platform.Api.Tests/Endpoints/
 ```
 
 - [ ] **Step 2: Create ManagementSystemEndpointsTests.cs**
@@ -1185,7 +1185,7 @@ public sealed class ManagementSystemEndpointsTests
 - [ ] **Step 1: Build Platform**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet build Asterisk.Platform.slnx
 ```
 
@@ -1194,7 +1194,7 @@ Expected: Build succeeds, 0 warnings, 0 errors.
 - [ ] **Step 2: Run Platform tests**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet test Asterisk.Platform.slnx -v q
 ```
 
@@ -1207,7 +1207,7 @@ Expected: All tests pass (existing 1,162 + new 2 = 1,164 tests).
 - [ ] **Step 1: Commit SDK Pro**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
 git add src/Asterisk.Sdk.Pro.Licensing/ILicenseStatus.cs \
         src/Asterisk.Sdk.Pro.Licensing/LicenseStatusTracker.cs \
         src/Asterisk.Sdk.Pro.Licensing/LicenseRevalidationService.cs \
@@ -1235,7 +1235,7 @@ Add 9 new tests for tracker and revalidation service."
 - [ ] **Step 1: Commit Platform**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 git add src/Asterisk.Platform.Api/Program.cs \
         src/Asterisk.Platform.Api/Endpoints/ManagementSystemEndpoints.cs \
         tests/Asterisk.Platform.Api.Tests/Endpoints/ManagementSystemEndpointsTests.cs

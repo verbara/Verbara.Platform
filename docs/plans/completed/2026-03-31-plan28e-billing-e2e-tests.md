@@ -8,7 +8,7 @@
 
 **Tech Stack:** Playwright 1.58.x, TypeScript, existing auth fixtures
 
-**Working directory:** `/media/Data/Source/IPcom/Asterisk.Platform.Web/`
+**Working directory:** `/media/Data/Source/Verbara/Asterisk.Platform.Web/`
 
 **Important:** The billing pages require `activeTenantId` to be set. Since the `platformAdminPage` fixture logs in as the `platform` tenant, and billing endpoints use `?tenantId=` query params (handled by the hooks using `useTenantStore.activeTenantId`), the tests need to first select a tenant. We'll use a helper that navigates to `/admin/tenants`, clicks a tenant to set `activeTenantId`, then navigates to the billing page. Alternatively, we can seed the activeTenantId directly into localStorage.
 

@@ -70,7 +70,7 @@
 ## Task 1: Sdk.Pro TenantStatus Enum Expansion
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/TenantStatus.cs`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/TenantStatus.cs`
 
 - [ ] **Step 1: Update TenantStatus enum with 3 new values**
 
@@ -106,7 +106,7 @@ public enum TenantStatus
 
 Run:
 ```sh
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
 dotnet build
 dotnet test
 ```
@@ -116,14 +116,14 @@ Fix any switch/pattern-match exhaustiveness warnings (add `default` or `_` cases
 - [ ] **Step 3: Pack to local NuGet feed**
 
 ```sh
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
-dotnet pack -c Release -o /media/Data/Source/IPcom/local-nuget-feed/
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
+dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/
 ```
 
 - [ ] **Step 4: Restore in Platform**
 
 ```sh
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 rm -rf ~/.nuget/packages/asterisk.sdk.pro*
 dotnet restore Asterisk.Platform.slnx
 dotnet build Asterisk.Platform.slnx
@@ -134,7 +134,7 @@ Fix any exhaustiveness warnings in Platform. The main one will be in `TenantStat
 - [ ] **Step 5: Commit**
 
 ```sh
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
 git add -A && git commit -m "feat: add Warning, Degraded, PendingDeletion to TenantStatus enum"
 ```
 
@@ -234,7 +234,7 @@ public sealed class PlanDefinitionTests
 - [ ] **Step 2: Run tests — verify they fail**
 
 ```sh
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet test tests/Asterisk.Platform.Core.Tests/ --filter "PlanDefinitionTests"
 ```
 
@@ -354,7 +354,7 @@ public static class PlanDefinition
 - [ ] **Step 6: Run tests — verify they pass**
 
 ```sh
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet test tests/Asterisk.Platform.Core.Tests/ --filter "PlanDefinitionTests"
 ```
 

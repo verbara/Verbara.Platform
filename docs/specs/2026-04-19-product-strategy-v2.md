@@ -325,7 +325,7 @@ Baseline actual:
 - SDK: tag-triggered publish a nuget.org (publish.yml v1.12+).
 - Pro: manual pack + push. CI override nuget.config.
 - Platform: **sin CI**, solo Docker.
-- Feed local `/media/Data/Source/IPcom/local-nuget-feed/` cross-repo dev.
+- Feed local `/media/Data/Source/Verbara/local-nuget-feed/` cross-repo dev.
 
 Decisiones:
 - **Platform CI setup** — `.github/workflows/ci.yml` (build + test) en Platform. Sin release workflow (Platform no se distribuye por NuGet, solo Docker image).
@@ -767,7 +767,7 @@ Sin estos tags, los dashboards de observability son slice-blind. Implementado vi
 
 Independientes de §2-§9 y ejecutadas en paralelo para desbloquear el stack:
 
-1. ✅ **W — Pack SDK 1.13.0 al feed local.** Ejecutado 2026-04-19. 24 paquetes SDK 1.13.0 en `/media/Data/Source/IPcom/local-nuget-feed/`.
+1. ✅ **W — Pack SDK 1.13.0 al feed local.** Ejecutado 2026-04-19. 24 paquetes SDK 1.13.0 en `/media/Data/Source/Verbara/local-nuget-feed/`.
 2. ✅ **D — Platform 1.8.1 bump.** Ejecutado 2026-04-19 (commit `d2e4b05`, pushed). Pro 1.7.2-pro → 1.8.1-pro + wired `AddProResilience`/`AddProLicenseGuard`/`AddProRetention` + 5 retention targets.
 3. 🟡 **V — Resolver `RemotePushEvent` collision.** ADR nuevo en Pro decidiendo (a) type-forward, (b) herencia, (c) dual namespace. Bloqueante para Pro bump a SDK 1.13.
 4. 🟡 **U — Pro.OpenTelemetry adopta `AsteriskSemanticConventions`.** Post-V (depende de Pro bump SDK 1.13). 2h aditivo zero-risk.

@@ -1725,7 +1725,7 @@ ls tests/Asterisk.Platform.Identity.Tests/
 If it does not exist, create the test project:
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet new xunit -o tests/Asterisk.Platform.Identity.Tests --framework net10.0
 dotnet sln Asterisk.Platform.slnx add tests/Asterisk.Platform.Identity.Tests/
 ```

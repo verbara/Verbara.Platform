@@ -11,29 +11,29 @@ Platform v1.3.1 is functionally complete (1,103 backend tests passing, 0 warning
 ## Deliverables
 
 ### 1. Fix vitest.config.ts E2E exclusion (Platform.Web)
-**File:** `/media/Data/Source/IPcom/Asterisk.Platform.Web/vitest.config.ts`
+**File:** `/media/Data/Source/Verbara/Asterisk.Platform.Web/vitest.config.ts`
 
 Add `exclude: ['**/tests/e2e/**', '**/node_modules/**']` to the `test` block. This makes `npm run test` run only the 4 unit test files (28 tests) without attempting Playwright specs.
 
 ### 2. Update demo-reset.sh to versioned paths
-**File:** `/media/Data/Source/IPcom/Asterisk.Platform/docker/demo/demo-reset.sh`
+**File:** `/media/Data/Source/Verbara/Asterisk.Platform/docker/demo/demo-reset.sh`
 
 Replace all 10 `/api/` calls with `/api/v1/` equivalents. The `/health` endpoint stays unversioned (it's not under `/api/`).
 
 ### 3. Update docs/demo-environment.md
-**File:** `/media/Data/Source/IPcom/Asterisk.Platform/docs/demo-environment.md`
+**File:** `/media/Data/Source/Verbara/Asterisk.Platform/docs/demo-environment.md`
 
 Add API versioning note to the "What Works" section.
 
 ### 4. Update Platform CLAUDE.md
-**File:** `/media/Data/Source/IPcom/Asterisk.Platform/CLAUDE.md`
+**File:** `/media/Data/Source/Verbara/Asterisk.Platform/CLAUDE.md`
 
 - Update test count from "1,259" to "1,103" (actual count from test run)
 - Add v1.3.1 Web sync section (API URL migration, GDPR fix)
 - Bump version references
 
 ### 5. Update Platform.Web CLAUDE.md
-**File:** `/media/Data/Source/IPcom/Asterisk.Platform.Web/CLAUDE.md`
+**File:** `/media/Data/Source/Verbara/Asterisk.Platform.Web/CLAUDE.md`
 
 - Update test count from "202" to "241" actual E2E tests
 - Update version to v1.3.1
@@ -41,7 +41,7 @@ Add API versioning note to the "What Works" section.
 - Update API layer section to mention `/api/v1/` prefix
 
 ### 6. E2E Sprint 3: Operations & Analytics (~50 tests)
-**Location:** `/media/Data/Source/IPcom/Asterisk.Platform.Web/tests/e2e/tests/`
+**Location:** `/media/Data/Source/Verbara/Asterisk.Platform.Web/tests/e2e/tests/`
 
 New spec files covering the 0% coverage areas:
 
@@ -79,7 +79,7 @@ Update MEMORY.md with final state after all deliverables.
 dotnet test Asterisk.Platform.slnx -v q  # 1,103 pass, 0 fail
 
 # Platform.Web unit tests
-cd /media/Data/Source/IPcom/Asterisk.Platform.Web
+cd /media/Data/Source/Verbara/Asterisk.Platform.Web
 npm run test  # 28 pass (4 unit test files), 0 fail, no E2E contamination
 
 # Platform.Web build

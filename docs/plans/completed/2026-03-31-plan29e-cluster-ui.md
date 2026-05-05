@@ -12,7 +12,7 @@
 
 **Prerequisite:** Plan 29C complete (server management API endpoints live).
 
-**Repo:** `/media/Data/Source/IPcom/Asterisk.Platform.Web/`
+**Repo:** `/media/Data/Source/Verbara/Asterisk.Platform.Web/`
 
 ---
 
@@ -217,7 +217,7 @@ export function useForceDrain() {
 
 - [ ] **Step 2: Verify build**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npm run build`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npm run build`
 Expected: Build succeeds.
 
 - [ ] **Step 3: Commit**

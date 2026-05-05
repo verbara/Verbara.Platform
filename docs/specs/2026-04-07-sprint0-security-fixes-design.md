@@ -190,12 +190,12 @@ SMS, Email, Video, WebChat, RCS have no HMAC — they only benefit from Layer 1 
 ### Build verification
 ```sh
 # Sdk.Pro
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
 dotnet build && dotnet test
-dotnet pack -c Release -o /media/Data/Source/IPcom/local-nuget-feed/
+dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/
 
 # Platform
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 rm -rf ~/.nuget/packages/asterisk.sdk.pro*
 dotnet restore && dotnet build Asterisk.Platform.slnx && dotnet test Asterisk.Platform.slnx
 ```

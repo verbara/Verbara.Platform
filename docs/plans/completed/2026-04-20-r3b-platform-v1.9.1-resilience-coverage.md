@@ -191,7 +191,7 @@ Ver tabla §C.
 ## Verification
 
 ```sh
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 
 dotnet restore
 dotnet build Asterisk.Platform.slnx --nologo /warnaserror
@@ -278,4 +278,4 @@ curl -s http://localhost:8080/health/ready | jq '.entries'
 - **R3 v1.9.0 plan:** [`2026-04-20-r3-platform-v1.9.0-secure-current.md`](./2026-04-20-r3-platform-v1.9.0-secure-current.md)
 - **Track A execution order:** [`../../../../Asterisk.Sdk.Pro/docs/plans/active/2026-04-20-track-a-execution-order.md`](../../../../Asterisk.Sdk.Pro/docs/plans/active/2026-04-20-track-a-execution-order.md)
 - **ADR-0029 Pro.Resilience sunset:** [`../../../../Asterisk.Sdk.Pro/docs/decisions/0006-pro-resilience-sunset.md`](../../../../Asterisk.Sdk.Pro/docs/decisions/0006-pro-resilience-sunset.md)
-- **Asterisk.Sdk.Resilience (MIT) source:** `/media/Data/Source/IPcom/Asterisk.Sdk/src/Asterisk.Sdk.Resilience/`
+- **Asterisk.Sdk.Resilience (MIT) source:** `/media/Data/Source/Verbara/Asterisk.Sdk/src/Asterisk.Sdk.Resilience/`

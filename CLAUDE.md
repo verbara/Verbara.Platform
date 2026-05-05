@@ -4,7 +4,7 @@ Project context for Claude Code working on **Verbara.Platform** — the API host
 
 > **This repo is the authoritative workstream for Platform + Platform.Web.** Plans, specs, ADRs, and research that touch either the API **or** the React frontend are authored under this repo's `docs/` tree. `Verbara.Platform.Web` remains a separate git repo for frontend source, but its own `docs/` is secondary — open new plans here. Decision recorded 2026-04-19 (feedback memory `feedback_platform_web_consolidation.md`).
 
-> **Do not append completed-work narrative to this file.** Milestone/sprint/plan write-ups belong in `~/.claude/projects/-media-Data-Source-IPcom-Asterisk-Platform/memory/` (indexed by `MEMORY.md`). Only evergreen context — what the codebase IS, not what it WAS — lives here.
+> **Do not append completed-work narrative to this file.** Milestone/sprint/plan write-ups belong in `~/.claude/projects/-media-Data-Source-Verbara-Asterisk-Platform/memory/` (indexed by `MEMORY.md`). Only evergreen context — what the codebase IS, not what it WAS — lives here.
 
 ## Project Overview
 
@@ -174,7 +174,7 @@ Spec + Plan must be approved before code. Update plan file as steps complete.
 
 ## Milestone History
 
-Evergreen roadmap and completed-milestone narrative live in `~/.claude/projects/-media-Data-Source-IPcom-Asterisk-Platform/memory/MEMORY.md` and its topic files (`project_*.md`, `feedback_*.md`, `research_*.md`, `reference_*.md`). Do not re-inline them here.
+Evergreen roadmap and completed-milestone narrative live in `~/.claude/projects/-media-Data-Source-Verbara-Asterisk-Platform/memory/MEMORY.md` and its topic files (`project_*.md`, `feedback_*.md`, `research_*.md`, `reference_*.md`). Do not re-inline them here.
 
 Latest milestones (pointers only):
 - **v1.5.0 "Production Ready"** (2026-04-09) — see `project_v150_production_ready.md`

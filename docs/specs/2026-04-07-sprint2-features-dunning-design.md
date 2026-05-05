@@ -406,7 +406,7 @@ Added to `ManagementBillingEndpoints`:
 ### 2.10 Changes
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/TenantStatus.cs` — add Warning, Degraded, PendingDeletion
+- Modify: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/src/Asterisk.Sdk.Pro.MultiTenant/TenantStatus.cs` — add Warning, Degraded, PendingDeletion
 - Create: `src/Asterisk.Platform.Billing/PaymentStatus.cs`
 - Create: `src/Asterisk.Platform.Billing/DunningConfig.cs`
 - Create: `src/Asterisk.Platform.Billing/DunningRecord.cs`
@@ -549,12 +549,12 @@ When PlatformAdmin sets add-ons via management settings PUT:
 
 ```sh
 # Sdk.Pro (TenantStatus enum change)
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
 dotnet build && dotnet test
-dotnet pack -c Release -o /media/Data/Source/IPcom/local-nuget-feed/
+dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/
 
 # Platform
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 rm -rf ~/.nuget/packages/asterisk.sdk.pro*
 dotnet restore && dotnet build Asterisk.Platform.slnx && dotnet test Asterisk.Platform.slnx
 ```

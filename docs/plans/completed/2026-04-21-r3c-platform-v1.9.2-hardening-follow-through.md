@@ -76,7 +76,7 @@ v1.9.2 NO introduce features ni cambia API surface. Es un hardening release que 
 ## Verification
 
 ```sh
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 
 # Build + tests (post cada commit)
 dotnet build Asterisk.Platform.slnx --nologo /warnaserror

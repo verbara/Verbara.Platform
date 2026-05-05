@@ -115,7 +115,7 @@ public sealed class AuditImpersonatorTests
 - [ ] **Step 2: Run tests — expect failure (ImpersonatorId does not exist)**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "AuditImpersonatorTests" -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "AuditImpersonatorTests" -v q
 ```
 
 - [ ] **Step 3: Add ImpersonatorId to AuditEntry**
@@ -146,7 +146,7 @@ In `src/Asterisk.Platform.Storage.Postgres/Stores/PostgresAuditStore.cs`, add `i
 - [ ] **Step 6: Run tests — expect pass**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "AuditImpersonatorTests" -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "AuditImpersonatorTests" -v q
 ```
 
 - [ ] **Step 7: Commit**
@@ -297,7 +297,7 @@ public sealed class ImpersonationReadOnlyTests
 - [ ] **Step 2: Run tests — expect pass (pure logic tests)**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ImpersonationReadOnlyTests" -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ImpersonationReadOnlyTests" -v q
 ```
 
 - [ ] **Step 3: Update ImpersonateRequest and ImpersonateResponse DTOs**
@@ -409,7 +409,7 @@ In `src/Asterisk.Platform.Api/Services/JwtTokenService.cs`, update the `Generate
 - [ ] **Step 6: Build and run all tests**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build Asterisk.Platform.slnx && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ImpersonationReadOnlyTests" -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build Asterisk.Platform.slnx && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ImpersonationReadOnlyTests" -v q
 ```
 
 - [ ] **Step 7: Commit**
@@ -515,7 +515,7 @@ public sealed class ReadOnlyMiddlewareTests
 - [ ] **Step 2: Run tests — expect pass**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ReadOnlyMiddlewareTests" -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ReadOnlyMiddlewareTests" -v q
 ```
 
 - [ ] **Step 3: Add read-only blocking to TenantResolutionMiddleware**
@@ -585,7 +585,7 @@ Add the helper methods:
 - [ ] **Step 4: Build and run tests**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build Asterisk.Platform.slnx && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ReadOnlyMiddlewareTests" -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build Asterisk.Platform.slnx && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ReadOnlyMiddlewareTests" -v q
 ```
 
 - [ ] **Step 5: Commit**
@@ -843,7 +843,7 @@ internal static class TenantProvisioningTemplates
 - [ ] **Step 2: Build to verify no compilation errors**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
 ```
 
 - [ ] **Step 3: Commit**
@@ -1144,7 +1144,7 @@ internal sealed partial class TenantProvisioningService : ITenantLifecycleHandle
 - [ ] **Step 3: Run tests**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "TenantProvisioningServiceTests" -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "TenantProvisioningServiceTests" -v q
 ```
 
 - [ ] **Step 4: Commit**
@@ -1273,7 +1273,7 @@ Add `using Asterisk.Platform.Api.Services;` at the top.
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build Asterisk.Platform.slnx && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ProvisioningIntegrationTests" -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build Asterisk.Platform.slnx && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "ProvisioningIntegrationTests" -v q
 ```
 
 - [ ] **Step 5: Commit**
@@ -1591,7 +1591,7 @@ In `src/Asterisk.Platform.Api/Services/TenantProvisioningService.cs`, add a publ
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build Asterisk.Platform.slnx && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "OnboardingEndpointsTests" -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build Asterisk.Platform.slnx && dotnet test tests/Asterisk.Platform.Api.Tests/ --filter "OnboardingEndpointsTests" -v q
 ```
 
 - [ ] **Step 5: Commit**
@@ -1641,13 +1641,13 @@ Add to `src/Asterisk.Platform.Api/Serialization/ApiJsonContext.cs`:
 - [ ] **Step 4: Build entire solution**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build Asterisk.Platform.slnx
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build Asterisk.Platform.slnx
 ```
 
 - [ ] **Step 5: Run all tests**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet test Asterisk.Platform.slnx -v q
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet test Asterisk.Platform.slnx -v q
 ```
 
 - [ ] **Step 6: Commit**

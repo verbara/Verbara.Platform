@@ -106,7 +106,7 @@ Since NO production database exists with real data, this is a config string chan
 
 ### Phase 1: Asterisk.Sdk → Verbara.Sdk 2.0.0 (~3-4 hours)
 
-**Repo:** `/media/Data/Source/IPcom/Asterisk.Sdk/`
+**Repo:** `/media/Data/Source/Verbara/Asterisk.Sdk/`
 **Scope:** 26 src + 31 test packages, 1,855 .cs files (1,192 with namespace)
 
 #### 1A. Structural rename (folders, projects, solution)
@@ -155,14 +155,14 @@ find src Tests -name "*.cs" -not -path "*/obj/*" -not -path "*/bin/*" \
 #### 1F. Gate
 - `dotnet build Verbara.Sdk.slnx -c Release` → 0 errors, 0 warnings
 - `dotnet test Verbara.Sdk.slnx` → all pass
-- `dotnet pack -c Release -o /media/Data/Source/IPcom/local-nuget-feed/` → 26 `Verbara.Sdk.*.2.0.0.nupkg`
+- `dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/` → 26 `Verbara.Sdk.*.2.0.0.nupkg`
 - Commit + tag `v2.0.0`
 
 ---
 
 ### Phase 2: Asterisk.Sdk.Pro → Verbara.Sdk.Pro 2.0.0-pro (~2-3 hours)
 
-**Repo:** `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/`
+**Repo:** `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/`
 **Scope:** 24 src + ~20 test packages, 1,092 .cs files (813 with namespace)
 **Depends on:** Phase 1 complete (Verbara.Sdk 2.0.0 in local-nuget-feed)
 
@@ -185,14 +185,14 @@ find src Tests -name "*.cs" -not -path "*/obj/*" -not -path "*/bin/*" \
 - `dotnet restore` → resolves Verbara.Sdk 2.0.0 from local feed
 - `dotnet build Verbara.Sdk.Pro.slnx -c Release` → 0 errors
 - `dotnet test` → all pass
-- `dotnet pack -c Release -o /media/Data/Source/IPcom/local-nuget-feed/` → 24 `Verbara.Sdk.Pro.*.2.0.0-pro.nupkg`
+- `dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/` → 24 `Verbara.Sdk.Pro.*.2.0.0-pro.nupkg`
 - Commit + tag `v2.0.0-pro`
 
 ---
 
 ### Phase 3: Asterisk.Platform → Verbara.Platform 2.0.0 (~4-5 hours)
 
-**Repo:** `/media/Data/Source/IPcom/Asterisk.Platform/`
+**Repo:** `/media/Data/Source/Verbara/Asterisk.Platform/`
 **Scope:** 31 src + tests, 1,508 .cs files (1,073 with namespace) + infra
 **Depends on:** Phase 2 complete (both SDK + Pro in local-nuget-feed)
 
@@ -274,7 +274,7 @@ find src Tests -name "*.cs" -not -path "*/obj/*" -not -path "*/bin/*" \
 
 ### Phase 4: Asterisk.Platform.Web → verbara-web 2.0.0 (~1-2 hours)
 
-**Repo:** `/media/Data/Source/IPcom/Asterisk.Platform.Web/`
+**Repo:** `/media/Data/Source/Verbara/Asterisk.Platform.Web/`
 **Depends on:** Phase 3 (API running for E2E verification)
 
 #### 4A. Package + config
@@ -334,25 +334,25 @@ After all phases complete:
 ## Critical Files
 
 **SDK:**
-- `/media/Data/Source/IPcom/Asterisk.Sdk/Directory.Build.props`
-- `/media/Data/Source/IPcom/Asterisk.Sdk/src/Asterisk.Sdk.Hosting/ServiceCollectionExtensions.cs` (config section preservation)
+- `/media/Data/Source/Verbara/Asterisk.Sdk/Directory.Build.props`
+- `/media/Data/Source/Verbara/Asterisk.Sdk/src/Asterisk.Sdk.Hosting/ServiceCollectionExtensions.cs` (config section preservation)
 
 **Pro:**
-- `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/Directory.Packages.props` (SDK pin)
-- `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/Directory.Build.props`
+- `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/Directory.Packages.props` (SDK pin)
+- `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/Directory.Build.props`
 
 **Platform:**
-- `/media/Data/Source/IPcom/Asterisk.Platform/Directory.Packages.props` (SDK + Pro pins)
-- `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Program.cs` (extension methods + config reads)
-- `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Services/MfaService.cs` (user-facing issuer)
-- `/media/Data/Source/IPcom/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/SetupEndpoints.cs` (default name)
-- `/media/Data/Source/IPcom/Asterisk.Platform/docker/asterisk-config/extensions.conf` (ARI Stasis app)
-- `/media/Data/Source/IPcom/Asterisk.Platform/infra/k8s/manifests/cloudnativepg/cluster.yaml` (DB name)
-- `/media/Data/Source/IPcom/Asterisk.Platform/infra/k8s/helm/platform/values.yaml` (image + ARI app)
+- `/media/Data/Source/Verbara/Asterisk.Platform/Directory.Packages.props` (SDK + Pro pins)
+- `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Program.cs` (extension methods + config reads)
+- `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Services/MfaService.cs` (user-facing issuer)
+- `/media/Data/Source/Verbara/Asterisk.Platform/src/Asterisk.Platform.Api/Endpoints/SetupEndpoints.cs` (default name)
+- `/media/Data/Source/Verbara/Asterisk.Platform/docker/asterisk-config/extensions.conf` (ARI Stasis app)
+- `/media/Data/Source/Verbara/Asterisk.Platform/infra/k8s/manifests/cloudnativepg/cluster.yaml` (DB name)
+- `/media/Data/Source/Verbara/Asterisk.Platform/infra/k8s/helm/platform/values.yaml` (image + ARI app)
 
 **Web:**
-- `/media/Data/Source/IPcom/Asterisk.Platform.Web/package.json`
-- `/media/Data/Source/IPcom/Asterisk.Platform.Web/public/locales/*/common.json`
+- `/media/Data/Source/Verbara/Asterisk.Platform.Web/package.json`
+- `/media/Data/Source/Verbara/Asterisk.Platform.Web/public/locales/*/common.json`
 
 ## Estimated Total Effort
 

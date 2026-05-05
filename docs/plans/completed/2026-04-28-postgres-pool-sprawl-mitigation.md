@@ -394,7 +394,7 @@ git commit -m "docs(research): archive Pro 1.16.0-pro shared-DataSource skeleton
 
 ### Task E.2: Memory update
 
-- [ ] **Step 1:** Crear `~/.claude/projects/-media-Data-Source-IPcom-Asterisk-Platform/memory/project_v1145_pool_sprawl_fix.md` con summary de v1.14.5 ship
+- [ ] **Step 1:** Crear `~/.claude/projects/-media-Data-Source-Verbara-Asterisk-Platform/memory/project_v1145_pool_sprawl_fix.md` con summary de v1.14.5 ship
 - [ ] **Step 2:** Update `MEMORY.md` con pointer al nuevo topic file
 - [ ] **Step 3:** Update `project_r55_validation_active.md` con cross-link al desvío Phase C-L → v1.14.5 → resume Phase C-L sweep secuencial real
 

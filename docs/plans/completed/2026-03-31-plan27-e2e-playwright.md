@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-31-e2e-playwright-design.md`
 
-**Working directory:** `/media/Data/Source/IPcom/Asterisk.Platform.Web/`
+**Working directory:** `/media/Data/Source/Verbara/Asterisk.Platform.Web/`
 
 ---
 
@@ -19,12 +19,12 @@
 ### Task 1: Install Playwright and configure npm scripts
 
 **Files:**
-- Modify: `/media/Data/Source/IPcom/Asterisk.Platform.Web/package.json`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Platform.Web/package.json`
 
 - [ ] **Step 1: Install Playwright and otpauth**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform.Web
+cd /media/Data/Source/Verbara/Asterisk.Platform.Web
 npm install -D @playwright/test otpauth
 npx playwright install chromium
 ```
@@ -238,7 +238,7 @@ export { expect } from '@playwright/test';
 
 - [ ] **Step 2: Add .auth-*.json to .gitignore**
 
-Append to `/media/Data/Source/IPcom/Asterisk.Platform.Web/.gitignore`:
+Append to `/media/Data/Source/Verbara/Asterisk.Platform.Web/.gitignore`:
 
 ```
 # Playwright auth state
@@ -329,7 +329,7 @@ git commit -m "feat(e2e): add API helper fixture for test setup/teardown"
 
 ## Phase B: Add data-testid attributes to frontend (Tasks 5-8)
 
-> All changes in `/media/Data/Source/IPcom/Asterisk.Platform.Web/src/`.
+> All changes in `/media/Data/Source/Verbara/Asterisk.Platform.Web/src/`.
 > Add `data-testid` only to interactive elements and key containers used by tests.
 
 ### Task 5: Add data-testid to login page, auth guard, and shared components
@@ -596,7 +596,7 @@ git commit -m "feat(e2e): add data-testid to auth config, events, sessions, and 
 
 ## Phase C: Write test specs (Tasks 9-18)
 
-> All test files under `/media/Data/Source/IPcom/Asterisk.Platform.Web/tests/e2e/tests/platform-admin/`.
+> All test files under `/media/Data/Source/Verbara/Asterisk.Platform.Web/tests/e2e/tests/platform-admin/`.
 > Tests import `{ test, expect }` from `../../fixtures/auth.fixture` (for authenticated tests) or from `@playwright/test` (for login tests).
 
 ### Task 9: Write login.spec.ts (8 tests)
@@ -694,7 +694,7 @@ test.describe('Login', () => {
 - [ ] **Step 2: Run tests to verify they pass**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform.Web
+cd /media/Data/Source/Verbara/Asterisk.Platform.Web
 npm run e2e -- --grep "Login"
 ```
 
@@ -1597,7 +1597,7 @@ git commit -m "test(e2e): add setup wizard spec — 3 tests"
 - [ ] **Step 1: Run the complete E2E suite**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform.Web
+cd /media/Data/Source/Verbara/Asterisk.Platform.Web
 npm run e2e
 ```
 

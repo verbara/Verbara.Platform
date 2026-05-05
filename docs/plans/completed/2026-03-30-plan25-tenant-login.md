@@ -22,7 +22,7 @@
 | `tests/.../AuthIntegrationTests.cs` | Integration tests for login with various tenant sources | Modify: add new test cases |
 | `docker/demo/demo-reset.sh` | Demo warmup curl | Modify: add tenantId to body |
 
-**Platform.Web (separate repo: `/media/Data/Source/IPcom/Asterisk.Platform.Web/`):**
+**Platform.Web (separate repo: `/media/Data/Source/Verbara/Asterisk.Platform.Web/`):**
 
 | File | Responsibility | Action |
 |------|---------------|--------|
@@ -34,7 +34,7 @@
 
 ## Phase A: Backend — Middleware + Auth Endpoint (Platform repo)
 
-> **Working directory:** `/media/Data/Source/IPcom/Asterisk.Platform/`
+> **Working directory:** `/media/Data/Source/Verbara/Asterisk.Platform/`
 
 ### Task 1: Add Subdomain Resolution to TenantResolutionMiddleware
 
@@ -398,7 +398,7 @@ git commit -m "fix(demo): add tenantId to login curl in demo-reset.sh"
 
 ## Phase B: Frontend — Tenant Resolution (Platform.Web repo)
 
-> **Working directory:** `/media/Data/Source/IPcom/Asterisk.Platform.Web/`
+> **Working directory:** `/media/Data/Source/Verbara/Asterisk.Platform.Web/`
 
 ### Task 4: Create resolveDefaultTenant Utility
 

@@ -23,7 +23,7 @@
 - [ ] **Step 1: Restore updated SDK Pro package**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet restore
 dotnet build src/Asterisk.Platform.Api/
 ```

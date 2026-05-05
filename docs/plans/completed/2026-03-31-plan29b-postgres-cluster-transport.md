@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-31-v121-operations-design.md` — Sub-project A.
 
-**Repo:** `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/`
+**Repo:** `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/`
 
 **Reference implementation:** `Asterisk.Sdk.Pro.Cluster/Transport/InMemoryClusterTransport.cs` — follow the same method signatures and behavior, but persist to PostgreSQL.
 
@@ -949,8 +949,8 @@ Expected: All tests pass.
 - [ ] **Step 3: Pack and publish to local feed**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
-dotnet pack src/Asterisk.Sdk.Pro.Cluster/ -c Release -o /media/Data/Source/IPcom/local-nuget-feed/
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
+dotnet pack src/Asterisk.Sdk.Pro.Cluster/ -c Release -o /media/Data/Source/Verbara/local-nuget-feed/
 rm -rf ~/.nuget/packages/asterisk.sdk.pro.cluster*/
 ```
 

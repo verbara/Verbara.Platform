@@ -14,7 +14,7 @@
 
 ## Phase A: SDK — AGI/ARI Hosted Services (Asterisk.Sdk repo)
 
-> **Working directory:** `/media/Data/Source/IPcom/Asterisk.Sdk/`
+> **Working directory:** `/media/Data/Source/Verbara/Asterisk.Sdk/`
 
 ### Task 1: Create AriConnectionHostedService
 
@@ -101,7 +101,7 @@ Both now auto-start/stop like AMI's AmiConnectionHostedService."
 - [ ] **Step 1: Pack SDK NuGet packages**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk
+cd /media/Data/Source/Verbara/Asterisk.Sdk
 dotnet pack -c Release -o /tmp/nuget-local/
 ```
 
@@ -109,7 +109,7 @@ Expected: All packages pack at version 1.5.2
 
 - [ ] **Step 2: Update Platform's Directory.Packages.props**
 
-In `/media/Data/Source/IPcom/Asterisk.Platform/Directory.Packages.props`, find the `Asterisk.Sdk.Hosting` package version and update to `1.5.2`:
+In `/media/Data/Source/Verbara/Asterisk.Platform/Directory.Packages.props`, find the `Asterisk.Sdk.Hosting` package version and update to `1.5.2`:
 
 ```xml
 <PackageVersion Include="Asterisk.Sdk.Hosting" Version="1.5.2" />
@@ -118,7 +118,7 @@ In `/media/Data/Source/IPcom/Asterisk.Platform/Directory.Packages.props`, find t
 - [ ] **Step 3: Restore and build Platform**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet restore
 dotnet build Asterisk.Platform.slnx
 ```
@@ -129,7 +129,7 @@ Expected: Build succeeded
 
 ## Phase B: Platform — InMemory RBAC Stores (Bug #2)
 
-> **Working directory:** `/media/Data/Source/IPcom/Asterisk.Platform/`
+> **Working directory:** `/media/Data/Source/Verbara/Asterisk.Platform/`
 
 ### Task 4: Create InMemoryPermissionStore
 

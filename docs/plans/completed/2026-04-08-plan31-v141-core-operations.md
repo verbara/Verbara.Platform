@@ -359,8 +359,8 @@ git commit -m "fix: update DI and tests for PlatformEventBus injection in switch
 ### Task 6: Agent State Selector in Platform.Web
 
 **Files:**
-- Create: `/media/Data/Source/IPcom/Asterisk.Platform.Web/src/pages/agent/components/agent-status-selector.tsx`
-- Modify: `/media/Data/Source/IPcom/Asterisk.Platform.Web/src/core/api/hooks/use-agents.ts`
+- Create: `/media/Data/Source/Verbara/Asterisk.Platform.Web/src/pages/agent/components/agent-status-selector.tsx`
+- Modify: `/media/Data/Source/Verbara/Asterisk.Platform.Web/src/core/api/hooks/use-agents.ts`
 
 - [ ] **Step 1: Add useUpdateAgentState mutation hook**
 
@@ -435,13 +435,13 @@ Find the agent workspace layout component and add `<AgentStatusSelector />` to t
 
 - [ ] **Step 4: Build frontend**
 
-Run: `cd /media/Data/Source/IPcom/Asterisk.Platform.Web && npm run build`
+Run: `cd /media/Data/Source/Verbara/Asterisk.Platform.Web && npm run build`
 Expected: Build succeeds
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform.Web
+cd /media/Data/Source/Verbara/Asterisk.Platform.Web
 git add -A
 git commit -m "feat: add agent status selector to workspace header"
 ```

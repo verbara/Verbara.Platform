@@ -283,7 +283,7 @@ PUT /management/tenants/{id}/settings (PlatformAdminOnly)
 ### Build Verification
 
 ```sh
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet build Asterisk.Platform.slnx && dotnet test Asterisk.Platform.slnx
 ```
 

@@ -14,13 +14,13 @@
 
 ## File Map
 
-### Sdk.Pro (repo: `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/`)
+### Sdk.Pro (repo: `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/`)
 | Action | File | Purpose |
 |--------|------|---------|
 | Modify | `src/Asterisk.Sdk.Pro.Analytics/LiveStateProvider.cs` | Add overload with allowedQueues filter |
 | Modify | `src/Asterisk.Sdk.Pro.Analytics/AnalyticsQueryService.cs` | Add overload with allowedQueues filter |
 
-### Platform (repo: `/media/Data/Source/IPcom/Asterisk.Platform/`)
+### Platform (repo: `/media/Data/Source/Verbara/Asterisk.Platform/`)
 | Action | File | Purpose |
 |--------|------|---------|
 | Modify | `src/Asterisk.Platform.Api/Endpoints/AnalyticsLiveEndpoints.cs` | Filter live states by tenant's queues |
@@ -78,7 +78,7 @@ public LiveState? GetLiveState(string queueName, IReadOnlySet<string>? allowedQu
 - [ ] **Step 2: Build to verify compilation**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro && dotnet build src/Asterisk.Sdk.Pro.Analytics/
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro && dotnet build src/Asterisk.Sdk.Pro.Analytics/
 ```
 Expected: Build succeeded, 0 warnings.
 
@@ -109,14 +109,14 @@ public IntervalSnapshot? GetCurrentInterval(string queueName, IReadOnlySet<strin
 - [ ] **Step 2: Build and test Sdk.Pro**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro && dotnet build && dotnet test
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro && dotnet build && dotnet test
 ```
 Expected: All tests pass, 0 warnings.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
 git add src/Asterisk.Sdk.Pro.Analytics/LiveStateProvider.cs src/Asterisk.Sdk.Pro.Analytics/AnalyticsQueryService.cs
 git commit -m "feat(analytics): add queue-filtered overloads for multi-tenant live state isolation"
 ```
@@ -126,21 +126,21 @@ git commit -m "feat(analytics): add queue-filtered overloads for multi-tenant li
 - [ ] **Step 1: Pack to local NuGet feed**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Sdk.Pro
-dotnet pack -c Release -o /media/Data/Source/IPcom/local-nuget-feed/
+cd /media/Data/Source/Verbara/Asterisk.Sdk.Pro
+dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/
 ```
 
 - [ ] **Step 2: Clear NuGet cache and restore in Platform**
 
 ```bash
 rm -rf ~/.nuget/packages/asterisk.sdk.pro*
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet restore
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet restore
 ```
 
 - [ ] **Step 3: Build Platform to verify new overloads are available**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build Asterisk.Platform.slnx
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build Asterisk.Platform.slnx
 ```
 Expected: Build succeeded, 0 warnings.
 
@@ -264,7 +264,7 @@ public sealed record CurrentIntervalDto(
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
 ```
 
 - [ ] **Step 3: Commit**
@@ -325,7 +325,7 @@ if (filePath is null)
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
 ```
 
 - [ ] **Step 3: Commit**
@@ -426,7 +426,7 @@ using Asterisk.Sdk.Pro.MultiTenant;
 - [ ] **Step 5: Build to verify**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
 ```
 
 - [ ] **Step 6: Commit**
@@ -468,7 +468,7 @@ if (parent.Status != TenantStatus.Active)
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
 ```
 
 - [ ] **Step 3: Commit**
@@ -502,7 +502,7 @@ using Asterisk.Platform.Channels.Core;
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build src/Asterisk.Platform.Api/
 ```
 
 - [ ] **Step 3: Commit**
@@ -594,7 +594,7 @@ using Asterisk.Platform.Channels.Core;
 - [ ] **Step 5: Build to verify**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet build src/Asterisk.Platform.Channels.WhatsApp/
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet build src/Asterisk.Platform.Channels.WhatsApp/
 ```
 
 ### Task 10: Messenger + Instagram handlers (same Meta pattern)
@@ -614,7 +614,7 @@ Apply the identical pattern as Task 9 to both handlers:
 - [ ] **Step 3: Build both**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet build src/Asterisk.Platform.Channels.Messenger/ && dotnet build src/Asterisk.Platform.Channels.Instagram/
 ```
 
@@ -639,7 +639,7 @@ dotnet build src/Asterisk.Platform.Channels.Messenger/ && dotnet build src/Aster
 - [ ] **Step 3: Build both**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet build src/Asterisk.Platform.Channels.Telegram/ && dotnet build src/Asterisk.Platform.Channels.Twitter/
 ```
 
@@ -719,7 +719,7 @@ public class ContextValidationTests
 - [ ] **Step 2: Run tests**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform && dotnet test Asterisk.Platform.slnx
+cd /media/Data/Source/Verbara/Asterisk.Platform && dotnet test Asterisk.Platform.slnx
 ```
 Expected: All tests pass (existing 1,396 + new security tests).
 
@@ -735,7 +735,7 @@ git commit -m "test: add security validation tests for path traversal and contex
 - [ ] **Step 1: Full clean build**
 
 ```bash
-cd /media/Data/Source/IPcom/Asterisk.Platform
+cd /media/Data/Source/Verbara/Asterisk.Platform
 dotnet build Asterisk.Platform.slnx
 ```
 Expected: 0 errors, 0 warnings.

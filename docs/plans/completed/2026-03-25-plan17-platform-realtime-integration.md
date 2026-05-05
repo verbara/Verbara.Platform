@@ -8,9 +8,9 @@
 
 **Tech Stack:** .NET 10, ASP.NET Minimal API, Pro.Realtime SDK (v1.0.0-pro), Dapper, Npgsql, xUnit + FluentAssertions + NSubstitute
 
-**Spec:** `/media/Data/Source/IPcom/Asterisk.Sdk.Pro/docs/specs/2026-03-25-platform-realtime-integration-design.md`
+**Spec:** `/media/Data/Source/Verbara/Asterisk.Sdk.Pro/docs/specs/2026-03-25-platform-realtime-integration-design.md`
 
-**Target repo:** `/media/Data/Source/IPcom/Asterisk.Platform/`
+**Target repo:** `/media/Data/Source/Verbara/Asterisk.Platform/`
 
 ---
 

@@ -2127,7 +2127,7 @@ Compliance Reporting follow as separate specs/plans.
 
 - [ ] **Step 13.7: Update the project memory**
 
-Add a one-liner to the user's auto-memory `MEMORY.md` (under `~/.claude/projects/-media-Data-Source-IPcom-Asterisk-Platform/memory/`) noting the new endpoint surface and `PlanFeature.IpAllowlist`. Skip if memory infrastructure is not in scope for this run.
+Add a one-liner to the user's auto-memory `MEMORY.md` (under `~/.claude/projects/-media-Data-Source-Verbara-Asterisk-Platform/memory/`) noting the new endpoint surface and `PlanFeature.IpAllowlist`. Skip if memory infrastructure is not in scope for this run.
 
 ---
 
