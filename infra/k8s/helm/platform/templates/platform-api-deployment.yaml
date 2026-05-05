@@ -53,6 +53,8 @@ spec:
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
           securityContext:
             runAsNonRoot: true
+            runAsUser: 1654
+            runAsGroup: 1654
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
             seccompProfile:
@@ -81,6 +83,28 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.api.jwt.keySecret }}
                   key: {{ .Values.api.jwt.keyField }}
+            - name: Services__ServiceKey
+              value: {{ .Values.api.serviceKey }}
+            - name: CORS_ORIGINS
+              value: {{ .Values.api.corsOrigins | quote }}
+            - name: Asterisk__Ami__Hostname
+              value: {{ .Values.api.asterisk.ami.hostname }}
+            - name: Asterisk__Ami__Port
+              value: {{ .Values.api.asterisk.ami.port | quote }}
+            - name: Asterisk__Ami__Username
+              value: {{ .Values.api.asterisk.ami.username }}
+            - name: Asterisk__Ami__Password
+              value: {{ .Values.api.asterisk.ami.password }}
+            - name: Asterisk__Ari__BaseUrl
+              value: {{ .Values.api.asterisk.ari.baseUrl }}
+            - name: Asterisk__Ari__Username
+              value: {{ .Values.api.asterisk.ari.username }}
+            - name: Asterisk__Ari__Password
+              value: {{ .Values.api.asterisk.ari.password }}
+            - name: Asterisk__Ari__Application
+              value: {{ .Values.api.asterisk.ari.application }}
+            - name: Licensing__EnforcementMode
+              value: {{ .Values.api.licensing.enforcementMode }}
           resources:
             requests:
               cpu: {{ .Values.api.resources.requests.cpu }}

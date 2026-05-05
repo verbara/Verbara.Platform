@@ -2,7 +2,7 @@ namespace: r55-platform
 
 api:
   image:
-    repository: asterisk-platform/api
+    repository: 192.168.122.1:5050/asterisk-platform/api
     tag: "1.14.6"
   replicas: 2
   port: 5000
@@ -33,12 +33,27 @@ api:
     audience: r55-staging
     keySecret: jwt-signing-key
     keyField: key
+  serviceKey: r55-staging-service-key-change-in-prod
+  corsOrigins: "http://r55.local,http://api.r55.local"
+  asterisk:
+    ami:
+      hostname: asterisk-sip.r55-asterisk.svc.cluster.local
+      port: 5038
+      username: platform
+      password: r55-staging-only-change-prod
+    ari:
+      baseUrl: http://asterisk-ari.r55-asterisk.svc.cluster.local:8088
+      username: asterisk-platform
+      password: r55-staging-only-change-prod
+      application: asterisk-platform
+  licensing:
+    enforcementMode: Disabled
   prometheus:
     enabled: false
 
 web:
   image:
-    repository: asterisk-platform/web
+    repository: 192.168.122.1:5050/asterisk-platform/web
     tag: "1.15.5"
   replicas: 1
   port: 80

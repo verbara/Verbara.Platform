@@ -39,7 +39,17 @@ backend:
   replicas: 0
 
 chunksCache:
-  allocatedMemory: 256
+  allocatedMemory: 128
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+resultsCache:
+  enabled: false
 
 gateway:
   enabled: false

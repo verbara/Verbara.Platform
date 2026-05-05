@@ -142,10 +142,11 @@ A fresh Phase 0L bring-up was the first scenario to exercise them.
 
 ## K8s local variant (Phase 0LK)
 
-> **Status (2026-05-04):** cluster provisioned, all Helm charts + manifests
-> committed, production hardening sprint shipped (PDBs, NetworkPolicies,
-> SecurityContexts, ResourceQuotas, probes). Pending: VM cold-bootstrap
-> test + live deployment verification (VMs currently off).
+> **Status (2026-05-04):** **LIVE DEPLOYMENT VERIFIED.** All 28 workload
+> pods running across 4 namespaces. Cold-bootstrap from powered-off VMs to
+> full stack took ~40 min (cluster 15 min + apps 25 min). Container images
+> served via host-local Docker registry (`192.168.122.1:5050`) with Talos
+> insecure-registry patch (applied live, no reboot).
 
 ### Stack
 
@@ -265,3 +266,34 @@ scripts/k8s-down.sh --confirm
 - [x] Grafana dashboard `r55-overview` provisioned, datasources Prometheus + Loki configured
 - [x] Alert smoke test — `PlatformApiUnavailable` fires after 2m down, resolves after restart, propagates to Alertmanager
 - [x] 2 P0 migration runner findings surfaced + fixed (`b0e6100`)
+
+---
+
+## Phase 0LK verification log
+
+### 2026-05-04 — Live deployment
+
+- [x] Talos cluster 4/4 nodes Ready (K8s 1.36.0, Cilium 1.19.3, Gateway 192.168.122.192)
+- [x] CloudNativePG Postgres 3-HA + PgBouncer pooler (2 replicas)
+- [x] Redis StatefulSet (AOF persistence, securityContext hardened)
+- [x] Asterisk 2-replica StatefulSet + Kamailio DaemonSet (3) + RTPEngine DaemonSet (3)
+- [x] Platform.Api 2-replica Deployment — Postgres healthy, background workers running
+- [x] Platform.Web nginx Deployment — serving static assets
+- [x] kube-prometheus-stack (Prometheus + Grafana + Alertmanager + node-exporter 4/4)
+- [x] Loki SingleBinary + blackbox-exporter
+- [x] 35 PrometheusRule sets loaded (34 kube-prometheus-stack + 1 r55-platform-rules)
+- [x] 17 NetworkPolicies across 4 namespaces
+- [x] 3 ResourceQuotas (all within limits)
+- [x] Prometheus scraping 13+ targets (apiserver, kubelet, coredns, grafana, kube-state-metrics, alertmanager, node-exporter all `up`)
+- [x] 28 workload pods total, 0 crashloops
+
+### Findings surfaced during live deployment
+
+| Finding | Fix | Detail |
+|---|---|---|
+| Platform API `runAsNonRoot` fails — aspnet:10.0 image defaults to root | Added `runAsUser: 1654` (dotnet `app` user) | Container starts with correct UID without Dockerfile change |
+| Platform API missing production env vars (`ServiceKey`, `CORS_ORIGINS`, AMI) | Added env vars to deployment template + values.yaml | ServiceKey, CORS, AMI/ARI, Licensing config required for production mode |
+| Prometheus `/prometheus` permission denied with `fsGroup` + local-path-provisioner | Added initContainer `fix-permissions` (chown as root) | hostPath-based PVs do not honor fsGroup; initContainer is the standard workaround |
+| Loki results-cache `Pending` — insufficient memory on 4 GB worker nodes | Disabled `resultsCache`, reduced `chunksCache` to 128 MB | SingleBinary mode doesn't benefit from memcached results-cache |
+| node-exporter blocked by PodSecurity `baseline` enforcement | `kubectl label ns monitoring pod-security.kubernetes.io/enforce=privileged` | node-exporter requires hostNetwork + hostPID + hostPath |
+| Container images need local registry — Talos has no `docker build` | Host registry `192.168.122.1:5050` + `talosctl patch` insecure-registry | `crane push --insecure` bypasses Docker daemon TLS requirement |
