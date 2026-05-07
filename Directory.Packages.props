@@ -39,10 +39,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Verbara.Sdk.Hosting" Version="2.0.0" />
-    <PackageVersion Include="Verbara.Sdk.Push" Version="2.0.0" />
-    <PackageVersion Include="Verbara.Sdk.Resilience" Version="2.0.0" />
-    <PackageVersion Include="Verbara.Sdk.OpenTelemetry" Version="2.0.0" />
+    <PackageVersion Include="Verbara.Sdk.Hosting" Version="2.1.0" />
+    <PackageVersion Include="Verbara.Sdk.Push" Version="2.1.0" />
+    <PackageVersion Include="Verbara.Sdk.Resilience" Version="2.1.0" />
+    <PackageVersion Include="Verbara.Sdk.OpenTelemetry" Version="2.1.0" />
   </ItemGroup>
 
   <ItemGroup>
