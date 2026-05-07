@@ -47,27 +47,27 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Verbara.Sdk.Pro.EventStore" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Analytics" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Dialer" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Dialer.Storage.Postgres" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.EventStore.Postgres" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Analytics.Storage.Postgres" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Licensing" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist.Storage.Postgres" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Routing" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Realtime" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Realtime.Storage.Postgres" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Cluster" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Cluster.Storage.Postgres" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.MultiTenant" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Push" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Push.SignalR" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Storage.Common" Version="2.0.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.OpenTelemetry" Version="2.0.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.EventStore" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Analytics" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Dialer" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Dialer.Storage.Postgres" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.EventStore.Postgres" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Analytics.Storage.Postgres" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Licensing" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist.Storage.Postgres" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Routing" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Realtime" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Realtime.Storage.Postgres" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Cluster" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Cluster.Storage.Postgres" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.MultiTenant" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Push" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Push.SignalR" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Storage.Common" Version="2.0.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.OpenTelemetry" Version="2.0.1-pro" />
   </ItemGroup>
 
   <ItemGroup>
