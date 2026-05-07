@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
   <ItemGroup>
@@ -39,10 +40,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Verbara.Sdk.Hosting" Version="2.1.0" />
-    <PackageVersion Include="Verbara.Sdk.Push" Version="2.1.0" />
-    <PackageVersion Include="Verbara.Sdk.Resilience" Version="2.1.0" />
-    <PackageVersion Include="Verbara.Sdk.OpenTelemetry" Version="2.1.0" />
+    <PackageVersion Include="Verbara.Sdk.Hosting" Version="2.1.1" />
+    <PackageVersion Include="Verbara.Sdk.Push" Version="2.1.1" />
+    <PackageVersion Include="Verbara.Sdk.Resilience" Version="2.1.1" />
+    <PackageVersion Include="Verbara.Sdk.OpenTelemetry" Version="2.1.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -75,8 +76,8 @@
 
   <ItemGroup>
     <PackageVersion Include="BCrypt.Net-Next" Version="4.0.3" />
-    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.7.0" />
-    <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.7.0" />
+    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.15.0" />
+    <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.15.0" />
     <PackageVersion Include="Otp.NET" Version="1.4.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.5" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.5" />
@@ -91,7 +92,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Graph" Version="5.74.0" />
+    <PackageVersion Include="Microsoft.Graph" Version="5.105.0" />
+    <PackageVersion Include="Microsoft.Kiota.Abstractions" Version="1.22.2" />
     <PackageVersion Include="Azure.Identity" Version="1.13.2" />
   </ItemGroup>
 
