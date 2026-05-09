@@ -53,7 +53,7 @@ This is the open-source backend of the **Verbara** open-core contact-center stac
 
 | Repository | License | Role |
 |---|---|---|
-| **Verbara Sdk** | MIT | Telephony primitives (AMI/ARI/SIP wrappers) — community attractor |
+| **Verbara Sdk** | MIT | Telephony primitives (AMI / AGI / ARI / Live API / Sessions / Voice AI) — community attractor |
 | **Verbara Web** | Apache 2.0 | Frontend UI (admin / agent / analytics / operations) |
 | **Verbara Platform** (this repository) | **Apache 2.0** | Backend application — full contact-center engine |
 | **Verbara Sdk Pro** | Commercial | Enterprise overlays (multi-tenant, analytics, cluster, licensing) |
