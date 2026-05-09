@@ -2,6 +2,8 @@
 
 > Backend for the **Verbara** open-core contact-center platform.
 > Formerly `Verbara.Platform` — rebranded to **Verbara** per [ADR-0016](docs/decisions/0016-license-and-rebrand-to-verbara.md).
+>
+> **Visibility status (2026-05-08):** This repository is currently **private**. The Apache 2.0 license has been chosen (see [ADR-0016](docs/decisions/0016-license-and-rebrand-to-verbara.md)) with a planned transition to public when all triggers in [ADR-0018](docs/decisions/0018-visibility-decision-3-private-now-public-on-trigger.md) are met. Tier 0 (Community) self-host becomes available at that time.
 
 Composition-root host + REST API for an omnichannel contact center built on the
 Asterisk PBX (Sangoma/Digium) + .NET 10 Native AOT. Consumes [Verbara Sdk](https://github.com/verbara/Verbara.Sdk)

@@ -49,3 +49,5 @@ The decision, stated in one or two sentences.
 ## Catalog
 
 - [ADR-0016](0016-license-and-rebrand-to-verbara.md) — License (Apache 2.0) + rebrand to **Verbara** (Accepted, 2026-05-03)
+- [ADR-0017](0017-verbara-rebrand-execution.md) — Verbara rebrand execution: versioning and scope (Accepted, 2026-05-05)
+- [ADR-0018](0018-visibility-decision-3-private-now-public-on-trigger.md) — Visibility: private now, public on trigger checklist (Decision 3) (Accepted, 2026-05-08)
