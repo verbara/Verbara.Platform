@@ -33,7 +33,9 @@ internal static class AuthAdminEndpoints
         var config = await configStore.GetAsync(tenantId, ct)
             ?? new TenantAuthConfig { TenantId = tenantId };
 
-        return Results.Ok(config);
+        // ADMIN-001 (PREPUB-2026-05-09): project to redacted response so the
+        // OIDC client secret never leaves the process via HTTP.
+        return Results.Ok(TenantAuthConfigResponse.FromConfig(config));
     }
 
     private static async Task<IResult> UpdateConfig(
@@ -70,7 +72,10 @@ internal static class AuthAdminEndpoints
         config.UpdatedAt = DateTimeOffset.UtcNow;
         await configStore.SaveAsync(config, ct);
 
-        return Results.Ok(config);
+        // ADMIN-001 (PREPUB-2026-05-09): project to redacted response so the
+        // OIDC client secret never leaves the process via HTTP — applies to
+        // PUT-after-write as well as GET reads.
+        return Results.Ok(TenantAuthConfigResponse.FromConfig(config));
     }
 
     private static async Task<IResult> ListEvents(

@@ -290,6 +290,10 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(PagedDataResponse<QaRowDto>))]
 // Auth
 [JsonSerializable(typeof(RevokedSessionsResponse))]
+// ADMIN-001 (PREPUB-2026-05-09): redacted projection of TenantAuthConfig
+// returned by /admin/auth/config — emits OidcClientSecretSet + fingerprint
+// instead of the raw OIDC client secret.
+[JsonSerializable(typeof(TenantAuthConfigResponse))]
 [JsonSerializable(typeof(MfaChallengeResponse))]
 [JsonSerializable(typeof(MfaEnrollmentRequiredResponse))]
 [JsonSerializable(typeof(MfaStepUpRequiredResponse))]

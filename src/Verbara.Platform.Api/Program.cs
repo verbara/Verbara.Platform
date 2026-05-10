@@ -217,6 +217,12 @@ if (!string.IsNullOrEmpty(coreConnectionString))
     // Apply Platform SQL migrations eagerly (before Pro EnsureSchemaAsync which references Platform tables)
     Verbara.Platform.Api.Services.DatabaseMigrationService.ApplyMigrations(coreConnectionString);
 
+    // ADMIN-001 (PREPUB-2026-05-09): one-shot, idempotent encryption of any
+    // legacy plaintext oidc_client_secret rows. Runs after the schema migrations
+    // and after DataProtection is wired (registered later in this file). Safe
+    // to leave registered — re-runs are no-ops once every row is encrypted.
+    builder.Services.AddOidcClientSecretEncryptionMigrator();
+
     // Override in-memory capacity with persistent version for restart recovery
     builder.Services.AddSingleton<IAgentCapacityService>(sp =>
         new PersistentAgentCapacityService(

@@ -190,4 +190,19 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Registers <see cref="OidcClientSecretEncryptionMigrator"/> as an
+    /// <see cref="Microsoft.Extensions.Hosting.IHostedService"/>. Closes
+    /// <c>PREPUB-2026-05-09-ADMIN-001</c>: encrypts any legacy plaintext
+    /// <c>oidc_client_secret</c> rows in <c>tenant_auth_config</c> at process
+    /// startup. Idempotent — safe to register unconditionally; subsequent runs
+    /// find every row already encrypted and perform zero writes.
+    /// </summary>
+    public static IServiceCollection AddOidcClientSecretEncryptionMigrator(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddHostedService<OidcClientSecretEncryptionMigrator>();
+        return services;
+    }
 }

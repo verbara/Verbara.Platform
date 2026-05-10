@@ -1,14 +1,71 @@
+using System.Security.Cryptography;
 using Dapper;
-using Npgsql;
 using Verbara.Platform.Identity;
+using Microsoft.AspNetCore.DataProtection;
+using Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
 internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
 {
-    private readonly NpgsqlDataSource _dataSource;
+    /// <summary>
+    /// DataProtection purpose for the OIDC client secret column. ADR-0003
+    /// extension (ADMIN-001 fix): every column-level secret persistence path
+    /// MUST go through <see cref="IDataProtectionProvider"/> with a
+    /// concern-specific purpose string so each concern can rotate keys
+    /// independently and prevent cross-purpose decryption.
+    /// </summary>
+    public const string OidcClientSecretProtectorPurpose = "Verbara.OidcClientSecret";
 
-    public PostgresTenantAuthConfigStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly IDataProtector _oidcSecretProtector;
+
+    public PostgresTenantAuthConfigStore(NpgsqlDataSource dataSource, IDataProtectionProvider dataProtectionProvider)
+    {
+        ArgumentNullException.ThrowIfNull(dataSource);
+        ArgumentNullException.ThrowIfNull(dataProtectionProvider);
+        _dataSource = dataSource;
+        _oidcSecretProtector = dataProtectionProvider.CreateProtector(OidcClientSecretProtectorPurpose);
+    }
+
+    /// <summary>
+    /// Returns the unwrapped (plaintext) secret expected by callers
+    /// (notably <c>OidcEndpoints.HandleCallback</c> at line 140 which feeds
+    /// it directly into the OIDC token-exchange request body). On
+    /// <see cref="CryptographicException"/> — which means the row contains
+    /// legacy plaintext that the
+    /// <c>OidcClientSecretEncryptionMigrator</c> has not yet rewritten —
+    /// the value is returned verbatim. The migrator runs on host startup
+    /// and is idempotent; the catch is a transitional belt-and-suspenders
+    /// guard so an early-loaded request between deploy and migrator
+    /// completion doesn't fail.
+    /// </summary>
+    internal string? UnprotectSecret(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return null;
+        try
+        {
+            return _oidcSecretProtector.Unprotect(value);
+        }
+        catch (CryptographicException)
+        {
+            // Legacy plaintext row. Returning the raw value preserves the OIDC
+            // token-exchange flow until the migrator catches up. Protect-on-write
+            // ensures every NEW save is encrypted from this point forward.
+            return value;
+        }
+    }
+
+    /// <summary>
+    /// Writes the encrypted form so plaintext never lands in the row.
+    /// </summary>
+    internal string? ProtectSecret(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return null;
+        return _oidcSecretProtector.Protect(value);
+    }
 
     public async Task<TenantAuthConfig?> GetAsync(string tenantId, CancellationToken ct)
     {
@@ -21,7 +78,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             "impersonation_max_concurrent_sessions, impersonation_auto_timeout_minutes, ip_allowlist_enabled, updated_at " +
             "FROM tenant_auth_config WHERE tenant_id = @TenantId",
             new { TenantId = tenantId });
-        return row?.ToTenantAuthConfig();
+        return row?.ToTenantAuthConfig(this);
     }
 
     public async Task SaveAsync(TenantAuthConfig config, CancellationToken ct)
@@ -67,7 +124,8 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
                 config.OidcEnabled,
                 config.OidcAuthority,
                 config.OidcClientId,
-                config.OidcClientSecret,
+                // ADMIN-001 (PREPUB-2026-05-09): wrap on write — never write plaintext.
+                OidcClientSecret = ProtectSecret(config.OidcClientSecret),
                 config.OidcAutoCreateUsers,
                 config.OidcDefaultRole,
                 config.ImpersonationMaxConcurrentSessions,
@@ -101,7 +159,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
         public bool ip_allowlist_enabled { get; init; }
         public DateTime? updated_at { get; init; }
 
-        public TenantAuthConfig ToTenantAuthConfig() => new()
+        public TenantAuthConfig ToTenantAuthConfig(PostgresTenantAuthConfigStore store) => new()
         {
             TenantId = tenant_id,
             MfaPolicy = mfa_policy,
@@ -117,7 +175,11 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             OidcEnabled = oidc_enabled,
             OidcAuthority = oidc_authority,
             OidcClientId = oidc_client_id,
-            OidcClientSecret = oidc_client_secret,
+            // ADMIN-001 (PREPUB-2026-05-09): unwrap on read — internal callers
+            // (OidcEndpoints token-exchange) receive plaintext; the API layer
+            // re-projects to TenantAuthConfigResponse so plaintext never
+            // crosses the HTTP boundary.
+            OidcClientSecret = store.UnprotectSecret(oidc_client_secret),
             OidcAutoCreateUsers = oidc_auto_create_users,
             OidcDefaultRole = oidc_default_role,
             ImpersonationMaxConcurrentSessions = impersonation_max_concurrent_sessions,
