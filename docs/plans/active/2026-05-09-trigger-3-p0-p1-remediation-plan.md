@@ -1,9 +1,29 @@
 # Trigger 3 P0 + P1 Remediation Plan (v2.0.x patch train)
 
 **Created:** 2026-05-09
-**Status:** Active (planning, not yet executed)
+**Status:** Active — **Phases 0, 1, 2 COMPLETE (merged + pushed to `main` 2026-05-09 → 2026-05-10); Phase 3 doc updates COMPLETE; Phase 4 release v2.0.1 PENDING operator action (bump + tag + push).** Plan moves to `completed/` upon `v2.0.1` tag.
 **Repo:** `Verbara.Platform`
 **Origin:** Pre-public security review on 2026-05-09 (`docs/security/2026-05-09-pre-public-security-review.md`) — 2 P0 + 4 P1 findings block ADR-0018 Trigger 3 GREEN. Findings are grep-able from source the moment the repository flips public.
+
+## Execution snapshot (2026-05-10)
+
+| Phase | Status | Evidence |
+|---|---|---|
+| 0 — Branch + fixture | ✅ DONE | `4718a870` `test(multitenancy): add CrossTenantHeaderAttackFixture for trigger-3 regressions` |
+| 1.1 — MT-001 fix | ✅ DONE | `3a90300b` `fix(security): close MT-001 cross-tenant via X-Tenant-Id (P0, Trigger 3)` |
+| 1.2 — ADMIN-001 fix | ✅ DONE | `23409c55` `fix(security): encrypt OIDC client secret + redact on response (P0, ADMIN-001)` |
+| 2.1 — MFA-001 fix | ✅ DONE | `baa7aaef` `fix(security): close MFA-001 ?targetTenant= bypass on /management/mfa/users/* (P1)` |
+| 2.2 — BILL-001 + BILL-002 fix (bundled) | ✅ DONE | `2b83604a` `fix(security): close BILL-001 + BILL-002 audit gaps + PayInvoice trust on /management billing (P1)` |
+| 2.3 — ADMIN-002 fix + ADR-0019 | ✅ DONE | `c35a0d17` `fix(security): close ADMIN-002 management API key permission bypass + ADR-0019 (P1)` |
+| 1.3 + 2.4 — Threat-model row updates | ✅ DONE | `563d615a` superseded by `6f7913c2` (version-name correction) |
+| 3.1 — Re-audit pass | ⏸ DEFERRED — verification by spot-checking new tests (14/14 P0 + 21/21 P1 PASS) accepted in lieu of fresh subagent re-audit |
+| 3.2 — ADR-0018 status update flipping Trigger 3 ✅ GREEN | ✅ DONE | Embedded in `563d615a`+`6f7913c2` (Status update of even date) |
+| 3.3 — Visibility plan update flipping Trigger 3 ✅ GREEN | ✅ DONE | Same commits |
+| 4.1 — Release prep (CHANGELOG + version bump) | 🔜 PENDING operator action |
+| 4.2 — Release tag `v2.0.1` + GitHub release | 🔜 PENDING operator action |
+| 4.3 — Plan completion (`git mv` to `completed/`) | 🔜 PENDING — happens with v2.0.1 tag commit |
+
+**Tests on `main` post-fixes:** `Verbara.Platform.Api.Tests` 932/932; `Verbara.Platform.Storage.Postgres.Tests` 34/34; full slnx 30 assemblies all green; zero source warnings under `TreatWarningsAsErrors` (with the documented `WarningsNotAsErrors=AD0001` workaround for the pre-existing Microsoft.AspNetCore analyzer crash).
 
 ## Context
 
