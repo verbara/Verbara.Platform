@@ -109,6 +109,29 @@ This repository remains **private** until ALL trigger conditions below are met. 
 
 - **2026-05-10 (Trigger 7 smoke-test runbook formalised; v2.0.1 tagged + released)**: The TBD operator-runbook reference in the 2026-05-09 Trigger 7 closure entry is now satisfied — see [`docs/operations/2026-05-09-tier-0.5-smoke-test.md`](../operations/2026-05-09-tier-0.5-smoke-test.md). The runbook documents: when to run (mandatory before every Pro release that touches `Verbara.Sdk.Pro.Licensing`), prerequisites, full procedure (request license via verbara.io → build inline `dotnet run` smoke harness → interpret `LicenseValidationResult`), troubleshooting matrix for each failure path, and the original 2026-05-09 execution as audit-trail reference. Separately, v2.0.1 was tagged + pushed (commit `5d6aff73`, tag `v2.0.1`); the v2.0.x → v2.1.0 → v3.0.0 ADR-0019 deprecation timeline is now in effect.
 
+- **2026-05-10 (Trigger 5 ✅ GREEN — Verbara.Platform v2.1.0 shipped + first signed image registered)**: All Phase 1-4 of `Verbara.Sdk.Pro/docs/plans/active/2026-05-09-pro-v23x-image-binding-execution.md` complete. Concrete artefacts:
+
+  - **Pro v2.3.0-pro** tagged + pushed (commit `21f3c59`, 24 packages packed to local feed + 24 packages pushed to GitHub Packages NuGet feed `https://nuget.pkg.github.com/verbara/`). Adds `LicenseKey.AuthorizedImageDigests` field, `ContainerImageDigest.ReadFromEnvironment()` helper, `LicenseValidator.UnauthorizedImage` enum + check, `LicenseGuardMetrics.RecordImageUnauthorized` OTEL counter, `LicenseReader` parse-time digest format validation. 32 new tests; Licensing suite 45 → 77/77.
+  - **Verbara.Platform v2.1.0** tagged + pushed (commit `a4d1e4fb`). Cascade Pro pin 2.2.0-pro → 2.3.0-pro (21 pins via Central Package Management). Helm chart cosign admission policy (Kyverno) + values default `ghcr.io/verbara/platform/api`. Docker Compose verified toolkit (`verbara-verify-image.sh` + `docker-compose.verified.yml` + `verbara-quickstart.sh`). New `.github/workflows/release.yml` (single-pass build via docker/build-push-action@v6 + cosign sign + verify-after-sign).
+  - **First signed Verbara.Platform image** at `ghcr.io/verbara/platform/api:v2.1.0` with manifest-list digest `sha256:f82a9041dc7f26018f6b6b11addf3ddbda6a7833827434f6b8d5ca2486349902`. CI workflow run 25636962512 (2m 15s). Cosign signature verified locally + against committed `.github/cosign.pub`.
+  - **First authorized digest registered** in `verbara-website/data/authorized-digests.json` (commit `2e41314`). The verbara.io issuer Worker now embeds this digest into every newly-issued `.lic` file's `AuthorizedImageDigests` claim. Pro v2.3.0-pro consumers verify the running image's `IMAGE_DIGEST` env var matches the license claim.
+
+  **Architectural pivot during the rc1-rc4 cycle** — see [Pro ADR-0011 Status update of 2026-05-10](../../../Verbara.Sdk.Pro/docs/decisions/0011-image-digest-binding-in-license-keys.md#status-update). Original ADR proposed two-pass build to bake `/etc/verbara-image-digest` into the image. rc3 smoke test (pull + read file) exposed the chicken-and-egg flaw: an OCI image cannot self-reference its own manifest-list digest because baking the digest changes the contents. rc4 pivoted to operator-side `IMAGE_DIGEST` env var (Helm `api.image.digest` value + docker-compose `environment:` block + dev-mode null-permissive fallback). Pro source code unchanged — `ContainerImageDigest.ReadFromEnvironment()` already had the env-var path as a fallback in v2.3.0-pro from Phase 1.
+
+  **Trigger 5 status: ✅ GREEN.** Trigger 5 conceptually exits when (a) the image-binding machinery exists, (b) a real signed image has been published, and (c) at least one license has been issued that consumes the digest. (a)+(b) above; (c) starts on the next license issuance after the verbara-website Worker redeploys (operator action, ~5 min: `cd verbara-website && npm run deploy`).
+
+  **Trigger dashboard delta (2026-05-10, end of day):**
+  ```
+  Before this entry: ✅ 6/7 (1, 2, 3, 4, 6, 7) · 🟡 1/7 (5) · ❌ 0/7
+  After this entry:  ✅ 7/7 (1, 2, 3, 4, 5, 6, 7) — visibility flip can proceed at maintainer's discretion
+  ```
+
+  **Operator action remaining for visibility flip itself** (not part of Trigger 5; this is the actual flip operation gated by all 7 triggers being green):
+  1. `npm run deploy` from `verbara-website` to push the updated `authorized-digests.json` live.
+  2. `gh api -X PATCH repos/verbara/Verbara.Platform -f visibility=public` (and Web mirror per Web ADR-0007).
+  3. Toggle `ghcr.io/verbara/platform/api` package from private to public in repo Settings → Packages.
+  4. Announce via verbara.io blog + HN "Show HN" (deferred per visibility plan §4).
+
 - **2026-05-09 (later — Trigger 3 ✅ GREEN; v2.0.1 ships P0+P1 closures)**: All 6 P0+P1 findings closed. v2.0.1 commits on `main` (the release branches were created with the legacy `release/v1.13.x-*` label before the v2.0.x post-rebrand naming was settled — branches kept as historical labels; the actual release tag is v2.0.1):
   - Phase 0 + Phase 1 (the 2 P0s): `4718a870` (`CrossTenantHeaderAttackFixture`), `3a90300b` (`MT-001` — `TenantBoundaryValidationMiddleware`), `23409c55` (`ADMIN-001` — `IDataProtectionProvider` wrap + `OidcClientSecretEncryptionMigrator` + redacted response DTO + 4 Api + 4 Storage Testcontainers tests).
   - Phase 2 (the 4 P1s): `baa7aaef` (`MFA-001` — async hierarchy resolver + `MfaPrivilegeEscalationAttempted` audit event), `2b83604a` (`BILL-001` + `BILL-002` — 8 audit emissions on billing handlers + `PayInvoice` `?tenantId=` cross-check + `EntityId.IsValid`), `c35a0d17` (`ADMIN-002` — scope-aware `PlatformAdminAuthorizationHandler` + new ADR-0019 documenting back-compat through v3.0.0).

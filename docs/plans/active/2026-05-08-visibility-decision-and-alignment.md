@@ -111,7 +111,12 @@ These are the work items that, when all complete, allow the visibility flip. Mos
 
 ### Trigger 5 — LicenseGuard tamper resistance (owner: Pro plan, gate here)
 
-- [ ] Cross-check that Pro plan `2026-05-08-pro-licensing-eula-overhaul.md` Phase 0 has shipped tamper-resistance baseline before flip
+- [x] Pro plan `2026-05-08-pro-licensing-eula-overhaul.md` Phase 0 closed (basic-tamper baseline accepted; advanced anti-tamper deferred per `feedback_subagent_patterns` ✅ DONE 2026-05-08).
+- [x] **Pro v2.3.x image-binding execution plan SHIPPED** — see `Verbara.Sdk.Pro/docs/plans/active/2026-05-09-pro-v23x-image-binding-execution.md` (ready to move to completed/ — Phase 0 cosign keypair + Phase 1 Pro code + Phase 2 verbara-website Worker + Phase 3 Platform CI cosign + Phase 4 v2.3.0-pro release ALL DONE 2026-05-10).
+- [x] **Verbara.Platform v2.1.0 tagged** — first signed image at `ghcr.io/verbara/platform/api@sha256:f82a9041dc7f26018f6b6b11addf3ddbda6a7833827434f6b8d5ca2486349902`. CI workflow run 25636962512 (2m 15s).
+- [x] **First digest registered** in `verbara-website/data/authorized-digests.json` (commit `2e41314`).
+
+**Trigger 5 status: ✅ GREEN as of v2.1.0 (2026-05-10).** Pivote arquitectural durante rc1-rc4 cycle: file-based `/etc/verbara-image-digest` baking abandonado (chicken-and-egg flaw) → operator-side `IMAGE_DIGEST` env var (Helm chart `api.image.digest` value + docker-compose `environment:` block + dev-mode null-permissive fallback). Pro source code unchanged (env var path was Phase-1 fallback, now canonical). Documented in [Pro ADR-0011 Status update](../../../Verbara.Sdk.Pro/docs/decisions/0011-image-digest-binding-in-license-keys.md#status-update) + ADR-0018 Status update of even date.
 
 ### Trigger 6 — verbara.io brand setup (owner: separate track)
 
