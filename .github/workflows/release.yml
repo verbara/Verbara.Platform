@@ -72,11 +72,18 @@ jobs:
           build-args: |
             VERBARA_IMAGE_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000
           # NUGET_AUTH_TOKEN — used inside the Dockerfile to authenticate to the
-          # GitHub Packages NuGet feed (private Verbara.Sdk.Pro.* packages). The
-          # auto-provisioned GITHUB_TOKEN has read:packages permission for the
-          # verbara org.
+          # GitHub Packages NuGet feed (private Verbara.Sdk.Pro.* packages).
+          # We use PACKAGES_PAT (a maintainer-owned PAT with read:packages scope
+          # for the verbara org) instead of GITHUB_TOKEN because the auto-
+          # provisioned workflow token's package access is gated per-package via
+          # "Manage Actions access" — packages pushed to the verbara org are
+          # linked by source-repo only (Verbara.Sdk.Pro), not auto-readable by
+          # workflows in sibling repos. Granting per-package access for 24+
+          # packages via UI is operationally noisy; PAT path is simpler. PAT
+          # rotation: every 90d, see operator runbook
+          # Verbara.Sdk.Pro/docs/operations/2026-05-10-pro-packages-to-github-packages.md.
           secrets: |
-            nuget_auth_token=${{ secrets.GITHUB_TOKEN }}
+            nuget_auth_token=${{ secrets.PACKAGES_PAT }}
           provenance: false
 
       - name: Build and push (pass 2 - final, real digest baked in)
@@ -90,7 +97,7 @@ jobs:
           build-args: |
             VERBARA_IMAGE_DIGEST=${{ steps.pass1.outputs.digest }}
           secrets: |
-            nuget_auth_token=${{ secrets.GITHUB_TOKEN }}
+            nuget_auth_token=${{ secrets.PACKAGES_PAT }}
           provenance: false
 
       - name: Install cosign
