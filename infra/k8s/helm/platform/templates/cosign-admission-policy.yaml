@@ -1,0 +1,47 @@
+{{- if .Values.imageVerification.enabled -}}
+{{- $pubKey := .Values.imageVerification.cosignPublicKey -}}
+{{- if not $pubKey -}}
+{{- fail "imageVerification.enabled=true but imageVerification.cosignPublicKey is empty. Pass with: --set-file imageVerification.cosignPublicKey=infra/k8s/helm/platform/files/cosign.pub" -}}
+{{- end -}}
+# Kyverno ClusterPolicy — requires every Pod admitted to the release namespace
+# whose image matches ghcr.io/verbara/platform/* to carry a valid cosign
+# signature from the Verbara cosign keypair (Pro v2.3.x Layer B, ADR-0011).
+#
+# Layer C (in-process check inside Verbara.Sdk.Pro.Licensing) catches the same
+# class of tampering at runtime; this admission policy catches it AT POD
+# CREATION so a tampered image cannot even reach the kubelet pull stage.
+#
+# Tested against Kyverno 1.11+. Disable with `--set imageVerification.enabled=false`
+# if the cluster has no admission-policy controller available.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ include "platform.fullname" . }}-cosign-verify
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  validationFailureAction: Enforce
+  webhookConfiguration:
+    failurePolicy: Fail
+  background: false
+  rules:
+    - name: verify-platform-image
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - {{ .Values.namespace | quote }}
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/verbara/platform/api*"
+            - "ghcr.io/verbara/platform/web*"
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+{{ $pubKey | indent 22 }}
+                    rekor:
+                      ignoreTlog: true
+{{- end }}

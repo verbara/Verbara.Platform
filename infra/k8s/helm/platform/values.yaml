@@ -2,7 +2,11 @@ namespace: r55-platform
 
 api:
   image:
-    repository: 192.168.122.1:5050/verbara-platform/api
+    # Canonical published registry per ADR-0011 (Pro v2.3.x image-binding).
+    # Override to the local KVM dev cluster registry when validating against
+    # the maintainer's k3s/Talos lab:
+    #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
+    repository: ghcr.io/verbara/platform/api
     tag: "1.14.6"
   replicas: 2
   port: 5000
@@ -53,7 +57,11 @@ api:
 
 web:
   image:
-    repository: 192.168.122.1:5050/verbara-platform/web
+    # Canonical published registry per ADR-0011 (Pro v2.3.x image-binding).
+    # Override to the local KVM dev cluster registry when validating against
+    # the maintainer's k3s/Talos lab:
+    #   --set web.image.repository=192.168.122.1:5050/verbara-platform/web
+    repository: ghcr.io/verbara/platform/web
     tag: "1.15.5"
   replicas: 1
   port: 80
@@ -70,3 +78,27 @@ ingress:
   hostnameApi: api.r55.local
   hostnameWeb: r55.local
   tlsEnabled: false
+
+# Cosign-based image verification (Pro v2.3.x Layer B, ADR-0011).
+# Renders a Kyverno ClusterPolicy that requires every Pod admitted to the
+# release namespace whose image matches ghcr.io/verbara/platform/* to carry a
+# valid cosign signature from the Verbara cosign keypair. Default disabled
+# for back-compat with clusters that have no admission-policy controller
+# installed; opt in once Kyverno >= 1.11 is running in the cluster.
+#
+# Quick start (ghcr.io defaults + verification ON):
+#   helm install platform infra/k8s/helm/platform/ \
+#     --set imageVerification.enabled=true \
+#     --set-file imageVerification.cosignPublicKey=infra/k8s/helm/platform/files/cosign.pub
+#
+# Notes:
+#   - cosignPublicKey expects the raw PEM bytes (header + base64 + footer);
+#     use --set-file to inject from disk rather than embedding inline.
+#   - When enabled, an unsigned image (or one signed by a different key)
+#     is rejected at admission time with `failed to verify signature`.
+#   - The chart ships infra/k8s/helm/platform/files/cosign.pub as the
+#     reference public key for convenience; rotation requires updating that
+#     file AND .github/cosign.pub AND the GitHub Actions secret.
+imageVerification:
+  enabled: false
+  cosignPublicKey: ""
