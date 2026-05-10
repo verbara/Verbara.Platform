@@ -103,7 +103,14 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
         with:
-          cosign-release: 'v3.0.6'
+          # cosign-installer@v3 currently fails on cosign v3.x because v3 changed
+          # the detached-signature distribution model (no more cosign-linux-amd64.sig
+          # alongside the binary on GitHub releases — v3 uses bundled Sigstore tlog
+          # signatures only). Pin to v2.5.2 (the action's default bootstrap version)
+          # which is mature + has the .sig file. ECDSA P-256 PEM keypair generated
+          # by cosign v3.0.6 (Phase 0) is fully readable by cosign v2.5.2 — same key
+          # format, just different default behaviours around tlog.
+          cosign-release: 'v2.5.2'
 
       - name: Sign final image with cosign
         env:
