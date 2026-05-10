@@ -42,6 +42,13 @@ public static class AuthEventTypes
     /// See P0 hierarchy check (v1.9.0).</summary>
     public const string ImpersonationPrivilegeEscalationAttempted = "impersonation_privilege_escalation_attempted";
 
+    /// <summary>Written to the CALLER's audit log when an MFA-admin operation
+    /// (<c>POST /management/mfa/users/{id}/reset</c> or <c>.../sessions/revoke</c>)
+    /// is rejected because the caller-supplied <c>?targetTenant=</c> override is
+    /// outside the caller's tenant hierarchy. Closes
+    /// <c>PREPUB-2026-05-09-MFA-001</c>. Severity: error.</summary>
+    public const string MfaPrivilegeEscalationAttempted = "mfa_privilege_escalation_attempted";
+
     public const string OidcLoginSuccess = "oidc_login_success";
     public const string OidcLoginFailure = "oidc_login_failure";
 }

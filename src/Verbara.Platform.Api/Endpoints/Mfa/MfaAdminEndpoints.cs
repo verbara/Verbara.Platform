@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
+using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints.Mfa;
@@ -52,18 +54,22 @@ internal static class MfaAdminEndpoints
         HttpContext context,
         [FromServices] IMfaAdminService service,
         [FromServices] IAuditService audit,
+        [FromServices] ITenantStore tenantStore,
         [FromQuery] string? targetTenant,
         CancellationToken ct)
     {
         var actor = ResolveActor(context);
-        var tenantId = ResolveTargetTenant(actor.TenantId, targetTenant);
+        var (tenantId, error) = await ResolveTargetTenantAsync(
+            actor.TenantId, targetTenant, tenantStore, audit, actor.UserId, context, "mfa.admin.reset", ct);
+        if (error is not null)
+            return error;
 
-        var ok = await service.ResetMfaAsync(tenantId, EntityId.From(id), ct);
+        var ok = await service.ResetMfaAsync(tenantId!.Value, EntityId.From(id), ct);
         if (!ok)
             return Results.NotFound();
 
         await audit.RecordAsync(
-            tenantId,
+            tenantId.Value,
             category: "admin",
             action: "mfa.admin.reset",
             severity: "warning",
@@ -71,7 +77,7 @@ internal static class MfaAdminEndpoints
             actorType: "user",
             targetId: id,
             targetType: "user",
-            metadata: BuildMetadata(context, actor.TenantId.Value, tenantId.Value),
+            metadata: BuildMetadata(context, actor.TenantId.Value, tenantId.Value.Value),
             ct: ct);
 
         return Results.NoContent();
@@ -82,18 +88,22 @@ internal static class MfaAdminEndpoints
         HttpContext context,
         [FromServices] IMfaAdminService service,
         [FromServices] IAuditService audit,
+        [FromServices] ITenantStore tenantStore,
         [FromQuery] string? targetTenant,
         CancellationToken ct)
     {
         var actor = ResolveActor(context);
-        var tenantId = ResolveTargetTenant(actor.TenantId, targetTenant);
+        var (tenantId, error) = await ResolveTargetTenantAsync(
+            actor.TenantId, targetTenant, tenantStore, audit, actor.UserId, context, "mfa.admin.sessions_revoked", ct);
+        if (error is not null)
+            return error;
 
-        var revokedCount = await service.RevokeSessionsAsync(tenantId, EntityId.From(id), ct);
+        var revokedCount = await service.RevokeSessionsAsync(tenantId!.Value, EntityId.From(id), ct);
         if (revokedCount < 0)
             return Results.NotFound();
 
         await audit.RecordAsync(
-            tenantId,
+            tenantId.Value,
             category: "admin",
             action: "mfa.admin.sessions_revoked",
             severity: "warning",
@@ -104,7 +114,7 @@ internal static class MfaAdminEndpoints
             metadata: BuildMetadata(
                 context,
                 actor.TenantId.Value,
-                tenantId.Value,
+                tenantId.Value.Value,
                 ("revoked_count", revokedCount.ToString(System.Globalization.CultureInfo.InvariantCulture))),
             ct: ct);
 
@@ -125,10 +135,64 @@ internal static class MfaAdminEndpoints
         return (new TenantId(tenantClaim), userClaim);
     }
 
-    private static TenantId ResolveTargetTenant(TenantId actorTenant, string? overrideTenant) =>
-        string.IsNullOrWhiteSpace(overrideTenant)
-            ? actorTenant
-            : new TenantId(overrideTenant);
+    /// <summary>
+    /// MFA-001 fix (PREPUB-2026-05-09): the legacy synchronous resolver trusted
+    /// any caller-supplied <paramref name="overrideTenant"/>. Mirror the
+    /// impersonation-hierarchy pattern from
+    /// <see cref="ManagementImpersonationEndpoints.IsTenantInCallerHierarchyAsync"/>:
+    /// allow iff (a) override is null/whitespace, (b) override equals actor's
+    /// own tenant, (c) the actor sits in a Platform tenant, or (d) the override
+    /// is a descendant of the actor's tenant in the parent chain. Otherwise
+    /// emit <see cref="AuthEventTypes.MfaPrivilegeEscalationAttempted"/> on the
+    /// caller's audit log and reject with 403.
+    /// </summary>
+    private static async Task<(TenantId? Tenant, IResult? Error)> ResolveTargetTenantAsync(
+        TenantId actorTenant,
+        string? overrideTenant,
+        ITenantStore tenantStore,
+        IAuditService audit,
+        string actorUserId,
+        HttpContext context,
+        string attemptedAction,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(overrideTenant))
+            return (actorTenant, null);
+        if (string.Equals(actorTenant.Value, overrideTenant, StringComparison.Ordinal))
+            return (actorTenant, null);
+
+        var callerTenant = await tenantStore.GetAsync(actorTenant.Value, ct);
+        if (callerTenant?.Type == TenantType.Platform)
+            return (new TenantId(overrideTenant), null);
+
+        var inHierarchy = await ManagementImpersonationEndpoints.IsTenantInCallerHierarchyAsync(
+            tenantStore, actorTenant.Value, overrideTenant, ct);
+        if (inHierarchy)
+            return (new TenantId(overrideTenant), null);
+
+        // Audit the attempt on the CALLER tenant before rejecting — this is the
+        // signal a Partner Admin tried to escalate into a foreign hierarchy.
+        await audit.RecordAsync(
+            actorTenant,
+            category: "admin",
+            action: AuthEventTypes.MfaPrivilegeEscalationAttempted,
+            severity: "error",
+            actorId: actorUserId,
+            actorType: "user",
+            targetId: overrideTenant,
+            targetType: "tenant",
+            metadata: BuildMetadata(
+                context,
+                actorTenant.Value,
+                overrideTenant,
+                ("attempted_action", attemptedAction)),
+            ct: ct);
+
+        return (null, Results.Problem(
+            title: "MFA admin not authorized",
+            detail: "Target tenant is not in your tenant hierarchy.",
+            statusCode: StatusCodes.Status403Forbidden));
+    }
 
     private static Dictionary<string, string> BuildMetadata(
         HttpContext context,
