@@ -1,0 +1,7 @@
+# Verbara cosign public key (ECDSA P-256). Used by .github/workflows/release.yml verify-after-sign step.
+# Private key in GitHub secret COSIGN_PRIVATE_KEY + Cloudflare Worker secret VERBARA_COSIGN_PRIVATE_KEY.
+# See Verbara.Sdk.Pro/docs/operations/2026-05-10-cosign-keypair-bootstrap.md for custody.
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEBKvVcEKiEr1VKAlS2tnnaBOymdBY
+Il+bfvD2YMK7KQe+QdziuA1dVa8TGmg0NGM082ScomxlxxNI8aMRAGN0aQ==
+-----END PUBLIC KEY-----
