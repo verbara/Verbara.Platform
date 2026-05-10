@@ -2,6 +2,8 @@
 
 **Última actualización:** 2026-04-19 · **Baselines actuales:** Platform `1.8.1` · Platform.Web `1.8.0`
 
+> ⚠️ **DRIFT WARNING (2026-05-10)** — This roadmap is **~12+ releases behind** the actual `Directory.Build.props` PackageVersion (currently **`2.0.1`**, last entry below stops at 1.8.1). Backfilling 1.9.x → 2.0.1 is tracked as a dedicated cleanup task. In the meantime use [`CHANGELOG.md`](../CHANGELOG.md), [`docs/decisions/`](decisions/) (especially [ADR-0016 license + rebrand](decisions/0016-license-and-rebrand-to-verbara.md), [ADR-0017 rebrand execution](decisions/0017-verbara-rebrand-execution.md), [ADR-0018 visibility decision](decisions/0018-visibility-decision-3-private-now-public-on-trigger.md), [ADR-0019 scope-aware management API keys](decisions/0019-scope-aware-management-api-keys.md)) and [`docs/plans/completed/`](plans/completed/) as the authoritative record per release. Latest tag: **v2.0.1** (2026-05-10, security: ADR-0018 Trigger 3 closure — 2 P0 + 4 P1 fixes).
+
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
 Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/Data/Source/Verbara/Verbara.Sdk.Pro/docs/roadmap.md`.
