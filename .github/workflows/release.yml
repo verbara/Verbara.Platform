@@ -1,0 +1,156 @@
+# Release workflow: build the Verbara.Platform.Api image, push to ghcr.io, and
+# Sigstore-cosign-sign it. Triggered by pushing a `v*` tag (e.g. `v2.0.1`, `v2.3.0`).
+#
+# Two-pass build rationale (see Dockerfile + Verbara.Sdk.Pro/docs/decisions/0011):
+#   pass 1 -> push staging tag with a placeholder VERBARA_IMAGE_DIGEST
+#             so we can read back the resulting manifest-list digest from
+#             docker/build-push-action's `digest` output.
+#   pass 2 -> rebuild and push the final tag with the real digest baked in
+#             via --build-arg, then sign the final manifest-list digest.
+#
+# Result: the running container can read its own image digest from
+# /etc/verbara-image-digest, and the final image carries a valid cosign
+# signature that Verbara.Sdk.Pro.Licensing's Layer-B + Layer-C checks can
+# verify (Helm Kyverno admission + in-process check).
+#
+# Layer-B verification reference: docker/verbara-verify-image.sh
+# Layer-C verification reference: Verbara.Sdk.Pro.Licensing.ContainerImageDigest.ReadFromEnvironment()
+
+name: Release
+
+"on":
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: verbara/platform/api
+
+jobs:
+  release:
+    name: Build, push, and sign API image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ -z "$TAG" ]; then
+            echo "GITHUB_REF_NAME is empty; cannot derive release tag" >&2
+            exit 1
+          fi
+          echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "staging_tag=${TAG}-staging" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (pass 1 - staging, placeholder digest)
+        id: pass1
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.staging_tag }}
+          build-args: |
+            VERBARA_IMAGE_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000
+          provenance: false
+
+      - name: Build and push (pass 2 - final, real digest baked in)
+        id: pass2
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.release_tag }}
+          build-args: |
+            VERBARA_IMAGE_DIGEST=${{ steps.pass1.outputs.digest }}
+          provenance: false
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v3.0.6'
+
+      - name: Sign final image with cosign
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.pass2.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Write the private key to a tmpfs-backed location and clean up immediately
+          # after signing. COSIGN_PRIVATE_KEY env var is consumed by `cosign sign`
+          # with `--key env://COSIGN_PRIVATE_KEY`.
+          umask 077
+          KEY_FILE="$(mktemp -t cosign-key.XXXXXX)"
+          trap 'shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"' EXIT
+          printf '%s' "$COSIGN_PRIVATE_KEY" > "$KEY_FILE"
+          cosign sign \
+            --key "$KEY_FILE" \
+            --yes \
+            --tlog-upload=false \
+            "$IMAGE_REF"
+
+      - name: Verify cosign signature against committed public key
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.pass2.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --key .github/cosign.pub \
+            --insecure-ignore-tlog \
+            "$IMAGE_REF"
+
+      - name: Cleanup staging tag
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STAGING_TAG: ${{ steps.tag.outputs.staging_tag }}
+        run: |
+          # Best-effort delete of the staging tag's package version. Failures are
+          # non-fatal because the tag may have already been garbage-collected if a
+          # previous run cleaned up partially. The signed final tag (and the digest
+          # behind it) are independent of this cleanup.
+          set +e
+          PACKAGE_NAME="platform/api"
+          VERSION_ID=$(gh api \
+            "/orgs/verbara/packages/container/${PACKAGE_NAME//\//%2F}/versions" \
+            --jq ".[] | select(.metadata.container.tags[]? == \"${STAGING_TAG}\") | .id" \
+            2>/dev/null | head -n 1)
+          if [ -n "$VERSION_ID" ]; then
+            echo "Deleting staging package version id=$VERSION_ID (tag=$STAGING_TAG)"
+            gh api -X DELETE "/orgs/verbara/packages/container/${PACKAGE_NAME//\//%2F}/versions/${VERSION_ID}" \
+              || echo "Staging cleanup failed (non-fatal); operator can prune from ghcr.io UI"
+          else
+            echo "No staging version found for ${STAGING_TAG} (already cleaned or not present)"
+          fi
+
+      - name: Print final image reference
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.pass2.outputs.digest }}
+        run: |
+          echo "Signed image manifest-list digest: ${{ steps.pass2.outputs.digest }}"
+          echo "Final image reference: $IMAGE_REF"
+          echo ""
+          echo "Next step: append a new entry to verbara-website's"
+          echo "data/authorized-digests.json with manifest_list_digest=${{ steps.pass2.outputs.digest }}"
+          echo "(see docs/operations/2026-05-10-update-authorized-digests-after-release.md)"
