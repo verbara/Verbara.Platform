@@ -52,7 +52,96 @@ After this release:  ✅ 6/7 (1, 2, 3, 4, 6, 7) · 🟡 1/7 (5) · ❌ 0/7
 
 Visibility flip is now gated **only** by Trigger 5 (Pro v2.3.x image binding execution; plan published at `Verbara.Sdk.Pro/docs/plans/active/2026-05-09-pro-v23x-image-binding-execution.md`).
 
-> **Note on the version gap (1.14.6 → 2.0.1):** The intervening v1.15.0 (pre-v2 Foundation) and v2.0.0 (Verbara rebrand) releases shipped without inline CHANGELOG entries; the rebrand details live in [ADR-0016](docs/decisions/0016-license-and-rebrand-to-verbara.md) and [ADR-0017](docs/decisions/0017-verbara-rebrand-execution.md). Backfilling those entries is tracked as a separate roadmap-cleanup exercise.
+> **Note on the version gap (1.14.6 → 2.0.1):** The intervening v1.15.0 (Pre-v2 Foundation) and v2.0.0 (Verbara rebrand) releases were originally shipped without inline CHANGELOG entries; both have been **backfilled below on 2026-05-10** sourced from `git log` ranges + ADR-0016 + ADR-0017 + `docs/plans/completed/`.
+
+---
+
+## [2.0.0] — 2026-05-05 — Verbara rebrand + R5.5 K8s Phase 0LK
+
+**Major release.** Closes the brand transition from `Asterisk.Platform` to `Verbara.Platform` per [ADR-0016 license + rebrand](docs/decisions/0016-license-and-rebrand-to-verbara.md) (Accepted 2026-05-03) and [ADR-0017 rebrand execution](docs/decisions/0017-verbara-rebrand-execution.md) (Accepted 2026-05-05). Coordinated cross-repo with **SDK 2.1.0** + **Pro 2.0.0-pro**. Pre-rebrand artefacts archived under the `pre-rebrand` git tag.
+
+### License
+
+- **Apache License 2.0** adopted (was previously license-unspecified — README mentioned "open-core" without naming the governing license for the Platform backend itself).
+- `LICENSE` file added at repo root.
+- `NOTICE` file added with attributions.
+- README updated with the canonical 4-row stack table (Sdk MIT / Web Apache 2.0 / Platform Apache 2.0 / Pro commercial) + the "engineering moat is the runtime ECDSA license-key validation in `Pro.Licensing`, not source-license restrictions" framing.
+- Trademark note: "Asterisk" remains a registered trademark of Sangoma Technologies / Digium; this project builds *on top of* Asterisk PBX as a runtime dependency. The "Verbara" name + branding are distinct.
+
+### Rebrand
+
+- `Asterisk.Platform.*` namespace → `Verbara.Platform.*` (mechanical rename across all `src/` + `tests/` + project files).
+- Repository renamed (GitHub URL).
+- `<Product>` and `<PackageTags>` in `Directory.Build.props` updated to Verbara branding.
+- `RepositoryUrl` updated to `https://github.com/verbara/verbara-platform`.
+- All cross-repo SDK + Pro pins bumped to consume the new `Verbara.Sdk.*` + `Verbara.Sdk.Pro.*` package names (SDK 2.1.0 + Pro 2.0.0-pro).
+- All references to "Asterisk.Platform" in docs/ updated where pre-rebrand context is no longer needed (historical references in `docs/plans/completed/` and old ADRs preserved as-is per append-only convention).
+
+### Infrastructure — R5.5 K8s Phase 0LK (live K8s deployment baseline)
+
+12 infrastructure commits landing the local-K8s validation environment that R5.5 Phase 0LK requires. Brought up before the rebrand merge to validate the new package names on a real cluster.
+
+- **Talos K8s cluster bootstrap** (P0LK.2) — 1 control-plane + 3 workers on local KVM.
+- **Cilium eBPF networking** (P0LK.3) — replaces Flannel + MetalLB + Traefik with the Cilium full stack.
+- **CloudNativePG 3-instance HA Postgres** (P0LK.4) — operator-managed cluster with PgBouncer pooler.
+- **Redis 8 StatefulSet** (P0LK.5) — AOF persistence enabled.
+- **Asterisk Helm chart** (P0LK.6) + **Kamailio/RTPEngine SBC layer** (P0LK.7) — telephony plane.
+- **Platform.Api + Web Helm chart** (P0LK.8) — application layer.
+- **Observability stack** (P0LK.9) — kube-prometheus-stack + Loki + blackbox-exporter values.
+- **PrometheusRule CRD** (P0LK.10) — wraps `alerts.yml` (17 rules).
+- **K8s staging docs + bootstrap script** (P0LK.11+12) — `k8s-apps.sh`.
+- **Production hardening sprint** — PDBs + NetworkPolicies + SecurityContexts + probes across all workloads.
+- **K8s live deployment** of Platform API + Web + observability with 6 production-readiness fixes.
+
+### Cross-repo coordination
+
+- SDK pin: `1.15.x → 2.1.0` (rebrand cascade).
+- Pro pin: `1.16.0-pro → 2.0.0-pro` (rebrand cascade).
+- Verbara.Platform.Web (separate repo): tracking 2.0.0 + R5.5 Phase 0LK in parallel.
+
+---
+
+## [1.15.0] — 2026-05-02 — Pre-v2 Foundation: IP allowlist + R5.5 D-L 24h soak + observability hardening
+
+**Final pre-rebrand release.** Lands the IP allowlist tenant feature (the first concrete `PlanFeature.IpAllowlist` capability), closes R5.5 Phase D-L production-validation, and tightens observability. Last release under the `Asterisk.Platform` brand before the rebrand to Verbara in v2.0.0.
+
+### IP allowlist (per-tenant) — first PlanFeature.IpAllowlist capability
+
+13-task FCM-batched implementation per `docs/plans/completed/2026-04-28-ip-allowlist-implementation.md`. Tenant-scoped CIDR allowlist with cached lookup, request-time enforcement middleware, and admin CRUD surface.
+
+- **`PlanFeature.IpAllowlist`** — new enum value gating the feature behind the appropriate plan tier.
+- **`Verbara.Platform.Identity`** — `TenantAuthConfig.IpAllowlistEnabled` flag; `IpAllowlistEntry` record + `ITenantIpAllowlistStore` contract; `IIpAllowlistEvaluator` + `DefaultIpAllowlistEvaluator` (CIDR matching).
+- **`Verbara.Platform.Storage.Postgres`** — migration `023_TenantIpAllowlist.sql` (tenant_ip_allowlist table + ip_allowlist_enabled column on tenant_auth_config); `PostgresTenantIpAllowlistStore` + Testcontainers integration tests.
+- **`Verbara.Platform.Storage.InMemory`** — `InMemoryTenantIpAllowlistStore` for dev/tests.
+- **`Verbara.Platform.Api`** — `CachedTenantIpAllowlistStore` decorator (per-tenant cache, TTL); `IpAllowlistMiddleware` per-request enforcement; `ManagementTenantIpAllowlistEndpoints` admin CRUD; `ForwardedHeaders` config wiring; `tenant-settings` surface exposes `IpAllowlistEnabled` toggle.
+- All endpoints + middleware AOT-compatible, source-gen-registered DTOs, integration-tested via Testcontainers.
+
+### R5.5 Phase D-L — 24h production-validation soak PASS
+
+- 24-hour soak test executed locally on Phase D-L hardware envelope. Closure report at `docs/operations/soak-test-report-local.md`.
+- ~959M requests, **0 failures**, p99 average 60.66 ms across the run.
+- New `scripts/soak-log-watchdog` + `scripts/soak-drift-snapshot` introduced to guard for log-flood + drift during long-running tests.
+- Drift snapshot output path fixed (avoid NBomber's `load-test-reports` wipe).
+- Synthetic monitoring verified during the soak (Phase E-L closure-precondition).
+
+### Observability hardening
+
+- **NodeDiskSpaceLow P0 alert** added — fired during R5.5 Phase 0LK pre-soak when an unrelated disk-fill incident surfaced; runbook documented at `docs/operations/alerts-runbook.md`.
+- **Datasource UIDs pinned** in Grafana dashboards — prevents UID drift across environments.
+- **Per-service Docker log rotation** pinned in `docker-compose.full.yml` (`max-size 100m`, `max-file 5`) — prevents host disk exhaustion under high-traffic conditions.
+
+### Other
+
+- Endpoint group count refreshed in CLAUDE.md: 59 → **70** (post-R5.5 endpoint additions).
+- R5.5 Phase C-L.1 stress sweep documented (knee crossing post-Phase-2).
+- Pre-existing PlatformEventBus consumers audit (Sprint 1 Task A5, 2026-04-13) archived to `docs/research/archived/`.
+- Operations docs: `staging-environment.md` updated with K8s hardening sprint preview; `compose` comments + `ConnectionStringDefaults` rephrased Phase 1 → Phase 2 wording for clarity.
+
+### Cross-repo
+
+- SDK pin: unchanged (`1.15.x`).
+- Pro pin: unchanged (`1.16.0-pro`).
+- Verbara.Platform.Web (separate repo): aligned cosmetic-track with Platform 1.14.x → 1.15.x.
 
 ---
 
