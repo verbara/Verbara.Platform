@@ -13,6 +13,74 @@ _No unreleased changes._
 
 ---
 
+## [2.1.0] — 2026-05-10 — Image-binding (ADR-0011 + ADR-0018 Trigger 5 machinery) + Pro 2.3.0-pro cascade
+
+Minor bump because this release introduces operator-visible new surface: Helm chart values default to `ghcr.io/verbara/platform/{api,web}` (was local KVM registry), new admission-policy template, new docker-compose verification toolkit, new CI workflow that publishes signed OCI images to GitHub Container Registry, and the consumed Pro v2.3.0-pro adds `LicenseValidator.UnauthorizedImage` semantics. Coordinated cross-repo with **Pro 2.3.0-pro** + **verbara-website Worker integration** that ships license-issuance with `AuthorizedImageDigests` claims.
+
+This is the Platform-side closure of [ADR-0018](docs/decisions/0018-visibility-decision-3-private-now-public-on-trigger.md) Trigger 5 (last visibility-flip gate). Once the first signed Platform image is published to `ghcr.io/verbara/platform/api` (by tagging this version) AND the digest is registered in `verbara-website/data/authorized-digests.json`, Trigger 5 flips to ✅ GREEN and the dashboard reaches 7/7.
+
+### Cosign image-signing machinery
+
+- **`.github/workflows/release.yml`** — first-ever GitHub Actions workflow in this repo. Triggered by pushing a `v*` tag. Two-pass build via `docker/build-push-action@v6`:
+  1. Pass 1: build + push `ghcr.io/verbara/platform/api:${tag}-staging` with placeholder `VERBARA_IMAGE_DIGEST` → captures the resulting manifest-list digest from the action output.
+  2. Pass 2: rebuild + push `ghcr.io/verbara/platform/api:${tag}` with the real digest baked in via `--build-arg`.
+  3. Sigstore cosign sign of the final manifest-list digest using the `COSIGN_PRIVATE_KEY` + `COSIGN_PASSWORD` Actions secrets.
+  4. Verify-after-sign against the committed `.github/cosign.pub` to fail-fast on signing errors.
+  5. Best-effort cleanup of the staging tag.
+- **`.github/cosign.pub`** — the official Verbara cosign public key (ECDSA P-256), committed for offline verification by the workflow + customers. Private key custody: `~/.verbara/keys/cosign.key` + Cloudflare Worker secret `VERBARA_COSIGN_PRIVATE_KEY` (see `Verbara.Sdk.Pro/docs/operations/2026-05-10-cosign-keypair-bootstrap.md`).
+- **`Dockerfile`** — accepts `ARG VERBARA_IMAGE_DIGEST` (default empty for local dev). Runtime stage bakes the value into `/etc/verbara-image-digest` so Pro v2.3.0-pro's `ContainerImageDigest.ReadFromEnvironment()` can read it. When the arg is empty (local dev `docker build` without --build-arg), the file is empty → Pro's permissive path applies.
+
+### NuGet GitHub Packages integration (resolves the CI build path)
+
+- **`NuGet.Config`** — adds `github` source pointing at `https://nuget.pkg.github.com/verbara/index.json` for private Verbara.Sdk.Pro.* packages. Adds `packageSourceMapping` so private Pro packages resolve exclusively via `github`, everything else via `nuget.org` (required by Central Package Management when multiple sources are defined; previously triggered NU1507).
+- **`Dockerfile`** — replaces the old IPcom-era sed-mangling logic with a BuildKit secret mount (`--mount=type=secret,id=nuget_auth_token`) + `dotnet nuget update source github -u verbara -p ...` runtime credential injection. Cleanly handles both CI (token via `GITHUB_TOKEN`) and local docker builds (token via maintainer's `GITHUB_PACKAGES_PAT`). Removes the `local` source inside the build context (its host path doesn't exist there; NuGet errors hard NU1301 on missing local sources).
+- **`release.yml`** — passes `GITHUB_TOKEN` as BuildKit secret `nuget_auth_token` to both `build-push-action@v6` invocations; the auto-provisioned token has `read:packages` scope for the verbara org.
+- **48 Pro packages now live on GitHub Packages** (`https://nuget.pkg.github.com/verbara/`): 24 v2.3.0-pro + 24 v2.2.0-pro backfill. See `Verbara.Sdk.Pro/docs/operations/2026-05-10-pro-packages-to-github-packages.md`.
+
+### Helm chart updates
+
+- **`infra/k8s/helm/platform/values.yaml`** — `api.image.repository` and `web.image.repository` defaults changed from `192.168.122.1:5050/verbara-platform/{api,web}` (the maintainer's local KVM cluster registry) to **`ghcr.io/verbara/platform/{api,web}`** (production). Local KVM remains as documented `--set` override for dev; chart README has the snippet.
+- **`infra/k8s/helm/platform/templates/cosign-admission-policy.yaml`** — new Kyverno `ClusterPolicy` template (opt-in via `imageVerification.enabled: true`) that calls `verifyImages` with the embedded cosign public key. Rejects pods whose images aren't signed by the official Verbara cosign key. Gatekeeper variant deferred to a future enhancement; operators can author their own ConstraintTemplate.
+- **`infra/k8s/helm/platform/values.yaml`** — new `imageVerification` section (`enabled: false` default for back-compat with clusters without admission-policy controllers; `cosignPublicKey` accepts inline string or `--set-file ...=cosign.pub`).
+- **`infra/k8s/helm/platform/files/cosign.pub`** — chart asset (same bytes as `.github/cosign.pub`).
+- Chart README documents the verification flow + the local KVM dev override.
+
+### Docker Compose verification toolkit
+
+- **`docker/verbara-verify-image.sh`** — operator pre-flight: HEADs the OCI manifest, runs `cosign verify --key https://verbara.io/.well-known/cosign.pub`, prints the manifest-list digest. Run before `docker compose up`.
+- **`docker/docker-compose.verified.yml`** — template using digest-pinned image references (`@sha256:REPLACE_WITH_MANIFEST_LIST_DIGEST`). Operator copies + substitutes their resolved digest from `verbara.io/data/authorized-digests.json`.
+- **`docker/verbara-quickstart.sh`** — wrapper that fetches the digest, runs verify, generates the verified compose file, and runs `docker compose up`. Fully working (not a stub); `TODO(web-image-binding)` marker for future v2.4 enhancement.
+- **`docker/README.md`** — verification flow documented for both quick (`verbara-quickstart.sh`) and power-user (`docker-compose.verified.yml` template) paths.
+
+### Operator runbooks (new)
+
+- [`docs/operations/2026-05-10-update-authorized-digests-after-release.md`](docs/operations/2026-05-10-update-authorized-digests-after-release.md) — post-release runbook: capture the new manifest-list digest from the workflow output → PR new entry to `verbara-website/data/authorized-digests.json`'s `current` array. Future automation (cross-repo Action) tracked as deferred enhancement.
+
+### Pro 2.3.0-pro cascade (Directory.Packages.props)
+
+- 21 `Verbara.Sdk.Pro.*` PackageVersion pins bumped from `2.2.0-pro` → `2.3.0-pro`. Adds `UnauthorizedImage` validation + `ContainerImageDigest` helper + `LicenseGuardMetrics.RecordImageUnauthorized` counter + parse-time digest format validation on Platform's consumption surface.
+- Verified: `dotnet build Verbara.Platform.slnx -c Release` clean; `dotnet test Verbara.Platform.slnx --filter Category!=Integration` all green (Api.Tests 932/932, Storage.Postgres.Tests 30/30, Storage.InMemory 125/125, Identity.Redis 34/34, plus rest). Back-compat preserved: Pro 2.3.0-pro accepts v2.2.0-pro signed `.lic` files unchanged.
+
+### Trigger dashboard delta
+
+```
+Before this release: ✅ 6/7 (1, 2, 3, 4, 6, 7) · 🟡 1/7 (5) · ❌ 0/7
+After this release ships AND first signed image lands on ghcr.io
+AND first digest registers in verbara-website:
+                     ✅ 7/7 — visibility flip can proceed (operator action)
+```
+
+### Maintainer follow-ups
+
+1. **Tag this release** (`v2.1.0` or RC `v2.1.0-rc1` first per the rigorous 21-step plan) → triggers `release.yml` for the first time → first `ghcr.io/verbara/platform/api` push creates the package.
+2. **Verify package** lands as private-by-default in `verbara/Verbara.Platform` → Settings → Packages.
+3. **Run** `docs/operations/2026-05-10-update-authorized-digests-after-release.md` runbook to register the new digest.
+4. **Smoke-test** the full F+B+C chain end-to-end (see `Verbara.Sdk.Pro/docs/operations/2026-05-10-cosign-keypair-bootstrap.md` companion runbook).
+5. **ADR-0018 Status update** flipping Trigger 5 ✅ GREEN.
+6. **Optional**: install `actionlint` + `shellcheck` locally; install Kyverno + add admission-policy as a follow-up if K8s test cluster reachable.
+
+---
+
 ## [2.0.1] — 2026-05-10 — Security: ADR-0018 Trigger 3 closure (2 P0 + 4 P1 fixes)
 
 First patch since the v2.0.0 rebrand release. Closes the 6 grep-able-from-source security findings raised in the 2026-05-09 pre-public security review (`docs/security/2026-05-09-pre-public-security-review.md`), unblocking ADR-0018 visibility-flip Trigger 3.
