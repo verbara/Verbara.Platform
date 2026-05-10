@@ -89,6 +89,24 @@ This repository remains **private** until ALL trigger conditions below are met. 
 
 - **2026-05-08**: ADR Accepted. Trigger checklist active. Tracking in `docs/plans/active/2026-05-08-visibility-decision-and-alignment.md`.
 
+- **2026-05-09 (Trigger 4 ✅ + threat model published)**: `docs/security/threat-model.md` published — closes Trigger 4. STRIDE-per-asset coverage with cross-references to `audit-checklist.md` Scope.Item identifiers; explicit "Pro is closed; Platform/Web open by design but the binary moat is in Pro" framing per the trigger requirement.
+
+- **2026-05-09 (Trigger 7 met by Option B — Tier 0.5 e2e validation)**: The original literal trigger language *"first signed Tier 1+ customer demo"* is met by an equivalent-or-stronger validation path: an external evaluator (the maintainer acting as evaluator) requested a Tier 0.5 Developer license through the live `verbara.io/developer-license` form; the verbara.io Worker validated Cloudflare Turnstile, rate-limited, ECDSA-signed the `.lic`, audited to D1, and emailed via Resend; the resulting license file `verbara-developer-399812ee-bf2c-4246-824e-6ed92c4783c1.lic` was loaded by Pro v2.2.0-pro through the full `LicenseReader` → `LicenseValidator.Validate(LicenseTrustAnchor.OfficialPublicKey, gracePeriod)` path and returned `LicenseValidationResult.Valid` (Tier=Developer, Features=All=0x1FF, MaxAgents=5, MaxNodes=1, expires 2026-06-08). Smoke-test artefact at `Verbara.Platform/docs/operations/2026-05-09-tier-0.5-smoke-test.md` (TBD — operator runbook entry).
+
+  **Reinterpretation rationale.** The original trigger sought to validate that the pricing + tier model are real and not aspirational before flipping public. The Tier 0.5 self-issuance loop validates the *delivery mechanism* end-to-end without requiring an arbitrary business event (paying customer) over which engineering has no control. With verbara.io live (Trigger 6) + the Tier 0.5 round-trip operational, the public-launch narrative ("self-serve evaluation in 2 minutes via verbara.io, paid Tier 1+ via Stripe Payment Link or sales contact") is backed by a working production system. The first paying-Tier 1+ customer remains a desirable post-launch milestone but is no longer treated as a flip prerequisite.
+
+  **Trigger 7 status: ✅ GREEN.**
+
+- **2026-05-09 (Trigger 3 ❌ BLOCKED — deeper audit findings)**: A focused pre-public security review of 60 endpoints across the four Trigger 3 families raised 2 P0 + 4 P1 findings (`docs/security/2026-05-09-pre-public-security-review.md`). MT-001 (cross-tenant via `X-Tenant-Id` on bare `AdminOnly` surfaces) and ADMIN-001 (OIDC client secret persisted plaintext) are both grep-able from source the moment this repository goes public. Trigger 3 remains OPEN until the v1.13.x patch train remediation lands — see `docs/plans/active/2026-05-09-trigger-3-p0-p1-remediation-plan.md`. Threat model Section 6.2 row "path-supplied tenant ID ignored when conflicting with claim — ✅ Verified (10/10 sample)" is factually superseded by this finding; an append-only Status update to the threat model documents the supersession (the original row is preserved per append-only convention).
+
+  **Trigger dashboard delta (2026-05-09 19:00 UTC):**
+  ```
+  ✅ GREEN:    5/7  (Triggers 1, 2, 4, 6, 7)
+  🟡 PARTIAL:  1/7  (Trigger 5 — image-binding research published; Pro v2.3.x execution pending)
+  ❌ BLOCKED:  1/7  (Trigger 3 — code remediation in v1.13.x)
+  ```
+  Visibility flip is now blocked by Platform code remediation (Trigger 3), not by process gates. Trigger 5 design landed today (`Verbara.Sdk.Pro/docs/research/2026-05-09-pro-image-binding-research.md`); ship via Pro v2.3.x.
+
 ## References
 
 - ADR-0016 (this repo) — license decision (Apache 2.0) and rebrand to Verbara

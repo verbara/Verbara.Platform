@@ -125,7 +125,7 @@ These are the work items that, when all complete, allow the visibility flip. Mos
 - [ ] Track in CRM or `docs/operations/customer-pipeline.md` (private)
 - [ ] Demo signed = pricing validated + tier model real
 
-**Trigger 7 status: 🟡 PENDING REINTERPRETATION (Option B chosen 2026-05-09).** Maintainer chose to soften this trigger from "first paying customer" to "Tier 0.5 e2e portal validation by external evaluator". Smoke test executed 2026-05-09: license `verbara-developer-399812ee-bf2c-4246-824e-6ed92c4783c1.lic` issued by verbara.io Worker, downloaded by maintainer, validated through full `LicenseReader` → `LicenseValidator.Validate` → `LicenseTrustAnchor.OfficialPublicKey` path against Pro v2.2.0-pro. Result: `LicenseValidationResult.Valid` (Tier=Developer, Features=All=0x1FF, MaxAgents=5, MaxNodes=1, expires 2026-06-08). Formalisation pending: ADR-0018 status update declaring Trigger 7 met by Option B (verbara.io live + Tier 0.5 self-issuance round-trip validated end-to-end). Once that status update lands, Trigger 7 flips to ✅ GREEN.
+**Trigger 7 status: ✅ GREEN (Option B formalised 2026-05-09).** Maintainer chose to soften this trigger from "first paying customer" to "Tier 0.5 e2e portal validation by external evaluator". Smoke test executed 2026-05-09: license `verbara-developer-399812ee-bf2c-4246-824e-6ed92c4783c1.lic` issued by verbara.io Worker, downloaded by maintainer, validated through full `LicenseReader` → `LicenseValidator.Validate` → `LicenseTrustAnchor.OfficialPublicKey` path against Pro v2.2.0-pro. Result: `LicenseValidationResult.Valid` (Tier=Developer, Features=All=0x1FF, MaxAgents=5, MaxNodes=1, expires 2026-06-08). Formalised in ADR-0018 Status update (2026-05-09) and mirrored in Web ADR-0007 Status update.
 
 ---
 
