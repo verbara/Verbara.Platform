@@ -107,6 +107,22 @@ This repository remains **private** until ALL trigger conditions below are met. 
   ```
   Visibility flip is now blocked by Platform code remediation (Trigger 3), not by process gates. Trigger 5 design landed today (`Verbara.Sdk.Pro/docs/research/2026-05-09-pro-image-binding-research.md`); ship via Pro v2.3.x.
 
+- **2026-05-09 (later — Trigger 3 ✅ GREEN; v1.13.0 ships P0+P1 closures)**: All 6 P0+P1 findings closed. v1.13.0 commits on `main`:
+  - Phase 0 + Phase 1 (the 2 P0s): `4718a870` (`CrossTenantHeaderAttackFixture`), `3a90300b` (`MT-001` — `TenantBoundaryValidationMiddleware`), `23409c55` (`ADMIN-001` — `IDataProtectionProvider` wrap + `OidcClientSecretEncryptionMigrator` + redacted response DTO + 4 Api + 4 Storage Testcontainers tests).
+  - Phase 2 (the 4 P1s): `baa7aaef` (`MFA-001` — async hierarchy resolver + `MfaPrivilegeEscalationAttempted` audit event), `2b83604a` (`BILL-001` + `BILL-002` — 8 audit emissions on billing handlers + `PayInvoice` `?tenantId=` cross-check + `EntityId.IsValid`), `c35a0d17` (`ADMIN-002` — scope-aware `PlatformAdminAuthorizationHandler` + new ADR-0019 documenting back-compat through v1.15.x).
+
+  Verification: full `dotnet test Verbara.Platform.slnx` PASSES across 30 test assemblies; `Verbara.Platform.Api.Tests` 932/932 (897 baseline + 35 new — 14 P0 + 21 P1); `Verbara.Platform.Storage.Postgres.Tests` 34/34. Zero source-code warnings under `TreatWarningsAsErrors`. Threat model gets append-only Status update of even date covering §6.2 (Tampering — fixed), §6.3 (Repudiation — comprehensive billing audit), §6.4 (Information-Disclosure — OIDC plaintext closed), §6.6 (Elevation-of-privilege — two new ✅ Verified-fixed rows for MFA tenant-scoping and management-key permissions).
+
+  **Trigger 3 status: ✅ GREEN.** New ADR-0019 (`docs/decisions/0019-scope-aware-management-api-keys.md`) Accepted, documenting management-key permission model change with v1.13.x → v1.14.x → v1.15.x deprecation timeline.
+
+  **Trigger dashboard delta (2026-05-09, end of session):**
+  ```
+  ✅ GREEN:    6/7  (Triggers 1, 2, 3, 4, 6, 7)
+  🟡 PARTIAL:  1/7  (Trigger 5 — Pro v2.3.x execution: cosign keypair + image-digest binding)
+  ❌ BLOCKED:  0/7
+  ```
+  Visibility flip is now gated **only** by Trigger 5 execution (~5 days work, planned in `Verbara.Sdk.Pro/docs/plans/active/2026-05-09-pro-v23x-image-binding-execution.md`).
+
 ## References
 
 - ADR-0016 (this repo) — license decision (Apache 2.0) and rebrand to Verbara

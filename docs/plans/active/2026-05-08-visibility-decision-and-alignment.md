@@ -100,7 +100,7 @@ These are the work items that, when all complete, allow the visibility flip. Mos
 - [ ] Add tests for any boundary not yet covered (multi-tenant cross-access, privilege escalation, MFA bypass) — **DEFERRED** to v1.13.x patch train fix tickets (test added per fix)
 - [x] Document the review in `docs/security/2026-05-09-pre-public-security-review.md` — **DONE 2026-05-09**
 
-**Trigger 3 status: ❌ BLOCKED.** Catalog + audit done, but 2 P0 findings (cross-tenant via `X-Tenant-Id` header on `/admin/*`; OIDC client secret persisted plaintext) and 4 P1 findings must be fixed in code before flip. Detailed findings + remediation plan in `docs/security/2026-05-09-pre-public-security-review.md`. Threat model updated with append-only Status entry referencing this audit. Path forward: v1.13.x patch train — see new remediation plan (TBD).
+**Trigger 3 status: ✅ GREEN as of v1.13.0 (2026-05-09).** Catalog + audit done; all 6 P0 + P1 findings closed in code; full slnx test suite passes (932/932 in Api.Tests + 34/34 in Storage.Postgres.Tests + 30 assemblies all green); zero source warnings under `TreatWarningsAsErrors`; new ADR-0019 documents the management-key permission model change. Threat model carries append-only Status update flipping §6.2/§6.3/§6.4 and adding two ✅ Verified-fixed rows under §6.6. ADR-0018 Status update of even date records the closure. P0+P1 commits on `main`: `4718a870` `3a90300b` `23409c55` `baa7aaef` `2b83604a` `c35a0d17`. Remediation plan ready to `git mv` to `completed/` upon v1.13.0 tag.
 
 ### Trigger 4 — Public threat model (Wk 3, ~4h)
 
