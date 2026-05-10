@@ -102,8 +102,10 @@ These are the work items that, when all complete, allow the visibility flip. Mos
 
 ### Trigger 4 — Public threat model (Wk 3, ~4h)
 
-- [ ] `docs/security/threat-model.md` — what assets exist, what is exposed by being public, what is still protected, who the threat actors are, mitigations per threat
-- [ ] Mirror Pro's threat model (LicenseGuard, ECDSA validator) — explicit "Pro is closed; Platform/Web open by design but the binary moat is in Pro"
+- [x] `docs/security/threat-model.md` — what assets exist, what is exposed by being public, what is still protected, who the threat actors are, mitigations per threat — **DONE 2026-05-09**
+- [x] Mirror Pro's threat model (LicenseGuard, ECDSA validator) — explicit "Pro is closed; Platform/Web open by design but the binary moat is in Pro" — **DONE 2026-05-09** (covered in §4 "What remains protected" and §8 residual-risk row on `LicenseGateMiddleware` bypass)
+
+**Trigger 4 status: ✅ GREEN.**
 
 ### Trigger 5 — LicenseGuard tamper resistance (owner: Pro plan, gate here)
 
