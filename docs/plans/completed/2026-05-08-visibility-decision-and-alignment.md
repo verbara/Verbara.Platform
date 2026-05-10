@@ -1,7 +1,7 @@
 # Platform Visibility Decision (Decision 3) + Doc Alignment
 
 **Created:** 2026-05-08
-**Status:** Active (planning, not yet executed)
+**Status:** ✅ **COMPLETE** — visibility flip executed 2026-05-10 19:04 UTC. All 7 ADR-0018 triggers GREEN; `gh api -X PATCH ... visibility=public` ran on `verbara/Verbara.Platform` + `verbara/Verbara.Platform.Web`; secret scanning + push protection enabled (free tier); first cosign-signed image at `ghcr.io/verbara/platform/api@sha256:f82a9041...`; `verbara-website/data/authorized-digests.json` carries the digest; Worker live. Plan moves to `completed/` with this status header. ghcr.io package visibility flip remains as UI-only operator step.
 **Repo:** `/media/Data/Source/Verbara/Verbara.Platform/`
 **Origin:** Cross-repo licensing & visibility audit run 2026-05-08 in `Verbara.Sdk` session. Full findings in SDK auto-memory `project_2026_05_08_licensing_audit.md`.
 

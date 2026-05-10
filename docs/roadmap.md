@@ -1,6 +1,6 @@
 # Roadmap — Verbara.Platform + Verbara.Platform.Web
 
-**Última actualización:** 2026-05-10 · **Baselines actuales:** Platform `2.0.1` · Platform.Web `3.0.1` · SDK pin `2.1.2` · Pro pin `2.2.0-pro`
+**Última actualización:** 2026-05-10 · **Baselines actuales:** Platform **`2.1.0`** · Platform.Web `3.0.1` · SDK pin `2.1.2` · Pro pin **`2.3.0-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed image live at `ghcr.io/verbara/platform/api`**
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
@@ -42,6 +42,7 @@ Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/
 | Platform 1.15.0 "Pre-v2 Foundation" | 2026-05-02 | Final pre-rebrand baseline; alignment with SDK 2.x preparation | SDK 1.15.x + Pro 1.16.0-pro |
 | **Platform 2.0.0 "Verbara"** | **2026-05-05** | **Verbara rebrand** — full namespace + package rename per [ADR-0016 license + rebrand](decisions/0016-license-and-rebrand-to-verbara.md) and [ADR-0017 rebrand execution](decisions/0017-verbara-rebrand-execution.md); **Apache 2.0** license adopted; pre-rebrand artefacts archived under `pre-rebrand` tag | **SDK 2.1.0 + Pro 2.0.0-pro** |
 | **Platform 2.0.1 "Trigger 3 closure"** | **2026-05-10** | **Security**: closes 2 P0 + 4 P1 findings raised in the 2026-05-09 pre-public security review (`docs/security/2026-05-09-pre-public-security-review.md`); new `TenantBoundaryValidationMiddleware`, OIDC client-secret encryption, scope-aware management API keys ([ADR-0019](decisions/0019-scope-aware-management-api-keys.md)); 35 new regression tests; threat model published; unblocks [ADR-0018](decisions/0018-visibility-decision-3-private-now-public-on-trigger.md) Trigger 3 (visibility-flip 6/7 GREEN) | **SDK 2.1.2 + Pro 2.2.0-pro** |
+| **Platform 2.1.0 "Image-binding + visibility flip"** | **2026-05-10** | **Trigger 5 closure + repo PUBLIC**. (a) Pro v2.3.0-pro cascade — consumer adopts image-binding API surface (`LicenseGenerator.Generate(..., imageDigest)`, runtime `IMAGE_DIGEST` env-var check on startup per [Pro ADR-0011](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0011-image-digest-binding-in-license-keys.md)); (b) GitHub Actions `release.yml` builds + pushes to `ghcr.io/verbara/platform/api`, signs with cosign v2.5.2 (Sigstore keyless OIDC), publishes manifest digest to job summary; (c) Helm chart `infra/k8s/helm/platform` defaults `image.repository=ghcr.io/verbara/platform/{api,web}` + injects `IMAGE_DIGEST` env-var on Deployment when `api.image.digest` set; Kyverno admission policy template enforces cosign verification cluster-wide; (d) docker-compose verification toolkit (`docker-compose.verified.yml` + `verbara-verify-image.sh` cosign pre-flight script) ships paridad single-host; (e) [ADR-0019](decisions/0019-scope-aware-management-api-keys.md) deprecation warning emitted on wildcard `platform:*` API key use (back-compat through v3.0.0); (f) **first signed image published** `ghcr.io/verbara/platform/api@sha256:f82a9041dc7f26018f6b6b11addf3ddbda6a7833827434f6b8d5ca2486349902` registered in `verbara-website/data/authorized-digests.json` (commit `2e41314`); (g) **🎉 visibility flip executed 19:04 UTC** — `gh api -X PATCH repos/verbara/Verbara.Platform -f visibility=public` succeeded (coordinated with Web); secret scanning + push protection enabled (free tier post-flip); Apache 2.0 declared in repo metadata; ADR-0006 economics now operating | **SDK 2.1.2 + Pro 2.3.0-pro** |
 
 **Platform.Web** track sigue cadencia independiente desde el rebrand (Web v3.0.x; ROADMAP COMPLETE 2026-05-09 — todas las 7 niveles cerradas).
 
@@ -51,20 +52,23 @@ Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/
 
 ## En curso (active plans)
 
-> Las "En planificación" originales (1.9.x sub-releases + 2.0.0 arquitectónico) **YA SHIPPEARON** entre 2026-04-20 y 2026-05-10 — ver tabla "Shipped" arriba. Sección reescrita 2026-05-10 reflejando el estado real.
+> Las "En planificación" originales (1.9.x sub-releases + 2.0.0 arquitectónico + v2.1.0 image-binding + visibility flip) **YA SHIPPEARON** entre 2026-04-20 y 2026-05-10 — ver tabla "Shipped" arriba. Sección reescrita 2026-05-10 (post-flip) reflejando el estado real.
 
-### Trigger 3 P0/P1 remediation — ✅ COMPLETE en v2.0.1
+### ADR-0018 visibility-flip checklist — ✅ COMPLETE 2026-05-10
 
-Tracked en `docs/plans/completed/2026-05-09-trigger-3-p0-p1-remediation-plan.md`. Cierra ADR-0018 Trigger 3 (visibility-flip 6/7 GREEN). Pendiente sólo Trigger 5 (image-binding, repo Pro).
+7/7 GREEN. Flip ejecutado 2026-05-10 19:04 UTC sobre Platform + Platform.Web. Plan tracking en `docs/plans/completed/2026-05-08-visibility-decision-and-alignment.md`. Apache 2.0 economics ya operando; ADR-0006 funnel ahora viable.
 
-### Platform v2.1.x "ADR-0019 deprecation" (planned)
+### Post-flip follow-ups (no version-gated)
 
-Cuando Pro v2.3.x shippe el image-binding (ver `Verbara.Sdk.Pro/docs/plans/active/2026-05-09-pro-v23x-image-binding-execution.md`), Platform v2.1.0 agrega:
-- ADR-0019 deprecation warning emitido al usar wildcard `platform:*` en management API keys (back-compat preserved).
-- Helm chart con admission-policy template para verificación cosign de la imagen oficial.
-- Docker-compose template + `verbara-verify-image.sh` pre-flight script (paridad con K8s).
+Capturados en el Status update del 2026-05-10 en [ADR-0018](decisions/0018-visibility-decision-3-private-now-public-on-trigger.md). Resumen:
+- **ghcr.io package visibility** — los paquetes OCI (`ghcr.io/verbara/platform/{api,web}`) heredan visibility privada por defecto; flip manual UI pendiente (GitHub no expone REST API para esto).
+- **Real-customer e2e validation** — primer cliente Tier 1+ que descargue imagen + corra `verbara-verify-image.sh` cerrará la valid-loop completa.
+- **Announcement** (HN "Show HN" / r/asterisk / r/devops / Twitter / ProductHunt) — deferred hasta primer customer-driven milestone.
+- **Cloudflare git auto-deploy reconnect** — re-attach pipeline (operator: dashboard → Workers & Pages → verbara-website → Settings → Builds & deployments).
 
-Estimado: ~2-3 semanas tras Pro v2.3.x.
+### Platform v2.1.x patch train (reactive)
+
+Reservado para parches sobre v2.1.0 (security follow-ups, image-binding bug fixes, cosign workflow drift). Sin plan activo; trigger será findings reales en producción o feedback de operadores tras visibility flip.
 
 ### Platform v3.0.0 "ADR-0019 wildcard removal" (planned, breaking)
 
@@ -72,11 +76,7 @@ Próximo major. Removes:
 - Legacy `platform:*` wildcard en management API keys (operadores deben rotar a scope-whitelists explícitos).
 - Posiblemente otras deprecations acumuladas en v2.x.
 
-Sin fecha — gated por adopción del scope-aware pattern por consumidores existentes (none today; this remediation lands pre-public).
-
-### Visibility flip de Platform + Web (gated por Trigger 5)
-
-Cuando todos los 7 triggers de [ADR-0018](decisions/0018-visibility-decision-3-private-now-public-on-trigger.md) estén ✅ GREEN (hoy 6/7), `gh api -X PATCH repos/verbara/Verbara.Platform -f visibility=public` coordinado con `Verbara.Platform.Web`. Estimado: 1-2 semanas tras Pro v2.3.x ship.
+Sin fecha — gated por adopción del scope-aware pattern por consumidores existentes (none today post-flip; deprecation warning ya en v2.1.0).
 
 ---
 
@@ -119,5 +119,5 @@ Cuando todos los 7 triggers de [ADR-0018](decisions/0018-visibility-decision-3-p
 - **Platform 1.14.0→1.14.6** (AHH + ADR-0015 patch train, 2026-04-27 → 2026-04-28): 7 patches en 2 días (hot fixes + pool sprawl mitigation).
 - **Platform 1.15.0→2.0.0** (rebrand window, 2026-05-02 → 2026-05-05): pre-rebrand foundation + Verbara cutover.
 - **Platform 2.0.0→2.0.1** (post-rebrand security patch, 2026-05-05 → 2026-05-10): 1 patch closing ADR-0018 Trigger 3 P0+P1 findings.
-- **Platform 2.1.0** (planned): ADR-0019 deprecation warning + cosign-verifying Helm + docker-compose template; estimado Q3 2026 tras Pro v2.3.x ship.
+- **Platform 2.1.0** (2026-05-10, same-day with 2.0.1): image-binding + cosign-signed image + Helm/docker-compose verification toolkit + visibility-flip event. Final trigger (#5) cerrado y flip ejecutado en single coordinated push.
 - **Platform 3.0.0** (planned, breaking): ADR-0019 wildcard removal + accumulated v2.x deprecations.

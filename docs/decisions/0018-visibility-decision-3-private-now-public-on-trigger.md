@@ -132,6 +132,28 @@ This repository remains **private** until ALL trigger conditions below are met. 
   3. Toggle `ghcr.io/verbara/platform/api` package from private to public in repo Settings → Packages.
   4. Announce via verbara.io blog + HN "Show HN" (deferred per visibility plan §4).
 
+- **2026-05-10 19:04 UTC (🎉 visibility flip EXECUTED)**: All seven triggers GREEN; coordinated flip operations executed at maintainer's discretion within ~5 minutes of the Trigger 5 closure entry above.
+
+  **Steps executed**:
+  1. ✅ `npm run deploy` from `verbara-website` — Worker version `60b1bb80-697d-489d-aea8-5ba9eda6e222` deployed live with the new `authorized-digests.json` (carries first entry: `Verbara.Platform v2.1.0` digest `sha256:f82a9041...`). Cron `17 3 * * * UTC` re-registered.
+  2. ✅ `npx wrangler d1 migrations apply verbara-license-audit --remote` — D1 migration `0002_add_authorized_image_digests.sql` applied (idempotent ALTER TABLE adds `authorized_image_digests TEXT NOT NULL DEFAULT '[]'`).
+  3. ✅ `gh api -X PATCH repos/verbara/Verbara.Platform -f visibility=public` — repo flipped, license `Apache-2.0` declared in repo metadata.
+  4. ✅ `gh api -X PATCH repos/verbara/Verbara.Platform.Web -f visibility=public` — Web repo flipped (mirror per Web ADR-0007).
+  5. ✅ Secret scanning + push protection enabled on both repos (auto-PATCH via `gh api` with `security_and_analysis[secret_scanning][status]=enabled` + `secret_scanning_push_protection][status]=enabled`). Free tier — both features unlock automatically post-flip; PATCH made them active immediately rather than waiting for first sync.
+  6. 🟡 **`ghcr.io/verbara/platform/api` package — pending UI flip**. GitHub does NOT expose package visibility via REST API for org-scoped containers (verified 404 on `PATCH /orgs/verbara/packages/container/platform%2Fapi/visibility` — endpoint is UI-only). Operator step: <https://github.com/orgs/verbara/packages/container/platform%2Fapi/settings> → Danger Zone → Change visibility → Public.
+
+  **State at flip time**:
+  - `Verbara.Platform` (Apache 2.0) — public, latest tag `v2.1.0`
+  - `Verbara.Platform.Web` (Apache 2.0) — public, latest tag `v3.0.1`
+  - `Verbara.Sdk` (MIT) — public (was already public pre-flip)
+  - `Verbara.Sdk.Pro` (commercial) — **stays private intentionally** (open-core engineering moat per ADR-0016 §"Why Apache 2.0 + commercial Pro")
+
+  **What this activates**: ADR-0016's funnel-driven evaluator-to-Pro-customer rationale (~$1.08M ARR modelling at 1000 GitHub visitors/month → ~3 conversions/month at $30k/customer) is now load-bearing. The "open-core honest" narrative (vs Twilio/Genesys closed competitors) has live source-code evidence to back it up.
+
+  **Audit trail**: `docs/plans/active/2026-05-08-visibility-decision-and-alignment.md` moved to `docs/plans/completed/` with closure status header. Web mirror plan moved likewise. This ADR remains as the canonical decision record.
+
+  **Next-quarter follow-ups** (not blocking; tracked in [`project_2026_05_10_visibility_flip_executed.md`](memory file in user-level auto-memory)): announcement (HN/Reddit/Twitter), real-customer e2e validation, Web image-binding (currently `TODO(web-image-binding)` marker in `docker/verbara-quickstart.sh`), backfill `authorized-digests.json` automation via cross-repo Action.
+
 - **2026-05-09 (later — Trigger 3 ✅ GREEN; v2.0.1 ships P0+P1 closures)**: All 6 P0+P1 findings closed. v2.0.1 commits on `main` (the release branches were created with the legacy `release/v1.13.x-*` label before the v2.0.x post-rebrand naming was settled — branches kept as historical labels; the actual release tag is v2.0.1):
   - Phase 0 + Phase 1 (the 2 P0s): `4718a870` (`CrossTenantHeaderAttackFixture`), `3a90300b` (`MT-001` — `TenantBoundaryValidationMiddleware`), `23409c55` (`ADMIN-001` — `IDataProtectionProvider` wrap + `OidcClientSecretEncryptionMigrator` + redacted response DTO + 4 Api + 4 Storage Testcontainers tests).
   - Phase 2 (the 4 P1s): `baa7aaef` (`MFA-001` — async hierarchy resolver + `MfaPrivilegeEscalationAttempted` audit event), `2b83604a` (`BILL-001` + `BILL-002` — 8 audit emissions on billing handlers + `PayInvoice` `?tenantId=` cross-check + `EntityId.IsValid`), `c35a0d17` (`ADMIN-002` — scope-aware `PlatformAdminAuthorizationHandler` + new ADR-0019 documenting back-compat through v3.0.0).
