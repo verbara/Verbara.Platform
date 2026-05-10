@@ -1,20 +1,20 @@
 # Release workflow: build the Verbara.Platform.Api image, push to ghcr.io, and
 # Sigstore-cosign-sign it. Triggered by pushing a `v*` tag (e.g. `v2.0.1`, `v2.3.0`).
 #
-# Two-pass build rationale (see Dockerfile + Verbara.Sdk.Pro/docs/decisions/0011):
-#   pass 1 -> push staging tag with a placeholder VERBARA_IMAGE_DIGEST
-#             so we can read back the resulting manifest-list digest from
-#             docker/build-push-action's `digest` output.
-#   pass 2 -> rebuild and push the final tag with the real digest baked in
-#             via --build-arg, then sign the final manifest-list digest.
+# Single-pass build (since v2.1.0-rc4): an OCI image cannot self-reference its
+# own manifest digest, so the original two-pass build (rc1-rc3) was abandoned
+# in favour of operator-side IMAGE_DIGEST env-var injection (ADR-0011 Status
+# update of 2026-05-10). The Dockerfile no longer accepts VERBARA_IMAGE_DIGEST.
+# This workflow simply builds + pushes + cosign-signs the resulting image.
 #
-# Result: the running container can read its own image digest from
-# /etc/verbara-image-digest, and the final image carries a valid cosign
-# signature that Verbara.Sdk.Pro.Licensing's Layer-B + Layer-C checks can
-# verify (Helm Kyverno admission + in-process check).
-#
-# Layer-B verification reference: docker/verbara-verify-image.sh
-# Layer-C verification reference: Verbara.Sdk.Pro.Licensing.ContainerImageDigest.ReadFromEnvironment()
+# Layer-B verification (the cosign signature on the OCI image): docker/verbara-verify-image.sh
+# Layer-C verification (Pro consumer reads IMAGE_DIGEST env var at runtime):
+#   Verbara.Sdk.Pro.Licensing.ContainerImageDigest.ReadFromEnvironment() ->
+#   compares against LicenseKey.AuthorizedImageDigests claims.
+# Operator wiring of IMAGE_DIGEST: Helm chart api.image.digest value OR
+# docker-compose environment block, value sourced from
+# verbara-website/data/authorized-digests.json (the registry the issuer Worker
+# reads when minting licenses).
 
 name: Release
 
@@ -49,7 +49,6 @@ jobs:
             exit 1
           fi
           echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "staging_tag=${TAG}-staging" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -61,16 +60,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push (pass 1 - staging, placeholder digest)
-        id: pass1
+      - name: Build and push final image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.staging_tag }}
-          build-args: |
-            VERBARA_IMAGE_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.release_tag }}
           # NUGET_AUTH_TOKEN — used inside the Dockerfile to authenticate to the
           # GitHub Packages NuGet feed (private Verbara.Sdk.Pro.* packages).
           # We use PACKAGES_PAT (a maintainer-owned PAT with read:packages scope
@@ -82,20 +79,6 @@ jobs:
           # packages via UI is operationally noisy; PAT path is simpler. PAT
           # rotation: every 90d, see operator runbook
           # Verbara.Sdk.Pro/docs/operations/2026-05-10-pro-packages-to-github-packages.md.
-          secrets: |
-            nuget_auth_token=${{ secrets.PACKAGES_PAT }}
-          provenance: false
-
-      - name: Build and push (pass 2 - final, real digest baked in)
-        id: pass2
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.release_tag }}
-          build-args: |
-            VERBARA_IMAGE_DIGEST=${{ steps.pass1.outputs.digest }}
           secrets: |
             nuget_auth_token=${{ secrets.PACKAGES_PAT }}
           provenance: false
@@ -116,12 +99,11 @@ jobs:
         env:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.pass2.outputs.digest }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
           # Write the private key to a tmpfs-backed location and clean up immediately
-          # after signing. COSIGN_PRIVATE_KEY env var is consumed by `cosign sign`
-          # with `--key env://COSIGN_PRIVATE_KEY`.
+          # after signing.
           umask 077
           KEY_FILE="$(mktemp -t cosign-key.XXXXXX)"
           trap 'shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"' EXIT
@@ -134,7 +116,7 @@ jobs:
 
       - name: Verify cosign signature against committed public key
         env:
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.pass2.outputs.digest }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
           cosign verify \
@@ -142,37 +124,17 @@ jobs:
             --insecure-ignore-tlog \
             "$IMAGE_REF"
 
-      - name: Cleanup staging tag
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          STAGING_TAG: ${{ steps.tag.outputs.staging_tag }}
-        run: |
-          # Best-effort delete of the staging tag's package version. Failures are
-          # non-fatal because the tag may have already been garbage-collected if a
-          # previous run cleaned up partially. The signed final tag (and the digest
-          # behind it) are independent of this cleanup.
-          set +e
-          PACKAGE_NAME="platform/api"
-          VERSION_ID=$(gh api \
-            "/orgs/verbara/packages/container/${PACKAGE_NAME//\//%2F}/versions" \
-            --jq ".[] | select(.metadata.container.tags[]? == \"${STAGING_TAG}\") | .id" \
-            2>/dev/null | head -n 1)
-          if [ -n "$VERSION_ID" ]; then
-            echo "Deleting staging package version id=$VERSION_ID (tag=$STAGING_TAG)"
-            gh api -X DELETE "/orgs/verbara/packages/container/${PACKAGE_NAME//\//%2F}/versions/${VERSION_ID}" \
-              || echo "Staging cleanup failed (non-fatal); operator can prune from ghcr.io UI"
-          else
-            echo "No staging version found for ${STAGING_TAG} (already cleaned or not present)"
-          fi
-
       - name: Print final image reference
         env:
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.pass2.outputs.digest }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
         run: |
-          echo "Signed image manifest-list digest: ${{ steps.pass2.outputs.digest }}"
+          echo "Signed image manifest-list digest: ${{ steps.build.outputs.digest }}"
           echo "Final image reference: $IMAGE_REF"
           echo ""
           echo "Next step: append a new entry to verbara-website's"
-          echo "data/authorized-digests.json with manifest_list_digest=${{ steps.pass2.outputs.digest }}"
+          echo "data/authorized-digests.json with manifest_list_digest=${{ steps.build.outputs.digest }}"
           echo "(see docs/operations/2026-05-10-update-authorized-digests-after-release.md)"
+          echo ""
+          echo "Operator wiring of IMAGE_DIGEST at deploy time:"
+          echo "  Helm: --set api.image.digest=${{ steps.build.outputs.digest }}"
+          echo "  Compose: environment: IMAGE_DIGEST=${{ steps.build.outputs.digest }}"

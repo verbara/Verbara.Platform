@@ -8,6 +8,14 @@ api:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
     tag: "1.14.6"
+    # Manifest-list digest of the `repository:tag` image, used for Layer-C
+    # in-process image verification (ADR-0011, Pro v2.3.x). When set, the
+    # Deployment template injects IMAGE_DIGEST env var that
+    # ContainerImageDigest.ReadFromEnvironment() reads + compares against the
+    # license's AuthorizedImageDigests claim. Source: the corresponding entry
+    # in verbara-website/data/authorized-digests.json. Leave empty to opt out
+    # (Pro falls through to permissive path; matches dev-mode semantics).
+    digest: ""
   replicas: 2
   port: 5000
   resources:

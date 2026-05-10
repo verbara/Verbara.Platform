@@ -29,21 +29,24 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app .
-# Bake the OCI manifest-list digest of THIS image into /etc/verbara-image-digest so
-# Verbara.Sdk.Pro.Licensing's ContainerImageDigest.ReadFromEnvironment() can compare
-# against LicenseKey.AuthorizedImageDigests at runtime (Pro v2.3.x Layer C, ADR-0011).
+# Layer C in-process check (Pro v2.3.x ADR-0011) reads the running image's OCI
+# manifest-list digest from the IMAGE_DIGEST env var, NOT from a file baked
+# inside the image. Original two-pass build attempted to bake the digest into
+# /etc/verbara-image-digest, but an OCI image cannot self-reference its own
+# manifest digest (chicken-and-egg: pass-1 staging digest != pass-2 final
+# digest because content differs). Pivot documented in ADR-0011 Status update.
 #
-# The CI release workflow (.github/workflows/release.yml) runs a two-pass build:
-#   pass 1 -> placeholder digest -> push to a -staging tag -> capture the resulting
-#             manifest-list digest reported by docker/build-push-action.
-#   pass 2 -> rebuild with --build-arg VERBARA_IMAGE_DIGEST=<sha256:...> from pass 1
-#             -> push to the final release tag -> sign that final digest with cosign.
+# Operator-side wiring of IMAGE_DIGEST:
+#   * Helm chart: api.image.digest value -> IMAGE_DIGEST env var on Deployment
+#   * docker-compose: environment: IMAGE_DIGEST=sha256:... in compose template
+#   * The digest value comes from verbara-website/data/authorized-digests.json
+#     (the registry the Worker reads when issuing licenses with
+#     AuthorizedImageDigests claims).
 #
-# When VERBARA_IMAGE_DIGEST is empty (local `docker build` with no --build-arg, dev
-# scenarios) the file is empty -> ContainerImageDigest returns null -> permissive
-# path applies (matches ADR-0011 dev-mode semantics).
-ARG VERBARA_IMAGE_DIGEST=""
-RUN echo "${VERBARA_IMAGE_DIGEST}" > /etc/verbara-image-digest && chmod 644 /etc/verbara-image-digest
+# When IMAGE_DIGEST is unset (local `dotnet run`, plain `docker run` for dev),
+# Pro's ContainerImageDigest.ReadFromEnvironment() returns null -> permissive
+# path applies -> license validation falls through to expiry check unchanged
+# (matches ADR-0011 dev-mode semantics).
 EXPOSE 5000
 ENV ASPNETCORE_URLS=http://+:5000
 ENTRYPOINT ["dotnet", "Verbara.Platform.Api.dll"]

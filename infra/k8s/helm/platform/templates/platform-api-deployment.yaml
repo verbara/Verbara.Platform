@@ -50,7 +50,10 @@ spec:
               echo "Postgres pooler DNS resolved"
       containers:
         - name: api
-          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          # Pin by digest when set (ADR-0011 Layer B: kubelet pulls byte-exact
+          # signed image, ignores tag float). Falls back to tag-only reference
+          # when api.image.digest is empty (dev / local KVM cluster scenarios).
+          image: "{{ .Values.api.image.repository }}{{ if .Values.api.image.digest }}@{{ .Values.api.image.digest }}{{ else }}:{{ .Values.api.image.tag }}{{ end }}"
           securityContext:
             runAsNonRoot: true
             runAsUser: 1654
@@ -63,6 +66,15 @@ spec:
             - name: http
               containerPort: {{ .Values.api.port }}
           env:
+            {{- if .Values.api.image.digest }}
+            # Layer C in-process image-binding check (ADR-0011, Pro v2.3.x).
+            # Pro's ContainerImageDigest.ReadFromEnvironment() reads this env
+            # var + compares against LicenseKey.AuthorizedImageDigests claims.
+            # Operator sets api.image.digest in values.yaml (or via --set);
+            # value sourced from verbara-website/data/authorized-digests.json.
+            - name: IMAGE_DIGEST
+              value: {{ .Values.api.image.digest | quote }}
+            {{- end }}
             - name: ASPNETCORE_URLS
               value: "http://+:{{ .Values.api.port }}"
             - name: PG_PASSWORD

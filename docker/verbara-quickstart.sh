@@ -83,9 +83,16 @@ GENERATED="${SCRIPT_DIR}/docker-compose.verified.${VERSION}.yml"
 echo "Generating ${GENERATED} ..."
 
 # Substitute the resolved digest. Use a sed alternative that handles the `/`
-# in the digest cleanly by anchoring on the literal sentinel.
+# in the digest cleanly by anchoring on the literal sentinel. THREE substitutions:
+#   1. image: line for the API service (digest-pinned image reference)
+#   2. IMAGE_DIGEST env var (Layer C in-process check, ADR-0011 Pro v2.3.x;
+#      Pro can't self-discover the running image's digest from inside the
+#      container — operator-side env var is the canonical wiring)
+#   3. image: line for the Web service (still tag-pinned per
+#      TODO(web-image-binding) above; will become digest-pinned in v2.4)
 sed \
   -e "s|ghcr.io/verbara/platform/api@sha256:REPLACE_WITH_MANIFEST_LIST_DIGEST|${API_PINNED_REF}|g" \
+  -e "s|IMAGE_DIGEST: sha256:REPLACE_WITH_MANIFEST_LIST_DIGEST|IMAGE_DIGEST: ${API_DIGEST}|g" \
   -e "s|ghcr.io/verbara/platform/web@sha256:REPLACE_WITH_WEB_MANIFEST_LIST_DIGEST|ghcr.io/verbara/platform/web:${VERSION}|g" \
   "$TEMPLATE" > "$GENERATED"
 
