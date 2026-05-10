@@ -13,6 +13,49 @@ _No unreleased changes._
 
 ---
 
+## [2.0.1] — 2026-05-10 — Security: ADR-0018 Trigger 3 closure (2 P0 + 4 P1 fixes)
+
+First patch since the v2.0.0 rebrand release. Closes the 6 grep-able-from-source security findings raised in the 2026-05-09 pre-public security review (`docs/security/2026-05-09-pre-public-security-review.md`), unblocking ADR-0018 visibility-flip Trigger 3.
+
+### Security (P0 — closes cross-tenant data exposure + plaintext OAuth secret)
+
+- **MT-001 — Cross-tenant data access via `X-Tenant-Id` header on `/admin/*` and legacy `/admin/audit`** (`3a90300b`). New `TenantBoundaryValidationMiddleware` rejects requests where `X-Tenant-Id` (header / subdomain) conflicts with the JWT `tid` claim, except for `key_type=management` API keys and callers resolving to `TenantType.Platform` / `TenantType.Partner`. Bare `RequireRole("Admin")` policy is no longer sufficient to read another tenant's users, queues, agents, teams, or audit log.
+- **ADMIN-001 — OIDC client secret persisted and returned plaintext on `/admin/auth/config`** (`23409c55`). `PostgresTenantAuthConfigStore` now `IDataProtectionProvider`-wraps `oidc_client_secret` on write and unwraps on internal read. `GET /admin/auth/config` returns a new `TenantAuthConfigResponse` DTO carrying only `OidcClientSecretSet: bool` + 8-hex SHA-256 fingerprint — never the raw value. New `OidcClientSecretEncryptionMigrator` IHostedService idempotently encrypts existing rows on first deploy. New migration `024_EncryptOidcClientSecret.sql`.
+
+### Security (P1 — closes tenant-scoping bypass on MFA admin, billing audit gap, scope-bypass on management API keys)
+
+- **MFA-001 — `?targetTenant=` on `/management/mfa/users/*` accepts arbitrary tenant id without ownership check** (`baa7aaef`). New async `ResolveTargetTenantAsync` mirrors the impersonation-hierarchy pattern from `ManagementImpersonationEndpoints.IsTenantInCallerHierarchyAsync`. Foreign-hierarchy attempts emit a new `MfaPrivilegeEscalationAttempted` audit event and return 403.
+- **BILL-001 — 8 of 9 billing mutations emitted no audit entries** (`2b83604a`). New `BillingAuditEventTypes` constants + `IAuditService.AppendAsync` emissions added to `CreateRateCard`, `UpdateRateCard`, `DeleteRateCard`, `GenerateInvoice`, `IssueInvoice`, `PayInvoice`, `UpdateQuota`, `PauseDunning`. `PayInvoice` records both `payment_status_before/after` and `tenant_status_before/after`.
+- **BILL-002 — `PayInvoice` derived tenant from path-supplied invoice id without caller cross-check** (`2b83604a` — bundled). `PayInvoice` now requires an explicit `?tenantId=` query parameter and asserts it matches the dunning record's tenant; rejects mismatched IDs with `400` + audit-emit. Validates `invoiceId` shape via new `EntityId.IsValid` before the store call.
+- **ADMIN-002 — Management API keys short-circuited every `PlatformAdminRequirement` permission check** (`c35a0d17`). `PlatformAdminAuthorizationHandler` now reads the API key's `scopes` array and succeeds iff the requested `requirement.Permission` is contained. Legacy `platform:*` wildcard kept working for back-compat through v2.0.x patches; deprecation warning v2.1.0; wildcard removal v3.0.0 per [ADR-0019](docs/decisions/0019-scope-aware-management-api-keys.md).
+
+### Tests
+
+- 35 new tests added (14 P0 + 21 P1). New shared fixture `tests/Verbara.Platform.Api.Tests/Multitenancy/CrossTenantHeaderAttackFixture.cs` (`4718a870`) seeds a 5-tenant hierarchy and is reused by MT-001, MFA-001, and ADMIN-002 tests.
+- `Verbara.Platform.Api.Tests`: **932/932** (897 baseline + 35 new). `Verbara.Platform.Storage.Postgres.Tests`: **34/34** (30 baseline + 4 new ADMIN-001 Testcontainers). Full slnx: 30 test assemblies all green. Zero source-code warnings under `TreatWarningsAsErrors`.
+
+### Docs
+
+- New: `docs/security/threat-model.md` — public threat model published to close ADR-0018 Trigger 4.
+- New: `docs/security/2026-05-09-pre-public-security-review.md` — focused 60-endpoint audit (Trigger 3 evidence).
+- New: `docs/decisions/0019-scope-aware-management-api-keys.md` (Accepted) — documents the management-key permission model change with v2.0.x → v2.1.0 → v3.0.0 timeline.
+- ADR-0018 Status updates flipping Triggers 4, 7 → ✅ GREEN; Trigger 3 → BLOCKED → ✅ GREEN as code shipped.
+- Web ADR-0007 mirror updates.
+- `docs/plans/active/2026-05-09-trigger-3-p0-p1-remediation-plan.md` → `docs/plans/completed/` on this release.
+
+### ADR-0018 visibility-flip dashboard delta
+
+```
+Before this release: ✅ 5/7 (1, 2, 4, 6, 7) · 🟡 1/7 (5) · ❌ 1/7 (3)
+After this release:  ✅ 6/7 (1, 2, 3, 4, 6, 7) · 🟡 1/7 (5) · ❌ 0/7
+```
+
+Visibility flip is now gated **only** by Trigger 5 (Pro v2.3.x image binding execution; plan published at `Verbara.Sdk.Pro/docs/plans/active/2026-05-09-pro-v23x-image-binding-execution.md`).
+
+> **Note on the version gap (1.14.6 → 2.0.1):** The intervening v1.15.0 (pre-v2 Foundation) and v2.0.0 (Verbara rebrand) releases shipped without inline CHANGELOG entries; the rebrand details live in [ADR-0016](docs/decisions/0016-license-and-rebrand-to-verbara.md) and [ADR-0017](docs/decisions/0017-verbara-rebrand-execution.md). Backfilling those entries is tracked as a separate roadmap-cleanup exercise.
+
+---
+
 ## [1.14.6] — 2026-04-28 — ADR-0015 Phase 2 — Shared `NpgsqlDataSource` adoption (Pro 1.16.0-pro)
 
 **Closes the architectural connection-pool sprawl** identified in R5.5 Phase C-L by collapsing the 14-pool sprawl into **1 shared `NpgsqlDataSource` per distinct connection string** per platform-api instance. Coordinated ship with **Pro 1.16.0-pro** which exposes the `Use*Storage(IServiceCollection, NpgsqlDataSource)` overloads on every storage entry point.
