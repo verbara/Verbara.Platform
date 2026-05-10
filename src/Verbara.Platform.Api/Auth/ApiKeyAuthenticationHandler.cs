@@ -62,6 +62,14 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
             new Claim("key_name", apiKey.Name),
         };
 
+        // ADMIN-002 (PREPUB-2026-05-09): emit one "scope" claim per scope so
+        // PlatformAdminAuthorizationHandler can enforce per-permission scope
+        // checks against the management-key principal. Legacy "platform:*"
+        // keys also surface as a scope claim, preserving back-compat through
+        // the wildcard branch in the authorization handler.
+        foreach (var scope in apiKey.Scopes)
+            claims.Add(new Claim("scope", scope));
+
         if (apiKey.KeyType == ApiKeyType.Management)
         {
             claims.Add(new Claim(ClaimTypes.Role, "Admin"));

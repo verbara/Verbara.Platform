@@ -23,11 +23,29 @@ internal sealed class PlatformAdminAuthorizationHandler : AuthorizationHandler<P
     protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context, PlatformAdminRequirement requirement)
     {
-        // Management API keys bypass all checks
+        // ADMIN-002 (PREPUB-2026-05-09): the legacy short-circuit accepted any
+        // management-key request unconditionally — the permission seed on
+        // PlatformAdminRequirement(...) was ornamental for that auth path.
+        // Now: management keys still bypass the host/Partner/role gate, but
+        // a permission-bearing requirement MUST match the key's scopes.
+        // Bare PlatformAdminRequirement() (no permission) continues to
+        // succeed on any management key (matches /management/api-keys,
+        // /management/billing/*, /management/tenants/* — those surfaces are
+        // gated by PlatformAdminOnly with no specific permission).
         var keyTypeClaim = context.User.FindFirst("key_type")?.Value;
         if (keyTypeClaim == "management")
         {
-            context.Succeed(requirement);
+            if (requirement.Permission is null)
+            {
+                context.Succeed(requirement);
+                return;
+            }
+
+            if (ManagementKeyHasPermission(context, requirement.Permission))
+                context.Succeed(requirement);
+
+            // No fall-through to the user-permission path — management keys
+            // never carry a tenant role to resolve against.
             return;
         }
 
@@ -93,5 +111,44 @@ internal sealed class PlatformAdminAuthorizationHandler : AuthorizationHandler<P
             _cachedHostTenantId = host.TenantId;
 
         return _cachedHostTenantId;
+    }
+
+    /// <summary>
+    /// ADMIN-002 (PREPUB-2026-05-09): mirror <c>ApiKey.HasScope</c> wildcard
+    /// expansion against the principal's <c>scope</c> claims. Three branches:
+    /// <list type="bullet">
+    /// <item>Exact match: <c>scope = required</c>.</item>
+    /// <item>Legacy blanket back-compat: <c>scope == "platform:*"</c> grants
+    /// any platform-admin permission. Documented in ADR-0019 as deprecated for
+    /// v1.13.x; remove the wildcard interpretation in v1.15.x per the migration
+    /// path captured there.</item>
+    /// <item>Prefix wildcard: <c>scope</c> ends in <c>":*"</c> and the prefix
+    /// matches the start of <paramref name="requiredPermission"/> (mirrors
+    /// <c>ApiKey.HasScope</c>).</item>
+    /// </list>
+    /// </summary>
+    private static bool ManagementKeyHasPermission(
+        AuthorizationHandlerContext context, string requiredPermission)
+    {
+        foreach (var claim in context.User.FindAll("scope"))
+        {
+            var scope = claim.Value;
+            if (string.Equals(scope, requiredPermission, StringComparison.Ordinal))
+                return true;
+
+            // Legacy "platform:*" blanket — kept through v1.13.x for back-compat.
+            if (string.Equals(scope, "platform:*", StringComparison.Ordinal))
+                return true;
+
+            // Generic prefix wildcard ("admin:*" matches "admin:foo").
+            if (scope.EndsWith(":*", StringComparison.Ordinal))
+            {
+                var prefix = scope[..^1]; // "admin:*" → "admin:"
+                if (requiredPermission.StartsWith(prefix, StringComparison.Ordinal))
+                    return true;
+            }
+        }
+
+        return false;
     }
 }
