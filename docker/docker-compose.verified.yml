@@ -1,0 +1,83 @@
+# docker-compose.verified.yml — TEMPLATE for digest-pinned, cosign-verified Verbara
+# Platform deploys (Pro v2.3.x Layer B equivalent for docker-compose customers,
+# ADR-0011, Verbara.Sdk.Pro repo).
+#
+# This file is intentionally a TEMPLATE — the digest below is a placeholder.
+# Operators copy + edit this file with the manifest-list digest of the Verbara
+# Platform release they intend to deploy:
+#
+#   1. Look up the latest signed digest:
+#        curl -s https://verbara.io/data/authorized-digests.json | \
+#          jq -r '.current[-1].manifest_list_digest'
+#
+#   2. Pre-flight verify the image:
+#        ./verbara-verify-image.sh ghcr.io/verbara/platform/api:vX.Y.Z
+#
+#   3. Edit the lines below to substitute the resolved digest (the
+#        REPLACE_WITH_MANIFEST_LIST_DIGEST sentinel marks the line to edit).
+#
+#   4. Bring up the stack:
+#        docker compose -f docker-compose.verified.yml up -d
+#
+# Why digest-pinned (not tag-pinned):
+#   Tags are mutable in OCI registries — a tag like `:v2.0.1` could be
+#   re-pushed to point at a different digest. Pinning by `@sha256:...` makes
+#   the deploy content-addressed: the byte-for-byte image is locked, and
+#   docker refuses to start if the registry contents change. This is the
+#   docker-compose equivalent of the `imageRef@digest` reference Kyverno
+#   verifies in K8s deploys.
+#
+# Layer B + Layer C combination:
+#   - Layer B (this file + verbara-verify-image.sh): catches a tampered image
+#     at pull time, BEFORE any code from it executes.
+#   - Layer C (Verbara.Sdk.Pro.Licensing): catches a digest mismatch at Pro
+#     startup IF the image is somehow swapped between pull and run.
+#   Both reinforce each other; running only one leaves a defense gap.
+#
+# Reference Helm equivalent: infra/k8s/helm/platform/templates/cosign-admission-policy.yaml
+
+services:
+  platform-api:
+    # Digest-pinned. Replace with the digest of the Platform release you trust.
+    image: ghcr.io/verbara/platform/api@sha256:REPLACE_WITH_MANIFEST_LIST_DIGEST
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://+:5000
+      # Mount your Verbara Pro license at /etc/verbara/license.lic and reference it
+      # via VERBARA_LICENSE_PATH (or whatever env var your Pro version expects).
+      # See verbara.io/docs/licensing for the latest contract.
+      VERBARA_LICENSE_PATH: /etc/verbara/license.lic
+      # Connection strings — populate from your secrets manager / .env file.
+      ConnectionStrings__Postgres: ${PG_CONNECTION_STRING}
+      ConnectionStrings__Redis: ${REDIS_CONNECTION_STRING}
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./license.lic:/etc/verbara/license.lic:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  platform-web:
+    # Digest-pinned. Replace with the digest of the matching Web release.
+    # Note: the Web image is signed independently of the API image — verify
+    # both before deploying.
+    image: ghcr.io/verbara/platform/web@sha256:REPLACE_WITH_WEB_MANIFEST_LIST_DIGEST
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      platform-api:
+        condition: service_healthy
+
+# After editing the digests above:
+#   docker compose -f docker-compose.verified.yml config       # validate syntax
+#   docker compose -f docker-compose.verified.yml pull         # forces digest match
+#   docker compose -f docker-compose.verified.yml up -d        # bring up stack
+#
+# Tamper-detection check (the deploy SHOULD fail at `pull` if the digest no
+# longer exists in the registry — that is the desired behaviour, NOT a bug;
+# refresh from authorized-digests.json and try again).
