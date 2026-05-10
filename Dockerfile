@@ -2,14 +2,28 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 ARG CACHEBUST=1
 COPY . .
-RUN NUGET_FILE=$(find . -maxdepth 1 -iname "nuget.config" | head -1) \
-    && dotnet nuget locals all --clear \
-    && if [ -d local-nuget-feed ] && [ -n "$NUGET_FILE" ]; then \
-        sed -i "s|/media/Data/Source/IPcom/local-nuget-feed/|/src/local-nuget-feed/|" "$NUGET_FILE"; \
-    else \
-        dotnet nuget remove source local 2>/dev/null || true; \
-    fi \
-    && dotnet publish src/Verbara.Platform.Api/Verbara.Platform.Api.csproj -c Release -o /app
+# Authenticate to GitHub Packages NuGet for private Verbara.Sdk.Pro.* packages.
+# The github source is declared in NuGet.Config; we inject credentials at restore
+# time via `dotnet nuget update source` (NOT a static packageSourceCredentials
+# block — %VAR% substitution is unreliable on .NET Core). CI passes the token as
+# BuildKit secret `nuget_auth_token`; local Docker builds pass the maintainer's
+# GITHUB_PACKAGES_PAT the same way. The local-nuget-feed source declared in
+# NuGet.Config is not available inside the build context — NuGet ignores missing
+# directories and falls through to `github` (private Pro packages) and
+# `nuget.org` (everything else) cleanly. Build stage is intermediate; the final
+# stage COPYs only /app, so any credentials written into NuGet.Config here are
+# discarded with the build layer.
+RUN --mount=type=secret,id=nuget_auth_token,required=false \
+    set -e; \
+    dotnet nuget remove source local 2>/dev/null || true; \
+    if [ -f /run/secrets/nuget_auth_token ]; then \
+        dotnet nuget update source github \
+            --username verbara \
+            --password "$(cat /run/secrets/nuget_auth_token)" \
+            --store-password-in-clear-text; \
+    fi; \
+    dotnet nuget locals all --clear; \
+    dotnet publish src/Verbara.Platform.Api/Verbara.Platform.Api.csproj -c Release -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
