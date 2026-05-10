@@ -1,4 +1,4 @@
-# Trigger 3 P0 + P1 Remediation Plan (v1.13.x patch train)
+# Trigger 3 P0 + P1 Remediation Plan (v2.0.x patch train)
 
 **Created:** 2026-05-09
 **Status:** Active (planning, not yet executed)
@@ -13,12 +13,12 @@ This plan does **not** revisit the visibility decision (correct per ADR-0018) an
 
 ## Goal
 
-By end of this plan: Platform v1.13.x patch train ships with all 2 P0 + 4 P1 findings closed, regression tests added, threat-model `Status updates` section refreshed with the new verified state, and ADR-0018 Trigger 3 flipped from ❌ BLOCKED to ✅ GREEN.
+By end of this plan: Platform v2.0.x patch train (next concrete tag: v2.0.1) ships with all 2 P0 + 4 P1 findings closed, regression tests added, threat-model `Status updates` section refreshed with the new verified state, and ADR-0018 Trigger 3 flipped from ❌ BLOCKED to ✅ GREEN.
 
 ## Non-goals
 
 - **Visibility flip itself** — gated by all 7 triggers, not just Trigger 3
-- **Fixing the 3 P2 findings inline** (`ADMIN-003` Setup hard-coding, `MFA-002` MFA re-enroll step-up, `MT-002` webhook DLQ tenant trust) — these track as separate v1.13.x tickets, do not block flip per audit sign-off, and reduce review-load if scoped separately
+- **Fixing the 3 P2 findings inline** (`ADMIN-003` Setup hard-coding, `MFA-002` MFA re-enroll step-up, `MT-002` webhook DLQ tenant trust) — these track as separate v2.0.x tickets, do not block flip per audit sign-off, and reduce review-load if scoped separately
 - **Fixing the 3 prior PENDING findings** from the 2026-04 audit (`CFG-003` dev-config secrets, `MFA-007` in-memory cache default) — already tracked elsewhere, intentionally outside this plan's scope
 - **Code refactors beyond what each fix requires** — minimum-diff to close the finding; no surrounding cleanup; per `superpowers:test-driven-development` discipline
 
@@ -27,7 +27,7 @@ By end of this plan: Platform v1.13.x patch train ships with all 2 P0 + 4 P1 fin
 P0 fixes ship first because:
 1. They are pre-conditions for any other code change merging without re-introducing the breach (e.g. fixing `BILL-002` while `MT-001` still allows cross-tenant header escalation does not actually contain the attack).
 2. Each P0 has a smaller blast radius for review — easier to land in isolation.
-3. If a P1 fix takes longer than expected, the P0 fixes are still ship-worthy on their own and can land as v1.13.0.
+3. If a P1 fix takes longer than expected, the P0 fixes are still ship-worthy on their own and can land as v2.0.1.
 
 P1 fixes ship in parallel where independent. `BILL-001` (audit-emission gaps on 8 handlers) and `BILL-002` (`PayInvoice` trust) overlap and should land together. `MFA-001` (tenant-scoping bypass) is independent. `ADMIN-002` (management API key bypass) is independent but has the highest review-cost because it touches `PlatformAdminAuthorizationHandler` consumed by every `/management/*` endpoint.
 
@@ -37,7 +37,7 @@ P1 fixes ship in parallel where independent. `BILL-001` (audit-emission gaps on 
 
 ### 0.1 — Branch + CI baseline
 
-- [ ] Create branch `release/v1.13.x-trigger3-remediation` from `main`
+- [ ] Create branch `release/v1.13.x-trigger3-remediation` from `main` (NOTE: branch literally created with this name during execution — kept as historical label even though the actual release is v2.0.1; do not rename a pushed branch)
 - [ ] Verify CI green on baseline: `dotnet test Verbara.Platform.slnx` passes locally
 - [ ] Confirm `dotnet list package --vulnerable --include-transitive` clean (post-MailKit bump)
 - [ ] Tag baseline commit with notes for rollback reference
@@ -193,7 +193,7 @@ These are bundled because they touch the same file (`ManagementBillingEndpoints.
 
 **Approach:** Replace the `if (keyTypeClaim == "management") { context.Succeed(requirement); return; }` short-circuit with: read the API key's `scopes` array from claims, check whether the requested `requirement.Permission` is contained, succeed iff yes. Existing API keys with `scopes=["platform:*"]` keep working via wildcard expansion (back-compat) — but new keys default to a minimum-scope whitelist.
 
-The ADR addendum explicitly documents this is a back-compat change for new keys. Existing `platform:*` keys remain valid through v1.13.x; v1.14.x ships a deprecation warning; v1.15.x removes the wildcard.
+The ADR addendum explicitly documents this is a back-compat change for new keys. Existing `platform:*` keys remain valid through v2.0.x patches; v2.1.0 (next minor) ships a deprecation warning; v3.0.0 (next major) removes the wildcard.
 
 **Tests required:**
 - [ ] `MgmtKey_ShouldSucceed_WhenScopeIncludesPermission`
@@ -234,24 +234,24 @@ After all P1 fixes merge:
 
 ---
 
-## Phase 4 — Release v1.13.0 (Wk 3-4)
+## Phase 4 — Release v2.0.1 (Wk 3-4)
 
 ### 4.1 — Release prep
 
 - [ ] CHANGELOG.md entry: "Security: 2 P0 + 4 P1 findings closed (PREPUB-2026-05-09 series). See `docs/security/2026-05-09-pre-public-security-review.md` for details."
-- [ ] Bump version to `v1.13.0` in `Directory.Build.props`
+- [ ] Bump `<PackageVersion>` from `2.0.0` to `2.0.1` in `Directory.Build.props`
 - [ ] `dotnet pack -c Release` clean across all projects
 
 ### 4.2 — Release tag + GitHub release
 
-- [ ] Tag `v1.13.0` on `main` after PR merge
+- [ ] Tag `v2.0.1` on `main` after PR merge
 - [ ] Create GitHub release with security advisory note (private repo today; published when visibility flip occurs)
 
 ### 4.3 — Plan completion
 
 - [ ] `git mv docs/plans/active/2026-05-09-trigger-3-p0-p1-remediation-plan.md docs/plans/completed/`
 
-**Phase 4 exit:** v1.13.0 shipped, plan archived to completed/.
+**Phase 4 exit:** v2.0.1 shipped, plan archived to completed/.
 
 ---
 
@@ -261,9 +261,9 @@ After all P1 fixes merge:
 |---|---|
 | MT-001 fix breaks legitimate Platform/Partner cross-tenant flows | Phase 0 fixture explicitly tests both attack and legitimate-use; tests must pass before merge |
 | OIDC migration encrypts secrets twice on re-run | Migration is idempotent: try-Unprotect, skip if already encrypted (catches `CryptographicException`) |
-| ADMIN-002 fix breaks existing customer integrations using legacy wildcard `platform:*` keys | Wildcard kept working through v1.13.x via back-compat; deprecation warning v1.14.x; removal v1.15.x. ADR-0019 documents the migration path. |
+| ADMIN-002 fix breaks existing customer integrations using legacy wildcard `platform:*` keys | Wildcard kept working through v2.0.x patches via back-compat; deprecation warning v2.1.0 (next minor); removal v3.0.0 (next major — required because removing the wildcard is a breaking SemVer change). ADR-0019 documents the migration path. |
 | Audit-emission additions in BILL-001 introduce performance regression on hot billing paths | `IAuditService.AppendAsync` is async + non-blocking; benchmark before/after the change; if regression > 5%, defer to async-fire-and-forget per audit-checklist Scope 4.4 |
-| One subagent task overruns budget (e.g. ADMIN-002 turns out to need broader DI changes) | Task is independently mergeable; if blocked, P0 fixes (1.1 + 1.2) ship first as v1.13.0 and ADMIN-002 lands in v1.13.1 |
+| One subagent task overruns budget (e.g. ADMIN-002 turns out to need broader DI changes) | Task is independently mergeable; if blocked, P0 fixes (1.1 + 1.2) ship first as v2.0.1 and ADMIN-002 lands in v2.0.2 |
 | Threat-model status-updates accumulate (3 separate updates from this plan: 1.3, 2.4, 3.2) | Acceptable — threat-model is append-only by design; each update is small and dated |
 
 ## Dependencies

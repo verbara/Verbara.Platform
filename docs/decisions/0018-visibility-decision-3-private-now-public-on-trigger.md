@@ -97,23 +97,23 @@ This repository remains **private** until ALL trigger conditions below are met. 
 
   **Trigger 7 status: ✅ GREEN.**
 
-- **2026-05-09 (Trigger 3 ❌ BLOCKED — deeper audit findings)**: A focused pre-public security review of 60 endpoints across the four Trigger 3 families raised 2 P0 + 4 P1 findings (`docs/security/2026-05-09-pre-public-security-review.md`). MT-001 (cross-tenant via `X-Tenant-Id` on bare `AdminOnly` surfaces) and ADMIN-001 (OIDC client secret persisted plaintext) are both grep-able from source the moment this repository goes public. Trigger 3 remains OPEN until the v1.13.x patch train remediation lands — see `docs/plans/active/2026-05-09-trigger-3-p0-p1-remediation-plan.md`. Threat model Section 6.2 row "path-supplied tenant ID ignored when conflicting with claim — ✅ Verified (10/10 sample)" is factually superseded by this finding; an append-only Status update to the threat model documents the supersession (the original row is preserved per append-only convention).
+- **2026-05-09 (Trigger 3 ❌ BLOCKED — deeper audit findings)**: A focused pre-public security review of 60 endpoints across the four Trigger 3 families raised 2 P0 + 4 P1 findings (`docs/security/2026-05-09-pre-public-security-review.md`). MT-001 (cross-tenant via `X-Tenant-Id` on bare `AdminOnly` surfaces) and ADMIN-001 (OIDC client secret persisted plaintext) are both grep-able from source the moment this repository goes public. Trigger 3 remains OPEN until the v2.0.x patch train remediation lands — see `docs/plans/active/2026-05-09-trigger-3-p0-p1-remediation-plan.md`. Threat model Section 6.2 row "path-supplied tenant ID ignored when conflicting with claim — ✅ Verified (10/10 sample)" is factually superseded by this finding; an append-only Status update to the threat model documents the supersession (the original row is preserved per append-only convention).
 
   **Trigger dashboard delta (2026-05-09 19:00 UTC):**
   ```
   ✅ GREEN:    5/7  (Triggers 1, 2, 4, 6, 7)
   🟡 PARTIAL:  1/7  (Trigger 5 — image-binding research published; Pro v2.3.x execution pending)
-  ❌ BLOCKED:  1/7  (Trigger 3 — code remediation in v1.13.x)
+  ❌ BLOCKED:  1/7  (Trigger 3 — code remediation in v2.0.x patch train)
   ```
   Visibility flip is now blocked by Platform code remediation (Trigger 3), not by process gates. Trigger 5 design landed today (`Verbara.Sdk.Pro/docs/research/2026-05-09-pro-image-binding-research.md`); ship via Pro v2.3.x.
 
-- **2026-05-09 (later — Trigger 3 ✅ GREEN; v1.13.0 ships P0+P1 closures)**: All 6 P0+P1 findings closed. v1.13.0 commits on `main`:
+- **2026-05-09 (later — Trigger 3 ✅ GREEN; v2.0.1 ships P0+P1 closures)**: All 6 P0+P1 findings closed. v2.0.1 commits on `main` (the release branches were created with the legacy `release/v1.13.x-*` label before the v2.0.x post-rebrand naming was settled — branches kept as historical labels; the actual release tag is v2.0.1):
   - Phase 0 + Phase 1 (the 2 P0s): `4718a870` (`CrossTenantHeaderAttackFixture`), `3a90300b` (`MT-001` — `TenantBoundaryValidationMiddleware`), `23409c55` (`ADMIN-001` — `IDataProtectionProvider` wrap + `OidcClientSecretEncryptionMigrator` + redacted response DTO + 4 Api + 4 Storage Testcontainers tests).
-  - Phase 2 (the 4 P1s): `baa7aaef` (`MFA-001` — async hierarchy resolver + `MfaPrivilegeEscalationAttempted` audit event), `2b83604a` (`BILL-001` + `BILL-002` — 8 audit emissions on billing handlers + `PayInvoice` `?tenantId=` cross-check + `EntityId.IsValid`), `c35a0d17` (`ADMIN-002` — scope-aware `PlatformAdminAuthorizationHandler` + new ADR-0019 documenting back-compat through v1.15.x).
+  - Phase 2 (the 4 P1s): `baa7aaef` (`MFA-001` — async hierarchy resolver + `MfaPrivilegeEscalationAttempted` audit event), `2b83604a` (`BILL-001` + `BILL-002` — 8 audit emissions on billing handlers + `PayInvoice` `?tenantId=` cross-check + `EntityId.IsValid`), `c35a0d17` (`ADMIN-002` — scope-aware `PlatformAdminAuthorizationHandler` + new ADR-0019 documenting back-compat through v3.0.0).
 
   Verification: full `dotnet test Verbara.Platform.slnx` PASSES across 30 test assemblies; `Verbara.Platform.Api.Tests` 932/932 (897 baseline + 35 new — 14 P0 + 21 P1); `Verbara.Platform.Storage.Postgres.Tests` 34/34. Zero source-code warnings under `TreatWarningsAsErrors`. Threat model gets append-only Status update of even date covering §6.2 (Tampering — fixed), §6.3 (Repudiation — comprehensive billing audit), §6.4 (Information-Disclosure — OIDC plaintext closed), §6.6 (Elevation-of-privilege — two new ✅ Verified-fixed rows for MFA tenant-scoping and management-key permissions).
 
-  **Trigger 3 status: ✅ GREEN.** New ADR-0019 (`docs/decisions/0019-scope-aware-management-api-keys.md`) Accepted, documenting management-key permission model change with v1.13.x → v1.14.x → v1.15.x deprecation timeline.
+  **Trigger 3 status: ✅ GREEN.** New ADR-0019 (`docs/decisions/0019-scope-aware-management-api-keys.md`) Accepted, documenting management-key permission model change with v2.0.x → v2.1.0 → v3.0.0 deprecation timeline (removal of the wildcard is a breaking SemVer change and therefore lands at the next major).
 
   **Trigger dashboard delta (2026-05-09, end of session):**
   ```

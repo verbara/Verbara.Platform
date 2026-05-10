@@ -15,7 +15,7 @@
 | MFA enforcement (`/auth/mfa/*`, `/profile/security/mfa/*`, `/management/mfa/*`) | 10 | 0 | 1 | 1 | 0 | 2 |
 | **Total** | **60** | **2** | **4** | **4** | **0** | **10** |
 
-**Trigger 3 status: BLOCKED.** Two P0 findings expose cross-tenant data and a long-lived plaintext OAuth secret on a path reachable by any tenant Admin. Four P1 findings (one tenant-scoping bypass on MFA admin, three audit-emission gaps on billing mutations) must be closed before flip — public source enables an attacker to read the bypass code paths directly. P2 findings track as v1.13.x patch tickets.
+**Trigger 3 status: BLOCKED.** Two P0 findings expose cross-tenant data and a long-lived plaintext OAuth secret on a path reachable by any tenant Admin. Four P1 findings (one tenant-scoping bypass on MFA admin, three audit-emission gaps on billing mutations) must be closed before flip — public source enables an attacker to read the bypass code paths directly. P2 findings track as v2.0.x patch tickets.
 
 ---
 
@@ -293,7 +293,7 @@ A management API key (issued via `/api/setup` or `/management/api-keys`) — a s
 
 **Risk:** Management API key compromise = unconditional control over MFA reset, JWT signing-key rotation, audit log export, retention dry-run toggle, and tenant lifecycle. The threat-model assumes "rotation handlers emit audit + flush relevant cache" (Scope 5.5 ✅) — but a leaked management key does not need to rotate, it persists across user MFA enrollment and password rotation. There is no per-key permission scope (the key carries `scopes=["platform:*"]` per `ManagementApiKeyEndpoints.cs:68`).
 
-**Recommended fix:** Either (a) enforce `requirement.Permission` against the API key's `scopes` array, or (b) require management API keys to declare an explicit permission whitelist at creation time and reject the bypass when the requested permission is absent. Minimum: add a startup-warn log when a management API key is used to reach a permission-gated surface AND the permission is not in the API key's recorded scopes. Track in v1.13.x as `ADMIN-002: scope-aware management API keys`. Recommend a concurrent `key_age_days` constraint test for the JWT key rotation surface (refuse `mgmt_*` keys older than 90 days for `security.jwt.rotate`).
+**Recommended fix:** Either (a) enforce `requirement.Permission` against the API key's `scopes` array, or (b) require management API keys to declare an explicit permission whitelist at creation time and reject the bypass when the requested permission is absent. Minimum: add a startup-warn log when a management API key is used to reach a permission-gated surface AND the permission is not in the API key's recorded scopes. Track in v2.0.x as `ADMIN-002: scope-aware management API keys`. Recommend a concurrent `key_age_days` constraint test for the JWT key rotation surface (refuse `mgmt_*` keys older than 90 days for `security.jwt.rotate`).
 
 **Status:** OPEN — **blocks public flip** unless explicitly accepted as documented residual exposure (in which case demote to P2 with sign-off and document in `threat-model.md` §8 "Open risks").
 
@@ -315,7 +315,7 @@ A management API key (issued via `/api/setup` or `/management/api-keys`) — a s
 - Make the host tenant id configurable via `IOptions<PlatformOptions>` (default `"platform"`) so multi-cluster deployments can avoid id collisions.
 - Add `Setup_ShouldEmitAudit_WhenSucceeds` and `Setup_ShouldReturnPartial_WhenRbacFails`.
 
-**Status:** OPEN — track as v1.13.x ticket (does not block flip; audit gap is hygiene, not exploitable in steady state).
+**Status:** OPEN — track as v2.0.x ticket (does not block flip; audit gap is hygiene, not exploitable in steady state).
 
 ---
 
@@ -336,7 +336,7 @@ A management API key (issued via `/api/setup` or `/management/api-keys`) — a s
 - Emit `AuthEventTypes.MfaSecretRebindAttempted` audit event on every `Verify`/`Setup` regardless of success.
 - Send the existing `INotificationService.CreateAsync(..., "security.mfa_rebound", ...)` notification on `Verify` success, not only `Confirm`.
 
-**Status:** OPEN — track as v1.13.x ticket (extension of the MFA hardening epic that already produced `MFA-007`).
+**Status:** OPEN — track as v2.0.x ticket (extension of the MFA hardening epic that already produced `MFA-007`).
 
 ---
 
@@ -350,16 +350,16 @@ A management API key (issued via `/api/setup` or `/management/api-keys`) — a s
 
 **Risk:** Mostly contained by `PlatformAdminOnly` (host or partner caller). Combined with `ADMIN-002`, a leaked management API key reads any tenant's webhook delivery payloads (which can carry conversation snapshots, contact PII, OAuth bearer responses for outbound integrations).
 
-**Recommended fix:** Validate `delivery.TenantId == queryTenantId` in `RetryDeadLetter`. Add `IAuditService` emission `webhook.dead_letter.retried`. Add `?tenantId` cross-validation against caller hierarchy when caller is `Partner` (mirror `MFA-001` fix). Track as v1.13.x.
+**Recommended fix:** Validate `delivery.TenantId == queryTenantId` in `RetryDeadLetter`. Add `IAuditService` emission `webhook.dead_letter.retried`. Add `?tenantId` cross-validation against caller hierarchy when caller is `Partner` (mirror `MFA-001` fix). Track as v2.0.x.
 
-**Status:** OPEN — track as v1.13.x.
+**Status:** OPEN — track as v2.0.x.
 
 ---
 
 ## Cross-references to existing v1.13.x tickets
 
 - **AUTH-002 (audit 2026-04)** — `?token=` / `?access_token=` query-string token acceptance. **CLOSED in v1.14.4** per `Auth/AuthSchemeConfiguration.cs:46-62` (`IsQueryTokenPathAllowed` whitelist) and `:73-84` (`OnMessageReceived` mirror guard). Threat-model row 6.4 ("TA1 captures a JWT from server access logs because it was passed in `?token=`") should be flipped from 🟡 Tracked to ✅ Verified in the next status-update entry of `threat-model.md`.
-- **CFG-003 (audit 2026-04)** — Plaintext placeholder credentials in `appsettings.Development.json`. **STILL PENDING.** Confirmed unchanged; the Development file still ships and is included in the publish output. Continues to apply to public-flip readiness; track for v1.13.x as previously scoped. Not re-flagged here.
+- **CFG-003 (audit 2026-04)** — Plaintext placeholder credentials in `appsettings.Development.json`. **STILL PENDING.** Confirmed unchanged; the Development file still ships and is included in the publish output. Continues to apply to public-flip readiness; track for v2.0.x (continuing the scope inherited from the original v1.13.x filing). Not re-flagged here.
 - **MFA-007 (audit 2026-04)** — In-memory default for `IJtiRevocationCache`/`IMfaPendingCache`. **STILL PENDING.** Confirmed unchanged; Redis variant ships in `Verbara.Platform.Identity.Redis`, default wiring still in-memory, no fail-loud guard in production. Continues to apply.
 - **MT-005 (audit 2026-04)** — `analytics_interval_snapshots` 3-table CHECK constraint coverage. Out of scope for Trigger 3 (Pro-side schema). Untouched.
 - **AUDIT-006 (audit 2026-04)** — DB-level UPDATE/DELETE prevention on `audit_entries`. Out of scope for Trigger 3 (operator DB-grant hygiene). Untouched.
@@ -372,7 +372,7 @@ A management API key (issued via `/api/setup` or `/management/api-keys`) — a s
 
 - [ ] All P0 findings fixed before flip — **MT-001** (cross-tenant header escalation), **ADMIN-001** (OIDC plaintext)
 - [ ] All P1 findings fixed before flip — **MFA-001** (`?targetTenant=` bypass), **BILL-001** (billing audit gap), **BILL-002** (`PayInvoice` trust), **ADMIN-002** (management-key permission bypass)
-- [ ] P2 findings tracked as v1.13.x tickets — **ADMIN-003** (Setup hard-codes/swallows), **MFA-002** (no step-up on re-enroll), **MT-002** (webhook DLQ tenant trust)
+- [ ] P2 findings tracked as v2.0.x tickets — **ADMIN-003** (Setup hard-codes/swallows), **MFA-002** (no step-up on re-enroll), **MT-002** (webhook DLQ tenant trust)
 - [ ] Threat-model `Status updates` entry appended to flip AUTH-002 row to ✅ and add ⚠️ rows for MT-001 + ADMIN-001 + MFA-001 + ADMIN-002
 
 ## Sign-off
@@ -383,6 +383,6 @@ Blocker IDs: `PREPUB-2026-05-09-MT-001`, `PREPUB-2026-05-09-ADMIN-001`, `PREPUB-
 
 The 4 P1 findings and 2 P0 findings each have a documented exploit path that becomes grep-able once the repository goes public. None require sophisticated tooling — `MT-001` is a single header swap; `ADMIN-001` is a single GET; `MFA-001` is a single query parameter; `BILL-001` is the absence of records (visible to any compliance reviewer); `ADMIN-002` is a 6-line bypass in the auth handler that any reader of `Auth/PlatformAdminAuthorizationHandler.cs:27-32` can identify in seconds.
 
-This auditor recommends the trigger remain **OPEN (RED)** until at minimum the two P0 findings are remediated and merged. The four P1 findings should land in the same v1.13.x patch train; demoting any to P2 requires explicit ADR sign-off (extend ADR-0018) documenting the residual exposure in `threat-model.md` §8.
+This auditor recommends the trigger remain **OPEN (RED)** until at minimum the two P0 findings are remediated and merged. The four P1 findings should land in the same v2.0.x patch train; demoting any to P2 requires explicit ADR sign-off (extend ADR-0018) documenting the residual exposure in `threat-model.md` §8.
 
 **Auditor note:** The 2026-04 audit's Scope 2.1 verification ("10/10 sampled endpoints filter") was sound for the management surface but did not sample the bare `AdminOnly` surfaces (`/admin/users`, `/admin/queues`, `/admin/agents`, `/admin/audit`). The flat `RequireRole("Admin")` policy combined with header-driven tenant resolution is the proximate cause of `MT-001`. Recommend that future audits explicitly sample BOTH the `PlatformAdminOnly` and the bare `AdminOnly` groups, and that `audit-checklist.md` Scope 2.1 be amended to call out "test against `AdminOnly` policies specifically".
