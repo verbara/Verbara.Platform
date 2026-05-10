@@ -1217,6 +1217,10 @@ app.UseMiddleware<RateLimitHeadersMiddleware>();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+// MT-001 (PREPUB-2026-05-09): rejects header/subdomain-driven tenant overrides
+// when the principal's tid claim does not match. Must run AFTER UseAuthorization
+// so context.User is populated, BEFORE per-handler tenant trust kicks in.
+app.UseMiddleware<TenantBoundaryValidationMiddleware>();
 app.UseMiddleware<TenantStatusMiddleware>();
 app.UseMiddleware<LicenseGateMiddleware>();
 app.UseMiddleware<IpAllowlistMiddleware>();
