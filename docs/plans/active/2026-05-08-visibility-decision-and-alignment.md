@@ -95,10 +95,12 @@ These are the work items that, when all complete, allow the visibility flip. Mos
 
 ### Trigger 3 — Sensitive-endpoint security review (Wk 2-3, ~1 day focused)
 
-- [ ] Catalog endpoints touching `/api/v1/billing/*`, tenant-boundary, admin operations
-- [ ] Threat-model each: authn → authz → tenant scoping → input validation → output filtering → audit log
-- [ ] Add tests for any boundary not yet covered (multi-tenant cross-access, privilege escalation, MFA bypass)
-- [ ] Document the review in `docs/security/2026-05-XX-pre-public-security-review.md` (private until visibility flips, then public after redaction of internal infra details)
+- [x] Catalog endpoints touching `/api/v1/billing/*`, tenant-boundary, admin operations — **DONE 2026-05-09** (60 endpoints catalogued in pre-public review doc)
+- [x] Threat-model each: authn → authz → tenant scoping → input validation → output filtering → audit log — **DONE 2026-05-09** (10 findings: 2 P0, 4 P1, 4 P2)
+- [ ] Add tests for any boundary not yet covered (multi-tenant cross-access, privilege escalation, MFA bypass) — **DEFERRED** to v1.13.x patch train fix tickets (test added per fix)
+- [x] Document the review in `docs/security/2026-05-09-pre-public-security-review.md` — **DONE 2026-05-09**
+
+**Trigger 3 status: ❌ BLOCKED.** Catalog + audit done, but 2 P0 findings (cross-tenant via `X-Tenant-Id` header on `/admin/*`; OIDC client secret persisted plaintext) and 4 P1 findings must be fixed in code before flip. Detailed findings + remediation plan in `docs/security/2026-05-09-pre-public-security-review.md`. Threat model updated with append-only Status entry referencing this audit. Path forward: v1.13.x patch train — see new remediation plan (TBD).
 
 ### Trigger 4 — Public threat model (Wk 3, ~4h)
 
@@ -122,6 +124,8 @@ These are the work items that, when all complete, allow the visibility flip. Mos
 
 - [ ] Track in CRM or `docs/operations/customer-pipeline.md` (private)
 - [ ] Demo signed = pricing validated + tier model real
+
+**Trigger 7 status: 🟡 PENDING REINTERPRETATION (Option B chosen 2026-05-09).** Maintainer chose to soften this trigger from "first paying customer" to "Tier 0.5 e2e portal validation by external evaluator". Smoke test executed 2026-05-09: license `verbara-developer-399812ee-bf2c-4246-824e-6ed92c4783c1.lic` issued by verbara.io Worker, downloaded by maintainer, validated through full `LicenseReader` → `LicenseValidator.Validate` → `LicenseTrustAnchor.OfficialPublicKey` path against Pro v2.2.0-pro. Result: `LicenseValidationResult.Valid` (Tier=Developer, Features=All=0x1FF, MaxAgents=5, MaxNodes=1, expires 2026-06-08). Formalisation pending: ADR-0018 status update declaring Trigger 7 met by Option B (verbara.io live + Tier 0.5 self-issuance round-trip validated end-to-end). Once that status update lands, Trigger 7 flips to ✅ GREEN.
 
 ---
 
