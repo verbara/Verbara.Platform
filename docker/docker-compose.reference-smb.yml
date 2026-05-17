@@ -1,0 +1,407 @@
+# docker/docker-compose.reference-smb.yml
+#
+# REFERENCE DEPLOYMENT — Verbara Platform SMB on-premise.
+#
+# This is the customer-facing compose for a single-server Verbara Platform
+# install. It is the file referenced from `docs/manuales/smb/`. It assumes:
+#
+#   • One Linux host (Debian 12 recommended, Ubuntu 22.04+ / Rocky 9 /
+#     Alma 9 / Amazon Linux 2023 also supported). NOT Docker Desktop.
+#   • Docker Engine 24+ with the Compose v2 plugin.
+#   • The operator has filled in `.env.reference-smb` (copy from
+#     `.env.reference-smb.example` and edit).
+#   • Public network access for image pulls from ghcr.io.
+#
+# Architectural decisions vs the dev/loadtest compose (`full.yml`):
+#
+#   1) Asterisk runs in `network_mode: host`.
+#      Reason: bridge networking with port-mapping for the SIP signalling
+#      port + 200-port RTP range adds one `docker-proxy` userland process
+#      per UDP port (~5 MB RAM + scheduling overhead each) plus a DNAT
+#      iptables rule per port. At 300 concurrent calls this becomes
+#      ~3 GB RAM of pure overhead before Asterisk handles a single call,
+#      and the per-packet latency floor rises 0.5–2 ms.
+#      Host networking eliminates both costs — Asterisk binds directly to
+#      the host NIC. The cost is that Asterisk reclaims 5060/5061/8088/
+#      8089/5038/8180/9092 of the HOST (no other PBX may run there).
+#
+#   2) Platform.Api + Web + Postgres + Redis stay on a docker bridge
+#      (`default` network). The Api reaches Asterisk via
+#      `host.docker.internal:{8088,5038}` thanks to
+#      `extra_hosts: ["host.docker.internal:host-gateway"]`.
+#
+#   3) Postgres is bound to the host on `127.0.0.1:5432` (loopback only,
+#      NOT the LAN). This lets Asterisk-on-host-network reach the realtime
+#      DB while keeping the DB invisible from the LAN.
+#
+#   4) Images are tag-pinned to the latest signed release at the time this
+#      file ships. Operators who want byte-for-byte content addressing
+#      should use `docker-compose.verified.yml` instead (digest-pinned).
+#
+# Capacity envelope (with default .env values):
+#   SMB Standard tier (target sweet-spot): 8 vCPU / 32 GB / 250 GB SSD
+#   → 150 concurrent calls / 150 WebRTC agents / RTP range 20000-20400.
+#
+#   Change to SMB Lite (4 vCPU / 16 GB → 50 calls) or SMB Plus
+#   (16 vCPU / 64 GB → 300 calls) by editing only `.env.reference-smb`:
+#   - RTP_PORT_START / RTP_PORT_END
+#   - ASTERISK_CPU_LIMIT / ASTERISK_MEM_LIMIT
+#   - PLATFORM_API_CPU_LIMIT / PLATFORM_API_MEM_LIMIT
+#   See docs/manuales/smb/capacity-reference.md for the full matrix.
+#
+# Usage:
+#   cp .env.reference-smb.example .env.reference-smb
+#   $EDITOR .env.reference-smb                       # set passwords + EXTERNAL_IP
+#   docker compose -f docker/docker-compose.reference-smb.yml \
+#                  --env-file docker/.env.reference-smb \
+#                  up -d --wait
+#
+# Optional profiles:
+#   --profile identity-redis  → enable Redis for JWT rotation pool
+#                                (multi-replica / ADR-0012)
+#   --profile coturn          → enable Coturn TURN server for WebRTC
+#                                agents behind strict NAT (compose with
+#                                docker-compose.coturn.yml)
+#   --profile observability   → enable Prometheus + Grafana + Loki
+#                                (compose with docker-compose.observability.yml)
+#
+# Validation: run `scripts/quickstart-smb.sh` BEFORE this compose. It checks
+# host pre-requisites (ports free, RAM/CPU/disk sufficient, NAT detected,
+# firewall hints printed) and aborts cleanly if the host is not ready.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "100m"
+    max-file: "5"
+
+services:
+  # ──────────────────────────────────────────────────────────────────────
+  # Asterisk PBX — host networking, all SIP ports on the host NIC.
+  # ──────────────────────────────────────────────────────────────────────
+  asterisk:
+    build:
+      context: .
+      dockerfile: Dockerfile.asterisk
+      args:
+        ASTERISK_VERSION: ${ASTERISK_VERSION:-22}
+    image: verbara/asterisk-local:${ASTERISK_VERSION:-22}
+    # The customer can switch to a pre-built image once we publish one to
+    # ghcr.io/verbara/asterisk. Until then, the Dockerfile builds locally
+    # (~7 min first time, cached afterwards). Building is purely apt + curl
+    # (codec_opus from Digium + sounds) — no NuGet auth needed.
+    container_name: verbara-asterisk
+    logging: *default-logging
+    network_mode: host
+    # ↑ Owns the host's SIP/RTP ports. The compose `ports:` block is
+    # intentionally absent — host networking exposes everything Asterisk
+    # binds to (configured in pjsip.conf, http.conf, manager.conf, rtp.conf).
+    environment:
+      EXTERNAL_IP: ${EXTERNAL_IP:-}
+      AMI_PASSWORD: ${AMI_PASSWORD:?AMI_PASSWORD required in .env.reference-smb}
+      ARI_PASSWORD: ${ARI_PASSWORD:?ARI_PASSWORD required in .env.reference-smb}
+      # Realtime DB on the loopback (Postgres binds 127.0.0.1:5432 below).
+      # Asterisk on host network can't resolve the docker DNS name `postgres`,
+      # so we point dbhost at 127.0.0.1. entrypoint-asterisk.sh rewrites
+      # res_config_pgsql.conf when these are set.
+      PG_REALTIME_HOST: ${PG_REALTIME_HOST:-127.0.0.1}
+      PG_REALTIME_PORT: ${PG_REALTIME_PORT:-5432}
+      PG_REALTIME_DB: ${POSTGRES_DB:-verbara}
+      PG_REALTIME_USER: ${POSTGRES_USER:-platform}
+      PG_REALTIME_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+    volumes:
+      - ./asterisk-config:/etc/asterisk
+      - verbara_asterisk_recordings:/var/spool/asterisk/recording
+      - verbara_asterisk_voicemail:/var/spool/asterisk/voicemail
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show version"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${ASTERISK_CPU_LIMIT:-4.0}"
+          memory: ${ASTERISK_MEM_LIMIT:-4G}
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Platform.Api — composition root. Pinned to the latest signed release.
+  # ──────────────────────────────────────────────────────────────────────
+  platform-api:
+    image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.1.0}
+    container_name: verbara-platform-api
+    logging: *default-logging
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5000
+      # Postgres on the same docker network → resolves via service DNS.
+      ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform};Password=${POSTGRES_PASSWORD};Maximum Pool Size=${PG_POOL_MAX:-10};Minimum Pool Size=${PG_POOL_MIN:-2};Connection Idle Lifetime=300;Pooling=true"
+      # Asterisk on host network → reach via host gateway.
+      Asterisk__Ami__Hostname: host.docker.internal
+      Asterisk__Ami__Port: "5038"
+      Asterisk__Ami__Username: platform
+      Asterisk__Ami__Password: ${AMI_PASSWORD}
+      Asterisk__Ari__BaseUrl: http://host.docker.internal:8088
+      Asterisk__Ari__Username: verbara
+      Asterisk__Ari__Password: ${ARI_PASSWORD}
+      Asterisk__Ari__Application: verbara
+      # Auth — JWT signing key. Generate a fresh 64-char string per install.
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY required (64+ chars)}
+      Jwt__Issuer: ${JWT_ISSUER:-https://verbara.local}
+      Jwt__Audience: ${JWT_AUDIENCE:-verbara-api}
+      # CORS — allow only the front-end origin you ship to customers.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,https://localhost}
+      # Licensing — Disabled = community/OSS; Enforce = require Pro license.
+      Licensing__EnforcementMode: ${LICENSING_MODE:-Disabled}
+      # Pro Layer C image-binding (ADR-0011). Required only when running a
+      # commercial Pro license that has authorized digests. Leave empty for
+      # the community/OSS path.
+      IMAGE_DIGEST: ${IMAGE_DIGEST:-}
+      # Recording storage. Default = local filesystem; override to s3:// to
+      # offload to MinIO / AWS S3 / GCS / Azure Blob.
+      Recordings__BasePath: ${RECORDINGS_PATH:-/recordings}
+      # Microservices on the same bridge.
+      Services__Renderer__BaseUrl: http://renderer:5010
+      Services__Mail__BaseUrl: http://mail:5020
+      Services__ServiceKey: ${SERVICE_KEY:?SERVICE_KEY required (32+ chars)}
+      # Optional Redis for JWT rotation pool / MFA throttle / SignalR backplane.
+      # Uncomment the connection string AND start with --profile identity-redis.
+      # ConnectionStrings__IdentityRedis: redis:6379
+    volumes:
+      - verbara_recordings:/recordings
+      - verbara_media:/app/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      asterisk:
+        condition: service_healthy
+      renderer:
+        condition: service_healthy
+      mail:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-5000}:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/health/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${PLATFORM_API_CPU_LIMIT:-2.0}"
+          memory: ${PLATFORM_API_MEM_LIMIT:-1500M}
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Platform.Web — React SPA + nginx. Pinned to the latest signed release.
+  # ──────────────────────────────────────────────────────────────────────
+  web:
+    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.0.3-web}
+    container_name: verbara-web
+    logging: *default-logging
+    ports:
+      - "${WEB_HTTP_PORT:-80}:80"
+      # Uncomment for TLS termination at nginx (requires WEB_TLS_CERT/KEY).
+      # - "${WEB_HTTPS_PORT:-443}:443"
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${WEB_CPU_LIMIT:-0.5}"
+          memory: ${WEB_MEM_LIMIT:-256M}
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Postgres 18 — main store. Bound on the docker bridge AND on the host
+  # loopback (127.0.0.1:5432) so Asterisk-on-host-network can reach it.
+  # ──────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:18-alpine
+    container_name: verbara-postgres
+    logging: *default-logging
+    command:
+      - postgres
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-200}
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-512MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-2GB}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-verbara}
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - verbara_postgres_data:/var/lib/postgresql/data
+    ports:
+      # Loopback-only binding — accessible to:
+      #   • Asterisk on host network (via 127.0.0.1:5432)
+      #   • Local psql / backup tooling on the same host
+      # NOT accessible from the LAN. To enable LAN admin access (e.g. for
+      # pgAdmin from another box), change to "0.0.0.0:${PG_PORT}:5432" AND
+      # firewall-restrict 5432 to a known admin IP.
+      - "127.0.0.1:${PG_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platform} -d ${POSTGRES_DB:-verbara}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${POSTGRES_CPU_LIMIT:-2.0}"
+          memory: ${POSTGRES_MEM_LIMIT:-2G}
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Redis 8 — opt-in (--profile identity-redis or --profile cluster).
+  # Required for: JWT rotation pool (ADR-0012, multi-replica), SignalR
+  # backplane (multi-replica), MFA throttle (single-instance optional).
+  # Single-instance SMB without horizontal scaling does NOT need Redis.
+  # ──────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:8-alpine
+    container_name: verbara-redis
+    logging: *default-logging
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:-}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - verbara_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    profiles: [identity-redis, cluster]
+    deploy:
+      resources:
+        limits:
+          cpus: "${REDIS_CPU_LIMIT:-0.5}"
+          memory: ${REDIS_MEM_LIMIT:-512M}
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Renderer microservice — QuestPDF + ScottPlot for reports/charts.
+  # Built locally from the monorepo (not yet published to ghcr). First boot
+  # takes ~5 min for the build; subsequent boots reuse the cached image.
+  # ──────────────────────────────────────────────────────────────────────
+  renderer:
+    build:
+      context: ..
+      dockerfile: src/Verbara.Platform.Renderer/Dockerfile.renderer
+    image: verbara/renderer-local:${PLATFORM_API_TAG:-v2.1.0}
+    container_name: verbara-renderer
+    logging: *default-logging
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5010
+      Services__ServiceKey: ${SERVICE_KEY}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5010/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Mail microservice — MailKit SMTP + IMAP + Microsoft Graph OAuth.
+  # Built locally from the monorepo (not yet published to ghcr).
+  # ──────────────────────────────────────────────────────────────────────
+  mail:
+    build:
+      context: ..
+      dockerfile: src/Verbara.Platform.Mail/Dockerfile.mail
+    image: verbara/mail-local:${PLATFORM_API_TAG:-v2.1.0}
+    container_name: verbara-mail
+    logging: *default-logging
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5020
+      ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform};Password=${POSTGRES_PASSWORD}"
+      Smtp__Host: ${SMTP_HOST:-localhost}
+      Smtp__Port: ${SMTP_PORT:-587}
+      Smtp__UseTls: ${SMTP_USE_TLS:-true}
+      Smtp__Username: ${SMTP_USER:-}
+      Smtp__Password: ${SMTP_PASSWORD:-}
+      Smtp__FromAddress: ${SMTP_FROM:-noreply@verbara.local}
+      Smtp__FromName: ${SMTP_FROM_NAME:-Verbara}
+      # Microsoft Graph for OAuth-based send (optional).
+      Microsoft__ClientId: ${MS_CLIENT_ID:-}
+      Microsoft__TenantId: ${MS_TENANT_ID:-common}
+      # IMAP for inbound email channel (optional — required only if Email
+      # channel uses IMAP polling instead of webhook).
+      Imap__Host: ${IMAP_HOST:-}
+      Imap__Port: ${IMAP_PORT:-993}
+      Imap__UseTls: ${IMAP_USE_TLS:-true}
+      Imap__Username: ${IMAP_USER:-}
+      Imap__Password: ${IMAP_PASSWORD:-}
+      Services__ServiceKey: ${SERVICE_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5020/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # ──────────────────────────────────────────────────────────────────────
+  # MinIO — opt-in S3-compatible object store (--profile s3).
+  # Use if you want recordings off the local filesystem for retention /
+  # multi-server consistency. Bound on host so a backup tool can reach it.
+  # ──────────────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: verbara-minio
+    logging: *default-logging
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - verbara_minio_data:/data
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    restart: unless-stopped
+    profiles: [s3]
+
+volumes:
+  verbara_postgres_data:
+  verbara_redis_data:
+  verbara_asterisk_recordings:
+  verbara_asterisk_voicemail:
+  verbara_recordings:
+  verbara_media:
+  verbara_minio_data:

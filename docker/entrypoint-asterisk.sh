@@ -4,6 +4,7 @@ RTP_CONF="/etc/asterisk/rtp.conf"
 
 MANAGER_CONF="/etc/asterisk/manager.conf"
 ARI_CONF="/etc/asterisk/ari.conf"
+PGSQL_CONF="/etc/asterisk/res_config_pgsql.conf"
 
 # Inject AMI/ARI passwords from environment so .env secrets propagate into Asterisk
 if [ -n "$AMI_PASSWORD" ] && [ -f "$MANAGER_CONF" ]; then
@@ -13,6 +14,28 @@ fi
 if [ -n "$ARI_PASSWORD" ] && [ -f "$ARI_CONF" ]; then
     sed -i "s/^password = .*/password = $ARI_PASSWORD/" "$ARI_CONF"
     echo "[entrypoint] ARI password injected from environment"
+fi
+
+# Realtime Postgres rewiring. Required when Asterisk runs with
+# `network_mode: host` (reference SMB) — the docker DNS name `postgres` is
+# unreachable from host network, so dbhost has to be the loopback / LAN IP
+# where Postgres is bound. Optional in all other stacks (defaults preserved
+# when env vars unset).
+if [ -n "$PG_REALTIME_HOST" ] && [ -f "$PGSQL_CONF" ]; then
+    sed -i "s/^dbhost = .*/dbhost = $PG_REALTIME_HOST/" "$PGSQL_CONF"
+    echo "[entrypoint] Realtime dbhost set to $PG_REALTIME_HOST"
+fi
+if [ -n "$PG_REALTIME_PORT" ] && [ -f "$PGSQL_CONF" ]; then
+    sed -i "s/^dbport = .*/dbport = $PG_REALTIME_PORT/" "$PGSQL_CONF"
+fi
+if [ -n "$PG_REALTIME_DB" ] && [ -f "$PGSQL_CONF" ]; then
+    sed -i "s/^dbname = .*/dbname = $PG_REALTIME_DB/" "$PGSQL_CONF"
+fi
+if [ -n "$PG_REALTIME_USER" ] && [ -f "$PGSQL_CONF" ]; then
+    sed -i "s/^dbuser = .*/dbuser = $PG_REALTIME_USER/" "$PGSQL_CONF"
+fi
+if [ -n "$PG_REALTIME_PASSWORD" ] && [ -f "$PGSQL_CONF" ]; then
+    sed -i "s/^dbpass = .*/dbpass = $PG_REALTIME_PASSWORD/" "$PGSQL_CONF"
 fi
 
 if [ -n "$EXTERNAL_IP" ] && [ -f "$PJSIP_CONF" ]; then

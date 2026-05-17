@@ -1,0 +1,87 @@
+# docker/docker-compose.coturn.yml — opt-in TURN server overlay.
+#
+# Why you might need this:
+#   When a Verbara agent's browser is on a strict corporate NAT (symmetric
+#   NAT, firewall blocks 1024-65535/udp, or both ends behind NAT), STUN
+#   alone is not enough. The WebRTC peer connection negotiates ICE
+#   candidates; if the only working candidate is `relay`, the call routes
+#   media through a TURN server. Without a TURN server, the call connects
+#   (SIP signalling completes via WSS) but you hear no audio.
+#
+# When you DON'T need this:
+#   • Agents on the same LAN as Asterisk (no NAT in path)
+#   • Agents whose corporate NAT supports hairpinning + UDP outbound to
+#     20000-20200/udp on your EXTERNAL_IP
+#   • You only ship a softphone (Linphone/Zoiper) and never WebRTC
+#
+# Public alternative (free, no infra):
+#   For light usage you can use Google's public STUN
+#     stun:stun.l.google.com:19302
+#   This is OK for STUN-only scenarios. It is NOT a TURN relay — strict
+#   NATs will still fail. Coturn below is for those cases.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.reference-smb.yml \
+#                  -f docker/docker-compose.coturn.yml \
+#                  --env-file docker/.env.reference-smb \
+#                  --profile coturn \
+#                  up -d --wait
+#
+# After bringing up, register the TURN URL in the platform admin UI:
+#   /admin/tenant-settings → WebRTC → TURN URL:
+#     turn:<your-public-host>:3478?transport=udp
+#     turn:<your-public-host>:3478?transport=tcp
+#     turns:<your-public-host>:5349?transport=tcp
+#   Username: ${COTURN_USER}
+#   Password: ${COTURN_PASSWORD}
+#
+# Firewall: open 3478/udp + 3478/tcp + 5349/tcp + 49152-65535/udp on the
+# host firewall AND any upstream router. The relay range (49152-65535/udp)
+# is wide because each relay session uses 2 random ports.
+
+services:
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    container_name: verbara-coturn
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+    network_mode: host
+    # Host networking for the same reason as Asterisk: a 16 k-port UDP
+    # range cannot be reasonably forwarded through docker-proxy.
+    command:
+      - turnserver
+      - --no-cli
+      - --listening-port=${COTURN_LISTEN_PORT:-3478}
+      - --tls-listening-port=${COTURN_TLS_PORT:-5349}
+      - --min-port=${COTURN_RELAY_MIN:-49152}
+      - --max-port=${COTURN_RELAY_MAX:-65535}
+      - --realm=${COTURN_REALM:-verbara.local}
+      - --user=${COTURN_USER}:${COTURN_PASSWORD}
+      - --lt-cred-mech
+      - --fingerprint
+      - --no-multicast-peers
+      - --no-tlsv1
+      - --no-tlsv1_1
+      - --external-ip=${EXTERNAL_IP}
+      # TLS cert paths (optional — required for the turns:// URI).
+      # - --cert=/etc/coturn/cert.pem
+      # - --pkey=/etc/coturn/key.pem
+    volumes:
+      - verbara_coturn_data:/var/lib/coturn
+      # Mount your TLS cert (same one as the Web nginx works fine):
+      # - /etc/letsencrypt/live/your-domain.com:/etc/coturn:ro
+    restart: unless-stopped
+    profiles: [coturn]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "nc -uvz 127.0.0.1 ${COTURN_LISTEN_PORT:-3478} 2>&1 | grep -q open || exit 1"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  verbara_coturn_data:
