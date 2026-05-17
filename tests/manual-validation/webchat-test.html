@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Verbara WebChat — Página de prueba</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin: 0;
+        padding: 0;
+        line-height: 1.6;
+        color: #1f2937;
+        background: linear-gradient(135deg, #f3f4f6 0%, #e0f2fe 100%);
+        min-height: 100vh;
+      }
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 48px 24px;
+      }
+      h1 { color: #0d9488; margin-top: 0; }
+      h2 { color: #0f766e; margin-top: 32px; }
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 32px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        margin-bottom: 24px;
+      }
+      pre {
+        background: #1e293b;
+        color: #e2e8f0;
+        padding: 16px;
+        border-radius: 8px;
+        overflow-x: auto;
+        font-size: 13px;
+      }
+      code {
+        background: #f1f5f9;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 13px;
+        color: #be185d;
+      }
+      pre code { background: transparent; color: inherit; padding: 0; }
+      .config-form {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        gap: 12px 16px;
+        align-items: center;
+        margin: 24px 0;
+      }
+      label { font-weight: 500; color: #475569; }
+      input[type='text'], input[type='url'] {
+        padding: 8px 12px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 14px;
+        font-family: monospace;
+      }
+      button {
+        background: #0d9488;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        font-size: 14px;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      button:hover { background: #0f766e; }
+      .checklist { list-style: none; padding: 0; }
+      .checklist li {
+        padding: 8px 0;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .checklist input[type='checkbox'] {
+        margin-top: 5px;
+        cursor: pointer;
+        transform: scale(1.2);
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .badge-info { background: #dbeafe; color: #1e40af; }
+      .badge-warn { background: #fef3c7; color: #92400e; }
+      .footer {
+        text-align: center;
+        color: #64748b;
+        font-size: 13px;
+        margin-top: 32px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🧪 Verbara WebChat — Página de prueba</h1>
+      <p>
+        Esta página existe únicamente para que el operador valide
+        manualmente el canal WebChat de un deploy Verbara antes de
+        embeberlo en el sitio del cliente. Usala junto con el manual
+        <code>docs/manuales/smb/04-canal-webchat.md</code>.
+      </p>
+
+      <div class="card">
+        <h2>1. Configurar el target</h2>
+        <p>
+          Por defecto la página carga el widget desde el mismo host que
+          la sirve (<code>window.location.origin</code>). Si querés
+          probar contra otro deploy, cambialo abajo y click "Recargar
+          widget":
+        </p>
+        <div class="config-form">
+          <label for="webchat-host">Host del Verbara Web:</label>
+          <input type="url" id="webchat-host" value="" placeholder="https://verbara.tu-dominio.com" />
+
+          <label for="webchat-tenant">Tenant ID:</label>
+          <input type="text" id="webchat-tenant" value="platform" />
+
+          <label for="webchat-locale">Locale:</label>
+          <input type="text" id="webchat-locale" value="auto" />
+
+          <label for="webchat-position">Position:</label>
+          <input type="text" id="webchat-position" value="bottom-right" />
+        </div>
+        <button onclick="reloadWidget()">Recargar widget con esta config</button>
+        <p style="margin-top: 16px;">
+          <span class="badge badge-info">ℹ️ Tip</span> El widget va a aparecer en
+          la esquina inferior derecha (o donde elijas) — buscalo ahí.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>2. Snippet HTML que vas a darle al cliente</h2>
+        <p>Una vez validado acá, pegá este snippet en el HTML del sitio del cliente, antes del cierre de <code>&lt;/body&gt;</code>:</p>
+        <pre><code id="snippet-preview">&lt;!-- se actualiza dinámicamente --&gt;</code></pre>
+      </div>
+
+      <div class="card">
+        <h2>3. Checklist de validación manual</h2>
+        <p>Marcá cada caja a medida que la validás:</p>
+        <ul class="checklist">
+          <li><input type="checkbox" /> El widget cargó sin errores en la consola devtools (F12 → Console).</li>
+          <li><input type="checkbox" /> La burbuja aparece en la posición configurada.</li>
+          <li><input type="checkbox" /> Click en la burbuja abre el panel del widget.</li>
+          <li><input type="checkbox" /> El form de "iniciar conversación" pide nombre + email.</li>
+          <li><input type="checkbox" /> Iniciar conversación + enviar mensaje funciona sin errores.</li>
+          <li><input type="checkbox" /> El mensaje aparece en <code>/agent/queue</code> en otra pestaña (logueado como agente).</li>
+          <li><input type="checkbox" /> El agente acepta la conversación + responde.</li>
+          <li><input type="checkbox" /> La respuesta del agente llega de vuelta al widget en esta página.</li>
+          <li><input type="checkbox" /> Cerrar el panel del widget + reabrirlo preserva el hilo (no se pierde).</li>
+          <li><input type="checkbox" /> Refrescar esta página + reabrir mantiene la sesión (cookie funciona).</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>4. Errores comunes</h2>
+        <p>Si algo no funciona, abrí la consola devtools (F12 → Console) y buscá:</p>
+        <ul>
+          <li><code>Failed to load resource: net::ERR_CONNECTION_REFUSED</code> → el host del Web está mal escrito o no está corriendo.</li>
+          <li><code>Access to fetch ... blocked by CORS policy</code> → el origen de esta página no está en <code>allowedOrigins</code> del canal. Editar en <code>/admin/channels</code>.</li>
+          <li><code>WebSocket connection ... failed</code> → puerto WSS bloqueado por firewall, o cert TLS inválido.</li>
+          <li>El widget carga pero no muestra burbuja → JS del widget tirando exception, ver Console.</li>
+        </ul>
+        <p>
+          Más detalles en
+          <a href="https://github.com/verbara/platform/blob/main/docs/manuales/smb/04-canal-webchat.md#6-cors-troubleshooting" target="_blank">
+            04-canal-webchat.md §6 CORS troubleshooting
+          </a>.
+        </p>
+      </div>
+
+      <p class="footer">
+        Verbara Platform — Manual Validation · v2.1.0+ ·
+        <a href="https://verbara.io" target="_blank">verbara.io</a>
+      </p>
+    </div>
+
+    <script>
+      // Auto-inicialización con el host actual
+      document.addEventListener('DOMContentLoaded', () => {
+        const hostInput = document.getElementById('webchat-host');
+        if (!hostInput.value) {
+          hostInput.value = window.location.origin;
+        }
+        updateSnippetPreview();
+        loadWidget();
+      });
+
+      function updateSnippetPreview() {
+        const host = document.getElementById('webchat-host').value;
+        const tenant = document.getElementById('webchat-tenant').value;
+        const locale = document.getElementById('webchat-locale').value;
+        const position = document.getElementById('webchat-position').value;
+        const snippet = `<script
+  src="${host}/webchat/v1/verbara-webchat.js"
+  data-tenant-id="${tenant}"
+  data-locale="${locale}"
+  data-position="${position}"><` + `/script>`;
+        document.getElementById('snippet-preview').textContent = snippet;
+      }
+
+      function loadWidget() {
+        const host = document.getElementById('webchat-host').value;
+        const tenant = document.getElementById('webchat-tenant').value;
+        const locale = document.getElementById('webchat-locale').value;
+        const position = document.getElementById('webchat-position').value;
+
+        // Remover widget previo si existe
+        const oldScript = document.getElementById('verbara-webchat-script');
+        if (oldScript) oldScript.remove();
+        const oldBubble = document.querySelector('[data-verbara-webchat-bubble]');
+        if (oldBubble) oldBubble.remove();
+        const oldFrame = document.querySelector('[data-verbara-webchat-iframe]');
+        if (oldFrame) oldFrame.remove();
+
+        const script = document.createElement('script');
+        script.id = 'verbara-webchat-script';
+        script.src = `${host}/webchat/v1/verbara-webchat.js`;
+        script.setAttribute('data-tenant-id', tenant);
+        script.setAttribute('data-locale', locale);
+        script.setAttribute('data-position', position);
+        script.onerror = () => {
+          alert(
+            'Error cargando el widget desde ' + host +
+            '. Verificá que el Verbara Web esté corriendo y la URL sea correcta.',
+          );
+        };
+        document.body.appendChild(script);
+      }
+
+      function reloadWidget() {
+        updateSnippetPreview();
+        loadWidget();
+      }
+
+      // Re-render snippet al editar cualquier input
+      ['webchat-host', 'webchat-tenant', 'webchat-locale', 'webchat-position'].forEach((id) => {
+        document.getElementById(id).addEventListener('input', updateSnippetPreview);
+      });
+    </script>
+  </body>
+</html>
