@@ -1,0 +1,10 @@
+	Go version:  go1.26.2
+	OS/Arch:     linux/amd64
+Server:
+	NODE:        192.168.122.10
+	Tag:         v1.13.0
+	SHA:         b9e9c657
+	Built:       
+	Go version:  go1.26.2
+	OS/Arch:     linux/amd64
+	Enabled:     RBAC

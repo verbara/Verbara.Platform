@@ -1,0 +1,8 @@
+192.168.122.13   k8s.io      └─ kube-system/cilium-t9sj6:cilium-agent:a485b092e497                                               263.98       265303255000
+192.168.122.13   k8s.io      └─ r55-platform/platform-api-558f699fc9-2kqkl:api:0aded05a993b                                      192.09       41586297000
+192.168.122.13   k8s.io      └─ r55-platform/platform-api-558f699fc9-r8wkb:api:3a6f2b791dc0                                      182.71       42141820000
+192.168.122.13   k8s.io      └─ monitoring/loki-0:loki:2af3610b2b9a                                                              140.98       124048028000
+192.168.122.13   k8s.io      └─ r55-data/postgres-2:postgres:cc78f169dabe                                                        132.43       74100719000
+192.168.122.13   k8s.io      └─ monitoring/loki-0:loki-sc-rules:f4fe35181791                                                     81.13        7584392000
+192.168.122.13   k8s.io      └─ cnpg-system/cnpg-controller-manager-6f488cd599-4xrvm:manager:8be0494e298d                        80.08        15565523000
+192.168.122.13   k8s.io      └─ kube-system/cilium-operator-9c8749c7b-258rt:cilium-operator:bccd0fc4b0a3                         56.34        28040336000

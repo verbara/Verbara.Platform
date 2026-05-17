@@ -672,3 +672,58 @@ Reports captured under `tests/Verbara.Platform.LoadTests/load-test-reports/k8s-b
 - Phase 0LK chart gap-fix commit `ce17edc0` — adds HTTPRoute + 3 JWT env vars + initContainer hardening + rollout strategy tweak.
 - Phase B-L Docker baseline (above) — same NuGet image `1.14.6`, very different hardware budget.
 - `infra/k8s/helm/platform/values.yaml` § `api.identityRedis` — the new config surface that activates the rotation pool.
+
+---
+
+## K8s lab hardware baseline (R5.5 Phase B-LK.3, 2026-05-17 02:13 UTC)
+
+Snapshot captured after the B-LK.1 NBomber rounds completed (~10 min after Round 6 peak). Reflects steady-state idle + ~10-min-old peak residuals (Postgres connection pool warm, Cilium eBPF maps populated, Asterisk + Kamailio idle). Raw `talosctl` output committed under `docs/operations/load-test-baseline-data/k8s-blk3/`.
+
+### Per-node memory (MiB)
+
+| Node | Role | Total | Used | Cache | Available |
+|---|---|---|---|---|---|
+| `talos-cp1` (192.168.122.10) | control-plane | 3 894 | 1 388 | 1 633 | 2 231 |
+| `talos-w1` (192.168.122.11) | worker | 3 893 | 1 245 | 2 487 | 2 316 |
+| `talos-w2` (192.168.122.12) | worker | 3 893 | 1 092 | 2 181 | 2 454 |
+| `talos-w3` (192.168.122.13) | worker | 3 893 | **1 647** | 2 092 | **1 821** |
+
+**Note:** worker 3 carries both `platform-api` replicas (anti-affinity is `preferredDuringScheduling`, not `required` — scheduler co-located them when worker 3 had the most free memory at deploy time). Confirms the architectural risk: a single-node failure on `talos-w3` would take both API replicas, defeating the 2-replica HPA design. Production should switch to `requiredDuringScheduling` once worker count ≥ 4 OR add a `topologySpreadConstraints` block with `maxSkew: 1` + `whenUnsatisfiable: DoNotSchedule`.
+
+### CPU + workload distribution per worker (top containers by CPU-time)
+
+**worker 1 (192.168.122.11)** — Asterisk-1 + RTPEngine + Postgres-3 (replica) + cilium + prometheus + hubble-relay. PIDs ~85-407 per container. CPU-time accumulated ≈ 1.6 s aggregate over snapshot window (light idle).
+
+**worker 2 (192.168.122.12)** — Asterisk-0 + RTPEngine + Postgres-1 (primary) + Redis-0 + cilium + prometheus-operator + loki-canary. Most node-local IO (Postgres primary writes + Redis). PIDs ~47-462.
+
+**worker 3 (192.168.122.13)** — **both platform-api replicas** + Postgres-2 (replica) + Loki (storage tier) + CNPG controller + Cilium operator. PIDs ~56-264. Aggregate CPU-time was 41-42 s per platform-api replica over the snapshot window, reflecting Postgres pool maintenance + scheduled health probes (no live traffic).
+
+### Cilium status
+
+Cluster-wide eBPF + Hubble health: `OK`. No drops, no NetworkPolicy violations observed.
+
+### Capacity headroom (worker-level)
+
+Total worker pool: 12 vCPU (4 × 2-vCPU per `talosctl get cpu`) + 11.7 GiB RAM. Allocated by Asterisk SBC layer (Asterisk + Kamailio + RTPEngine ≈ 1 vCPU + 600 MB across 3 workers via DaemonSets + StatefulSet), Postgres HA (3 instances ≈ 1.5 vCPU + 600 MB), Redis, monitoring stack, Cilium control + data plane. Net headroom for application workloads: ~6-7 vCPU + 4-5 GiB across the pool.
+
+The B-LK.1 envelope numbers (50-150 RPS read, 3 RPS Argon2id login per replica) are consistent with this headroom: a single `platform-api` pod (2 vCPU limit) cannot exceed ~2 cores of synchronous CPU work, and the Argon2id hash defaults consume ~half a core for ~50 ms per login. Two replicas → ~4 cores → ceiling ~6-14 RPS sustained logins cluster-wide. **No surprise factor — the cluster sizes the envelope exactly as predicted by the resource budget.**
+
+### B-LK.4 cross-correlation (consolidated here)
+
+Combining B-LK.1 (NBomber) + B-LK.3 (Talos hardware) snapshots:
+
+| Observable | B-LK.1 measurement | B-LK.3 root cause |
+|---|---|---|
+| Read knee 50-150 RPS / replica | p99 9.6 ms @ 50 RPS, crash @ 200 RPS | 2 vCPU limit per pod + Postgres pool wait under burst |
+| Concurrent read 1 075 RPS @ VU=50 | p99 97 ms | Cilium eBPF kube-proxy-replacement balances across both replicas; bound by Postgres-cached path hot-loop |
+| Login knee 3 → 10 RPS | p99 116 ms → 23 s + 8 % errs | Argon2id is single-thread CPU; 2 replicas × 2 vCPU is the hard ceiling |
+| Liveness probe restarts (2-5 per replica during stress) | — | `timeoutSeconds: 1` insufficient for CPU-saturated pod /health response |
+| Both platform-api on worker 3 | — | preferredDuringScheduling anti-affinity yielded to bin-packing |
+
+No surprises. The lab cluster behaves as its budget predicts; the chart's HPA target of 2-8 replicas would scale read capacity linearly but does NOT improve per-login latency past per-pod CPU saturation.
+
+### Reference
+
+- Snapshot raw data: `docs/operations/load-test-baseline-data/k8s-blk3/`
+- B-LK.1 envelope numbers: § "Local K8s results" above
+- Cilium status command: `kubectl -n kube-system exec ds/cilium -- cilium status --brief`

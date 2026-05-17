@@ -1,0 +1,8 @@
+192.168.122.11   k8s.io      └─ monitoring/prometheus-prometheus-prometheus-0:prometheus:185931b23581                       406.88       97374810000
+192.168.122.11   k8s.io      └─ kube-system/cilium-jcd65:cilium-agent:5eb10596d5cf                                          229.92       272634863000
+192.168.122.11   k8s.io      └─ r55-asterisk/rtpengine-b77v4:rtpengine:5fe4d0c34ab6                                         197.57       1224531000
+192.168.122.11   k8s.io      └─ r55-data/postgres-3:postgres:aa696f68c18d                                                   135.63       73155279000
+192.168.122.11   k8s.io      └─ r55-asterisk/asterisk-1:asterisk:b7bfcb526d61                                               116.22       95100192000
+192.168.122.11   k8s.io      └─ kube-system/cilium-envoy-llgfs:cilium-envoy:c8ccc1d70f5d                                    87.16        27748812000
+192.168.122.11   k8s.io      └─ monitoring/prometheus-kube-state-metrics-5d4654dd56-v2dbv:kube-state-metrics:4f5ad5ccc757   86.62        12506665000
+192.168.122.11   k8s.io      └─ kube-system/hubble-relay-599d47597b-ltlj8:hubble-relay:7aec4de5abfe                         84.87        3932247000

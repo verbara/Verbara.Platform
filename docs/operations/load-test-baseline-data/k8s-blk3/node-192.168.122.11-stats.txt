@@ -1,0 +1,2 @@
+NODE             NAMESPACE   ID     MEMORY(MB)   CPU
+192.168.122.11   system      apid   16.11        857874000

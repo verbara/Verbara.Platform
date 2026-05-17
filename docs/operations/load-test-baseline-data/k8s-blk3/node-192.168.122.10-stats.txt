@@ -1,0 +1,3 @@
+NODE             NAMESPACE   ID       MEMORY(MB)   CPU
+192.168.122.10   system      apid     15.09        870556000
+192.168.122.10   system      trustd   14.68        868992000

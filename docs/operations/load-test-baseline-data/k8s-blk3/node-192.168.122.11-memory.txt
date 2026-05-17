@@ -1,0 +1,2 @@
+NODE             TOTAL   USED   FREE   SHARED   BUFFERS   CACHE   AVAILABLE
+192.168.122.11   3893    1245   159    129      1         2487    2316

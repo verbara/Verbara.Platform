@@ -1,0 +1,8 @@
+192.168.122.12   k8s.io      └─ kube-system/cilium-8n9v9:cilium-agent:c85e53ae57b4                                                462.36       300385617000
+192.168.122.12   k8s.io      └─ r55-asterisk/rtpengine-lvqpx:rtpengine:e427f68b74f2                                               194.71       1237071000
+192.168.122.12   k8s.io      └─ r55-data/postgres-1:postgres:96ad704aa236                                                         165.24       172351998000
+192.168.122.12   k8s.io      └─ kube-system/cilium-envoy-f5cgq:cilium-envoy:ab11c3bc9b81                                          141.48       54594603000
+192.168.122.12   k8s.io      └─ r55-asterisk/asterisk-0:asterisk:545c334cf105                                                     116.20       97278050000
+192.168.122.12   k8s.io      └─ monitoring/prometheus-operator-5c9b6659d5-j2gwt:kube-prometheus-stack:238e42b7a4a6                88.53        22270019000
+192.168.122.12   k8s.io      └─ r55-data/redis-0:redis:29e88156aa23                                                               71.12        69672930000
+192.168.122.12   k8s.io      └─ monitoring/loki-canary-4qfhd:loki-canary:4fe77d44202f                                             47.49        13079509000

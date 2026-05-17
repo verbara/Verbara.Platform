@@ -1,0 +1,5 @@
+NODE             NAMESPACE   TYPE        ID      VERSION   MANUFACTURER   MODEL            CORES   THREADS
+192.168.122.12   hardware    Processor   CPU-0   1         QEMU           pc-i440fx-10.0   1       1
+192.168.122.12   hardware    Processor   CPU-1   1         QEMU           pc-i440fx-10.0   1       1
+192.168.122.12   hardware    Processor   CPU-2   1         QEMU           pc-i440fx-10.0   1       1
+192.168.122.12   hardware    Processor   CPU-3   1         QEMU           pc-i440fx-10.0   1       1
