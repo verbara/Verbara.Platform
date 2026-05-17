@@ -29,6 +29,16 @@ data:
     loadmodule "ctl.so"
     loadmodule "jsonrpcs.so"
 
+    # Round 4 #3 (SIP timer T1 tuning) attempted on 2026-05-17 but rolled
+    # back the same session — bumping `fr_timer` from default 30s to 5s
+    # accidentally TIGHTENED the timeout (it's the final-response timer,
+    # not the retransmit interval) and broke valid BYE 200 OK arrivals.
+    # The actual T1 retransmit interval (500 ms) is hardcoded in Kamailio
+    # core (`cfg_get(tm, retr_timer1)`) and not configurable via cfg in
+    # this 5.8 build. Real fix requires either rebuilding tm with a
+    # different default OR reducing the LB-IP UDP path latency (the real
+    # source of retransmit-trigger). Deferred to Phase F follow-up.
+
     modparam("dispatcher", "list_file", "/etc/kamailio/dispatcher.list")
     modparam("dispatcher", "ds_ping_interval", 30)
     modparam("dispatcher", "ds_probing_mode", 1)

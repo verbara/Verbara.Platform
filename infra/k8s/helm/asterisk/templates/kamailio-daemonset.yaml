@@ -91,23 +91,32 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 30
-          # postStart hook: wait for Kamailio + the dispatcher targets to
-          # settle, then force a `dispatcher.reload`. This works around the
-          # cold-start race where the first OPTIONS probe (sent within ~1 s
-          # of process start) fails because the destination ClusterIP /
-          # LoadBalancer eBPF map is not yet populated for the new pod's
-          # network namespace, leaving the destination flagged Inactive
-          # forever (FLAGS: IP). ds_probing_threshold=3 in kamailio.cfg
-          # prevents flap during steady-state but does NOT override the
-          # initial-Inactive marker. This hook is the documented work-
-          # around per Phase 0LK gap-fix round 3 (2026-05-17).
+          # postStart hook: event-driven dispatcher.reload until at least
+          # one destination is Active (FLAGS contains 'A'). The earlier
+          # fixed `sleep 20` (Phase 0LK gap-fix round 3) was empirically
+          # insufficient on talos-w3 (post-restart dispatcher took >30 s to
+          # see a successful OPTIONS probe response). This loop retries
+          # every 5 s for up to 60 s. If the dispatcher never goes Active
+          # (Cilium L2 hairpin on the L2-owner node), the loop exits
+          # silently and the pod continues — operator can confirm via
+          # `kamcmd dispatcher.list`. Phase 0LK gap-fix round 4
+          # (2026-05-17).
           lifecycle:
             postStart:
               exec:
                 command:
                   - sh
                   - -c
-                  - "sleep 20 && kamcmd dispatcher.reload >/dev/null 2>&1 || true"
+                  - |
+                    sleep 5
+                    for i in $(seq 1 12); do
+                      kamcmd dispatcher.reload >/dev/null 2>&1 || true
+                      sleep 5
+                      if kamcmd dispatcher.list 2>/dev/null | grep -q "FLAGS: A"; then
+                        exit 0
+                      fi
+                    done
+                    exit 0  # never fail postStart even if dispatcher never goes Active
       volumes:
         - name: config
           configMap:
