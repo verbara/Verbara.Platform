@@ -158,6 +158,8 @@ Exact lines live in `src/Verbara.Platform.Api/Program.cs` — this section only 
 | `docs/plans/archived/` | Skeletons / superseded / abandoned plans | Append-only |
 | `docs/research/` | Exploratory findings, market analysis, discovery | Freeform |
 | `docs/research/archived/` | Older research kept for context | Append-only |
+| `docs/manuales/smb/` | **Customer-facing manuales (español)** — step-by-step deployment guide for SMB on-premise; the source of truth for the operator that installs Verbara at a customer site. 12 archivos cubriendo install (01) → arranque (02) → setup wizard (03) → 3 canales V1 (04 WebChat, 05 Email, 06 Voz/SIP) → validación E2E (07) → troubleshooting SIP (08) + general (99) + checklist firmable + capacity reference. Cualquier cambio en `docker/docker-compose.reference-smb.yml`, `scripts/quickstart-smb.sh`, o el flujo del setup wizard DEBE reflejarse acá en el mismo commit. | Edit on relevant feature change |
+| `docs/manuales/k8s/` (Fase 2 — pending) | Customer-facing K8s on-prem manuales — spejean los SMB para deploy K8s | Future |
 
 After `ExitPlanMode` approval, copy the system-path plan file (`~/.claude/plans/*.md`) into `docs/plans/active/` with a date-prefixed meaningful name — the repo is authoritative. When the plan ships, `git mv` it to `docs/plans/completed/`.
 
