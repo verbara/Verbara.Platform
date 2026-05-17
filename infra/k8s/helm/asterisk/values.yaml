@@ -37,7 +37,15 @@ kamailio:
 rtpengine:
   image:
     repository: fonoster/rtpengine
-    tag: "latest"
+    # Pinned 2026-05-17 (Phase 0LK gap-fix round 3) — kept fonoster
+    # because it accepts the chart's RTPENGINE_* env vars (drachtio
+    # uses /etc/rtpengine.conf with sed substitution + cloud-detection,
+    # not compatible without a chart rewrite). The fonoster image is
+    # very minimal (no pgrep / nc / ss / ps), so probes were removed
+    # entirely — for a hostNetwork single-process daemon, K8s' default
+    # "container Started ⇒ Ready" semantics are adequate. Tag pin
+    # prevents future `latest` drift from re-breaking probe assumptions.
+    tag: "0.3.17"
   hostNetwork: true
   rtpPortMin: 10000
   rtpPortMax: 10500

@@ -49,29 +49,13 @@ spec:
             limits:
               cpu: "2"
               memory: 1Gi
-          readinessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - "echo 'd 3' | nc -u -w1 127.0.0.1 22222 | grep -q 'result'"
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - "echo 'd 3' | nc -u -w1 127.0.0.1 22222 | grep -q 'result'"
-            initialDelaySeconds: 15
-            periodSeconds: 30
-            failureThreshold: 3
-          startupProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - "echo 'd 3' | nc -u -w1 127.0.0.1 22222 | grep -q 'result'"
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 30
+          # NO probes — fonoster/rtpengine:0.3.17 is too minimal to ship
+          # any of pgrep / nc / ss / ps, and shelling out via env-driven
+          # check is not viable. For a hostNetwork single-process daemon,
+          # the container's Running state is a strong-enough Ready
+          # indicator (rtpengine binds its NG socket within ~1 s of start;
+          # if it crashes the kubelet restart loop catches it via
+          # restartPolicy). Production-grade alternative: ship a tiny
+          # sidecar with iproute2 to run the ss-based probe, OR rebuild
+          # the rtpengine image with procps included. Tracked as Phase F
+          # follow-up. (Phase 0LK gap-fix round 3, 2026-05-17.)

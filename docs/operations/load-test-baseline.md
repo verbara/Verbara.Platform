@@ -818,3 +818,92 @@ Logs captured under `sipp-reports/k8s-blk2-baseline/`.
 - Phase B-LK.1 + B-LK.5 envelope (NBomber) — same Phase 0LK methodology issues led to today's fix bundle.
 - Asterisk dialplan + pjsip configmap: `infra/k8s/helm/asterisk/templates/asterisk-configmap.yaml`.
 - SBC path gaps captured in memory `project_r55_k8s_real_state_2026_05_16.md` § "Still deferred".
+
+---
+
+## K8s lab SIP signaling — SBC chain extension (R5.5 Phase 0LK gap-fix round 3, 2026-05-17)
+
+Closes — partially — the SBC chain path (SIPp → Kamailio → Asterisk via Cilium L2 LoadBalancer IP) that was deferred from the B-LK.2 baseline run earlier. Three chart-level gaps were closed to make this possible:
+
+### Chart changes (shipped commit `<pending>` round 3)
+
+1. **rtpengine image pin + probe removal** (`infra/k8s/helm/asterisk/values.yaml` + `templates/rtpengine-daemonset.yaml`)
+   - Pinned `fonoster/rtpengine:0.3.17` (was `latest`). The previous chart used `nc`-based UDP NG probes that broke when fonoster pushed a `latest` build that dropped `nc`. Followup attempts to use `pgrep` (not in image) or switch to `drachtio/rtpengine` (incompatible env-var contract — uses sed-substituted config file) both failed. Final state: keep fonoster, drop all probes. For a hostNetwork single-process daemon, the container's Running state is a strong-enough Ready indicator. **Tracked as Phase F follow-up:** rebuild a minimal rtpengine image that includes procps so probes can be re-enabled.
+2. **kamailio initContainer resources** (`templates/kamailio-daemonset.yaml`)
+   - `wait-for-asterisk-dns` initContainer now declares `cpu/memory requests + limits`. r55-asterisk-quota was rejecting 16 consecutive DaemonSet `FailedCreate` events because the init container lacked them. Same pattern as the platform-api initContainer fix in commit `ce17edc0` round 1.
+3. **kamailio postStart auto-reload hook**
+   - `lifecycle.postStart.exec: sleep 20 && kamcmd dispatcher.reload || true`. Works around the cold-start race where the first OPTIONS probe (sent within ~1 s of process start) fails because the destination LoadBalancer eBPF map is not yet populated for the new pod's network namespace, leaving the destination flagged `Inactive` forever. With this hook, the dispatcher reload happens 20 s after pod start and refreshes the probe state.
+
+### Measured SBC chain envelope
+
+Test path: SIPp pod (pod network) → Kamailio worker 2 (hostNetwork, dispatcher Active) → Cilium L2 LB IP `192.168.122.201:5060` → backend Asterisk pod (round-robin).
+
+| Profile | Calls | Rate | Concurrent peak | Successful | Retransmits | Timeouts | Notes |
+|---|---|---|---|---|---|---|---|
+| Smoke | 10 | 2 cps | 5 | **10/10 (100 %)** | 30 × 200OK + 30 × ACK + 18 × BYE | 0 | OK — retransmits suggest path latency |
+| Baseline | 50 | 5 cps | 20 (peak: 20) | **50/50 (100 %)** | 150 × 200OK + 150 × ACK + 96 × BYE | 0 | All INVITE→BYE cycles completed |
+
+All INVITE → 100 → 200 OK → ACK → 5 s pause → BYE → 200 OK transactions completed. Retransmits indicate the LB IP UDP path has higher latency / packet loss than the direct pod-to-pod path measured earlier. The pattern is consistent with Cilium's `kubeProxyReplacement: true` + `hostFirewall: true` adding extra hops for hostNetwork↔LoadBalancer traffic, which the SIP retransmit timers (T1 default 500 ms) end up triggering before the late ack arrives.
+
+### Cilium L2 announce + hostNetwork hairpin — root cause for the originally observed "broken LB" issue
+
+Verified during round 3 execution that the LB IP works **from cluster pod-network sources** (3/3 OK from a sipp pod, then 50/50 OK from sipp via Kamailio w2) but **fails when source is hostNetwork on the same node as the L2 announce owner**. Current L2 lease state:
+
+| Lease | Owner node |
+|---|---|
+| `cilium-l2announce-r55-asterisk-asterisk-sip` | `talos-w1` |
+| `cilium-l2announce-default-cilium-gateway-platform-gateway` | `talos-w2` |
+
+Kamailio dispatcher state after 35 s settle (post `postStart` hook reload):
+
+| Kamailio pod | Node | Dispatcher FLAGS | Path works? |
+|---|---|---|---|
+| `kamailio-95slb` | `talos-w1` (same as L2 owner) | **IP** (Inactive) | Probe fails — hairpin |
+| `kamailio-dd7tt` | `talos-w2` | **AP** (Active) | YES — used for baseline above |
+| `kamailio-n9q9d` | `talos-w3` | **IP** (Inactive) | Probe fails — root cause TBD |
+
+Workers w1 + w3 stayed Inactive even after the postStart `dispatcher.reload`. w1 is explained by the hairpin (its OPTIONS probe targets the LB IP that lives on the same node — Cilium short-circuits but the path doesn't actually deliver). w3 should not have the hairpin issue but still didn't recover; likely the postStart hook fired before the dispatcher had finished initial OPTIONS round. **Tracked as Phase 0LK gap-fix round 4 / Phase F:**
+
+1. **Cilium L2 hairpin** — hostNetwork → same-node L2-announced LoadBalancer IP requires `cilium.spec.bpf.lbBypassFIBLookup` or moving L2 announce to a dedicated non-Kamailio node. Better long-term fix: split the L2 announcement node pool to exclude all SBC-layer nodes.
+2. **postStart hook timing** — `sleep 20` is empirically too short for w3. Either bump to 30-45 s OR rewrite to be event-driven (`until kamcmd dispatcher.list | grep -q AX; do sleep 2; kamcmd dispatcher.reload; done` with a max-iterations cap).
+3. **High retransmits at 5 cps** — investigate whether bumping `timer_t1=1000` in kamailio.cfg (currently 500 ms) absorbs the LB path latency. May indicate Cilium L2 announce needs `loadBalancerSourceRanges` tuning.
+
+### Reproducibility (SBC chain)
+
+```bash
+# After Phase 0LK gap-fix round 3 ship (this commit), find a Kamailio
+# pod on a node DIFFERENT from the L2-announce owner:
+export KUBECONFIG=$HOME/.kube/config-talos
+ACTIVE_KAMA=$(kubectl -n r55-asterisk get pod -l app.kubernetes.io/name=kamailio \
+  -o jsonpath='{range .items[*]}{.metadata.name} {.spec.nodeName}{"\n"}{end}' \
+  | while read pod node; do
+      flags=$(kubectl -n r55-asterisk exec "$pod" -c kamailio -- \
+        kamcmd dispatcher.list 2>/dev/null | grep FLAGS | awk '{print $2}')
+      [[ "$flags" == "AP" || "$flags" == "AX" ]] && echo "$node" && break
+    done)
+WORKER_IP=$(kubectl get node "$ACTIVE_KAMA" -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+echo "Active Kamailio on $ACTIVE_KAMA ($WORKER_IP)"
+
+cat <<YAML | kubectl -n r55-asterisk apply -f -
+apiVersion: v1
+kind: Pod
+metadata: { name: sipp-sbc }
+spec:
+  restartPolicy: Never
+  containers:
+    - name: sipp
+      image: ctaloi/sipp:latest
+      command: [sipp, -sf, /scenarios/01-basic-call.xml, -s, queue-1,
+                -m, "50", -r, "5", -l, "20",
+                "$WORKER_IP:5060"]
+      volumeMounts: [{ name: scenarios, mountPath: /scenarios, readOnly: true }]
+      resources:
+        requests: { cpu: 100m, memory: 64Mi }
+        limits: { cpu: 500m, memory: 256Mi }
+  volumes:
+    - { name: scenarios, configMap: { name: sipp-scenarios } }
+YAML
+kubectl -n r55-asterisk logs -f sipp-sbc
+```
+
+Logs at `sipp-reports/k8s-blk2-sbc/round{1,2}-*-sbc.log`.

@@ -26,6 +26,18 @@ spec:
       initContainers:
         - name: wait-for-asterisk-dns
           image: busybox:1.37
+          # ResourceQuota r55-asterisk-quota requires every container
+          # (init included) to declare limits + requests. Phase 0LK
+          # gap-fix round 3 — was the blocker for the kamailio DaemonSet
+          # rolling restart in 2026-05-17 (16 consecutive FailedCreate
+          # events before this was added).
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
           command:
             - sh
             - -c
@@ -79,6 +91,23 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 30
+          # postStart hook: wait for Kamailio + the dispatcher targets to
+          # settle, then force a `dispatcher.reload`. This works around the
+          # cold-start race where the first OPTIONS probe (sent within ~1 s
+          # of process start) fails because the destination ClusterIP /
+          # LoadBalancer eBPF map is not yet populated for the new pod's
+          # network namespace, leaving the destination flagged Inactive
+          # forever (FLAGS: IP). ds_probing_threshold=3 in kamailio.cfg
+          # prevents flap during steady-state but does NOT override the
+          # initial-Inactive marker. This hook is the documented work-
+          # around per Phase 0LK gap-fix round 3 (2026-05-17).
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - "sleep 20 && kamcmd dispatcher.reload >/dev/null 2>&1 || true"
       volumes:
         - name: config
           configMap:
