@@ -1,0 +1,21 @@
+# Chaos #06 — Inject 200ms network delay on Platform.Api pods for 60s.
+# Tests latency tolerance of clients + measures effective p99 under degraded
+# network conditions. NBomber baseline measured p99 ~10ms for reads; with
+# 200ms delay we expect p99 ~210ms, no error increase.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: platform-api-network-delay
+  namespace: r55-platform
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces: [r55-platform]
+    labelSelectors:
+      app.kubernetes.io/name: platform-api
+  delay:
+    latency: 200ms
+    correlation: '50'
+    jitter: 50ms
+  duration: 60s

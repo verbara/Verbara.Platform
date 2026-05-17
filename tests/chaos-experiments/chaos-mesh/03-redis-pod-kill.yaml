@@ -1,0 +1,18 @@
+# Chaos #03 — Kill Redis pod.
+# Redis is the JWT rotation pool store + IJtiRevocationCache. Killing it should:
+# - Briefly fail new logins (DataProtection still works via Postgres)
+# - Existing tokens validate via cached key entries until rotation pool re-syncs
+# - Pod restarts in <30s; replicas re-fetch state from persistent volume
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: redis-pod-kill
+  namespace: r55-data
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces: [r55-data]
+    labelSelectors:
+      app: redis
+  duration: 0s

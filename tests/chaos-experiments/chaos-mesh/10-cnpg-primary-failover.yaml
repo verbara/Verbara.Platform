@@ -1,0 +1,21 @@
+# Chaos #10 — Kill CloudNativePG primary. Forces automated failover to
+# a replica.
+# CNPG operator should detect lost primary and promote one of the replicas
+# within 30s. Platform.Api connection pool should reconnect transparently
+# (PgBouncer pooler routes to the new primary via Service DNS).
+#
+# Most invasive chaos in this suite — keep for last and observe closely.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: cnpg-primary-failover
+  namespace: r55-data
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces: [r55-data]
+    labelSelectors:
+      cnpg.io/cluster: postgres
+      role: primary
+  duration: 0s

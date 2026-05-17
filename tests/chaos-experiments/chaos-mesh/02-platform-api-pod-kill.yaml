@@ -1,0 +1,17 @@
+# Chaos #02 — Kill one Platform.Api replica.
+# Validates HPA + JWT rotation pool: surviving replica should keep issuing
+# valid tokens, and the killed pod's reschedule should not re-fetch RSA keys
+# (ADR-0012 Redis-backed rotation pool means new pod uses pre-existing keys).
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: platform-api-pod-kill
+  namespace: r55-platform
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces: [r55-platform]
+    labelSelectors:
+      app.kubernetes.io/name: platform-api
+  duration: 0s

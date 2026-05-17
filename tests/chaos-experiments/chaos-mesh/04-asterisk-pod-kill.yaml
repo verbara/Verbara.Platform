@@ -1,0 +1,18 @@
+# Chaos #04 — Kill Asterisk pod (one of two).
+# Validates Kamailio dispatcher's automatic failover to the surviving Asterisk
+# backend. With 2 Asterisk pods behind LB, killing one should result in zero
+# call drops if SBC chain is healthy; Kamailio dispatcher should mark the
+# killed backend Inactive within one probe cycle.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: asterisk-pod-kill
+  namespace: r55-asterisk
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces: [r55-asterisk]
+    labelSelectors:
+      app.kubernetes.io/name: asterisk
+  duration: 0s

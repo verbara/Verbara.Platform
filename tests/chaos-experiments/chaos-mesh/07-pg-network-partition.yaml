@@ -1,0 +1,28 @@
+# Chaos #07 — Partition Postgres primary from r55-platform for 60s.
+# Tests Platform.Api's behavior when DB is unreachable:
+# - In-flight queries should fail with 5xx
+# - Health probe /health/ready should turn unhealthy → pod marked NotReady
+# - On partition heal, queries should resume; Platform.Api should auto-reconnect
+# (Npgsql connection pool re-validates connections; ADR-0015 Phase 2 shared
+#  data source has retry-on-failure for new acquisitions)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: pg-network-partition
+  namespace: r55-data
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces: [r55-data]
+    labelSelectors:
+      cnpg.io/cluster: postgres
+      role: primary
+  direction: from
+  target:
+    mode: all
+    selector:
+      namespaces: [r55-platform]
+      labelSelectors:
+        app.kubernetes.io/name: platform-api
+  duration: 60s

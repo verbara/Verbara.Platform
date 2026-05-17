@@ -1,0 +1,23 @@
+# Chaos #08 — CPU stress on Platform.Api pods for 90s.
+# Saturates Platform.Api to ~100% CPU. Should:
+# - Trigger HPA scale-up from 2 to 4+ replicas (with metrics-server installed;
+#   if not, HPA stays at 2)
+# - Surface readiness probe back-pressure (matches the manual NBomber stress
+#   observation that liveness was too aggressive at 1s timeout)
+# - Eventually recover when stress lifts
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: platform-api-cpu-stress
+  namespace: r55-platform
+spec:
+  mode: all
+  selector:
+    namespaces: [r55-platform]
+    labelSelectors:
+      app.kubernetes.io/name: platform-api
+  stressors:
+    cpu:
+      workers: 4
+      load: 90
+  duration: 90s

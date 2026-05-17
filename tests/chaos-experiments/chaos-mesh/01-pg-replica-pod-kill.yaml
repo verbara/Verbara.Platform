@@ -1,0 +1,18 @@
+# Chaos #01 — Kill one Postgres replica pod.
+# Lowest-risk experiment (CNPG instantly reschedules + promotes another replica
+# as primary if needed; data is replicated). Validates pod restart resilience
+# + readiness gates.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pg-replica-pod-kill
+  namespace: r55-data
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces: [r55-data]
+    labelSelectors:
+      cnpg.io/cluster: postgres
+      role: replica
+  duration: 0s

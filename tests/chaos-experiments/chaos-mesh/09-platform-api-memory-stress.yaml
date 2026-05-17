@@ -1,0 +1,22 @@
+# Chaos #09 — Memory stress on Platform.Api pods.
+# Allocates 1.5Gi (below 2Gi limit) to stay within pod budget but force GC
+# pressure + heap expansion. Should:
+# - Increase GC pause times (visible in Grafana .NET runtime dashboards)
+# - Not trigger OOMKill (allocation stays under limit)
+# - Validate that pods don't crash under sustained memory load
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: platform-api-memory-stress
+  namespace: r55-platform
+spec:
+  mode: all
+  selector:
+    namespaces: [r55-platform]
+    labelSelectors:
+      app.kubernetes.io/name: platform-api
+  stressors:
+    memory:
+      workers: 1
+      size: 1500MB
+  duration: 60s

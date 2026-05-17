@@ -28,6 +28,82 @@ PG_USER="${PG_USER:-platform}"
 PG_DB="${PG_DB:-platform}"
 RECOVERY_SLEEP="${RECOVERY_SLEEP:-30}"
 
+# ---------------------------------------------------------------------------
+# K8s mode (R5.5 Phase C-LK) — iterates Chaos Mesh CRD manifests under
+# tests/chaos-experiments/chaos-mesh/. Selected via `--k8s` first arg.
+# Independent code path: no pumba, no docker, no Postgres pg_dumpall (would
+# be wrong target anyway — CNPG primary lives inside the cluster, not on the
+# host's docker daemon). Snapshots are kubectl-based.
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "--k8s" ]; then
+    OBSERVE_SEC="${OBSERVE_SEC:-90}"
+    K8S_EXP_DIR="$ROOT/tests/chaos-experiments/chaos-mesh"
+    REPORT_DIR="${REPORT_DIR:-$ROOT/chaos-reports/$(date +%Y%m%d-%H%M%S)}"
+
+    if [ -z "${KUBECONFIG:-}" ]; then
+        echo "[chaos-k8s] FATAL: KUBECONFIG env var required" >&2
+        exit 1
+    fi
+    if ! command -v kubectl >/dev/null 2>&1; then
+        echo "[chaos-k8s] FATAL: kubectl not on PATH" >&2
+        exit 1
+    fi
+    if ! kubectl get crd podchaos.chaos-mesh.org >/dev/null 2>&1; then
+        echo "[chaos-k8s] FATAL: Chaos Mesh CRDs not installed." >&2
+        echo "[chaos-k8s]        See tests/chaos-experiments/chaos-mesh/README.md" >&2
+        exit 1
+    fi
+
+    mkdir -p "$REPORT_DIR"
+    echo "[chaos-k8s] reports: $REPORT_DIR"
+    echo "[chaos-k8s] observation window: ${OBSERVE_SEC}s per experiment"
+
+    kubectl get pods -A -o wide > "$REPORT_DIR/00-pre-snapshot-pods.txt" 2>&1
+
+    for exp in "$K8S_EXP_DIR"/*.yaml; do
+        [ -f "$exp" ] || continue
+        NAME=$(basename "$exp" .yaml)
+        echo ""
+        echo "[chaos-k8s] === $NAME ==="
+        LOG="$REPORT_DIR/$NAME.log"
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) applying" > "$LOG"
+
+        if ! kubectl apply -f "$exp" >> "$LOG" 2>&1; then
+            echo "[chaos-k8s] $NAME — apply failed"
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) apply-failed" >> "$LOG"
+            continue
+        fi
+
+        echo "[chaos-k8s] $NAME — applied; observing ${OBSERVE_SEC}s..."
+        sleep "$OBSERVE_SEC"
+
+        {
+            echo ""
+            echo "=== Chaos object status ==="
+            kubectl get -f "$exp" -o yaml 2>&1
+            echo ""
+            echo "=== Pods after observation ==="
+            kubectl get pods -A -o wide 2>&1
+        } >> "$LOG"
+
+        kubectl delete -f "$exp" --ignore-not-found >> "$LOG" 2>&1
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) cleaned" >> "$LOG"
+        echo "[chaos-k8s] $NAME — cleaned"
+    done
+
+    kubectl get pods -A -o wide > "$REPORT_DIR/zz-post-snapshot-pods.txt" 2>&1
+
+    echo ""
+    echo "[chaos-k8s] suite complete. Reports: $REPORT_DIR"
+    echo "[chaos-k8s] Diff pre/post pod state:"
+    echo "[chaos-k8s]   diff $REPORT_DIR/00-pre-snapshot-pods.txt $REPORT_DIR/zz-post-snapshot-pods.txt"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Default mode (R5.5 Phase C-L) — Pumba against docker-compose stack.
+# ---------------------------------------------------------------------------
+
 if ! command -v pumba >/dev/null 2>&1; then
     echo "[chaos] FAIL: pumba not found on PATH." >&2
     echo "[chaos]       Install with:" >&2

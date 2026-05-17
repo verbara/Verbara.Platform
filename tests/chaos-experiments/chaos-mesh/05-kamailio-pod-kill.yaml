@@ -1,0 +1,18 @@
+# Chaos #05 — Kill one Kamailio SBC pod.
+# Kamailio is a DaemonSet (one per worker). Killing one should cause
+# DaemonSet controller to immediately re-create + postStart hook to fire
+# dispatcher.reload. SIPp traffic via other Kamailio pods should be
+# unaffected.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: kamailio-pod-kill
+  namespace: r55-asterisk
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces: [r55-asterisk]
+    labelSelectors:
+      app.kubernetes.io/name: kamailio
+  duration: 0s
