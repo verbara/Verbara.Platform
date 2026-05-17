@@ -19,7 +19,7 @@ internal static partial class JwtScenario
 
     public static ScenarioProps Build(string baseUrl)
     {
-        var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        var http = Verbara.Platform.LoadTests.Infrastructure.LoadTestHttpClient.Create(baseUrl);
 
         // Staging-aware credentials. Defaults match the R5.4 fixture
         // (`loadtest` tenant + `loadtest@loadtest.local` user). When run via

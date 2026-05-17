@@ -27,7 +27,7 @@ internal static class LiveQueueWriterScenario
 {
     public static ScenarioProps Build(string baseUrl)
     {
-        var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        var http = Verbara.Platform.LoadTests.Infrastructure.LoadTestHttpClient.Create(baseUrl);
         var token = Environment.GetEnvironmentVariable("LOADTEST_TOKEN") ?? "";
         var tenant = Environment.GetEnvironmentVariable("LOADTEST_TENANT") ?? "loadtest";
         // Fixture tenant has 1 queue called loadtest-{0..N-1}. Seeded staging

@@ -586,3 +586,89 @@ Per-step screen logs at `/tmp/scenario-sweep-<scenario>-r<rate>.log`.
 - Plan: `docs/plans/active/2026-04-27-r5.5-execution-plan.md` § "Phase C-L · Task C-L.1"
 - Phase 2 baseline above (presence-only ladder)
 - ADR-0015 § "Phase 2 measured impact"
+
+---
+
+## Local K8s results (R5.5 Phase B-LK, 2026-05-16)
+
+**Cluster:** Talos v1.13.0 + K8s 1.36.0 + Cilium 1.19.3 (eBPF). 1 CP + 3 workers as KVM VMs (per worker: 2 vCPU per `talosctl get cpu`, 4 GB RAM, 40 GB qcow2). Total cluster capacity ~10 vCPU + 12 GB RAM divided across CNPG postgres-HA (3 instances), pgbouncer (2), redis, asterisk x2, kamailio + rtpengine DaemonSets x3 each, monitoring stack, plus Platform.Api + Web. Net headroom for platform-api when idle: ~2 vCPU per replica, ~512 Mi-2 Gi RAM (per chart).
+
+**Image:** `192.168.122.1:5050/asterisk-platform/api:1.14.6` (pre-rebrand, matching Phase B-L Docker baseline by design).
+
+**Access path:** NBomber on host → Cilium L2-announced Gateway IP `192.168.122.192:80` → HTTPRoute `r55-platform/platform-api` (host `api.r55.local`) → Service `platform-api:5000` → Pods. Hostname resolved client-side via the `LOADTEST_RESOLVE=api.r55.local:192.168.122.192` env var (consumed by `LoadTestHttpClient.ConnectCallback` — added 2026-05-16 to avoid sudo on `/etc/hosts`).
+
+### Measured envelope (per-scenario, 60 s, single ramp)
+
+| Scenario | Profile | Sustained | p50 | p95 | p99 | Outcome |
+|---|---|---|---|---|---|---|
+| `queue_ingestion` (GET /admin/queues — Postgres-cached read) | Inject 50 RPS × 60 s | **50 RPS** | 3.1 ms | 5.7 ms | **9.6 ms** | 3000 / 3000 OK ✅ |
+| `presence_broadcast` (GET /admin/agents — concurrent read) | KeepConstant 50 VU × 60 s | **1 075 RPS** | 47 ms | 87 ms | **97 ms** | 64 516 / 64 516 OK ✅ |
+| `jwt_issuance_validation` (POST /auth/login + Argon2id) | Inject 3 RPS × 60 s | **3 RPS** | 51 ms | 70 ms | **116 ms** | 180 / 180 OK ✅ |
+| `jwt_issuance_validation` (push attempt) | Inject 10 RPS × 30 s | — | 57 ms | 656 ms | **23 183 ms** | 47/51 OK + 4 × 500 ❌ (knee passed) |
+| `queue_ingestion` (push attempt) | Inject 200 RPS × 60 s | — | — | — | — | 0 / 0 OK — pods crashed mid-ramp ❌ |
+| `live_queue_snapshot_write` | Inject 30 RPS × 60 s | N/A | — | — | — | 1800 × 404 NotFound (Pro.Analytics feature disabled in this deployment — scenario invalid) |
+| `agent_assist_session_start` | Inject 50 RPS × 25 s | N/A | — | — | — | 1800 × 503 ServiceUnavailable (AgentAssist feature toggle off — scenario invalid) |
+
+### Knees observed
+
+- **Read-heavy (Postgres-cached):** breakeven at **≥ 50 RPS per replica**; cliff between 50 and 200 RPS (200 RPS crashed liveness probes on both replicas). Probable per-replica read ceiling for SMB sustained: **~80–150 RPS** with current 500 m CPU request / 2 vCPU limit per pod.
+- **Read concurrent (KeepConstant VU):** **1 075 RPS observed at VU = 50** with p99 just under 100 ms SLO. The presence endpoint scales well under VU pressure because Cilium eBPF kube-proxy-replacement balances across both replicas + the response is small + Postgres is hit only on first request per second (cached in-process).
+- **Write/login (Argon2id):** **3 RPS sustained** with p99 ≤ 120 ms; jumped to **p99 = 23 s at 10 RPS** with 8 % errors. Knee is in the 3-7 RPS band per replica. Two replicas → ~6-14 RPS cluster-wide sustained logins. Argon2id is single-threaded CPU bottleneck; can only scale horizontally with more pods.
+
+### Comparison vs Phase B-L Docker baseline
+
+**Methodology note:** the two baselines are NOT directly comparable. Phase B-L ran NBomber against `docker-compose-full.yml + smb.yml` on the host (24 cores × 60 GB RAM, all containers contending). Phase B-LK ran NBomber against the same NuGet code (image `1.14.6`) inside Talos cluster lab (3 × 2 vCPU × 4 GB RAM VMs, sharing the same host). The K8s lab has roughly 1/4 the CPU and 1/5 the RAM available for app workload after subtracting Postgres, Asterisk SBC layer, and observability stack. Order-of-magnitude differences are dominated by hardware budget, not by K8s overhead.
+
+| Metric | Docker B-L (host hardware) | K8s B-LK (lab cluster) | Ratio |
+|---|---|---|---|
+| Read sustained (queues) | 5 000–10 000 RPS / replica | 50–150 RPS / replica | ≈ 1/50 |
+| Read knee (queues) | 5 k → 10 k RPS | 50 → 200 RPS | ≈ 1/50 |
+| Login sustained (jwt) | 50–75 RPS / replica | 3 RPS / replica | ≈ 1/20 |
+| Presence p99 @ moderate VU | < 10 ms | 97 ms @ VU=50 | order of magnitude |
+
+A proper K8s-vs-Docker overhead comparison requires Phase B-C (cloud cluster with hardware budget equivalent to the Docker B-L host). For SMB-tier production sizing, **scale the cluster lab numbers by the CPU+RAM ratio of the target node pool**.
+
+### Side-effects worth recording (operational findings)
+
+1. **Liveness probe is too aggressive for stressed-pod recovery.** Default `timeoutSeconds: 1` killed pods that were CPU-saturated but still responsive — see B-LK.1 Round 2 (after 13 k req burst, both pods cycled through 2-5 restarts over 5 minutes before stabilising). Recommend `timeoutSeconds: 5` + `failureThreshold: 5` for K8s lab; production should reassess against actual load profile.
+2. **Argon2id hashing is the unavoidable single-thread bottleneck on every login.** Even with the Phase 0LK gap-fix's Redis-backed JWT rotation pool (ADR-0012) — which solves cross-replica token validation — each login still costs ~50 ms of CPU time on the issuing pod for the password hash. The pool's `IJtiRevocationCache` doesn't help here. Login throughput scales linearly with pod count, not with per-pod CPU upgrade beyond core count.
+3. **`live_queue_snapshot_write` + `agent_assist_session_start` returned 404 / 503 throughout.** Pro.Analytics and AgentAssist are not enabled in this deployment (the medium-loadtest tenant features show `"analytics": false, "agentAssist": false`). To exercise these scenarios in K8s, enable the corresponding Pro packages with valid Postgres + feature toggles. Phase B-LK skipped both scenarios.
+4. **Port-forward is NOT viable for load tests.** Initial attempt (`kubectl port-forward svc/platform-api 5000:5000`) hit kernel-level "Cannot assign requested address" (port exhaustion) plus port-forward stream timeouts above ~50 concurrent connections. Switched to direct Gateway IP + ConnectCallback — sustainable.
+5. **NBomber harness extension (LoadTestHttpClient.cs)** added for this phase. Reads `LOADTEST_RESOLVE=host:ip` env var and installs `SocketsHttpHandler.ConnectCallback` to divert socket connect to the configured IP while preserving the request `Host` header (so Gateway API HTTPRoute hostname matching works without sudo on `/etc/hosts`).
+
+### Reproducibility
+
+```bash
+# Prereqs: scripts/k8s-up.sh + helm upgrade with Phase 0LK gap-fix (commit ce17edc0)
+export KUBECONFIG=$HOME/.kube/config-talos
+
+# Seed (idempotent)
+PLATFORM_API_URL=http://localhost:5000 ./scripts/seed-staging.sh   # one-time
+# (or against Gateway with --resolve)
+
+LOADTEST_TOKEN=$(cat docker/.staging-admin-token)
+
+# Run each scenario at the documented intensities:
+for run in "queues-only 50" "presence-only 50" "jwt-only 3"; do
+    mode=${run% *}; rate=${run##* }
+    PLATFORM_API_URL=http://api.r55.local \
+    LOADTEST_RESOLVE=api.r55.local:192.168.122.192 \
+    LOADTEST_TOKEN="$LOADTEST_TOKEN" \
+    LOADTEST_TENANT=medium-loadtest \
+    LOADTEST_EMAIL=agent1@medium-loadtest.local \
+    LOADTEST_PASSWORD=Agent2026! \
+    LOADTEST_MODE=$mode \
+    LOADTEST_RATE=$rate \
+    LOADTEST_DURATION_SEC=60 \
+    dotnet run --project tests/Verbara.Platform.LoadTests -c Release
+done
+```
+
+Reports captured under `tests/Verbara.Platform.LoadTests/load-test-reports/k8s-blk1-baseline/` (most recent NBomber report — earlier rounds overwritten because NBomber default-output is unique-by-run, not unique-by-scenario; for future ladder runs use per-scenario subfolders).
+
+### References
+
+- ADR-0012 (JWT rotation pool wire-up + multi-replica gate) — closed today as part of Phase 0LK gap-fix (commit `ce17edc0`).
+- Phase 0LK chart gap-fix commit `ce17edc0` — adds HTTPRoute + 3 JWT env vars + initContainer hardening + rollout strategy tweak.
+- Phase B-L Docker baseline (above) — same NuGet image `1.14.6`, very different hardware budget.
+- `infra/k8s/helm/platform/values.yaml` § `api.identityRedis` — the new config surface that activates the rotation pool.

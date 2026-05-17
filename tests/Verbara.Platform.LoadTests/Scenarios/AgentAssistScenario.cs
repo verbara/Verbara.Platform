@@ -31,7 +31,7 @@ internal static class AgentAssistScenario
 {
     public static ScenarioProps Build(string baseUrl)
     {
-        var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        var http = Verbara.Platform.LoadTests.Infrastructure.LoadTestHttpClient.Create(baseUrl);
         var token = Environment.GetEnvironmentVariable("LOADTEST_TOKEN") ?? "";
         var tenant = Environment.GetEnvironmentVariable("LOADTEST_TENANT") ?? "loadtest";
 
