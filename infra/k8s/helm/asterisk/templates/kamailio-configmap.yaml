@@ -34,6 +34,16 @@ data:
     modparam("dispatcher", "ds_probing_mode", 1)
     modparam("dispatcher", "flags", 2)
     modparam("dispatcher", "ds_hash_size", 4)
+    # R5.5 Phase 0LK gap-fix round 2 (2026-05-17) — tolerate the first few
+    # OPTIONS probes failing during cold start. Without this the first
+    # probe (sent before Asterisk pjsip is fully ready) marks the target
+    # Inactive (FLAGS: IP) and the dispatcher only recovers after a manual
+    # `kamcmd dispatcher.reload`. ds_probing_threshold=3 requires 3
+    # consecutive failures before marking inactive; ds_inactive_threshold=2
+    # requires 2 consecutive successes before reactivating, so a brief
+    # blip during steady-state won't flap.
+    modparam("dispatcher", "ds_probing_threshold", 3)
+    modparam("dispatcher", "ds_inactive_threshold", 2)
     modparam("rtpengine", "rtpengine_sock", "udp:127.0.0.1:22222")
     modparam("jsonrpcs", "transport", 6)
 
@@ -106,5 +116,13 @@ data:
 
   dispatcher.list: |
     # setid destination flags priority attrs
-    # Uses ClusterIP service (stable DNS) — per-pod stickiness via alg=10 call-id hash at service level
-    1 sip:asterisk-sip.{{ .Values.namespace }}.svc.cluster.local:5060 0 0
+    # R5.5 Phase 0LK gap-fix round 2 (2026-05-17) — point at the
+    # Cilium-L2-announced LoadBalancer IP of the asterisk-sip Service
+    # instead of the ClusterIP DNS name. hostNetwork Kamailio cannot
+    # reach in-cluster ClusterIPs when Cilium runs with hostFirewall=true
+    # + kubeProxyReplacement=true (the eBPF redirect path bypasses
+    # hostNetwork sources). LoadBalancer IP 192.168.122.201 lives on
+    # the LAN and round-trips cleanly. Selection across the 2 Asterisk
+    # pods happens at the Service ClusterIP layer behind the LB,
+    # picking per-call via call-id hash (Cilium default).
+    1 sip:192.168.122.201:5060 0 0

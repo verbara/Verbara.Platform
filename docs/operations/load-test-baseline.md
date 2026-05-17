@@ -727,3 +727,94 @@ No surprises. The lab cluster behaves as its budget predicts; the chart's HPA ta
 - Snapshot raw data: `docs/operations/load-test-baseline-data/k8s-blk3/`
 - B-LK.1 envelope numbers: § "Local K8s results" above
 - Cilium status command: `kubectl -n kube-system exec ds/cilium -- cilium status --brief`
+
+---
+
+## K8s lab SIP signaling baseline (R5.5 Phase B-LK.2, 2026-05-17 02:53 UTC)
+
+**Status:** partial — direct pod-to-pod SIP path validated, SBC path (Kamailio → Asterisk via LoadBalancer) deferred pending Cilium L2 announce diagnosis.
+
+**Methodology pivot from original plan:** the original B-LK.2 step targeted Kamailio worker IPs (192.168.122.11–13:5060) as the SBC entrypoint, then trusted Cilium L2-announced LoadBalancer IP `192.168.122.201` to forward `asterisk-sip` UDP/5060 traffic to the Asterisk pods. During execution the LoadBalancer path returned zero responses (UDP send succeeded at the kernel, but neither Hubble flow logs nor Asterisk pjsip showed inbound packets — Cilium L2 announce appears broken for UDP/5060 in this release, even though TCP/8088 and TCP/5038 entries are in the BPF LB map). Pivoted to lanching SIPp from a Kubernetes Pod against the headless Service DNS name (`asterisk-0.asterisk.r55-asterisk.svc.cluster.local:5060`). This validates the Asterisk SIP layer in isolation but does NOT exercise the full Kamailio → RTPEngine → Asterisk SBC chain. SBC chain validation deferred to Phase 0LK gap-fix round 3 (see "Open gaps" below).
+
+### Chart changes shipped to enable the test
+
+The original Phase 0LK Asterisk deployment had ZERO usable SIP infrastructure — a fact that surfaced only when the first SIPp INVITE arrived. Three classes of gap closed in commit `<pending>`:
+
+1. **Asterisk dialplan + pjsip endpoint** (`infra/k8s/helm/asterisk/templates/asterisk-configmap.yaml`)
+   - `[anonymous]` endpoint with context `r55-loadtest` (accepts unauthenticated INVITEs from Kamailio's worker subnet 192.168.122.0/24).
+   - New dialplan context `[r55-loadtest]` with pattern `_queue-.` → Answer + Wait(5) + Hangup. Catchall `_X.` returns `NO_ROUTE_DESTINATION` to keep stray traffic explicit.
+2. **NetworkPolicy `allow-sip-from-kamailio-sbc`** (`infra/k8s/manifests/network-policies.yaml`)
+   - Ingress UDP/5060 on `app.kubernetes.io/name=asterisk` pods from `ipBlock: 192.168.122.0/24`. NetworkPolicy podSelector/namespaceSelector cannot match hostNetwork pods, so the worker node CIDR is the only way to allow Kamailio's host-net source IP.
+3. **Kamailio dispatcher cold-start mitigation** (`templates/kamailio-configmap.yaml`)
+   - `modparam("dispatcher", "ds_probing_threshold", 3)` + `ds_inactive_threshold=2`. Reduces flap; does NOT solve the initial-state Inactive issue (see open gaps).
+   - `dispatcher.list` switched from `asterisk-sip.r55-asterisk.svc.cluster.local:5060` (ClusterIP) to `192.168.122.201:5060` (Cilium L2 LoadBalancer IP). Subsequently moot — the LB path is broken.
+4. **`asterisk-sip` Service: ClusterIP → LoadBalancer** (`templates/asterisk-service-lb.yaml`)
+   - Pinned to `192.168.122.201` via `io.cilium/lb-ipam-ips` annotation.
+   - Intent was to give Kamailio (hostNetwork, cannot reach ClusterIPs when Cilium is configured with `hostFirewall: true` + `kubeProxyReplacement: true`) a stable LAN-reachable address. The Service is correctly assigned the IP and BPF backend entries exist, but actual UDP forwarding fails — Cilium L2 announce ARP works but packets are not delivered to pods.
+
+### Measured baseline (intra-cluster pod-to-pod path)
+
+| Profile | Calls | Rate (cps) | Concurrent | Successful | Failed | Retransmits | Timeouts | Call length |
+|---|---|---|---|---|---|---|---|---|
+| Smoke #1 | 5 | 1 | 5 | **5/5 (100 %)** | 0 | 0 | 0 | 5.008 s |
+| Smoke #2 | 50 | 5 | 20 | **50/50 (100 %)** | 0 | 0 | 0 | 5.006 s |
+| Push | 200 | 20 requested → **9.453 effective** | 60 | **200/200 (100 %)** | 0 | 0 | 0 | 5.006 s |
+
+Push run was rate-capped by the 60-concurrent-call limit (with a 5 s call duration, max sustainable rate is ~12 cps). All 200 INVITEs round-tripped through INVITE → 100 Trying → 200 OK → ACK → 5 s pause → BYE → 200 OK with zero retransmits or timeouts. No Asterisk channel exhaustion at 60 concurrent calls.
+
+### Open gaps (Phase 0LK gap-fix round 3 backlog)
+
+1. **Kamailio dispatcher cold-start initial state is Inactive (`FLAGS: IP`).** `ds_probing_threshold=3` does NOT change this — the threshold prevents flap during steady state but doesn't override the initial-Inactive marker that appears immediately after Kamailio process start. Manual `kamcmd dispatcher.reload` recovers to `Active` (`FLAGS: AX`) reliably. Root cause likely: the first probe (sent within ~1 s of startup) fails because the kernel UDP send buffer is not yet drained / the destination ClusterIP eBPF map is not yet populated, and the cold-start probe failure is treated specially. Fix candidates: `ds_probing_partial` flag, init-script that runs `dispatcher.reload` after a 10 s delay, or migrate to active-immediately dispatcher mode (set destination flag = 4 in dispatcher.list).
+2. **Cilium L2 announce + LoadBalancer Service does NOT forward UDP/5060 packets.** Verified end-to-end:
+   - Service `asterisk-sip` is `type: LoadBalancer`, external IP `192.168.122.201`, L2-announced from `talos-w1`.
+   - `cilium-dbg bpf lb list` shows correct backend entries: `192.168.122.201:5060/UDP → 10.244.0.174:5060` and `→ 10.244.1.85:5060`.
+   - ARP entry for `192.168.122.201` resolves to `talos-w1` MAC (`52:54:00:a0:00:11`) — L2 advertisement OK.
+   - UDP packets sent to `192.168.122.201:5060` from host (external to cluster) AND from Kamailio (hostNetwork on same node) result in zero Asterisk-side delivery; Hubble shows no flows; Asterisk pjsip logger ON shows nothing.
+   - TCP ports on the same LB IP (5038 AMI, 8088 ARI) also do not respond — so it is not a UDP-specific bug, it's L2-announce-related.
+   - Workaround for now: SIPp from pod against headless Service DNS. Production-grade fix probably requires Cilium upgrade or `loadBalancerIPs` reconfiguration; out of scope for B-LK.2 measurement.
+3. **`rtpengine` DaemonSet partial rollout failure.** The `helm upgrade` for the asterisk chart triggered a rotation of the `rtpengine` DaemonSet (no chart change, but the rolling update implicit). The new pod `rtpengine-gvp4c` on `talos-w2` is in startup-probe crashloop because `fonoster/rtpengine:latest` image tag drifted to a build that omits `nc` (the chart's startup probe uses `nc` for TCP open-check). The other two rtpengine pods on workers 1 + 3 still run the cached previous image and are healthy. **Recommendation:** pin `rtpengine` image to a specific tag (e.g. `fonoster/rtpengine:0.x.x`) AND rewrite the startup probe to use an in-image utility (`pgrep` or `/proc` poke). This is unrelated to SIPp baseline but blocks Phase C-LK chaos experiments that would force DaemonSet reschedule.
+
+### Reproducibility
+
+```bash
+# Prereqs: cluster up, Phase 0LK gap-fix round 2 shipped (this commit)
+export KUBECONFIG=$HOME/.kube/config-talos
+
+# Create scenario ConfigMap once
+kubectl -n r55-asterisk create configmap sipp-scenarios \
+  --from-file=tests/sipp-scenarios/
+
+# Run baseline
+cat <<'YAML' | kubectl -n r55-asterisk apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sipp-baseline
+spec:
+  restartPolicy: Never
+  containers:
+    - name: sipp
+      image: ctaloi/sipp:latest
+      command: [sipp, -sf, /scenarios/01-basic-call.xml, -s, queue-1,
+                -m, "200", -r, "20", -l, "60",
+                asterisk-0.asterisk.r55-asterisk.svc.cluster.local:5060]
+      volumeMounts:
+        - { name: scenarios, mountPath: /scenarios, readOnly: true }
+      resources:
+        requests: { cpu: 200m, memory: 64Mi }
+        limits: { cpu: 1000m, memory: 256Mi }
+  volumes:
+    - { name: scenarios, configMap: { name: sipp-scenarios } }
+YAML
+
+# Tail
+kubectl -n r55-asterisk logs -f sipp-baseline
+```
+
+Logs captured under `sipp-reports/k8s-blk2-baseline/`.
+
+### References
+
+- Phase B-LK.1 + B-LK.5 envelope (NBomber) — same Phase 0LK methodology issues led to today's fix bundle.
+- Asterisk dialplan + pjsip configmap: `infra/k8s/helm/asterisk/templates/asterisk-configmap.yaml`.
+- SBC path gaps captured in memory `project_r55_k8s_real_state_2026_05_16.md` § "Still deferred".

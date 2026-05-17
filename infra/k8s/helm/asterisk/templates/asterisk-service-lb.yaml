@@ -5,8 +5,25 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     {{- include "asterisk.labels" . | nindent 4 }}
+  annotations:
+    # Pin to a stable IP from the Cilium L2 pool (192.168.122.200/28)
+    # so Kamailio dispatcher.list can reference a known address. Without
+    # a pin, the pool assigns the next-free IP non-deterministically.
+    io.cilium/lb-ipam-ips: "192.168.122.201"
 spec:
-  type: ClusterIP
+  # type LoadBalancer is required because the Kamailio SBC layer runs
+  # `hostNetwork: true` on every worker. hostNetwork pods cannot reach
+  # ClusterIP services through the in-cluster eBPF path when Cilium runs
+  # with `hostFirewall: enabled: true` + `kubeProxyReplacement: true`
+  # (the kube-proxy-replacement path is bypassed for traffic that does
+  # not originate from a pod-network endpoint). LoadBalancer + Cilium L2
+  # announce gives Kamailio a host-network-reachable address.
+  #
+  # Discovered 2026-05-17 during R5.5 Phase B-LK.2 SIPp execution —
+  # Kamailio's dispatcher_probes silently dropped at the eBPF redirect
+  # step when targeting the ClusterIP, marking the only backend Inactive
+  # despite Asterisk being healthy.
+  type: LoadBalancer
   selector:
     app.kubernetes.io/name: asterisk
   ports:

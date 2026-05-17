@@ -241,6 +241,33 @@ spec:
         - protocol: UDP
           port: 4569  # IAX2 (UDP)
 ---
+# 10b. Allow SIP signaling (UDP 5060) from Kamailio SBC layer.
+# Kamailio runs hostNetwork=true on every worker — source IP is the
+# worker node IP (192.168.122.10-13 range = libvirt default network).
+# Standard K8s NetworkPolicy podSelector / namespaceSelector cannot
+# match hostNetwork pods (their packets bypass the CNI source-NAT
+# layer), so we use the ipBlock selector with the cluster node CIDR.
+# Discovered 2026-05-17 during R5.5 Phase B-LK.2 SIPp execution —
+# this was the third missing piece of Phase 0LK validation.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-sip-from-kamailio-sbc
+  namespace: r55-asterisk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asterisk
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 192.168.122.0/24
+      ports:
+        - protocol: UDP
+          port: 5060  # SIP signaling from Kamailio
+---
 # 11. Allow blackbox-exporter probes from monitoring (TCP connect checks)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

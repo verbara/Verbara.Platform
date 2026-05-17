@@ -17,13 +17,56 @@ data:
     type=transport
     protocol=udp
     bind=0.0.0.0:5060
+    local_net=192.168.122.0/24
+    local_net=10.244.0.0/16
+
+    ; ─────────────────────────────────────────────────────────────────
+    ; R5.5 Phase 0LK gap-fix round 2 (2026-05-17) — anonymous endpoint
+    ; for SIPp load traffic via Kamailio SBC. The endpoint named
+    ; `anonymous` is the special pjsip fallback Asterisk uses for inbound
+    ; calls that match NO other endpoint. Kamailio dispatches INVITEs
+    ; toward asterisk-sip.r55-asterisk.svc.cluster.local:5060 without
+    ; passing any auth credentials (SBC-fronted topology — Kamailio is
+    ; the trust boundary at the cluster edge). All such calls land here
+    ; and route into the r55-loadtest dialplan context below.
+    ;
+    ; For production-grade deployments, replace this with per-Kamailio-
+    ; worker `[identify]`-bound endpoints (one per worker IP) so the
+    ; allow-list is enforced inside Asterisk too. The current setup is
+    ; appropriate for Phase B-LK only.
+    ; ─────────────────────────────────────────────────────────────────
+    [anonymous]
+    type=endpoint
+    context=r55-loadtest
+    disallow=all
+    allow=ulaw
+    allow=alaw
 
   extensions.conf: |
+    ; Original demo context (kept for backward compat with manual probes)
     [from-internal]
     exten => _X.,1,NoOp(Internal call from ${CALLERID(all)})
     same => n,Answer()
     same => n,Playback(hello-world)
     same => n,Hangup()
+
+    ; ─────────────────────────────────────────────────────────────────
+    ; R5.5 Phase 0LK gap-fix round 2 (2026-05-17) — load-test dialplan
+    ; Pattern `_queue-.` matches queue-1, queue-12, queue-100, etc.
+    ; Answer + brief wait + hangup keeps the call short so SIPp can
+    ; ramp call-rate without exhausting Asterisk channels. The
+    ; SIPp default scenario expects a 200 OK INVITE + 5 s RTP + BYE
+    ; from the UAS side; we Answer immediately and Wait(5) to give RTP
+    ; time to flow. The catchall exten `_X.` is the safety net for any
+    ; non-queue extension (returns 404).
+    ; ─────────────────────────────────────────────────────────────────
+    [r55-loadtest]
+    exten => _queue-.,1,NoOp(SIPp load-test call to ${EXTEN} from ${CALLERID(all)})
+    same => n,Answer()
+    same => n,Wait(5)
+    same => n,Hangup()
+    exten => _X.,1,NoOp(Unmatched load-test call to ${EXTEN})
+    same => n,Hangup(NO_ROUTE_DESTINATION)
 
   modules.conf: |
     [modules]
