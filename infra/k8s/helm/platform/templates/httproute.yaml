@@ -1,0 +1,58 @@
+{{- if .Values.ingress.enabled }}
+# Gateway API HTTPRoutes bind the platform hostnames to the cluster-level
+# Cilium Gateway (default/platform-gateway). This replaced the legacy
+# networking.k8s.io/v1 Ingress template on 2026-05-16 (R5.5 Phase 0LK
+# gap-fix) because Cilium runs with gatewayAPI.enabled=true and
+# ingressController DISABLED, so the legacy Ingress resource was orphaned
+# (no controller). The Gateway's allowedRoutes.from=All lets HTTPRoutes
+# in any namespace attach without a ReferenceGrant.
+#
+# Backend services live in {{ .Values.namespace }} (this release's ns) and
+# the Gateway lives in `default`; cross-ns reference is via parentRefs.namespace.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: platform-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform.apiLabels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.ingress.gatewayName | default "platform-gateway" }}
+      namespace: {{ .Values.ingress.gatewayNamespace | default "default" }}
+      sectionName: http
+  hostnames:
+    - {{ .Values.ingress.hostnameApi | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: platform-api
+          port: {{ .Values.api.port }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.ingress.gatewayName | default "platform-gateway" }}
+      namespace: {{ .Values.ingress.gatewayNamespace | default "default" }}
+      sectionName: http
+  hostnames:
+    - {{ .Values.ingress.hostnameWeb | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: web
+          port: {{ .Values.web.port }}
+{{- end }}

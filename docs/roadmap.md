@@ -1,6 +1,6 @@
 # Roadmap — Verbara.Platform + Verbara.Platform.Web
 
-**Última actualización:** 2026-05-10 · **Baselines actuales:** Platform **`2.1.0`** · Platform.Web `3.0.1` · SDK pin `2.1.2` · Pro pin **`2.3.0-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed image live at `ghcr.io/verbara/platform/api`**
+**Última actualización:** 2026-05-16 · **Baselines actuales:** Platform **`2.1.0`** · Platform.Web `3.0.1` · SDK pin `2.1.2` · Pro pin **`2.3.0-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed image live at `ghcr.io/verbara/platform/api`** · **⚠️ 2026-05-16: R5.5 K8s Phase 0LK reabierto — dos gaps reales del chart bloquean B-LK (orphaned legacy Ingress + ADR-0012 JWT rotation pool sin wireup). Fix planeado, no shippeado.**
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
@@ -57,6 +57,39 @@ Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/
 ### ADR-0018 visibility-flip checklist — ✅ COMPLETE 2026-05-10
 
 7/7 GREEN. Flip ejecutado 2026-05-10 19:04 UTC sobre Platform + Platform.Web. Plan tracking en `docs/plans/completed/2026-05-08-visibility-decision-and-alignment.md`. Apache 2.0 economics ya operando; ADR-0006 funnel ahora viable.
+
+### R5.5 K8s Phase 0LK reabierto (2026-05-16) — chart gap-fix blocking B-LK
+
+Status: **2 gaps reales detectados, 1 mitigado, 1 pendiente de ship.**
+
+Cuando se reanudó B-LK.1 el 2026-05-16, primer `curl -X POST /api/v1/setup` contra el cluster devolvió `HTTP 401 — Access to the path '/app/data' is denied`. Diagnóstico profundo (ver `~/.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/project_r55_k8s_real_state_2026_05_16.md` — incluye análisis de 7 alternativas rechazadas) reveló que Phase 0LK declaró "FULLY COMPLETE" con 28 pods Ready, pero **el path de auth nunca se ejerció contra el cluster K8s**. Hay DOS gaps en el Helm chart `infra/k8s/helm/platform/`:
+
+1. **Orphaned legacy `Ingress`** (`templates/ingress.yaml`) — Cilium tiene `gatewayAPI.enabled: true` pero NO `ingressController.enabled: true`, así que los recursos `networking.k8s.io/v1 Ingress` quedan huérfanos sin controller. El Gateway cluster-level tiene 0 HTTPRoutes. **Mitigado hoy** con `infra/k8s/manifests/httproute-platform.yaml` (HTTPRoutes binding `api.r55.local` → `platform-api:5000` + `r55.local` → `web:80`, cross-ns referencia al `default/platform-gateway`). Sin commitear. Migrar chart de Ingress → HTTPRoute es la solución permanente.
+
+2. **ADR-0012 JWT rotation pool sin wireup** — `Program.cs:540` defaults `Auth:KeyDirectory` a `{ContentRoot}/data` = `/app/data`. Pod corre como UID 1654 sin volumen ahí → 401 en TODA llamada de auth. Aunque se montase un volumen escribible, el problema multi-réplica que ADR-0012 fue escrita para resolver persiste (cada réplica genera su propio RSA → JWT firmado por A falla validación en B). **El chart no setea las 3 env vars que activan el path correcto:**
+   ```yaml
+   - name: Identity__JwtKeyRotation__UseRotationPool
+     value: "true"
+   - name: Identity__JwtKeyRotation__RequireRedisStore
+     value: "true"
+   - name: ConnectionStrings__IdentityRedis
+     value: "redis.r55-data.svc.cluster.local:6379"
+   ```
+   Redis prereqs OK: service `redis.r55-data.svc:6379` Running 12d; NetworkPolicy `allow-redis-from-platform` permite 6379 desde r55-platform; conectividad TCP verificada via `/dev/tcp` desde dentro del pod platform-api.
+
+**Atajos rechazados** (todos crean nuevo anti-pattern en lugar de cerrar el real): emptyDir + fsGroup (claves efímeras → logout en cada redeploy + multi-replica desync), PVC + fsGroup (pods → pets, rompe HPA 2→8), image rebuild con /app/data chowned (single-pod-ok, multi-replica-broken), initContainer chown (idem), runAsRoot (viola PodSecurity baseline). Sólo la opción 1 (Redis-pool wireup) cierra ambos síntomas.
+
+**Plan de ship** (~30 min):
+- Editar `infra/k8s/helm/platform/templates/platform-api-deployment.yaml` + `values.yaml` (3 env vars + matching values block).
+- `helm upgrade platform infra/k8s/helm/platform/` (rolling, ~60 s).
+- Probar `/api/v1/setup` → 201 (o 409); seed-staging.sh; arrancar B-LK.1.
+- Commit conjunto: `feat(k8s): R5.5 Phase 0LK gap-fix (HTTPRoute migration + JWT rotation pool wireup) — unblocks B-LK auth`.
+
+**Notas adicionales descubiertas en el camino:**
+- `scripts/k8s-up.sh` necesita rama "warm-restart": pasos 5 (apply-config --insecure) y 6 (bootstrap) fallan si los nodos ya están provisionados. Hoy hubo que ejecutar manualmente `talosctl kubeconfig --force` para saltarlos. Parche idempotente a `net-start default` ya aplicado en working tree (no committeado).
+- Imagen deployada es `asterisk-platform/api:1.14.6` + `asterisk-platform/web:1.15.5` (pre-rebrand, namespace OCI `asterisk-platform/*`) — esto es **metodológicamente correcto** para Phase B-LK ya que matchea la baseline Docker B-L también v1.14.6 (D-L 24h soak PASS 2026-04-30 fue en esta versión). NO actualizar a v2.1.0 antes de B-LK o el comparativo K8s vs Docker pierde validez. SDK pin transitivo ~1.15.x, Pro pin transitivo 1.16.0-pro.
+- **Registry host `192.168.122.1:5050` DOWN** — los pods corren porque las imágenes están cacheadas en `containerd` de cada nodo. `helm upgrade` con `imagePullPolicy: IfNotPresent` (chart default, verificar) funciona; si fuera `Always` fallaría. **Antes de Phase C-LK chaos** (que mata pods intencionalmente) el registry debe estar arriba. Para B-LK.1 baseline es safe diferirlo.
+- **Licensing no se necesita para B-LK** — chart hardcodea `licensing.enforcementMode: Disabled`. `LicenseGateMiddleware` pasa todo sin validar. Mantiene paridad con Docker B-L baseline (también sin license). Modos disponibles: `Disabled` (actual), `WarnOnly` (staging), `Enforce` (production — requeriría license key con `AuthorizedImageDigests` si fuera v2.1.0 por ADR-0011, o solo expiry check si es v1.14.6). Medir overhead de `LicenseGateMiddleware` con Enforce + license válido sería un Phase B-LK.6 opcional separado.
 
 ### Post-flip follow-ups (no version-gated)
 

@@ -40,6 +40,17 @@ api:
   redis:
     host: redis-0.redis.r55-data.svc.cluster.local
     port: 6379
+  # Redis-backed JWT signing-key rotation pool (ADR-0012, AHH Phase 3).
+  # MUST be set for multi-replica deployments — without the rotation pool,
+  # each Platform.Api replica generates its own RSA key on first boot and
+  # tokens signed by replica A are rejected by replica B. The chart enables
+  # this by default because api.replicas defaults to 2; single-replica dev
+  # deployments can override to false to keep the file-based default.
+  identityRedis:
+    host: redis-0.redis.r55-data.svc.cluster.local
+    port: 6379
+    useRotationPool: true
+    requireRedisStore: true
   jwt:
     issuer: r55-staging
     audience: r55-staging

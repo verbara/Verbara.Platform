@@ -13,8 +13,13 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      # maxSurge: 0 + maxUnavailable: 1 tolerates clusters where worker
+      # memory is tight (4 GB Talos VMs in lab). Production clusters with
+      # ample memory can override to maxSurge: 1 + maxUnavailable: 0 via
+      # --set for zero-downtime semantics, at the cost of N+1 temporary
+      # replicas during rollout.
+      maxSurge: 0
+      maxUnavailable: 1
   template:
     metadata:
       labels:
@@ -39,6 +44,24 @@ spec:
       initContainers:
         - name: wait-for-postgres
           image: busybox:1.37
+          # PodSecurity restricted + r55-platform ResourceQuota require both
+          # securityContext and resources on every container (init included).
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
           command:
             - sh
             - -c
@@ -54,6 +77,7 @@ spec:
           # signed image, ignores tag float). Falls back to tag-only reference
           # when api.image.digest is empty (dev / local KVM cluster scenarios).
           image: "{{ .Values.api.image.repository }}{{ if .Values.api.image.digest }}@{{ .Values.api.image.digest }}{{ else }}:{{ .Values.api.image.tag }}{{ end }}"
+          imagePullPolicy: IfNotPresent
           securityContext:
             runAsNonRoot: true
             runAsUser: 1654
@@ -86,6 +110,16 @@ spec:
               value: "Host={{ .Values.api.postgres.host }};Port={{ .Values.api.postgres.port }};Database={{ .Values.api.postgres.database }};Username={{ .Values.api.postgres.user }};Password=$(PG_PASSWORD)"
             - name: ConnectionStrings__Redis
               value: "{{ .Values.api.redis.host }}:{{ .Values.api.redis.port }}"
+            # ADR-0012 JWT rotation pool — required for multi-replica deployments.
+            # Default chart deploys 2 replicas; without the pool, each replica
+            # generates its own RSA key on first boot and tokens signed by
+            # replica A get rejected by replica B. Code path Program.cs:540-554.
+            - name: ConnectionStrings__IdentityRedis
+              value: "{{ .Values.api.identityRedis.host }}:{{ .Values.api.identityRedis.port }}"
+            - name: Identity__JwtKeyRotation__UseRotationPool
+              value: {{ .Values.api.identityRedis.useRotationPool | quote }}
+            - name: Identity__JwtKeyRotation__RequireRedisStore
+              value: {{ .Values.api.identityRedis.requireRedisStore | quote }}
             - name: Identity__Jwt__Issuer
               value: {{ .Values.api.jwt.issuer }}
             - name: Identity__Jwt__Audience

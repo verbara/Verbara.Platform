@@ -39,7 +39,7 @@ if ! $VIRSH net-info default &>/dev/null; then
 fi
 if ! $VIRSH net-info default 2>/dev/null | grep -q "Active:.*yes"; then
     echo "  Starting default network..."
-    $VIRSH net-start default
+    $VIRSH net-start default 2>/dev/null || true
 fi
 
 for i in "${!VM_NAMES[@]}"; do
