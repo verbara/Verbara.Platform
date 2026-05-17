@@ -1,6 +1,6 @@
 # Roadmap — Verbara.Platform + Verbara.Platform.Web
 
-**Última actualización:** 2026-05-16 · **Baselines actuales:** Platform **`2.1.0`** · Platform.Web `3.0.1` · SDK pin `2.1.2` · Pro pin **`2.3.0-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed image live at `ghcr.io/verbara/platform/api`** · **⚠️ 2026-05-16: R5.5 K8s Phase 0LK reabierto — dos gaps reales del chart bloquean B-LK (orphaned legacy Ingress + ADR-0012 JWT rotation pool sin wireup). Fix planeado, no shippeado.**
+**Última actualización:** 2026-05-16 · **Baselines actuales:** Platform **`2.1.0`** · Platform.Web `3.0.1` · SDK pin `2.1.2` · Pro pin **`2.3.0-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed image live at `ghcr.io/verbara/platform/api`** · **✅ 2026-05-16: R5.5 Phase 0LK gap-fix + B-LK.1 K8s lab envelope SHIPPED (commits `ce17edc0` + `b54bf20d`). Chart agora multi-replica-correct (ADR-0012 Redis JWT pool wired). Lab envelope mapped: 1 075 RPS @ p99 97 ms reads, 3 RPS sustained Argon2id login. Comparison-vs-Docker deferred to Phase B-C (cloud, host-equivalent hw).**
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
