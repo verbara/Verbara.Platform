@@ -907,3 +907,69 @@ kubectl -n r55-asterisk logs -f sipp-sbc
 ```
 
 Logs at `sipp-reports/k8s-blk2-sbc/round{1,2}-*-sbc.log`.
+
+---
+
+## K8s lab 24h soak — D-LK setup (R5.5 Phase D-LK, started 2026-05-17 04:11 UTC)
+
+**Status:** RUNNING — soak in flight, T+0h at commit time.
+
+### Profile
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| Scenario | `queue_ingestion` only | Read-heavy, no Argon2id bottleneck; matches B-LK.1 sustainable knee |
+| Rate | **30 req/s** sustained | 60 % of measured B-LK.1 knee (50 RPS @ p99 9.6 ms); leaves headroom for 24h drift |
+| Concurrent shape | NBomber `Inject` (open-loop) | Matches Docker B-L baseline shape (D-L 24h soak ran VU=500 KeepConstant, but for read-only-Postgres path the Inject pattern keeps RPS deterministic without VU coupling) |
+| Duration | 86 400 s (24 h) | Per R5.5 plan Phase D-L gate |
+| Tenant | `medium-loadtest` | 100 agents, 50 queues — middle-tier per capacity-planning.md |
+| Target URL | `http://api.r55.local` via Cilium Gateway L2-announced IP 192.168.122.192 | Same path as B-LK.1 — production-equivalent ingress |
+| Image | `asterisk-platform/api:1.14.6` (pre-rebrand) | Methodology pinned vs Docker D-L baseline for comparability |
+
+### Launch command (reproducibility)
+
+```bash
+export KUBECONFIG=$HOME/.kube/config-talos
+TOKEN=$(curl -sS -X POST -H "Content-Type: application/json" -H "X-Tenant-Id: platform" \
+  -d '{"email":"platform-admin@r55-staging.local","password":"PlatformAdmin2026!"}' \
+  http://api.r55.local/api/v1/auth/login | python3 -c "import json,sys; print(json.load(sys.stdin)['accessToken'])")
+echo "$TOKEN" > docker/.staging-admin-token
+
+nohup env PLATFORM_API_URL=http://api.r55.local \
+     LOADTEST_RESOLVE=api.r55.local:192.168.122.192 \
+     LOADTEST_TOKEN="$TOKEN" \
+     LOADTEST_TENANT=medium-loadtest \
+     LOADTEST_EMAIL=agent1@medium-loadtest.local \
+     LOADTEST_PASSWORD=Agent2026! \
+     LOADTEST_MODE=queues-only \
+     LOADTEST_RATE=30 \
+     LOADTEST_DURATION_SEC=86400 \
+     dotnet run --project tests/Verbara.Platform.LoadTests -c Release --no-build \
+     > /tmp/dlk-soak.log 2>&1 &
+disown
+```
+
+### Observation plan
+
+- **Continuous watcher** (live alerts via Monitor): `pgrep` NBomber process every 60 s + log-grep for `fail count: [1-9]`, FATAL, exception, aborted. Notifies immediately on process death or error spike.
+- **Grafana dashboards** (operator may observe live): http://grafana.r55.local (`admin / r55-staging`)
+  - Kubernetes / Compute Resources / Pod → `r55-platform/platform-api-*` for CPU/memory drift
+  - Kubernetes / Compute Resources / Cluster → cluster-wide stability
+- **Hourly manual snapshot** (proposed): `kubectl get pods -A`, Postgres connection count, Cilium endpoint count. Captures step-changes over the 24h window.
+- **Final report**: NBomber writes summary at T+24h to `tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-<ts>/` (folder pre-created).
+
+### Gate (R5.5 plan)
+
+For PASS the suite must show:
+- 100 % HTTP 200 (or <0.1 % errors) across the full 24 h window
+- p99 latency stable: no degradation > 2× baseline (baseline 9.6 ms → ceiling ~20 ms)
+- No platform-api pod restarts attributable to the soak (chaos-induced restarts pre-D-LK don't count)
+- No memory growth > 50 % from T+0 to T+24h (detect leaks)
+- Postgres connection count stays bounded (~20-40 active per replica per ADR-0015 Phase 2 single-pool)
+
+Failures get categorized + investigated; soak is re-launched after fix.
+
+### Reference
+
+- Docker baseline D-L (2026-04-30, commit `dd8048f0` era): 24h × VU=500 × ~11k RPS × **0 fails @ p99 60 ms** — Phase 2 single-pool architecture validation. ~959M req total.
+- K8s D-LK is methodologically **different**: lower rate (30 RPS vs ~11k), open-loop Inject vs VU KeepConstant, hardware budget 1/4. NOT a direct replacement for D-L — it validates K8s deployment sustainability at the rate the lab cluster can sustain. Cloud Phase D-C will repeat with host-equivalent hardware for fair K8s-vs-Docker comparison.
