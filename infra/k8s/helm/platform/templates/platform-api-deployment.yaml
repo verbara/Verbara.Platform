@@ -84,6 +84,8 @@ spec:
             runAsGroup: 1654
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
             seccompProfile:
               type: RuntimeDefault
           ports:

@@ -107,7 +107,7 @@ web:
     # the maintainer's k3s/Talos lab:
     #   --set web.image.repository=192.168.122.1:5050/verbara-platform/web
     repository: ghcr.io/verbara/platform/web
-    tag: "1.15.5"
+    tag: "v3.1.0-web"
   replicas: 1
   port: 80
   resources:
