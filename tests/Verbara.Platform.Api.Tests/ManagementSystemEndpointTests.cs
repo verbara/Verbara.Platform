@@ -56,6 +56,40 @@ public sealed class ManagementSystemEndpointTests : IClassFixture<PlatformAdminA
         body.Should().Contain("\"blocked\":true");
     }
 
+    // Pro v2.4.0-pro — `GET /management/system/license/status` returns the raw
+    // ILicenseStatusReader.Snapshot() output (no Platform DTO wrapper). Sibling
+    // endpoint to `GET /management/system/license` — surfaces the upstream
+    // contract directly so admin tooling reads it as the canonical view.
+
+    [Fact]
+    public async Task LicenseStatus_ShouldReturnSnapshot_WhenPlatformAdmin()
+    {
+        var response = await _client.GetAsync("/api/management/system/license/status");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/json");
+    }
+
+    [Fact]
+    public async Task LicenseStatus_ShouldExposeSnapshotFields()
+    {
+        var response = await _client.GetAsync("/api/management/system/license/status");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadAsStringAsync();
+        // Required fields from LicenseStatusSnapshot (Pro v2.4.0-pro contract via
+        // LicensingJsonContext — serialized via ApiJsonContext registration).
+        body.Should().Contain("isLoaded");
+        body.Should().Contain("isValid");
+        body.Should().Contain("tier");
+        body.Should().Contain("lastValidationResult");
+        body.Should().Contain("authorizedDigestsCount");
+        // The factory removes LicenseValidationHostedService, so the tracker keeps
+        // its initial Invalid state — assert the unloaded shape.
+        body.Should().Contain("\"isLoaded\":false");
+        body.Should().Contain("\"isValid\":false");
+    }
+
     [Fact]
     public async Task Settings_ShouldPersistRoundTrip()
     {

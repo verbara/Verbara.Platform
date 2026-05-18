@@ -1,6 +1,6 @@
 # Roadmap — Verbara.Platform + Verbara.Platform.Web
 
-**Última actualización:** 2026-05-17 · **Baselines actuales:** Platform **`2.1.0`** · Platform.Web `3.0.3-web` · SDK pin `2.1.2` · Pro pin **`2.3.0-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed images live at `ghcr.io/verbara/platform/{api,web}`** · **🎯 2026-05-17 PIVOT EJECUTADO: Reference Deployment + manuales SMB on-premise (Fase 1) — 6 deliverables shipped (~6,300 líneas), 12 manuales español, capacity-calc + quickstart scripts, Playwright reference-deployment suite, customer-ready compose con `network_mode: host` Asterisk + RTP completo (5060+8088+8089+5038+20000-20200). D-LK 24h soak v2 sigue corriendo en background (T+24h ETA 2026-05-18 04:36) — capturará reporte como bonus. R5.5 cloud (Phase 0C+) deferred indefinidamente — capacity envelope Docker B-L basta para sales hasta primer cliente real.**
+**Última actualización:** 2026-05-17 · **Baselines actuales:** Platform **`2.1.0`** · Platform.Web `3.0.3-web` · SDK pin `2.1.2` · Pro pin **`2.3.0-pro`** (cambiará a `2.4.0-pro` en v2.2.0) · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed images live at `ghcr.io/verbara/platform/{api,web}`** · **🎯 2026-05-17 PIVOT EJECUTADO: Reference Deployment + manuales SMB on-premise (Fase 1) — 6 deliverables shipped (~6,300 líneas), 12 manuales español, capacity-calc + quickstart scripts, Playwright reference-deployment suite, customer-ready compose con `network_mode: host` Asterisk + RTP completo (5060+8088+8089+5038+20000-20200). **NEW 2026-05-17: Platform v2.2.0 plan APPROVED** — consumer migration to Pro `2.4.0-pro` (just shipped same day), HTTP 402 contract + `ILicenseStatusReader` admin surface + SMB manuales migration off `LICENSING_MODE`; unlocks Pro v2.5.0-pro pre-conditions 2+3. R5.5 cloud (Phase 0C+) deferred indefinidamente — capacity envelope Docker B-L basta para sales hasta primer cliente real.**
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
@@ -122,6 +122,34 @@ Capturados en el Status update del 2026-05-10 en [ADR-0018](decisions/0018-visib
 ### Platform v2.1.x patch train (reactive)
 
 Reservado para parches sobre v2.1.0 (security follow-ups, image-binding bug fixes, cosign workflow drift). Sin plan activo; trigger será findings reales en producción o feedback de operadores tras visibility flip.
+
+### Platform v2.2.0 "Pro v2.4.0-pro consumer migration" (APPROVED 2026-05-17, implementation pending)
+
+**Plan APPROVED 2026-05-17** same day as Pro v2.4.0-pro ship — canonical execution doc en `~/.claude/plans/si-refactored-pascal.md`; memoria proyecto en [`.project-memory/project_v22_pro_240_consumer.md`](../../.project-memory/project_v22_pro_240_consumer.md).
+
+**Scope:**
+- **Pro pin cascade** — 21 `Verbara.Sdk.Pro.*` `PackageVersion` lines en `Directory.Packages.props` bumpean `2.3.0-pro` → `2.4.0-pro`.
+- **Nuevo endpoint** `GET /management/system/license/status` (`PlatformAdminOnly`, sibling del existente `GET /management/system/license`) consumiendo el nuevo `ILicenseStatusReader` de Pro 2.4.0-pro. Retorna raw `LicenseStatusSnapshot` (NO Platform DTO wrapper — Pro guarantees el contract vía `LicensingJsonContext`). Tier, ExpiresAt, MaxAgents, MaxNodes, AuthorizedDigestsCount, LastValidationResult, LastValidationAt, RevalidationInterval, Licensee.
+- **`LicenseGateMiddleware` contract change** — HTTP status code **403 → 402 Payment Required** (RFC-9110-accurate para subscription gates, no consume SLO error budget, no auto-retry en HTTP clients). Body sigue siendo RFC 9457 ProblemDetails pero gana extension members `tier_required` + `trial_url` + `upgrade_url` + `contact_sales_url` poblados por `LicenseGuard.Evaluate` (Pro 2.4.0-pro's `Enrich` helper).
+- **SMB operator docs migration off `LICENSING_MODE`** — 4 files updated (`.env.reference-smb.example`, `docker-compose.reference-smb.yml`, `docs/manuales/smb/99-troubleshooting.md`, `docs/operations/first-realistic-demo.md`). Reemplazo canónico: `LICENSE_PATH=` + referencia al Tier 0.5 issuer en `https://verbara.io/developer-license`. Historical docs (specs/, completed plans, R5.5 active plan, onboarding-feedback) intacto — snapshots-in-time.
+- **Dev/demo compose strategy** — `docker-compose.full.yml` + `demo/docker-compose.demo.yml` MANTIENEN `Licensing__EnforcementMode: Disabled` (removing-the-var rompería startup bajo Pro 2.4.0-pro back-compat) PERO añaden `Logging__LogLevel__Verbara.Sdk.Pro.Licensing.LicensingDeprecationHostedService: Warning` para suprimir el event-id 12001 boot log spam hasta lockstep migration en v2.5.0-pro.
+- **Helm chart additive update** — `infra/k8s/helm/platform/values.yaml` gana `licenseFilePath: ""` (nuevo, opcional). `enforcementMode` mantenido pero documentado como deprecated. Template emite ambas env vars condicionalmente.
+- **CHANGELOG** entry `## [2.2.0] — 2026-05-17` cubriendo Pro pin cascade + endpoint + contract change + deprecation handling + SMB doc updates.
+- **Tests** — `LicenseGateTests.cs` flip 403→402 + rename 3 métodos + 4 nuevos tests (ProblemDetails extension members per `LicenseBlockReason`). `ManagementClusterLicenseGateTests.cs` add `.NotBe(PaymentRequired)`. NEW `LicenseStatusEndpointTests.cs` (4 tests: happy-path / unloaded / 401-anon / 403-tenant-admin).
+
+**Decisiones arquitectónicas tomadas en planning** (algunas divergen del spec Pro original — Platform-side prerogative):
+
+| Aspect | Pro spec ejemplo | v2.2.0 decision | Why |
+|---|---|---|---|
+| Endpoint path | `/api/v1/admin/license/status` | **`/management/system/license/status`** | Platform convention — system-level state pertenece a `/management/system/*` (`PlatformAdminOnly`), no a tenant-admin `/api/v1/admin/*` (`AdminOnly`) |
+| HTTP status code | 501 Not Implemented | **402 Payment Required** | RFC-9110-accurate para subscription gates (Stripe-style); 4xx no consume SLO error budget; clients no auto-retry 402 |
+| Endpoint return shape | (custom JSON) | **Raw `LicenseStatusSnapshot`** (no Platform DTO) | Pro guarantees contract via `LicensingJsonContext`; wrapping = translation layer con zero value |
+
+**Total: 16 files modified.** ~6h estimated. Target tag `v2.2.0`.
+
+**Pre-flight risk (crítico):** `NuGet.Config` `packageSourceMapping` constrains `Verbara.Sdk.Pro*` a la `github` source exclusivamente. Pro CI broken (0 workflow runs en `verbara/Verbara.Sdk.Pro` desde rebrand 2026-05-05 — Actions billing pending org admin fix). Platform restore puede fallar NU1101 a menos que (a) los 24 v2.4.0-pro `.nupkg` se push manualmente vía `dotnet nuget push --source github`, OR (b) `Verbara.Sdk.Pro*` pattern se añada al `local` source mapping en Platform `NuGet.Config`.
+
+**Cross-repo dependency:** Esta release es el **unlock** para Pro v2.5.0-pro pre-conditions 2 (consumer release) + 3 (manuales updated). Pre-condition 1 (≥6 semanas desde Pro v2.4.0-pro tag 2026-05-17) elegible **2026-06-28+**.
 
 ### Platform v3.0.0 "ADR-0019 wildcard removal" (planned, breaking)
 

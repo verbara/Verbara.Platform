@@ -158,8 +158,12 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-verbara-api}
       # CORS — allow only the front-end origin you ship to customers.
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,https://localhost}
-      # Licensing — Disabled = community/OSS; Enforce = require Pro license.
-      Licensing__EnforcementMode: ${LICENSING_MODE:-Disabled}
+      # Licensing — point Licensing__FilePath at your signed .lic to enable Pro
+      # features. Empty / unset = community/OSS mode (Pro endpoints respond with
+      # HTTP 402 PaymentRequired + RFC 9457 ProblemDetails carrying actionable
+      # trial / upgrade URLs). Acquire a free Tier 0.5 developer license at
+      # https://verbara.io/developer-license
+      Licensing__FilePath: ${LICENSE_PATH:-}
       # Pro Layer C image-binding (ADR-0011). Required only when running a
       # commercial Pro license that has authorized digests. Leave empty for
       # the community/OSS path.
@@ -177,6 +181,9 @@ services:
     volumes:
       - verbara_recordings:/recordings
       - verbara_media:/app/media
+      # To enable Pro features, uncomment the following bind-mount and set
+      # LICENSE_PATH in .env to the host-side path of your .lic file.
+      # - ${LICENSE_PATH}:/etc/verbara/license.lic:ro
     depends_on:
       postgres:
         condition: service_healthy

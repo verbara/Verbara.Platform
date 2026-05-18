@@ -149,8 +149,17 @@ spec:
               value: {{ .Values.api.asterisk.ari.password }}
             - name: Asterisk__Ari__Application
               value: {{ .Values.api.asterisk.ari.application }}
+            # Licensing__EnforcementMode is DEPRECATED in Pro v2.4.0-pro (removal in
+            # v2.5.0-pro). Kept conditional on the legacy value for back-compat.
             - name: Licensing__EnforcementMode
               value: {{ .Values.api.licensing.enforcementMode }}
+            {{- if .Values.api.licensing.licenseFilePath }}
+            # Pro v2.4.0-pro+ — prefer this path. When set, license features are
+            # gated by the loaded .lic; Pro endpoints respond with HTTP 402 +
+            # actionable URLs when no valid license is present.
+            - name: Licensing__FilePath
+              value: {{ .Values.api.licensing.licenseFilePath | quote }}
+            {{- end }}
           resources:
             requests:
               cpu: {{ .Values.api.resources.requests.cpu }}

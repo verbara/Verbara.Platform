@@ -35,10 +35,19 @@ internal static class ManagementSystemEndpoints
 
         group.MapGet("/info", GetSystemInfo);
         group.MapGet("/license", GetLicenseInfo);
+        group.MapGet("/license/status", GetLicenseStatus);
         group.MapPut("/license", UpdateLicense);
         group.MapGet("/settings", GetSettings);
         group.MapPut("/settings", SaveSettings);
     }
+
+    // Pro v2.4.0-pro — expose the raw LicenseStatusSnapshot. Sibling of GetLicenseInfo
+    // but returns the upstream Pro contract verbatim (Tier, ExpiresAt, MaxAgents, MaxNodes,
+    // AuthorizedDigestsCount, LastValidationResult, LastValidationAt, RevalidationInterval,
+    // Licensee). No Platform DTO wrapper — Pro guarantees the shape via LicensingJsonContext.
+    private static IResult GetLicenseStatus(
+        [FromServices] ILicenseStatusReader reader)
+        => Results.Ok(reader.Snapshot());
 
     private static async Task<IResult> GetSystemInfo(
         [FromServices] Verbara.Platform.Core.IFeatureRegistry features,

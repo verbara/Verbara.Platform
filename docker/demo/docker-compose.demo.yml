@@ -88,7 +88,10 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE: "false"
       HostOptions__BackgroundServiceExceptionBehavior: Ignore
+      # Licensing__EnforcementMode is [Obsolete] in Pro v2.4.0-pro; removal in v2.5.0-pro.
+      # Kept `Disabled` for demo back-compat; LogLevel filter suppresses event 12001.
       Licensing__EnforcementMode: Disabled
+      Logging__LogLevel__Verbara.Sdk.Pro.Licensing.LicensingDeprecationHostedService: Warning
       ConnectionStrings__Postgres: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       ConnectionStrings__Cluster: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       ConnectionStrings__Analytics: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}

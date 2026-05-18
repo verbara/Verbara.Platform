@@ -70,7 +70,16 @@ api:
       password: r55-staging-only-change-prod
       application: verbara
   licensing:
+    # DEPRECATED in Pro v2.4.0-pro; scheduled for removal in Pro v2.5.0-pro.
+    # Keep `Disabled` for community/OSS deployments. Prefer using `licenseFilePath`
+    # below — Pro v2.4.0-pro derives effective enforcement from license presence.
     enforcementMode: Disabled
+    # Pro v2.4.0-pro+ — path inside the container to a mounted .lic file.
+    # Empty / unset = community/OSS mode (Pro endpoints return HTTP 402
+    # PaymentRequired + RFC 9457 ProblemDetails carrying actionable trial /
+    # upgrade URLs). Acquire a free Tier 0.5 developer license at:
+    #   https://verbara.io/developer-license
+    licenseFilePath: ""
   prometheus:
     enabled: false
 

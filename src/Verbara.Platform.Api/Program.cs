@@ -1,3 +1,9 @@
+// Back-compat licensing path: Platform v2.2.0 consumes Pro v2.4.0-pro which marks
+// LicenseOptions.EnforcementMode [Obsolete]. We preserve the 3-mode behaviour
+// (Disabled / WarnOnly / Enforce) until Platform's lockstep migration with Pro v2.5.0-pro.
+// Dev/demo compose still set Licensing__EnforcementMode=Disabled — see ADR-0012.
+#pragma warning disable CS0618 // EnforcementMode
+
 using Asp.Versioning;
 using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.DependencyInjection;

@@ -236,9 +236,21 @@ Web UI → **Admin → Retention**. Three sections:
 
 Web UI → **Admin → License**. Shows the loaded ECDSA license envelope:
 issued-to, expiry, enabled features, current `ILicenseGuard` state per
-feature, grace-period remaining. Fresh installs run with
-`Licensing__EnforcementMode=Disabled` (set in `docker-compose.full.yml`
-env) — switch to `Enforced` for a production install.
+feature, grace-period remaining.
+
+Fresh installs run with `LICENSE_PATH` empty (community / OSS mode — Pro
+endpoints respond with HTTP 402 PaymentRequired + RFC 9457 ProblemDetails
+carrying actionable `trial_url` and `upgrade_url`). For a production
+install, mount a signed `.lic` at `/etc/verbara/license.lic` and set
+`LICENSE_PATH=/etc/verbara/license.lic`. Free Tier 0.5 developer licenses
+(≤5 agents · ≤1 node · 30-day rolling) are at
+https://verbara.io/developer-license.
+
+> Note: `docker-compose.full.yml` keeps `Licensing__EnforcementMode=Disabled`
+> for dev/demo back-compat until Pro v2.5.0-pro lockstep migration; the
+> deprecated enum still bypasses the gate. Refer to
+> [Pro migration guide](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/migration/pro-v240-v250-licensing.md)
+> for the v2.5.0-pro path.
 
 ---
 

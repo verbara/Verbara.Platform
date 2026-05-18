@@ -1,3 +1,6 @@
+// Back-compat tests: EnforcementMode is [Obsolete] in Pro v2.4.0-pro but kept functional until v2.5.0-pro.
+#pragma warning disable CS0618
+
 using System.Net;
 using Verbara.Sdk.Pro.Licensing;
 using FluentAssertions;

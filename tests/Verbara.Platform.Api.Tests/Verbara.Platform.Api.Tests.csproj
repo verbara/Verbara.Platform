@@ -5,7 +5,9 @@
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
     <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
     <EnableAotAnalyzer>false</EnableAotAnalyzer>
-    <NoWarn>$(NoWarn);IL2026;IL3050</NoWarn>
+    <!-- AD0001 = Roslyn analyzer crashed (RouteHandlerAnalyzer flaky on this assembly's
+         WebApplicationFactory route topology). Not a semantic issue with our code. -->
+    <NoWarn>$(NoWarn);IL2026;IL3050;AD0001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

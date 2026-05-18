@@ -1,3 +1,6 @@
+// Back-compat tests: EnforcementMode is [Obsolete] in Pro v2.4.0-pro but kept functional until v2.5.0-pro.
+#pragma warning disable CS0618
+
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -64,12 +67,16 @@ public sealed class ManagementClusterLicenseGateTests
     }
 
     [Fact]
-    public async Task ClusterDrainStatus_ShouldNotReturn403_WhenNoLicenseAndEnforceMode()
+    public async Task ClusterDrainStatus_ShouldNotReturnLicenseBlockStatuses_WhenNoLicenseAndEnforceMode()
     {
         var response = await _client.GetAsync("/api/management/cluster/drain-status");
 
-        // Endpoint may return 200 or 404 depending on cluster state, but never 403 for license.
+        // Endpoint may return 200 or 404 depending on cluster state, but never the
+        // license-block status codes: 403 (legacy v2.1.0) or 402 (Pro v2.4.0-pro
+        // contract change). Management routes don't carry LicenseFeatureMetadata, so
+        // the LicenseGate middleware passes them through.
         response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+        response.StatusCode.Should().NotBe(HttpStatusCode.PaymentRequired);
     }
 
     /// <summary>

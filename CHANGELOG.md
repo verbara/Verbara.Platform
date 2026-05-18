@@ -13,6 +13,64 @@ _No unreleased changes._
 
 ---
 
+## [2.2.0] — 2026-05-17 — License-status surface + HTTP 402 RFC 9457 contract + Pro 2.4.0-pro cascade
+
+MINOR bump because this release introduces a new platform-admin-visible endpoint (`GET /management/system/license/status`) and changes the `LicenseGateMiddleware` response contract from HTTP 403 → HTTP **402 Payment Required** with RFC 9457 ProblemDetails extension members carrying actionable `tier_required`, `trial_url`, `upgrade_url`, and `contact_sales_url` sourced from the enriched `LicenseGuardResult` in Pro v2.4.0-pro. Adds back-compat plumbing to suppress the new Pro deprecation event 12001 (`Licensing:EnforcementMode`) in demo / dev / Helm surfaces until we migrate in lockstep with Pro v2.5.0-pro.
+
+Canonical execution plan: `~/.claude/plans/si-refactored-pascal.md`. Platform-side memory: [`Verbara.Platform/.project-memory/project_v22_pro_240_consumer.md`](Verbara.Platform/.project-memory/project_v22_pro_240_consumer.md).
+
+**Coordinated cross-repo:** SDK `2.1.2` (unchanged) · Pro **`2.4.0-pro`** (cascade) · Web `3.0.3-web` (unchanged — no client-side 402 branching needed today; follow-up v2.3.x track).
+
+### Pro 2.4.0-pro cascade (Directory.Packages.props)
+
+- 21 `Verbara.Sdk.Pro.*` `PackageVersion` pins bumped from `2.3.0-pro` → `2.4.0-pro`. Adds new `ILicenseStatusReader` admin surface + `LicenseStatusSnapshot` record + enriches `LicenseGuardResult` (record struct extended with `TierRequired`, `UpgradeUrl`, `TrialUrl`, `ContactSalesUrl` init-only properties — positional ctor unchanged). Back-compat preserved verbatim: `Licensing:EnforcementMode` still accepted (deprecated; removal in Pro v2.5.0-pro). See [Pro CHANGELOG `[2.4.0-pro]`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/CHANGELOG.md).
+- All 24 Pro nupkg packages pushed to GitHub Packages via manual `dotnet nuget push --source github` (Pro CI on `verbara/Verbara.Sdk.Pro` is currently 0-run state since rebrand 2026-05-05; Actions billing setup pending org-admin fix).
+
+### New endpoint
+
+- `GET /management/system/license/status` (`PlatformAdminOnly` policy, sibling of existing `GET /management/system/license`). Returns the raw Pro `LicenseStatusSnapshot` record directly — no Platform DTO wrapper. Pro guarantees the contract via the public `LicensingJsonContext` for AOT-safe serialization. Fields: `IsLoaded`, `IsValid`, `Tier`, `ExpiresAt`, `MaxAgents`, `MaxNodes`, `AuthorizedDigestsCount`, `LastValidationResult`, `LastValidationAt`, `RevalidationInterval`, `Licensee`. Companion to existing `GET /license` (which wraps in `LicenseInfoDto` because it synthesises grace-period derived state; the new snapshot carries the full evaluated view).
+- Registered in `ApiJsonContext` via `[JsonSerializable(typeof(Verbara.Sdk.Pro.Licensing.LicenseStatusSnapshot))]`.
+
+### Contract change — LicenseGateMiddleware
+
+- **HTTP 402 Payment Required** (was HTTP 403 Forbidden) on Pro feature blocks in `EnforcementMode.Enforce`. RFC 9110 reserves 402 for subscription/payment gates (Stripe-style). 4xx-class so it does NOT consume the SLO error budget (5xx would have); HTTP clients do not auto-retry 402.
+- Response body is **RFC 9457 ProblemDetails** (same family the Platform already uses for all errors) with new extension members populated from `LicenseGuard.Evaluate`:
+  - `tier_required` — populated for tier-limit scenarios.
+  - `trial_url` — populated for `NotLicensed` / `Expired` / `GraceExhausted` reasons (points at `https://verbara.io/developer-license`).
+  - `upgrade_url` — same set as above (points at `https://verbara.io/pricing`).
+  - `contact_sales_url` — populated for `Revoked` (points at `https://verbara.io/contact-sales`).
+  - All omitted for `UnauthorizedImage` reason — operator's remedy is to redeploy with the authorized image, not upgrade.
+- Middleware now injects `ILicenseGuard` (in addition to `ILicenseStatus`) so the response surfaces the enriched URLs automatically — no Platform-side string composition. Constructor signature changed (4-arg → 5-arg).
+- `WarnOnly` and `Disabled` paths unchanged. `LicenseFeatureMetadata` and the per-endpoint gating mechanism are intact.
+
+### Deprecation handling
+
+- **Dev / demo compose** ([`docker/docker-compose.full.yml`](docker/docker-compose.full.yml) + [`docker/demo/docker-compose.demo.yml`](docker/demo/docker-compose.demo.yml)): keep `Licensing__EnforcementMode: Disabled` (removing it would break startup under v2.4.0-pro back-compat — Enforce-default throws on null `LicenseFilePath`). Add `Logging__LogLevel__Verbara.Sdk.Pro.Licensing.LicensingDeprecationHostedService: Warning` to suppress the boot-time deprecation log event 12001 (`LogInformation`-level message from Pro). Migration to the post-`EnforcementMode` model lands in lockstep with Pro v2.5.0-pro.
+- **Helm chart** ([`infra/k8s/helm/platform/values.yaml`](infra/k8s/helm/platform/values.yaml) + [`templates/platform-api-deployment.yaml`](infra/k8s/helm/platform/templates/platform-api-deployment.yaml)): add `api.licensing.licenseFilePath` value (default empty string = community mode). Existing `api.licensing.enforcementMode` documented as deprecated. Template emits both env vars conditionally — existing chart consumers keep working without touching values.
+
+### SMB operator docs
+
+- [`docker/.env.reference-smb.example`](docker/.env.reference-smb.example) — section "9. LICENSING" rewritten. `LICENSING_MODE=Disabled/Enforce` → `LICENSE_PATH=` model. Points operators at https://verbara.io/developer-license for free Tier 0.5 acquisition.
+- [`docker/docker-compose.reference-smb.yml`](docker/docker-compose.reference-smb.yml) — line 162 swap: `Licensing__EnforcementMode: ${LICENSING_MODE:-Disabled}` → `Licensing__FilePath: ${LICENSE_PATH:-}`. Added commented-out bind-mount for the .lic file.
+- [`docs/manuales/smb/99-troubleshooting.md`](docs/manuales/smb/99-troubleshooting.md) — `Failed to load license` row updated to reference `LICENSE_PATH` + HTTP 402 community mode + Tier 0.5 link.
+- [`docs/operations/first-realistic-demo.md`](docs/operations/first-realistic-demo.md) — Admin → License section rewritten to reflect HTTP 402 community mode + Tier 0.5 acquisition.
+
+### Tests
+
+- [`tests/Verbara.Platform.Api.Tests/LicenseGateTests.cs`](tests/Verbara.Platform.Api.Tests/LicenseGateTests.cs):
+  - `BuildMiddleware` helper now accepts an optional `ILicenseGuard` substitute (defaults to a `NotLicensed` result with the canonical URLs).
+  - `InvokeAsync_ShouldReturn403_WhenUnlicensedInEnforceMode` → `InvokeAsync_ShouldReturn402_WhenUnlicensedInEnforceMode`. Assertion flipped to `Status402PaymentRequired`.
+  - Phase I follow-up: 4 new tests asserting RFC 9457 extension members per `LicenseBlockReason` (added separately if needed; back-compat coverage stays).
+- 14 existing test factory / fixture files file-scoped `#pragma warning disable CS0618` (back-compat: they continue to construct `EnforcementMode={Disabled,Enforce,WarnOnly}`).
+
+### Cross-repo v2.5.0-pro unlock
+
+- Pre-condition #2 (≥1 Platform release consumed Pro 2.4.0-pro) — **satisfied** on `v2.2.0` tag push.
+- Pre-condition #3 (`.env.reference-smb.example` no longer references `LICENSING_MODE`; manuales updated) — **satisfied** by this release.
+- Pre-condition #1 (≥6 weeks since Pro v2.4.0-pro tag 2026-05-17) — elegible from **2026-06-28** onwards.
+
+---
+
 ## [2.1.0] — 2026-05-10 — Image-binding (ADR-0011 + ADR-0018 Trigger 5 machinery) + Pro 2.3.0-pro cascade
 
 Minor bump because this release introduces operator-visible new surface: Helm chart values default to `ghcr.io/verbara/platform/{api,web}` (was local KVM registry), new admission-policy template, new docker-compose verification toolkit, new CI workflow that publishes signed OCI images to GitHub Container Registry, and the consumed Pro v2.3.0-pro adds `LicenseValidator.UnauthorizedImage` semantics. Coordinated cross-repo with **Pro 2.3.0-pro** + **verbara-website Worker integration** that ships license-issuance with `AuthorizedImageDigests` claims.
