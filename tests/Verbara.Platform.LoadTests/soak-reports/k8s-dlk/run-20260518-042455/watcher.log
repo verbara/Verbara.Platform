@@ -1,0 +1,26 @@
+[watcher] 2026-05-18T04:25:43-05:00 — armed for PIDs 1465519/1465565. Output: /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260518-042455
+[watcher] 2026-05-18T04:37:13-05:00 — soak process ended after 690s in watch.
+[watcher] capturing NBomber outputs...
+'/tmp/dlk-soak.log' -> '/media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260518-042455/dlk-soak-stdout.log'
+  (NBomber reports dir not found at /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/bin/Release/net10.0/load-test-reports)
+'/media/Data/Source/Verbara/Verbara.Platform/load-test-reports/nbomber-log-2026051704.txt' -> '/media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260518-042455/nbomber-log-2026051704.txt'
+'/media/Data/Source/Verbara/Verbara.Platform/load-test-reports/nbomber-log-2026051804.txt' -> '/media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260518-042455/nbomber-log-2026051804.txt'
+[watcher] capturing K8s state...
+[watcher] checking presence-related Pro workers in logs...
+[watcher] final health snapshot...
+[watcher] resource snapshot...
+error: Metrics API not available
+error: Metrics API not available
+[watcher] DONE. Summary at: /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260518-042455/SUMMARY.txt
+total 48
+drwxrwxr-x 2 orion75 orion75 4096 May 18 04:37 .
+drwxrwxr-x 4 orion75 orion75 4096 May 18 04:24 ..
+-rw-rw-r-- 1 orion75 orion75 5720 May 18 04:37 dlk-soak-stdout.log
+-rw-rw-r-- 1 orion75 orion75 3550 May 18 04:37 health-final.json
+-rw-rw-r-- 1 orion75 orion75 2929 May 18 04:37 k8s-events.txt
+-rw-rw-r-- 1 orion75 orion75  497 May 18 04:37 k8s-pods.txt
+-rw-rw-r-- 1 orion75 orion75    0 May 18 04:37 k8s-top.txt
+-rw-rw-r-- 1 orion75 orion75 1056 May 18 04:37 nbomber-log-2026051704.txt
+-rw-rw-r-- 1 orion75 orion75  423 May 18 04:37 nbomber-log-2026051804.txt
+-rw-rw-r-- 1 orion75 orion75 5008 May 18 04:37 SUMMARY.txt
+-rw-rw-r-- 1 orion75 orion75 1496 May 18 04:37 watcher.log

@@ -1,0 +1,14 @@
+LAST SEEN   TYPE      REASON                    OBJECT                                          MESSAGE
+44m         Warning   Failed                    podnetworkchaos/platform-api-558f699fc9-r8wkb   Failed to set iptables: failed to apply for pod r55-platform/platform-api-558f699fc9-r8wkb: unable to set ip tables chains for pod platform-api-558f699fc9-r8wkb
+44m         Normal    Updated                   podnetworkchaos/platform-api-558f699fc9-nnqqt   Successfully update ObservedGeneration and FailedMessage of resource
+44m         Normal    Updated                   podnetworkchaos/platform-api-558f699fc9-r8wkb   Successfully update ObservedGeneration and FailedMessage of resource
+44m         Warning   Failed                    podnetworkchaos/platform-api-558f699fc9-nnqqt   Failed to set iptables: failed to apply for pod r55-platform/platform-api-558f699fc9-nnqqt: unable to set ip tables chains for pod platform-api-558f699fc9-nnqqt
+27m         Normal    Updated                   podnetworkchaos/platform-api-558f699fc9-nnqqt   Successfully update ObservedGeneration and FailedMessage of resource
+27m         Warning   Failed                    podnetworkchaos/platform-api-558f699fc9-nnqqt   Failed to set iptables: failed to apply for pod r55-platform/platform-api-558f699fc9-nnqqt: unable to set ip tables chains for pod platform-api-558f699fc9-nnqqt
+27m         Warning   Failed                    podnetworkchaos/platform-api-558f699fc9-r8wkb   Failed to set iptables: failed to apply for pod r55-platform/platform-api-558f699fc9-r8wkb: unable to set ip tables chains for pod platform-api-558f699fc9-r8wkb
+27m         Normal    Updated                   podnetworkchaos/platform-api-558f699fc9-r8wkb   Successfully update ObservedGeneration and FailedMessage of resource
+10m         Normal    Updated                   podnetworkchaos/platform-api-558f699fc9-nnqqt   Successfully update ObservedGeneration and FailedMessage of resource
+10m         Warning   Failed                    podnetworkchaos/platform-api-558f699fc9-nnqqt   Failed to set iptables: failed to apply for pod r55-platform/platform-api-558f699fc9-nnqqt: unable to set ip tables chains for pod platform-api-558f699fc9-nnqqt
+10m         Warning   Failed                    podnetworkchaos/platform-api-558f699fc9-r8wkb   Failed to set iptables: failed to apply for pod r55-platform/platform-api-558f699fc9-r8wkb: unable to set ip tables chains for pod platform-api-558f699fc9-r8wkb
+10m         Normal    Updated                   podnetworkchaos/platform-api-558f699fc9-r8wkb   Successfully update ObservedGeneration and FailedMessage of resource
+108s        Warning   FailedGetResourceMetric   horizontalpodautoscaler/platform-api            failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)

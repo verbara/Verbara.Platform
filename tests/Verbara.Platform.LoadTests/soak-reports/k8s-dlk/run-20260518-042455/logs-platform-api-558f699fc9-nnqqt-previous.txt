@@ -1,0 +1,301 @@
+Defaulted container "api" out of: api, wait-for-postgres (init)
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[3]
+      Writing value of type 'PagedResult`1' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - 200 - application/json;+charset=utf-8 3.0167ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[3]
+      Writing value of type 'PagedResult`1' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - 200 - application/json;+charset=utf-8 2.4915ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[3]
+      Writing value of type 'PagedResult`1' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - 200 - application/json;+charset=utf-8 2.4251ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[3]
+      Writing value of type 'PagedResult`1' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - 200 - application/json;+charset=utf-8 4.6905ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[3]
+      Writing value of type 'PagedResult`1' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - 200 - application/json;+charset=utf-8 2.5067ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.OkObjectResult[3]
+      Writing value of type 'PagedResult`1' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'HTTP: GET /api/v{version:apiVersion}/admin/queues => ListQueues'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - 200 - application/json;+charset=utf-8 2.1224ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.160:5000/health - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0012ms with message 'PresenceMergeConsumer heartbeat stale (77035.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0016ms with message 'PresenceFanoutService heartbeat stale (77035.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0016ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+fail: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check services with status Unhealthy completed after 0.1163ms with message 'Background services unhealthy: QueueDistributionWorker'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.160:5000/health/ready - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.160:5000/health - 503 - text/plain 11013.8383ms
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0013ms with message 'PresenceMergeConsumer heartbeat stale (77039.7s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0017ms with message 'PresenceFanoutService heartbeat stale (77039.7s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0012ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0004ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.Hosting.Lifetime[0]
+      Application is shutting down...
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+warn: Asterisk.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: NotLicensed
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://api.r55.local/api/v1/admin/queues?pageSize=20 - - -

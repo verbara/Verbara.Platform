@@ -1,0 +1,62 @@
+═══════════════════════════════════════════════════════════════════════
+  D-LK 24h soak — post-execution summary
+═══════════════════════════════════════════════════════════════════════
+Soak start:        2026-05-17 04:36:49 (local)
+Watcher armed:     2026-05-18T04:25:43-05:00
+Soak end detected: 2026-05-18T04:37:13-05:00
+Watch duration:    690s
+Output dir:        /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260518-042455
+
+═══ Files captured ═══
+total 44
+drwxrwxr-x 2 orion75 orion75 4096 May 18 04:37 .
+drwxrwxr-x 4 orion75 orion75 4096 May 18 04:24 ..
+-rw-rw-r-- 1 orion75 orion75 5720 May 18 04:37 dlk-soak-stdout.log
+-rw-rw-r-- 1 orion75 orion75 3550 May 18 04:37 health-final.json
+-rw-rw-r-- 1 orion75 orion75 2929 May 18 04:37 k8s-events.txt
+-rw-rw-r-- 1 orion75 orion75  497 May 18 04:37 k8s-pods.txt
+-rw-rw-r-- 1 orion75 orion75    0 May 18 04:37 k8s-top.txt
+-rw-rw-r-- 1 orion75 orion75 1056 May 18 04:37 nbomber-log-2026051704.txt
+-rw-rw-r-- 1 orion75 orion75  423 May 18 04:37 nbomber-log-2026051804.txt
+-rw-rw-r-- 1 orion75 orion75  805 May 18 04:37 SUMMARY.txt
+-rw-rw-r-- 1 orion75 orion75 1338 May 18 04:37 watcher.log
+
+═══ Last 30 lines of NBomber soak log ═══
+│                         │ 102.91                                             │
+│ latency percentile (ms) │ p50 = 3.56, p75 = 4.35, p95 = 6.53, p99 = 10.73    │
+│      data transfer (KB) │ min = 4.999, mean = 4.999, max = 5.003, all =      │
+│                         │ 12652.2 MB                                         │
+└─────────────────────────┴────────────────────────────────────────────────────┘
+┌─────────────────────────┬────────────────────────────────────────────────────┐
+│                    step │ failures stats                                     │
+├─────────────────────────┼────────────────────────────────────────────────────┤
+│                    name │ global information                                 │
+│           request count │ all = 2592000, fail = 333, RPS = 0                 │
+│            latency (ms) │ min = 69102.58, mean = 80063.84, max = 91210.43,   │
+│                         │ StdDev = 6417.48                                   │
+│ latency percentile (ms) │ p50 = 80150.53, p75 = 85590.02, p95 = 90177.54,    │
+│                         │ p99 = 91226.11                                     │
+│      data transfer (KB) │ min = 0.695, mean = 0.695, max = 0.695, all = 0.2  │
+│                         │ MB                                                 │
+└─────────────────────────┴────────────────────────────────────────────────────┘
+
+status codes for scenario: queue_ingestion
+┌────────────────────┬─────────┬─────────┐
+│        status code │  count  │ message │
+├────────────────────┼─────────┼─────────┤
+│                 OK │ 2591667 │         │
+│ ServiceUnavailable │   333   │         │
+└────────────────────┴─────────┴─────────┘
+
+
+04:36:53 [INF] Reports saved in folder: "/media/Data/Source/Verbara/Verbara.Platform/load-test-reports"
+04:36:53 [WRN] THIS VERSION IS FREE ONLY FOR PERSONAL USE. You can't use it for an 
+organization.
+
+═══ Final pod state ═══
+NAME                            READY   STATUS    RESTARTS        AGE   IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-558f699fc9-nnqqt   1/1     Running   2 (7h24m ago)   29h   10.244.3.160   talos-w3   <none>           <none>
+platform-api-558f699fc9-r8wkb   1/1     Running   2 (32h ago)     33h   10.244.3.245   talos-w3   <none>           <none>
+web-5866dc8559-z2m6t            1/1     Running   2 (34h ago)     13d   10.244.3.135   talos-w3   <none>           <none>
+
+═══ Restart counters per replica ═══

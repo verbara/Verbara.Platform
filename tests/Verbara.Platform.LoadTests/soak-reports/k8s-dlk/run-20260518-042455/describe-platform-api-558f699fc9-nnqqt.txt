@@ -1,0 +1,122 @@
+Name:             platform-api-558f699fc9-nnqqt
+Namespace:        r55-platform
+Priority:         0
+Service Account:  default
+Node:             talos-w3/192.168.122.13
+Start Time:       Sat, 16 May 2026 23:23:56 -0500
+Labels:           app.kubernetes.io/component=api
+                  app.kubernetes.io/instance=platform
+                  app.kubernetes.io/managed-by=Helm
+                  app.kubernetes.io/name=platform-api
+                  app.kubernetes.io/version=1.14.6
+                  pod-template-hash=558f699fc9
+Annotations:      prometheus.io/path: /metrics
+                  prometheus.io/port: 5000
+                  prometheus.io/scrape: true
+Status:           Running
+IP:               10.244.3.160
+IPs:
+  IP:           10.244.3.160
+Controlled By:  ReplicaSet/platform-api-558f699fc9
+Init Containers:
+  wait-for-postgres:
+    Container ID:    containerd://7ead9f1b07d2af63e3cbe198f01a7aaa801a9ddad5329726c9a897fc9a959b64
+    Image:           busybox:1.37
+    Image ID:        docker.io/library/busybox@sha256:1487d0af5f52b4ba31c7e465126ee2123fe3f2305d638e7827681e7cf6c83d5e
+    Port:            <none>
+    Host Port:       <none>
+    SeccompProfile:  RuntimeDefault
+    Command:
+      sh
+      -c
+      echo "Waiting for postgres-pooler.r55-data.svc.cluster.local..."
+      until nslookup postgres-pooler.r55-data.svc.cluster.local > /dev/null 2>&1; do
+        sleep 3
+      done
+      echo "Postgres pooler DNS resolved"
+      
+    State:          Terminated
+      Reason:       Completed
+      Exit Code:    0
+      Started:      Sat, 16 May 2026 23:23:57 -0500
+      Finished:     Sat, 16 May 2026 23:23:57 -0500
+    Ready:          True
+    Restart Count:  0
+    Limits:
+      cpu:     50m
+      memory:  32Mi
+    Requests:
+      cpu:        10m
+      memory:     16Mi
+    Environment:  <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-b6jbh (ro)
+Containers:
+  api:
+    Container ID:    containerd://f98bc6feb7e45201057ee6d28a06a7f87812466932b9f21457962ff9e8cacf1d
+    Image:           192.168.122.1:5050/asterisk-platform/api:1.14.6
+    Image ID:        192.168.122.1:5050/asterisk-platform/api@sha256:bcba75867b9a4fcf54de1bab0ca164ae926ec799031b114800264aae6ebc3fca
+    Port:            5000/TCP (http)
+    Host Port:       0/TCP (http)
+    SeccompProfile:  RuntimeDefault
+    State:           Running
+      Started:       Sun, 17 May 2026 21:12:27 -0500
+    Last State:      Terminated
+      Reason:        Error
+      Exit Code:     137
+      Started:       Sat, 16 May 2026 23:47:07 -0500
+      Finished:      Sun, 17 May 2026 21:12:27 -0500
+    Ready:           True
+    Restart Count:   2
+    Limits:
+      cpu:     2
+      memory:  2Gi
+    Requests:
+      cpu:      500m
+      memory:   512Mi
+    Liveness:   http-get http://:5000/health delay=30s timeout=1s period=15s #success=1 #failure=3
+    Readiness:  http-get http://:5000/health/ready delay=10s timeout=1s period=10s #success=1 #failure=3
+    Startup:    http-get http://:5000/health delay=5s timeout=1s period=5s #success=1 #failure=12
+    Environment:
+      ASPNETCORE_URLS:                              http://+:5000
+      PG_PASSWORD:                                  <set to the key 'password' in secret 'platform-pg-credentials'>  Optional: false
+      ConnectionStrings__Postgres:                  Host=postgres-pooler.r55-data.svc.cluster.local;Port=5432;Database=asterisk_platform;Username=platform;Password=$(PG_PASSWORD)
+      ConnectionStrings__Redis:                     redis-0.redis.r55-data.svc.cluster.local:6379
+      ConnectionStrings__IdentityRedis:             redis-0.redis.r55-data.svc.cluster.local:6379
+      Identity__JwtKeyRotation__UseRotationPool:    true
+      Identity__JwtKeyRotation__RequireRedisStore:  true
+      Identity__Jwt__Issuer:                        r55-staging
+      Identity__Jwt__Audience:                      r55-staging
+      JWT_SIGNING_KEY:                              <set to the key 'key' in secret 'jwt-signing-key'>  Optional: false
+      Services__ServiceKey:                         r55-staging-service-key-change-in-prod
+      CORS_ORIGINS:                                 http://r55.local,http://api.r55.local
+      Asterisk__Ami__Hostname:                      asterisk-sip.r55-asterisk.svc.cluster.local
+      Asterisk__Ami__Port:                          5038
+      Asterisk__Ami__Username:                      platform
+      Asterisk__Ami__Password:                      r55-staging-only-change-prod
+      Asterisk__Ari__BaseUrl:                       http://asterisk-ari.r55-asterisk.svc.cluster.local:8088
+      Asterisk__Ari__Username:                      asterisk-platform
+      Asterisk__Ari__Password:                      r55-staging-only-change-prod
+      Asterisk__Ari__Application:                   asterisk-platform
+      Licensing__EnforcementMode:                   Disabled
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-b6jbh (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-b6jbh:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:                      <none>

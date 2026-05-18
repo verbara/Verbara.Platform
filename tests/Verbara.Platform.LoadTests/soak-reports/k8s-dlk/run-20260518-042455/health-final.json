@@ -1,0 +1,91 @@
+{
+    "status": "Degraded",
+    "totalDurationMs": 0.6769,
+    "checks": {
+        "dialer-engine": {
+            "status": "Degraded",
+            "durationMs": 0.0008,
+            "description": "DialerEngine has not completed its first reconciliation tick yet"
+        },
+        "eventstore-subscriber": {
+            "status": "Healthy",
+            "durationMs": 0.0007,
+            "description": "EventStoreSubscriber running; no events observed yet (inside startup grace)"
+        },
+        "analytics-aggregator": {
+            "status": "Healthy",
+            "durationMs": 0.0005,
+            "description": "RealTimeAggregator running; no events processed yet (inside startup grace)"
+        },
+        "callanalytics-engine": {
+            "status": "Healthy",
+            "durationMs": 0.0006,
+            "description": "CallAnalyticsEngine running; no events observed yet (inside startup grace)"
+        },
+        "agentassist-engine": {
+            "status": "Healthy",
+            "durationMs": 0.0007,
+            "description": "AgentAssistEngine running; no events observed yet (inside startup grace)"
+        },
+        "analytics-live-queue-writer": {
+            "status": "Healthy",
+            "durationMs": 0.0006,
+            "description": "LiveQueueSnapshotWriter running; no events observed yet (inside startup grace)"
+        },
+        "services": {
+            "status": "Healthy",
+            "durationMs": 0.0068,
+            "description": "All 2 background services healthy",
+            "data": {
+                "heartbeats": {
+                    "QueueDistributionWorker": "{ IsHealthy = True, lastTick = 05/18/2026 09:37:22 +00:00, expectedIntervalSeconds = 2 }",
+                    "ConversationTimeoutWorker": "{ IsHealthy = True, lastTick = 05/18/2026 09:37:22 +00:00, expectedIntervalSeconds = 5 }"
+                },
+                "circuits": {
+                    "webhook.delivery": "unobserved",
+                    "smtp.send": "unobserved",
+                    "oidc.token-exchange": "unobserved",
+                    "worker.asterisk-capacity-sync": "unobserved"
+                }
+            }
+        },
+        "asterisk": {
+            "status": "Degraded",
+            "durationMs": 0.0021,
+            "description": "AMI configured at localhost:5038 \u2014 connectivity depends on SDK AmiClient",
+            "data": {
+                "asterisk.ami": "unobserved",
+                "asterisk.ari": "unobserved",
+                "worker.asterisk-capacity-sync": "unobserved"
+            }
+        },
+        "presence-heartbeat": {
+            "status": "Healthy",
+            "durationMs": 0.0027,
+            "description": "PresenceHeartbeatService heartbeat 12.8s ago"
+        },
+        "presence-fanout": {
+            "status": "Degraded",
+            "durationMs": 0.0014,
+            "description": "PresenceFanoutService heartbeat stale (117476.0s > 30s)"
+        },
+        "presence-merge": {
+            "status": "Degraded",
+            "durationMs": 0.001,
+            "description": "PresenceMergeConsumer heartbeat stale (117476.0s > 30s)"
+        },
+        "retention": {
+            "status": "Healthy",
+            "durationMs": 0.0008,
+            "description": "RetentionService heartbeat 6.0s ago"
+        },
+        "postgres": {
+            "status": "Healthy",
+            "durationMs": 0.6109,
+            "description": "PostgreSQL connection OK",
+            "data": {
+                "healthcheck.postgres": "unobserved"
+            }
+        }
+    }
+}
