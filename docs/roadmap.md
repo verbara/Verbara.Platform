@@ -1,6 +1,6 @@
 # Roadmap — Verbara.Platform + Verbara.Platform.Web
 
-**Última actualización:** 2026-05-18 · **Baselines actuales:** Platform **`2.2.0`** (SHIPPED 2026-05-18 — commit `0de22761`, tag `v2.2.0`, CI green) · Platform.Web **`3.1.0-web`** (HTTP 402 upgrade-modal UX **SHIPPED 2026-05-18** — commit `5a929ee`, tag pushed, CI triggered) · SDK pin `2.1.2` · Pro pin **`2.4.0-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed images live at `ghcr.io/verbara/platform/{api,web}`** · **🎯 2026-05-17 PIVOT: Reference Deployment + manuales SMB on-premise (Fase 1) — 6 deliverables shipped (~6,300 líneas)** · **✅ 2026-05-18 PRO 2.4.0-pro TRAIN END-TO-END COMPLETE**: Platform v2.2.0 (HTTP 402 RFC 9457 contract + `GET /management/system/license/status` admin surface + SMB manuales off `LICENSING_MODE`) + Web v3.1.0-web (`<PaymentRequiredDialogHost />` modal renders tiered Trial/Upgrade/ContactSales CTAs from RFC 9457 extension members). Cumulative: 48 files / 2,048 + 1,064 = 3,112 tests passing cross-repo. **Pro v2.5.0-pro pre-conditions #2 + #3 MET; #1 elegible 2026-06-28+.** R5.5 cloud (Phase 0C+) deferred indefinidamente.
+**Última actualización:** 2026-05-18 · **Baselines actuales:** Platform **`2.2.0`** (SHIPPED 2026-05-18 — commit `0de22761`, tag `v2.2.0`, CI green) · Platform.Web **`3.1.0-web`** (HTTP 402 upgrade-modal UX **SHIPPED 2026-05-18** — commit `5a929ee`, tag pushed, CI triggered) · SDK pin `2.1.2` · Pro pin **`2.4.0-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed images live at `ghcr.io/verbara/platform/{api,web}`** · **🎯 2026-05-17 PIVOT: Reference Deployment + manuales SMB on-premise (Fase 1) — 6 deliverables shipped (~6,300 líneas)** · **✅ 2026-05-18 PRO 2.4.0-pro TRAIN END-TO-END COMPLETE**: Platform v2.2.0 (HTTP 402 RFC 9457 contract + `GET /management/system/license/status` admin surface + SMB manuales off `LICENSING_MODE`) + Web v3.1.0-web (`<PaymentRequiredDialogHost />` modal renders tiered Trial/Upgrade/ContactSales CTAs from RFC 9457 extension members). Cumulative: 48 files / 2,048 + 1,064 = 3,112 tests passing cross-repo. **Pro v2.5.0-pro pre-conditions #2 + #3 MET; #1 elegible 2026-06-28+.** R5.5 cloud (Phase 0C+) deferred indefinidamente. · **✅ 2026-05-18 R5.5 K8s Phase D-LK COMPLETE PASS-with-findings** — 24h soak K8s 99.987% success @ p99 10.73 ms (9.3× under SLO); forensics revelaron worker silent-death architectural bug → nuevo spec `docs/specs/2026-05-18-worker-resilience-pattern-hardening.md` para Pro v2.4.1-pro + Platform v2.3.0 (~20h cross-repo, **NEXT-priority track**).
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
@@ -151,6 +151,59 @@ Reservado para parches sobre v2.1.0 (security follow-ups, image-binding bug fixe
 **Pre-flight risk (resolved during ship):** `NuGet.Config` `packageSourceMapping` constraint para `Verbara.Sdk.Pro*` → GH Packages source. Pro CI broken (0 workflow runs en `verbara/Verbara.Sdk.Pro` desde rebrand 2026-05-05). **Resolution:** maintainer's `GITHUB_PACKAGES_PAT` (`~/.verbara/secrets.env`) used to push all 24 v2.4.0-pro `.nupkg` files manually via `dotnet nuget push --source github`. Platform restore resolved cleanly.
 
 **Cross-repo unlock state (post-ship 2026-05-18):** ✅ Pro v2.5.0-pro pre-conditions #2 (consumer release) + #3 (manuales updated) **MET**. ⏳ Pre-condition #1 (≥6 weeks since Pro v2.4.0-pro tag 2026-05-17) elegible **2026-06-28+** — only calendar gate remaining.
+
+### Worker Resilience Pattern Hardening — Pro v2.4.1-pro + Platform v2.3.0 (~20h cross-repo, NEXT-priority)
+
+**Status:** **Spec listo, ejecución pending.** Spec canónico: [`docs/specs/2026-05-18-worker-resilience-pattern-hardening.md`](specs/2026-05-18-worker-resilience-pattern-hardening.md).
+
+**Origen:** D-LK 24h soak forensics (2026-05-18) — ver `R5.5 K8s Phase D-LK` arriba. El Finding 1 documentó un pattern bug que afecta cualquier `BackgroundService` long-running en Platform o Pro: cuando una excepción propaga out of `ExecuteAsync`, el default `BackgroundServiceExceptionBehavior.Ignore` la oculta — el worker queda "Running" para el orquestador pero internamente muerto. K8s liveness probe detecta la cascada (health check Unhealthy) y mata el pod 30-45s después; Docker no tiene esa autorrecuperación y el worker queda zombie indefinidamente.
+
+**Scope (cross-repo):**
+
+- **Pattern A (timer-based workers):** outer try-catch wrapping el while loop completo + `LogWorkerCrash` + `throw` (rethrow para que `StopHost` lo capture).
+- **Pattern B (Rx event-driven workers):** OnError handler nullifica `_subscription` → `CheckHealthAsync` retorna Unhealthy en lugar de Healthy-stale.
+- **Host-level:** `services.Configure<HostOptions>(o => o.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.StopHost)` en `Program.cs`. **Esto es el cambio crítico** que hace el pattern funcione.
+
+**Workers afectados (audit needed):**
+
+| Repo | Worker | Pattern |
+|---|---|---|
+| Platform | `QueueDistributionWorker` | A — confirmed vulnerable (el que murió en D-LK) |
+| Platform | `ConversationTimeoutWorker` | A — likely same pattern |
+| Platform | Otros `*Worker.cs` en `src/Verbara.Platform.Api/Services/` | audit |
+| Pro | `PresenceFanoutService` + `PresenceMergeConsumer` | B |
+| Pro | `Verbara.Sdk.Pro.Dialer/` workers | audit (A/B) |
+| Pro | `Verbara.Sdk.Pro.EventStore/` workers | audit (A/B) |
+| Pro | `Verbara.Sdk.Pro.Realtime/` workers | audit (A/B) |
+
+Estimado 8-12 worker files total cross-repo.
+
+**Cadence:**
+
+- **Pro v2.4.1-pro** — Pro half (~10h: PresenceFanout/Merge + Dialer/EventStore/Realtime workers audit + tests). Spec section "Pattern B" + "Pro repo" en el doc.
+- **Platform v2.3.0** — Platform half (~10h: QueueDistributionWorker + ConversationTimeoutWorker + HostOptions wiring + integration test + Platform-side `WorkerLog.cs`). Sibling release; consumer migration de Pro v2.4.1-pro.
+- **Sequence:** ship Pro v2.4.1-pro primero, luego Platform v2.3.0 que consume.
+
+**Decisión: NO bundlear con Pro v2.4.0-pro Licensing simplification** (que YA shipped 2026-05-17). Razones: clarity > bundle (rollback de un train no afecta el otro; tests aislados; changelog limpio). Confirmado en spec §"Distribution / release pathway".
+
+**Relacionado:** el Phase G-PRE del Pro v2.4.0-pro spec (presence health check semantic fix — `CheckHealthAsync` differentiates pre-start / disposed / active-idle) **NO shipped en v2.4.0-pro** (no estaba en spec original); ahora documentado para bundlear con Pro v2.4.1-pro Worker Resilience train. Total Pro v2.4.1-pro effort: ~10h + 3h G-PRE = ~13h.
+
+### R5.5 K8s Phase D-LK — ✅ COMPLETE 2026-05-18 (PASS-with-findings)
+
+**Status:** ✅ **PASS** del 24h soak K8s. 2,591,667 / 2,592,000 requests OK (**99.987%** success). p99 latency **10.73 ms** (9.3× bajo el SLO budget de 100 ms). Run window: 2026-05-17 04:36:49 → 2026-05-18 04:36:13 local. Reporte canónico: [`docs/operations/soak-test-report-k8s-local.md`](operations/soak-test-report-k8s-local.md).
+
+**El "OOM" hipotético resultó NO ser OOM.** Forensics post-soak ([`chaos-reports/dlk-oom-analysis-20260518.md`](../chaos-reports/dlk-oom-analysis-20260518.md)) reveló que el restart a T+16h36m fue K8s liveness probe failure (NOT kernel OOM killer) gatillado por `QueueDistributionWorker` silent death. 333 fails (0.013%) correspondieron al window de SIGTERM→SIGKILL grace + Cilium endpoint slice update (~30s).
+
+**5 hallazgos catalogados:**
+1. 🔴 **Worker silent-death architectural bug** (REAL, customer-facing). `BackgroundService` workers en Platform + Pro pueden morir silenciosamente cuando excepción propaga out of `ExecuteAsync` con default `BackgroundServiceExceptionBehavior.Ignore`. Afecta cualquier deploy long-running (Docker SMB o K8s). Nuevo spec: [`docs/specs/2026-05-18-worker-resilience-pattern-hardening.md`](specs/2026-05-18-worker-resilience-pattern-hardening.md). Ships en Worker Resilience track (sección siguiente).
+2. 🟡 **`presence-fanout/merge` Degraded 21h FALSE POSITIVE.** Workers son event-driven (Rx subscription); idle heartbeat = stale by design. El bug está en el HealthCheck design, no en los workers. Cosmético. Fix bundleado en Pro v2.4.0-pro Phase G-PRE (ya en spec, ejecución pendiente patch o v2.4.1).
+3. 🟡 **metrics-server caído en lab Talos** → HPA non-functional. Mandatory para Fase 2 K8s ref deploy customer-facing. ~2h.
+4. 🟢 **Cilium eBPF endpoint slice updates ROBUST** (validation). Production-ready.
+5. 🟡 **Chaos Mesh + Cilium kube-proxy-replacement incompat** reconfirmado. Deferred Phase 0C cloud.
+
+**Comparativa con Docker D-L (2026-04-30 PASS):** K8s D-LK p99 10.73 ms vs Docker D-L p99 60.66 ms (K8s ~6× mejor, pero scenario más simple). Restart pattern absent en Docker (no liveness probe mechanism). Methodologically válido — D-L baseline cerró antes de pivot a customer-facing trabajo.
+
+**R5.5 K8s validation completa.** Próximos K8s steps (Fase 2 customer ref deploy, cloud Phase 0C+) deferidos por pivot 2026-05-17 a SMB Docker.
 
 ### Platform v3.0.0 "ADR-0019 wildcard removal" (planned, breaking)
 
