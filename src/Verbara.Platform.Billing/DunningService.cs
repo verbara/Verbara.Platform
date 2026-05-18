@@ -35,34 +35,46 @@ public sealed partial class DunningService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await _policy.ExecuteAsync(
-                    ResiliencePolicyKey,
-                    async innerCt =>
-                    {
-                        await ProcessDunningCycleAsync(innerCt);
-                        return 0;
-                    },
-                    stoppingToken);
-            }
-            catch (CircuitBreakerOpenException)
-            {
-                // Circuit open — skip this cycle, next hourly tick retries.
-                LogCircuitOpen(_logger);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogDunningCycleFailed(_logger, ex);
-            }
+                try
+                {
+                    await _policy.ExecuteAsync(
+                        ResiliencePolicyKey,
+                        async innerCt =>
+                        {
+                            await ProcessDunningCycleAsync(innerCt);
+                            return 0;
+                        },
+                        stoppingToken);
+                }
+                catch (CircuitBreakerOpenException)
+                {
+                    // Circuit open — skip this cycle, next hourly tick retries.
+                    LogCircuitOpen(_logger);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogDunningCycleFailed(_logger, ex);
+                }
 
-            await Task.Delay(TimeSpan.FromHours(_config.CheckIntervalHours), stoppingToken);
+                await Task.Delay(TimeSpan.FromHours(_config.CheckIntervalHours), stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(_logger, nameof(DunningService), fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
@@ -196,4 +208,8 @@ public sealed partial class DunningService : BackgroundService
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Circuit open for worker.dunning — skipping cycle")]
     private static partial void LogCircuitOpen(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private static partial void LogWorkerCrash(ILogger logger, string workerName, string reason, Exception ex);
 }

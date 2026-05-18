@@ -55,38 +55,50 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
-
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_options.PollIntervalMs));
-
-        var pollInterval = TimeSpan.FromMilliseconds(_options.PollIntervalMs);
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        try
         {
-            _heartbeat.RecordTick(nameof(QueueDistributionWorker), pollInterval);
-            try
+            await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_options.PollIntervalMs));
+
+            var pollInterval = TimeSpan.FromMilliseconds(_options.PollIntervalMs);
+            while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                await _policy.ExecuteAsync(
-                    ResiliencePolicyKey,
-                    async innerCt =>
-                    {
-                        await DistributeAsync(innerCt);
-                        return 0;
-                    },
-                    stoppingToken);
+                _heartbeat.RecordTick(nameof(QueueDistributionWorker), pollInterval);
+                try
+                {
+                    await _policy.ExecuteAsync(
+                        ResiliencePolicyKey,
+                        async innerCt =>
+                        {
+                            await DistributeAsync(innerCt);
+                            return 0;
+                        },
+                        stoppingToken);
+                }
+                catch (CircuitBreakerOpenException)
+                {
+                    // Circuit open — skip this tick, next timer tick retries.
+                    LogCircuitOpen();
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogDistributionError(ex);
+                }
             }
-            catch (CircuitBreakerOpenException)
-            {
-                // Circuit open — skip this tick, next timer tick retries.
-                LogCircuitOpen();
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogDistributionError(ex);
-            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(nameof(QueueDistributionWorker), fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
@@ -146,4 +158,8 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Circuit open for worker.queue-distribution — skipping tick")]
     private partial void LogCircuitOpen();
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private partial void LogWorkerCrash(string workerName, string reason, Exception ex);
 }

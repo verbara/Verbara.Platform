@@ -40,27 +40,39 @@ internal sealed partial class TokenRefreshService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        LogStarted();
-
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            LogStarted();
+
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await RefreshExpiringTokensAsync(stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogRefreshCycleError(ex.Message);
+                try
+                {
+                    await RefreshExpiringTokensAsync(stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogRefreshCycleError(ex.Message);
+                }
+
+                await Task.Delay(Interval, stoppingToken);
             }
 
-            await Task.Delay(Interval, stoppingToken);
+            LogStopped();
         }
-
-        LogStopped();
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(nameof(TokenRefreshService), fatalEx.Message, fatalEx);
+            throw;
+        }
     }
 
     private async Task RefreshExpiringTokensAsync(CancellationToken ct)
@@ -164,6 +176,10 @@ internal sealed partial class TokenRefreshService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Token refresh cycle error: {Error}")]
     private partial void LogRefreshCycleError(string error);
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private partial void LogWorkerCrash(string workerName, string reason, Exception ex);
 }
 
 internal sealed class TokenResponse

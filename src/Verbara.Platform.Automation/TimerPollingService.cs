@@ -39,35 +39,47 @@ public sealed partial class TimerPollingService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        LogServiceStarted(_logger);
-
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(TimerPollIntervalSeconds));
-
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+        try
         {
-            try
+            LogServiceStarted(_logger);
+
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(TimerPollIntervalSeconds));
+
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
-                await _policy.ExecuteAsync(
-                    ResiliencePolicyKey,
-                    async innerCt =>
-                    {
-                        await PollAsync(innerCt).ConfigureAwait(false);
-                        return 0;
-                    },
-                    stoppingToken).ConfigureAwait(false);
+                try
+                {
+                    await _policy.ExecuteAsync(
+                        ResiliencePolicyKey,
+                        async innerCt =>
+                        {
+                            await PollAsync(innerCt).ConfigureAwait(false);
+                            return 0;
+                        },
+                        stoppingToken).ConfigureAwait(false);
+                }
+                catch (CircuitBreakerOpenException)
+                {
+                    LogCircuitOpen(_logger);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogPollCycleError(_logger, ex);
+                }
             }
-            catch (CircuitBreakerOpenException)
-            {
-                LogCircuitOpen(_logger);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogPollCycleError(_logger, ex);
-            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(_logger, nameof(TimerPollingService), fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
@@ -121,4 +133,8 @@ public sealed partial class TimerPollingService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Timer polling tick failed")]
     private static partial void LogPollCycleError(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private static partial void LogWorkerCrash(ILogger logger, string workerName, string reason, Exception ex);
 }

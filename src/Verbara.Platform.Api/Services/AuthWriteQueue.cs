@@ -122,45 +122,55 @@ internal sealed partial class AuthWriteQueue : BackgroundService
 
         try
         {
-            while (await reader.WaitToReadAsync(stoppingToken).ConfigureAwait(false))
+            try
             {
-                while (batch.Count < _batchSize && reader.TryRead(out var cmd))
-                    batch.Add(cmd);
-
-                if (batch.Count > 0)
+                while (await reader.WaitToReadAsync(stoppingToken).ConfigureAwait(false))
                 {
-                    await ProcessBatchAsync(batch, stoppingToken).ConfigureAwait(false);
-                    batch.Clear();
-                }
+                    while (batch.Count < _batchSize && reader.TryRead(out var cmd))
+                        batch.Add(cmd);
 
-                // Inter-batch pause lets more commands accumulate so we can
-                // coalesce same-user mutations into a single DB upsert.
-                if (!stoppingToken.IsCancellationRequested)
-                {
-                    try
+                    if (batch.Count > 0)
                     {
-                        await Task.Delay(_flushInterval, stoppingToken).ConfigureAwait(false);
+                        await ProcessBatchAsync(batch, stoppingToken).ConfigureAwait(false);
+                        batch.Clear();
                     }
-                    catch (OperationCanceledException) { /* shutdown */ }
+
+                    // Inter-batch pause lets more commands accumulate so we can
+                    // coalesce same-user mutations into a single DB upsert.
+                    if (!stoppingToken.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            await Task.Delay(_flushInterval, stoppingToken).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) { /* shutdown */ }
+                    }
+                }
+            }
+            catch (OperationCanceledException) { /* shutdown */ }
+
+            // Drain the channel on graceful shutdown so in-flight enqueues are
+            // flushed instead of silently dropped.
+            while (reader.TryRead(out var cmd))
+                batch.Add(cmd);
+            if (batch.Count > 0)
+            {
+                try
+                {
+                    await ProcessBatchAsync(batch, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    LogShutdownDrainFailed(_logger, ex, batch.Count);
                 }
             }
         }
-        catch (OperationCanceledException) { /* shutdown */ }
-
-        // Drain the channel on graceful shutdown so in-flight enqueues are
-        // flushed instead of silently dropped.
-        while (reader.TryRead(out var cmd))
-            batch.Add(cmd);
-        if (batch.Count > 0)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            try
-            {
-                await ProcessBatchAsync(batch, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                LogShutdownDrainFailed(_logger, ex, batch.Count);
-            }
+            // Fatal crash — Critical log + rethrow so the host can stop and be
+            // restarted by the orchestrator. Never swallow.
+            LogWorkerCrash(_logger, nameof(AuthWriteQueue), ex.Message, ex);
+            throw;
         }
     }
 
@@ -321,4 +331,8 @@ internal sealed partial class AuthWriteQueue : BackgroundService
     [LoggerMessage(EventId = 4, Level = LogLevel.Error,
         Message = "AuthWriteQueue shutdown drain failed; {Count} commands lost.")]
     private static partial void LogShutdownDrainFailed(ILogger logger, Exception ex, int count);
+
+    [LoggerMessage(EventId = 5, Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private static partial void LogWorkerCrash(ILogger logger, string workerName, string reason, Exception ex);
 }

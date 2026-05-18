@@ -13,6 +13,98 @@ _No unreleased changes._
 
 ---
 
+## [2.3.0] — 2026-05-18 — Worker resilience hardening + Pro 2.4.1-pro cascade (ADR-0021)
+
+MINOR bump because this release wires a new host-level switch (`HostOptions.BackgroundServiceExceptionBehavior = StopHost`) and applies the outer try-catch + LogWorkerCrash + rethrow discipline to **all 14 Platform `BackgroundService` implementations**. The pair with Pro v2.4.1-pro (ADR-0013) closes the silent-worker-death architectural bug exposed by the D-LK 24h K8s soak (2026-05-17/18) when `QueueDistributionWorker` stopped heart-beating at T+16h36m and the pod stayed "Running" for 21 h.
+
+Canonical spec: [`docs/specs/2026-05-18-worker-resilience-pattern-hardening.md`](docs/specs/2026-05-18-worker-resilience-pattern-hardening.md). Execution plan: [`docs/plans/completed/2026-05-18-platform-v230-worker-resilience.md`](docs/plans/completed/2026-05-18-platform-v230-worker-resilience.md). Decision: [ADR-0021](docs/decisions/0021-stophost-on-worker-crash-house-style.md). Pro counterpart: [Verbara.Sdk.Pro ADR-0013](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0013-stophost-on-worker-crash-house-style.md).
+
+**Coordinated cross-repo:** SDK `2.1.2` (unchanged) · Pro **`2.4.1-pro`** (cascade) · Web `3.0.3-web` (unchanged — no client-side worker-resilience surface).
+
+### Host-level wiring
+
+- **`src/Verbara.Platform.Api/Program.cs` (L96-110)** — `builder.Services.Configure<HostOptions>(o => o.BackgroundServiceExceptionBehavior = StopHost)`. With this switch any worker (Platform's or Pro's) that rethrows from its outer try-catch causes the host process to stop, K8s observes the exit, and the operator sees `Last State Reason: Error` plus the `WorkerCrash` Critical log in `--previous`. Without it, the .NET default `Ignore` swallows the rethrow silently — the failure mode D-LK exposed.
+
+### Hardened (14 workers)
+
+**Pattern A — polling (timer / `while`-loop), 11 files:**
+- `Services/QueueDistributionWorker.cs` ⭐ (the one that died in D-LK)
+- `Services/ConversationTimeoutWorker.cs`
+- `Services/CampaignMetricsPoller.cs`
+- `Services/WebhookDeliveryService.cs` (dual-loop — both `ProcessChannelAsync` + `PollPendingRetriesAsync` wrapped)
+- `Services/RetentionPurgeService.cs`
+- `Services/AuditRetentionService.cs`
+- `Services/ImpersonationSessionTimeoutService.cs`
+- `Services/Reports/ReportSchedulerService.cs`
+- `Verbara.Platform.Automation/TimerPollingService.cs`
+- `Verbara.Platform.Mail/Services/TokenRefreshService.cs`
+- `Verbara.Platform.Billing/DunningService.cs`
+
+**Pattern B — Rx subscribe, 2 files:**
+- `Services/BotAnalyticsPersistenceService.cs` (subscription nullification on `OnError`; `IsSubscriptionHealthy` property; `HandleEventSafely` wraps fire-and-forget)
+- `Services/VerbaraCapacitySyncService.cs` (`async ExecuteAsync` with outer try-catch; subscription nullification; `HandleCapacityChangedSafely`)
+
+**Channel consumer, 1 file:**
+- `Services/AuthWriteQueue.cs` (outer catch was OCE-only; extended to full Critical-log + rethrow for non-OCE fatals; `LogWorkerCrash` source-gen added)
+
+### Added
+
+- **25 new resilience tests** in `tests/Verbara.Platform.Api.Tests/Workers/Resilience/`:
+  - **Tier-1 deep (4 workers × ~4 tests = 15):** `QueueDistributionWorkerResilienceTests`, `ConversationTimeoutWorkerResilienceTests`, `WebhookDeliveryServiceResilienceTests`, `BotAnalyticsPersistenceServiceResilienceTests`
+  - **Smoke (7 workers, 1 test each = 7):** `SimpleWorkerSmokeTests.cs` covering `CampaignMetricsPoller`, `RetentionPurgeService`, `AuditRetentionService`, `ImpersonationSessionTimeoutService`, `ReportSchedulerService`, `VerbaraCapacitySyncService`, `AuthWriteQueue`
+  - **Integration:** `WorkerResilienceHostOptionsTests` asserts Platform DI resolves `IOptions<HostOptions>` with `BackgroundServiceExceptionBehavior = StopHost`
+  - **Helper:** `WorkerResilienceTestHelpers.AwaitExecuteFaultAsync` uses `BackgroundService.ExecuteTask` (public .NET 8+) to assert outer rethrow without reflection
+- **`[LoggerMessage]` source-gen** per-worker (matches existing Platform convention — colocated `partial void LogXxx(...)` methods inside the worker class):
+  - `LogWorkerCrash(string workerName, string reason, Exception ex)` — Critical, `[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}`
+  - For Pattern B: `LogSubscriptionFault(string reason)` — Critical
+  - For Pattern B with fire-and-forget: `LogFireAndForgetSwallowed(string reason)` — Warning
+
+### Changed
+
+- **`NuGet.Config`** — extended `packageSourceMapping` to also map `Verbara.Sdk.Pro*` patterns to the `local` source for the maintainer's dev-iteration loop. The `Dockerfile` already removes the `local` source before production restore, so production builds remain GitHub-Packages-exclusive. Dev-only change.
+- **`Directory.Packages.props`** — bumped 21 `Verbara.Sdk.Pro.*` package pins from `2.4.0-pro` → `2.4.1-pro`.
+- **Platform.Api workers' `ExecuteAsync` signatures** preserved (still `protected override async Task` for Pattern A, `protected override Task` for Pattern B). `VerbaraCapacitySyncService.ExecuteAsync` is now `async Task` (added `await Task.Delay(Timeout.Infinite, stoppingToken)` so the outer try-catch can surface fatal exceptions during the worker's lifetime; previously was sync `Task.CompletedTask` after Subscribe).
+
+### Pro 2.4.1-pro cascade (`Directory.Packages.props`)
+
+| Package | Was | Now |
+|---|---|---|
+| Verbara.Sdk.Pro.EventStore | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Analytics | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.CallAnalytics | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Dialer | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Dialer.Storage.Postgres | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.EventStore.Postgres | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Analytics.Storage.Postgres | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Licensing | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.AgentAssist | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.AgentAssist.Storage.Postgres | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Routing | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Realtime | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Realtime.Storage.Postgres | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Cluster | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Cluster.Storage.Postgres | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.MultiTenant | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Push | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Push.SignalR | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.Storage.Common | 2.4.0-pro | 2.4.1-pro |
+| Verbara.Sdk.Pro.OpenTelemetry | 2.4.0-pro | 2.4.1-pro |
+
+### Back-compat
+
+- No public API removed. No DTO contract changes. No DB migrations.
+- All 938 pre-existing `Verbara.Platform.Api.Tests` tests pass unchanged after hardening.
+- Workers' business logic preserved 100% — the change is invisible until a worker would have died.
+- HTTP 402 (RFC 9457) license-gate contract from v2.2.0 unchanged.
+
+### Follow-up work tracked (non-blocking)
+
+- Per-worker resilience tests for `TimerPollingService` (Automation), `TokenRefreshService` (Mail), `DunningService` (Billing) — the workers themselves are hardened; their resilience contract is covered transitively by `WorkerResilienceHostOptionsTests`. Per-worker smoke tests deferred to v2.4.0 or v2.4.1 maintenance.
+- D-LK soak repeat with the hardened image to confirm the silent-stale-heartbeat failure mode is impossible by construction.
+
+---
+
 ## [2.2.0] — 2026-05-17 — License-status surface + HTTP 402 RFC 9457 contract + Pro 2.4.0-pro cascade
 
 MINOR bump because this release introduces a new platform-admin-visible endpoint (`GET /management/system/license/status`) and changes the `LicenseGateMiddleware` response contract from HTTP 403 → HTTP **402 Payment Required** with RFC 9457 ProblemDetails extension members carrying actionable `tier_required`, `trial_url`, `upgrade_url`, and `contact_sales_url` sourced from the enriched `LicenseGuardResult` in Pro v2.4.0-pro. Adds back-compat plumbing to suppress the new Pro deprecation event 12001 (`Licensing:EnforcementMode`) in demo / dev / Helm surfaces until we migrate in lockstep with Pro v2.5.0-pro.

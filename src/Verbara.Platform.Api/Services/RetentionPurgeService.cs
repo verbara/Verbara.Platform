@@ -64,36 +64,48 @@ internal sealed partial class RetentionPurgeService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Delay initial run by 5 minutes to let the app start up
-        await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
-            {
-                await _policy.ExecuteAsync(
-                    ResiliencePolicyKey,
-                    async innerCt =>
-                    {
-                        await RunRetentionPurgeAsync(innerCt);
-                        return 0;
-                    },
-                    stoppingToken);
-            }
-            catch (CircuitBreakerOpenException)
-            {
-                LogCircuitOpen();
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogRetentionError(ex);
-            }
+            // Delay initial run by 5 minutes to let the app start up
+            await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
 
-            await Task.Delay(_interval, stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await _policy.ExecuteAsync(
+                        ResiliencePolicyKey,
+                        async innerCt =>
+                        {
+                            await RunRetentionPurgeAsync(innerCt);
+                            return 0;
+                        },
+                        stoppingToken);
+                }
+                catch (CircuitBreakerOpenException)
+                {
+                    LogCircuitOpen();
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogRetentionError(ex);
+                }
+
+                await Task.Delay(_interval, stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(nameof(RetentionPurgeService), fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
@@ -186,4 +198,8 @@ internal sealed partial class RetentionPurgeService : BackgroundService
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Circuit open for worker.retention-purge — skipping cycle")]
     private partial void LogCircuitOpen();
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private partial void LogWorkerCrash(string workerName, string reason, Exception ex);
 }

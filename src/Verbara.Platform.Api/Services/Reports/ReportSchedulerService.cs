@@ -65,35 +65,47 @@ internal sealed partial class ReportSchedulerService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await Task.Delay(InitialDelay, stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
-            {
-                await _policy.ExecuteAsync(
-                    ResiliencePolicyKey,
-                    async innerCt =>
-                    {
-                        await RunSchedulerTickAsync(innerCt);
-                        return 0;
-                    },
-                    stoppingToken);
-            }
-            catch (CircuitBreakerOpenException)
-            {
-                LogCircuitOpen();
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogTickError(ex);
-            }
+            await Task.Delay(InitialDelay, stoppingToken);
 
-            await Task.Delay(TickInterval, stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await _policy.ExecuteAsync(
+                        ResiliencePolicyKey,
+                        async innerCt =>
+                        {
+                            await RunSchedulerTickAsync(innerCt);
+                            return 0;
+                        },
+                        stoppingToken);
+                }
+                catch (CircuitBreakerOpenException)
+                {
+                    LogCircuitOpen();
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogTickError(ex);
+                }
+
+                await Task.Delay(TickInterval, stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(nameof(ReportSchedulerService), fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
@@ -326,4 +338,8 @@ internal sealed partial class ReportSchedulerService : BackgroundService
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Circuit open for worker.report-scheduler — skipping tick")]
     private partial void LogCircuitOpen();
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private partial void LogWorkerCrash(string workerName, string reason, Exception ex);
 }

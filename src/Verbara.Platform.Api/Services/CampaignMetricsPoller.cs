@@ -34,33 +34,45 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
-
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        try
         {
-            try
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+
+            while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                await _policy.ExecuteAsync(
-                    ResiliencePolicyKey,
-                    async innerCt =>
-                    {
-                        await PollMetricsAsync(innerCt);
-                        return 0;
-                    },
-                    stoppingToken);
+                try
+                {
+                    await _policy.ExecuteAsync(
+                        ResiliencePolicyKey,
+                        async innerCt =>
+                        {
+                            await PollMetricsAsync(innerCt);
+                            return 0;
+                        },
+                        stoppingToken);
+                }
+                catch (CircuitBreakerOpenException)
+                {
+                    LogCircuitOpen();
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogPollError(ex);
+                }
             }
-            catch (CircuitBreakerOpenException)
-            {
-                LogCircuitOpen();
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogPollError(ex);
-            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(nameof(CampaignMetricsPoller), fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
@@ -113,4 +125,8 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Circuit open for worker.campaign-metrics-poller — skipping tick")]
     private partial void LogCircuitOpen();
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private partial void LogWorkerCrash(string workerName, string reason, Exception ex);
 }

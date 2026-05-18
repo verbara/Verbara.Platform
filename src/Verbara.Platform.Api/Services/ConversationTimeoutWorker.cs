@@ -52,37 +52,49 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        try
         {
-            _heartbeat.RecordTick(nameof(ConversationTimeoutWorker), TimeSpan.FromSeconds(5));
-            try
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+
+            while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                await _policy.ExecuteAsync(
-                    ResiliencePolicyKey,
-                    async innerCt =>
-                    {
-                        await ProcessTimeoutsAsync(innerCt);
-                        return 0;
-                    },
-                    stoppingToken);
+                _heartbeat.RecordTick(nameof(ConversationTimeoutWorker), TimeSpan.FromSeconds(5));
+                try
+                {
+                    await _policy.ExecuteAsync(
+                        ResiliencePolicyKey,
+                        async innerCt =>
+                        {
+                            await ProcessTimeoutsAsync(innerCt);
+                            return 0;
+                        },
+                        stoppingToken);
+                }
+                catch (CircuitBreakerOpenException)
+                {
+                    // Circuit open — skip this tick, next timer tick retries.
+                    LogCircuitOpen();
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogTimeoutCycleError(ex);
+                }
             }
-            catch (CircuitBreakerOpenException)
-            {
-                // Circuit open — skip this tick, next timer tick retries.
-                LogCircuitOpen();
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogTimeoutCycleError(ex);
-            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(nameof(ConversationTimeoutWorker), fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
@@ -194,4 +206,8 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Circuit open for worker.conversation-timeout — skipping tick")]
     private partial void LogCircuitOpen();
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private partial void LogWorkerCrash(string workerName, string reason, Exception ex);
 }

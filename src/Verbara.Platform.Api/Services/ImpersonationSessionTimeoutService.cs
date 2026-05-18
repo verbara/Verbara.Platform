@@ -59,9 +59,9 @@ public sealed partial class ImpersonationSessionTimeoutService : BackgroundServi
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(_sweepInterval, _clock);
         try
         {
+            using var timer = new PeriodicTimer(_sweepInterval, _clock);
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
                 try
@@ -80,7 +80,12 @@ public sealed partial class ImpersonationSessionTimeoutService : BackgroundServi
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // graceful shutdown
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(nameof(ImpersonationSessionTimeoutService), fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
@@ -159,4 +164,8 @@ public sealed partial class ImpersonationSessionTimeoutService : BackgroundServi
     [LoggerMessage(EventId = 9101, Level = LogLevel.Warning,
         Message = "Impersonation auto-timeout revoke succeeded but audit emission failed for session {SessionId}.")]
     partial void LogAuditWriteFailed(string sessionId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    partial void LogWorkerCrash(string workerName, string reason, Exception ex);
 }

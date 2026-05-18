@@ -63,37 +63,61 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
 
     private async Task ProcessChannelAsync(CancellationToken ct)
     {
-        await foreach (var delivery in _dispatcher.DeliveryReader.ReadAllAsync(ct))
+        try
         {
-            await DeliverAsync(delivery, ct);
+            await foreach (var delivery in _dispatcher.DeliveryReader.ReadAllAsync(ct))
+            {
+                await DeliverAsync(delivery, ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(_logger, nameof(WebhookDeliveryService) + ".ProcessChannelAsync", fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
     private async Task PollPendingRetriesAsync(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        try
         {
-            try
+            while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(RetryPollInterval, ct);
-
-                var pending = await _deliveryStore.ListPendingRetriesAsync(
-                    _clock.UtcNow, batchSize: 100, ct);
-
-                foreach (var delivery in pending)
+                try
                 {
-                    if (ct.IsCancellationRequested) break;
-                    await DeliverAsync(delivery, ct);
+                    await Task.Delay(RetryPollInterval, ct);
+
+                    var pending = await _deliveryStore.ListPendingRetriesAsync(
+                        _clock.UtcNow, batchSize: 100, ct);
+
+                    foreach (var delivery in pending)
+                    {
+                        if (ct.IsCancellationRequested) break;
+                        await DeliverAsync(delivery, ct);
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogPollError(_logger, ex);
                 }
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogPollError(_logger, ex);
-            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Normal shutdown — host is stopping. Don't rethrow.
+        }
+        catch (Exception fatalEx)
+        {
+            LogWorkerCrash(_logger, nameof(WebhookDeliveryService) + ".PollPendingRetriesAsync", fatalEx.Message, fatalEx);
+            throw;
         }
     }
 
@@ -300,4 +324,8 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Webhook {DeliveryId} retry #{Attempts} scheduled for {NextRetry}")]
     private static partial void LogRetryScheduled(ILogger logger, string deliveryId, int attempts, DateTimeOffset nextRetry);
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
+    private static partial void LogWorkerCrash(ILogger logger, string workerName, string reason, Exception ex);
 }
