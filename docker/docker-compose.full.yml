@@ -62,13 +62,12 @@ services:
       Asterisk__Ari__Password: ${ARI_PASSWORD:-asterisk_ari_secret}
       Asterisk__Ari__Application: verbara
       Recordings__BasePath: /recordings
-      # Licensing__EnforcementMode is [Obsolete] in Pro v2.4.0-pro and will be
-      # removed in Pro v2.5.0-pro. Kept `Disabled` here for dev/demo back-compat;
-      # the LogLevel filter below suppresses the boot-time deprecation event
-      # 12001 noise while we wait for the lockstep migration. See
-      # https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/migration/pro-v240-v250-licensing.md
-      Licensing__EnforcementMode: Disabled
-      Logging__LogLevel__Verbara.Sdk.Pro.Licensing.LicensingDeprecationHostedService: Warning
+      # Pro v2.5.0-pro: Licensing__EnforcementMode is GONE (ADR-0012). License
+      # presence drives behaviour — set Licensing__LicenseFilePath to a mounted
+      # .lic to enable Pro features; leave empty/unset for community / OSS mode
+      # where Pro endpoints respond HTTP 402 + RFC 9457 ProblemDetails. Free
+      # endpoints (auth, queues, conversations, channels) are unaffected.
+      # Migration docs: https://verbara.io/docs/migration/pro-v240-v250-licensing
       CORS_ORIGINS: http://localhost
       Services__Renderer__BaseUrl: http://renderer:5010
       Services__Mail__BaseUrl: http://mail:5020

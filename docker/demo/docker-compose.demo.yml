@@ -88,10 +88,11 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE: "false"
       HostOptions__BackgroundServiceExceptionBehavior: Ignore
-      # Licensing__EnforcementMode is [Obsolete] in Pro v2.4.0-pro; removal in v2.5.0-pro.
-      # Kept `Disabled` for demo back-compat; LogLevel filter suppresses event 12001.
-      Licensing__EnforcementMode: Disabled
-      Logging__LogLevel__Verbara.Sdk.Pro.Licensing.LicensingDeprecationHostedService: Warning
+      # Pro v2.5.0-pro: Licensing__EnforcementMode is GONE (ADR-0012). License
+      # presence drives behaviour. Demo has no LicenseFilePath set → community
+      # / OSS mode → Pro endpoints return HTTP 402 + ProblemDetails, free
+      # endpoints unaffected. Set Licensing__LicenseFilePath to /etc/verbara/license.lic
+      # + mount the .lic via secret to unlock Pro features.
       ConnectionStrings__Postgres: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       ConnectionStrings__Cluster: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       ConnectionStrings__Analytics: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
