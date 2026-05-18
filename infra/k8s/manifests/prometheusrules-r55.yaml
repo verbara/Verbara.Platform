@@ -269,3 +269,131 @@ spec:
             summary: "Redis memory utilization > 75% on {{ $labels.instance }} sustained 1h"
             description: "Capacity warning. JTI revocation cache + presence backplane share Redis; consider TTL tuning or instance resize before maxmemory-policy kicks in."
             runbook_url: "alerts-runbook.md#redismemoryhigh"
+
+    # =================================================================
+    # Verbara Pro Licensing alerts (Phase 5.3, paired with the
+    # docs/operations/grafana-licensing-panels.md dashboard).
+    #
+    # Sources:
+    #   - Pro `Verbara.Sdk.Pro.Licensing.Guard` meter (license_guard_blocked_total,
+    #     license_image_unauthorized_total, license_guard_grace_remaining_seconds)
+    #   - kube-state-metrics (kube_pod_container_status_restarts_total,
+    #     kube_pod_container_status_last_terminated_reason)
+    #   - Loki count_over_time for log-derived signals (WorkerCrash, LicenseException,
+    #     ProductionSafetyNet event-id 12002)
+    # =================================================================
+    - name: platform_licensing
+      interval: 30s
+      rules:
+
+        - alert: LicenseImageUnauthorized
+          expr: |
+            sum(increase(license_image_unauthorized_total[5m])) > 0
+          for: 1m
+          labels:
+            severity: P0
+            service: licensing
+          annotations:
+            summary: "ADR-0011 Layer C breach — license rejects current IMAGE_DIGEST"
+            description: |
+              `license.image_unauthorized` counter incremented in last 5min. The running container's
+              manifest digest is NOT in the license's AuthorizedImageDigests claim. Either:
+                (a) operator deployed wrong image (registry mirror skew?);
+                (b) license is stale (issued before current digest registered);
+                (c) intentional pirate attempt — investigate.
+              Drill-down: Grafana dashboard `verbara-licensing` panel 8 (table) shows truncated digest
+              + authorized_count. Verify against verbara-website/data/authorized-digests.json.
+            runbook_url: "alerts-runbook.md#licenseimageunauthorized"
+
+        - alert: PlatformApiContainerErrorTermination
+          # Prometheus-native signal: any platform-api pod terminated with Reason=Error
+          # in last 10min. CAUSE attribution (license? worker? DB?) requires log
+          # inspection — see Grafana `verbara-licensing` panel 7 (Loki) or
+          # `kubectl logs <pod> --previous`. Loki Ruler will add the joined log-based
+          # variants (LicenseValidationFailedAtBoot, WorkerCrashDetected) in a follow-up.
+          expr: |
+            sum(increase(kube_pod_container_status_last_terminated_reason{reason="Error",pod=~"platform-api-.*"}[10m])) > 0
+          for: 2m
+          labels:
+            severity: P0
+            service: platform-api
+          annotations:
+            summary: "Platform-api pod terminated with Reason=Error in last 10min"
+            description: |
+              At least one platform-api pod restarted with `Last State Reason: Error` (not OOMKilled,
+              not Completed, not SIGTERM). Possible causes:
+                - License validation failure at boot (LicenseException) — pre-v2.3.1 DI race regression
+                  is the historical pattern; check the v2.3.1+ deployment
+                - Worker silent-death caught by ADR-0021 StopHost (WorkerCrash log present)
+                - Postgres / Redis connectivity failure during startup
+                - DB schema mismatch / migration failure
+                - Configuration error (missing required env, invalid Helm values)
+              Investigation steps:
+                1. `kubectl describe pod <pod>` — Events section shows the terminated reason + signal
+                2. `kubectl logs <pod> --previous` — stack trace from the crashed run
+                3. Grafana `verbara-licensing` panel 7 (Loki) — search for "LicenseException|WorkerCrash"
+              If logs show LicenseException → check verbara-lab-license Secret content;
+              if logs show WorkerCrash → ADR-0021 worker resilience worked as designed, investigate the worker.
+            runbook_url: "alerts-runbook.md#platformapicontainerexterrortermination"
+
+        - alert: LicenseGraceWindowExhausted
+          expr: |
+            min by (feature) (license_guard_grace_remaining_seconds) == 0
+          for: 5m
+          labels:
+            severity: P1
+            service: licensing
+          annotations:
+            summary: "Pro feature {{ $labels.feature }} grace window exhausted — calls now denied"
+            description: |
+              `license.guard.grace_remaining_seconds{feature="{{ $labels.feature }}"}` hit 0 and stayed
+              there for 5min. LicenseGuard.CanExecute now returns Allowed=false; Pro endpoints respond
+              HTTP 402 RFC 9457 with `Reason=GraceExhausted`. Renew the license urgently OR upgrade the
+              installation tier. Public trial issuer: https://verbara.io/developer-license.
+            runbook_url: "alerts-runbook.md#licensegracewindowexhausted"
+
+        - alert: LicenseBlocksRateHigh
+          expr: |
+            sum(rate(license_guard_blocked_total[10m])) > 1
+          for: 15m
+          labels:
+            severity: P2
+            service: licensing
+          annotations:
+            summary: "Sustained license-block rate > 1 block/s for 15min"
+            description: |
+              Either: customer is repeatedly hitting Pro endpoints without a valid license (high HTTP 402
+              rate — expected post v2.5.0-pro removal for unlicensed installs); OR a misconfigured client
+              is polling. Use Grafana panel 5 to identify which `feature` + `reason` combination is
+              dominant. If `reason=NotLicensed` AND a fresh deploy, check Secret mount + values.yaml.
+            runbook_url: "alerts-runbook.md#licenseblocksratehigh"
+
+        - alert: LicenseExpiringSoon
+          expr: |
+            min(license_guard_grace_remaining_seconds) < 604800
+            and
+            min(license_guard_grace_remaining_seconds) > 0
+          for: 1h
+          labels:
+            severity: P2
+            service: licensing
+          annotations:
+            summary: "Pro license within grace window — < 7 days remaining"
+            description: |
+              The Pro license has entered the grace-period window. `license.guard.grace_remaining_seconds`
+              minimum across features < 604800s (7 days). Renew the license now; Pro features remain
+              available until grace exhausts (alert `LicenseGraceWindowExhausted` will page when that
+              happens). Hot-reload via FileSystemWatcher means rotation is downtime-free —
+              just replace the K8s Secret.
+            runbook_url: "alerts-runbook.md#licenseexpiringsoon"
+
+        # Note: 3 additional log-derived alerts are documented in
+        # docs/operations/prometheus-licensing-alerts.md for installation as Loki Ruler
+        # rules (separate from this PrometheusRule manifest because they use LogQL
+        # `count_over_time({...} |~ "pattern" [duration])` syntax that Prometheus
+        # itself does not parse):
+        #   - LicenseValidationFailedAtBoot  (LicenseException in logs, P0)
+        #   - WorkerCrashDetected            (WorkerCrash in logs,        P1)
+        #   - ProductionWithoutImageDigest   (event.id=12002 in logs,     P3)
+        # Loki Ruler installation is deferred until the kube-prometheus-stack chart
+        # values enable the Loki ruler component (loki-stack.loki.config.ruler).

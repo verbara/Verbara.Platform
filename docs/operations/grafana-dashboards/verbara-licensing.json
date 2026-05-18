@@ -1,0 +1,283 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "name": "License validation events",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "enable": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "expr": "{job=~\".*platform-api\"} |~ \"LicenseValidationHostedService|LicenseRevalidationService\""
+      }
+    ]
+  },
+  "description": "Verbara Pro Licensing observability. Exposes Pro.Licensing.Guard meter signals (blocked counts, image-unauthorized counts, grace-remaining gauge) plus log-derived annotations for license validation events. Pair with the alerts in docs/operations/prometheus-licensing-alerts.md.",
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 38,
+  "tags": ["verbara", "licensing", "pro", "v2.3.1"],
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Verbara — Pro Licensing",
+  "uid": "verbara-licensing",
+  "version": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(up{job=\"platform-api\"}, namespace)",
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2,
+        "regex": "",
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "License image-unauthorized count (24h)",
+      "description": "license.image_unauthorized counter sum over 24h. NON-ZERO means an operator deployed an image whose manifest digest is NOT in the license's AuthorizedImageDigests claim (ADR-0011 Layer C breach). Expected value: 0.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "mappings": [{ "options": { "0": { "color": "green", "text": "OK" } }, "type": "value" }]
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["last"], "fields": "", "values": false },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(license_image_unauthorized_total{namespace=~\"$namespace\"}[24h]))",
+          "legendFormat": "image_unauthorized 24h",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "License blocks (24h, total)",
+      "description": "license.guard.blocked counter sum over 24h. Counts every CanExecute call that returned Allowed=false. Normal at zero unless customer attempts Pro features without a valid license.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "orange", "value": 100 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["last"], "fields": "", "values": false },
+        "textMode": "auto",
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(license_guard_blocked_total{namespace=~\"$namespace\"}[24h]))",
+          "legendFormat": "blocked 24h",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Platform-api replicas Up",
+      "description": "Indirect license-health signal: if the license is invalid AND EnforcementMode forces a startup throw (pre-v2.5.0-pro Enforce mode), pods crashloop and `up` goes to 0.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["last"], "fields": "", "values": false },
+        "textMode": "auto",
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "sum(up{job=\"platform-api\",namespace=~\"$namespace\"})",
+          "legendFormat": "replicas",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Worker crash count (24h)",
+      "description": "ADR-0021 worker resilience signal: any BackgroundService that throws out of ExecuteAsync should produce a Critical log event + StopHost-driven pod restart. Expected value: 0. NON-ZERO → check Loki for WorkerCrash logs + kubectl describe pod for Last State Reason: Error.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["last"], "fields": "", "values": false },
+        "textMode": "auto",
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({namespace=~\"$namespace\"} |~ \"WorkerCrash\" [24h]))",
+          "legendFormat": "crashes",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Block rate per feature × reason (req/s)",
+      "description": "Time-series of license.guard.blocked counter, broken down by Pro feature (Dialer, EventStore, Analytics, etc.) and the reason (NotLicensed, Expired, GraceExhausted, UnauthorizedImage, Revoked). Use this to identify which features are being denied + why.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0 }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["sum"] }
+      },
+      "targets": [
+        {
+          "expr": "sum by (feature, reason) (rate(license_guard_blocked_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "{{feature}} / {{reason}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Grace-period remaining per feature (seconds)",
+      "description": "Observable gauge license.guard.grace_remaining_seconds tagged by feature. Reports the configured grace window when the license is fully valid + decreases linearly as expiry approaches. Reaches 0 when grace exhausted (LicenseGuard now returns Allowed=false with Reason=GraceExhausted).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0 }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"] }
+      },
+      "targets": [
+        {
+          "expr": "license_guard_grace_remaining_seconds{namespace=~\"$namespace\"}",
+          "legendFormat": "{{feature}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "logs",
+      "title": "License validation events (boot + revalidation)",
+      "description": "Loki query for LicenseValidationHostedService (boot) + LicenseRevalidationService (every 6h interval). Watch for 'is valid for' on boot, 'License re-validation started' periodic, and any 'failed' / 'Throwing LicenseException' / 'invalid signature' / 'UnauthorizedImage' indicators.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 8 },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "expr": "{namespace=~\"$namespace\"} |~ \"LicenseValidationHostedService|LicenseRevalidationService|LicenseException|WorkerCrash\"",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Recent image-unauthorized events (running_digest × authorized_count)",
+      "description": "Truncated running_digest (first 16 chars) + authorized_count from license. Each row = one rejection. Expected: empty. Any row means an operator attempted to run an image whose manifest digest is not in the license's allowlist.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 21, "w": 12, "h": 6 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (running_digest, authorized_count) (increase(license_image_unauthorized_total{namespace=~\"$namespace\"}[24h]))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Pod restart count over time (license-related)",
+      "description": "Restarts/min for platform-api pods. Compare against `Pod Last State Reason` annotation: if Reason=Error AND `WorkerCrash` log appeared near the restart → silent worker death caught by ADR-0021 StopHost. If LicenseException at startup → license invalid; check Loki panel above.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 21, "w": 12, "h": 6 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0 }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      },
+      "targets": [
+        {
+          "expr": "sum by (pod) (changes(kube_pod_container_status_restarts_total{namespace=~\"$namespace\",pod=~\"platform-api-.*\"}[5m]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}
