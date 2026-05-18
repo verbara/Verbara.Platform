@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-Project context for Claude Code working on **Verbara.Platform** — the API host and composition root for an omnichannel contact-center built on .NET 10 Native AOT. Read top-to-bottom for architecture; jump to **Critical Gotchas** for non-obvious pitfalls before editing code.
+Project context for Claude Code working on **Verbara.Platform** — the API host and composition root for an omnichannel contact-center built on .NET 10. Read top-to-bottom for architecture; jump to **Critical Gotchas** for non-obvious pitfalls before editing code.
+
+> **AOT shipping caveat (2026-05-18, [ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md)):** Platform.Api currently ships as portable IL DLLs, NOT Native AOT. The SDK + Pro library packages assert `IsAotCompatible=true` and ARE AOT-clean, but the API host project itself disables AOT (`<IsAotCompatible>false</IsAotCompatible>`) because of SignalR server-side dispatch + EF Core DataProtection. Future public ghcr.io images MUST be AOT per ADR-0022 — non-AOT publishing ships Pro IP as decompilable IL. The SignalR extraction + DataProtection migration roadmap blocks Pro v2.5.0-pro public release.
 
 > **This repo is the authoritative workstream for Platform + Platform.Web.** Plans, specs, ADRs, and research that touch either the API **or** the React frontend are authored under this repo's `docs/` tree. `Verbara.Platform.Web` remains a separate git repo for frontend source, but its own `docs/` is secondary — open new plans here. Decision recorded 2026-04-19 (feedback memory `feedback_platform_web_consolidation.md`).
 
@@ -8,9 +10,9 @@ Project context for Claude Code working on **Verbara.Platform** — the API host
 
 ## Project Overview
 
-Verbara.Platform is the API host and composition root for the omnichannel contact center. .NET 10 Native AOT. Consumes SDK (MIT) and Pro packages via NuGet — versions pinned in `Directory.Packages.props`.
+Verbara.Platform is the API host and composition root for the omnichannel contact center. .NET 10. Consumes SDK (MIT) and Pro packages via NuGet — versions pinned in `Directory.Packages.props`. The SDK + Pro libraries are AOT-compatible (`IsAotCompatible=true` per package csproj); the Api host project disables AOT pending the SignalR + DataProtection refactor described in [ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md).
 
-**NativeAOT (`IsAotCompatible=true`), `/api/v1/` (URL-segment versioning), 70 endpoint groups (14 with feature gates).** Current version in `Directory.Build.props`; package list under `src/`.
+**`/api/v1/` (URL-segment versioning), 70 endpoint groups (14 with feature gates).** Current version in `Directory.Build.props`; package list under `src/`.
 
 **Package layers** (purpose-grouped; one DI extension per package):
 

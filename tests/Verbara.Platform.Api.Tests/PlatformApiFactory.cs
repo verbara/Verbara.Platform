@@ -1,6 +1,3 @@
-// Back-compat tests: EnforcementMode is [Obsolete] in Pro v2.4.0-pro but kept functional until v2.5.0-pro.
-#pragma warning disable CS0618
-
 using Verbara.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,9 +16,9 @@ public sealed class PlatformApiFactory : WebApplicationFactory<Program>
             // ── Asterisk SDK stubs (no real AMI/ARI connections in tests) ────
             AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
 
-            // Disable license enforcement and provide dummy public key so
-            // LicenseValidationHostedService starts without a real license file.
-            services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Disabled);
+            // v2.5.0-pro: substitute ILicenseStatus with all features licensed
+            // so LicenseGateMiddleware short-circuits to next() in tests.
+            services.AddAllProFeaturesLicensed();
             if (!services.Any(d => d.ServiceType == typeof(byte[])))
                 services.AddSingleton<byte[]>([]);
 

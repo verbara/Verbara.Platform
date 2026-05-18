@@ -13,6 +13,45 @@ _No unreleased changes._
 
 ---
 
+## [2.4.0-rc] — 2026-05-18 — Pro v2.5.0-pro consumer migration (drops EnforcementMode); **NOT PUBLICLY SHIPPED** ([ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md))
+
+Internal RC tag for the Pro v2.5.0-pro consumer migration ([ADR-0012](../Verbara.Sdk.Pro/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md)). The `-rc` suffix signals that the code is correct + tests pass (958/958 Api.Tests green, 0 warnings, 0 errors) BUT the canonical `ghcr.io/verbara/platform/api:*` image cannot be published from this commit per [ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md) — the current Dockerfile produces a non-AOT image that ships 68 closed-source `Verbara.Sdk.Pro.*` DLLs as decompilable IL. Public image cutover blocked on ADR-0022 Phases A+B+C (SignalR Hub extraction + EF Core DataProtection migration + AOT publish), estimated 3–4 maintainer-days.
+
+### Changed (consumer migration)
+
+- [`Program.cs`](src/Verbara.Platform.Api/Program.cs) — removed the `CS0618` pragma + back-compat header + `EnforcementMode` config parsing block (~15 lines). License path: `LicenseFilePath` only.
+- [`Middleware/LicenseGateMiddleware.cs`](src/Verbara.Platform.Api/Middleware/LicenseGateMiddleware.cs) — full rewrite. Constructor no longer takes `IOptions<LicenseOptions>`. Logic collapses to "metadata + feature licensed → next; metadata + not licensed → HTTP 402 + RFC 9457 ProblemDetails". 158 → 100 lines.
+- [`Directory.Packages.props`](Directory.Packages.props) — 21 `Verbara.Sdk.Pro.*` `PackageVersion` entries bumped `2.4.1-pro` → `2.5.0-pro`.
+- [`Verbara.Platform.Api.Tests/LicenseTestHelpers.cs`](tests/Verbara.Platform.Api.Tests/LicenseTestHelpers.cs) — NEW. `services.AddAllProFeaturesLicensed()` + `services.AddNoProFeaturesLicensed()` extension methods replacing the old `services.Configure<LicenseOptions>(o => o.EnforcementMode = Disabled)` pattern across test factories.
+- 14 test fixture files migrated to the new helper.
+- `LicenseGateTests` rewritten to test the simplified middleware contract (no `EnforcementMode` parameter). Tests for `WarnOnly` and `Disabled` modes deleted (behaviour gone).
+
+### Added
+
+- [ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md) — Platform.Api Native AOT shipping path. Empirical AOT publish attempt 2026-05-18 produced 8 errors (5× IL3050, 3× IL2026) in two classes: SignalR `IHubContext.Clients.get` (`PushToHubRelay.cs:163,179,195`) + EF Core DataProtection (`Program.cs:515,523,525`). Roadmap Phases A-E documented (~3-4 maintainer-days).
+- [`docs/operations/compressed-validation-report-v250pro.md`](docs/operations/compressed-validation-report-v250pro.md) — Pro v2.5.0-pro compressed-validation evidence + verdict (**NO-GO** for public release until ADR-0022 closed).
+- [`docs/operations/compressed-validation-evidence/`](docs/operations/compressed-validation-evidence/) — Scenario E baseline metrics + boot logs captured against `v2.3.1` + valid license + `WarnOnly` mode in the K8s preview namespace.
+- [`infra/k8s/helm/platform/values-preview-warnonly.yaml`](infra/k8s/helm/platform/values-preview-warnonly.yaml) — Helm overlay for compressed-validation preview deploys.
+- [`infra/k8s/manifests/network-policies.yaml`](infra/k8s/manifests/network-policies.yaml) — `allow-postgres-from-workloads` + `allow-redis-from-platform` now honour `verbara.io/postgres-access: allowed` + `verbara.io/redis-access: allowed` namespace labels for preview / test / blue-green opt-in.
+- [`Dockerfile`](Dockerfile) — prominent IP-leak warning header + commented AOT pathway ready to activate post-ADR-0022.
+
+### Documentation
+
+- [`CLAUDE.md`](CLAUDE.md) — corrected the misleading "Native AOT" claim for Platform.Api; now states the host disables AOT pending ADR-0022.
+- [`../CLAUDE.md`](../CLAUDE.md) (monorepo) — same correction applied to the per-repo stack table.
+
+### Test impact
+
+- Platform.Api.Tests: **958/958 PASS** against Pro v2.5.0-pro packages, 0 warnings, 0 errors.
+
+### Known gaps (deferred)
+
+- `docs/manuales/smb/` still references `LICENSING_MODE` / `EnforcementMode` — separate small commit pending.
+- Scenarios B/C/D/E against the v2.5.0-pro RC image cannot run until ADR-0022 unblocks AOT shipping. Scenario E pre-swap baseline is captured.
+- Test-license trust-anchor mismatch (local `private.pem` ≠ `OfficialPublicKeyFingerprintSha256`) — blocks Scenario C until either an offline 5-minute license is issued from Cloudflare or a `LICENSE_TRUST_ANCHOR_PEM_FILE` env override is added to `Program.cs` as a development affordance.
+
+---
+
 ## [2.3.1] — 2026-05-18 — Security fix: `LicenseTrustAnchor.OfficialPublicKey` was overridden by empty `byte[]` (Program.cs DI race)
 
 PATCH bump for a one-line bug that silently rendered **every signed Pro license invalid at startup** unless the operator explicitly set `Licensing__PublicKeyPath`. The bug was masked for the entire post-rebrand period by the legacy `Licensing__EnforcementMode=Disabled` short-circuit which skipped the validation call entirely. Surfaced during the v2.3.0 K8s lab deploy when we dropped `EnforcementMode=Disabled` in the Helm chart per the Pro v2.4.0-pro deprecation + v2.5.0-pro removal pathway.

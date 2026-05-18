@@ -1,6 +1,3 @@
-// Back-compat tests: EnforcementMode is [Obsolete] in Pro v2.4.0-pro but kept functional until v2.5.0-pro.
-#pragma warning disable CS0618
-
 using System.Net;
 using System.Net.Http.Json;
 using Verbara.Platform.Core;
@@ -83,7 +80,7 @@ public sealed class PasswordResetEmailTests
             {
                 // Stub Asterisk hosted services and licensing
                 AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
-                services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Disabled);
+                services.AddAllProFeaturesLicensed();
                 if (!services.Any(d => d.ServiceType == typeof(byte[])))
                     services.AddSingleton<byte[]>([]);
 

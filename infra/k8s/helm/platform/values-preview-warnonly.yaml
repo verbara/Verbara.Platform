@@ -1,0 +1,90 @@
+# =============================================================================
+# values-preview-warnonly.yaml — Pro v2.5.0-pro compressed-validation overlay
+# =============================================================================
+#
+# Layered overlay for `helm install/upgrade` against a sandbox namespace
+# (e.g. `r55-platform-v25-preview`) to exercise license-enforcement
+# scenarios with the deprecated `Licensing__EnforcementMode=WarnOnly` knob
+# that lets the API log violations without returning HTTP 402.
+#
+# Designed for the compressed-validation cycle documented in
+# `docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md`
+# (Pro repo) Amendment §3 — scenarios B (boot w/o license), C (mid-soak
+# license expiration) and E (license-transition w/o customer downtime).
+#
+# Pre-requisites on the target namespace (one-time setup):
+#   kubectl create ns r55-platform-v25-preview
+#   kubectl label ns r55-platform-v25-preview \
+#     verbara.io/postgres-access=allowed \
+#     verbara.io/redis-access=allowed
+#
+# Apply against the same chart that production uses:
+#   helm install platform-preview infra/k8s/helm/platform/ \
+#     --namespace r55-platform-v25-preview \
+#     --values infra/k8s/helm/platform/values.yaml \
+#     --values infra/k8s/helm/platform/values-preview-warnonly.yaml
+#
+# The chart's NetworkPolicy in r55-data is updated separately (see
+# `infra/k8s/manifests/network-policies.yaml` policies #2 + #3) to honour
+# the `verbara.io/database-access` opt-in labels.
+# =============================================================================
+
+namespace: r55-platform-v25-preview
+
+api:
+  # Single replica to minimise memory footprint on the constrained lab
+  # (3 workers × ~3.4 Gi allocatable; the production lab namespace already
+  # holds 2 replicas, so we cap preview at 1 to avoid scheduler pressure).
+  replicas: 1
+  # HPA off: the preview environment receives synthetic Scenario E/B/C
+  # traffic only — we want a deterministic single-pod target.
+  hpa:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 1
+  # Smaller request/limit envelope. The preview path doesn't push the
+  # SMB-tier knee (~11 k RPS @ p99 ≤ 100 ms) — Scenarios C/E exercise
+  # behaviour transitions, not throughput plateaus.
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  licensing:
+    # The whole reason this overlay exists — Pro v2.4.x WarnOnly path.
+    # Pro logs `license guard blocked: <reason>` at Warning level but does
+    # NOT return HTTP 402, so synthetic clients can observe the transition
+    # without scenario abort. Pro v2.5.0-pro RC images IGNORE this env var
+    # (per ADR-0012) — preview should pin to a v2.4.x image when using it.
+    enforcementMode: WarnOnly
+    # Leave licenseFilePath as-shipped (operator-defaulted). The Secret
+    # `verbara-lab-license` must already exist in the preview namespace —
+    # either copy from r55-platform or issue a short-lived (24h) preview
+    # license via the issuance CLI per
+    # `docs/operations/k8s-lab-licensing-setup.md` §3.
+    licenseSecret:
+      enabled: true
+      name: verbara-lab-license
+      key: license.lic
+
+# Cosign admission verification is preview-safe to leave OFF — the chart
+# default is `false`, and we keep it false here to allow rapid image swaps
+# during scenario execution (digest pin changes per Pro RC iteration).
+imageVerification:
+  enabled: false
+
+# The web frontend is not exercised by Scenario B/C/E (those are API-only
+# license-behaviour tests). Scaling to 0 frees ~64 Mi of memory on the
+# preview ns. Re-enable for full end-to-end smoke after scenarios PASS.
+web:
+  replicas: 0
+
+# Ingress disabled at the chart level — preview reaches the API via
+# `kubectl port-forward` from the maintainer workstation OR via a separate
+# HTTPRoute manifest applied out-of-band. Avoids contention with the
+# production Gateway listener (192.168.122.192:80).
+ingress:
+  enabled: false

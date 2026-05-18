@@ -1,6 +1,3 @@
-// Back-compat tests: EnforcementMode is [Obsolete] in Pro v2.4.0-pro but kept functional until v2.5.0-pro.
-#pragma warning disable CS0618
-
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -25,10 +22,13 @@ namespace Verbara.Platform.Api.Tests;
 /// loaded is an operational hole, not a safeguard. The license gate protects
 /// tenant-facing features (dialer, analytics, agent-assist), not the admin console.
 ///
-/// This fixture forces <see cref="EnforcementMode.Enforce"/> with
-/// <see cref="LicenseFeature.None"/> — the exact state of a fresh demo where no
-/// license file has been seeded — and asserts that every /management/cluster/*
-/// route is reachable by a platform admin.
+/// This fixture forces <see cref="LicenseFeature.None"/> — the exact state of
+/// a fresh demo where no license file has been seeded — and asserts that every
+/// /management/cluster/* route is reachable by a platform admin. The Pro v2.5.0-pro
+/// LicenseGateMiddleware always 402s endpoints carrying <c>LicenseFeatureMetadata</c>
+/// when the requested feature isn't licensed; /management/* routes are intentionally
+/// NOT decorated with <c>LicenseFeatureMetadata</c>, so the middleware short-circuits
+/// at the first metadata check (see <see cref="Middleware.LicenseGateMiddleware"/>).
 /// </summary>
 public sealed class ManagementClusterLicenseGateTests
     : IClassFixture<ManagementClusterLicenseGateTests.EnforcedNoLicenseFactory>
@@ -99,18 +99,9 @@ public sealed class ManagementClusterLicenseGateTests
                 AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
                 AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
 
-                // Real-world demo: enforce mode with NO licensed features.
-                services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Enforce);
-
-                // Override ILicenseStatus to return LicenseFeature.None explicitly
-                // (a fresh LicenseStatusTracker does this by default, but we make it
-                // explicit so the test fails loudly if future refactors change defaults).
-                var existing = services.SingleOrDefault(d => d.ServiceType == typeof(ILicenseStatus));
-                if (existing is not null) services.Remove(existing);
-
-                var status = Substitute.For<ILicenseStatus>();
-                status.LicensedFeatures.Returns(LicenseFeature.None);
-                services.AddSingleton(status);
+                // Real-world demo: NO licensed features (Pro v2.5.0-pro: no
+                // EnforcementMode knob — license absence alone drives the gate).
+                services.AddNoProFeaturesLicensed();
 
                 if (!services.Any(d => d.ServiceType == typeof(byte[])))
                     services.AddSingleton<byte[]>([]);

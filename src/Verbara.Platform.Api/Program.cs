@@ -1,9 +1,3 @@
-// Back-compat licensing path: Platform v2.2.0 consumes Pro v2.4.0-pro which marks
-// LicenseOptions.EnforcementMode [Obsolete]. We preserve the 3-mode behaviour
-// (Disabled / WarnOnly / Enforce) until Platform's lockstep migration with Pro v2.5.0-pro.
-// Dev/demo compose still set Licensing__EnforcementMode=Disabled — see ADR-0012.
-#pragma warning disable CS0618 // EnforcementMode
-
 using Asp.Versioning;
 using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.DependencyInjection;
@@ -309,36 +303,17 @@ var publicKeyPath = licenseConfig["PublicKeyPath"];
 // ⚠️ Operator-supplied trust anchor override is optional. When unset, do NOT
 // register a byte[] here — let Verbara.Sdk.Pro.Licensing's AddProLicensing()
 // register LicenseTrustAnchor.OfficialPublicKey via its own TryAddSingleton.
-//
-// Prior buggy behaviour (fixed in v2.3.1): this block UNCONDITIONALLY called
-// AddSingleton(Array.Empty<byte>()) when PublicKeyPath was unset, which won
-// the DI race against AddProLicensing's TryAddSingleton<byte[]>(OfficialPublicKey).
-// Result: LicenseValidationHostedService received Array.Empty<byte>() as its
-// publicKey, ECDsa.ImportSubjectPublicKeyInfo threw, VerifySignature returned
-// false, and EVERY signed license was reported "invalid signature" at startup.
-// The bug was masked for years by the legacy `EnforcementMode=Disabled` short-
-// circuit which skipped the validate call entirely. Removing Disabled (Pro
-// v2.4.0-pro deprecation + v2.5.0-pro removal pathway) exposed the bug.
 if (!string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath))
 {
     builder.Services.AddSingleton<byte[]>(File.ReadAllBytes(publicKeyPath));
 }
 
-var enforcementMode = Enum.TryParse<Verbara.Sdk.Pro.Licensing.EnforcementMode>(
-    licenseConfig["EnforcementMode"], ignoreCase: true, out var parsedMode)
-    ? parsedMode
-    : (builder.Environment.IsDevelopment()
-        ? Verbara.Sdk.Pro.Licensing.EnforcementMode.WarnOnly
-        : Verbara.Sdk.Pro.Licensing.EnforcementMode.Enforce);
-
-// If no license file exists and no explicit config, fall back to WarnOnly (community mode)
-if (!File.Exists(licensePath) && !licenseConfig.Exists())
-    enforcementMode = Verbara.Sdk.Pro.Licensing.EnforcementMode.WarnOnly;
-
+// Pro v2.5.0-pro: EnforcementMode is GONE (ADR-0012). License-presence drives
+// behaviour: file at LicenseFilePath valid → Pro enabled; missing/invalid/
+// expired → Pro endpoints return HTTP 402 via LicenseGateMiddleware.
 builder.Services.AddProLicensing(o =>
 {
     o.LicenseFilePath = licensePath;
-    o.EnforcementMode = enforcementMode;
     o.RevalidationInterval = TimeSpan.TryParse(licenseConfig["RevalidationInterval"], out var interval)
         ? interval
         : TimeSpan.FromHours(6);

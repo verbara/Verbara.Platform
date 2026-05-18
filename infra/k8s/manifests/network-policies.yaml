@@ -27,7 +27,21 @@ spec:
   policyTypes:
     - Ingress
 ---
-# 2. Allow Postgres pooler access from r55-asterisk and r55-platform
+# 2. Allow Postgres pooler access from workload namespaces.
+#    Three selector forms (OR-combined):
+#      a) namespace name == r55-asterisk  (back-compat: production workload)
+#      b) namespace name == r55-platform  (back-compat: production workload)
+#      c) namespace label `verbara.io/postgres-access: allowed`
+#         opt-in marker for preview / test / blue-green deploys. Add the
+#         label to a new namespace to grant access without editing this
+#         policy (e.g. `kubectl label ns r55-platform-v25-preview
+#         verbara.io/postgres-access=allowed`). The label uses a per-
+#         backend key (postgres-access, redis-access) so a namespace can
+#         opt into multiple data tiers via separate labels — one label
+#         key per opt-in is required because Kubernetes labels are a
+#         simple `key=value` map (no list-membership semantics).
+#         Discovered necessary 2026-05-18 during Pro v2.5.0-pro
+#         compressed-validation Scenario E.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -47,11 +61,19 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: r55-platform
+        - namespaceSelector:
+            matchLabels:
+              verbara.io/postgres-access: allowed
       ports:
         - protocol: TCP
           port: 5432
 ---
-# 3. Allow Redis access from r55-platform only
+# 3. Allow Redis access from workload namespaces.
+#    Mirrors the postgres-pooler policy (#2): r55-platform by name +
+#    label-based opt-in for preview/test/blue-green deploys
+#    (`verbara.io/redis-access: allowed`). Independent from the
+#    postgres-access label so a preview ns can opt into Postgres
+#    only, Redis only, or both via separate labels.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -68,6 +90,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: r55-platform
+        - namespaceSelector:
+            matchLabels:
+              verbara.io/redis-access: allowed
       ports:
         - protocol: TCP
           port: 6379

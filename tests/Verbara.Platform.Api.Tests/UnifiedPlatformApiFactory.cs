@@ -1,6 +1,3 @@
-// Back-compat tests: EnforcementMode is [Obsolete] in Pro v2.4.0-pro but kept functional until v2.5.0-pro.
-#pragma warning disable CS0618
-
 using System.Collections.Concurrent;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
@@ -59,7 +56,7 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
             AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
 
             // ── Licensing ─────────────────────────────────────────────────────
-            services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Disabled);
+            services.AddAllProFeaturesLicensed();
             if (!services.Any(d => d.ServiceType == typeof(byte[])))
                 services.AddSingleton<byte[]>([]);
 

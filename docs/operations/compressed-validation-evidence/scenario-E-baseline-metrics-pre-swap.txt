@@ -1,0 +1,228 @@
+# TYPE license_guard_grace_remaining_seconds gauge
+# UNIT license_guard_grace_remaining_seconds seconds
+# HELP license_guard_grace_remaining_seconds Remaining grace-period seconds per feature.
+license_guard_grace_remaining_seconds{otel_scope_name="Verbara.Sdk.Pro.Licensing.Guard",feature="Dialer"} 604800 1779141055144
+# TYPE kestrel_active_connections gauge
+# HELP kestrel_active_connections Number of connections that are currently active on the server.
+kestrel_active_connections{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000"} 0 1779141055144
+kestrel_active_connections{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000"} 1 1779141055144
+# TYPE kestrel_connection_duration_seconds histogram
+# UNIT kestrel_connection_duration_seconds seconds
+# HELP kestrel_connection_duration_seconds The duration of connections on the server.
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="0.01"} 22 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="0.02"} 25 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="0.05"} 25 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="0.1"} 25 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="0.2"} 25 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="0.5"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="1"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="2"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="5"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="10"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="30"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="60"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="120"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="300"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000",le="+Inf"} 26 1779141055144
+kestrel_connection_duration_seconds_sum{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000"} 0.4946855 1779141055144
+kestrel_connection_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000"} 26 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="0.01"} 0 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="0.02"} 0 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="0.05"} 0 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="0.1"} 0 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="0.2"} 0 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="0.5"} 0 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="1"} 0 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="2"} 10 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="5"} 10 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="10"} 10 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="30"} 10 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="60"} 10 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="120"} 10 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="300"} 10 1779141055144
+kestrel_connection_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000",le="+Inf"} 10 1779141055144
+kestrel_connection_duration_seconds_sum{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000"} 10.163036300000002 1779141055144
+kestrel_connection_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_protocol_name="http",network_protocol_version="1.1",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000"} 10 1779141055144
+# TYPE kestrel_queued_connections gauge
+# HELP kestrel_queued_connections Number of connections that are currently queued and are waiting to start.
+kestrel_queued_connections{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_transport="tcp",network_type="ipv6",server_address="::ffff:10.244.0.42",server_port="5000"} 0 1779141055144
+kestrel_queued_connections{otel_scope_name="Microsoft.AspNetCore.Server.Kestrel",network_transport="tcp",network_type="ipv6",server_address="::ffff:127.0.0.1",server_port="5000"} 0 1779141055144
+# TYPE dialer_campaign_active gauge
+# HELP dialer_campaign_active Number of campaigns currently tracked by the DialerEngine
+dialer_campaign_active{otel_scope_name="Verbara.Sdk.Pro.Dialer",otel_scope_version="1.0.0"} 0 1779141055144
+# TYPE dialer_originate_inflight gauge
+# HELP dialer_originate_inflight Global in-flight originations (per node)
+dialer_originate_inflight{otel_scope_name="Verbara.Sdk.Pro.Dialer",otel_scope_version="1.0.0"} 0 1779141055144
+# TYPE eventstore_subscriber_inflight gauge
+# HELP eventstore_subscriber_inflight Events currently being appended by EventStoreSubscriber (fire-and-forget queue depth)
+eventstore_subscriber_inflight{otel_scope_name="Verbara.Sdk.Pro.EventStore"} 0 1779141055144
+# TYPE eventstore_projection_lag_ms gauge
+# HELP eventstore_projection_lag_ms Most recent projection-completion lag, in milliseconds
+eventstore_projection_lag_ms{otel_scope_name="Verbara.Sdk.Pro.EventStore"} 0 1779141055144
+# TYPE callanalytics_pipeline_inflight gauge
+# HELP callanalytics_pipeline_inflight Call analyses currently running through the pipeline
+callanalytics_pipeline_inflight{otel_scope_name="Verbara.Sdk.Pro.CallAnalytics"} 0 1779141055144
+# TYPE agentassist_session_active gauge
+# HELP agentassist_session_active Currently active assisted sessions
+agentassist_session_active{otel_scope_name="Verbara.Sdk.Pro.AgentAssist"} 0 1779141055144
+# TYPE agentassist_transcription_queue_depth gauge
+# HELP agentassist_transcription_queue_depth Pending transcript segments awaiting downstream analysis
+agentassist_transcription_queue_depth{otel_scope_name="Verbara.Sdk.Pro.AgentAssist"} 0 1779141055144
+# TYPE live_queue_writer_inflight gauge
+# HELP live_queue_writer_inflight Number of live queue snapshot writes currently in flight.
+live_queue_writer_inflight{otel_scope_name="Verbara.Sdk.Pro.Analytics.Live"} 0 1779141055144
+# TYPE http_server_active_requests gauge
+# HELP http_server_active_requests Number of active HTTP server requests.
+http_server_active_requests{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",url_scheme="http"} 1 1779141055144
+http_server_active_requests{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",url_scheme="http"} 0 1779141055144
+# TYPE http_server_request_duration_seconds histogram
+# UNIT http_server_request_duration_seconds seconds
+# HELP http_server_request_duration_seconds Duration of HTTP server requests.
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="0.005"} 7 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="0.01"} 9 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="0.025"} 10 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="0.05"} 10 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="0.075"} 10 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="0.1"} 10 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="0.25"} 10 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="0.5"} 11 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="0.75"} 11 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="1"} 11 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="2.5"} 11 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="5"} 11 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="7.5"} 11 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="10"} 11 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http",le="+Inf"} 11 1779141055144
+http_server_request_duration_seconds_sum{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 0.4095238 1779141055144
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 11 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="0.005"} 13 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="0.01"} 16 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="0.025"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="0.05"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="0.075"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="0.1"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="0.25"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="0.5"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="0.75"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="1"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="2.5"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="5"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="7.5"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="10"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http",le="+Inf"} 17 1779141055144
+http_server_request_duration_seconds_sum{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 0.07102180000000001 1779141055144
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 17 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.005"} 4 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.01"} 4 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.025"} 4 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.05"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.075"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.1"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.25"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.5"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.75"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="1"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="2.5"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="5"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="7.5"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="10"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="+Inf"} 5 1779141055144
+http_server_request_duration_seconds_sum{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http"} 0.062305900000000004 1779141055144
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="GET",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http"} 5 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="0.005"} 0 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="0.01"} 0 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="0.025"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="0.05"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="0.075"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="0.1"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="0.25"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="0.5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="0.75"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="1"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="2.5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="7.5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="10"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http",le="+Inf"} 1 1779141055144
+http_server_request_duration_seconds_sum{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 0.0149473 1779141055144
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="0.005"} 0 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="0.01"} 0 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="0.025"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="0.05"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="0.075"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="0.1"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="0.25"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="0.5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="0.75"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="1"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="2.5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="7.5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="10"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http",le="+Inf"} 1 1779141055144
+http_server_request_duration_seconds_sum{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http"} 0.0229357 1779141055144
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="401",http_route="/api/v{version:apiVersion}/management/system/license",network_protocol_version="1.1",url_scheme="http"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.005"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.01"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.025"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.05"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.075"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.1"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.25"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="0.75"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="1"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="2.5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="7.5"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="10"} 1 1779141055144
+http_server_request_duration_seconds_bucket{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http",le="+Inf"} 1 1779141055144
+http_server_request_duration_seconds_sum{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http"} 0.003268 1779141055144
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",aspnetcore_request_is_unhandled="true",http_request_method="POST",http_response_status_code="404",network_protocol_version="1.1",url_scheme="http"} 1 1779141055144
+# TYPE circuit_state gauge
+# HELP circuit_state Current circuit state per key: 0 = closed, 1 = half-open, 2 = open.
+circuit_state{otel_scope_name="Verbara.Sdk.Resilience",key="worker.campaign-metrics-poller"} 0 1779141055144
+circuit_state{otel_scope_name="Verbara.Sdk.Resilience",key="worker.queue-distribution"} 0 1779141055144
+circuit_state{otel_scope_name="Verbara.Sdk.Resilience",key="worker.conversation-timeout"} 0 1779141055144
+circuit_state{otel_scope_name="Verbara.Sdk.Resilience",key="worker.dunning"} 0 1779141055144
+circuit_state{otel_scope_name="Verbara.Sdk.Resilience",key="worker.report-scheduler"} 0 1779141055144
+# TYPE aspnetcore_routing_match_attempts_total counter
+# HELP aspnetcore_routing_match_attempts_total Number of requests that were attempted to be matched to an endpoint.
+aspnetcore_routing_match_attempts_total{otel_scope_name="Microsoft.AspNetCore.Routing",aspnetcore_routing_is_fallback="false",aspnetcore_routing_match_status="success",http_route="/health"} 11 1779141055144
+aspnetcore_routing_match_attempts_total{otel_scope_name="Microsoft.AspNetCore.Routing",aspnetcore_routing_is_fallback="false",aspnetcore_routing_match_status="success",http_route="/health/ready"} 17 1779141055144
+aspnetcore_routing_match_attempts_total{otel_scope_name="Microsoft.AspNetCore.Routing",aspnetcore_routing_match_status="failure"} 6 1779141055144
+aspnetcore_routing_match_attempts_total{otel_scope_name="Microsoft.AspNetCore.Routing",aspnetcore_routing_is_fallback="false",aspnetcore_routing_match_status="success",http_route="/metrics"} 2 1779141055144
+aspnetcore_routing_match_attempts_total{otel_scope_name="Microsoft.AspNetCore.Routing",aspnetcore_routing_is_fallback="false",aspnetcore_routing_match_status="success",http_route="/api/v{version:apiVersion}/management/system/license"} 1 1779141055144
+# TYPE audiosocket_sessions_active gauge
+# HELP audiosocket_sessions_active Active AudioSocket sessions
+audiosocket_sessions_active{otel_scope_name="Verbara.Sdk.VoiceAi.AudioSocket",otel_scope_version="1.0.0"} 0 1779141055144
+# TYPE realtime_drift_detected_total counter
+# HELP realtime_drift_detected_total Configuration drift events detected during reconciliation
+realtime_drift_detected_total{otel_scope_name="Verbara.Sdk.Pro.Realtime"} 0 1779141055144
+# TYPE realtime_reconcile_duration_ms_milliseconds histogram
+# UNIT realtime_reconcile_duration_ms_milliseconds milliseconds
+# HELP realtime_reconcile_duration_ms_milliseconds Reconciliation cycle duration
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="0"} 0 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="5"} 0 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="10"} 1 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="25"} 2 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="50"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="75"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="100"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="250"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="500"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="750"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="1000"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="2500"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="5000"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="7500"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="10000"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_bucket{otel_scope_name="Verbara.Sdk.Pro.Realtime",le="+Inf"} 3 1779141055144
+realtime_reconcile_duration_ms_milliseconds_sum{otel_scope_name="Verbara.Sdk.Pro.Realtime"} 65.8291 1779141055144
+realtime_reconcile_duration_ms_milliseconds_count{otel_scope_name="Verbara.Sdk.Pro.Realtime"} 3 1779141055144
+# TYPE asterisk_push_subscribers_active_subscribers gauge
+# UNIT asterisk_push_subscribers_active_subscribers subscribers
+# HELP asterisk_push_subscribers_active_subscribers Currently active push subscriptions
+asterisk_push_subscribers_active_subscribers{otel_scope_name="Verbara.Sdk.Push",otel_scope_version="1.6.0"} 0 1779141055144
+# EOF

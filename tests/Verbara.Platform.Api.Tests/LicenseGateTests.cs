@@ -1,17 +1,22 @@
-// Back-compat tests: EnforcementMode is [Obsolete] in Pro v2.4.0-pro but kept functional until v2.5.0-pro.
-#pragma warning disable CS0618
-
 using Verbara.Platform.Api.Middleware;
 using Verbara.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using NSubstitute;
 
 namespace Verbara.Platform.Api.Tests;
 
+/// <summary>
+/// Pro v2.5.0-pro <see cref="LicenseGateMiddleware"/> tests.
+///
+/// Middleware contract post-ADR-0012: license-presence drives the gate, no
+/// EnforcementMode knob. Tests cover three branches:
+///   * no LicenseFeatureMetadata on endpoint → middleware short-circuits to next()
+///   * metadata + feature licensed → middleware passes to next()
+///   * metadata + feature NOT licensed → middleware responds 402 + ProblemDetails
+/// </summary>
 public sealed class LicenseGateTests
 {
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -19,22 +24,16 @@ public sealed class LicenseGateTests
     private static LicenseGateMiddleware BuildMiddleware(
         RequestDelegate next,
         ILicenseStatus licenseStatus,
-        EnforcementMode mode,
         ILicenseGuard? licenseGuard = null)
     {
-        var options = Options.Create(new LicenseOptions { EnforcementMode = mode });
         var guard = licenseGuard ?? BuildDefaultGuard();
         return new LicenseGateMiddleware(
             next,
             NullLogger<LicenseGateMiddleware>.Instance,
             licenseStatus,
-            guard,
-            options);
+            guard);
     }
 
-    // Pro v2.4.0-pro — default ILicenseGuard substitute returns NotLicensed-with-URLs
-    // so existing tests that only assert status code / content-type keep working.
-    // Phase I tests will inject custom guards to assert ProblemDetails extension members.
     private static ILicenseGuard BuildDefaultGuard()
     {
         var guard = Substitute.For<ILicenseGuard>();
@@ -61,7 +60,6 @@ public sealed class LicenseGateTests
 
         if (metadata is not null)
         {
-            // Attach an endpoint with the given metadata so GetEndpoint() returns it.
             var endpointMetadata = new EndpointMetadataCollection(metadata);
             var endpoint = new Endpoint(null, endpointMetadata, "test");
             ctx.Features.Set<IEndpointFeature>(new EndpointFeature { Endpoint = endpoint });
@@ -111,9 +109,8 @@ public sealed class LicenseGateTests
         RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
 
         var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce);
+        var middleware = BuildMiddleware(next, status);
 
-        // No metadata attached → no endpoint feature set.
         var ctx = BuildContext(metadata: null);
 
         await middleware.InvokeAsync(ctx);
@@ -127,7 +124,7 @@ public sealed class LicenseGateTests
         RequestDelegate next = ctx => { ctx.Response.StatusCode = 200; return Task.CompletedTask; };
 
         var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce);
+        var middleware = BuildMiddleware(next, status);
 
         var ctx = BuildContext(metadata: null);
 
@@ -145,7 +142,7 @@ public sealed class LicenseGateTests
         RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
 
         var status = LicensedWith(LicenseFeature.Dialer);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce);
+        var middleware = BuildMiddleware(next, status);
 
         var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.Dialer));
 
@@ -155,12 +152,12 @@ public sealed class LicenseGateTests
     }
 
     [Fact]
-    public async Task InvokeAsync_ShouldNotSet403_WhenFeatureIsLicensed()
+    public async Task InvokeAsync_ShouldNotBlock_WhenFeatureIsLicensed()
     {
         RequestDelegate next = ctx => { ctx.Response.StatusCode = 200; return Task.CompletedTask; };
 
         var status = LicensedWith(LicenseFeature.All);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce);
+        var middleware = BuildMiddleware(next, status);
 
         var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.Analytics));
 
@@ -169,79 +166,15 @@ public sealed class LicenseGateTests
         ctx.Response.StatusCode.Should().Be(200);
     }
 
-    // ── WarnOnly mode → request passes + header present ──────────────────────
+    // ── Unlicensed feature → 402 ─────────────────────────────────────────────
 
     [Fact]
-    public async Task InvokeAsync_ShouldCallNext_WhenUnlicensedInWarnOnlyMode()
-    {
-        var nextCalled = false;
-        RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
-
-        var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.WarnOnly);
-
-        var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.Dialer));
-
-        await middleware.InvokeAsync(ctx);
-
-        nextCalled.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task InvokeAsync_ShouldAddWarningHeader_WhenUnlicensedInWarnOnlyMode()
+    public async Task InvokeAsync_ShouldReturn402_WhenUnlicensed()
     {
         RequestDelegate next = _ => Task.CompletedTask;
 
         var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.WarnOnly);
-
-        var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.Dialer));
-
-        await middleware.InvokeAsync(ctx);
-
-        ctx.Response.Headers.ContainsKey("X-License-Warning").Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task InvokeAsync_ShouldNotSet403_WhenUnlicensedInWarnOnlyMode()
-    {
-        RequestDelegate next = ctx => { ctx.Response.StatusCode = 200; return Task.CompletedTask; };
-
-        var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.WarnOnly);
-
-        var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.AgentAssist));
-
-        await middleware.InvokeAsync(ctx);
-
-        ctx.Response.StatusCode.Should().Be(200);
-    }
-
-    [Fact]
-    public async Task InvokeAsync_ShouldIncludeFeatureNameInWarningHeader_WhenUnlicensedInWarnOnlyMode()
-    {
-        RequestDelegate next = _ => Task.CompletedTask;
-
-        var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.WarnOnly);
-
-        var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.Routing));
-
-        await middleware.InvokeAsync(ctx);
-
-        var headerValue = ctx.Response.Headers["X-License-Warning"].ToString();
-        headerValue.Should().Contain("Routing");
-    }
-
-    // ── Enforce mode → 402 (Pro v2.4.0-pro changed 403 → 402 Payment Required) ──
-
-    [Fact]
-    public async Task InvokeAsync_ShouldReturn402_WhenUnlicensedInEnforceMode()
-    {
-        RequestDelegate next = _ => Task.CompletedTask;
-
-        var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce);
+        var middleware = BuildMiddleware(next, status);
 
         var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.Dialer));
 
@@ -251,13 +184,13 @@ public sealed class LicenseGateTests
     }
 
     [Fact]
-    public async Task InvokeAsync_ShouldNotCallNext_WhenUnlicensedInEnforceMode()
+    public async Task InvokeAsync_ShouldNotCallNext_WhenUnlicensed()
     {
         var nextCalled = false;
         RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
 
         var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce);
+        var middleware = BuildMiddleware(next, status);
 
         var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.Analytics));
 
@@ -267,12 +200,12 @@ public sealed class LicenseGateTests
     }
 
     [Fact]
-    public async Task InvokeAsync_ShouldSetProblemJsonContentType_WhenBlockedInEnforceMode()
+    public async Task InvokeAsync_ShouldSetProblemJsonContentType_WhenBlocked()
     {
         RequestDelegate next = _ => Task.CompletedTask;
 
         var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce);
+        var middleware = BuildMiddleware(next, status);
 
         var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.Cluster));
 
@@ -281,31 +214,8 @@ public sealed class LicenseGateTests
         ctx.Response.ContentType.Should().Contain("application/problem+json");
     }
 
-    // ── Disabled mode → always pass regardless of license ────────────────────
+    // ── RFC 9457 ProblemDetails extension members ───────────────────────────
 
-    [Fact]
-    public async Task InvokeAsync_ShouldCallNext_WhenEnforcementIsDisabledAndFeatureUnlicensed()
-    {
-        var nextCalled = false;
-        RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
-
-        var status = LicensedWith(LicenseFeature.None);
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Disabled);
-
-        var ctx = BuildContext(new LicenseFeatureMetadata(LicenseFeature.CallAnalytics));
-
-        await middleware.InvokeAsync(ctx);
-
-        nextCalled.Should().BeTrue();
-    }
-
-    // ── RFC 9457 ProblemDetails extension members (Pro v2.4.0-pro) ──────────
-
-    /// <summary>
-    /// Reads the response body as a JSON object — middleware writes
-    /// <see cref="Microsoft.AspNetCore.Mvc.ProblemDetails"/> serialized via
-    /// <see cref="Verbara.Platform.Api.Serialization.ApiJsonContext"/>.
-    /// </summary>
     private static async Task<System.Text.Json.JsonElement> ReadResponseBodyAsJson(HttpContext ctx)
     {
         ctx.Response.Body.Seek(0, SeekOrigin.Begin);
@@ -338,7 +248,7 @@ public sealed class LicenseGateTests
             TrialUrl = LicensingDefaults.TrialUrl,
             UpgradeUrl = LicensingDefaults.UpgradeUrl,
         });
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce, guard);
+        var middleware = BuildMiddleware(next, status, guard);
         var ctx = BuildContextWithCapturedBody(new LicenseFeatureMetadata(LicenseFeature.Dialer));
 
         await middleware.InvokeAsync(ctx);
@@ -359,7 +269,7 @@ public sealed class LicenseGateTests
             TrialUrl = LicensingDefaults.TrialUrl,
             UpgradeUrl = LicensingDefaults.UpgradeUrl,
         });
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce, guard);
+        var middleware = BuildMiddleware(next, status, guard);
         var ctx = BuildContextWithCapturedBody(new LicenseFeatureMetadata(LicenseFeature.Cluster));
 
         await middleware.InvokeAsync(ctx);
@@ -378,7 +288,7 @@ public sealed class LicenseGateTests
         {
             ContactSalesUrl = LicensingDefaults.ContactSalesUrl,
         });
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce, guard);
+        var middleware = BuildMiddleware(next, status, guard);
         var ctx = BuildContextWithCapturedBody(new LicenseFeatureMetadata(LicenseFeature.AgentAssist));
 
         await middleware.InvokeAsync(ctx);
@@ -393,10 +303,8 @@ public sealed class LicenseGateTests
     {
         RequestDelegate next = _ => Task.CompletedTask;
         var status = LicensedWith(LicenseFeature.None);
-        // UnauthorizedImage is a deployment-correctness signal — Pro returns the result
-        // with all URLs null (no upgrade/trial helps; operator must redeploy).
         var guard = GuardReturning(new LicenseGuardResult(false, LicenseBlockReason.UnauthorizedImage));
-        var middleware = BuildMiddleware(next, status, EnforcementMode.Enforce, guard);
+        var middleware = BuildMiddleware(next, status, guard);
         var ctx = BuildContextWithCapturedBody(new LicenseFeatureMetadata(LicenseFeature.CallAnalytics));
 
         await middleware.InvokeAsync(ctx);

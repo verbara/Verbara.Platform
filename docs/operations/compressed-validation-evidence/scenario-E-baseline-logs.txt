@@ -1,0 +1,501 @@
+RBAC seeder skipped: 23503: insert or update on table "role_template_permissions" violates foreign key constraint "role_template_permissions_permission_id_fkey"
+
+DETAIL: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.
+info: Verbara.Platform.Storage.Postgres.Stores.OidcClientSecretEncryptionMigrator[4001]
+      OIDC client secret encryption migration completed: 0 scanned, 0 legacy plaintext re-encrypted, 0 already encrypted
+info: Verbara.Sdk.Pro.Licensing.LicenseValidationHostedService[363817437]
+      License '5cda07d0-c1c0-449b-ba25-31f699a8aaae' is valid for 'Verbara Internal Lab', expires 2027-05-18T23:59:59.0000000+00:00.
+info: Verbara.Sdk.Pro.Licensing.LicenseValidationHostedService[376663578]
+      License hot-reload watcher started for '/etc/verbara/license.lic'.
+info: Verbara.Sdk.Pro.Licensing.LicenseRevalidationService[818478244]
+      License re-validation started with interval 06:00:00.
+info: Verbara.Sdk.Pro.Licensing.LicensingDeprecationHostedService[12001]
+      DEPRECATED: Licensing:EnforcementMode setting is in use (WarnOnly). This setting will be removed in Pro v2.5.0-pro. Migration: remove Licensing__EnforcementMode from your config. To disable Pro, leave Licensing__LicenseFilePath empty. To enable Pro, populate it with your .lic path. Get a free Developer license at https://verbara.io/developer-license. Docs: https://verbara.io/docs/migration/pro-v240-v250-licensing
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT d.id, d.friendly_name, d.xml
+      FROM data_protection_keys AS d
+info: Verbara.Platform.Api.Services.JwtLegacyKeyMigrationService[1]
+      JWT pool already has active key 'fea29838bb3a4be09a889f1087a78c45'; legacy migration skipped.
+info: Verbara.Platform.Identity.Redis.RedisAuthCacheInvalidator[1]
+      RedisAuthCacheInvalidator started on channel 'asterisk:auth:invalidate' with 3 local sink(s).
+info: Verbara.Sdk.Pro.Cluster.ClusterManager[1280267637]
+      [CLUSTER] Starting instance platform-api-64748d766c-x2kcd with 1 initial nodes
+info: Verbara.Sdk.Pro.Dialer.DialerEngine[1280267637]
+      [DIALER] Engine starting, reconciliation interval: 30s
+info: Verbara.Sdk.Pro.Cluster.Registry.NodeRegistry[1474863612]
+      Synced 1 nodes from transport
+fail: Verbara.Sdk.Pro.Cluster.ClusterManager[1775888278]
+      [CLUSTER] Failed to connect initial node primary
+      System.Net.Sockets.SocketException (13): Permission denied
+         at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+         at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+         at System.Net.Sockets.TcpClient.CompleteConnectAsync(ValueTask task)
+         at Verbara.Sdk.Ami.Transport.PipelineSocketConnection.ConnectAsync(String hostname, Int32 port, Boolean useSsl, CancellationToken cancellationToken)
+         at Verbara.Sdk.Ami.Connection.AmiConnection.ConnectAsync(CancellationToken cancellationToken)
+         at Verbara.Sdk.Ami.Connection.AmiConnectionFactory.CreateAndConnectAsync(AmiConnectionOptions options, CancellationToken cancellationToken)
+         at Verbara.Sdk.Pro.Cluster.ClusterManager.ConnectNodeAsync(String nodeId, ClusterNodeOptions nodeOptions, CancellationToken ct)
+         at Verbara.Sdk.Pro.Cluster.ClusterManager.<ConnectInitialNodesAsync>b__31_0(KeyValuePair`2 kvp, CancellationToken innerCt)
+info: Verbara.Sdk.Pro.Cluster.ClusterManager[1929458206]
+      [CLUSTER] Instance platform-api-64748d766c-x2kcd started with 1 nodes connected
+info: Verbara.Sdk.Pro.EventStore.EventStoreSubscriber[1929458206]
+      EventStoreSubscriber started — listening for session events
+warn: Microsoft.AspNetCore.Hosting.Diagnostics[15]
+      Overriding HTTP_PORTS '8080' and HTTPS_PORTS ''. Binding to values defined by URLS instead 'http://+:5000'.
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://[::]:5000
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Production
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: /app
+info: Verbara.Sdk.Pro.Analytics.Live.LiveQueueSnapshotWriter[1929458206]
+      LiveQueueSnapshotWriter started — subscribing to LiveQueueStateEvent
+info: Verbara.Sdk.VoiceAi.AudioSocket.AudioSocketServer[928178707]
+      [AudioSocket] Server listening on 0.0.0.0:9093
+info: Verbara.Sdk.Pro.Realtime.Engine.RealtimeReconciler[1280267637]
+      [REALTIME] Reconciler starting, interval: 60s
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.1842ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 363.0327ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0148ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 10.1230ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0059ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 5.3884ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0083ms with message 'PresenceMergeConsumer heartbeat stale (37.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0106ms with message 'PresenceFanoutService heartbeat stale (37.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0289ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 3.8138ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.005ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0067ms with message 'PresenceMergeConsumer heartbeat stale (41.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.006ms with message 'PresenceFanoutService heartbeat stale (41.6s > 30s)'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 3.3850ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0039ms with message 'PresenceMergeConsumer heartbeat stale (47.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0037ms with message 'PresenceFanoutService heartbeat stale (47.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0071ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 2.6712ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0047ms with message 'PresenceMergeConsumer heartbeat stale (56.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0044ms with message 'PresenceFanoutService heartbeat stale (56.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0059ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 2.5357ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.006ms with message 'PresenceMergeConsumer heartbeat stale (57.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0034ms with message 'PresenceFanoutService heartbeat stale (57.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0056ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 2.3164ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0036ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0025ms with message 'PresenceFanoutService heartbeat stale (67.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0157ms with message 'PresenceMergeConsumer heartbeat stale (67.0s > 30s)'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 2.9910ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0038ms with message 'PresenceMergeConsumer heartbeat stale (71.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0031ms with message 'PresenceFanoutService heartbeat stale (71.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0235ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 2.1477ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0029ms with message 'PresenceMergeConsumer heartbeat stale (77.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0033ms with message 'PresenceFanoutService heartbeat stale (77.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0119ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 5.1071ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0028ms with message 'PresenceMergeConsumer heartbeat stale (86.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0032ms with message 'PresenceFanoutService heartbeat stale (86.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0037ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 2.3039ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0047ms with message 'PresenceFanoutService heartbeat stale (87.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0017ms with message 'PresenceMergeConsumer heartbeat stale (87.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.01ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 3.2246ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0018ms with message 'PresenceMergeConsumer heartbeat stale (94.7s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0024ms with message 'PresenceFanoutService heartbeat stale (94.7s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0047ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/health - 200 - text/plain 2.5813ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.009ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0021ms with message 'PresenceFanoutService heartbeat stale (94.7s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0025ms with message 'PresenceMergeConsumer heartbeat stale (94.7s > 30s)'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/health/ready - 200 - application/json;+charset=utf-8 3.7323ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/api/v1/license/status - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/api/v1/license/status - 404 0 - 3.1486ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[16]
+      Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://127.0.0.1:5099/api/v1/license/status, Response status code: 404
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/api/v1/dialer/campaigns - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/api/v1/dialer/campaigns - 404 0 - 2.6030ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[16]
+      Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://127.0.0.1:5099/api/v1/dialer/campaigns, Response status code: 404
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/metrics - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/metrics'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/metrics'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/metrics - 200 - text/plain;+charset=utf-8;+version=0.0.4 14.9473ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0125ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0018ms with message 'PresenceMergeConsumer heartbeat stale (97.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0026ms with message 'PresenceFanoutService heartbeat stale (97.0s > 30s)'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 3.2745ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0018ms with message 'PresenceFanoutService heartbeat stale (101.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0016ms with message 'PresenceMergeConsumer heartbeat stale (101.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0172ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 2.7490ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.002ms with message 'PresenceMergeConsumer heartbeat stale (107.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0022ms with message 'PresenceFanoutService heartbeat stale (107.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0058ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 3.0466ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0079ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0036ms with message 'PresenceMergeConsumer heartbeat stale (116.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0503ms with message 'PresenceFanoutService heartbeat stale (116.6s > 30s)'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 11.8220ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.008ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0028ms with message 'PresenceFanoutService heartbeat stale (117.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0024ms with message 'PresenceMergeConsumer heartbeat stale (117.0s > 30s)'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 9.8131ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0022ms with message 'PresenceMergeConsumer heartbeat stale (127.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0264ms with message 'PresenceFanoutService heartbeat stale (127.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0087ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 3.3719ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0028ms with message 'PresenceMergeConsumer heartbeat stale (131.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0132ms with message 'PresenceFanoutService heartbeat stale (131.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0058ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 7.5278ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/management/system/license - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/management/system/license - 404 0 - 4.6343ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[16]
+      Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://127.0.0.1:5099/management/system/license, Response status code: 404
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/api/v1/management/system/license - - -
+info: Microsoft.AspNetCore.Authorization.DefaultAuthorizationService[2]
+      Authorization failed. These requirements were not met:
+      Verbara.Platform.Api.Auth.PlatformAdminRequirement
+info: Verbara.Platform.Api.Auth.ApiKeyAuthenticationHandler[12]
+      AuthenticationScheme: ApiKey was challenged.
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/api/v1/management/system/license - 401 0 - 22.9357ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/api/v1/dialer/campaigns/list - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/api/v1/dialer/campaigns/list - 404 0 - 4.9554ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[16]
+      Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://127.0.0.1:5099/api/v1/dialer/campaigns/list, Response status code: 404
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:5099/api/v1/dialer/campaigns - - -
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:5099/api/v1/dialer/campaigns - 404 0 - 3.2680ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[16]
+      Request reached the end of the middleware pipeline without being handled by application code. Request path: POST http://127.0.0.1:5099/api/v1/dialer/campaigns, Response status code: 404
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/api/v1/dialer/campaigns - - -
+info: Verbara.Platform.Api.Auth.ApiKeyAuthenticationHandler[7]
+      ApiKey was not authenticated. Failure message: Invalid API key
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/api/v1/dialer/campaigns - 404 0 - 46.9646ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[16]
+      Request reached the end of the middleware pipeline without being handled by application code. Request path: GET http://127.0.0.1:5099/api/v1/dialer/campaigns, Response status code: 404
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0021ms with message 'PresenceMergeConsumer heartbeat stale (137.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0022ms with message 'PresenceFanoutService heartbeat stale (137.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0054ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 2.9985ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.003ms with message 'PresenceFanoutService heartbeat stale (146.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0179ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0035ms with message 'PresenceMergeConsumer heartbeat stale (146.6s > 30s)'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 3.3193ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0022ms with message 'PresenceMergeConsumer heartbeat stale (147.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0024ms with message 'PresenceFanoutService heartbeat stale (147.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0032ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 2.9065ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0021ms with message 'PresenceMergeConsumer heartbeat stale (157.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0028ms with message 'PresenceFanoutService heartbeat stale (157.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0043ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 2.9798ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0023ms with message 'PresenceFanoutService heartbeat stale (161.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0026ms with message 'PresenceMergeConsumer heartbeat stale (161.6s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0073ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health - 200 - text/plain 8.1194ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.42:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-merge with status Degraded completed after 0.0023ms with message 'PresenceMergeConsumer heartbeat stale (167.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check presence-fanout with status Degraded completed after 0.0029ms with message 'PresenceFanoutService heartbeat stale (167.0s > 30s)'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0053ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.42:5000/health/ready - 200 - application/json;+charset=utf-8 3.2631ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5099/metrics - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/metrics'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/metrics'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5099/metrics - 200 - text/plain;+charset=utf-8;+version=0.0.4 2.8296ms

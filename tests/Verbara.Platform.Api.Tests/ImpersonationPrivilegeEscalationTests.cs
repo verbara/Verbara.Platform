@@ -1,6 +1,3 @@
-// Back-compat tests: EnforcementMode is [Obsolete] in Pro v2.4.0-pro but kept functional until v2.5.0-pro.
-#pragma warning disable CS0618
-
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -229,7 +226,7 @@ public sealed class ImpersonationPrivilegeEscalationTests
                 AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
                 AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
 
-                services.Configure<LicenseOptions>(o => o.EnforcementMode = EnforcementMode.Disabled);
+                services.AddAllProFeaturesLicensed();
                 if (!services.Any(d => d.ServiceType == typeof(byte[])))
                     services.AddSingleton<byte[]>([]);
 
