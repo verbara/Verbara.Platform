@@ -306,10 +306,23 @@ builder.Services.AddSingleton<IIpAllowlistEvaluator, DefaultIpAllowlistEvaluator
 var licenseConfig = builder.Configuration.GetSection("Licensing");
 var licensePath = licenseConfig["FilePath"] ?? "./license.lic";
 var publicKeyPath = licenseConfig["PublicKeyPath"];
-var licensePublicKey = !string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath)
-    ? File.ReadAllBytes(publicKeyPath)
-    : Array.Empty<byte>();
-builder.Services.AddSingleton(licensePublicKey);
+// ⚠️ Operator-supplied trust anchor override is optional. When unset, do NOT
+// register a byte[] here — let Verbara.Sdk.Pro.Licensing's AddProLicensing()
+// register LicenseTrustAnchor.OfficialPublicKey via its own TryAddSingleton.
+//
+// Prior buggy behaviour (fixed in v2.3.1): this block UNCONDITIONALLY called
+// AddSingleton(Array.Empty<byte>()) when PublicKeyPath was unset, which won
+// the DI race against AddProLicensing's TryAddSingleton<byte[]>(OfficialPublicKey).
+// Result: LicenseValidationHostedService received Array.Empty<byte>() as its
+// publicKey, ECDsa.ImportSubjectPublicKeyInfo threw, VerifySignature returned
+// false, and EVERY signed license was reported "invalid signature" at startup.
+// The bug was masked for years by the legacy `EnforcementMode=Disabled` short-
+// circuit which skipped the validate call entirely. Removing Disabled (Pro
+// v2.4.0-pro deprecation + v2.5.0-pro removal pathway) exposed the bug.
+if (!string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath))
+{
+    builder.Services.AddSingleton<byte[]>(File.ReadAllBytes(publicKeyPath));
+}
 
 var enforcementMode = Enum.TryParse<Verbara.Sdk.Pro.Licensing.EnforcementMode>(
     licenseConfig["EnforcementMode"], ignoreCase: true, out var parsedMode)

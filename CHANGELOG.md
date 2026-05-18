@@ -13,6 +13,63 @@ _No unreleased changes._
 
 ---
 
+## [2.3.1] — 2026-05-18 — Security fix: `LicenseTrustAnchor.OfficialPublicKey` was overridden by empty `byte[]` (Program.cs DI race)
+
+PATCH bump for a one-line bug that silently rendered **every signed Pro license invalid at startup** unless the operator explicitly set `Licensing__PublicKeyPath`. The bug was masked for the entire post-rebrand period by the legacy `Licensing__EnforcementMode=Disabled` short-circuit which skipped the validation call entirely. Surfaced during the v2.3.0 K8s lab deploy when we dropped `EnforcementMode=Disabled` in the Helm chart per the Pro v2.4.0-pro deprecation + v2.5.0-pro removal pathway.
+
+### The bug
+
+[`src/Verbara.Platform.Api/Program.cs:307-309`](src/Verbara.Platform.Api/Program.cs#L307-L309) unconditionally registered a `byte[]` singleton even when `Licensing__PublicKeyPath` was unset:
+
+```csharp
+var licensePublicKey = !string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath)
+    ? File.ReadAllBytes(publicKeyPath)
+    : Array.Empty<byte>();
+builder.Services.AddSingleton(licensePublicKey);  // ← BUG
+```
+
+Because Platform's `AddSingleton` runs **before** Pro's `AddProLicensing()`, the empty array won the DI race against Pro's `TryAddSingleton<byte[]>(LicenseTrustAnchor.OfficialPublicKey)`. `LicenseValidationHostedService` then received `Array.Empty<byte>()` as its `publicKey` parameter, `ECDsa.ImportSubjectPublicKeyInfo(empty span)` threw, `VerifySignature` returned `false`, and every license returned `LicenseValidationResult.Invalid` with the (mis-attributed) "invalid signature" error.
+
+Sequence that masked the bug since pre-rebrand:
+
+1. Old Helm chart shipped `Licensing__EnforcementMode=Disabled` for community/OSS deployments.
+2. `LicenseValidationHostedService.StartAsync` short-circuited at line 63: `if (_options.EnforcementMode == Disabled) { _tracker.Update(Valid, null); return; }` — never invoked `Validate(...)`.
+3. Pro v2.4.0-pro (Platform v2.2.0 consumer) marked `EnforcementMode` `[Obsolete]` but preserved back-compat. Lab continued running with `Disabled`.
+4. v2.3.0 Helm migration off `EnforcementMode=Disabled` activated the previously-dormant code path. Every Pro license attempted at startup hit the broken `byte[]` path → `Invalid`.
+
+### Fix
+
+[`src/Verbara.Platform.Api/Program.cs:307-325`](src/Verbara.Platform.Api/Program.cs#L307-L325) — only register the `byte[]` when an operator-supplied custom trust anchor file actually exists. Otherwise let `AddProLicensing()` register `LicenseTrustAnchor.OfficialPublicKey` via its own `TryAddSingleton`.
+
+```csharp
+if (!string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath))
+{
+    builder.Services.AddSingleton<byte[]>(File.ReadAllBytes(publicKeyPath));
+}
+// else: AddProLicensing's TryAddSingleton<byte[]>(LicenseTrustAnchor.OfficialPublicKey) wins.
+```
+
+### Impact assessment
+
+- **Pre-fix consumers running `EnforcementMode=Disabled`**: no operational impact — validation was being skipped anyway. The Pro tier on these deployments effectively ran without runtime gating, exactly as documented in the SMB v1.x reference docs.
+- **Pre-fix consumers running `EnforcementMode=Enforce/WarnOnly` WITHOUT setting `Licensing__PublicKeyPath`**: license validation always failed. `Enforce` mode crashed the host at boot; `WarnOnly` logged warnings continuously. Operators would have noticed immediately — no customer has reported this, which corroborates that the dominant deployment pattern was `Disabled`.
+- **Pre-fix consumers setting `Licensing__PublicKeyPath`**: not affected — the operator-supplied path took precedence as designed.
+
+No Pro license bytes were ever leaked, no signature material was misused. This is a "validation always denies" bug, not a "validation always allows" bug.
+
+### Required for v2.5.0-pro readiness
+
+Pro v2.5.0-pro removes `EnforcementMode` entirely (ADR-0012 transition). Without this Platform fix, ANY consumer that doesn't explicitly set `Licensing__PublicKeyPath` would have hit the validation-always-fails bug at v2.5.0-pro upgrade time. This patch unblocks the v2.5.0-pro consumer migration (Platform v2.4.0).
+
+### Test coverage
+
+Adds regression test `tests/Verbara.Platform.Api.Tests/Licensing/LicenseTrustAnchorWiringTests.cs`:
+
+- `Resolved_ShouldBeOfficialPublicKey_WhenPublicKeyPathUnset` — builds host with no `Licensing:PublicKeyPath` config; asserts `IServiceProvider.GetRequiredService<byte[]>()` equals `LicenseTrustAnchor.OfficialPublicKey` (not `Array.Empty<byte>()`).
+- `Resolved_ShouldBeCustomKey_WhenPublicKeyPathPointsToValidFile` — confirms operator override still works.
+
+---
+
 ## [2.3.0] — 2026-05-18 — Worker resilience hardening + Pro 2.4.1-pro cascade (ADR-0021)
 
 MINOR bump because this release wires a new host-level switch (`HostOptions.BackgroundServiceExceptionBehavior = StopHost`) and applies the outer try-catch + LogWorkerCrash + rethrow discipline to **all 14 Platform `BackgroundService` implementations**. The pair with Pro v2.4.1-pro (ADR-0013) closes the silent-worker-death architectural bug exposed by the D-LK 24h K8s soak (2026-05-17/18) when `QueueDistributionWorker` stopped heart-beating at T+16h36m and the pod stayed "Running" for 21 h.
