@@ -1,6 +1,6 @@
 # Roadmap — Verbara.Platform + Verbara.Platform.Web
 
-**Última actualización:** 2026-05-18 · **Baselines actuales:** Platform **`2.2.0`** (SHIPPED 2026-05-18 — commit `0de22761`, tag `v2.2.0`, CI green) · Platform.Web **`3.1.0-web`** (HTTP 402 upgrade-modal UX **SHIPPED 2026-05-18** — commit `5a929ee`, tag pushed, CI triggered) · SDK pin `2.1.2` · Pro pin **`2.4.0-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed images live at `ghcr.io/verbara/platform/{api,web}`** · **🎯 2026-05-17 PIVOT: Reference Deployment + manuales SMB on-premise (Fase 1) — 6 deliverables shipped (~6,300 líneas)** · **✅ 2026-05-18 PRO 2.4.0-pro TRAIN END-TO-END COMPLETE**: Platform v2.2.0 (HTTP 402 RFC 9457 contract + `GET /management/system/license/status` admin surface + SMB manuales off `LICENSING_MODE`) + Web v3.1.0-web (`<PaymentRequiredDialogHost />` modal renders tiered Trial/Upgrade/ContactSales CTAs from RFC 9457 extension members). Cumulative: 48 files / 2,048 + 1,064 = 3,112 tests passing cross-repo. **Pro v2.5.0-pro pre-conditions #2 + #3 MET; #1 elegible 2026-06-28+.** R5.5 cloud (Phase 0C+) deferred indefinidamente. · **✅ 2026-05-18 R5.5 K8s Phase D-LK COMPLETE PASS-with-findings** — 24h soak K8s 99.987% success @ p99 10.73 ms (9.3× under SLO); forensics revelaron worker silent-death architectural bug → nuevo spec `docs/specs/2026-05-18-worker-resilience-pattern-hardening.md` para Pro v2.4.1-pro + Platform v2.3.0 (~20h cross-repo, **NEXT-priority track**).
+**Última actualización:** 2026-05-18 · **Baselines actuales:** Platform **`2.3.0`** (SHIPPED 2026-05-18 — commits `5d773e55` + `d592e8d5`, tag `v2.3.0`, pushed; CI triggered for signed image build) · Platform.Web **`3.1.0-web`** (HTTP 402 upgrade-modal UX SHIPPED 2026-05-18) · SDK pin `2.1.2` · Pro pin **`2.4.1-pro`** (SHIPPED 2026-05-18 — commit `8d98022`, tag `v2.4.1-pro`, pushed; 24 nupkgs queued for GH Packages) · **🎉 visibility flip EXECUTED 2026-05-10 19:04 UTC — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC; first cosign-signed images live at `ghcr.io/verbara/platform/{api,web}`** · **🎯 2026-05-17 PIVOT: Reference Deployment + manuales SMB on-premise (Fase 1) — 6 deliverables shipped (~6,300 líneas)** · **✅ 2026-05-18 PRO 2.4.0-pro TRAIN END-TO-END COMPLETE**: Platform v2.2.0 (HTTP 402 RFC 9457 contract + `GET /management/system/license/status` admin surface + SMB manuales off `LICENSING_MODE`) + Web v3.1.0-web (`<PaymentRequiredDialogHost />` modal renders tiered Trial/Upgrade/ContactSales CTAs from RFC 9457 extension members). Cumulative cross-repo: 3,112 tests passing. · **✅ 2026-05-18 R5.5 K8s Phase D-LK COMPLETE PASS-with-findings** — 24h soak K8s 99.987% success @ p99 10.73 ms (9.3× under SLO); forensics revelaron worker silent-death architectural bug → resuelto en Worker Resilience train. · **✅ 2026-05-18 WORKER RESILIENCE TRAIN COMPLETE**: Pro v2.4.1-pro + Platform v2.3.0 (27 workers hardened cross-repo + `HostOptions.BackgroundServiceExceptionBehavior = StopHost` wired + 48 net new resilience tests; Pro 1,550 tests / Platform 961 tests; 0 warnings; ADRs Pro-0013 + Platform-0021). **D-LK soak rerun bundled con Pro v2.5.0-pro train** (extended protocol scenarios A-E covering hardening + licensing-mode removal) — eligible 2026-06-28+. **Pro v2.5.0-pro pre-conditions #2 + #3 MET; #1 elegible 2026-06-28+.** R5.5 cloud (Phase 0C+) deferred indefinidamente.
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
@@ -152,7 +152,29 @@ Reservado para parches sobre v2.1.0 (security follow-ups, image-binding bug fixe
 
 **Cross-repo unlock state (post-ship 2026-05-18):** ✅ Pro v2.5.0-pro pre-conditions #2 (consumer release) + #3 (manuales updated) **MET**. ⏳ Pre-condition #1 (≥6 weeks since Pro v2.4.0-pro tag 2026-05-17) elegible **2026-06-28+** — only calendar gate remaining.
 
-### Worker Resilience Pattern Hardening — Pro v2.4.1-pro + Platform v2.3.0 (~20h cross-repo, NEXT-priority)
+### Worker Resilience Pattern Hardening — Pro v2.4.1-pro + Platform v2.3.0 — ✅ SHIPPED 2026-05-18 (commits `8d98022` Pro, `5d773e55` + `d592e8d5` Platform; tags `v2.4.1-pro` + `v2.3.0`)
+
+**Status:** SHIPPED. 27 workers hardened cross-repo (13 Pro + 14 Platform) + `BackgroundServiceExceptionBehavior.StopHost` wired in `Verbara.Platform.Api/Program.cs`. 48 new resilience tests (25 Pro Tier-1 deep + smoke + 23 Platform incl. integration test for HostOptions wiring). Pro 1,550 tests pass; Platform 961 tests pass (was 938 + 23 new). 0 warnings; AOT publish clean.
+
+**D-LK soak repeat — bundled with Pro v2.5.0-pro train, NOT run standalone:**
+
+The post-train D-LK rerun (originally tracked as "validate hardening in real cluster") is consolidated into the Pro v2.5.0-pro release validation when that train executes (≥2026-06-28). Rationale: (a) 48 new tests already lock the discipline at code-level; (b) `StopHost` is well-tested .NET runtime behavior; (c) workers running live in lab K8s during the 6-week observability window IS continuous validation — any silent-death regression surfaces as visible pod restart via the new discipline; (d) bundling saves cluster-hours + improves failure attribution; (e) the v2.5.0-pro behavioral change (Pro features degrade to 402 instead of crashing at startup on invalid license) introduces new scenarios that benefit from sustained soak validation in the same run.
+
+**Extended D-LK protocol** when v2.5.0-pro train runs (5 scenarios):
+
+| ID | Scenario | Validates v2.4.1-pro hardening | Validates v2.5.0-pro removal |
+|---|---|---|---|
+| A | Boot with valid license + sustained 24h load | ✅ no silent worker death | ✅ Pro features OK |
+| B | Boot WITHOUT license (v2.5.0-pro: app starts) | indirect | ✅ Pro features 402 from boot |
+| C | Mid-soak license expiration at T+12h | ✅ no worker crash during transition | ✅ in-flight 200→402 graceful |
+| D | Chaos: kill worker under stress → pod restart visible | ✅ `StopHost` E2E + liveness reaction | n/a |
+| E | Chaos: invalid IMAGE_DIGEST + license válida | n/a | ✅ `UnauthorizedImage` 402 path |
+
+Canonical: Pro spec [`2026-05-17-pro-v250-licensing-enforcement-mode-removal.md`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/specs/2026-05-17-pro-v250-licensing-enforcement-mode-removal.md) section "Validation requirements — D-LK protocol extension".
+
+---
+
+### Worker Resilience Pattern Hardening — ORIGINAL planning (kept for archive — superseded by ✅ SHIPPED above)
 
 **Status:** **Spec listo, ejecución pending.** Spec canónico: [`docs/specs/2026-05-18-worker-resilience-pattern-hardening.md`](specs/2026-05-18-worker-resilience-pattern-hardening.md).
 
