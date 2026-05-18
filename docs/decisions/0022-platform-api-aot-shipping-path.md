@@ -197,3 +197,57 @@ no longer acceptable.
 - ASP.NET Core SignalR AOT status (as of .NET 10): not supported for
   server-side hubs; client-side hub proxy is supported via
   `Microsoft.AspNetCore.SignalR.Client.SourceGenerator`.
+
+## Amendment §6 — 2026-05-18 — gRPC AOT empirical smoke (Phase A.0 gate)
+
+Before locking in HTTP+JSON as the canonical IPC for `Verbara.Platform.Api ↔ Verbara.Platform.Realtime` (per the active Phase A plan at `docs/plans/active/2026-05-18-phase-a-realtime-extraction.md`), the maintainer requested empirical verification that the alternative gRPC server-side stack would NOT have been a better choice today on .NET 10.
+
+### Experiment
+
+Throwaway changes (reverted after the publish):
+
+1. `Directory.Packages.props`: `<PackageVersion Include="Grpc.AspNetCore" Version="2.80.0" />`.
+2. `src/Verbara.Platform.Api/Verbara.Platform.Api.csproj`: `<PackageReference Include="Grpc.AspNetCore" />`. AOT flags flipped on (`IsAotCompatible=true`, `EnableTrimAnalyzer=true`, `EnableSingleFileAnalyzer=true`, `EnableAotAnalyzer=true`, `PublishAot=true`, `InvariantGlobalization=true`).
+3. `src/Verbara.Platform.Api/Program.cs`: `builder.Services.AddGrpc();` inserted just before `var app = builder.Build();`.
+
+Command:
+
+```sh
+dotnet publish src/Verbara.Platform.Api/Verbara.Platform.Api.csproj \
+  -c Release -r linux-x64 --self-contained true \
+  -o /tmp/aot-grpc-smoke/ 2>&1 | tee /tmp/aot-grpc-smoke.log
+```
+
+### Result
+
+| Bucket | Count | Delta vs §3 baseline |
+|---|---|---|
+| SignalR `IL3050` at `PushToHubRelay.cs:163,179,195` | 3 | unchanged |
+| EF Core `IL2026`+`IL3050` at `Program.cs:515,523,525` | 5 | unchanged |
+| **NEW gRPC-related `IL2026`/`IL3050`** | **0** | **none** |
+| Grpc / Protobuf string matches in `/tmp/aot-grpc-smoke.log` | **0** | clean |
+
+Total errors: **8** (identical to §3 baseline). Zero net regression from adding `services.AddGrpc()`.
+
+### Caveat
+
+This smoke covered the DI-registration path (`services.AddGrpc()`) but NOT a full `MapGrpcService<TServiceImpl>` wire-up because we did not bring in a `.proto` file + `Grpc.Tools` codegen. The reflection-heavy AOT-risky surface for gRPC is in the per-service dispatch tables. So the result is **necessary but not sufficient** evidence:
+
+- **Necessary**: gRPC's core DI registration is AOT-clean (✅ proven empirically here).
+- **Sufficient**: gRPC's full server runtime (per-service base classes + dispatcher) is AOT-clean (NOT tested here — would require ~2h of `.proto` + `Grpc.Tools` scaffolding).
+
+### Verdict
+
+`Grpc.AspNetCore` 2.80.0 in .NET 10 appears AOT-friendly at the level we exercised, consistent with Microsoft's claims since 2.60+. The empirical evidence is positive but partial.
+
+**Phase A decision stands**: HTTP+JSON via `IHttpClientFactory` for `Verbara.Platform.Api ↔ Verbara.Platform.Realtime`. Justifications:
+
+1. **Operational consistency**: same pattern as Renderer + Mail. Single mental model.
+2. **Zero new tooling**: no `.proto` files, no codegen step, no `Grpc.Tools` MSBuild integration.
+3. **Empirically AOT-clean** at the system-wide level (Phase A removes the SignalR errors; Phase B removes the EF Core errors; both are independently verified).
+4. **gRPC's marginal benefits** (binary efficiency, native streaming) are wasted at the ~10 RPS sparse req/resp + fire-and-forget traffic shape measured in the code inventory.
+5. **Future-proofing**: if a future microservice (e.g. a Vector/AI inference service) needs streaming, gRPC remains an available choice — this empirical evidence has lowered the perceived risk for that future call.
+
+### Cleanup
+
+All throwaway edits reverted via `git checkout -- Directory.Packages.props src/Verbara.Platform.Api/Verbara.Platform.Api.csproj src/Verbara.Platform.Api/Program.cs`. The `/tmp/aot-grpc-smoke.log` retained for reference; copy to `docs/operations/compressed-validation-evidence/` if desired.
