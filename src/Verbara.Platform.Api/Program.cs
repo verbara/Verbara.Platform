@@ -93,7 +93,7 @@ using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ─── Host-level worker resilience (ADR-0019) ─────────────────────────────────
+// ─── Host-level worker resilience (ADR-0021) ─────────────────────────────────
 // Verbara house-style: any BackgroundService that throws out of ExecuteAsync
 // must cause the host to stop, so K8s/orchestrator restarts the pod with a
 // clear "Last State Reason: Error" + the exception in --previous logs. Without
@@ -101,7 +101,7 @@ var builder = WebApplication.CreateBuilder(args);
 // mode that produced D-LK's 21h-silent-QueueDistributionWorker death. Every
 // hardened worker (this repo + Verbara.Sdk.Pro v2.4.1-pro) emits a Critical
 // `WorkerCrash` log BEFORE rethrowing, so the stop is observable + attributable.
-// See: docs/decisions/0019-stophost-on-worker-crash-house-style.md
+// See: docs/decisions/0021-stophost-on-worker-crash-house-style.md
 //      docs/specs/2026-05-18-worker-resilience-pattern-hardening.md
 builder.Services.Configure<HostOptions>(options =>
 {
