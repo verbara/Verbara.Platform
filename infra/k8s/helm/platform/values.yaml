@@ -1,13 +1,18 @@
 namespace: r55-platform
 
 api:
+  # ASPNETCORE_ENVIRONMENT — controls behaviour of Pro's ProductionSafetyNet
+  # (Diagnostics/ProductionSafetyNet.cs). When "Production", Pro emits a
+  # `LogError event-id 12002` at startup if IMAGE_DIGEST is unset (warning only,
+  # non-blocking). The K8s lab sets IMAGE_DIGEST below, so 12002 will NOT fire.
+  aspnetcoreEnvironment: Production
   image:
     # Canonical published registry per ADR-0011 (Pro v2.3.x image-binding).
     # Override to the local KVM dev cluster registry when validating against
     # the maintainer's k3s/Talos lab:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
-    tag: "1.14.6"
+    tag: "v2.3.1"
     # Manifest-list digest of the `repository:tag` image, used for Layer-C
     # in-process image verification (ADR-0011, Pro v2.3.x). When set, the
     # Deployment template injects IMAGE_DIGEST env var that
@@ -15,7 +20,7 @@ api:
     # license's AuthorizedImageDigests claim. Source: the corresponding entry
     # in verbara-website/data/authorized-digests.json. Leave empty to opt out
     # (Pro falls through to permissive path; matches dev-mode semantics).
-    digest: ""
+    digest: "sha256:e0c876329fbeb24cfa1fd2c3a14da905ba45953ea12e19f8756b03b313fe0a8d"
   replicas: 2
   port: 5000
   resources:
@@ -71,15 +76,27 @@ api:
       application: verbara
   licensing:
     # DEPRECATED in Pro v2.4.0-pro; scheduled for removal in Pro v2.5.0-pro.
-    # Keep `Disabled` for community/OSS deployments. Prefer using `licenseFilePath`
-    # below — Pro v2.4.0-pro derives effective enforcement from license presence.
-    enforcementMode: Disabled
+    # Set to "" (empty) to skip injection — Pro derives effective enforcement
+    # from license presence (preferred path; see licenseFilePath below).
+    # Operators upgrading from pre-v2.4.0-pro chart versions can set this to
+    # `Disabled` to maintain back-compat behaviour during transition.
+    enforcementMode: ""
     # Pro v2.4.0-pro+ — path inside the container to a mounted .lic file.
     # Empty / unset = community/OSS mode (Pro endpoints return HTTP 402
     # PaymentRequired + RFC 9457 ProblemDetails carrying actionable trial /
     # upgrade URLs). Acquire a free Tier 0.5 developer license at:
     #   https://verbara.io/developer-license
-    licenseFilePath: ""
+    licenseFilePath: "/etc/verbara/license.lic"
+    # K8s Secret source for the .lic file mounted at licenseFilePath.
+    # When enabled, the Deployment template adds a Secret-backed volume mount
+    # at the parent dir of licenseFilePath. Operator pre-creates the Secret:
+    #   kubectl create secret generic verbara-lab-license \
+    #     --from-file=license.lic=./verbara-lab-v230.lic \
+    #     -n r55-platform
+    licenseSecret:
+      enabled: true
+      name: verbara-lab-license
+      key: license.lic
   prometheus:
     enabled: false
 

@@ -90,6 +90,10 @@ spec:
             - name: http
               containerPort: {{ .Values.api.port }}
           env:
+            {{- if .Values.api.aspnetcoreEnvironment }}
+            - name: ASPNETCORE_ENVIRONMENT
+              value: {{ .Values.api.aspnetcoreEnvironment | quote }}
+            {{- end }}
             {{- if .Values.api.image.digest }}
             # Layer C in-process image-binding check (ADR-0011, Pro v2.3.x).
             # Pro's ContainerImageDigest.ReadFromEnvironment() reads this env
@@ -149,10 +153,15 @@ spec:
               value: {{ .Values.api.asterisk.ari.password }}
             - name: Asterisk__Ari__Application
               value: {{ .Values.api.asterisk.ari.application }}
+            {{- if .Values.api.licensing.enforcementMode }}
             # Licensing__EnforcementMode is DEPRECATED in Pro v2.4.0-pro (removal in
-            # v2.5.0-pro). Kept conditional on the legacy value for back-compat.
+            # v2.5.0-pro). Only injected when explicitly set in values.yaml —
+            # default chart now omits to let Pro derive enforcement from license
+            # presence. Setting any non-empty value here emits Pro deprecation
+            # log event-id 12001 at boot.
             - name: Licensing__EnforcementMode
-              value: {{ .Values.api.licensing.enforcementMode }}
+              value: {{ .Values.api.licensing.enforcementMode | quote }}
+            {{- end }}
             {{- if .Values.api.licensing.licenseFilePath }}
             # Pro v2.4.0-pro+ — prefer this path. When set, license features are
             # gated by the loaded .lic; Pro endpoints respond with HTTP 402 +
@@ -160,6 +169,16 @@ spec:
             - name: Licensing__FilePath
               value: {{ .Values.api.licensing.licenseFilePath | quote }}
             {{- end }}
+          {{- if and .Values.api.licensing.licenseFilePath .Values.api.licensing.licenseSecret.enabled }}
+          volumeMounts:
+            # Mount Secret-backed .lic at the parent dir of Licensing__FilePath.
+            # `subPath` is intentionally NOT used so the FileSystemWatcher in
+            # LicenseValidationHostedService (Pro v2.4.0-pro hot-reload) picks
+            # up the atomic K8s Secret-update symlink swap.
+            - name: license
+              mountPath: {{ dir .Values.api.licensing.licenseFilePath }}
+              readOnly: true
+          {{- end }}
           resources:
             requests:
               cpu: {{ .Values.api.resources.requests.cpu }}
@@ -188,3 +207,12 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 12
+      {{- if and .Values.api.licensing.licenseFilePath .Values.api.licensing.licenseSecret.enabled }}
+      volumes:
+        - name: license
+          secret:
+            secretName: {{ .Values.api.licensing.licenseSecret.name }}
+            items:
+              - key: {{ .Values.api.licensing.licenseSecret.key }}
+                path: {{ base .Values.api.licensing.licenseFilePath }}
+      {{- end }}
