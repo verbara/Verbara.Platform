@@ -20,10 +20,13 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" />
     <PackageReference Include="Verbara.Sdk.Resilience" />
-    <!-- DataProtection DB-backed keyring (R5.2 P0.8 / ADR-0003) -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" />
+    <!-- DataProtection DB-backed keyring (ADR-0003 + ADR-0022 Phase B —
+         Dapper IXmlRepository replaces the EF Core path so Platform.Api can
+         ship as Native AOT). -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Dapper" />
   </ItemGroup>
 
 </Project>

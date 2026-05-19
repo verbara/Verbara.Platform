@@ -20,11 +20,9 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Media;
 using Verbara.Platform.Switchboard;
 using Verbara.Platform.Identity;
-using Verbara.Platform.Identity.DataProtection;
 using Verbara.Platform.Identity.DependencyInjection;
 using Verbara.Platform.Identity.OidcTokenExchange;
 using Verbara.Platform.Identity.Redis.DependencyInjection;
-using Microsoft.EntityFrameworkCore;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Hosting;
@@ -484,10 +482,10 @@ builder.Services.AddHttpClient("EmailAttachments", c =>
 // PasswordService and MfaService are static — no DI registration needed
 
 // DataProtection must be registered before JwtTokenService so the factory can resolve it.
-// Per ADR-0003 (R5.2 P0.8): DB-backed via PlatformDataProtectionDbContext. Fail-fast if
-// Postgres connection unavailable in production environments. Test environments
-// (WebApplicationFactory<Program>) fall back to ephemeral keys so endpoint tests
-// don't require a live Postgres connection just to exercise non-encryption paths.
+// Per ADR-0003 + ADR-0022 Phase B: Postgres-backed via DapperXmlRepository (replaces
+// the legacy EF Core PersistKeysToDbContext path so the host stays AOT-clean). Test
+// environments fall back to ephemeral keys so endpoint tests don't require a live
+// Postgres connection just to exercise non-encryption paths.
 if (string.IsNullOrEmpty(coreConnectionString))
 {
     if (!builder.Environment.IsEnvironment("Testing"))
@@ -503,13 +501,18 @@ if (string.IsNullOrEmpty(coreConnectionString))
 }
 else
 {
-    builder.Services.AddDbContext<PlatformDataProtectionDbContext>(opt =>
-        opt.UseNpgsql(coreConnectionString));
+    // Resolve through the shared NpgsqlDataSource cache (ADR-0015 Phase 2) so
+    // DataProtection joins the host pool instead of opening its own. Pool
+    // defaults were applied to coreConnectionString upstream via
+    // ConnectionStringDefaults.ApplyPoolDefaults.
+    var dataProtectionDataSource = ResolveDataSource(coreConnectionString)
+        ?? throw new InvalidOperationException(
+            "ResolveDataSource returned null for the DataProtection connection string — " +
+            "this should be unreachable given the non-empty check above.");
     builder.Services.AddPlatformDataProtection(opt =>
     {
         opt.ApplicationName = "Verbara.Platform";
-        // Default: DB-backed via PlatformDataProtectionDbContext.
-        // Override via opt.UseFileSystem("/path") for single-node deploys with mounted volume.
+        opt.UsePostgres(dataProtectionDataSource);
     });
 }
 builder.Services.AddSingleton<IJtiRevocationCache, InMemoryJtiRevocationCache>();

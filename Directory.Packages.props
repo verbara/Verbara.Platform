@@ -24,15 +24,13 @@
     <PackageVersion Include="Dapper" Version="2.1.72" />
   </ItemGroup>
 
-  <!-- EF Core stack consumed exclusively by Verbara.Platform.Identity DataProtection
-       integration (R5.2 P0.8 / ADR-0003). Versions match the .NET 10 SDK band already
-       in use elsewhere in the repo. -->
+  <!-- DataProtection consumed by Verbara.Platform.Identity (ADR-0003 + ADR-0022
+       Phase B). Dapper-backed IXmlRepository replaces the EF Core stack so the
+       Platform.Api host can publish Native AOT. Versions match the .NET 10 SDK
+       band. -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.7" />
-    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
-    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.7" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="10.0.7" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="10.0.7" />
   </ItemGroup>
 
   <ItemGroup>

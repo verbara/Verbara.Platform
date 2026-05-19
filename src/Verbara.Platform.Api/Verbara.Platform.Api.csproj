@@ -76,10 +76,10 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
     <PackageReference Include="Dapper" />
     <PackageReference Include="Npgsql" />
-    <!-- DataProtection DB-backed keyring (R5.2 P0.8 / ADR-0003) needs EF Core +
-         Npgsql provider for the connection-string registration in Program.cs. -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- DataProtection moved off EF Core to Dapper in ADR-0022 Phase B — see
+         Verbara.Platform.Identity.DataProtection.DapperXmlRepository. The
+         Identity package now owns the persistence stack; Platform.Api just
+         passes an NpgsqlDataSource via PlatformDataProtectionOptions.UsePostgres. -->
     <!-- QuestPDF, ScottPlot, MailKit moved to Platform.Renderer and Platform.Mail microservices -->
     <PackageReference Include="NCrontab" />
     <PackageReference Include="Verbara.Sdk.Hosting" />

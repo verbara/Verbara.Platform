@@ -1,54 +1,47 @@
-using System.Diagnostics.CodeAnalysis;
-using Verbara.Platform.Identity.DataProtection;
 using Verbara.Platform.Identity.DependencyInjection;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Identity.Tests.DataProtection;
 
 /// <summary>
-/// Verifies R5.2 P0.8 / ADR-0003 — DB-backed DataProtection keyring survives
-/// process recreation when two distinct ServiceProvider instances share the
-/// same DbContext database (simulating two API replicas or one container
-/// recycle).
+/// Unit-level verification of <see cref="PlatformDataProtectionOptions"/> +
+/// <see cref="PlatformDataProtectionExtensions.AddPlatformDataProtection"/>.
+/// The Postgres-backed round-trip path lives in the integration suite (real
+/// NpgsqlDataSource) since Dapper has no in-memory provider equivalent to
+/// EF Core's InMemoryDatabase. Ephemeral + option-validation paths exercise
+/// the public surface here without a DB.
 /// </summary>
-[RequiresUnreferencedCode("EF Core path uses reflection; not trim-safe.")]
-[RequiresDynamicCode("EF Core path builds queries dynamically; not NativeAOT-safe.")]
 public sealed class PlatformDataProtectionTests
 {
     [Fact]
-    public void Protect_ShouldRoundTrip_WhenDbBackedKeysShared()
+    public void AddPlatformDataProtection_ShouldRegisterDataProtectionProvider_WhenEphemeralSelected()
     {
-        // Arrange — both "processes" share the same in-memory DB.
-        const string dbName = nameof(Protect_ShouldRoundTrip_WhenDbBackedKeysShared);
+        var services = new ServiceCollection();
+        services.AddLogging();
 
-        // First "process": protect a value
-        string protectedPayload;
+        services.AddPlatformDataProtection(opt =>
         {
-            using var sp = BuildProvider(dbName);
-            var protector = sp.GetRequiredService<IDataProtectionProvider>().CreateProtector("test-purpose");
-            protectedPayload = protector.Protect("the secret");
-        }
+            opt.ApplicationName = "Verbara.Platform.Test";
+            opt.UseEphemeralKeysForTesting();
+        });
 
-        // Second "process" (new ServiceProvider, same DB): unprotect must succeed
-        {
-            using var sp = BuildProvider(dbName);
-            var protector = sp.GetRequiredService<IDataProtectionProvider>().CreateProtector("test-purpose");
-            var unprotected = protector.Unprotect(protectedPayload);
-            unprotected.Should().Be("the secret");
-        }
+        using var sp = services.BuildServiceProvider();
+        var provider = sp.GetRequiredService<IDataProtectionProvider>();
+
+        provider.Should().NotBeNull("ephemeral path still wires the ASP.NET Core DataProtection stack");
     }
 
     [Fact]
-    public void AddPlatformDataProtection_ShouldDefaultToDbContextPersistence()
+    public void AddPlatformDataProtection_ShouldThrow_WhenNoPersistenceStrategyChosen()
     {
-        const string dbName = nameof(AddPlatformDataProtection_ShouldDefaultToDbContextPersistence);
-        using var sp = BuildProvider(dbName);
+        var services = new ServiceCollection();
+        services.AddLogging();
 
-        var provider = sp.GetRequiredService<IDataProtectionProvider>();
+        var act = () => services.AddPlatformDataProtection(opt => opt.ApplicationName = "Verbara.Platform");
 
-        provider.Should().NotBeNull("default path is DB-backed via PlatformDataProtectionDbContext");
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*UsePostgres*UseFileSystem*UseEphemeralKeysForTesting*");
     }
 
     [Fact]
@@ -58,8 +51,7 @@ public sealed class PlatformDataProtectionTests
 
         var act = () => options.UseFileSystem("   ");
 
-        act.Should().Throw<ArgumentException>()
-            .WithMessage("*non-empty*");
+        act.Should().Throw<ArgumentException>().WithMessage("*non-empty*");
     }
 
     [Fact]
@@ -72,12 +64,13 @@ public sealed class PlatformDataProtectionTests
         options.UseEphemeralForTesting.Should().BeTrue();
     }
 
-    private static ServiceProvider BuildProvider(string dbName)
+    [Fact]
+    public void UsePostgres_ShouldRejectNullDataSource()
     {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddDbContext<PlatformDataProtectionDbContext>(opt => opt.UseInMemoryDatabase(dbName));
-        services.AddPlatformDataProtection(opt => opt.ApplicationName = "Verbara.Platform.Test");
-        return services.BuildServiceProvider();
+        var options = new PlatformDataProtectionOptions();
+
+        var act = () => options.UsePostgres(null!);
+
+        act.Should().Throw<ArgumentNullException>();
     }
 }
