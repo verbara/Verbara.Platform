@@ -1120,9 +1120,13 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // tripping the AOT analyzer or registering each DTO in ApiJsonContext.
     options.SerializerOptions.TypeInfoResolverChain.Insert(1,
         Verbara.Platform.Realtime.Contracts.RealtimeContractsJsonContext.Default);
-#pragma warning disable IL3050 // Non-generic JsonStringEnumConverter: fallback for enums not in ApiJsonContext
-    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
-#pragma warning restore IL3050
+    // ADR-0022 Phase C — the non-generic JsonStringEnumConverter was a runtime
+    // fallback for enums that hadn't been registered in ApiJsonContext. It
+    // trips IL3050 under Native AOT. Every enum the API surface emits is
+    // declared in ApiJsonContext's [JsonSerializable] manifest; if a new enum
+    // type is added without a context entry, serialization will throw at
+    // call-time instead of silently using a reflection-based fallback —
+    // making the omission loud + fixable.
 });
 // ─── OpenAPI (R5.3 Phase B Task B.7 / D.1) ───────────────────────────────────
 //

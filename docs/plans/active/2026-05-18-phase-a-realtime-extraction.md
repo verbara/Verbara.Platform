@@ -2,11 +2,13 @@
 
 (Phase A of [ADR-0022](../../media/Data/Source/Verbara/Verbara.Platform/docs/decisions/0022-platform-api-aot-shipping-path.md))
 
-> **Status (2026-05-18):** A.0 gRPC empirical gate ✅, A.1 scaffold ✅, **A.2+A.3 cutover ✅** (this update). Two plan deviations applied during cutover:
+> **Status (2026-05-19):** A.0 gRPC empirical gate ✅, A.1 scaffold ✅, **A.2+A.3 cutover ✅**, **A.4 test migration ✅**, **B EF Core → Dapper ✅**, **C empirical AOT publish ✅** (residual Dapper blocker documented in [ADR-0022 Amendment §7](../../decisions/0022-platform-api-aot-shipping-path.md)).
+>
+> Two plan deviations applied during cutover (preserved as historical record):
 > 1. **Bridges STAY in Platform.Api** (not moved). `WithClusterEventBridge / WithConversationBridge / WithAgentBridge` depend on SDK heavyweight types (`ICallSessionManager`, `VerbaraServerPool`, `ClusterTransportBase`) that live in Platform.Api. Cross-process delivery is via the **Pro.Push Redis backplane** (`AddVerbaraProPushRedis`) which both services now register. Platform.Api keeps the `Verbara.Sdk.Pro.Push.SignalR` PackageReference (for the bridges + event types) — only the Hub host, presence services, relay, and authz interfaces moved.
 > 2. **Single-pod Realtime** (Helm `realtime.hpa.maxReplicas: 1`) because Pro.Cluster does not yet expose an `IsLeader` API. The SignalR Redis backplane is wired and ready; the relay leader-gate ships in **Phase A.5** once Pro.Cluster adds the abstraction. Multi-pod presence CRDT (Phase G-PRE) works orthogonally.
 >
-> A.4 (test migration to `Verbara.Platform.Realtime.Tests` + orphan cleanup) follows separately.
+> **Phase D** (new, future): Dapper.AOT migration across Verbara.Platform (~57 files) AND Verbara.Sdk.Pro (~120 files). Required to flip `<IsAotCompatible>true</IsAotCompatible>` in Platform.Api.csproj. Multi-week, both-repos-in-lockstep. Unblocks Phase E (image-digest regen + ghcr.io cutover).
 
 ## Context
 

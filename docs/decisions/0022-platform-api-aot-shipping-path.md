@@ -251,3 +251,78 @@ This smoke covered the DI-registration path (`services.AddGrpc()`) but NOT a ful
 ### Cleanup
 
 All throwaway edits reverted via `git checkout -- Directory.Packages.props src/Verbara.Platform.Api/Verbara.Platform.Api.csproj src/Verbara.Platform.Api/Program.cs`. The `/tmp/aot-grpc-smoke.log` retained for reference; copy to `docs/operations/compressed-validation-evidence/` if desired.
+
+## Amendment §7 — 2026-05-19 — Phase C empirical AOT publish: Dapper as the residual blocker
+
+### Goal
+
+After Phases A.2+A.3 (SignalR Hub extracted to Verbara.Platform.Realtime, commit `ce8a76dc`) and Phase B (EF Core DataProtection → Dapper IXmlRepository, commit `73b4db73`), re-run the §3 empirical AOT publish to confirm progress and identify what remains.
+
+### Command
+
+```sh
+dotnet publish src/Verbara.Platform.Api/Verbara.Platform.Api.csproj \
+  -c Release -r linux-x64 --self-contained true \
+  -p:PublishAot=true -p:InvariantGlobalization=true -p:TrimmerSingleWarn=false
+```
+
+### Result (vs §3 baseline)
+
+| Bucket | §3 baseline | Phase B (this run) | Δ |
+|---|---|---|---|
+| SignalR `IL3050` at `PushToHubRelay.cs` | 3 | **0** | −3 ✅ (Phase A extracted the Hub) |
+| EF Core `IL2026`+`IL3050` at `Program.cs:515,523,525` (DbContext + UseNpgsql) | 5 | **0** | −5 ✅ (Phase B replaced with Dapper) |
+| `JsonStringEnumConverter` non-generic `IL3050` at `Program.cs:1124` | 1 (latent — masked behind §3 blockers) | **0** | −1 (this commit dropped the fallback) |
+| **NEW: Dapper 2.1.72 `IL2046`+`IL2060`+`IL2067`+`IL2070`+`IL2075`+`IL2080`+`IL3050`** | not surfaced (held behind §3) | **~40** | unmasked |
+| `runtimeconfig.template.json` warning | not surfaced | 1 (warning, not error) | benign — moves to `<RuntimeHostConfigurationOption>` in Phase C completion |
+
+The historically-tracked blockers from §3 are eliminated. The unmasked Dapper diagnostics fall into two qualitatively-different buckets:
+
+1. **AOT analysis errors** (`IL3050`): Dapper calls `System.Reflection.Emit.DynamicMethod`, `System.Type.MakeGenericType`, `System.Reflection.MethodInfo.MakeGenericMethod` — none of these are AOT-safe. Examples:
+   - `Dapper.SqlMapper.CreateParamInfoGenerator` builds parameter-emitter IL at runtime via DynamicMethod.
+   - `Dapper.SqlMapper.GetTypeDeserializerImpl` builds row-deserialiser IL at runtime.
+   - `Dapper.SqlMapper.LookupDbType` calls `MakeGenericType` to construct `Nullable<>` and other generic wrappers.
+2. **Trim analysis errors** (`IL2046`+`IL2060`-`IL2080`): Dapper reflects over user row types' public/non-public constructors, properties, and fields without the `[DynamicallyAccessedMembers]` annotations that would let the trimmer preserve them. Examples:
+   - `Dapper.DefaultTypeMap.GetSettableProps(Type)` calls `Type.GetProperties(BindingFlags)` on the row type without annotations.
+   - `Dapper.DefaultTypeMap.FindConstructor(string[], Type[])` calls `Type.GetConstructors(BindingFlags)` similarly.
+
+These are not "suppress and ship" diagnostics. Suppressing them would let `ilc` complete, but the resulting binary would throw `PlatformNotSupportedException: Dynamic code generation is not supported on this platform.` the first time any Postgres-storage path executes a query — i.e. immediately, since Identity, Conversations, Queues, Audit, RBAC, et al. all go through Dapper.
+
+### Inventory of Dapper consumers
+
+Cross-repo grep (`grep -rln "using Dapper" src/`):
+
+| Repo | Count of `.cs` files importing Dapper |
+|---|---|
+| `Verbara.Platform` (this) — `Storage.Postgres` + `Api` + `Identity.DataProtection` | 57 |
+| `Verbara.Sdk.Pro` — 8 storage packages (Dialer, EventStore, Analytics, CallAnalytics, AgentAssist, Realtime, Cluster, MultiTenant) | ~120 (estimated; cross-repo grep) |
+
+Every store on both repos uses Dapper as the SQL ↔ object mapper. There is no incremental ramp where we ship "AOT for the easy half" — Dapper is on the hot path of every request that touches a database.
+
+### Paths forward (evaluated)
+
+| Option | Effort | Outcome | Notes |
+|---|---|---|---|
+| **A. Migrate to `Dapper.AOT`** (source-generator based replacement) | Multi-week, both repos | Full AOT image; Pro IP protected by native compilation. | Dapper.AOT is API-compatible for the basic `Query<T>` / `Execute` surface but requires per-call analyzer attribute hints; behavioural drift on edge cases (multi-mapping, dynamic) needs query-by-query review. Both Verbara.Platform.Storage.Postgres AND every Pro.*.Storage.Postgres package must migrate in lockstep because the AOT host bundles them all. |
+| **B. Replace Dapper with hand-rolled `NpgsqlCommand` readers** | Multi-week+, both repos | Full AOT image; zero ORM-layer reflection. | Maximum control + no third-party AOT risk, but ~ 5-10× the code volume vs option A. Loses Dapper's parameter-emission optimisations. |
+| **C. Hybrid: keep Dapper for now, accept Platform.Api ships as IL** | 0 (today's state) | Current state — Pro IP exposed as decompilable IL in the public ghcr.io image. | The status quo this ADR exists to fix. **Not acceptable per the maintainer's "esta imagen siempre debe ser AOT" directive.** |
+| **D. Ship Platform.Api as `PublishReadyToRun=true` + `PublishTrimmed=false` instead of full AOT** | 1-2 days | Partial native code; Pro DLLs still decompilable. | R2R adds ahead-of-time JIT-compiled methods to the IL DLLs but does NOT replace them — `.dll` files remain in `/app` and are still decompilable. Solves perf but not IP leak. |
+| **E. Encrypt the published IL** (custom AssemblyLoadContext + decrypt-on-load) | 1 week | IL ships encrypted; Pro IP harder to extract but still recoverable via memory dump. | Adds a second moving piece (key management) and is widely considered security-by-obscurity. Not chosen. |
+
+### Decision
+
+**Option A — Dapper.AOT migration — is the only path that satisfies both the AOT directive and the IP-protection goal.** It is a substantial undertaking that touches two repos in lockstep and is therefore scoped as a **new Phase D** (numbered to follow A/B/C, even though the original §3 plan listed "Phase C" as the AOT flip):
+
+- **Phase C** (this Amendment §7 closes it): empirical confirmation that the §3 blockers are eliminated; ship is **NOT** flippable to AOT yet because Dapper remains. Platform.Api continues to publish as IL until Phase D ships. The csproj keeps `<IsAotCompatible>false</IsAotCompatible>` (truthful) and a comment pointing here.
+- **Phase D** (new, future): Dapper.AOT spike on a small Postgres store (e.g. `PostgresUserStore`), measure incremental coverage, then roll out to the remaining 56 files in this repo + the ~120 in `Verbara.Sdk.Pro`. Once both repos are clean, flip `<IsAotCompatible>true</IsAotCompatible>` in `Verbara.Platform.Api.csproj`, drop the analyzer-disables, and re-run this empirical publish. Expected diagnostic count: 0.
+- **Phase E** (renumbered from "Phase D" in §3): image-digest regeneration + `authorized-digests.json` update + ghcr.io image cutover. Unblocked by Phase D.
+
+Until Phase D ships, the IP-leak surface persists at the same level as today. Mitigations stay where the §3 plan left them:
+
+- ADR-0011 image-binding stays in force (`AuthorizedImageDigests` claim binds Pro features to specific tags so a leaked image cannot be repackaged under a different digest and continue to function).
+- Pro repo stays PRIVATE.
+- The Platform.Api `Dockerfile` carries the IP-leak warning header added in commit `5e89f1e2`.
+
+### Cleanup
+
+This run was empirical (no code persisted from the publish attempt). `Program.cs:1124` (the JsonStringEnumConverter drop) is kept — the diagnostic was real and the source-generated `ApiJsonContext` covers the surface; keeping it removes one residual AOT smell ahead of the eventual Phase D flip.
