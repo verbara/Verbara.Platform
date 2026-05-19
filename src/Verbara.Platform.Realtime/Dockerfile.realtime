@@ -1,0 +1,44 @@
+# =============================================================================
+# Verbara.Platform.Realtime Dockerfile
+# =============================================================================
+#
+# Non-AOT by design (Phase A.1 of ADR-0022). This microservice hosts the
+# SignalR PlatformHub extracted from Verbara.Platform.Api so that the API
+# host can ship as Native AOT. SignalR server-side dispatch + the Pro.Push.SignalR
+# presence CRDT both require [RequiresDynamicCode] code paths that cannot be
+# AOT-compiled in .NET 10. Realtime ships as IL DLLs like Renderer + Mail.
+#
+# IP-leak surface: this image bundles Pro.Push.SignalR (a Pro package). That
+# package is the *public* SignalR contract layer — it does NOT contain the
+# closed-source Pro engines (Dialer, Analytics, CallAnalytics, AgentAssist,
+# EventStore). Those stay inside the Native-AOT Platform.Api image post-Phase C.
+# Realtime is therefore acceptable as a non-AOT image even if eventually
+# pushed to ghcr.io.
+# =============================================================================
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+ARG CACHEBUST=1
+COPY . .
+# Mirror Verbara.Platform.Api Dockerfile credentials pattern. Build stage is
+# intermediate; final stage COPYs only /app so any NuGet.Config credentials
+# written here are discarded with the build layer.
+RUN --mount=type=secret,id=nuget_auth_token,required=false \
+    set -e; \
+    dotnet nuget remove source local 2>/dev/null || true; \
+    if [ -f /run/secrets/nuget_auth_token ]; then \
+        dotnet nuget update source github \
+            --username verbara \
+            --password "$(cat /run/secrets/nuget_auth_token)" \
+            --store-password-in-clear-text; \
+    fi; \
+    dotnet nuget locals all --clear; \
+    dotnet publish src/Verbara.Platform.Realtime/Verbara.Platform.Realtime.csproj -c Release -o /app
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /app .
+EXPOSE 5030
+ENV ASPNETCORE_URLS=http://+:5030
+ENTRYPOINT ["dotnet", "Verbara.Platform.Realtime.dll"]

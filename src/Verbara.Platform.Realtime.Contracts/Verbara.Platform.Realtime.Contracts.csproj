@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Shared DTO contracts for HTTP+JSON RPC between Verbara.Platform.Api (server) and Verbara.Platform.Realtime (client). Referenced by both projects so a shape change is a compile-time error, not a runtime drift.</Description>
+    <!-- AOT-clean: pure DTO library with System.Text.Json source-gen. Platform.Api
+         (Native AOT post-Phase C) references this assembly directly, so the
+         analyzers MUST be on. Phase A Plan §"Estructura de archivos" / Shared DTOs. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <Description>SignalR realtime microservice for Verbara.Platform — hosts the PlatformHub (extracted from Verbara.Platform.Api per ADR-0022 to unblock Native AOT publishing of the API host). Phase A.1 scope: scaffold skeleton + /health endpoint + X-Service-Key middleware. Full hub mapping + Pro.Push.SignalR wiring lands in Phase A.2+A.3.</Description>
+    <!-- Non-AOT by design — SignalR server-side dispatch + Pro.Push.SignalR
+         reflection is the whole reason this microservice exists separately
+         from the API. Same flags as Verbara.Platform.Renderer + Verbara.Platform.Mail. -->
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Verbara.Platform.Realtime.Contracts\Verbara.Platform.Realtime.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

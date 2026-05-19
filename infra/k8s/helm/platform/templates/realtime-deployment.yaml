@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-realtime
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform.realtimeLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.realtime.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-realtime
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Same maxSurge: 0 / maxUnavailable: 1 envelope as platform-api per
+      # the Talos lab tight-memory constraint (4 GB worker VMs).
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        {{- include "platform.realtimeLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.realtime.port }}"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 60
+      affinity:
+        # Spread Realtime pods across worker nodes so a single node loss does
+        # not take down every Hub connection. Preferred (not required) so a
+        # 3-worker cluster + replicas=4 still schedules.
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values: [platform-realtime]
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: realtime
+          image: "{{ .Values.realtime.image.repository }}{{ if .Values.realtime.image.digest }}@{{ .Values.realtime.image.digest }}{{ else }}:{{ .Values.realtime.image.tag }}{{ end }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654
+            runAsGroup: 1654
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: {{ .Values.realtime.port }}
+          env:
+            {{- if .Values.realtime.aspnetcoreEnvironment }}
+            - name: ASPNETCORE_ENVIRONMENT
+              value: {{ .Values.realtime.aspnetcoreEnvironment | quote }}
+            {{- end }}
+            - name: ASPNETCORE_URLS
+              value: "http://+:{{ .Values.realtime.port }}"
+            # Phase A.2+A.3 adds SignalR backplane + Pro.Cluster + JWT env vars.
+            # A.1 stages only the X-Service-Key + Platform.Api base URL.
+            - name: Services__ServiceKey
+              value: {{ .Values.api.serviceKey }}
+            - name: Services__PlatformApi__BaseUrl
+              value: "http://platform-api.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.api.port }}"
+          resources:
+            requests:
+              cpu: {{ .Values.realtime.resources.requests.cpu }}
+              memory: {{ .Values.realtime.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.realtime.resources.limits.cpu }}
+              memory: {{ .Values.realtime.resources.limits.memory }}
+          readinessProbe:
+            # Phase A.2+A.3 promotes to /health/ready (Redis backplane + Cluster).
+            httpGet:
+              path: /health
+              port: {{ .Values.realtime.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.realtime.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.realtime.port }}
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            failureThreshold: 10

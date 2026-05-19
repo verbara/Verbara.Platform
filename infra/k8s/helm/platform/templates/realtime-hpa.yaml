@@ -1,0 +1,39 @@
+{{- if .Values.realtime.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: platform-realtime
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform.realtimeLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: platform-realtime
+  minReplicas: {{ .Values.realtime.hpa.minReplicas }}
+  maxReplicas: {{ .Values.realtime.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.realtime.hpa.targetCpuPercent }}
+  behavior:
+    scaleDown:
+      # Slower scale-down to avoid disconnecting users mid-conversation
+      # — each Realtime pod loss means SignalR auto-reconnect cycles for
+      # every connected client.
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+{{- end }}

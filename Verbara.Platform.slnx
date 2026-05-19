@@ -31,6 +31,8 @@
     <Project Path="src/Verbara.Platform.Api/Verbara.Platform.Api.csproj" />
     <Project Path="src/Verbara.Platform.Renderer/Verbara.Platform.Renderer.csproj" />
     <Project Path="src/Verbara.Platform.Mail/Verbara.Platform.Mail.csproj" />
+    <Project Path="src/Verbara.Platform.Realtime.Contracts/Verbara.Platform.Realtime.Contracts.csproj" />
+    <Project Path="src/Verbara.Platform.Realtime/Verbara.Platform.Realtime.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Verbara.Platform.Core.Tests/Verbara.Platform.Core.Tests.csproj" />

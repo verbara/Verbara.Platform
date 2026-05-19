@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-realtime
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform.realtimeLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  # No sticky sessions — SignalR backplane (Phase A.2+A.3) plus the presence
+  # CRDT make cross-pod broadcasts transparent. Default round-robin is fine.
+  sessionAffinity: None
+  selector:
+    app.kubernetes.io/name: platform-realtime
+  ports:
+    - name: http
+      port: {{ .Values.realtime.port }}
+      targetPort: {{ .Values.realtime.port }}

@@ -1,0 +1,41 @@
+{{- if .Values.ingress.enabled }}
+# Cilium Gateway API route for the SignalR Hub endpoint. Matches /hubs/*
+# on the SAME hostname as the Platform.Api HTTPRoute so the browser SignalR
+# JS client URL (`wss://<hostnameApi>/hubs/platform?access_token=...`) does
+# not change across the Phase A cutover. Gateway path-prefix longest-match
+# routes /hubs/* here and everything else continues to platform-api.
+#
+# Phase A.1 ships this HTTPRoute BUT the Realtime pod does not yet host the
+# Hub (Platform.Api still owns it). Until Phase A.2+A.3 cutover, traffic
+# arriving here returns 404 from the Realtime /health-only scaffold. The
+# httproute.yaml platform-api route still catches /hubs/* because Cilium
+# Gateway evaluates by route specificity — but a /hubs/-prefix is more
+# specific than /, so this WOULD shadow platform-api. Therefore A.1
+# intentionally keeps this template behind a separate values flag so
+# operators do not enable it before A.2+A.3 ships.
+{{- if .Values.realtime.ingress.enabled }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: platform-realtime
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform.realtimeLabels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.ingress.gatewayName | default "platform-gateway" }}
+      namespace: {{ .Values.ingress.gatewayNamespace | default "default" }}
+      sectionName: http
+  hostnames:
+    - {{ .Values.ingress.hostnameApi | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /hubs/
+      backendRefs:
+        - name: platform-realtime
+          port: {{ .Values.realtime.port }}
+{{- end }}
+{{- end }}

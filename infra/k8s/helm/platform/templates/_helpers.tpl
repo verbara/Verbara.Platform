@@ -24,3 +24,9 @@ app.kubernetes.io/name: web
 app.kubernetes.io/component: frontend
 {{ include "platform.commonLabels" . }}
 {{- end -}}
+
+{{- define "platform.realtimeLabels" -}}
+app.kubernetes.io/name: platform-realtime
+app.kubernetes.io/component: realtime
+{{ include "platform.commonLabels" . }}
+{{- end -}}
