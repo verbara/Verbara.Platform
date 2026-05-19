@@ -115,7 +115,20 @@ For the ~32 sites in 14 files that use `CommandDefinition` / `DynamicParameters`
 
 Per-file decision matrix lives in [day-1-findings.md](../../operations/phase-d-validation/2026-05-19-day-1-findings.md). Wave 3 (Platform sweep) does the Platform files. Pro files done in Wave 2.
 
-### Phase D.4 — Triple gate validation (~1 day)
+### Phase D.1 — Verbara.Sdk.Dapper.Stubs ✅ SHIPPED 2026-05-19
+
+Sub-deliverable D.1 shipped 2026-05-19 in 10 commits on Verbara.Sdk `feat/dapper-stubs` branch. See [`docs/plans/completed/2026-05-19-verbara-sdk-dapper-stubs.md`](../completed/2026-05-19-verbara-sdk-dapper-stubs.md). Outcomes:
+- 30 Dapper 2.1.72 public types + 134 method stubs mirrored 1:1, all with `[RequiresDynamicCode]` + `[RequiresUnreferencedCode]`
+- 16/16 stub tests PASS (PublicApiSurface + AotAnnotations + behavioral CommandDefinition/DynamicParameters/SqlMapperStub)
+- Sessions.Postgres canary adopted (Phase E commit `08a36b8c` on Verbara.Sdk): stub `Dapper.dll` (50KB) confirmed in test `bin/` output replacing real Dapper.dll (240KB); 14/16 Sessions.Postgres.Tests fail with exact predicted `NotSupportedException — Dapper.AOT did not intercept this call site` (R10 confirmed empirically; PostgresSessionStore uses `CommandDefinition` overload in 6/6 sites)
+
+**Phase F closure gap finding** ([`docs/operations/phase-d-validation/2026-05-19-stubs-smoke-findings.md`](../../operations/phase-d-validation/2026-05-19-stubs-smoke-findings.md)): the Platform.Api AOT publish diagnostic count stayed at 50 (zero delta from baseline) because **Sessions.Postgres is NOT in Platform.Api's closure** — CPM declares versions but doesn't pull packages; no Platform project `<PackageReference>`s Sessions.Postgres. The real AOT-diagnostic-delta validation requires migrating a storage package that IS in Platform.Api's closure — that's `Verbara.Platform.Storage.Postgres` (Phase D.2 first target).
+
+**Re-scoped: Phase F (AOT publish triple gate validation) moves to Phase D.2 first-package close**, not Phase D.1.
+
+### Phase D.4 — Triple gate validation (~1 day) — REVISED scope per Phase F closure gap finding
+
+Runs AFTER the first Platform storage package migrates (likely `Verbara.Platform.Storage.Postgres`). Until then, the gate cannot validate at Platform scale.
 
 | Gate | What it checks | Pass criteria |
 |---|---|---|
