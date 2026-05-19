@@ -2,6 +2,12 @@
 
 (Phase A of [ADR-0022](../../media/Data/Source/Verbara/Verbara.Platform/docs/decisions/0022-platform-api-aot-shipping-path.md))
 
+> **Status (2026-05-18):** A.0 gRPC empirical gate ✅, A.1 scaffold ✅, **A.2+A.3 cutover ✅** (this update). Two plan deviations applied during cutover:
+> 1. **Bridges STAY in Platform.Api** (not moved). `WithClusterEventBridge / WithConversationBridge / WithAgentBridge` depend on SDK heavyweight types (`ICallSessionManager`, `VerbaraServerPool`, `ClusterTransportBase`) that live in Platform.Api. Cross-process delivery is via the **Pro.Push Redis backplane** (`AddVerbaraProPushRedis`) which both services now register. Platform.Api keeps the `Verbara.Sdk.Pro.Push.SignalR` PackageReference (for the bridges + event types) — only the Hub host, presence services, relay, and authz interfaces moved.
+> 2. **Single-pod Realtime** (Helm `realtime.hpa.maxReplicas: 1`) because Pro.Cluster does not yet expose an `IsLeader` API. The SignalR Redis backplane is wired and ready; the relay leader-gate ships in **Phase A.5** once Pro.Cluster adds the abstraction. Multi-pod presence CRDT (Phase G-PRE) works orthogonally.
+>
+> A.4 (test migration to `Verbara.Platform.Realtime.Tests` + orphan cleanup) follows separately.
+
 ## Context
 
 El AOT-publish empírico ejecutado 2026-05-18 sobre `Verbara.Platform.Api` falló con 3 errores `IL3050` en `src/Verbara.Platform.Api/Services/PushToHubRelay.cs:163,179,195` — `IHubContext<THub, T>.Clients.get` está anotado `[RequiresDynamicCode]` (genera proxies de cliente en runtime). Mientras esa dependencia siga dentro del proceso de Platform.Api, el host no puede shipear como Native AOT, y la imagen pública seguirá distribuyendo 68 DLLs `Verbara.*` (incluyendo `Verbara.Sdk.Pro.*` cerrado/comercial) como IL decompilable — la fuga de IP catastrófica que motiva ADR-0022.

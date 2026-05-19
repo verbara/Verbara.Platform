@@ -174,12 +174,17 @@ realtime:
       cpu: "1"
       memory: 1Gi
   hpa:
+    # Phase A.2+A.3 ships single-pod because Pro.Cluster does not yet expose a
+    # leader-election API to dedup the T27 → SignalR relay across pods. Multi-
+    # pod scaling lands in Phase A.5 once that abstraction is added; flip
+    # maxReplicas + adopt the leader-gate together.
     enabled: true
     minReplicas: 1
-    maxReplicas: 4
+    maxReplicas: 1
     targetCpuPercent: 70
-  # Phase A.1 keeps the HTTPRoute behind a flag so operators don't
-  # shadow the Platform.Api /hubs/* route before A.2+A.3 ships the Hub
-  # in this microservice. Flip to true alongside the v2.4.0 cutover.
+  # ADR-0022 Phase A.2+A.3 — the SignalR Hub now lives ONLY in this
+  # microservice. The Platform.Api HTTPRoute no longer matches /hubs/*, so the
+  # Realtime HTTPRoute owns that prefix cleanly. Set to false on bring-up
+  # environments where the Realtime service hasn't been deployed yet.
   ingress:
-    enabled: false
+    enabled: true

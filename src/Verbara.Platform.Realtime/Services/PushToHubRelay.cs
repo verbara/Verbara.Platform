@@ -5,11 +5,8 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Verbara.Platform.Api.Services;
+namespace Verbara.Platform.Realtime.Services;
 
-// ---------------------------------------------------------------------------
-// Log messages
-// ---------------------------------------------------------------------------
 internal static partial class PushToHubRelayLog
 {
     [LoggerMessage(Level = LogLevel.Warning,
@@ -33,20 +30,20 @@ internal static partial class PushToHubRelayLog
     public static partial void ForwardError(ILogger logger, string eventType, string reason);
 }
 
-// ---------------------------------------------------------------------------
-// Service
-// ---------------------------------------------------------------------------
-
 /// <summary>
 /// Bridges the in-process <see cref="IPushEventBus"/> T27 events to the
 /// SignalR <see cref="PlatformHub"/> so connected clients receive real-time
 /// conversation, agent, and cluster node state transitions.
 ///
-/// Subscribes to <see cref="ConversationStateChangedEvent"/>,
-/// <see cref="AgentStateChangedEvent"/>, and <see cref="ClusterNodeStateChangedEvent"/>
-/// on <see cref="StartAsync"/> and disposes the subscriptions on <see cref="StopAsync"/>.
-/// Conversation and agent events whose <c>Metadata.TenantId</c> is null or empty are
-/// silently skipped. Cluster events whose <c>NodeId</c> is null or empty are skipped.
+/// <para>
+/// <b>Multi-pod note (ADR-0022 Phase A):</b> Realtime currently ships
+/// single-pod (Helm values <c>realtime.hpa.maxReplicas: 1</c>) because
+/// Pro.Cluster does not yet expose a leader-election API. When the
+/// follow-up phase adds an <c>IClusterLeadershipGate</c> abstraction, the
+/// relay will short-circuit on non-leader pods and the SignalR Redis
+/// backplane (already wired in <c>Program.cs</c>) will fan the leader's
+/// broadcasts to every pod's connected clients.
+/// </para>
 /// </summary>
 public sealed class PushToHubRelay : IHostedService
 {
@@ -58,7 +55,6 @@ public sealed class PushToHubRelay : IHostedService
     private IDisposable? _agentSubscription;
     private IDisposable? _clusterSubscription;
 
-    /// <summary>Creates a new relay instance.</summary>
     public PushToHubRelay(
         IPushEventBus bus,
         IHubContext<PlatformHub, IPlatformHubClient> hubContext,
@@ -69,7 +65,6 @@ public sealed class PushToHubRelay : IHostedService
         _logger = logger;
     }
 
-    /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _conversationSubscription = _bus.OfType<ConversationStateChangedEvent>()
@@ -84,7 +79,6 @@ public sealed class PushToHubRelay : IHostedService
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _conversationSubscription?.Dispose();
@@ -95,10 +89,6 @@ public sealed class PushToHubRelay : IHostedService
         _clusterSubscription = null;
         return Task.CompletedTask;
     }
-
-    // -----------------------------------------------------------------------
-    // Internal forwarding helpers (fire-and-forget; errors logged, not thrown)
-    // -----------------------------------------------------------------------
 
     private void ForwardConversation(ConversationStateChangedEvent evt)
     {

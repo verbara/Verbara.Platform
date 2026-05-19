@@ -1,7 +1,4 @@
-using System.Reactive.Subjects;
 using Verbara.Platform.Api.Authz;
-using Verbara.Sdk.Push.Bus;
-using Verbara.Sdk.Push.Events;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
@@ -121,7 +118,6 @@ public sealed class CachedAgentTenantResolverTests
             : base(
                 NpgsqlDataSource.Create("Host=localhost;Database=ignored;Username=postgres"),
                 new MemoryCache(new MemoryCacheOptions()),
-                new NoopPushEventBus(),
                 NullLogger<CachedAgentTenantResolver>.Instance)
         {
         }
@@ -139,25 +135,5 @@ public sealed class CachedAgentTenantResolverTests
 
             return Task.FromResult(TenantToReturn);
         }
-    }
-
-    /// <summary>
-    /// No-op <see cref="IPushEventBus"/> for tests that don't exercise the
-    /// lateral-invalidation path. Subscribing returns a disposable that does
-    /// nothing; publishes are silently dropped.
-    /// </summary>
-    private sealed class NoopPushEventBus : IPushEventBus, IDisposable
-    {
-        private readonly Subject<PushEvent> _subject = new();
-
-        public void Dispose() => _subject.Dispose();
-
-        public ValueTask PublishAsync<TEvent>(TEvent pushEvent, CancellationToken ct = default)
-            where TEvent : PushEvent => ValueTask.CompletedTask;
-
-        public IObservable<PushEvent> AsObservable() => _subject;
-
-        public IObservable<TEvent> OfType<TEvent>() where TEvent : PushEvent =>
-            (IObservable<TEvent>)System.Reactive.Linq.Observable.OfType<TEvent>(_subject);
     }
 }

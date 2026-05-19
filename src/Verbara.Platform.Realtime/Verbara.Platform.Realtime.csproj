@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Description>SignalR realtime microservice for Verbara.Platform — hosts the PlatformHub (extracted from Verbara.Platform.Api per ADR-0022 to unblock Native AOT publishing of the API host). Phase A.1 scope: scaffold skeleton + /health endpoint + X-Service-Key middleware. Full hub mapping + Pro.Push.SignalR wiring lands in Phase A.2+A.3.</Description>
+    <Description>SignalR realtime microservice for Verbara.Platform — hosts the PlatformHub (extracted from Verbara.Platform.Api per ADR-0022 to unblock Native AOT publishing of the API host). Owns the T27 push→hub bridge + Pro.Cluster leader-election + Redis SignalR backplane for horizontal scaling.</Description>
     <!-- Non-AOT by design — SignalR server-side dispatch + Pro.Push.SignalR
          reflection is the whole reason this microservice exists separately
          from the API. Same flags as Verbara.Platform.Renderer + Verbara.Platform.Mail. -->
@@ -13,7 +13,28 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Verbara.Platform.Realtime.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Verbara.Platform.Core\Verbara.Platform.Core.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Identity\Verbara.Platform.Identity.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Identity.Redis\Verbara.Platform.Identity.Redis.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Realtime.Contracts\Verbara.Platform.Realtime.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" />
+    <PackageReference Include="Verbara.Sdk.Hosting" />
+    <PackageReference Include="Verbara.Sdk.Resilience" />
+    <PackageReference Include="Verbara.Sdk.Push" />
+    <PackageReference Include="Verbara.Sdk.Pro.Push" />
+    <PackageReference Include="Verbara.Sdk.Pro.Push.SignalR" />
+    <PackageReference Include="Verbara.Sdk.Pro.Cluster" />
+    <PackageReference Include="Verbara.Sdk.Pro.Cluster.Storage.Postgres" />
   </ItemGroup>
 
 </Project>

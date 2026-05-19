@@ -54,6 +54,9 @@
     <ProjectReference Include="..\Verbara.Platform.Audit\Verbara.Platform.Audit.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Media\Verbara.Platform.Media.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Storage.Postgres\Verbara.Platform.Storage.Postgres.csproj" />
+    <!-- ADR-0022 Phase A — shared DTOs for /api/v1/internal endpoints consumed by
+         Verbara.Platform.Realtime. Contracts project is AOT-clean. -->
+    <ProjectReference Include="..\Verbara.Platform.Realtime.Contracts\Verbara.Platform.Realtime.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -99,6 +102,12 @@
     <PackageReference Include="Verbara.Sdk.Pro.Cluster.Storage.Postgres" />
     <PackageReference Include="Verbara.Sdk.Pro.MultiTenant" />
     <PackageReference Include="Verbara.Sdk.Pro.Push" />
+    <!-- Verbara.Sdk.Pro.Push.SignalR is kept for the T27 bridges + event types
+         (Verbara.Sdk.Pro.Push.SignalR.Bridges, Verbara.Sdk.Pro.Push.SignalR.Events).
+         The Hub host + PresenceTracker + PushToHubRelay moved to
+         Verbara.Platform.Realtime per ADR-0022, but the bridges still run here
+         because they depend on SDK heavyweight types (ICallSessionManager,
+         VerbaraServerPool, ClusterTransportBase) that live in Platform.Api. -->
     <PackageReference Include="Verbara.Sdk.Pro.Push.SignalR" />
     <PackageReference Include="Verbara.Sdk.OpenTelemetry" />
     <PackageReference Include="Verbara.Sdk.Pro.OpenTelemetry" />

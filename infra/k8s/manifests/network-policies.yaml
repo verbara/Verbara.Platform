@@ -370,6 +370,26 @@ spec:
         - protocol: TCP
           port: 80
 ---
+# 14b. ADR-0022 Phase A — Allow ingress to Realtime SignalR Hub on port 5030
+#     Browser WebSocket handshakes arrive through Cilium Gateway /hubs/* →
+#     platform-realtime Service. Source is "any" — same rationale as the
+#     allow-api-ingress + allow-web-ingress policies above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-realtime-ingress
+  namespace: r55-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: platform-realtime
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 5030
+---
 # 15. Allow Prometheus scrapes from monitoring namespace on API metrics
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -411,6 +431,8 @@ spec:
           port: 5000  # health/ready, health/live endpoints
         - protocol: TCP
           port: 80    # web frontend probe
+        - protocol: TCP
+          port: 5030  # ADR-0022 Phase A — realtime health probe
 
 ---
 # =============================================================================

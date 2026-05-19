@@ -73,14 +73,11 @@ using Verbara.Platform.Channels.WebChat;
 using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Pro.MultiTenant.DependencyInjection;
 using Verbara.Sdk.Push.Hosting;
-using Verbara.Sdk.Push.Authz;
-using Verbara.Sdk.Pro.Push.SignalR.DependencyInjection;
-using Verbara.Sdk.Pro.Push.SignalR.Hubs;
+using Verbara.Sdk.Pro.Push;
 using Verbara.Sdk.Pro.Push.SignalR.Bridges;
-using Verbara.Sdk.Pro.Push.SignalR.Presence;
 using Verbara.Sdk.Pro.Storage.Common.Retention;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Verbara.Platform.Api.Hubs;
+using Verbara.Platform.Api.Endpoints.Internal;
 using Verbara.Sdk.OpenTelemetry;
 using Verbara.Sdk.Pro.OpenTelemetry;
 using Scalar.AspNetCore;
@@ -114,46 +111,32 @@ builder.Services.AddVerbaraSessionsMultiServer();
 // for the PlatformEventBus DI ctor and the platform-specific delivery filter
 // can override the SDK default.
 builder.Services.AddVerbaraPush();
-// Verbara.Sdk.Pro.Push.SignalR: PlatformHub + Phoenix-style Presence CRDT.
-// Registers PresenceTracker (singleton), heartbeat + merge HostedServices,
-// topic registration, SignalR server with ProPresenceJsonContext JSON resolver.
-builder.Services.AddVerbaraProPushSignalR(o =>
+
+// ADR-0022 Phase A — The SignalR Hub itself (MapHub, PresenceTracker,
+// PushToHubRelay) moved to Verbara.Platform.Realtime. Platform.Api KEEPS the
+// T27 event bridges (WithClusterEventBridge / WithConversationBridge /
+// WithAgentBridge) because they depend on SDK heavyweight types
+// (ICallSessionManager, VerbaraServerPool, ClusterTransportBase) that live
+// here. Bridges publish state-change events to IPushEventBus → Pro.Push
+// Redis backplane → Realtime's local bus → PushToHubRelay → SignalR clients.
+var pushBackplaneRedis = builder.Configuration.GetConnectionString("Redis");
+if (!string.IsNullOrWhiteSpace(pushBackplaneRedis))
 {
-    var clusterNodeId = builder.Configuration["Asterisk:ClusterNodeId"];
-    if (!string.IsNullOrEmpty(clusterNodeId))
-        o.NodeId = clusterNodeId;
-});
-// T27 event bridges (v1.8.0-pro): opt-in HostedServices that publish cluster /
-// conversation / agent state transitions to IPushEventBus so cross-node consumers
-// (SignalR clients, webhook subscribers, SSE listeners) observe state changes in
-// real time. Each bridge throttles per key (node/conversation/agent) — see
-// BridgeOptions for tuning knobs. DefaultTenantId only applies when ambient
-// TenantContext.Current is unset (background SDK events without a request scope).
+    builder.Services.AddVerbaraProPushRedis(pushBackplaneRedis);
+}
+
 builder.Services
     .WithClusterEventBridge()
     .WithConversationBridge(opt => opt.DefaultTenantId = "default-tenant")
     .WithAgentBridge();
 
-// Relay T27 bus events (conversation + agent state) to SignalR tenant groups.
-builder.Services.AddHostedService<PushToHubRelay>();
-
-// Override the SDK default AllowAllSubscriptionAuthorizer with RBAC-aware authorizer.
-builder.Services.AddSingleton<ISubscriptionAuthorizer, RbacSubscriptionAuthorizer>();
-// Replace Pro.Push.SignalR's NotImplementedSupervisorCoordinator default with the
-// Platform concrete impl that delegates to AgentAssistSupervisor.
-builder.Services.AddSingleton<ISupervisorCoordinator, PlatformSupervisorCoordinator>();
-// R5.2 P0.6 — cross-tenant subscription validation per ADR-0005.
-// IAgentTenantResolver: Postgres-backed, 5-minute IMemoryCache. Hub method
-// SubscribeToAgentPresenceAsync queries this resolver to validate that the
-// caller's JWT `tid` claim equals the agent's resolved tenant before joining
-// the presence:agent:{agentId} group.
-// IHubAuditSink: bridges hub.cross_tenant_subscription_denied entries into
-// the Platform audit pipeline for SOC operators / SIEM correlation.
+// Postgres-backed agent→tenant resolver consumed by /api/v1/internal/agent-tenant
+// (which Realtime calls over HTTP+JSON to honour cross-tenant Hub subscription
+// checks). Pre-ADR-0022 this implemented Pro.Push.SignalR's IAgentTenantResolver
+// directly; the interface dependency was dropped along with the Pro.Push.SignalR
+// PackageReference.
 builder.Services.AddMemoryCache();
-builder.Services.AddSingleton<Verbara.Sdk.Pro.Push.SignalR.Authz.IAgentTenantResolver,
-    Verbara.Platform.Api.Authz.CachedAgentTenantResolver>();
-builder.Services.AddSingleton<Verbara.Sdk.Pro.Push.SignalR.Authz.IHubAuditSink,
-    Verbara.Platform.Api.Authz.PlatformHubAuditSink>();
+builder.Services.AddSingleton<Verbara.Platform.Api.Authz.CachedAgentTenantResolver>();
 // R5.2 PC.5 / B.12 — debounced last-used stamp for API keys. Backed by the
 // shared IMemoryCache registered above; ≤ 1 UPDATE per minute per key per
 // process. Fire-and-forget from ApiKeyAuthenticationHandler so auth latency
@@ -1031,13 +1014,8 @@ builder.Services.AddAuthorization(options =>
         Verbara.Platform.Api.Endpoints.Security.JwtKeyEndpoints.AuthorizationPolicy,
         p => p.AddRequirements(new PlatformAdminRequirement("security.jwt.rotate")));
 
-    // Plan 32C — PlatformHub method-level policies. "Supervisor" is role-based
-    // (Supervisor or Admin); "Agent" is role-based for UpdatePresence/RequestHelp;
-    // "PlatformAdmin" is role-based for hub-level administrative methods (distinct
-    // from the existing "PlatformAdminOnly" which uses the PlatformAdminRequirement).
-    options.AddPolicy("Supervisor", p => p.RequireRole("Supervisor", "Admin"));
-    options.AddPolicy("Agent", p => p.RequireRole("Agent", "Supervisor", "Admin"));
-    options.AddPolicy("PlatformAdmin", p => p.RequireRole("PlatformAdmin"));
+    // Plan 32C PlatformHub method-level policies (Supervisor/Agent/PlatformAdmin)
+    // moved to Verbara.Platform.Realtime per ADR-0022 along with the Hub itself.
 });
 
 // RBAC permission-based authorization
@@ -1083,19 +1061,15 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
 // Unhealthy. The pattern mirrors AnalyticsLiveServiceCollectionExtensions
 // (R5.1 LiveQueueSnapshotWriter): register T as Singleton, then forward
 // IHostedService via factory so both resolve to the same instance.
+// ADR-0022 Phase A — Presence health checks moved to Verbara.Platform.Realtime
+// along with the Pro.Push.SignalR services that host them. RetentionService
+// remains in Platform.Api.
 builder.Services
-    .PromoteHostedServiceToSingleton<PresenceHeartbeatService>()
-    .PromoteHostedServiceToSingleton<PresenceFanoutService>()
-    .PromoteHostedServiceToSingleton<PresenceMergeConsumer>()
     .PromoteHostedServiceToSingleton<RetentionService>();
 
 var healthBuilder = builder.Services.AddHealthChecks()
     .AddCheck<Verbara.Platform.Api.Health.BackgroundServiceHealthCheck>("services", tags: ["ready"])
     .AddCheck<Verbara.Platform.Api.Health.AsteriskAmiHealthCheck>("asterisk", tags: ["ready"])
-    // R5.3 A.5.b — Pro 1.13.0-pro health checks (presence + retention).
-    .AddCheck<PresenceHeartbeatService>("presence-heartbeat", tags: ["ready"])
-    .AddCheck<PresenceFanoutService>("presence-fanout", tags: ["ready"])
-    .AddCheck<PresenceMergeConsumer>("presence-merge", tags: ["ready"])
     .AddCheck<RetentionService>("retention", tags: ["ready"]);
 
 // Only add Postgres health check if NpgsqlDataSource is registered
@@ -1138,6 +1112,11 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     options.SerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, ApiJsonContext.Default);
+    // Cross-service DTOs shared with Verbara.Platform.Realtime (ADR-0022). Adding the
+    // resolver lets the /api/v1/internal endpoints serialize/deserialize without
+    // tripping the AOT analyzer or registering each DTO in ApiJsonContext.
+    options.SerializerOptions.TypeInfoResolverChain.Insert(1,
+        Verbara.Platform.Realtime.Contracts.RealtimeContractsJsonContext.Default);
 #pragma warning disable IL3050 // Non-generic JsonStringEnumConverter: fallback for enums not in ApiJsonContext
     options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
 #pragma warning restore IL3050
@@ -1294,10 +1273,10 @@ v1.MapManagementApiKeyEndpoints();
 v1.MapAgentAssistFeatureEndpoints();
 v1.MapSseEndpoints();
 
-// Plan 32C — SignalR PlatformHub for supervisor + presence real-time channels.
-// JWT validation supports both ?token= (legacy) and ?access_token= (SignalR default)
-// via AuthSchemeConfiguration.
-app.MapHub<PlatformHub>("/hubs/platform");
+// ADR-0022 Phase A — PlatformHub moved to Verbara.Platform.Realtime. Service-to-
+// service internal endpoints expose the data Realtime needs (agent→tenant cache
+// + hub audit sink) over HTTP+JSON gated by X-Service-Key.
+app.MapInternalIntegrationEndpoints(builder.Configuration["Services:ServiceKey"]);
 v1.MapMediaEndpoints();
 v1.MapCampaignEndpoints();
 v1.MapCallAttemptEndpoints();
