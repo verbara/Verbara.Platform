@@ -1,6 +1,45 @@
-# Phase D — Dapper.AOT Migration (Technical Design)
+# Phase D — Dapper AOT-Shipping Path (Technical Design)
 
-**Status:** Approved 2026-05-19 · **Companion plan:** [`docs/plans/active/2026-05-19-phase-d-dapper-aot.md`](../plans/active/2026-05-19-phase-d-dapper-aot.md) · **Drives:** [ADR-0022](../decisions/0022-platform-api-aot-shipping-path.md) Amendment §7 closure + new Amendment §8 (Phase D execution report, written post-ship)
+**Status:** Approach pivoted 2026-05-19 (same day) — see Pivot Notice below · **Companion plan:** [`docs/plans/active/2026-05-19-phase-d-dapper-aot.md`](../plans/active/2026-05-19-phase-d-dapper-aot.md) (authoritative, post-pivot) · **Day 1 evidence:** [`docs/operations/phase-d-validation/2026-05-19-day-1-findings.md`](../operations/phase-d-validation/2026-05-19-day-1-findings.md) · **Drives:** [ADR-0022](../decisions/0022-platform-api-aot-shipping-path.md) Amendment §7 closure + new Amendment §8 (Phase D execution report, written post-ship)
+
+---
+
+## 🚨 PIVOT NOTICE — 2026-05-19 (same day as initial draft)
+
+**The original design below (Sections 1-11) framed Phase D as a "Dapper.AOT source-generator migration" project. Day 1 empirical testing on canary A (`Verbara.Sdk.Sessions.Postgres`) invalidated that framing.**
+
+### What Day 1 proved
+
+1. **R10 confirmed (CommandDefinition not intercepted)** — Dapper.AOT 1.0.52 does NOT intercept `conn.QueryAsync(new CommandDefinition(sql, param, ct))`. Only the simple `(sql, param)` overload is intercepted. Upstream [PR #153](https://github.com/DapperLib/DapperAOT/issues/153) addresses this — unmerged 12 months.
+2. **R11 confirmed (CT-in-params generator bug)** — The canonical [DAP045](https://github.com/dapperlib/dapperaot/blob/main/docs/rules/DAP045.md) pattern `new { id, cancellationToken = ct }` produces broken C# (CS0103 + CS0162) in Dapper.AOT 1.0.48 AND 1.0.52. Longstanding bug.
+3. **R12 — THE meta-blocker** — Even if every consumer call site were Dapper.AOT-intercept-compatible, **ILC still scans `Dapper.dll` itself and emits the ~50 fatal diagnostics from base Dapper code**. This is upstream issue [DapperLib/DapperAOT#168](https://github.com/DapperLib/DapperAOT/issues/168), filed by the user (Harol-Reina) 2026-03-16, 0 comments since.
+
+### What Day 1 also proved (empirical inventory that resized the problem)
+
+- 92% of Dapper call sites (~411 of ~447) are ALREADY in the simple shape that Dapper.AOT can intercept
+- Only ~14 files (of ~100) need special handling (R9 DynamicParameters ∪ R10 CommandDefinition ∪ R11 CT-in-params)
+- The mainstream codebase pattern propagates CT via `OpenConnectionAsync(ct)` but NOT into the Dapper call itself — migrating to Dapper.AOT is a NO-OP for CT semantics on 411 sites
+
+### Pivot to Option O
+
+User decision 2026-05-19: build **`Verbara.Sdk.Dapper.Stubs`** — the solution the user's own issue #168 already proposed:
+
+> A minimal `Dapper.Stubs` assembly that provides the same public API surface as `Dapper.dll` but with empty AOT-annotated method bodies + working implementations only for the runtime-touched types (`GridReader`, `DbString`, `IWrappedDataReader`, `ICustomQueryParameter`).
+
+**Why this works:**
+- Replaces `Dapper.dll` in the runtime closure with an AOT-clean assembly → ILC stops emitting diagnostics → resolves #168/R12
+- `Dapper.AOT` source-generated interceptors replace the runtime calls → stub bodies are never invoked
+- Bypasses R10 because the stub `CommandDefinition` extension methods just compile (never invoked at runtime when interceptors win)
+- Bypasses R11 because the buggy CT-in-params pattern isn't needed (sites that need mid-query CT use NpgsqlCommand raw instead)
+- Bounded scope: Dapper public API is stable (last public-breaking change pre-2020); stubs assembly is ~10 types
+
+**The authoritative execution plan is the COMPANION PLAN file** ([`docs/plans/active/2026-05-19-phase-d-dapper-aot.md`](../plans/active/2026-05-19-phase-d-dapper-aot.md), amended same day). Sections 1-11 below are PRESERVED AS HISTORICAL ARTIFACT of the initial design and the reasoning that led to the pivot.
+
+A NEW design spec for the `Verbara.Sdk.Dapper.Stubs` assembly itself will be authored as part of Phase D.1 kickoff (fresh-context brainstorming session) and committed alongside the implementation.
+
+---
+
+## SUPERSEDED SECTIONS BELOW (preserved as historical context for the pivot decision)
 
 ## 1. Problem statement
 

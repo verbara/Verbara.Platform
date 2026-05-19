@@ -1,6 +1,8 @@
-# Phase D — Dapper.AOT Migration (ADR-0022)
+# Phase D — Dapper AOT-Shipping Path (ADR-0022) [APPROACH PIVOTED 2026-05-19]
 
-**Created:** 2026-05-19 · **Owner:** Maintainer · **Target tag:** Platform `2.4.0` (or `2.5.0` if major-bump for AOT cutover) · **Estimated runway:** ~3 weeks post-spike kickoff · **Canonical spec:** [`docs/specs/2026-05-19-phase-d-dapper-aot-migration-design.md`](../../specs/2026-05-19-phase-d-dapper-aot-migration-design.md) · **Approved via ExitPlanMode 2026-05-19** (origin: `~/.claude/plans/continua-mutable-token.md`)
+**Created:** 2026-05-19 · **Approach pivoted:** 2026-05-19 (same day) per [Day 1 empirical findings](../../operations/phase-d-validation/2026-05-19-day-1-findings.md) · **Owner:** Maintainer · **Target tag:** Platform `2.4.0` (or `2.5.0` if major-bump for AOT cutover) · **Revised runway:** ~2-3 weeks · **Canonical spec:** [`docs/specs/2026-05-19-phase-d-dapper-aot-migration-design.md`](../../specs/2026-05-19-phase-d-dapper-aot-migration-design.md)
+
+> **Pivot summary (2026-05-19):** Original plan was "spike-then-sweep" using `Dapper.AOT` source generator alone. Day 1 empirical testing on canary A (`Verbara.Sdk.Sessions.Postgres`) revealed that the **real blocker is upstream issue [DapperLib/DapperAOT #168](https://github.com/DapperLib/DapperAOT/issues/168)** (filed by user 2026-03-16, 0 comments since) — ILC scans the base `Dapper.dll` and emits ~50 fatal diagnostics regardless of how many consumer call sites adopt the source generator. Pivoted to **Option O — build `Verbara.Sdk.Dapper.Stubs`** assembly per the user's own proposed solution in #168. R10 (CommandDefinition not intercepted) + R11 (CT-in-params generator bug) confirmed empirically but irrelevant once Stubs are in place.
 
 ## Context
 
@@ -12,70 +14,108 @@ Until this phase ships, `Verbara.Platform.Api` continues to publish as portable 
 
 ## Pre-conditions (verify at kickoff)
 
-- [ ] **v2.2.0 (Pro v2.4.0-pro consumer migration) shipped + tagged + pushed** (workstream coordination decision 2026-05-19 — ~6h plan in `~/.claude/plans/si-refactored-pascal.md`, materialize first).
+- [x] **v2.2.0 (Pro v2.4.0-pro consumer migration) shipped + tagged + pushed** — ✅ SHIPPED 2026-05-18 (commit `0de22761`, tag `v2.2.0`). Pre-condition already met when this plan was written.
 - [ ] D-LK soak writeup committed (closure of 24h soak run 2026-05-18 04:37 PASS) — does not block Phase D but should close the open ledger.
-- [ ] Platform on `main` at `2.3.x` (post-v2.2.0).
+- [ ] Platform on `main` at `2.4.0-rc` (current `Directory.Build.props`).
 - [ ] Cross-repo dev workflow validated: `dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/` + `rm -rf ~/.nuget/packages/verbara.sdk*/` + `dotnet restore` round-trip clean.
 - [ ] All tests green cross-repo at kickoff (snapshot for regression comparison): Platform.Api.Tests 943 + Realtime.Tests 22 + Pro 1,329 (1,165 unit + 164 IT) + SDK ~3,079 unit.
+- [ ] Baseline AOT publish log captured in `docs/operations/phase-d-validation/2026-05-19-baseline-aot-publish.log` (✅ done 2026-05-19) — 50 diagnostics, 100% Dapper-attributable.
 
-## Scope
+## Scope (re-measured empirically 2026-05-19)
 
-**9 storage packages / ~169 .cs files across 3 repos** (verified 2026-05-19 via `reference_dapper_consumers_inventory.md`):
+**9 storage packages / ~447 Dapper call sites across 3 repos.** Updated counts from Day 1 inventory:
 
-| Repo | Package | Approx files |
+| Surface | Count | Action under Option O |
 |---|---|---|
-| Verbara.Sdk | `Sessions.Postgres` | ~5 |
-| Verbara.Sdk.Pro | `Dialer.Storage.Postgres`, `EventStore.Postgres`, `Analytics.Storage.Postgres`, `CallAnalytics.Storage.Postgres`, `AgentAssist.Storage.Postgres`, `Realtime.Storage.Postgres`, `Cluster.Storage.Postgres` | ~100 |
-| Verbara.Platform | `Storage.Postgres` + `Identity.DataProtection` (`DapperXmlRepository.cs` from Phase B) + direct Dapper sites in `Api` | ~64 |
+| Total Dapper call sites cross-repo | ~447 | — |
+| Sites in simple shape `conn.X<T>(sql, param)` (Dapper.AOT-compatible AS-IS) | ~411 (92%) | Adopt Dapper.AOT — auto-intercept, no code change |
+| Sites with `new CommandDefinition(...)` (R10) | 16 in 5 files | Case-by-case: NpgsqlCommand raw OR refactor to simple shape |
+| Sites passing `cancellationToken: ct` to a Dapper call (R11) | 18 in 5 files | Same — choose CT-preserving (NpgsqlCommand) or CT-dropping (simple shape) per site |
+| Sites with `new DynamicParameters` (R9 — DAP015) | 14 in 11 files | Rewrite to typed/anonymous params OR NpgsqlCommand raw |
+| **Files requiring special handling (R9 ∪ R10 ∪ R11)** | **~14 of ~100** | Targeted refactor (~3-5 days) |
 
-**Cross-repo grep confirms ZERO usage of `SplitOn` / `QueryMultiple` / `dynamic`** — the codebase is overwhelmingly simple `Query<T>` / `Execute` / `QuerySingleOrDefault` surface, which is exactly what Dapper.AOT intercepts cleanly. House style ("class-based rows with `{ get; init; }` + explicit column aliases") aligns with what Dapper.AOT's hash-based column matcher expects.
+**The 14 special-handling files** are concentrated and named: `PostgresSessionStore.cs` (SDK), `PostgresAuditStore.cs`, `RoleTemplateSeeder.cs`, `PostgresAuthEventStore.cs`, `PostgresConversationStore.cs`, `PostgresAgentStore.cs`, `PostgresPurgeLogStore.cs` (Platform), `PostgresLiveQueueSnapshotStore.cs`, `SnoopChannelManager.cs`, `PostgresClusterTransport.cs`, `PostgresIntervalSnapshotStore.cs`, `PostgresDncListStore.cs`, `PostgresCallAnalyticsStore.cs`, `PostgresCompletedSessionStore.cs` (Pro).
 
-## Approach: Spike → Sweep paralelo
+**Confirmed:** ZERO usage of `SplitOn` / `QueryMultiple` / `dynamic` across all 3 repos. House style ("class-based rows with `{ get; init; }` + explicit column aliases") aligns with Dapper.AOT's hash-based column matcher.
 
-### Phase D.0 — Spike (2 canaries, ~2 days)
+**CRITICAL META-FINDING ([#168](https://github.com/DapperLib/DapperAOT/issues/168), filed by user 2026-03-16):** Adopting `Dapper.AOT` source generator alone does NOT eliminate the 50 AOT publish diagnostics — ILC scans `Dapper.dll` itself and emits the diagnostics from there, regardless of consumer call site shape. **Dapper.Stubs is the only path that resolves this.**
 
-Branch `feat/phase-d-dapper-aot-spike` per repo, isolated worktree.
+## Approach: Option O — Build `Verbara.Sdk.Dapper.Stubs` + adopt Dapper.AOT cross-repo
 
-**Canary A — `Verbara.Sdk.Sessions.Postgres`** (simplest possible, no JSONB)
-- 1 store, ~5 .cs files
-- Validates: PackageReference + `InterceptorsPreviewNamespaces` MSBuild flag + `[module: DapperAot]` AssemblyInfo + interceptor generation + cross-repo pack-and-restore round trip
+Per [Day 1 findings](../../operations/phase-d-validation/2026-05-19-day-1-findings.md), the original Spike → Sweep approach is **ABANDONED** because empirical testing proved `Dapper.AOT` alone cannot resolve the AOT publish blocker. The real blocker is upstream issue #168 (ILC scans `Dapper.dll`). Solution: ship a parallel `Verbara.Sdk.Dapper.Stubs` assembly that satisfies ILC while interceptors handle the runtime calls.
 
-**Canary B — `Verbara.Platform.Storage.Postgres/Stores/PostgresAuditStore.cs`** (canary for JSONB + init-only rows)
-- Validates: `NpgsqlDbType.Jsonb` parameter binding through generated `CommandFactory`, `{ get; init; }` row materialization via generated `RowFactory<T>` (object initializer pattern `new Row { ... }` not property setters), coexistence with un-migrated stores in the same package
+### Phase D.1 — Build `Verbara.Sdk.Dapper.Stubs` (~5-7 days)
 
-**Spike exit criteria:**
-1. Both canaries build clean (`TreatWarningsAsErrors=true`, `WarningLevel=9999`).
-2. Tests verdes: SDK Sessions tests + Platform Audit-related Postgres IT.
-3. `dotnet publish -p:PublishAot=true` shows diagnostic count drop ≥ N (N = files migrated). If less → un-intercepted call site → investigate.
-4. Manual inspection of `obj/Debug/generated/Dapper.AOT.Analyzers/.../*.generated.cs` confirms object-initializer pattern for `{ get; init; }` rows.
-5. **Playbook written** to `docs/specs/2026-05-19-phase-d-dapper-aot-playbook.md`: per-package checklist, JSONB pattern, init-only confirmation, analyzer warning whitelist.
-6. Risk register updated (R1-R8 from spec) with empirical outcomes.
+New project in Verbara.Sdk repo (MIT-licensed, candidate for upstream contribution to `dapperlib/dapperaot`):
 
-### Phase D.1 — Sweep (parallel subagents, ~5 days)
+- **Goal:** mirror the public API surface of `Dapper.dll` so consumer code compiles against either real Dapper OR these stubs; ship stubs with AOT-clean annotations + empty bodies that ILC can trim.
+- **Mirrored types** (1:1 public API surface, with `[RequiresDynamicCode("…")] + [RequiresUnreferencedCode("…")]` annotations + `throw new NotSupportedException("…")` bodies):
+  - `SqlMapper` static class — all `Query*` / `Execute*` / `ExecuteScalar*` extension methods + their async variants
+  - `CommandDefinition` struct — passthrough constructor + properties (must compile; never invoked at runtime when interceptors win)
+  - `DynamicParameters` class — same passthrough policy
+  - `DefaultTypeMap`, `CustomPropertyTypeMap`, `SqlMapper.ITypeMap` — passthrough definitions
+- **Working implementations** (interceptors call these at runtime — must NOT throw):
+  - `GridReader` base class (abstract; `AotGridReader` extends it and calls `OnBeforeGrid`/`OnAfterGrid`)
+  - `DbString` class (properties read at runtime by generated `DbStringHelpers`)
+  - `IWrappedDataReader` interface (referenced by generated `AotWrappedDbDataReader`)
+  - `SqlMapper.ICustomQueryParameter` interface (implemented by `PostgresSessionStore.JsonbParameter` — runtime calls `AddParameter`)
+  - `SqlMapper.ITypeHandler` interface (referenced by tests that register custom type handlers — optional pending audit)
+- **Spike validation:** after stubs are built, redo the canary on `Verbara.Sdk.Sessions.Postgres`:
+  - Add `Dapper.AOT` PackageReference + `[module: DapperAot]`
+  - Replace `Dapper` PackageReference with `Verbara.Sdk.Dapper.Stubs`
+  - Build → expect 0 warnings (stubs satisfy compilation)
+  - Pack SDK → pivot to Platform → AOT publish → **expect 0 IL3050/IL207x diagnostics from the Sessions.Postgres path**
+- **Exit criteria for D.1:**
+  1. Verbara.Sdk.Dapper.Stubs builds clean cross-target (net8.0 + net10.0).
+  2. `Verbara.Sdk.Sessions.Postgres` builds clean against stubs (all 6 sites OK).
+  3. AOT publish of Platform.Api with Sessions.Postgres using stubs → diagnostic count drops by the # attributable to Sessions surface (verifies stubs concept).
+  4. Sessions.Postgres existing Testcontainers tests pass — runtime behavior identical.
 
-Apply playbook to remaining 7 paquetes via the `dapper-aot-migration` subagent (1 invocation per package, fresh context, given playbook + risk register + scoped prompt).
+### Phase D.2 — Sweep adoption cross-repo (~3-5 days, parallel subagents)
 
-**Wave 1 (parallel, 4 stores — independent)**
+Apply pattern from D.1 to all 9 storage packages via the `dapper-aot-migration` subagent. Per-package mechanical change:
+
+```diff
+- <PackageReference Include="Dapper" />
++ <PackageReference Include="Dapper" ExcludeAssets="runtime" />
++ <PackageReference Include="Verbara.Sdk.Dapper.Stubs" />
++ <PackageReference Include="Dapper.AOT" PrivateAssets="all" />
+```
+
+Plus new `AssemblyInfo.cs` with `[module: DapperAot]` + `<InterceptorsPreviewNamespaces>` MSBuild property.
+
+**Wave 1 (parallel, 4 stores — independent + simplest patterns)**
 - `Verbara.Sdk.Pro.Dialer.Storage.Postgres`
 - `Verbara.Sdk.Pro.EventStore.Postgres`
 - `Verbara.Sdk.Pro.Cluster.Storage.Postgres`
 - `Verbara.Sdk.Pro.Realtime.Storage.Postgres`
 
-**Gate Wave 1 → Wave 2:** all packages build clean + tests verdes + interceptors emitted.
-
-**Wave 2 (parallel, 3 stores — informed by Wave 1)**
-- `Verbara.Sdk.Pro.Analytics.Storage.Postgres`
-- `Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres`
-- `Verbara.Sdk.Pro.AgentAssist.Storage.Postgres`
+**Wave 2 (parallel, 3 stores — touch the ~14 special-handling files)**
+- `Verbara.Sdk.Pro.Analytics.Storage.Postgres` — includes `PostgresLiveQueueSnapshotStore` (4 CommandDefinition sites)
+- `Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres` — includes `PostgresCallAnalyticsStore` (DynamicParameters)
+- `Verbara.Sdk.Pro.AgentAssist.Storage.Postgres` — includes `SnoopChannelManager` (CommandDefinition)
 
 **Wave 3 (Platform sweep)**
-- `Verbara.Platform.Storage.Postgres` (remaining ~63 .cs files after canary B)
-- `Verbara.Platform.Identity/DataProtection/DapperXmlRepository.cs` (Phase B output)
-- `Verbara.Platform.Api` direct Dapper sites (~3-5 files)
+- `Verbara.Platform.Storage.Postgres` — includes RoleTemplateSeeder + PostgresAuditStore + 5 DynamicParameters stores
+- `Verbara.Platform.Identity/DataProtection/DapperXmlRepository.cs` (Phase B output) — simple shape, no special handling expected
+- `Verbara.Platform.Api` direct Dapper sites
 
-**Cross-repo packaging during sweep**: experimental version suffix `2.5.0-dapperaot.N` (SDK) / `2.5.0-pro-dapperaot.N` (Pro), pack to both `/media/Data/Source/Verbara/local-nuget-feed/` AND `Verbara.Platform/local-nuget-feed/` (per `feedback_nuget_two_feeds.md`). Final pack at sweep close drops the suffix.
+**Cross-repo packaging during sweep:** pack `Verbara.Sdk.Dapper.Stubs` + updated SDK + updated Pro to `/media/Data/Source/Verbara/local-nuget-feed/` AND `Verbara.Platform/local-nuget-feed/` (per `feedback_nuget_two_feeds.md`). Experimental version suffixes: `2.1.3-aotstubs.N` (SDK) / `2.5.0-pro-aotstubs.N` (Pro). Final pack at sweep close drops the suffix.
 
-### Phase D.2 — Triple gate validation (~1 day)
+### Phase D.3 — Special-handling site remediation (~3-5 days, can overlap with D.2)
+
+For the ~32 sites in 14 files that use `CommandDefinition` / `DynamicParameters` / `cancellationToken: ct`, decide per-site:
+
+| Pattern | Default action | Rationale |
+|---|---|---|
+| `CommandDefinition` with `cancellationToken: ct` where CT-mid-query is critical (hot path, long queries) | **Refactor to NpgsqlCommand raw** (preserves CT semantics, AOT-clean by construction) | NpgsqlCommand is AOT-compatible out of the box; ~10-20 lines per site |
+| `CommandDefinition` with `cancellationToken: ct` where CT is cosmetic (short queries, batch operations) | **Refactor to simple shape** (drop mid-query CT; connection-level timeout from NpgsqlDataSource) | No regression — mainstream 411 sites already work this way |
+| `DynamicParameters` for dynamic WHERE building | **Build SQL fully formed + use anonymous types** OR **NpgsqlCommand raw with parameter loop** | Per DAP015 doc + #157 (open upstream) |
+| `DynamicParameters` for SQL output parameters | **NpgsqlCommand raw with explicit `ParameterDirection.Output`** | Dapper.AOT's `[DbValue]` workaround is unergonomic |
+
+Per-file decision matrix lives in [day-1-findings.md](../../operations/phase-d-validation/2026-05-19-day-1-findings.md). Wave 3 (Platform sweep) does the Platform files. Pro files done in Wave 2.
+
+### Phase D.4 — Triple gate validation (~1 day)
 
 | Gate | What it checks | Pass criteria |
 |---|---|---|
@@ -113,12 +153,32 @@ Re-run D-LK profile against `ghcr.io/verbara/platform/api:2.4.0` AOT image in Ta
 
 ## Critical files to modify
 
-### All 3 repos
-- `Directory.Packages.props` — add `<PackageVersion Include="Dapper.AOT" Version="X.Y.Z" />` (pin version after spike validates)
+### NEW project: `Verbara.Sdk.Dapper.Stubs` (in Verbara.Sdk repo)
+- `src/Verbara.Sdk.Dapper.Stubs/Verbara.Sdk.Dapper.Stubs.csproj` — multi-target net8.0;net10.0, MIT-licensed package; `<IsAotCompatible>true</IsAotCompatible>` + all AOT analyzers ON
+- `src/Verbara.Sdk.Dapper.Stubs/SqlMapper.cs` — passthrough static class with all Query/Execute extension methods (`throw NotSupportedException` + AOT annotations)
+- `src/Verbara.Sdk.Dapper.Stubs/CommandDefinition.cs` — passthrough struct
+- `src/Verbara.Sdk.Dapper.Stubs/DynamicParameters.cs` — passthrough class
+- `src/Verbara.Sdk.Dapper.Stubs/GridReader.cs` — abstract base class with WORKING `OnBeforeGrid` / `OnAfterGrid` virtual methods
+- `src/Verbara.Sdk.Dapper.Stubs/DbString.cs` — class with WORKING property accessors
+- `src/Verbara.Sdk.Dapper.Stubs/IWrappedDataReader.cs` — interface definition
+- `src/Verbara.Sdk.Dapper.Stubs/ICustomQueryParameter.cs` — interface definition
+- `Tests/Verbara.Sdk.Dapper.Stubs.Tests/` — unit tests that verify stubs throw correctly + working types behave correctly
 
-### Per storage package (9 total)
-- `<Package>.csproj` — add `<PackageReference Include="Dapper.AOT" />` + `<InterceptorsPreviewNamespaces>$(InterceptorsPreviewNamespaces);Dapper.AOT</InterceptorsPreviewNamespaces>`
-- `<Package>/Properties/AssemblyInfo.cs` (or any top-level file) — add `[module: DapperAot]`
+### All 3 repos `Directory.Packages.props`
+- add `<PackageVersion Include="Dapper.AOT" Version="1.0.52" />` (pinned)
+- add `<PackageVersion Include="Verbara.Sdk.Dapper.Stubs" Version="..." />` (pinned to current Stubs build)
+
+### Per storage package (9 total) — csproj diff
+```diff
+- <PackageReference Include="Dapper" />
++ <PackageReference Include="Dapper" ExcludeAssets="runtime" />
++ <PackageReference Include="Verbara.Sdk.Dapper.Stubs" />
++ <PackageReference Include="Dapper.AOT" PrivateAssets="all" />
+```
+Plus `<InterceptorsPreviewNamespaces>$(InterceptorsPreviewNamespaces);Dapper.AOT</InterceptorsPreviewNamespaces>` + new `AssemblyInfo.cs` with `[module: DapperAot]`.
+
+### Special-handling files (14 across 3 repos)
+- See [Day 1 findings — file inventory](../../operations/phase-d-validation/2026-05-19-day-1-findings.md). Per-site rewrite to NpgsqlCommand raw OR simple-shape refactor per the decision matrix in D.3.
 
 ### Platform.Api (final flip)
 - `src/Verbara.Platform.Api/Verbara.Platform.Api.csproj` — flip `<IsAotCompatible>false→true</IsAotCompatible>`, remove analyzer disables, add `<PublishAot>true</PublishAot>` + `<InvariantGlobalization>true</InvariantGlobalization>`
@@ -145,18 +205,24 @@ Re-run D-LK profile against `ghcr.io/verbara/platform/api:2.4.0` AOT image in Ta
 - **`Verbara.Platform.Storage.Postgres/Stores/PostgresAuditStore.cs`** (canary B): exemplifies JSONB binding + init-only rows.
 - **`dapper-aot-migration` subagent**: pre-existing specialized agent that "understands the Verbara Platform and Pro codebase patterns (class-based rows with {get; init;}, Npgsql 9, PostgreSQL 18)". One invocation per package during sweep, fresh context, prompted with playbook.
 
-## Risk register (initial — to be empirically updated post-spike)
+## Risk register (post-Day-1 empirical update)
 
-| # | Risk | P | Mitigation |
-|---|------|---|------------|
-| R1 | `{ get; init; }` rows need object-initializer pattern (docs example uses `{ get; set; }`) | M | Canary B validates; fallback: relax to `{ get; set; }` only on row types, or use primary constructor pattern |
-| R2 | JSONB parameter binding loses `NpgsqlDbType.Jsonb` annotation in generated `CommandFactory` | M | Canary B validates; fallback: `[DapperAot(false)]` per method + raw `NpgsqlCommand` for those sites |
-| R3 | Dapper.AOT analyzer warnings break `TreatWarningsAsErrors=true` | A | Catalog expected warnings (DAP001 / DAP005 / etc.), address vs `NoWarn` per-package, document policy in playbook |
-| R4 | Build time inflation > 30s from source-gen over ~169 files | L | Measure pre/post in spike; mitigation: `EmitCompilerGeneratedFiles=false` in CI |
-| R5 | `Identity.DataProtection.DapperXmlRepository` (Phase B fresh code) has divergent pattern | L | Migrate as part of Platform.Storage.Postgres sweep (same package, same release tag) |
-| R6 | Pro signing / license validation interacts with interceptors | L | `[module: DapperAot]` applies only to `*.Storage.Postgres` packages; Pro.Licensing untouched |
-| R7 | Dapper.AOT latest version has .NET 10 regression | L | Pin to version with last-published-≥30d; downgrade + upstream issue if found |
-| R8 | Multi-mapping / dynamic surfaces not detected by initial grep (false negatives) | VL | Sweep playbook includes exhaustive per-package grep before migration |
+| # | Risk | P | Status | Mitigation |
+|---|------|---|---|---|
+| R1 | `{ get; init; }` rows need object-initializer pattern | M | Untested under Option O | Stubs path: Dapper.AOT still emits the row factory; will surface during D.1 Sessions.Postgres canary |
+| R2 | JSONB binding via `ICustomQueryParameter` | M | Mitigated by Stubs design | Stubs ship `ICustomQueryParameter` as a working interface (not a stub); `PostgresSessionStore.JsonbParameter` runtime call hits the real impl |
+| R3 | Dapper.AOT analyzer warnings break `TreatWarningsAsErrors=true` | A | Validated 2026-05-19 — 0 warnings emitted in spike | None needed; build clean |
+| R4 | Build time inflation from source-gen over ~169 files | L | Validated 2026-05-19 — 10s build, no concern | None |
+| R5 | `Identity.DataProtection.DapperXmlRepository` (Phase B output) divergent pattern | L | Single file, simple shape | Migrate as part of Platform.Storage.Postgres sweep |
+| R6 | Pro signing/licensing interacts with interceptors | L | Out of scope (Pro.Licensing has no Dapper) | None |
+| R7 | Dapper.AOT version regression | L | Pin 1.0.52 (2026-05-16) — within 30d window relaxed | Trivial downgrade if needed |
+| R8 | Multi-mapping / `dynamic` / `QueryMultiple` not detected by initial grep | VL | Confirmed ZERO cross-repo 2026-05-19 | None |
+| **R9** | **`DynamicParameters` not interceptable by Dapper.AOT (DAP015)** | **CONFIRMED** | 14 sites in 11 files | Rewrite to typed/anonymous params OR NpgsqlCommand raw per D.3 decision matrix |
+| **R10** | **`new CommandDefinition(...)` overload not intercepted by Dapper.AOT** | **CONFIRMED** | 16 sites in 5 files; upstream PR #153 unmerged 12 months | Bypass via Stubs (CommandDefinition compiles against stub; never invoked at runtime) + per-site decision per D.3 |
+| **R11** | **DAP045 canonical CT-in-params pattern emits broken C# (CS0103 + CS0162)** | **CONFIRMED in 1.0.48 + 1.0.52** | Generator bug in `GetCancellationToken` override | Avoid the CT-in-params pattern entirely (use NpgsqlCommand raw for sites where CT-mid-query matters); file upstream issue + 10-line PR |
+| **R12** | **ILC scans `Dapper.dll` and emits ~50 fatal diagnostics regardless of source-gen interception** | **CONFIRMED — issue #168 filed by user 2026-03-16; 0 comments since** | THE meta-blocker | **Option O — `Verbara.Sdk.Dapper.Stubs`** resolves by replacing Dapper.dll in the runtime closure with an AOT-clean stub assembly |
+| R13 | Stubs assembly drifts from real Dapper API as Dapper evolves | L | Dapper API is stable (last public-breaking change pre-2020) | API mirroring test: contract-compare stubs.dll vs dapper.dll public API surface; CI gate |
+| R14 | Some interceptor calls a stub method that should be working (not throwing) — runtime crash | M | Catch in D.1 canary | Expand stubs `working impl` set iteratively; runtime tests are the verifier |
 
 ## Verification (end-to-end)
 
@@ -205,17 +271,21 @@ docker compose -f docker/docker-compose.reference-smb.yml \
 - **Verbara.Platform.Realtime** — non-AOT by design (owns SignalR Hub per ADR-0022 Phase A). Out of Phase D scope.
 - **K8s manifests update** — image tags propagate via existing Helm values templating. No structural changes required.
 
-## Timeline
+## Timeline (revised post-pivot)
 
 ```
-[D+0-2]   v2.2.0 Pro v2.4.0-pro consumer ship  (pre-condition)
-[D+3]     Phase D spike kickoff (canary A + canary B)
-[D+5]     Spike triple gate verify → playbook + risk register frozen
-[D+6-10]  Phase D sweep (Wave 1, Wave 2, Platform sweep, integration)
-[D+11]    Phase D triple gate validation (G1 + G2 + G3)
-[D+12]    Phase E cutover (pack + tag + push + digest regen + manuales)
-[D+13-14] Phase F 24h AOT soak (opcional pero recomendado)
-[D+15]    R5.5 Phase F closure + Production Readiness Review
+[D+0]     Day 0 baseline + Day 1 empirical + pivot to Option O    ✅ 2026-05-19
+[D+1-7]   D.1 — Build Verbara.Sdk.Dapper.Stubs + Sessions.Postgres canary
+[D+8-12]  D.2 — Sweep adoption in 8 remaining storage packages (parallel subagents)
+                Overlaps with D.3
+[D+9-13]  D.3 — Special-handling site remediation (14 files, ~32 sites)
+                Per-site decision matrix: NpgsqlCommand raw vs simple-shape refactor
+[D+14]    D.4 — Triple gate validation (AOT publish → 0 diagnostics target)
+[D+15]    Phase E cutover (pack + tag + push + digest regen + manuales)
+[D+16-17] Phase F 24h AOT soak (optional)
+[D+18]    R5.5 Phase F closure + Production Readiness Review
+[parallel] Submit Verbara.Sdk.Dapper.Stubs as upstream PR to dapperlib/dapperaot#168
+[parallel] Submit R11 fix (10-line generator change) upstream
 ```
 
-Total Phase D + E runway: ~12 días tras v2.2.0 ship, conservador con buffer.
+Total Phase D + E runway: ~2.5 weeks (vs original "5-6 weeks" panic estimate; bounded scope confirmed by Day 1 empirical inventory).
