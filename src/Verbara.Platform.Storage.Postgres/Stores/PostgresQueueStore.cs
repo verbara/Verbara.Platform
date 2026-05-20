@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -16,26 +16,26 @@ internal sealed class PostgresQueueStore : IQueueStore
 
     public async Task<Queue?> GetByIdAsync(TenantId tenantId, EntityId queueId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<QueueRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
             "required_skills, created_at, updated_at, created_by, updated_by " +
             "FROM queue_configs WHERE tenant_id = @TenantId AND queue_id = @QueueId",
-            new { TenantId = tenantId.Value, QueueId = queueId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("QueueId", queueId.Value)); },
+            QueueRow.Map, ct);
         return row?.ToQueue();
     }
 
     public async Task<PagedResult<Queue>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var total = await conn.ExecuteScalarAsync<int>(
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM queue_configs WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId.Value });
-        var rows = await conn.QueryAsync<QueueRow>(
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)), ct) ?? 0L);
+        var rows = await _dataSource.QueryListAsync(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
             "required_skills, created_at, updated_at, created_by, updated_by " +
             "FROM queue_configs WHERE tenant_id = @TenantId ORDER BY name LIMIT @Limit OFFSET @Offset",
-            new { TenantId = tenantId.Value, Limit = query.PageSize, Offset = query.Offset });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Limit", query.PageSize)); p.Add(new NpgsqlParameter("Offset", query.Offset)); },
+            QueueRow.Map, ct);
         var items = rows.Select(r => r.ToQueue()).ToList();
         return new PagedResult<Queue>(items, total, query.Page, query.PageSize);
     }
@@ -54,10 +54,9 @@ internal sealed class PostgresQueueStore : IQueueStore
         var wrapUpJson = JsonSerializer.Serialize(queue.WrapUp, PostgresJson.Ctx.WrapUpConfig);
         var skillsJson = JsonSerializer.Serialize(queue.RequiredSkills, PostgresJson.Ctx.IReadOnlyListString);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         try
         {
-            await conn.ExecuteAsync(
+            await _dataSource.ExecuteAsync(
                 "INSERT INTO queue_configs (queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
                 "required_skills, created_at, updated_at, created_by, updated_by) " +
                 "VALUES (@QueueId, @TenantId, @Name, @IsActive, @MaxWaiting, @SlaTargets::jsonb, @OverflowRule::jsonb, " +
@@ -67,23 +66,24 @@ internal sealed class PostgresQueueStore : IQueueStore
                 "  sla_targets = EXCLUDED.sla_targets, overflow_rule = EXCLUDED.overflow_rule, hours = EXCLUDED.hours, " +
                 "  wrap_up = EXCLUDED.wrap_up, required_skills = EXCLUDED.required_skills, " +
                 "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-                new
+                p =>
                 {
-                    QueueId = queue.QueueId.Value,
-                    TenantId = queue.TenantId.Value,
-                    queue.Name,
-                    queue.IsActive,
-                    queue.MaxWaiting,
-                    SlaTargets = slaJson,
-                    OverflowRule = overflowJson,
-                    Hours = hoursJson,
-                    WrapUp = wrapUpJson,
-                    RequiredSkills = skillsJson,
-                    queue.CreatedAt,
-                    queue.UpdatedAt,
-                    queue.CreatedBy,
-                    queue.UpdatedBy,
-                });
+                    p.Add(new NpgsqlParameter("QueueId", queue.QueueId.Value));
+                    p.Add(new NpgsqlParameter("TenantId", queue.TenantId.Value));
+                    p.Add(new NpgsqlParameter("Name", queue.Name));
+                    p.Add(new NpgsqlParameter("IsActive", queue.IsActive));
+                    p.Add(new NpgsqlParameter("MaxWaiting", (object?)queue.MaxWaiting ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("SlaTargets", (object?)slaJson ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("OverflowRule", (object?)overflowJson ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("Hours", (object?)hoursJson ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("WrapUp", wrapUpJson));
+                    p.Add(new NpgsqlParameter("RequiredSkills", skillsJson));
+                    p.Add(new NpgsqlParameter("CreatedAt", queue.CreatedAt));
+                    p.Add(new NpgsqlParameter("UpdatedAt", (object?)queue.UpdatedAt ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("CreatedBy", (object?)queue.CreatedBy ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("UpdatedBy", (object?)queue.UpdatedBy ?? DBNull.Value));
+                },
+                ct);
         }
         catch (PostgresException ex) when (ex.SqlState == "23505")
         {
@@ -102,10 +102,10 @@ internal sealed class PostgresQueueStore : IQueueStore
 
     public async Task DeleteAsync(TenantId tenantId, EntityId queueId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "DELETE FROM queue_configs WHERE tenant_id = @TenantId AND queue_id = @QueueId",
-            new { TenantId = tenantId.Value, QueueId = queueId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("QueueId", queueId.Value)); },
+            ct);
     }
 
     private sealed class QueueRow
@@ -124,6 +124,24 @@ internal sealed class PostgresQueueStore : IQueueStore
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
+
+        public static QueueRow Map(NpgsqlDataReader r) => new()
+        {
+            queue_id = r.GetString("queue_id"),
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            is_active = r.GetBoolean("is_active"),
+            max_waiting = r.GetInt32OrNull("max_waiting"),
+            sla_targets = r.GetStringOrNull("sla_targets"),
+            overflow_rule = r.GetStringOrNull("overflow_rule"),
+            hours = r.GetStringOrNull("hours"),
+            wrap_up = r.GetStringOrNull("wrap_up"),
+            required_skills = r.GetString("required_skills"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTimeOrNull("updated_at"),
+            created_by = r.GetStringOrNull("created_by"),
+            updated_by = r.GetStringOrNull("updated_by"),
+        };
 
         public Queue ToQueue() => new()
         {
