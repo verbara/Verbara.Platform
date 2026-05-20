@@ -73,10 +73,24 @@ The raw-Npgsql param-binding pattern `(object?)x ?? DBNull.Value` without an exp
   - ✅ **The migrated data-access code runs correctly under AOT against real Postgres:** `DatabaseMigrationService` applied migrations; the RBAC seeder ran; `OidcClientSecretEncryptionMigrator` completed; `NpgsqlXmlRepository` created DataProtection keys. **This is the core proof that the Dapper→Npgsql migration is AOT-correct at runtime.**
   - ⚠️ **NEW finding (out of Phase D scope, pre-existing): HTTP/JSON-layer AOT-readiness gaps.** `/health`, `/api/v1/branding`, `/openapi/v1.json` all return 500 under AOT. Confirmed cause for endpoints: `System.NotSupportedException: JsonTypeInfo metadata for type 'Verbara.Platform.Api.Endpoints.LoginRequest' was not provided` — some endpoint request/response DTOs are not registered in `ApiJsonContext` (it has 348 `[JsonSerializable]` entries but is incomplete); `/openapi` 500 is the well-known OpenAPI-doc-generation-uses-reflection issue under AOT. **ILC does not catch these — they are runtime-only System.Text.Json failures.** This is a separate AOT-readiness workstream (audit every endpoint DTO for `[JsonSerializable]` registration; decide OpenAPI strategy under AOT) that must close before the native image is shippable. It is NOT a Dapper-removal regression.
 
-### Conclusion
-**ADR-0022 Phase D (total Dapper removal) is COMPLETE and its goal met:** Dapper was the last *compile-time* AOT blocker; it is gone cross-repo, Platform.Api compiles to a clean native binary (0 diagnostics), and the migrated data layer runs correctly under AOT. **A shippable AOT image additionally requires closing the HTTP/JSON-layer AOT-runtime gaps (JSON source-gen completeness + OpenAPI)** — a distinct workstream surfaced by the G3 smoke, tracked separately before Phase 5 cutover.
+### HTTP/JSON AOT-readiness — ✅ CLOSED (2026-05-20)
+The G3 gaps were closed: `<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>` set on the Api host (the correct AOT contract — makes JIT dev/test surface gaps too, no silent reflection fallback), **74 endpoint request/response DTOs registered** in `ApiJsonContext`, OpenAPI confirmed already gated behind `openApiEnabled` (dev/config-only; runtime doc-gen is reflection-based and intentionally unavailable in the production AOT image). Api.Tests **943/943** (the 3 prior DispositionEndpointTests failures were missing `Disposition`/`CreateDispositionRequest` registrations — now green; the suite is strictly better than the pre-Phase-D 940/943 baseline). Commits `e115c85f` + `42b4541d`.
 
-### Remaining (separate workstreams)
-- **HTTP/JSON AOT-readiness** (new) — register all endpoint DTOs in `ApiJsonContext`; resolve OpenAPI-under-AOT. Prerequisite for a functional AOT image.
-- **Phase 5 image cutover** — requires publishing the Dapper-free Pro `2.5.0-pro` packages to GitHub Packages (the Docker build restores Pro from `github`, not the local feed) + digest regen + ghcr.io push.
+### G3 — FINAL native-binary runtime smoke ✅ PASSED (2026-05-20)
+Rebuilt the AOT binary with the JSON registrations (0 diagnostics, native ELF, 67 MB, 0 managed Verbara DLLs) and ran it against a real `postgres:18-alpine`:
+
+| Probe | Result | Proves |
+|---|---|---|
+| boot | `Now listening` + `Application started` (Production) | full DI + config + migrations + DataProtection key creation under AOT |
+| `GET /health` | **200** (was 500) | HTTP pipeline serves under AOT |
+| `POST /api/v1/auth/login` (bad creds) | **400** (was 500) | `LoginRequest` deserializes + DB user/tenant lookup → proper auth failure: full request→Npgsql→response cycle under AOT |
+| `GET /api/v1/branding` | **404** (was 500) | branding DTO + DB query serialize correctly under AOT |
+| `NotSupportedException` / JSON-metadata errors | **0** | no remaining source-gen gaps on the served surface |
+
+### Conclusion
+**ADR-0022 Phase D is COMPLETE and the AOT image is functionally proven.** Dapper is gone cross-repo; `Verbara.Platform.Api` compiles to a clean native ELF (0 diagnostics, 0 managed Verbara DLLs) AND the native binary boots + serves real HTTP requests (200/400/404, zero JSON 500s) with the migrated raw-Npgsql data layer executing correctly against Postgres under AOT. The Pro commercial IP no longer ships as decompilable IL.
+
+### Remaining (release activities, separate)
+- **Phase 5 image cutover** — publish the Dapper-free Pro `2.5.0-pro` packages to GitHub Packages (the Docker build restores Pro from `github`, not the local feed), build/push the AOT image to ghcr.io, regenerate `authorized-digests.json`.
 - **Phase 6 24h AOT soak** (mandatory gate before production-readiness sign-off).
+- **Branch integration** — SDK `feat/dapper-removal`, Pro `feat/dapper-removal`, Platform `feat/phase-d-dapper-removal`.
