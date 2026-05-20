@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -35,8 +36,8 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
                 p.Add(new NpgsqlParameter("Total",       invoice.Total));
                 p.Add(new NpgsqlParameter("Status",      (short)invoice.Status));
                 p.Add(new NpgsqlParameter("GeneratedAt", invoice.GeneratedAt));
-                p.Add(new NpgsqlParameter("IssuedAt",    (object?)invoice.IssuedAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("PaidAt",      (object?)invoice.PaidAt ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("IssuedAt", NpgsqlDbType.TimestampTz) { Value = (object?)invoice.IssuedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("PaidAt", NpgsqlDbType.TimestampTz) { Value = (object?)invoice.PaidAt ?? DBNull.Value });
             },
             ct);
     }

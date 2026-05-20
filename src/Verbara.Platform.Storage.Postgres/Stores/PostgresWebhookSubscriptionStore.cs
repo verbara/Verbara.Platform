@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core.Webhooks;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -82,8 +83,8 @@ internal sealed class PostgresWebhookSubscriptionStore : IWebhookSubscriptionSto
                 p.Add(new NpgsqlParameter("UpdatedAt", subscription.UpdatedAt.UtcDateTime));
                 p.Add(new NpgsqlParameter("CircuitStatus", circuitStatus));
                 p.Add(new NpgsqlParameter("CircuitFailures", subscription.CircuitFailures));
-                p.Add(new NpgsqlParameter("CircuitOpenedAt", (object?)subscription.CircuitOpenedAt?.UtcDateTime ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("CircuitNextProbeAt", (object?)subscription.CircuitNextProbeAt?.UtcDateTime ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("CircuitOpenedAt", NpgsqlDbType.TimestampTz) { Value = (object?)subscription.CircuitOpenedAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CircuitNextProbeAt", NpgsqlDbType.TimestampTz) { Value = (object?)subscription.CircuitNextProbeAt?.UtcDateTime ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CircuitProbeAttempts", subscription.CircuitProbeAttempts));
             },
             ct);

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Sdk.Data.Npgsql;
@@ -107,15 +108,15 @@ internal sealed class PostgresConversationStore : IConversationStore
                 p.Add(new NpgsqlParameter("ContactId", conversation.ContactId.Value));
                 p.Add(new NpgsqlParameter("Channel", (int)conversation.Channel));
                 p.Add(new NpgsqlParameter("State", (int)conversation.State));
-                p.Add(new NpgsqlParameter("OwnerKind", (object?)(conversation.Owner != null ? (int?)conversation.Owner.Kind : null) ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("OwnerId", (object?)conversation.Owner?.OwnerId?.Value ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("CaseId", (object?)conversation.CaseId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = (object?)(conversation.Owner != null ? (int?)conversation.Owner.Kind : null) ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("OwnerId", NpgsqlDbType.Text) { Value = (object?)conversation.Owner?.OwnerId?.Value ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CaseId", NpgsqlDbType.Text) { Value = (object?)conversation.CaseId?.Value ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Metadata", metadataJson));
                 p.Add(new NpgsqlParameter("CreatedAt", conversation.CreatedAt));
-                p.Add(new NpgsqlParameter("ClosedAt", (object?)conversation.ClosedAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)conversation.UpdatedAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("CreatedBy", (object?)conversation.CreatedBy ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UpdatedBy", (object?)conversation.UpdatedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ClosedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.ClosedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.UpdatedBy ?? DBNull.Value });
             },
             ct);
     }

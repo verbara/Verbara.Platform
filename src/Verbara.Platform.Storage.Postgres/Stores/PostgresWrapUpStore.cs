@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
@@ -26,7 +27,7 @@ internal sealed class PostgresWrapUpStore : IWrapUpStore
                 p.Add(new NpgsqlParameter("ConversationId", record.ConversationId.Value));
                 p.Add(new NpgsqlParameter("AgentId", record.AgentId.Value));
                 p.Add(new NpgsqlParameter("DispositionId", record.DispositionId.Value));
-                p.Add(new NpgsqlParameter("Notes", (object?)record.Notes ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Notes", NpgsqlDbType.Text) { Value = (object?)record.Notes ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("DurationSeconds", (long)record.Duration.TotalSeconds));
                 p.Add(new NpgsqlParameter("CompletedAt", record.CompletedAt.UtcDateTime));
             },

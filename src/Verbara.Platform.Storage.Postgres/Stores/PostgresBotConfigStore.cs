@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -61,8 +62,8 @@ internal sealed class PostgresBotConfigStore : IBotConfigStore
                 p.Add(new NpgsqlParameter("BotId", config.BotId.Value));
                 p.Add(new NpgsqlParameter("TenantId", config.TenantId.Value));
                 p.Add(new NpgsqlParameter("Name", config.Name));
-                p.Add(new NpgsqlParameter("DefaultFlowId", (object?)config.DefaultFlowId?.Value ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("FallbackQueueId", (object?)config.FallbackQueueId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("DefaultFlowId", NpgsqlDbType.Text) { Value = (object?)config.DefaultFlowId?.Value ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("FallbackQueueId", NpgsqlDbType.Text) { Value = (object?)config.FallbackQueueId?.Value ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("ConfidenceThreshold", config.ConfidenceThreshold));
                 p.Add(new NpgsqlParameter("MaxTurnsBeforeHandoff", config.MaxTurnsBeforeHandoff));
                 p.Add(new NpgsqlParameter("IsActive", config.IsActive));

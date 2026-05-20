@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
@@ -64,9 +65,9 @@ internal sealed class PostgresServiceAccountStore : IServiceAccountStore
                 p.Add(new NpgsqlParameter("Scopes", scopesJson));
                 p.Add(new NpgsqlParameter("IsActive", account.IsActive));
                 p.Add(new NpgsqlParameter("CreatedAt", account.CreatedAt));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)account.UpdatedAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("CreatedBy", (object?)account.CreatedBy ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UpdatedBy", (object?)account.UpdatedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)account.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)account.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)account.UpdatedBy ?? DBNull.Value });
             },
             ct);
     }

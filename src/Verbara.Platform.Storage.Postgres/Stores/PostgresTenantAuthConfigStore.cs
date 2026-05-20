@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Identity;
 using Microsoft.AspNetCore.DataProtection;
 using Verbara.Sdk.Data.Npgsql;
@@ -121,16 +122,16 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
                 p.Add(new NpgsqlParameter("SessionIdleTimeoutMinutes", config.SessionIdleTimeoutMinutes));
                 p.Add(new NpgsqlParameter("SessionAbsoluteTimeoutHours", config.SessionAbsoluteTimeoutHours));
                 p.Add(new NpgsqlParameter("OidcEnabled", config.OidcEnabled));
-                p.Add(new NpgsqlParameter("OidcAuthority", (object?)config.OidcAuthority ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("OidcClientId", (object?)config.OidcClientId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("OidcAuthority", NpgsqlDbType.Text) { Value = (object?)config.OidcAuthority ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("OidcClientId", NpgsqlDbType.Text) { Value = (object?)config.OidcClientId ?? DBNull.Value });
                 // ADMIN-001 (PREPUB-2026-05-09): wrap on write — never write plaintext.
-                p.Add(new NpgsqlParameter("OidcClientSecret", (object?)ProtectSecret(config.OidcClientSecret) ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("OidcClientSecret", NpgsqlDbType.Text) { Value = (object?)ProtectSecret(config.OidcClientSecret) ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("OidcAutoCreateUsers", config.OidcAutoCreateUsers));
                 p.Add(new NpgsqlParameter("OidcDefaultRole", config.OidcDefaultRole));
                 p.Add(new NpgsqlParameter("ImpersonationMaxConcurrentSessions", config.ImpersonationMaxConcurrentSessions));
                 p.Add(new NpgsqlParameter("ImpersonationAutoTimeoutMinutes", config.ImpersonationAutoTimeoutMinutes));
                 p.Add(new NpgsqlParameter("IpAllowlistEnabled", config.IpAllowlistEnabled));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)config.UpdatedAt ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)config.UpdatedAt ?? DBNull.Value });
             },
             ct);
     }

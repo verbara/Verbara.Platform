@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -105,21 +106,21 @@ internal sealed class PostgresContactStore : IContactStore
             {
                 p.Add(new NpgsqlParameter("ContactId", contact.ContactId.Value));
                 p.Add(new NpgsqlParameter("TenantId", contact.TenantId.Value));
-                p.Add(new NpgsqlParameter("FirstName", (object?)contact.FirstName ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("LastName", (object?)contact.LastName ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("Company", (object?)contact.Company ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("Segment", (object?)contact.Segment ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("FirstName", NpgsqlDbType.Text) { Value = (object?)contact.FirstName ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("LastName", NpgsqlDbType.Text) { Value = (object?)contact.LastName ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Company", NpgsqlDbType.Text) { Value = (object?)contact.Company ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Segment", NpgsqlDbType.Text) { Value = (object?)contact.Segment ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("PreferredChannel", contact.PreferredChannel.HasValue ? (object)(int)contact.PreferredChannel.Value : DBNull.Value));
-                p.Add(new NpgsqlParameter("PreferredLanguage", (object?)contact.PreferredLanguage ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("Timezone", (object?)contact.Timezone ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("PreferredLanguage", NpgsqlDbType.Text) { Value = (object?)contact.PreferredLanguage ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Timezone", NpgsqlDbType.Text) { Value = (object?)contact.Timezone ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("DoNotContact", contact.DoNotContact));
                 p.Add(new NpgsqlParameter("Addresses", addressesJson));
                 p.Add(new NpgsqlParameter("CustomFields", customFieldsJson));
                 p.Add(new NpgsqlParameter("ChannelConsent", consentJson));
                 p.Add(new NpgsqlParameter("CreatedAt", contact.CreatedAt));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)contact.UpdatedAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("CreatedBy", (object?)contact.CreatedBy ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UpdatedBy", (object?)contact.UpdatedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)contact.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)contact.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)contact.UpdatedBy ?? DBNull.Value });
             },
             ct);
     }

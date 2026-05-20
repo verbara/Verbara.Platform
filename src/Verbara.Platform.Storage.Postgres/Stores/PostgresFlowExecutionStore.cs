@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Flows;
 using Verbara.Sdk.Data.Npgsql;
@@ -35,7 +36,7 @@ internal sealed class PostgresFlowExecutionStore : IFlowExecutionStore
                 p.Add(new NpgsqlParameter("Status",         (int)execution.Status));
                 p.Add(new NpgsqlParameter("Variables",      variablesJson));
                 p.Add(new NpgsqlParameter("StartedAt",      execution.StartedAt));
-                p.Add(new NpgsqlParameter("CompletedAt",    (object?)execution.CompletedAt ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("CompletedAt", NpgsqlDbType.TimestampTz) { Value = (object?)execution.CompletedAt ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("StepCount",      execution.StepCount));
             },
             ct);

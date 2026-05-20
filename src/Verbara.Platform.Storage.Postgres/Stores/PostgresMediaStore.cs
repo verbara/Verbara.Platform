@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Media;
 using Verbara.Sdk.Data.Npgsql;
@@ -38,9 +39,9 @@ internal sealed class PostgresMediaStore : IMediaStore
                 p.Add(new NpgsqlParameter("ContentType",    file.ContentType));
                 p.Add(new NpgsqlParameter("SizeBytes",      file.SizeBytes));
                 p.Add(new NpgsqlParameter("StoragePath",    file.StoragePath));
-                p.Add(new NpgsqlParameter("ConversationId", (object?)file.ConversationId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ConversationId", NpgsqlDbType.Text) { Value = (object?)file.ConversationId?.Value ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("UploadedAt",     file.UploadedAt));
-                p.Add(new NpgsqlParameter("UploadedBy",     (object?)file.UploadedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UploadedBy", NpgsqlDbType.Text) { Value = (object?)file.UploadedBy ?? DBNull.Value });
             },
             ct);
     }

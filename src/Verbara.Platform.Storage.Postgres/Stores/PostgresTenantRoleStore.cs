@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
@@ -61,11 +62,11 @@ internal sealed class PostgresTenantRoleStore : ITenantRoleStore
                 p.Add(new NpgsqlParameter("RoleId", role.RoleId));
                 p.Add(new NpgsqlParameter("TenantId", role.TenantId.Value));
                 p.Add(new NpgsqlParameter("Name", role.Name));
-                p.Add(new NpgsqlParameter("Description", (object?)role.Description ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("SourceTemplateId", (object?)role.SourceTemplateId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Description", NpgsqlDbType.Text) { Value = (object?)role.Description ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("SourceTemplateId", NpgsqlDbType.Text) { Value = (object?)role.SourceTemplateId ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("IsDefault", role.IsDefault));
                 p.Add(new NpgsqlParameter("CreatedAt", role.CreatedAt));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)role.UpdatedAt ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)role.UpdatedAt ?? DBNull.Value });
             },
             ct);
     }
@@ -144,7 +145,7 @@ internal sealed class PostgresTenantRoleStore : ITenantRoleStore
                 p.Add(new NpgsqlParameter("RoleId", roleId));
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("Name", name));
-                p.Add(new NpgsqlParameter("Description", (object?)description ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Description", NpgsqlDbType.Text) { Value = (object?)description ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("TemplateId", templateId));
             },
             tx, ct);

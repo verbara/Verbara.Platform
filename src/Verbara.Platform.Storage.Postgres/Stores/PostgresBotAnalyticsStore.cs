@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -23,7 +24,7 @@ internal sealed class PostgresBotAnalyticsStore : IBotAnalyticsStore
                 p.Add(new NpgsqlParameter("BotId", record.BotId));
                 p.Add(new NpgsqlParameter("ConversationId", record.ConversationId));
                 p.Add(new NpgsqlParameter("TurnCount", record.TurnCount));
-                p.Add(new NpgsqlParameter("HandoffReason", (object?)record.HandoffReason ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("HandoffReason", NpgsqlDbType.Text) { Value = (object?)record.HandoffReason ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedAt", record.CreatedAt));
             },
             ct);

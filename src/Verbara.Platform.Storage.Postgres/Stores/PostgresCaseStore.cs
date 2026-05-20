@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Sdk.Data.Npgsql;
@@ -68,13 +69,13 @@ internal sealed class PostgresCaseStore : ICaseStore
                 p.Add(new NpgsqlParameter("Priority", (int)caseEntity.Priority));
                 p.Add(new NpgsqlParameter("Status", (int)caseEntity.Status));
                 p.Add(new NpgsqlParameter("ContactId", caseEntity.ContactId.Value));
-                p.Add(new NpgsqlParameter("AssignedAgentId", (object?)caseEntity.AssignedAgentId?.Value ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("SlaPolicyId", (object?)caseEntity.SlaPolicyId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("AssignedAgentId", NpgsqlDbType.Text) { Value = (object?)caseEntity.AssignedAgentId?.Value ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("SlaPolicyId", NpgsqlDbType.Text) { Value = (object?)caseEntity.SlaPolicyId?.Value ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("ConversationIds", conversationIdsJson));
                 p.Add(new NpgsqlParameter("CreatedAt", caseEntity.CreatedAt));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)caseEntity.UpdatedAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("CreatedBy", (object?)caseEntity.CreatedBy ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UpdatedBy", (object?)caseEntity.UpdatedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)caseEntity.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)caseEntity.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)caseEntity.UpdatedBy ?? DBNull.Value });
             },
             ct);
     }

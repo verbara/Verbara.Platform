@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Billing;
 using Verbara.Sdk.Data.Npgsql;
 using Verbara.Sdk.Pro.MultiTenant;
@@ -65,8 +66,8 @@ internal sealed class PostgresDunningStore : IDunningStore
                 p.Add(new NpgsqlParameter("InvoiceId",    record.InvoiceId));
                 p.Add(new NpgsqlParameter("CurrentStage", record.CurrentStage.ToString()));
                 p.Add(new NpgsqlParameter("StartedAt",    record.StartedAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("EscalatedAt",  (object?)record.EscalatedAt?.UtcDateTime ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("ResolvedAt",   (object?)record.ResolvedAt?.UtcDateTime ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("EscalatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)record.EscalatedAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ResolvedAt", NpgsqlDbType.TimestampTz) { Value = (object?)record.ResolvedAt?.UtcDateTime ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("IsPaused",     record.IsPaused));
                 p.Add(new NpgsqlParameter("IsActive",     record.IsActive));
             },

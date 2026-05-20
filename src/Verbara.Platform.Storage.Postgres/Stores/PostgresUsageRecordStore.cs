@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -28,8 +29,8 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
                 p.Add(new NpgsqlParameter("UsageType", (short)record.UsageType));
                 p.Add(new NpgsqlParameter("Quantity", record.Quantity));
                 p.Add(new NpgsqlParameter("Unit", (short)record.Unit));
-                p.Add(new NpgsqlParameter("Channel", (object?)record.Channel ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("ReferenceId", (object?)record.ReferenceId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Channel", NpgsqlDbType.Text) { Value = (object?)record.Channel ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ReferenceId", NpgsqlDbType.Text) { Value = (object?)record.ReferenceId ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("RecordedAt", record.RecordedAt));
                 p.Add(new NpgsqlParameter("Metadata", (object?)metadataJson ?? DBNull.Value));
             },
@@ -59,8 +60,8 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
                     p.Add(new NpgsqlParameter("UsageType", (short)record.UsageType));
                     p.Add(new NpgsqlParameter("Quantity", record.Quantity));
                     p.Add(new NpgsqlParameter("Unit", (short)record.Unit));
-                    p.Add(new NpgsqlParameter("Channel", (object?)record.Channel ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("ReferenceId", (object?)record.ReferenceId ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("Channel", NpgsqlDbType.Text) { Value = (object?)record.Channel ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("ReferenceId", NpgsqlDbType.Text) { Value = (object?)record.ReferenceId ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("RecordedAt", record.RecordedAt));
                     p.Add(new NpgsqlParameter("Metadata", (object?)metadataJson ?? DBNull.Value));
                 },

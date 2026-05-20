@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Automation;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -32,7 +33,7 @@ internal sealed class PostgresAutomationLogStore : IAutomationExecutionLogStore
                 p.Add(new NpgsqlParameter("Trigger", (int)log.Trigger));
                 p.Add(new NpgsqlParameter("ConditionsMatched", log.ConditionsMatched));
                 p.Add(new NpgsqlParameter("ActionsExecuted", actionsJson));
-                p.Add(new NpgsqlParameter("Error", (object?)log.Error ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Error", NpgsqlDbType.Text) { Value = (object?)log.Error ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("ExecutedAt", log.ExecutedAt));
             },
             ct);

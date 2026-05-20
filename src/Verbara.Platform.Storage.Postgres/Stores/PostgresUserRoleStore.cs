@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
@@ -39,7 +40,7 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("UserId", userId.Value));
                 p.Add(new NpgsqlParameter("RoleId", roleId));
-                p.Add(new NpgsqlParameter("AssignedBy", (object?)assignedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("AssignedBy", NpgsqlDbType.Text) { Value = (object?)assignedBy ?? DBNull.Value });
             },
             ct);
     }
@@ -82,7 +83,7 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
                     p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                     p.Add(new NpgsqlParameter("UserId", userId.Value));
                     p.Add(new NpgsqlParameter("RoleId", roleId));
-                    p.Add(new NpgsqlParameter("AssignedBy", (object?)assignedBy ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("AssignedBy", NpgsqlDbType.Text) { Value = (object?)assignedBy ?? DBNull.Value });
                 },
                 tx, ct);
         }

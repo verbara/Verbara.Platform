@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Serialization;
 using Verbara.Platform.Conversations.Stores;
@@ -33,16 +34,16 @@ internal sealed class PostgresMessageStore : IMessageStore
                 p.Add(new NpgsqlParameter("TenantId",          message.TenantId.Value));
                 p.Add(new NpgsqlParameter("Direction",         (int)message.Direction));
                 p.Add(new NpgsqlParameter("Channel",           (int)message.Channel));
-                p.Add(new NpgsqlParameter("SenderId",          (object?)message.SenderId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("SenderId", NpgsqlDbType.Text) { Value = (object?)message.SenderId ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Content",           contentJson));
                 p.Add(new NpgsqlParameter("DeliveryStatus",    (int)message.DeliveryStatus));
-                p.Add(new NpgsqlParameter("ExternalMessageId", (object?)message.ExternalMessageId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ExternalMessageId", NpgsqlDbType.Text) { Value = (object?)message.ExternalMessageId ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedAt",         message.CreatedAt));
-                p.Add(new NpgsqlParameter("DeliveredAt",       (object?)message.DeliveredAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("ReadAt",            (object?)message.ReadAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UpdatedAt",         (object?)message.UpdatedAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("CreatedBy",         (object?)message.CreatedBy ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UpdatedBy",         (object?)message.UpdatedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("DeliveredAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.DeliveredAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ReadAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.ReadAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)message.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)message.UpdatedBy ?? DBNull.Value });
             },
             ct);
     }
@@ -92,7 +93,7 @@ internal sealed class PostgresMessageStore : IMessageStore
                 p.Add(new NpgsqlParameter("Status",       (int)status));
                 p.Add(new NpgsqlParameter("DeliveredInt", (int)MessageDeliveryStatus.Delivered));
                 p.Add(new NpgsqlParameter("ReadInt",      (int)MessageDeliveryStatus.Read));
-                p.Add(new NpgsqlParameter("Timestamp",    (object?)timestamp ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Timestamp", NpgsqlDbType.TimestampTz) { Value = (object?)timestamp ?? DBNull.Value });
             },
             ct);
     }

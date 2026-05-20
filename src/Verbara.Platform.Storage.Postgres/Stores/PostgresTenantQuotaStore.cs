@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -43,10 +44,10 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
                 p.Add(new NpgsqlParameter("TenantId", quota.TenantId.Value));
                 p.Add(new NpgsqlParameter("MaxConcurrentChannels", quota.MaxConcurrentChannels));
                 p.Add(new NpgsqlParameter("MaxActiveCampaigns", quota.MaxActiveCampaigns));
-                p.Add(new NpgsqlParameter("MaxMonthlyVoiceMinutes", (object?)quota.MaxMonthlyVoiceMinutes ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("MaxMonthlyMessages", (object?)quota.MaxMonthlyMessages ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("MaxStorageBytes", (object?)quota.MaxStorageBytes ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("MaxActiveAgents", (object?)quota.MaxActiveAgents ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("MaxMonthlyVoiceMinutes", NpgsqlDbType.Bigint) { Value = (object?)quota.MaxMonthlyVoiceMinutes ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("MaxMonthlyMessages", NpgsqlDbType.Bigint) { Value = (object?)quota.MaxMonthlyMessages ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("MaxStorageBytes", NpgsqlDbType.Bigint) { Value = (object?)quota.MaxStorageBytes ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("MaxActiveAgents", NpgsqlDbType.Integer) { Value = (object?)quota.MaxActiveAgents ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("QuotaAction", (short)quota.QuotaAction));
             },
             ct);

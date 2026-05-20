@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -28,10 +29,10 @@ internal sealed class PostgresRefreshTokenStore : IRefreshTokenStore
                 p.Add(new NpgsqlParameter("ExpiresAt", token.ExpiresAt.UtcDateTime));
                 p.Add(new NpgsqlParameter("CreatedAt", token.CreatedAt.UtcDateTime));
                 p.Add(new NpgsqlParameter("LastActivityAt", token.LastActivityAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("RevokedAt", (object?)token.RevokedAt?.UtcDateTime ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("ReplacedBy", (object?)token.ReplacedBy ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("IpAddress", (object?)token.IpAddress ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UserAgent", (object?)token.UserAgent ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("RevokedAt", NpgsqlDbType.TimestampTz) { Value = (object?)token.RevokedAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ReplacedBy", NpgsqlDbType.Text) { Value = (object?)token.ReplacedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("IpAddress", NpgsqlDbType.Text) { Value = (object?)token.IpAddress ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UserAgent", NpgsqlDbType.Text) { Value = (object?)token.UserAgent ?? DBNull.Value });
             },
             ct);
     }
@@ -73,7 +74,7 @@ internal sealed class PostgresRefreshTokenStore : IRefreshTokenStore
             {
                 p.Add(new NpgsqlParameter("TokenId", tokenId));
                 p.Add(new NpgsqlParameter("RevokedAt", revokedAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("ReplacedBy", (object?)replacedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ReplacedBy", NpgsqlDbType.Text) { Value = (object?)replacedBy ?? DBNull.Value });
             },
             ct);
     }

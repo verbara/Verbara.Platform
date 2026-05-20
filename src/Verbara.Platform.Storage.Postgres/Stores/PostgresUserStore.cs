@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
@@ -164,22 +165,22 @@ internal sealed class PostgresUserStore : IUserStore
                     p.Add(new NpgsqlParameter("Role", (int)user.Role));
                     p.Add(new NpgsqlParameter("Status", (int)user.Status));
                     p.Add(new NpgsqlParameter("CreatedAt", user.CreatedAt));
-                    p.Add(new NpgsqlParameter("UpdatedAt", (object?)user.UpdatedAt ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("CreatedBy", (object?)user.CreatedBy ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("UpdatedBy", (object?)user.UpdatedBy ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("PasswordHash", (object?)user.PasswordHash ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)user.UpdatedAt ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)user.CreatedBy ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)user.UpdatedBy ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("PasswordHash", NpgsqlDbType.Text) { Value = (object?)user.PasswordHash ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("MfaEnabled", user.MfaEnabled));
-                    p.Add(new NpgsqlParameter("MfaSecret", (object?)user.MfaSecret ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("MfaRecoveryCodes", (object?)user.MfaRecoveryCodes?.ToArray() ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("MfaConfirmedAt", (object?)user.MfaConfirmedAt ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("MfaSecret", NpgsqlDbType.Text) { Value = (object?)user.MfaSecret ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("MfaRecoveryCodes", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = (object?)user.MfaRecoveryCodes?.ToArray() ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("MfaConfirmedAt", NpgsqlDbType.TimestampTz) { Value = (object?)user.MfaConfirmedAt ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("EmailVerified", user.EmailVerified));
                     p.Add(new NpgsqlParameter("FailedLoginAttempts", user.FailedLoginAttempts));
-                    p.Add(new NpgsqlParameter("LockedUntil", (object?)user.LockedUntil ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("PasswordChangedAt", (object?)user.PasswordChangedAt ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("LastLoginAt", (object?)user.LastLoginAt ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("LockedUntil", NpgsqlDbType.TimestampTz) { Value = (object?)user.LockedUntil ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("PasswordChangedAt", NpgsqlDbType.TimestampTz) { Value = (object?)user.PasswordChangedAt ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("LastLoginAt", NpgsqlDbType.TimestampTz) { Value = (object?)user.LastLoginAt ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("AuthProvider", user.AuthProvider));
-                    p.Add(new NpgsqlParameter("ExternalId", (object?)user.ExternalId ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("OidcSubject", (object?)user.OidcSubject ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("ExternalId", NpgsqlDbType.Text) { Value = (object?)user.ExternalId ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("OidcSubject", NpgsqlDbType.Text) { Value = (object?)user.OidcSubject ?? DBNull.Value });
                 },
                 ct);
         }

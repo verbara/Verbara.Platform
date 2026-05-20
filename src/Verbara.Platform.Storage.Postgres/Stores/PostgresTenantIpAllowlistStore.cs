@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -37,8 +38,8 @@ internal sealed class PostgresTenantIpAllowlistStore : ITenantIpAllowlistStore
                 {
                     p.Add(new NpgsqlParameter("TenantId", tenantId));
                     p.Add(new NpgsqlParameter("Cidr", cidr));
-                    p.Add(new NpgsqlParameter("Description", (object?)description ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("CreatedByUserId", (object?)createdByUserId ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("Description", NpgsqlDbType.Text) { Value = (object?)description ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("CreatedByUserId", NpgsqlDbType.Text) { Value = (object?)createdByUserId ?? DBNull.Value });
                 },
                 IpAllowlistRow.Map, ct);
             return row.ToEntry();

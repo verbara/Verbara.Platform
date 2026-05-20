@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -34,18 +35,18 @@ internal sealed class PostgresAuditStore : IAuditStore
                 p.Add(new NpgsqlParameter("EntryId", entry.EntryId.Value));
                 p.Add(new NpgsqlParameter("TenantId", entry.TenantId.Value));
                 p.Add(new NpgsqlParameter("Action", entry.Action));
-                p.Add(new NpgsqlParameter("EntityType", (object?)entry.TargetType ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("EntityId", (object?)entry.TargetId ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("PerformedBy", (object?)entry.ActorId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("EntityType", NpgsqlDbType.Text) { Value = (object?)entry.TargetType ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("EntityId", NpgsqlDbType.Text) { Value = (object?)entry.TargetId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("PerformedBy", NpgsqlDbType.Text) { Value = (object?)entry.ActorId ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Details", (object?)metadataJson ?? DBNull.Value));
                 p.Add(new NpgsqlParameter("OccurredAt", entry.OccurredAt));
-                p.Add(new NpgsqlParameter("ImpersonatorId", (object?)entry.ImpersonatorId ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("Category", (object?)entry.Category ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("Severity", (object?)entry.Severity ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("ActorType", (object?)entry.ActorType ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ImpersonatorId", NpgsqlDbType.Text) { Value = (object?)entry.ImpersonatorId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Category", NpgsqlDbType.Text) { Value = (object?)entry.Category ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Severity", NpgsqlDbType.Text) { Value = (object?)entry.Severity ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ActorType", NpgsqlDbType.Text) { Value = (object?)entry.ActorType ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("BeforeJson", (object?)beforeJson ?? DBNull.Value));
                 p.Add(new NpgsqlParameter("AfterJson", (object?)afterJson ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("IntegrityHash", (object?)entry.IntegrityHash ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("IntegrityHash", NpgsqlDbType.Text) { Value = (object?)entry.IntegrityHash ?? DBNull.Value });
             },
             ct);
     }
@@ -147,7 +148,7 @@ internal sealed class PostgresAuditStore : IAuditStore
                     if (cursorOccurredAt is not null)
                     {
                         p.Add(new NpgsqlParameter("CursorOccurredAt", cursorOccurredAt.Value));
-                        p.Add(new NpgsqlParameter("CursorEntryId", (object?)cursorEntryId ?? DBNull.Value));
+                        p.Add(new NpgsqlParameter("CursorEntryId", NpgsqlDbType.Text) { Value = (object?)cursorEntryId ?? DBNull.Value });
                     }
                 },
                 AuditRow.Map, ct);

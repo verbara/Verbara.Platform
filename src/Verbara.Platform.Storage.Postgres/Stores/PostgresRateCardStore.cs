@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -32,7 +33,7 @@ public sealed class PostgresRateCardStore : IRateCardStore
                 p.Add(new NpgsqlParameter("Name", rateCard.Name));
                 p.Add(new NpgsqlParameter("Currency", rateCard.Currency));
                 p.Add(new NpgsqlParameter("EffectiveFrom", rateCard.EffectiveFrom));
-                p.Add(new NpgsqlParameter("EffectiveTo", (object?)rateCard.EffectiveTo ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("EffectiveTo", NpgsqlDbType.TimestampTz) { Value = (object?)rateCard.EffectiveTo ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Rates", ratesJson));
                 p.Add(new NpgsqlParameter("IsDefault", rateCard.IsDefault));
             },

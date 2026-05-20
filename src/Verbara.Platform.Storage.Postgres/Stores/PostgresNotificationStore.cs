@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core.Notifications;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -92,16 +93,16 @@ internal sealed class PostgresNotificationStore : INotificationStore
             {
                 p.Add(new NpgsqlParameter("NotificationId", notification.NotificationId));
                 p.Add(new NpgsqlParameter("TenantId",       notification.TenantId));
-                p.Add(new NpgsqlParameter("UserId",         (object?)notification.UserId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UserId", NpgsqlDbType.Text) { Value = (object?)notification.UserId ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Category",       (int)notification.Category));
                 p.Add(new NpgsqlParameter("Severity",       (int)notification.Severity));
                 p.Add(new NpgsqlParameter("Type",           notification.Type));
                 p.Add(new NpgsqlParameter("Title",          notification.Title));
                 p.Add(new NpgsqlParameter("Body",           notification.Body));
-                p.Add(new NpgsqlParameter("ActionUrl",      (object?)notification.ActionUrl ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ActionUrl", NpgsqlDbType.Text) { Value = (object?)notification.ActionUrl ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("IsRead",         notification.IsRead));
                 p.Add(new NpgsqlParameter("CreatedAt",      notification.CreatedAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("ReadAt",         (object?)notification.ReadAt?.UtcDateTime ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ReadAt", NpgsqlDbType.TimestampTz) { Value = (object?)notification.ReadAt?.UtcDateTime ?? DBNull.Value });
             },
             ct);
     }

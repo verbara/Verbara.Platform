@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Webhooks;
 using Verbara.Sdk.Data.Npgsql;
@@ -30,11 +31,11 @@ internal sealed class PostgresWebhookDeliveryStore : IWebhookDeliveryStore
                 p.Add(new NpgsqlParameter("Status", delivery.Status.ToString()));
                 p.Add(new NpgsqlParameter("Attempts", delivery.Attempts));
                 p.Add(new NpgsqlParameter("MaxAttempts", delivery.MaxAttempts));
-                p.Add(new NpgsqlParameter("NextRetryAt", (object?)delivery.NextRetryAt?.UtcDateTime ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("LastResponseCode", (object?)delivery.LastResponseCode ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("LastError", (object?)delivery.LastError ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("NextRetryAt", NpgsqlDbType.TimestampTz) { Value = (object?)delivery.NextRetryAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("LastResponseCode", NpgsqlDbType.Integer) { Value = (object?)delivery.LastResponseCode ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("LastError", NpgsqlDbType.Text) { Value = (object?)delivery.LastError ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedAt", delivery.CreatedAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("DeliveredAt", (object?)delivery.DeliveredAt?.UtcDateTime ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("DeliveredAt", NpgsqlDbType.TimestampTz) { Value = (object?)delivery.DeliveredAt?.UtcDateTime ?? DBNull.Value });
             },
             ct);
     }
@@ -132,10 +133,10 @@ internal sealed class PostgresWebhookDeliveryStore : IWebhookDeliveryStore
             {
                 p.Add(new NpgsqlParameter("Status", delivery.Status.ToString()));
                 p.Add(new NpgsqlParameter("Attempts", delivery.Attempts));
-                p.Add(new NpgsqlParameter("NextRetryAt", (object?)delivery.NextRetryAt?.UtcDateTime ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("LastResponseCode", (object?)delivery.LastResponseCode ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("LastError", (object?)delivery.LastError ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("DeliveredAt", (object?)delivery.DeliveredAt?.UtcDateTime ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("NextRetryAt", NpgsqlDbType.TimestampTz) { Value = (object?)delivery.NextRetryAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("LastResponseCode", NpgsqlDbType.Integer) { Value = (object?)delivery.LastResponseCode ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("LastError", NpgsqlDbType.Text) { Value = (object?)delivery.LastError ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("DeliveredAt", NpgsqlDbType.TimestampTz) { Value = (object?)delivery.DeliveredAt?.UtcDateTime ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("DeliveryId", delivery.DeliveryId));
             },
             ct);

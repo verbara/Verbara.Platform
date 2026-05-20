@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
@@ -62,15 +63,15 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
                 p.Add(new NpgsqlParameter("KeyHash", apiKey.HashedKey));
                 p.Add(new NpgsqlParameter("Name", apiKey.Name));
                 p.Add(new NpgsqlParameter("Scopes", scopesCsv));
-                p.Add(new NpgsqlParameter("RateLimitPerMinute", (object?)apiKey.RateLimitPerMinute ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("RateLimitPerMinute", NpgsqlDbType.Integer) { Value = (object?)apiKey.RateLimitPerMinute ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("IsRevoked", apiKey.IsRevoked));
                 p.Add(new NpgsqlParameter("KeyType", (int)apiKey.KeyType));
                 p.Add(new NpgsqlParameter("CreatedAt", apiKey.CreatedAt));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)apiKey.UpdatedAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("ExpiresAt", (object?)apiKey.ExpiresAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("CreatedBy", (object?)apiKey.CreatedBy ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UpdatedBy", (object?)apiKey.UpdatedBy ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UserId", (object?)apiKey.UserId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)apiKey.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ExpiresAt", NpgsqlDbType.TimestampTz) { Value = (object?)apiKey.ExpiresAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)apiKey.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)apiKey.UpdatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UserId", NpgsqlDbType.Text) { Value = (object?)apiKey.UserId?.Value ?? DBNull.Value });
             },
             ct);
     }

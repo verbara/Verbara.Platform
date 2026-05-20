@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -35,10 +36,10 @@ internal sealed class PostgresTenantRetentionPolicyStore : ITenantRetentionPolic
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", policy.TenantId));
-                p.Add(new NpgsqlParameter("ConversationRetentionDays", (object?)policy.ConversationRetentionDays ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("AuthEventRetentionDays", (object?)policy.AuthEventRetentionDays ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("AuditRetentionDays", (object?)policy.AuditRetentionDays ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UsageRecordRetentionDays", (object?)policy.UsageRecordRetentionDays ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ConversationRetentionDays", NpgsqlDbType.Integer) { Value = (object?)policy.ConversationRetentionDays ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("AuthEventRetentionDays", NpgsqlDbType.Integer) { Value = (object?)policy.AuthEventRetentionDays ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("AuditRetentionDays", NpgsqlDbType.Integer) { Value = (object?)policy.AuditRetentionDays ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UsageRecordRetentionDays", NpgsqlDbType.Integer) { Value = (object?)policy.UsageRecordRetentionDays ?? DBNull.Value });
             },
             ct);
     }

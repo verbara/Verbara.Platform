@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Data.Npgsql;
@@ -48,11 +49,11 @@ internal sealed class PostgresTeamStore : ITeamStore
                 p.Add(new NpgsqlParameter("TeamId", team.TeamId.Value));
                 p.Add(new NpgsqlParameter("TenantId", team.TenantId.Value));
                 p.Add(new NpgsqlParameter("Name", team.Name));
-                p.Add(new NpgsqlParameter("SupervisorId", (object?)team.SupervisorId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("SupervisorId", NpgsqlDbType.Text) { Value = (object?)team.SupervisorId?.Value ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedAt", team.CreatedAt));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)team.UpdatedAt ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("CreatedBy", (object?)team.CreatedBy ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UpdatedBy", (object?)team.UpdatedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)team.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)team.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)team.UpdatedBy ?? DBNull.Value });
             },
             ct);
     }

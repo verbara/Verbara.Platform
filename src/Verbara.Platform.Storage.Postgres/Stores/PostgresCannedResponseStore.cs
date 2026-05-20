@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Data.Npgsql;
@@ -73,11 +74,11 @@ internal sealed class PostgresCannedResponseStore : ICannedResponseStore
                 p.Add(new NpgsqlParameter("Shortcut", response.Shortcut));
                 p.Add(new NpgsqlParameter("Title", response.Title));
                 p.Add(new NpgsqlParameter("Body", response.Body));
-                p.Add(new NpgsqlParameter("Category", (object?)response.Category ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("Tags", (object?)tagsJson ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Category", NpgsqlDbType.Text) { Value = (object?)response.Category ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Tags", NpgsqlDbType.Text) { Value = (object?)tagsJson ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedBy", response.CreatedBy));
                 p.Add(new NpgsqlParameter("CreatedAt", response.CreatedAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)response.UpdatedAt?.UtcDateTime ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)response.UpdatedAt?.UtcDateTime ?? DBNull.Value });
             },
             ct);
     }

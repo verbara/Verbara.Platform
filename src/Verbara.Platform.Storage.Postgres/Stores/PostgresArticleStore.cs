@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.KnowledgeBase;
 using Verbara.Sdk.Data.Npgsql;
@@ -50,10 +51,10 @@ internal sealed class PostgresArticleStore : IArticleStore
                 p.Add(new NpgsqlParameter("Title", article.Title));
                 p.Add(new NpgsqlParameter("Content", article.Content));
                 p.Add(new NpgsqlParameter("Tags", article.Tags.ToArray()));
-                p.Add(new NpgsqlParameter("Language", (object?)article.Language ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Language", NpgsqlDbType.Text) { Value = (object?)article.Language ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("IsPublished", article.IsPublished));
                 p.Add(new NpgsqlParameter("CreatedAt", article.CreatedAt));
-                p.Add(new NpgsqlParameter("UpdatedAt", (object?)article.UpdatedAt ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)article.UpdatedAt ?? DBNull.Value });
             },
             ct);
     }

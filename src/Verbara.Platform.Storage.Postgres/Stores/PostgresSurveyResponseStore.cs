@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Surveys;
 using Verbara.Sdk.Data.Npgsql;
@@ -29,7 +30,7 @@ internal sealed class PostgresSurveyResponseStore : ISurveyResponseStore
                 p.Add(new NpgsqlParameter("TenantId", response.TenantId.Value));
                 p.Add(new NpgsqlParameter("ConversationId", response.ConversationId.Value));
                 p.Add(new NpgsqlParameter("ContactId", response.ContactId.Value));
-                p.Add(new NpgsqlParameter("AgentId", (object?)response.AgentId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("AgentId", NpgsqlDbType.Text) { Value = (object?)response.AgentId?.Value ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Answers", answersJson));
                 p.Add(new NpgsqlParameter("SubmittedAt", response.SubmittedAt.UtcDateTime));
             },

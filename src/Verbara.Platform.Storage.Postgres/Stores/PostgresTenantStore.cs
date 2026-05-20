@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Sdk.Data.Npgsql;
 using Verbara.Sdk.Pro.MultiTenant;
 
@@ -80,7 +81,7 @@ internal sealed class PostgresTenantStore : ITenantStore
                 p.Add(new NpgsqlParameter("Name", tenant.Name));
                 p.Add(new NpgsqlParameter("Status", (object)(int)tenant.Status));
                 p.Add(new NpgsqlParameter("Type", (object)(int)tenant.Type));
-                p.Add(new NpgsqlParameter("ParentTenantId", (object?)tenant.ParentTenantId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ParentTenantId", NpgsqlDbType.Text) { Value = (object?)tenant.ParentTenantId ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Options", optionsJson));
                 p.Add(new NpgsqlParameter("Metadata", (object?)metadataJson ?? DBNull.Value));
                 p.Add(new NpgsqlParameter("CreatedAt", tenant.CreatedAt.UtcDateTime));

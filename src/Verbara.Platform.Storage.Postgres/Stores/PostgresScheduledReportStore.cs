@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core.Reports;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -63,15 +64,15 @@ internal sealed class PostgresScheduledReportStore : IScheduledReportStore
                 p.Add(new NpgsqlParameter("Name", report.Name));
                 p.Add(new NpgsqlParameter("ReportType", report.ReportType));
                 p.Add(new NpgsqlParameter("Schedule", report.Schedule));
-                p.Add(new NpgsqlParameter("Filters", (object?)report.Filters ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Filters", NpgsqlDbType.Text) { Value = (object?)report.Filters ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Recipients", report.Recipients));
                 p.Add(new NpgsqlParameter("Format", report.Format));
                 p.Add(new NpgsqlParameter("IsActive", report.IsActive));
                 p.Add(new NpgsqlParameter("CreatedBy", report.CreatedBy));
                 p.Add(new NpgsqlParameter("CreatedAt", report.CreatedAt.UtcDateTime));
                 p.Add(new NpgsqlParameter("UpdatedAt", report.UpdatedAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("LastRunAt", (object?)report.LastRunAt?.UtcDateTime ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("NextRunAt", (object?)report.NextRunAt?.UtcDateTime ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("LastRunAt", NpgsqlDbType.TimestampTz) { Value = (object?)report.LastRunAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("NextRunAt", NpgsqlDbType.TimestampTz) { Value = (object?)report.NextRunAt?.UtcDateTime ?? DBNull.Value });
             },
             ct);
     }
@@ -93,7 +94,7 @@ internal sealed class PostgresScheduledReportStore : IScheduledReportStore
             {
                 p.Add(new NpgsqlParameter("ReportId", reportId));
                 p.Add(new NpgsqlParameter("LastRunAt", lastRunAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("NextRunAt", (object?)nextRunAt?.UtcDateTime ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("NextRunAt", NpgsqlDbType.TimestampTz) { Value = (object?)nextRunAt?.UtcDateTime ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("UpdatedAt", DateTime.UtcNow));
             },
             ct);
@@ -115,12 +116,12 @@ internal sealed class PostgresScheduledReportStore : IScheduledReportStore
                 p.Add(new NpgsqlParameter("ReportId", execution.ReportId));
                 p.Add(new NpgsqlParameter("TenantId", execution.TenantId));
                 p.Add(new NpgsqlParameter("StartedAt", execution.StartedAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("CompletedAt", (object?)execution.CompletedAt?.UtcDateTime ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("CompletedAt", NpgsqlDbType.TimestampTz) { Value = (object?)execution.CompletedAt?.UtcDateTime ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Status", execution.Status));
                 p.Add(new NpgsqlParameter("Format", execution.Format));
-                p.Add(new NpgsqlParameter("FileSizeBytes", (object?)execution.FileSizeBytes ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("ErrorMessage", (object?)execution.ErrorMessage ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("RecipientsSent", (object?)execution.RecipientsSent ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("FileSizeBytes", NpgsqlDbType.Bigint) { Value = (object?)execution.FileSizeBytes ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ErrorMessage", NpgsqlDbType.Text) { Value = (object?)execution.ErrorMessage ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("RecipientsSent", NpgsqlDbType.Integer) { Value = (object?)execution.RecipientsSent ?? DBNull.Value });
             },
             ct);
     }

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Data.Npgsql;
@@ -72,16 +73,16 @@ internal sealed class PostgresQueueStore : IQueueStore
                     p.Add(new NpgsqlParameter("TenantId", queue.TenantId.Value));
                     p.Add(new NpgsqlParameter("Name", queue.Name));
                     p.Add(new NpgsqlParameter("IsActive", queue.IsActive));
-                    p.Add(new NpgsqlParameter("MaxWaiting", (object?)queue.MaxWaiting ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("MaxWaiting", NpgsqlDbType.Integer) { Value = (object?)queue.MaxWaiting ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("SlaTargets", (object?)slaJson ?? DBNull.Value));
                     p.Add(new NpgsqlParameter("OverflowRule", (object?)overflowJson ?? DBNull.Value));
                     p.Add(new NpgsqlParameter("Hours", (object?)hoursJson ?? DBNull.Value));
                     p.Add(new NpgsqlParameter("WrapUp", wrapUpJson));
                     p.Add(new NpgsqlParameter("RequiredSkills", skillsJson));
                     p.Add(new NpgsqlParameter("CreatedAt", queue.CreatedAt));
-                    p.Add(new NpgsqlParameter("UpdatedAt", (object?)queue.UpdatedAt ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("CreatedBy", (object?)queue.CreatedBy ?? DBNull.Value));
-                    p.Add(new NpgsqlParameter("UpdatedBy", (object?)queue.UpdatedBy ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)queue.UpdatedAt ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)queue.CreatedBy ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)queue.UpdatedBy ?? DBNull.Value });
                 },
                 ct);
         }

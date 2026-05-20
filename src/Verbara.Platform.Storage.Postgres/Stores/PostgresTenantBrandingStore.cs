@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core.Branding;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -63,19 +64,19 @@ internal sealed class PostgresTenantBrandingStore : ITenantBrandingStore
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", branding.TenantId));
-                p.Add(new NpgsqlParameter("DisplayName", (object?)branding.DisplayName ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("LogoUrl", (object?)branding.LogoUrl ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("FaviconUrl", (object?)branding.FaviconUrl ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("PrimaryColor", (object?)branding.PrimaryColor ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("SecondaryColor", (object?)branding.SecondaryColor ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("AccentColor", (object?)branding.AccentColor ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("Locale", (object?)branding.Locale ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("Timezone", (object?)branding.Timezone ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("Subdomain", (object?)branding.Subdomain ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("SupportEmail", (object?)branding.SupportEmail ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("SupportUrl", (object?)branding.SupportUrl ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("EmailFromName", (object?)branding.EmailFromName ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("EmailFromAddress", (object?)branding.EmailFromAddress ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("DisplayName", NpgsqlDbType.Text) { Value = (object?)branding.DisplayName ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("LogoUrl", NpgsqlDbType.Text) { Value = (object?)branding.LogoUrl ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("FaviconUrl", NpgsqlDbType.Text) { Value = (object?)branding.FaviconUrl ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("PrimaryColor", NpgsqlDbType.Text) { Value = (object?)branding.PrimaryColor ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("SecondaryColor", NpgsqlDbType.Text) { Value = (object?)branding.SecondaryColor ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("AccentColor", NpgsqlDbType.Text) { Value = (object?)branding.AccentColor ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Locale", NpgsqlDbType.Text) { Value = (object?)branding.Locale ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Timezone", NpgsqlDbType.Text) { Value = (object?)branding.Timezone ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Subdomain", NpgsqlDbType.Text) { Value = (object?)branding.Subdomain ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("SupportEmail", NpgsqlDbType.Text) { Value = (object?)branding.SupportEmail ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("SupportUrl", NpgsqlDbType.Text) { Value = (object?)branding.SupportUrl ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("EmailFromName", NpgsqlDbType.Text) { Value = (object?)branding.EmailFromName ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("EmailFromAddress", NpgsqlDbType.Text) { Value = (object?)branding.EmailFromAddress ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedAt", branding.CreatedAt.UtcDateTime));
                 p.Add(new NpgsqlParameter("UpdatedAt", branding.UpdatedAt.UtcDateTime));
             },

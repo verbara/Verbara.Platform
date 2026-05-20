@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
@@ -23,10 +24,10 @@ internal sealed class PostgresAuthEventStore : IAuthEventStore
             {
                 p.Add(new NpgsqlParameter("EventId", authEvent.EventId));
                 p.Add(new NpgsqlParameter("TenantId", authEvent.TenantId));
-                p.Add(new NpgsqlParameter("UserId", (object?)authEvent.UserId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UserId", NpgsqlDbType.Text) { Value = (object?)authEvent.UserId ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("EventType", authEvent.EventType));
-                p.Add(new NpgsqlParameter("IpAddress", (object?)authEvent.IpAddress ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("UserAgent", (object?)authEvent.UserAgent ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("IpAddress", NpgsqlDbType.Text) { Value = (object?)authEvent.IpAddress ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UserAgent", NpgsqlDbType.Text) { Value = (object?)authEvent.UserAgent ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Details", (object?)detailsJson ?? DBNull.Value));
                 p.Add(new NpgsqlParameter("CreatedAt", authEvent.CreatedAt));
             },
