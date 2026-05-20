@@ -3,15 +3,21 @@
   <PropertyGroup>
     <Version>1.7.0</Version>
     <Description>ASP.NET Core Minimal API layer for Verbara.Platform — webhook ingestion, agent desktop, admin CRUD, SSE events, SignalR PlatformHub</Description>
-    <!-- Platform.Api consumes Verbara.Sdk.Pro.Push.SignalR (hub + presence CRDT)
-         which depends on Microsoft.AspNetCore.SignalR. SignalR server-side dispatch in
-         .NET 10 still relies on reflection that trips the trim/AOT analyzers. Keep the
-         analyzers off on this project so warnings-as-errors do not gate the build. -->
-    <IsAotCompatible>false</IsAotCompatible>
-    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
-    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
-    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <!-- ADR-0022 Phase D (2026-05-20): Dapper removed cross-repo (SDK + Pro + Platform);
+         Platform.Api now publishes Native AOT with 0 IL2026/IL3050/IL207x diagnostics
+         (validated 2026-05-20, docs/operations/phase-d-validation/2026-05-19-pilot-aot-delta.md).
+         The SignalR Hub was extracted to Verbara.Platform.Realtime in Phase A, so it is no
+         longer an AOT blocker here. Analyzers stay ON to keep the host AOT-clean on every
+         build; the native single-binary publish is invoked by docker/Dockerfile.api-aot
+         (-p:PublishAot=true -r linux-x64), not asserted unconditionally here so that
+         `dotnet build/test/run` for local dev + CI keep using the portable JIT path. -->
+    <IsAotCompatible>true</IsAotCompatible>
     <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+    <!-- Intercepts Configure<T>(IConfiguration) + ConfigurationBinder.GetValue<T> with
+         AOT-safe generated binders. PublishAot auto-enables this; we set it explicitly so
+         the regular `dotnet build` (analyzers on via IsAotCompatible) matches the AOT publish
+         and stays free of IL2026/IL3050 config-binding diagnostics. -->
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
     <IsPackable>false</IsPackable>
     <!-- v1.14.4 (CFG-003 fix) — enables `dotnet user-secrets` for the
          Development environment so devs don't need plaintext credentials in
@@ -24,6 +30,14 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Verbara.Platform.Api.Tests" />
+  </ItemGroup>
+
+  <!-- ADR-0022 Phase D: PublishAot does not support runtimeconfig.template.json, so the
+       Npgsql legacy-timestamp feature switch is declared as a host config option (emitted
+       into runtimeconfig.json for both JIT and AOT publish). Trim="false" keeps the switch
+       name string from being trimmed under AOT. Preserves the prior runtimeconfig.template.json. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="Npgsql.EnableLegacyTimestampBehavior" Value="true" Trim="false" />
   </ItemGroup>
 
 <ItemGroup>
