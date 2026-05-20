@@ -1,7 +1,6 @@
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Storage.Postgres.Stores;
-using Dapper;
 using Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
@@ -108,7 +107,7 @@ public sealed class ApiKeyStoreLastUsedTests
     /// <summary>
     /// Direct DB read used by tests that want to bypass the store mapper.
     /// Kept as a helper for future last-used coverage that might check the
-    /// raw column without round-tripping through Dapper's row mapper.
+    /// raw column without round-tripping through the store's row mapper.
     /// </summary>
     [Fact]
     public async Task UpdateLastUsedAsync_ShouldWriteColumnDirectly_WhenInspectedViaSql()
@@ -141,9 +140,11 @@ public sealed class ApiKeyStoreLastUsedTests
             await conn.OpenAsync();
             // Npgsql maps TIMESTAMPTZ → DateTime (UTC kind) by default; we
             // convert at the test boundary rather than fight the type mapper.
-            var raw = await conn.QuerySingleAsync<DateTime?>(
-                "SELECT last_used_at FROM api_keys WHERE key_id = @KeyId",
-                new { KeyId = keyId.Value });
+            await using var cmd = new NpgsqlCommand(
+                "SELECT last_used_at FROM api_keys WHERE key_id = @KeyId", conn);
+            cmd.Parameters.Add(new NpgsqlParameter("KeyId", keyId.Value));
+            var scalar = await cmd.ExecuteScalarAsync();
+            var raw = scalar is DBNull or null ? (DateTime?)null : (DateTime)scalar;
 
             raw.Should().NotBeNull();
             new DateTimeOffset(raw!.Value, TimeSpan.Zero)

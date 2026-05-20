@@ -2,8 +2,8 @@ using System.Text.Json;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Storage.Postgres.Stores;
-using Dapper;
 using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 
@@ -56,30 +56,33 @@ public sealed class AuditEntriesNormalizationTests
             // populated rather than tunneled through the details blob.
             await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
             await conn.OpenAsync();
-            var row = await conn.QuerySingleAsync<(
-                string Category,
-                string Severity,
-                string ActorType,
-                string? BeforeJson,
-                string? AfterJson,
-                string? IntegrityHash)>(
+            await using var cmd = new NpgsqlCommand(
                 "SELECT category, severity, actor_type, before_json::text, after_json::text, integrity_hash " +
-                "FROM audit_entries WHERE entry_id = @EntryId",
-                new { EntryId = entry.EntryId.Value });
+                "FROM audit_entries WHERE entry_id = @EntryId", conn);
+            cmd.Parameters.Add(new NpgsqlParameter("EntryId", entry.EntryId.Value));
+            await using var reader = await cmd.ExecuteReaderAsync();
+            (await reader.ReadAsync()).Should().BeTrue();
 
-            row.Category.Should().Be("security");
-            row.Severity.Should().Be("critical");
-            row.ActorType.Should().Be("user");
-            row.IntegrityHash.Should().Be("sha256:deadbeef");
-            row.BeforeJson.Should().NotBeNull();
+            var category = reader.GetString("category");
+            var severity = reader.GetString("severity");
+            var actorType = reader.GetString("actor_type");
+            var beforeJson = reader.GetStringOrNull("before_json");
+            var afterJson = reader.GetStringOrNull("after_json");
+            var integrityHash = reader.GetStringOrNull("integrity_hash");
+
+            category.Should().Be("security");
+            severity.Should().Be("critical");
+            actorType.Should().Be("user");
+            integrityHash.Should().Be("sha256:deadbeef");
+            beforeJson.Should().NotBeNull();
             // Postgres canonicalises jsonb with a space after colons — assert
             // on the property + value tokens independently to stay tolerant of
             // formatter changes.
-            row.BeforeJson!.Should().Contain("\"status\"");
-            row.BeforeJson.Should().Contain("\"Active\"");
-            row.AfterJson.Should().NotBeNull();
-            row.AfterJson!.Should().Contain("\"status\"");
-            row.AfterJson.Should().Contain("\"Suspended\"");
+            beforeJson!.Should().Contain("\"status\"");
+            beforeJson.Should().Contain("\"Active\"");
+            afterJson.Should().NotBeNull();
+            afterJson!.Should().Contain("\"status\"");
+            afterJson.Should().Contain("\"Suspended\"");
         }
     }
 
@@ -107,7 +110,7 @@ public sealed class AuditEntriesNormalizationTests
 
         // EXPLAIN returns one row per plan line — join into a single string
         // so Contains() can search the whole plan.
-        var planLines = await conn.QueryAsync<string>(
+        var planLines = await ExplainAsync(conn,
             "EXPLAIN (FORMAT TEXT) " +
             "SELECT * FROM audit_entries WHERE tenant_id = 'tenant-explain' AND severity = 'critical' " +
             "ORDER BY occurred_at DESC LIMIT 50");
@@ -140,7 +143,7 @@ public sealed class AuditEntriesNormalizationTests
         // (Npgsql default per-connection here) so this leaks no global state.
         await ExecAsync(conn, "SET enable_seqscan = off");
 
-        var planLines = await conn.QueryAsync<string>(
+        var planLines = await ExplainAsync(conn,
             "EXPLAIN (FORMAT TEXT) " +
             "SELECT * FROM audit_entries WHERE tenant_id = 'tenant-explain' AND category = 'security' " +
             "ORDER BY occurred_at DESC LIMIT 50");
@@ -161,6 +164,16 @@ public sealed class AuditEntriesNormalizationTests
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<List<string>> ExplainAsync(NpgsqlConnection conn, string sql)
+    {
+        var lines = new List<string>();
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            lines.Add(reader.GetString(0));
+        return lines;
     }
 
     [Theory]
