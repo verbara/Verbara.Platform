@@ -1,8 +1,8 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core;
 using Verbara.Platform.Surveys;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -16,47 +16,47 @@ internal sealed class PostgresSurveyResponseStore : ISurveyResponseStore
     {
         var answersJson = JsonSerializer.Serialize(response.Answers, PostgresJson.Ctx.IReadOnlyListSurveyAnswer);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO survey_responses (response_id, survey_id, tenant_id, conversation_id, contact_id, " +
             "agent_id, answers, submitted_at) " +
             "VALUES (@ResponseId, @SurveyId, @TenantId, @ConversationId, @ContactId, " +
             "@AgentId, @Answers::jsonb, @SubmittedAt) " +
             "ON CONFLICT (tenant_id, response_id) DO NOTHING",
-            new
+            p =>
             {
-                ResponseId = response.ResponseId.Value,
-                SurveyId = response.SurveyId.Value,
-                TenantId = response.TenantId.Value,
-                ConversationId = response.ConversationId.Value,
-                ContactId = response.ContactId.Value,
-                AgentId = response.AgentId?.Value,
-                Answers = answersJson,
-                response.SubmittedAt,
-            });
+                p.Add(new NpgsqlParameter("ResponseId", response.ResponseId.Value));
+                p.Add(new NpgsqlParameter("SurveyId", response.SurveyId.Value));
+                p.Add(new NpgsqlParameter("TenantId", response.TenantId.Value));
+                p.Add(new NpgsqlParameter("ConversationId", response.ConversationId.Value));
+                p.Add(new NpgsqlParameter("ContactId", response.ContactId.Value));
+                p.Add(new NpgsqlParameter("AgentId", (object?)response.AgentId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Answers", answersJson));
+                p.Add(new NpgsqlParameter("SubmittedAt", response.SubmittedAt.UtcDateTime));
+            },
+            ct);
     }
 
     public async Task<IReadOnlyList<SurveyResponse>> GetByConversationAsync(
         TenantId tenantId, EntityId conversationId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<ResponseRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT response_id, survey_id, tenant_id, conversation_id, contact_id, agent_id, answers, submitted_at " +
             "FROM survey_responses WHERE tenant_id = @TenantId AND conversation_id = @ConversationId " +
             "ORDER BY submitted_at",
-            new { TenantId = tenantId.Value, ConversationId = conversationId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("ConversationId", conversationId.Value)); },
+            ResponseRow.Map, ct);
         return rows.Select(r => r.ToResponse()).ToList();
     }
 
     public async Task<IReadOnlyList<SurveyResponse>> GetBySurveyAsync(
         TenantId tenantId, EntityId surveyId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<ResponseRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT response_id, survey_id, tenant_id, conversation_id, contact_id, agent_id, answers, submitted_at " +
             "FROM survey_responses WHERE tenant_id = @TenantId AND survey_id = @SurveyId " +
             "ORDER BY submitted_at",
-            new { TenantId = tenantId.Value, SurveyId = surveyId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("SurveyId", surveyId.Value)); },
+            ResponseRow.Map, ct);
         return rows.Select(r => r.ToResponse()).ToList();
     }
 
@@ -71,6 +71,18 @@ internal sealed class PostgresSurveyResponseStore : ISurveyResponseStore
         public string answers { get; init; } = null!;
         public DateTime submitted_at { get; init; }
 
+        public static ResponseRow Map(NpgsqlDataReader r) => new()
+        {
+            response_id = r.GetString("response_id"),
+            survey_id = r.GetString("survey_id"),
+            tenant_id = r.GetString("tenant_id"),
+            conversation_id = r.GetString("conversation_id"),
+            contact_id = r.GetString("contact_id"),
+            agent_id = r.GetStringOrNull("agent_id"),
+            answers = r.GetString("answers"),
+            submitted_at = r.GetDateTime("submitted_at"),
+        };
+
         public SurveyResponse ToResponse()
         {
             var answerList = JsonSerializer.Deserialize(answers, PostgresJson.Ctx.IReadOnlyListSurveyAnswer)
@@ -84,7 +96,7 @@ internal sealed class PostgresSurveyResponseStore : ISurveyResponseStore
                 ContactId = EntityId.From(contact_id),
                 AgentId = agent_id != null ? EntityId.From(agent_id) : null,
                 Answers = answerList,
-                SubmittedAt = submitted_at,
+                SubmittedAt = new DateTimeOffset(submitted_at, TimeSpan.Zero),
             };
         }
     }
