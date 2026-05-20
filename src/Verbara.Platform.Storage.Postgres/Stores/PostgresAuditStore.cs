@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -22,68 +22,74 @@ internal sealed class PostgresAuditStore : IAuditStore
         var beforeJson = SerializeChange(entry.Changes?.Before);
         var afterJson = SerializeChange(entry.Changes?.After);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO audit_entries (entry_id, tenant_id, action, entity_type, entity_id, " +
             "performed_by, details, occurred_at, impersonator_id, " +
             "category, severity, actor_type, before_json, after_json, integrity_hash) " +
             "VALUES (@EntryId, @TenantId, @Action, @EntityType, @EntityId, " +
             "@PerformedBy, @Details::jsonb, @OccurredAt, @ImpersonatorId, " +
             "@Category, @Severity, @ActorType, @BeforeJson::jsonb, @AfterJson::jsonb, @IntegrityHash)",
-            new
+            p =>
             {
-                EntryId = entry.EntryId.Value,
-                TenantId = entry.TenantId.Value,
-                entry.Action,
-                EntityType = entry.TargetType,
-                EntityId = entry.TargetId,
-                PerformedBy = entry.ActorId,
-                Details = metadataJson,
-                entry.OccurredAt,
-                ImpersonatorId = entry.ImpersonatorId,
-                Category = entry.Category,
-                Severity = entry.Severity,
-                ActorType = entry.ActorType,
-                BeforeJson = beforeJson,
-                AfterJson = afterJson,
-                IntegrityHash = entry.IntegrityHash,
-            });
+                p.Add(new NpgsqlParameter("EntryId", entry.EntryId.Value));
+                p.Add(new NpgsqlParameter("TenantId", entry.TenantId.Value));
+                p.Add(new NpgsqlParameter("Action", entry.Action));
+                p.Add(new NpgsqlParameter("EntityType", (object?)entry.TargetType ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("EntityId", (object?)entry.TargetId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("PerformedBy", (object?)entry.ActorId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Details", (object?)metadataJson ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("OccurredAt", entry.OccurredAt));
+                p.Add(new NpgsqlParameter("ImpersonatorId", (object?)entry.ImpersonatorId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Category", (object?)entry.Category ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Severity", (object?)entry.Severity ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ActorType", (object?)entry.ActorType ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("BeforeJson", (object?)beforeJson ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("AfterJson", (object?)afterJson ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("IntegrityHash", (object?)entry.IntegrityHash ?? DBNull.Value));
+            },
+            ct);
     }
 
     public async Task<IReadOnlyList<AuditEntry>> GetByEntityAsync(
         TenantId tenantId, string entityType, string entityId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<AuditRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
             "category, severity, actor_type, before_json, after_json, integrity_hash " +
             "FROM audit_entries WHERE tenant_id = @TenantId AND entity_type = @EntityType AND entity_id = @EntityId " +
             "ORDER BY occurred_at",
-            new { TenantId = tenantId.Value, EntityType = entityType, EntityId = entityId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("EntityType", entityType));
+                p.Add(new NpgsqlParameter("EntityId", entityId));
+            },
+            AuditRow.Map, ct);
         return rows.Select(r => r.ToEntry()).ToList();
     }
 
     public async Task<PagedResult<AuditEntry>> SearchAsync(
         TenantId tenantId, AuditQuery query, CancellationToken ct)
     {
-        var (where, parameters) = BuildWhereClause(tenantId, query);
+        var (where, binders) = BuildWhereClause(tenantId, query);
         var offset = (query.Page - 1) * query.PageSize;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        void BindFilters(NpgsqlParameterCollection p) { foreach (var b in binders) b(p); }
 
-        var total = await conn.ExecuteScalarAsync<int>(
-            new CommandDefinition($"SELECT COUNT(*) FROM audit_entries WHERE {where}", parameters, cancellationToken: ct));
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
+            $"SELECT COUNT(*) FROM audit_entries WHERE {where}", BindFilters, ct) ?? 0L);
 
-        parameters.Add("Limit", query.PageSize);
-        parameters.Add("Offset", offset);
-
-        var rows = await conn.QueryAsync<AuditRow>(
-            new CommandDefinition(
-                "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
-                "category, severity, actor_type, before_json, after_json, integrity_hash " +
-                $"FROM audit_entries WHERE {where} ORDER BY occurred_at DESC LIMIT @Limit OFFSET @Offset",
-                parameters,
-                cancellationToken: ct));
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
+            "category, severity, actor_type, before_json, after_json, integrity_hash " +
+            $"FROM audit_entries WHERE {where} ORDER BY occurred_at DESC LIMIT @Limit OFFSET @Offset",
+            p =>
+            {
+                BindFilters(p);
+                p.Add(new NpgsqlParameter("Limit", query.PageSize));
+                p.Add(new NpgsqlParameter("Offset", offset));
+            },
+            AuditRow.Map, ct);
 
         var items = rows.Select(r => r.ToEntry()).ToList();
         return new PagedResult<AuditEntry>(items, total, query.Page, query.PageSize);
@@ -98,10 +104,7 @@ internal sealed class PostgresAuditStore : IAuditStore
         // the full result set in memory. Batch size 500 balances round-trips vs
         // peak memory; the writer flushes between batches.
         const int batchSize = 500;
-        var (where, parameters) = BuildWhereClause(tenantId, query);
-        parameters.Add("Limit", batchSize);
-
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var (where, binders) = BuildWhereClause(tenantId, query);
 
         var lastOccurredAt = (DateTimeOffset?)null;
         var lastEntryId = (string?)null;
@@ -111,7 +114,12 @@ internal sealed class PostgresAuditStore : IAuditStore
             ct.ThrowIfCancellationRequested();
 
             string sql;
-            if (lastOccurredAt is null)
+            // Capture the cursor for this iteration so the bind delegate (which
+            // runs when the command executes) closes over the current value.
+            var cursorOccurredAt = lastOccurredAt;
+            var cursorEntryId = lastEntryId;
+
+            if (cursorOccurredAt is null)
             {
                 sql =
                     "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
@@ -122,8 +130,6 @@ internal sealed class PostgresAuditStore : IAuditStore
             {
                 // Keyset pagination on (occurred_at DESC, entry_id DESC) — avoids
                 // OFFSET cost growing with result size.
-                parameters.Add("CursorOccurredAt", lastOccurredAt.Value);
-                parameters.Add("CursorEntryId", lastEntryId);
                 sql =
                     "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
                     "category, severity, actor_type, before_json, after_json, integrity_hash " +
@@ -132,8 +138,19 @@ internal sealed class PostgresAuditStore : IAuditStore
                     "ORDER BY occurred_at DESC, entry_id DESC LIMIT @Limit";
             }
 
-            var rows = (await conn.QueryAsync<AuditRow>(
-                new CommandDefinition(sql, parameters, cancellationToken: ct))).ToList();
+            var rows = await _dataSource.QueryListAsync(
+                sql,
+                p =>
+                {
+                    foreach (var b in binders) b(p);
+                    p.Add(new NpgsqlParameter("Limit", batchSize));
+                    if (cursorOccurredAt is not null)
+                    {
+                        p.Add(new NpgsqlParameter("CursorOccurredAt", cursorOccurredAt.Value));
+                        p.Add(new NpgsqlParameter("CursorEntryId", (object?)cursorEntryId ?? DBNull.Value));
+                    }
+                },
+                AuditRow.Map, ct);
 
             if (rows.Count == 0)
                 yield break;
@@ -152,16 +169,19 @@ internal sealed class PostgresAuditStore : IAuditStore
         }
     }
 
-    private static (string Where, DynamicParameters Parameters) BuildWhereClause(TenantId tenantId, AuditQuery query)
+    private static (string Where, List<Action<NpgsqlParameterCollection>> Binders) BuildWhereClause(
+        TenantId tenantId, AuditQuery query)
     {
         var conditions = new List<string> { "tenant_id = @TenantId" };
-        var parameters = new DynamicParameters();
-        parameters.Add("TenantId", tenantId.Value);
+        var binders = new List<Action<NpgsqlParameterCollection>>
+        {
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
+        };
 
         if (!string.IsNullOrEmpty(query.Action))
         {
             conditions.Add("action = @Action");
-            parameters.Add("Action", query.Action);
+            binders.Add(p => p.Add(new NpgsqlParameter("Action", query.Action)));
         }
         if (!string.IsNullOrEmpty(query.ActionPrefix))
         {
@@ -172,32 +192,32 @@ internal sealed class PostgresAuditStore : IAuditStore
                 .Replace("\\", "\\\\", StringComparison.Ordinal)
                 .Replace("%", "\\%", StringComparison.Ordinal)
                 .Replace("_", "\\_", StringComparison.Ordinal);
-            parameters.Add("ActionPrefix", escaped + "%");
+            binders.Add(p => p.Add(new NpgsqlParameter("ActionPrefix", escaped + "%")));
         }
         if (!string.IsNullOrEmpty(query.EntityType))
         {
             conditions.Add("entity_type = @EntityType");
-            parameters.Add("EntityType", query.EntityType);
+            binders.Add(p => p.Add(new NpgsqlParameter("EntityType", query.EntityType)));
         }
         if (!string.IsNullOrEmpty(query.TargetType))
         {
             conditions.Add("entity_type = @TargetType");
-            parameters.Add("TargetType", query.TargetType);
+            binders.Add(p => p.Add(new NpgsqlParameter("TargetType", query.TargetType)));
         }
         if (!string.IsNullOrEmpty(query.TargetId))
         {
             conditions.Add("entity_id = @TargetId");
-            parameters.Add("TargetId", query.TargetId);
+            binders.Add(p => p.Add(new NpgsqlParameter("TargetId", query.TargetId)));
         }
         if (!string.IsNullOrEmpty(query.PerformedBy))
         {
             conditions.Add("performed_by = @PerformedBy");
-            parameters.Add("PerformedBy", query.PerformedBy);
+            binders.Add(p => p.Add(new NpgsqlParameter("PerformedBy", query.PerformedBy)));
         }
         if (!string.IsNullOrEmpty(query.ActorId))
         {
             conditions.Add("performed_by = @ActorId");
-            parameters.Add("ActorId", query.ActorId);
+            binders.Add(p => p.Add(new NpgsqlParameter("ActorId", query.ActorId)));
         }
         if (!string.IsNullOrEmpty(query.ActorSearch))
         {
@@ -206,42 +226,46 @@ internal sealed class PostgresAuditStore : IAuditStore
                 .Replace("\\", "\\\\", StringComparison.Ordinal)
                 .Replace("%", "\\%", StringComparison.Ordinal)
                 .Replace("_", "\\_", StringComparison.Ordinal);
-            parameters.Add("ActorSearch", "%" + escaped + "%");
+            binders.Add(p => p.Add(new NpgsqlParameter("ActorSearch", "%" + escaped + "%")));
         }
         if (!string.IsNullOrEmpty(query.Category))
         {
             // R5.3 A.1 — typed column lookup. Backed by idx_audit_category
             // (tenant_id, category, occurred_at DESC).
             conditions.Add("category = @Category");
-            parameters.Add("Category", query.Category);
+            binders.Add(p => p.Add(new NpgsqlParameter("Category", query.Category)));
         }
         if (!string.IsNullOrEmpty(query.Severity))
         {
             // R5.3 A.1 — typed column lookup. Backed by idx_audit_severity
             // (tenant_id, severity, occurred_at DESC).
             conditions.Add("severity = @Severity");
-            parameters.Add("Severity", query.Severity);
+            binders.Add(p => p.Add(new NpgsqlParameter("Severity", query.Severity)));
         }
         if (query.From.HasValue)
         {
             conditions.Add("occurred_at >= @From");
-            parameters.Add("From", query.From.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("From", query.From.Value)));
         }
         if (query.To.HasValue)
         {
             conditions.Add("occurred_at <= @To");
-            parameters.Add("To", query.To.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("To", query.To.Value)));
         }
 
-        return (string.Join(" AND ", conditions), parameters);
+        return (string.Join(" AND ", conditions), binders);
     }
 
     public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteAsync(
+        return await _dataSource.ExecuteAsync(
             "DELETE FROM audit_entries WHERE tenant_id = @TenantId AND occurred_at < @Cutoff",
-            new { TenantId = tenantId.Value, Cutoff = cutoff });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("Cutoff", cutoff));
+            },
+            ct);
     }
 
     /// <summary>
@@ -315,6 +339,25 @@ internal sealed class PostgresAuditStore : IAuditStore
         public string? before_json { get; init; }
         public string? after_json { get; init; }
         public string? integrity_hash { get; init; }
+
+        public static AuditRow Map(NpgsqlDataReader r) => new()
+        {
+            entry_id = r.GetString("entry_id"),
+            tenant_id = r.GetString("tenant_id"),
+            action = r.GetString("action"),
+            entity_type = r.GetStringOrNull("entity_type"),
+            entity_id = r.GetStringOrNull("entity_id"),
+            performed_by = r.GetStringOrNull("performed_by"),
+            details = r.GetStringOrNull("details"),
+            occurred_at = r.GetDateTime("occurred_at"),
+            impersonator_id = r.GetStringOrNull("impersonator_id"),
+            category = r.GetStringOrNull("category"),
+            severity = r.GetStringOrNull("severity"),
+            actor_type = r.GetStringOrNull("actor_type"),
+            before_json = r.GetStringOrNull("before_json"),
+            after_json = r.GetStringOrNull("after_json"),
+            integrity_hash = r.GetStringOrNull("integrity_hash"),
+        };
 
         public AuditEntry ToEntry()
         {
