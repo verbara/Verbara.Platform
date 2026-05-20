@@ -27,7 +27,7 @@
     <PackageReference Include="Microsoft.Graph" />
     <PackageReference Include="Azure.Identity" />
     <PackageReference Include="Npgsql" />
-    <PackageReference Include="Dapper" />
+    <PackageReference Include="Verbara.Sdk.Data.Npgsql" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
