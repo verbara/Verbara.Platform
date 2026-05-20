@@ -40,7 +40,32 @@ Verbara.Sdk.Pro.Realtime.Storage.Postgres/2.5.0-pro      -> Dapper 2.1.72
 
 3. **The true gate requires Phase 3 (Pro sweep) first.** Once the 7 Pro storage packages are migrated off Dapper and repacked, `Dapper.dll` leaves Platform.Api's closure and the count is expected to drop to **0** (no non-Dapper residual was observed). Only then can `<IsAotCompatible>true>` + `<PublishAot>true>` (Task 2.4/Phase 4 flip) succeed.
 
-## Verdict
+## Verdict (interim — Platform only)
 
 - **Platform Dapper removal: DONE + verified AOT-neutral** (0 Platform-attributable diagnostics; full solution builds 0 warnings; Storage.Postgres.Tests 34/34; full Platform suite — see Task 2.7).
 - **AOT-delta gate: BLOCKED on Phase 3 (Pro sweep).** Not a failure of the approach — a sequencing correction. The proof of the entire approach is now gated on completing the Pro side, after which a single re-publish validates the drop to 0.
+
+---
+
+## FINAL GATE RESULT (2026-05-20, after Phase 3 Pro sweep) — ✅ PASSED
+
+After migrating all 7 Pro storage packages off Dapper (repo `Verbara.Sdk.Pro`, branch `feat/dapper-removal`) and repacking `2.5.0-pro` Dapper-free, `Dapper.dll` left `Verbara.Platform.Api`'s closure entirely (verified: `project.assets.json` shows zero packages depending on Dapper). Re-running the AOT publish:
+
+```
+AOT diagnostic count:  0   (was 45)
+Dapper mentions:       0
+file /tmp/aot-final/Verbara.Platform.Api:
+  ELF 64-bit LSB pie executable, x86-64, ... stripped   ← native AOT binary
+```
+
+**`Verbara.Platform.Api` now publishes as Native AOT with zero IL2026/IL3050/IL207x diagnostics.** The ADR-0022 goal is met: the public image can ship a native single binary instead of decompilable IL, closing the Pro-IP-leak exposure. Confirms empirically that the 45 baseline diagnostics were 100% intrinsic to `Dapper.dll`'s presence (issue #168) — removing the last reference dropped them to 0 with **no non-Dapper residual blocker**.
+
+### Regression found + fixed during the Pro sweep (42P08)
+The raw-Npgsql param-binding pattern `(object?)x ?? DBNull.Value` without an explicit `NpgsqlDbType` causes `42P08: could not determine data type of parameter` when the value is null in a type-ambiguous SQL position (`@X IS NULL OR col = @X`, `@X IS NOT NULL AND col = @X`, `COALESCE`, etc.). Caught by Pro `IntegrationTests` (DncCheckerTests + PostgresRealtimeStoreTests — 10 failures that PASS on `main`). A subagent's "pre-existing" claim was disproven by a `git checkout main` baseline run. Fixed repo-wide by the rule **every nullable `NpgsqlParameter` that can carry `DBNull.Value` gets an explicit `NpgsqlDbType`** (jsonb string params with an explicit `::jsonb` SQL cast excepted): ~103 params hardened in Pro (IntegrationTests → 276/276) + 159 params in Platform across 38 stores (Storage.Postgres.Tests → 34/34).
+
+### Remaining (Phase 4/5/6, not yet done)
+- **G1 AOT publish clean — ✅ DONE** (this result).
+- **Csproj flip** — set `<IsAotCompatible>true>` + `<PublishAot>true>` + `<InvariantGlobalization>true>` on `Verbara.Platform.Api.csproj`; migrate `runtimeconfig.template.json` settings to `RuntimeHostConfigurationOption` (PublishAot warning).
+- **G2 tests green** — full cross-repo suites (in progress).
+- **G3 AOT image runtime smoke** — build the AOT Docker image, run the app, smoke the Setup Wizard + channels (proves runtime correctness, not just compile).
+- **Phase 5 image cutover** + **Phase 6 24h AOT soak** (mandatory gate).
