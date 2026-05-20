@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -16,21 +16,21 @@ internal sealed class PostgresPurgeLogStore : IPurgeLogStore
         var entitiesJson = JsonSerializer.Serialize(
             entry.EntitiesDeleted, PostgresJson.Ctx.DictionaryStringInt32);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO purge_log (purge_id, tenant_id, subject_type, subject_id, performed_by, reason, entities_deleted, purged_at) " +
             "VALUES (@PurgeId, @TenantId, @SubjectType, @SubjectId, @PerformedBy, @Reason, @EntitiesDeleted::jsonb, @PurgedAt)",
-            new
+            p =>
             {
-                entry.PurgeId,
-                entry.TenantId,
-                entry.SubjectType,
-                entry.SubjectId,
-                entry.PerformedBy,
-                entry.Reason,
-                EntitiesDeleted = entitiesJson,
-                entry.PurgedAt,
-            });
+                p.Add(new NpgsqlParameter("PurgeId", entry.PurgeId));
+                p.Add(new NpgsqlParameter("TenantId", entry.TenantId));
+                p.Add(new NpgsqlParameter("SubjectType", entry.SubjectType));
+                p.Add(new NpgsqlParameter("SubjectId", entry.SubjectId));
+                p.Add(new NpgsqlParameter("PerformedBy", entry.PerformedBy));
+                p.Add(new NpgsqlParameter("Reason", entry.Reason));
+                p.Add(new NpgsqlParameter("EntitiesDeleted", entitiesJson));
+                p.Add(new NpgsqlParameter("PurgedAt", entry.PurgedAt));
+            },
+            ct);
     }
 
     public async Task<PagedResult<PurgeEntry>> ListAsync(
@@ -38,39 +38,42 @@ internal sealed class PostgresPurgeLogStore : IPurgeLogStore
         int page, int pageSize, CancellationToken ct)
     {
         var conditions = new List<string>();
-        var parameters = new DynamicParameters();
+        var binders = new List<Action<NpgsqlParameterCollection>>();
 
         if (!string.IsNullOrEmpty(tenantId))
         {
             conditions.Add("tenant_id = @TenantId");
-            parameters.Add("TenantId", tenantId);
+            binders.Add(p => p.Add(new NpgsqlParameter("TenantId", tenantId)));
         }
         if (from.HasValue)
         {
             conditions.Add("purged_at >= @From");
-            parameters.Add("From", from.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("From", from.Value)));
         }
         if (until.HasValue)
         {
             conditions.Add("purged_at <= @Until");
-            parameters.Add("Until", until.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("Until", until.Value)));
         }
 
         var where = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
         var offset = (page - 1) * pageSize;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        void BindFilters(NpgsqlParameterCollection p) { foreach (var b in binders) b(p); }
 
-        var total = await conn.ExecuteScalarAsync<int>(
-            $"SELECT COUNT(*) FROM purge_log {where}", parameters);
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
+            $"SELECT COUNT(*) FROM purge_log {where}", BindFilters, ct) ?? 0L);
 
-        parameters.Add("Limit", pageSize);
-        parameters.Add("Offset", offset);
-
-        var rows = await conn.QueryAsync<PurgeLogRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT purge_id, tenant_id, subject_type, subject_id, performed_by, reason, entities_deleted, purged_at " +
             $"FROM purge_log {where} ORDER BY purged_at DESC LIMIT @Limit OFFSET @Offset",
-            parameters);
+            p =>
+            {
+                BindFilters(p);
+                p.Add(new NpgsqlParameter("Limit", pageSize));
+                p.Add(new NpgsqlParameter("Offset", offset));
+            },
+            PurgeLogRow.Map, ct);
 
         var items = rows.Select(r => r.ToPurgeEntry()).ToList();
         return new PagedResult<PurgeEntry>(items, total, page, pageSize);
@@ -86,6 +89,18 @@ internal sealed class PostgresPurgeLogStore : IPurgeLogStore
         public string reason { get; init; } = null!;
         public string entities_deleted { get; init; } = null!;
         public DateTime purged_at { get; init; }
+
+        public static PurgeLogRow Map(NpgsqlDataReader r) => new()
+        {
+            purge_id = r.GetString("purge_id"),
+            tenant_id = r.GetString("tenant_id"),
+            subject_type = r.GetString("subject_type"),
+            subject_id = r.GetString("subject_id"),
+            performed_by = r.GetString("performed_by"),
+            reason = r.GetString("reason"),
+            entities_deleted = r.GetString("entities_deleted"),
+            purged_at = r.GetDateTime("purged_at"),
+        };
 
         public PurgeEntry ToPurgeEntry() => new()
         {
