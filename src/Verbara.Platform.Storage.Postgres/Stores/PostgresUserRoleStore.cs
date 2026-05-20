@@ -1,7 +1,7 @@
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -14,32 +14,47 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
     public async Task<IReadOnlyList<UserRoleAssignment>> GetRolesForUserAsync(
         TenantId tenantId, EntityId userId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<UserRoleRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT tenant_id, user_id, role_id, assigned_at, assigned_by " +
             "FROM user_roles WHERE tenant_id = @TenantId AND user_id = @UserId " +
             "ORDER BY assigned_at",
-            new { TenantId = tenantId.Value, UserId = userId.Value });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("UserId", userId.Value));
+            },
+            UserRoleRow.Map, ct);
         return rows.Select(r => r.ToAssignment()).ToList();
     }
 
     public async Task AssignAsync(TenantId tenantId, EntityId userId, string roleId,
         string? assignedBy, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO user_roles (tenant_id, user_id, role_id, assigned_at, assigned_by) " +
             "VALUES (@TenantId, @UserId, @RoleId, now(), @AssignedBy) " +
             "ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING",
-            new { TenantId = tenantId.Value, UserId = userId.Value, RoleId = roleId, AssignedBy = assignedBy });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("UserId", userId.Value));
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+                p.Add(new NpgsqlParameter("AssignedBy", (object?)assignedBy ?? DBNull.Value));
+            },
+            ct);
     }
 
     public async Task RemoveAsync(TenantId tenantId, EntityId userId, string roleId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "DELETE FROM user_roles WHERE tenant_id = @TenantId AND user_id = @UserId AND role_id = @RoleId",
-            new { TenantId = tenantId.Value, UserId = userId.Value, RoleId = roleId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("UserId", userId.Value));
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+            },
+            ct);
     }
 
     public async Task ReplaceAllAsync(TenantId tenantId, EntityId userId,
@@ -50,21 +65,26 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
 
         await conn.ExecuteAsync(
             "DELETE FROM user_roles WHERE tenant_id = @TenantId AND user_id = @UserId",
-            new { TenantId = tenantId.Value, UserId = userId.Value }, tx);
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("UserId", userId.Value));
+            },
+            tx, ct);
 
-        if (roleIds.Count > 0)
+        foreach (var roleId in roleIds)
         {
             await conn.ExecuteAsync(
                 "INSERT INTO user_roles (tenant_id, user_id, role_id, assigned_at, assigned_by) " +
                 "VALUES (@TenantId, @UserId, @RoleId, now(), @AssignedBy)",
-                roleIds.Select(r => new
+                p =>
                 {
-                    TenantId = tenantId.Value,
-                    UserId = userId.Value,
-                    RoleId = r,
-                    AssignedBy = assignedBy,
-                }),
-                tx);
+                    p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                    p.Add(new NpgsqlParameter("UserId", userId.Value));
+                    p.Add(new NpgsqlParameter("RoleId", roleId));
+                    p.Add(new NpgsqlParameter("AssignedBy", (object?)assignedBy ?? DBNull.Value));
+                },
+                tx, ct);
         }
 
         await tx.CommitAsync(ct);
@@ -73,21 +93,26 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
     public async Task<IReadOnlySet<string>> GetEffectivePermissionsAsync(
         TenantId tenantId, EntityId userId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-
         // Get all permissions from all roles assigned to the user, plus implied permissions
-        var directPermissions = await conn.QueryAsync<string>(
+        var directPermissions = await _dataSource.QueryListAsync(
             "SELECT DISTINCT trp.permission_id " +
             "FROM user_roles ur " +
             "JOIN tenant_role_permissions trp ON ur.tenant_id = trp.tenant_id AND ur.role_id = trp.role_id " +
             "WHERE ur.tenant_id = @TenantId AND ur.user_id = @UserId",
-            new { TenantId = tenantId.Value, UserId = userId.Value });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("UserId", userId.Value));
+            },
+            r => r.GetString("permission_id"), ct);
 
         var directSet = new HashSet<string>(directPermissions);
 
         // Expand implied permissions
-        var allImplies = await conn.QueryAsync<ImpliesRow>(
-            "SELECT permission_id, implies FROM permissions WHERE implies IS NOT NULL AND array_length(implies, 1) > 0");
+        var allImplies = await _dataSource.QueryListAsync(
+            "SELECT permission_id, implies FROM permissions WHERE implies IS NOT NULL AND array_length(implies, 1) > 0",
+            static p => { },
+            ImpliesRow.Map, ct);
 
         var impliesMap = allImplies.ToDictionary(r => r.permission_id, r => r.implies ?? []);
 
@@ -117,6 +142,15 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
         public DateTime assigned_at { get; init; }
         public string? assigned_by { get; init; }
 
+        public static UserRoleRow Map(NpgsqlDataReader r) => new()
+        {
+            tenant_id = r.GetString("tenant_id"),
+            user_id = r.GetString("user_id"),
+            role_id = r.GetString("role_id"),
+            assigned_at = r.GetDateTime("assigned_at"),
+            assigned_by = r.GetStringOrNull("assigned_by"),
+        };
+
         public UserRoleAssignment ToAssignment() => new()
         {
             TenantId = new TenantId(tenant_id),
@@ -131,5 +165,11 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
     {
         public string permission_id { get; init; } = null!;
         public string[]? implies { get; init; }
+
+        public static ImpliesRow Map(NpgsqlDataReader r) => new()
+        {
+            permission_id = r.GetString("permission_id"),
+            implies = r.IsDBNull(r.GetOrdinal("implies")) ? null : r.GetFieldValue<string[]>(r.GetOrdinal("implies")),
+        };
     }
 }
