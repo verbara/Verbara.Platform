@@ -1,8 +1,8 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -16,35 +16,40 @@ internal sealed class PostgresAuthEventStore : IAuthEventStore
     {
         var detailsJson = authEvent.Details?.RootElement.GetRawText();
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO auth_events (event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at) " +
             "VALUES (@EventId, @TenantId, @UserId, @EventType, @IpAddress, @UserAgent, @Details::jsonb, @CreatedAt)",
-            new
+            p =>
             {
-                authEvent.EventId,
-                authEvent.TenantId,
-                authEvent.UserId,
-                authEvent.EventType,
-                authEvent.IpAddress,
-                authEvent.UserAgent,
-                Details = detailsJson,
-                authEvent.CreatedAt,
-            });
+                p.Add(new NpgsqlParameter("EventId", authEvent.EventId));
+                p.Add(new NpgsqlParameter("TenantId", authEvent.TenantId));
+                p.Add(new NpgsqlParameter("UserId", (object?)authEvent.UserId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("EventType", authEvent.EventType));
+                p.Add(new NpgsqlParameter("IpAddress", (object?)authEvent.IpAddress ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UserAgent", (object?)authEvent.UserAgent ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Details", (object?)detailsJson ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("CreatedAt", authEvent.CreatedAt));
+            },
+            ct);
     }
 
     public async Task<PagedResult<AuthEvent>> ListByTenantAsync(string tenantId, int page, int pageSize, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var total = await conn.ExecuteScalarAsync<int>(
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM auth_events WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId)), ct) ?? 0L);
 
         var offset = (page - 1) * pageSize;
-        var rows = await conn.QueryAsync<AuthEventRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at " +
             "FROM auth_events WHERE tenant_id = @TenantId ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
-            new { TenantId = tenantId, Limit = pageSize, Offset = offset });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("Limit", pageSize));
+                p.Add(new NpgsqlParameter("Offset", offset));
+            },
+            AuthEventRow.Map, ct);
 
         var items = rows.Select(r => r.ToAuthEvent()).ToList();
         return new PagedResult<AuthEvent>(items, total, page, pageSize);
@@ -52,16 +57,26 @@ internal sealed class PostgresAuthEventStore : IAuthEventStore
 
     public async Task<PagedResult<AuthEvent>> ListByUserAsync(string tenantId, string userId, int page, int pageSize, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var total = await conn.ExecuteScalarAsync<int>(
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM auth_events WHERE tenant_id = @TenantId AND user_id = @UserId",
-            new { TenantId = tenantId, UserId = userId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("UserId", userId));
+            }, ct) ?? 0L);
 
         var offset = (page - 1) * pageSize;
-        var rows = await conn.QueryAsync<AuthEventRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at " +
             "FROM auth_events WHERE tenant_id = @TenantId AND user_id = @UserId ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
-            new { TenantId = tenantId, UserId = userId, Limit = pageSize, Offset = offset });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("UserId", userId));
+                p.Add(new NpgsqlParameter("Limit", pageSize));
+                p.Add(new NpgsqlParameter("Offset", offset));
+            },
+            AuthEventRow.Map, ct);
 
         var items = rows.Select(r => r.ToAuthEvent()).ToList();
         return new PagedResult<AuthEvent>(items, total, page, pageSize);
@@ -70,45 +85,50 @@ internal sealed class PostgresAuthEventStore : IAuthEventStore
     public async Task<PagedResult<AuthEvent>> SearchAsync(string tenantId, AuthEventQuery query, CancellationToken ct)
     {
         var conditions = new List<string> { "tenant_id = @TenantId" };
-        var parameters = new DynamicParameters();
-        parameters.Add("TenantId", tenantId);
+        var binders = new List<Action<NpgsqlParameterCollection>>
+        {
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId)),
+        };
 
         if (!string.IsNullOrEmpty(query.UserId))
         {
             conditions.Add("user_id = @UserId");
-            parameters.Add("UserId", query.UserId);
+            binders.Add(p => p.Add(new NpgsqlParameter("UserId", query.UserId)));
         }
         if (!string.IsNullOrEmpty(query.EventType))
         {
             conditions.Add("event_type = @EventType");
-            parameters.Add("EventType", query.EventType);
+            binders.Add(p => p.Add(new NpgsqlParameter("EventType", query.EventType)));
         }
         if (query.StartDate.HasValue)
         {
             conditions.Add("created_at >= @StartDate");
-            parameters.Add("StartDate", query.StartDate.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("StartDate", query.StartDate.Value)));
         }
         if (query.EndDate.HasValue)
         {
             conditions.Add("created_at <= @EndDate");
-            parameters.Add("EndDate", query.EndDate.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("EndDate", query.EndDate.Value)));
         }
 
         var where = string.Join(" AND ", conditions);
         var offset = (query.Page - 1) * query.PageSize;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        void BindFilters(NpgsqlParameterCollection p) { foreach (var b in binders) b(p); }
 
-        var total = await conn.ExecuteScalarAsync<int>(
-            $"SELECT COUNT(*) FROM auth_events WHERE {where}", parameters);
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
+            $"SELECT COUNT(*) FROM auth_events WHERE {where}", BindFilters, ct) ?? 0L);
 
-        parameters.Add("Limit", query.PageSize);
-        parameters.Add("Offset", offset);
-
-        var rows = await conn.QueryAsync<AuthEventRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at " +
             $"FROM auth_events WHERE {where} ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
-            parameters);
+            p =>
+            {
+                BindFilters(p);
+                p.Add(new NpgsqlParameter("Limit", query.PageSize));
+                p.Add(new NpgsqlParameter("Offset", offset));
+            },
+            AuthEventRow.Map, ct);
 
         var items = rows.Select(r => r.ToAuthEvent()).ToList();
         return new PagedResult<AuthEvent>(items, total, query.Page, query.PageSize);
@@ -116,28 +136,40 @@ internal sealed class PostgresAuthEventStore : IAuthEventStore
 
     public async Task<IReadOnlyList<AuthEvent>> ListAllByUserAsync(string tenantId, string userId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<AuthEventRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT event_id, tenant_id, user_id, event_type, ip_address, user_agent, details, created_at " +
             "FROM auth_events WHERE tenant_id = @TenantId AND user_id = @UserId ORDER BY created_at DESC",
-            new { TenantId = tenantId, UserId = userId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("UserId", userId));
+            },
+            AuthEventRow.Map, ct);
         return rows.Select(r => r.ToAuthEvent()).ToList();
     }
 
     public async Task<int> DeleteByUserAsync(string tenantId, string userId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteAsync(
+        return await _dataSource.ExecuteAsync(
             "DELETE FROM auth_events WHERE tenant_id = @TenantId AND user_id = @UserId",
-            new { TenantId = tenantId, UserId = userId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("UserId", userId));
+            },
+            ct);
     }
 
     public async Task<int> DeleteOlderThanAsync(string tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteAsync(
+        return await _dataSource.ExecuteAsync(
             "DELETE FROM auth_events WHERE tenant_id = @TenantId AND created_at < @Cutoff",
-            new { TenantId = tenantId, Cutoff = cutoff });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("Cutoff", cutoff));
+            },
+            ct);
     }
 
     private sealed class AuthEventRow
@@ -150,6 +182,18 @@ internal sealed class PostgresAuthEventStore : IAuthEventStore
         public string? user_agent { get; init; }
         public string? details { get; init; }
         public DateTime created_at { get; init; }
+
+        public static AuthEventRow Map(NpgsqlDataReader r) => new()
+        {
+            event_id = r.GetString("event_id"),
+            tenant_id = r.GetString("tenant_id"),
+            user_id = r.GetStringOrNull("user_id"),
+            event_type = r.GetString("event_type"),
+            ip_address = r.GetStringOrNull("ip_address"),
+            user_agent = r.GetStringOrNull("user_agent"),
+            details = r.GetStringOrNull("details"),
+            created_at = r.GetDateTime("created_at"),
+        };
 
         public AuthEvent ToAuthEvent()
         {
