@@ -1,6 +1,7 @@
-using Dapper;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core.Reports;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -16,36 +17,35 @@ internal sealed class PostgresScheduledReportStore : IScheduledReportStore
 
     public async Task<ScheduledReport?> GetByIdAsync(string reportId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ReportRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {ReportColumns} FROM scheduled_reports WHERE report_id = @Id",
-            new { Id = reportId });
+            p => p.Add(new NpgsqlParameter("Id", reportId)),
+            ReportRow.Map, ct);
         return row?.ToModel();
     }
 
     public async Task<IReadOnlyList<ScheduledReport>> ListByTenantAsync(string tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<ReportRow>(
+        var rows = await _dataSource.QueryListAsync(
             $"SELECT {ReportColumns} FROM scheduled_reports WHERE tenant_id = @TenantId ORDER BY created_at DESC",
-            new { TenantId = tenantId });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId)),
+            ReportRow.Map, ct);
         return rows.Select(r => r.ToModel()).ToList();
     }
 
     public async Task<IReadOnlyList<ScheduledReport>> GetDueReportsAsync(DateTimeOffset now, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<ReportRow>(
+        var rows = await _dataSource.QueryListAsync(
             $"SELECT {ReportColumns} FROM scheduled_reports " +
             "WHERE is_active = true AND next_run_at IS NOT NULL AND next_run_at <= @Now",
-            new { Now = now.UtcDateTime });
+            p => p.Add(new NpgsqlParameter("Now", now.UtcDateTime)),
+            ReportRow.Map, ct);
         return rows.Select(r => r.ToModel()).ToList();
     }
 
     public async Task SaveAsync(ScheduledReport report, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO scheduled_reports " +
             "(report_id, tenant_id, name, report_type, schedule, filters, recipients, format, " +
             "is_active, created_by, created_at, updated_at, last_run_at, next_run_at) " +
@@ -57,52 +57,52 @@ internal sealed class PostgresScheduledReportStore : IScheduledReportStore
             "recipients = EXCLUDED.recipients, format = EXCLUDED.format, " +
             "is_active = EXCLUDED.is_active, updated_at = EXCLUDED.updated_at, " +
             "last_run_at = EXCLUDED.last_run_at, next_run_at = EXCLUDED.next_run_at",
-            new
+            p =>
             {
-                report.ReportId,
-                report.TenantId,
-                report.Name,
-                report.ReportType,
-                report.Schedule,
-                report.Filters,
-                report.Recipients,
-                report.Format,
-                report.IsActive,
-                report.CreatedBy,
-                CreatedAt = report.CreatedAt.UtcDateTime,
-                UpdatedAt = report.UpdatedAt.UtcDateTime,
-                LastRunAt = report.LastRunAt?.UtcDateTime,
-                NextRunAt = report.NextRunAt?.UtcDateTime,
-            });
+                p.Add(new NpgsqlParameter("ReportId", report.ReportId));
+                p.Add(new NpgsqlParameter("TenantId", report.TenantId));
+                p.Add(new NpgsqlParameter("Name", report.Name));
+                p.Add(new NpgsqlParameter("ReportType", report.ReportType));
+                p.Add(new NpgsqlParameter("Schedule", report.Schedule));
+                p.Add(new NpgsqlParameter("Filters", NpgsqlDbType.Text) { Value = (object?)report.Filters ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Recipients", report.Recipients));
+                p.Add(new NpgsqlParameter("Format", report.Format));
+                p.Add(new NpgsqlParameter("IsActive", report.IsActive));
+                p.Add(new NpgsqlParameter("CreatedBy", report.CreatedBy));
+                p.Add(new NpgsqlParameter("CreatedAt", report.CreatedAt.UtcDateTime));
+                p.Add(new NpgsqlParameter("UpdatedAt", report.UpdatedAt.UtcDateTime));
+                p.Add(new NpgsqlParameter("LastRunAt", NpgsqlDbType.TimestampTz) { Value = (object?)report.LastRunAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("NextRunAt", NpgsqlDbType.TimestampTz) { Value = (object?)report.NextRunAt?.UtcDateTime ?? DBNull.Value });
+            },
+            ct);
     }
 
     public async Task DeleteAsync(string reportId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "DELETE FROM scheduled_reports WHERE report_id = @Id",
-            new { Id = reportId });
+            p => p.Add(new NpgsqlParameter("Id", reportId)),
+            ct);
     }
 
     public async Task UpdateLastRunAsync(string reportId, DateTimeOffset lastRunAt, DateTimeOffset? nextRunAt, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "UPDATE scheduled_reports SET last_run_at = @LastRunAt, next_run_at = @NextRunAt, updated_at = @UpdatedAt " +
             "WHERE report_id = @ReportId",
-            new
+            p =>
             {
-                ReportId = reportId,
-                LastRunAt = lastRunAt.UtcDateTime,
-                NextRunAt = nextRunAt?.UtcDateTime,
-                UpdatedAt = DateTime.UtcNow,
-            });
+                p.Add(new NpgsqlParameter("ReportId", reportId));
+                p.Add(new NpgsqlParameter("LastRunAt", lastRunAt.UtcDateTime));
+                p.Add(new NpgsqlParameter("NextRunAt", NpgsqlDbType.TimestampTz) { Value = (object?)nextRunAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedAt", DateTime.UtcNow));
+            },
+            ct);
     }
 
     public async Task SaveExecutionAsync(ReportExecution execution, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO report_executions " +
             "(execution_id, report_id, tenant_id, started_at, completed_at, status, format, file_size_bytes, error_message, recipients_sent) " +
             "VALUES (@ExecutionId, @ReportId, @TenantId, @StartedAt, @CompletedAt, @Status, @Format, @FileSizeBytes, @ErrorMessage, @RecipientsSent) " +
@@ -110,40 +110,41 @@ internal sealed class PostgresScheduledReportStore : IScheduledReportStore
             "completed_at = EXCLUDED.completed_at, status = EXCLUDED.status, " +
             "file_size_bytes = EXCLUDED.file_size_bytes, error_message = EXCLUDED.error_message, " +
             "recipients_sent = EXCLUDED.recipients_sent",
-            new
+            p =>
             {
-                execution.ExecutionId,
-                execution.ReportId,
-                execution.TenantId,
-                StartedAt = execution.StartedAt.UtcDateTime,
-                CompletedAt = execution.CompletedAt?.UtcDateTime,
-                execution.Status,
-                execution.Format,
-                execution.FileSizeBytes,
-                execution.ErrorMessage,
-                execution.RecipientsSent,
-            });
+                p.Add(new NpgsqlParameter("ExecutionId", execution.ExecutionId));
+                p.Add(new NpgsqlParameter("ReportId", execution.ReportId));
+                p.Add(new NpgsqlParameter("TenantId", execution.TenantId));
+                p.Add(new NpgsqlParameter("StartedAt", execution.StartedAt.UtcDateTime));
+                p.Add(new NpgsqlParameter("CompletedAt", NpgsqlDbType.TimestampTz) { Value = (object?)execution.CompletedAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Status", execution.Status));
+                p.Add(new NpgsqlParameter("Format", execution.Format));
+                p.Add(new NpgsqlParameter("FileSizeBytes", NpgsqlDbType.Bigint) { Value = (object?)execution.FileSizeBytes ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ErrorMessage", NpgsqlDbType.Text) { Value = (object?)execution.ErrorMessage ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("RecipientsSent", NpgsqlDbType.Integer) { Value = (object?)execution.RecipientsSent ?? DBNull.Value });
+            },
+            ct);
     }
 
     public async Task<IReadOnlyList<ReportExecution>> GetExecutionsAsync(string reportId, int limit, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<ExecutionRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT execution_id, report_id, tenant_id, started_at, completed_at, status, format, " +
             "file_size_bytes, error_message, recipients_sent " +
             "FROM report_executions WHERE report_id = @ReportId ORDER BY started_at DESC LIMIT @Limit",
-            new { ReportId = reportId, Limit = limit });
+            p => { p.Add(new NpgsqlParameter("ReportId", reportId)); p.Add(new NpgsqlParameter("Limit", limit)); },
+            ExecutionRow.Map, ct);
         return rows.Select(r => r.ToModel()).ToList();
     }
 
     public async Task<ReportExecution?> GetExecutionAsync(string executionId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ExecutionRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT execution_id, report_id, tenant_id, started_at, completed_at, status, format, " +
             "file_size_bytes, error_message, recipients_sent " +
             "FROM report_executions WHERE execution_id = @Id",
-            new { Id = executionId });
+            p => p.Add(new NpgsqlParameter("Id", executionId)),
+            ExecutionRow.Map, ct);
         return row?.ToModel();
     }
 
@@ -163,6 +164,24 @@ internal sealed class PostgresScheduledReportStore : IScheduledReportStore
         public DateTime updated_at { get; init; }
         public DateTime? last_run_at { get; init; }
         public DateTime? next_run_at { get; init; }
+
+        public static ReportRow Map(NpgsqlDataReader r) => new()
+        {
+            report_id = r.GetString("report_id"),
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            report_type = r.GetString("report_type"),
+            schedule = r.GetString("schedule"),
+            filters = r.GetStringOrNull("filters"),
+            recipients = r.GetString("recipients"),
+            format = r.GetString("format"),
+            is_active = r.GetBoolean("is_active"),
+            created_by = r.GetString("created_by"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTime("updated_at"),
+            last_run_at = r.GetDateTimeOrNull("last_run_at"),
+            next_run_at = r.GetDateTimeOrNull("next_run_at"),
+        };
 
         public ScheduledReport ToModel() => new()
         {
@@ -195,6 +214,20 @@ internal sealed class PostgresScheduledReportStore : IScheduledReportStore
         public long? file_size_bytes { get; init; }
         public string? error_message { get; init; }
         public int? recipients_sent { get; init; }
+
+        public static ExecutionRow Map(NpgsqlDataReader r) => new()
+        {
+            execution_id = r.GetString("execution_id"),
+            report_id = r.GetString("report_id"),
+            tenant_id = r.GetString("tenant_id"),
+            started_at = r.GetDateTime("started_at"),
+            completed_at = r.GetDateTimeOrNull("completed_at"),
+            status = r.GetString("status"),
+            format = r.GetString("format"),
+            file_size_bytes = r.GetInt64OrNull("file_size_bytes"),
+            error_message = r.GetStringOrNull("error_message"),
+            recipients_sent = r.GetInt32OrNull("recipients_sent"),
+        };
 
         public ReportExecution ToModel() => new()
         {

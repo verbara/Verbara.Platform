@@ -1,10 +1,11 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Serialization;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -18,8 +19,7 @@ internal sealed class PostgresMessageStore : IMessageStore
     {
         var contentJson = JsonSerializer.Serialize(message.Content, ConversationsJsonContext.Default.MessageEnvelope);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO messages (message_id, conversation_id, tenant_id, direction, channel, sender_id, content, " +
             "delivery_status, external_message_id, created_at, delivered_at, read_at, updated_at, created_by, updated_by) " +
             "VALUES (@MessageId, @ConversationId, @TenantId, @Direction, @Channel, @SenderId, @Content::jsonb, " +
@@ -27,78 +27,85 @@ internal sealed class PostgresMessageStore : IMessageStore
             "ON CONFLICT (tenant_id, message_id) DO UPDATE SET " +
             "  delivery_status = EXCLUDED.delivery_status, delivered_at = EXCLUDED.delivered_at, " +
             "  read_at = EXCLUDED.read_at, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-            new
+            p =>
             {
-                MessageId = message.MessageId.Value,
-                ConversationId = message.ConversationId.Value,
-                TenantId = message.TenantId.Value,
-                Direction = (int)message.Direction,
-                Channel = (int)message.Channel,
-                message.SenderId,
-                Content = contentJson,
-                DeliveryStatus = (int)message.DeliveryStatus,
-                message.ExternalMessageId,
-                message.CreatedAt,
-                message.DeliveredAt,
-                message.ReadAt,
-                message.UpdatedAt,
-                message.CreatedBy,
-                message.UpdatedBy,
-            });
+                p.Add(new NpgsqlParameter("MessageId",         message.MessageId.Value));
+                p.Add(new NpgsqlParameter("ConversationId",    message.ConversationId.Value));
+                p.Add(new NpgsqlParameter("TenantId",          message.TenantId.Value));
+                p.Add(new NpgsqlParameter("Direction",         (int)message.Direction));
+                p.Add(new NpgsqlParameter("Channel",           (int)message.Channel));
+                p.Add(new NpgsqlParameter("SenderId", NpgsqlDbType.Text) { Value = (object?)message.SenderId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Content",           contentJson));
+                p.Add(new NpgsqlParameter("DeliveryStatus",    (int)message.DeliveryStatus));
+                p.Add(new NpgsqlParameter("ExternalMessageId", NpgsqlDbType.Text) { Value = (object?)message.ExternalMessageId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedAt",         message.CreatedAt));
+                p.Add(new NpgsqlParameter("DeliveredAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.DeliveredAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ReadAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.ReadAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)message.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)message.UpdatedBy ?? DBNull.Value });
+            },
+            ct);
     }
 
     public async Task<Message?> GetByIdAsync(TenantId tenantId, EntityId messageId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<MessageRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT message_id, conversation_id, tenant_id, direction, channel, sender_id, content, " +
             "delivery_status, external_message_id, created_at, delivered_at, read_at, updated_at, created_by, updated_by " +
             "FROM messages WHERE tenant_id = @TenantId AND message_id = @MessageId",
-            new { TenantId = tenantId.Value, MessageId = messageId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("MessageId", messageId.Value)); },
+            MessageRow.Map, ct);
         return row?.ToMessage();
     }
 
     public async Task<IReadOnlyList<Message>> GetConversationMessagesAsync(
         TenantId tenantId, EntityId conversationId, int limit, int offset, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<MessageRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT message_id, conversation_id, tenant_id, direction, channel, sender_id, content, " +
             "delivery_status, external_message_id, created_at, delivered_at, read_at, updated_at, created_by, updated_by " +
             "FROM messages WHERE tenant_id = @TenantId AND conversation_id = @ConversationId " +
             "ORDER BY created_at LIMIT @Limit OFFSET @Offset",
-            new { TenantId = tenantId.Value, ConversationId = conversationId.Value, Limit = limit, Offset = offset });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId",       tenantId.Value));
+                p.Add(new NpgsqlParameter("ConversationId", conversationId.Value));
+                p.Add(new NpgsqlParameter("Limit",          limit));
+                p.Add(new NpgsqlParameter("Offset",         offset));
+            },
+            MessageRow.Map, ct);
         return rows.Select(r => r.ToMessage()).ToList();
     }
 
     public async Task UpdateDeliveryStatusAsync(
         TenantId tenantId, EntityId messageId, MessageDeliveryStatus status, DateTimeOffset? timestamp, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "UPDATE messages SET delivery_status = @Status, " +
             "  delivered_at = CASE WHEN @Status = @DeliveredInt THEN @Timestamp ELSE delivered_at END, " +
             "  read_at = CASE WHEN @Status = @ReadInt THEN @Timestamp ELSE read_at END " +
             "WHERE tenant_id = @TenantId AND message_id = @MessageId",
-            new
+            p =>
             {
-                TenantId = tenantId.Value,
-                MessageId = messageId.Value,
-                Status = (int)status,
-                DeliveredInt = (int)MessageDeliveryStatus.Delivered,
-                ReadInt = (int)MessageDeliveryStatus.Read,
-                Timestamp = timestamp,
-            });
+                p.Add(new NpgsqlParameter("TenantId",     tenantId.Value));
+                p.Add(new NpgsqlParameter("MessageId",    messageId.Value));
+                p.Add(new NpgsqlParameter("Status",       (int)status));
+                p.Add(new NpgsqlParameter("DeliveredInt", (int)MessageDeliveryStatus.Delivered));
+                p.Add(new NpgsqlParameter("ReadInt",      (int)MessageDeliveryStatus.Read));
+                p.Add(new NpgsqlParameter("Timestamp", NpgsqlDbType.TimestampTz) { Value = (object?)timestamp ?? DBNull.Value });
+            },
+            ct);
     }
 
     public async Task<Message?> FindByExternalIdAsync(TenantId tenantId, string externalMessageId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<MessageRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT message_id, conversation_id, tenant_id, direction, channel, sender_id, content, " +
             "delivery_status, external_message_id, created_at, delivered_at, read_at, updated_at, created_by, updated_by " +
             "FROM messages WHERE tenant_id = @TenantId AND external_message_id = @ExternalMessageId",
-            new { TenantId = tenantId.Value, ExternalMessageId = externalMessageId });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("ExternalMessageId", externalMessageId)); },
+            MessageRow.Map, ct);
         return row?.ToMessage();
     }
 
@@ -107,14 +114,14 @@ internal sealed class PostgresMessageStore : IMessageStore
         if (conversationIds.Count == 0)
             return [];
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var ids = conversationIds.Select(id => id.Value).ToArray();
-        var rows = await conn.QueryAsync<MessageRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT message_id, conversation_id, tenant_id, direction, channel, sender_id, content, " +
             "delivery_status, external_message_id, created_at, delivered_at, read_at, updated_at, created_by, updated_by " +
             "FROM messages WHERE tenant_id = @TenantId AND conversation_id = ANY(@ConversationIds) " +
             "ORDER BY created_at",
-            new { TenantId = tenantId.Value, ConversationIds = ids });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("ConversationIds", ids)); },
+            MessageRow.Map, ct);
         return rows.Select(r => r.ToMessage()).ToList();
     }
 
@@ -123,20 +130,20 @@ internal sealed class PostgresMessageStore : IMessageStore
         if (conversationIds.Count == 0)
             return 0;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var ids = conversationIds.Select(id => id.Value).ToArray();
-        return await conn.ExecuteAsync(
+        return await _dataSource.ExecuteAsync(
             "DELETE FROM messages WHERE tenant_id = @TenantId AND conversation_id = ANY(@ConversationIds)",
-            new { TenantId = tenantId.Value, ConversationIds = ids });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("ConversationIds", ids)); },
+            ct);
     }
 
     public async Task<int> DeleteOrphanedAsync(TenantId tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteAsync(
+        return await _dataSource.ExecuteAsync(
             "DELETE FROM messages m WHERE m.tenant_id = @TenantId " +
             "AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.tenant_id = m.tenant_id AND c.conversation_id = m.conversation_id)",
-            new { TenantId = tenantId.Value });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
+            ct);
     }
 
     private sealed class MessageRow
@@ -156,6 +163,25 @@ internal sealed class PostgresMessageStore : IMessageStore
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
+
+        public static MessageRow Map(NpgsqlDataReader r) => new()
+        {
+            message_id          = r.GetString("message_id"),
+            conversation_id     = r.GetString("conversation_id"),
+            tenant_id           = r.GetString("tenant_id"),
+            direction           = r.GetInt32("direction"),
+            channel             = r.GetInt32("channel"),
+            sender_id           = r.GetStringOrNull("sender_id"),
+            content             = r.GetString("content"),
+            delivery_status     = r.GetInt32("delivery_status"),
+            external_message_id = r.GetStringOrNull("external_message_id"),
+            created_at          = r.GetDateTime("created_at"),
+            delivered_at        = r.GetDateTimeOrNull("delivered_at"),
+            read_at             = r.GetDateTimeOrNull("read_at"),
+            updated_at          = r.GetDateTimeOrNull("updated_at"),
+            created_by          = r.GetStringOrNull("created_by"),
+            updated_by          = r.GetStringOrNull("updated_by"),
+        };
 
         public Message ToMessage()
         {

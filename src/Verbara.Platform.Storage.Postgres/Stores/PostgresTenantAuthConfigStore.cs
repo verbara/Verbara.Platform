@@ -1,8 +1,9 @@
 using System.Security.Cryptography;
-using Dapper;
+using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Identity;
 using Microsoft.AspNetCore.DataProtection;
-using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -69,22 +70,21 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
 
     public async Task<TenantAuthConfig?> GetAsync(string tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<TenantAuthConfigRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT tenant_id, mfa_policy, mfa_required_roles, password_min_length, password_require_uppercase, " +
             "password_require_number, password_require_special, lockout_threshold, lockout_duration_minutes, " +
             "session_idle_timeout_minutes, session_absolute_timeout_hours, oidc_enabled, oidc_authority, " +
             "oidc_client_id, oidc_client_secret, oidc_auto_create_users, oidc_default_role, " +
             "impersonation_max_concurrent_sessions, impersonation_auto_timeout_minutes, ip_allowlist_enabled, updated_at " +
             "FROM tenant_auth_config WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId)),
+            TenantAuthConfigRow.Map, ct);
         return row?.ToTenantAuthConfig(this);
     }
 
     public async Task SaveAsync(TenantAuthConfig config, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO tenant_auth_config (tenant_id, mfa_policy, mfa_required_roles, password_min_length, " +
             "password_require_uppercase, password_require_number, password_require_special, lockout_threshold, " +
             "lockout_duration_minutes, session_idle_timeout_minutes, session_absolute_timeout_hours, oidc_enabled, " +
@@ -108,31 +108,32 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             "  impersonation_auto_timeout_minutes = EXCLUDED.impersonation_auto_timeout_minutes, " +
             "  ip_allowlist_enabled = EXCLUDED.ip_allowlist_enabled, " +
             "  updated_at = EXCLUDED.updated_at",
-            new
+            p =>
             {
-                config.TenantId,
-                config.MfaPolicy,
-                MfaRequiredRoles = config.MfaRequiredRoles.ToArray(),
-                config.PasswordMinLength,
-                config.PasswordRequireUppercase,
-                config.PasswordRequireNumber,
-                config.PasswordRequireSpecial,
-                config.LockoutThreshold,
-                config.LockoutDurationMinutes,
-                config.SessionIdleTimeoutMinutes,
-                config.SessionAbsoluteTimeoutHours,
-                config.OidcEnabled,
-                config.OidcAuthority,
-                config.OidcClientId,
+                p.Add(new NpgsqlParameter("TenantId", config.TenantId));
+                p.Add(new NpgsqlParameter("MfaPolicy", config.MfaPolicy));
+                p.Add(new NpgsqlParameter("MfaRequiredRoles", config.MfaRequiredRoles.ToArray()));
+                p.Add(new NpgsqlParameter("PasswordMinLength", config.PasswordMinLength));
+                p.Add(new NpgsqlParameter("PasswordRequireUppercase", config.PasswordRequireUppercase));
+                p.Add(new NpgsqlParameter("PasswordRequireNumber", config.PasswordRequireNumber));
+                p.Add(new NpgsqlParameter("PasswordRequireSpecial", config.PasswordRequireSpecial));
+                p.Add(new NpgsqlParameter("LockoutThreshold", config.LockoutThreshold));
+                p.Add(new NpgsqlParameter("LockoutDurationMinutes", config.LockoutDurationMinutes));
+                p.Add(new NpgsqlParameter("SessionIdleTimeoutMinutes", config.SessionIdleTimeoutMinutes));
+                p.Add(new NpgsqlParameter("SessionAbsoluteTimeoutHours", config.SessionAbsoluteTimeoutHours));
+                p.Add(new NpgsqlParameter("OidcEnabled", config.OidcEnabled));
+                p.Add(new NpgsqlParameter("OidcAuthority", NpgsqlDbType.Text) { Value = (object?)config.OidcAuthority ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("OidcClientId", NpgsqlDbType.Text) { Value = (object?)config.OidcClientId ?? DBNull.Value });
                 // ADMIN-001 (PREPUB-2026-05-09): wrap on write — never write plaintext.
-                OidcClientSecret = ProtectSecret(config.OidcClientSecret),
-                config.OidcAutoCreateUsers,
-                config.OidcDefaultRole,
-                config.ImpersonationMaxConcurrentSessions,
-                config.ImpersonationAutoTimeoutMinutes,
-                config.IpAllowlistEnabled,
-                config.UpdatedAt,
-            });
+                p.Add(new NpgsqlParameter("OidcClientSecret", NpgsqlDbType.Text) { Value = (object?)ProtectSecret(config.OidcClientSecret) ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("OidcAutoCreateUsers", config.OidcAutoCreateUsers));
+                p.Add(new NpgsqlParameter("OidcDefaultRole", config.OidcDefaultRole));
+                p.Add(new NpgsqlParameter("ImpersonationMaxConcurrentSessions", config.ImpersonationMaxConcurrentSessions));
+                p.Add(new NpgsqlParameter("ImpersonationAutoTimeoutMinutes", config.ImpersonationAutoTimeoutMinutes));
+                p.Add(new NpgsqlParameter("IpAllowlistEnabled", config.IpAllowlistEnabled));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)config.UpdatedAt ?? DBNull.Value });
+            },
+            ct);
     }
 
     private sealed class TenantAuthConfigRow
@@ -158,6 +159,37 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
         public int impersonation_auto_timeout_minutes { get; init; } = 240;
         public bool ip_allowlist_enabled { get; init; }
         public DateTime? updated_at { get; init; }
+
+        public static TenantAuthConfigRow Map(NpgsqlDataReader r)
+        {
+            var mfaRolesOrdinal = r.GetOrdinal("mfa_required_roles");
+            return new()
+            {
+                tenant_id = r.GetString("tenant_id"),
+                mfa_policy = r.GetString("mfa_policy"),
+                mfa_required_roles = r.IsDBNull(mfaRolesOrdinal)
+                    ? null
+                    : r.GetFieldValue<string[]>(mfaRolesOrdinal),
+                password_min_length = r.GetInt32("password_min_length"),
+                password_require_uppercase = r.GetBoolean("password_require_uppercase"),
+                password_require_number = r.GetBoolean("password_require_number"),
+                password_require_special = r.GetBoolean("password_require_special"),
+                lockout_threshold = r.GetInt32("lockout_threshold"),
+                lockout_duration_minutes = r.GetInt32("lockout_duration_minutes"),
+                session_idle_timeout_minutes = r.GetInt32("session_idle_timeout_minutes"),
+                session_absolute_timeout_hours = r.GetInt32("session_absolute_timeout_hours"),
+                oidc_enabled = r.GetBoolean("oidc_enabled"),
+                oidc_authority = r.GetStringOrNull("oidc_authority"),
+                oidc_client_id = r.GetStringOrNull("oidc_client_id"),
+                oidc_client_secret = r.GetStringOrNull("oidc_client_secret"),
+                oidc_auto_create_users = r.GetBoolean("oidc_auto_create_users"),
+                oidc_default_role = r.GetString("oidc_default_role"),
+                impersonation_max_concurrent_sessions = r.GetInt32("impersonation_max_concurrent_sessions"),
+                impersonation_auto_timeout_minutes = r.GetInt32("impersonation_auto_timeout_minutes"),
+                ip_allowlist_enabled = r.GetBoolean("ip_allowlist_enabled"),
+                updated_at = r.GetDateTimeOrNull("updated_at"),
+            };
+        }
 
         public TenantAuthConfig ToTenantAuthConfig(PostgresTenantAuthConfigStore store) => new()
         {

@@ -1,6 +1,6 @@
 using Verbara.Platform.Storage.Postgres.Seeds;
-using Dapper;
 using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Tests.Seeds;
 
@@ -140,10 +140,7 @@ public sealed class RoleTemplateSeederReseedTests
         adminPerms.Should().BeEquivalentTo(RoleTemplateSeeder.GetCanonicalPermissions());
 
         // agent role must remain untouched — exactly the one permission seeded.
-        var agentPerms = await conn.QueryAsync<string>(
-            "SELECT permission_id FROM tenant_role_permissions " +
-            "WHERE tenant_id = @TenantId AND role_id = @RoleId",
-            new { TenantId = "tenant-d", RoleId = "agent" });
+        var agentPerms = await ReadRolePermissionsAsync(conn, "tenant-d", "agent");
         agentPerms.Should().BeEquivalentTo(["contacts:conversation:handle"]);
     }
 
@@ -169,7 +166,8 @@ public sealed class RoleTemplateSeederReseedTests
 
         foreach (var perm in RoleTemplateSeeder.GetCanonicalPermissions())
         {
-            await conn.ExecuteAsync(sql, new { Id = perm });
+            await conn.ExecuteAsync(sql,
+                p => p.Add(new NpgsqlParameter("Id", perm)), null, CancellationToken.None);
         }
     }
 
@@ -178,7 +176,7 @@ public sealed class RoleTemplateSeederReseedTests
         await conn.ExecuteAsync(
             "INSERT INTO permissions (permission_id, category, resource, action, description, implies) " +
             "VALUES (@Id, 'legacy', 'legacy', 'legacy', 'retired in current code', ARRAY[]::text[])",
-            new { Id = permissionId });
+            p => p.Add(new NpgsqlParameter("Id", permissionId)), null, CancellationToken.None);
     }
 
     private static async Task CreateTenantWithPermissionsAsync(
@@ -194,7 +192,12 @@ public sealed class RoleTemplateSeederReseedTests
             "INSERT INTO tenant_roles (role_id, tenant_id, name, description, source_template_id, is_default) " +
             "VALUES (@RoleId, @TenantId, @Name, 'fixture role', @RoleId, true) " +
             "ON CONFLICT (tenant_id, role_id) DO NOTHING",
-            new { RoleId = roleId, TenantId = tenantId, Name = roleId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("Name", roleId));
+            }, null, CancellationToken.None);
 
         foreach (var perm in permissions)
         {
@@ -202,17 +205,31 @@ public sealed class RoleTemplateSeederReseedTests
                 "INSERT INTO tenant_role_permissions (tenant_id, role_id, permission_id) " +
                 "VALUES (@TenantId, @RoleId, @PermissionId) " +
                 "ON CONFLICT (tenant_id, role_id, permission_id) DO NOTHING",
-                new { TenantId = tenantId, RoleId = roleId, PermissionId = perm });
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId));
+                    p.Add(new NpgsqlParameter("RoleId", roleId));
+                    p.Add(new NpgsqlParameter("PermissionId", perm));
+                }, null, CancellationToken.None);
         }
     }
 
-    private static async Task<IReadOnlyCollection<string>> ReadTenantPermissionsAsync(
-        NpgsqlConnection conn, string tenantId)
+    private static Task<IReadOnlyCollection<string>> ReadTenantPermissionsAsync(
+        NpgsqlConnection conn, string tenantId) =>
+        ReadRolePermissionsAsync(conn, tenantId, RoleTemplateSeeder.PlatformAdminRoleId);
+
+    private static async Task<IReadOnlyCollection<string>> ReadRolePermissionsAsync(
+        NpgsqlConnection conn, string tenantId, string roleId)
     {
-        var rows = await conn.QueryAsync<string>(
+        var rows = new List<string>();
+        await using var cmd = new NpgsqlCommand(
             "SELECT permission_id FROM tenant_role_permissions " +
-            "WHERE tenant_id = @TenantId AND role_id = @RoleId",
-            new { TenantId = tenantId, RoleId = RoleTemplateSeeder.PlatformAdminRoleId });
-        return rows.ToList();
+            "WHERE tenant_id = @TenantId AND role_id = @RoleId", conn);
+        cmd.Parameters.Add(new NpgsqlParameter("TenantId", tenantId));
+        cmd.Parameters.Add(new NpgsqlParameter("RoleId", roleId));
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            rows.Add(reader.GetString(0));
+        return rows;
     }
 }

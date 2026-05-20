@@ -1,12 +1,12 @@
 using System.Xml.Linq;
-using Dapper;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Identity.DataProtection;
 
-internal static partial class DapperXmlRepositoryLog
+internal static partial class NpgsqlXmlRepositoryLog
 {
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,
         Message = "[DPK] Skipping malformed row id={Id} friendly={FriendlyName}: {Reason}")]
@@ -14,7 +14,7 @@ internal static partial class DapperXmlRepositoryLog
 }
 
 /// <summary>
-/// AOT-safe Dapper implementation of ASP.NET Core DataProtection's
+/// AOT-safe raw Npgsql implementation of ASP.NET Core DataProtection's
 /// <see cref="IXmlRepository"/>. Reads + writes the same
 /// <c>data_protection_keys</c> table that the legacy
 /// <c>EntityFrameworkCoreXmlRepository</c> consumed (migrations V018 + V022),
@@ -33,9 +33,13 @@ internal static partial class DapperXmlRepositoryLog
 /// Closes ADR-0022 Phase B — removing the EF Core dependency from the
 /// Platform.Api host so the only remaining AOT blockers are the SignalR
 /// shadow (closed in Phase A) and the AOT publish itself (Phase C).
+/// <see cref="IXmlRepository"/> is a synchronous interface, so this type uses
+/// raw synchronous <see cref="NpgsqlCommand"/> directly (the
+/// <c>Verbara.Sdk.Data.Npgsql</c> facade is async-only); the name-based reader
+/// getters from that package work on the synchronous reader too.
 /// </para>
 /// </remarks>
-public sealed class DapperXmlRepository : IXmlRepository
+public sealed class NpgsqlXmlRepository : IXmlRepository
 {
     private const string SelectAllSql =
         "SELECT id, friendly_name, xml FROM data_protection_keys";
@@ -44,9 +48,9 @@ public sealed class DapperXmlRepository : IXmlRepository
         "INSERT INTO data_protection_keys (friendly_name, xml) VALUES (@FriendlyName, @Xml)";
 
     private readonly NpgsqlDataSource _dataSource;
-    private readonly ILogger<DapperXmlRepository> _logger;
+    private readonly ILogger<NpgsqlXmlRepository> _logger;
 
-    public DapperXmlRepository(NpgsqlDataSource dataSource, ILogger<DapperXmlRepository> logger)
+    public NpgsqlXmlRepository(NpgsqlDataSource dataSource, ILogger<NpgsqlXmlRepository> logger)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentNullException.ThrowIfNull(logger);
@@ -57,22 +61,27 @@ public sealed class DapperXmlRepository : IXmlRepository
     /// <inheritdoc />
     public IReadOnlyCollection<XElement> GetAllElements()
     {
-        using var conn = _dataSource.OpenConnection();
-        var rows = conn.Query<KeyRow>(SelectAllSql).AsList();
+        var elements = new List<XElement>();
 
-        var elements = new List<XElement>(rows.Count);
-        foreach (var row in rows)
+        using var conn = _dataSource.OpenConnection();
+        using var cmd = new NpgsqlCommand(SelectAllSql, conn);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
         {
-            if (string.IsNullOrWhiteSpace(row.Xml))
+            var id = reader.GetInt64("id");
+            var friendlyName = reader.GetStringOrNull("friendly_name");
+            var xml = reader.GetStringOrNull("xml");
+
+            if (string.IsNullOrWhiteSpace(xml))
                 continue;
 
             try
             {
-                elements.Add(XElement.Parse(row.Xml));
+                elements.Add(XElement.Parse(xml));
             }
             catch (System.Xml.XmlException ex)
             {
-                DapperXmlRepositoryLog.MalformedRow(_logger, row.Id, row.FriendlyName ?? "<null>", ex.Message);
+                NpgsqlXmlRepositoryLog.MalformedRow(_logger, id, friendlyName ?? "<null>", ex.Message);
             }
         }
 
@@ -85,17 +94,9 @@ public sealed class DapperXmlRepository : IXmlRepository
         ArgumentNullException.ThrowIfNull(element);
 
         using var conn = _dataSource.OpenConnection();
-        conn.Execute(InsertSql, new
-        {
-            FriendlyName = friendlyName ?? string.Empty,
-            Xml = element.ToString(SaveOptions.DisableFormatting),
-        });
-    }
-
-    private sealed class KeyRow
-    {
-        public long Id { get; init; }
-        public string? FriendlyName { get; init; }
-        public string Xml { get; init; } = string.Empty;
+        using var cmd = new NpgsqlCommand(InsertSql, conn);
+        cmd.Parameters.Add(new NpgsqlParameter("FriendlyName", friendlyName ?? string.Empty));
+        cmd.Parameters.Add(new NpgsqlParameter("Xml", element.ToString(SaveOptions.DisableFormatting)));
+        cmd.ExecuteNonQuery();
     }
 }

@@ -1,8 +1,9 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -14,53 +15,64 @@ internal sealed class PostgresContactStore : IContactStore
 
     public async Task<Contact?> GetByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ContactRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT contact_id, tenant_id, first_name, last_name, company, segment, preferred_channel, " +
             "preferred_language, timezone, do_not_contact, addresses, custom_fields, channel_consent, " +
             "created_at, updated_at, created_by, updated_by " +
             "FROM contacts WHERE tenant_id = @TenantId AND contact_id = @ContactId",
-            new { TenantId = tenantId.Value, ContactId = contactId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("ContactId", contactId.Value)); },
+            ContactRow.Map, ct);
         return row?.ToContact();
     }
 
     public async Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<ContactRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT contact_id, tenant_id, first_name, last_name, company, segment, preferred_channel, " +
             "preferred_language, timezone, do_not_contact, addresses, custom_fields, channel_consent, " +
             "created_at, updated_at, created_by, updated_by " +
             "FROM contacts WHERE tenant_id = @TenantId " +
             "  AND EXISTS (SELECT 1 FROM jsonb_array_elements(addresses) AS a " +
             "              WHERE (a->>'channel')::int = @Channel AND a->>'address' = @Address)",
-            new { TenantId = tenantId.Value, Channel = (int)address.Channel, Address = address.Address });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Channel", (int)address.Channel)); p.Add(new NpgsqlParameter("Address", address.Address)); },
+            ContactRow.Map, ct);
         return rows.Select(r => r.ToContact()).FirstOrDefault();
     }
 
     public async Task<PagedResult<Contact>> SearchAsync(TenantId tenantId, string? searchTerm, PagedQuery query, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        int total;
+        List<ContactRow> rows;
 
-        string filter;
-        object parameters;
         if (string.IsNullOrEmpty(searchTerm))
         {
-            filter = "WHERE tenant_id = @TenantId";
-            parameters = new { TenantId = tenantId.Value, Limit = query.PageSize, Offset = query.Offset };
+            total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
+                "SELECT COUNT(*) FROM contacts WHERE tenant_id = @TenantId",
+                p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)), ct) ?? 0L);
+            rows = await _dataSource.QueryListAsync(
+                "SELECT contact_id, tenant_id, first_name, last_name, company, segment, preferred_channel, " +
+                "preferred_language, timezone, do_not_contact, addresses, custom_fields, channel_consent, " +
+                "created_at, updated_at, created_by, updated_by " +
+                "FROM contacts WHERE tenant_id = @TenantId ORDER BY created_at LIMIT @Limit OFFSET @Offset",
+                p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Limit", query.PageSize)); p.Add(new NpgsqlParameter("Offset", query.Offset)); },
+                ContactRow.Map, ct);
         }
         else
         {
-            filter = "WHERE tenant_id = @TenantId AND (first_name ILIKE @Term OR last_name ILIKE @Term OR company ILIKE @Term)";
-            parameters = new { TenantId = tenantId.Value, Term = $"%{searchTerm}%", Limit = query.PageSize, Offset = query.Offset };
+            var term = $"%{searchTerm}%";
+            total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
+                "SELECT COUNT(*) FROM contacts WHERE tenant_id = @TenantId AND (first_name ILIKE @Term OR last_name ILIKE @Term OR company ILIKE @Term)",
+                p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Term", term)); }, ct) ?? 0L);
+            rows = await _dataSource.QueryListAsync(
+                "SELECT contact_id, tenant_id, first_name, last_name, company, segment, preferred_channel, " +
+                "preferred_language, timezone, do_not_contact, addresses, custom_fields, channel_consent, " +
+                "created_at, updated_at, created_by, updated_by " +
+                "FROM contacts WHERE tenant_id = @TenantId AND (first_name ILIKE @Term OR last_name ILIKE @Term OR company ILIKE @Term) " +
+                "ORDER BY created_at LIMIT @Limit OFFSET @Offset",
+                p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Term", term)); p.Add(new NpgsqlParameter("Limit", query.PageSize)); p.Add(new NpgsqlParameter("Offset", query.Offset)); },
+                ContactRow.Map, ct);
         }
 
-        var total = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM contacts {filter}", parameters);
-        var rows = await conn.QueryAsync<ContactRow>(
-            "SELECT contact_id, tenant_id, first_name, last_name, company, segment, preferred_channel, " +
-            "preferred_language, timezone, do_not_contact, addresses, custom_fields, channel_consent, " +
-            $"created_at, updated_at, created_by, updated_by FROM contacts {filter} ORDER BY created_at LIMIT @Limit OFFSET @Offset",
-            parameters);
         var items = rows.Select(r => r.ToContact()).ToList();
         return new PagedResult<Contact>(items, total, query.Page, query.PageSize);
     }
@@ -77,8 +89,7 @@ internal sealed class PostgresContactStore : IContactStore
             (Dictionary<int, bool>)contact.ChannelConsent.ToDictionary(kv => (int)kv.Key, kv => kv.Value),
             PostgresJson.Ctx.DictionaryInt32Boolean);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO contacts (contact_id, tenant_id, first_name, last_name, company, segment, preferred_channel, " +
             "preferred_language, timezone, do_not_contact, addresses, custom_fields, channel_consent, created_at, updated_at, created_by, updated_by) " +
             "VALUES (@ContactId, @TenantId, @FirstName, @LastName, @Company, @Segment, @PreferredChannel, " +
@@ -91,34 +102,35 @@ internal sealed class PostgresContactStore : IContactStore
             "  do_not_contact = EXCLUDED.do_not_contact, addresses = EXCLUDED.addresses, " +
             "  custom_fields = EXCLUDED.custom_fields, channel_consent = EXCLUDED.channel_consent, " +
             "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-            new
+            p =>
             {
-                ContactId = contact.ContactId.Value,
-                TenantId = contact.TenantId.Value,
-                contact.FirstName,
-                contact.LastName,
-                contact.Company,
-                contact.Segment,
-                PreferredChannel = contact.PreferredChannel.HasValue ? (int?)contact.PreferredChannel.Value : null,
-                contact.PreferredLanguage,
-                contact.Timezone,
-                contact.DoNotContact,
-                Addresses = addressesJson,
-                CustomFields = customFieldsJson,
-                ChannelConsent = consentJson,
-                contact.CreatedAt,
-                contact.UpdatedAt,
-                contact.CreatedBy,
-                contact.UpdatedBy,
-            });
+                p.Add(new NpgsqlParameter("ContactId", contact.ContactId.Value));
+                p.Add(new NpgsqlParameter("TenantId", contact.TenantId.Value));
+                p.Add(new NpgsqlParameter("FirstName", NpgsqlDbType.Text) { Value = (object?)contact.FirstName ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("LastName", NpgsqlDbType.Text) { Value = (object?)contact.LastName ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Company", NpgsqlDbType.Text) { Value = (object?)contact.Company ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Segment", NpgsqlDbType.Text) { Value = (object?)contact.Segment ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("PreferredChannel", contact.PreferredChannel.HasValue ? (object)(int)contact.PreferredChannel.Value : DBNull.Value));
+                p.Add(new NpgsqlParameter("PreferredLanguage", NpgsqlDbType.Text) { Value = (object?)contact.PreferredLanguage ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Timezone", NpgsqlDbType.Text) { Value = (object?)contact.Timezone ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("DoNotContact", contact.DoNotContact));
+                p.Add(new NpgsqlParameter("Addresses", addressesJson));
+                p.Add(new NpgsqlParameter("CustomFields", customFieldsJson));
+                p.Add(new NpgsqlParameter("ChannelConsent", consentJson));
+                p.Add(new NpgsqlParameter("CreatedAt", contact.CreatedAt));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)contact.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)contact.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)contact.UpdatedBy ?? DBNull.Value });
+            },
+            ct);
     }
 
     public async Task DeleteAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "DELETE FROM contacts WHERE tenant_id = @TenantId AND contact_id = @ContactId",
-            new { TenantId = tenantId.Value, ContactId = contactId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("ContactId", contactId.Value)); },
+            ct);
     }
 
     private sealed class ContactRow
@@ -140,6 +152,27 @@ internal sealed class PostgresContactStore : IContactStore
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
+
+        public static ContactRow Map(NpgsqlDataReader r) => new()
+        {
+            contact_id = r.GetString("contact_id"),
+            tenant_id = r.GetString("tenant_id"),
+            first_name = r.GetStringOrNull("first_name"),
+            last_name = r.GetStringOrNull("last_name"),
+            company = r.GetStringOrNull("company"),
+            segment = r.GetStringOrNull("segment"),
+            preferred_channel = r.GetInt32OrNull("preferred_channel"),
+            preferred_language = r.GetStringOrNull("preferred_language"),
+            timezone = r.GetStringOrNull("timezone"),
+            do_not_contact = r.GetBoolean("do_not_contact"),
+            addresses = r.GetString("addresses"),
+            custom_fields = r.GetString("custom_fields"),
+            channel_consent = r.GetString("channel_consent"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTimeOrNull("updated_at"),
+            created_by = r.GetStringOrNull("created_by"),
+            updated_by = r.GetStringOrNull("updated_by"),
+        };
 
         public Contact ToContact()
         {

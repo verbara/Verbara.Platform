@@ -1,8 +1,9 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -14,30 +15,30 @@ internal sealed class PostgresServiceAccountStore : IServiceAccountStore
 
     public async Task<ServiceAccount?> GetByIdAsync(TenantId tenantId, EntityId accountId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ServiceAccountRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT account_id, tenant_id, name, description, scopes, is_active, " +
             "created_at, updated_at, created_by, updated_by " +
             "FROM service_accounts WHERE tenant_id = @TenantId AND account_id = @AccountId",
-            new { TenantId = tenantId.Value, AccountId = accountId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("AccountId", accountId.Value)); },
+            ServiceAccountRow.Map, ct);
         return row?.ToServiceAccount();
     }
 
     public async Task<PagedResult<ServiceAccount>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var offset = (query.Page - 1) * query.PageSize;
 
-        var total = await conn.ExecuteScalarAsync<int>(
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM service_accounts WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId.Value });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)), ct) ?? 0L);
 
-        var rows = await conn.QueryAsync<ServiceAccountRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT account_id, tenant_id, name, description, scopes, is_active, " +
             "created_at, updated_at, created_by, updated_by " +
             "FROM service_accounts WHERE tenant_id = @TenantId " +
             "ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
-            new { TenantId = tenantId.Value, Limit = query.PageSize, Offset = offset });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Limit", query.PageSize)); p.Add(new NpgsqlParameter("Offset", offset)); },
+            ServiceAccountRow.Map, ct);
 
         var items = rows.Select(r => r.ToServiceAccount()).ToList();
         return new PagedResult<ServiceAccount>(items, total, query.Page, query.PageSize);
@@ -47,8 +48,7 @@ internal sealed class PostgresServiceAccountStore : IServiceAccountStore
     {
         var scopesJson = JsonSerializer.Serialize(account.Scopes, PostgresJson.Ctx.IReadOnlyListString);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO service_accounts (account_id, tenant_id, name, description, scopes, is_active, " +
             "created_at, updated_at, created_by, updated_by) " +
             "VALUES (@AccountId, @TenantId, @Name, @Description, @Scopes::jsonb, @IsActive, " +
@@ -56,27 +56,28 @@ internal sealed class PostgresServiceAccountStore : IServiceAccountStore
             "ON CONFLICT (tenant_id, account_id) DO UPDATE SET " +
             "  name = EXCLUDED.name, description = EXCLUDED.description, scopes = EXCLUDED.scopes, " +
             "  is_active = EXCLUDED.is_active, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-            new
+            p =>
             {
-                AccountId = account.AccountId.Value,
-                TenantId = account.TenantId.Value,
-                account.Name,
-                account.Description,
-                Scopes = scopesJson,
-                account.IsActive,
-                account.CreatedAt,
-                account.UpdatedAt,
-                account.CreatedBy,
-                account.UpdatedBy,
-            });
+                p.Add(new NpgsqlParameter("AccountId", account.AccountId.Value));
+                p.Add(new NpgsqlParameter("TenantId", account.TenantId.Value));
+                p.Add(new NpgsqlParameter("Name", account.Name));
+                p.Add(new NpgsqlParameter("Description", account.Description));
+                p.Add(new NpgsqlParameter("Scopes", scopesJson));
+                p.Add(new NpgsqlParameter("IsActive", account.IsActive));
+                p.Add(new NpgsqlParameter("CreatedAt", account.CreatedAt));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)account.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)account.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)account.UpdatedBy ?? DBNull.Value });
+            },
+            ct);
     }
 
     public async Task DeactivateAsync(TenantId tenantId, EntityId accountId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "UPDATE service_accounts SET is_active = false WHERE tenant_id = @TenantId AND account_id = @AccountId",
-            new { TenantId = tenantId.Value, AccountId = accountId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("AccountId", accountId.Value)); },
+            ct);
     }
 
     private sealed class ServiceAccountRow
@@ -91,6 +92,20 @@ internal sealed class PostgresServiceAccountStore : IServiceAccountStore
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
+
+        public static ServiceAccountRow Map(NpgsqlDataReader r) => new()
+        {
+            account_id = r.GetString("account_id"),
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            description = r.GetString("description"),
+            scopes = r.GetString("scopes"),
+            is_active = r.GetBoolean("is_active"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTimeOrNull("updated_at"),
+            created_by = r.GetStringOrNull("created_by"),
+            updated_by = r.GetStringOrNull("updated_by"),
+        };
 
         public ServiceAccount ToServiceAccount()
         {

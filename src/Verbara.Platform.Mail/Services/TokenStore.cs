@@ -1,5 +1,5 @@
-using Dapper;
 using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Mail.Services;
 
@@ -19,6 +19,9 @@ internal sealed class OAuthToken
 
 internal class TokenStore
 {
+    private const string SelectColumns =
+        "id, tenant_id, user_id, provider, access_token, refresh_token, expires_at, scopes, created_at, updated_at";
+
     private readonly NpgsqlDataSource? _dataSource;
 
     public TokenStore(NpgsqlDataSource dataSource)
@@ -37,17 +40,22 @@ internal class TokenStore
 
     public virtual async Task<OAuthToken?> GetAsync(string tenantId, string userId, string provider, CancellationToken ct)
     {
-        const string sql = """
-            SELECT id, tenant_id AS TenantId, user_id AS UserId, provider, access_token AS AccessToken,
-                   refresh_token AS RefreshToken, expires_at AS ExpiresAt, scopes,
-                   created_at AS CreatedAt, updated_at AS UpdatedAt
+        var sql = $"""
+            SELECT {SelectColumns}
             FROM mail.oauth_tokens
             WHERE tenant_id = @TenantId AND user_id = @UserId AND provider = @Provider
             """;
 
-        await using var conn = await _dataSource!.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<OAuthTokenRow>(sql, new { TenantId = tenantId, UserId = userId, Provider = provider });
-        return row?.ToModel();
+        return await _dataSource!.QuerySingleOrDefaultAsync(
+            sql,
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("UserId", userId));
+                p.Add(new NpgsqlParameter("Provider", provider));
+            },
+            MapToken,
+            ct);
     }
 
     public virtual async Task UpsertAsync(OAuthToken token, CancellationToken ct)
@@ -60,72 +68,67 @@ internal class TokenStore
                           scopes = @Scopes, updated_at = @UpdatedAt
             """;
 
-        await using var conn = await _dataSource!.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(sql, new
-        {
-            token.Id,
-            token.TenantId,
-            token.UserId,
-            token.Provider,
-            token.AccessToken,
-            token.RefreshToken,
-            token.ExpiresAt,
-            token.Scopes,
-            token.CreatedAt,
-            token.UpdatedAt,
-        });
+        await _dataSource!.ExecuteAsync(
+            sql,
+            p =>
+            {
+                p.Add(new NpgsqlParameter("Id", token.Id));
+                p.Add(new NpgsqlParameter("TenantId", token.TenantId));
+                p.Add(new NpgsqlParameter("UserId", token.UserId));
+                p.Add(new NpgsqlParameter("Provider", token.Provider));
+                p.Add(new NpgsqlParameter("AccessToken", token.AccessToken));
+                p.Add(new NpgsqlParameter("RefreshToken", token.RefreshToken));
+                p.Add(new NpgsqlParameter("ExpiresAt", token.ExpiresAt));
+                p.Add(new NpgsqlParameter("Scopes", token.Scopes));
+                p.Add(new NpgsqlParameter("CreatedAt", token.CreatedAt));
+                p.Add(new NpgsqlParameter("UpdatedAt", token.UpdatedAt));
+            },
+            ct);
     }
 
     public virtual async Task DeleteAsync(string tenantId, string userId, string provider, CancellationToken ct)
     {
         const string sql = "DELETE FROM mail.oauth_tokens WHERE tenant_id = @TenantId AND user_id = @UserId AND provider = @Provider";
 
-        await using var conn = await _dataSource!.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(sql, new { TenantId = tenantId, UserId = userId, Provider = provider });
+        await _dataSource!.ExecuteAsync(
+            sql,
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("UserId", userId));
+                p.Add(new NpgsqlParameter("Provider", provider));
+            },
+            ct);
     }
 
     public virtual async Task<IReadOnlyList<OAuthToken>> GetExpiringAsync(TimeSpan window, CancellationToken ct)
     {
-        const string sql = """
-            SELECT id, tenant_id AS TenantId, user_id AS UserId, provider, access_token AS AccessToken,
-                   refresh_token AS RefreshToken, expires_at AS ExpiresAt, scopes,
-                   created_at AS CreatedAt, updated_at AS UpdatedAt
+        var sql = $"""
+            SELECT {SelectColumns}
             FROM mail.oauth_tokens
             WHERE expires_at <= @Threshold AND refresh_token IS NOT NULL AND refresh_token != ''
             ORDER BY expires_at ASC
             """;
 
         var threshold = DateTime.UtcNow.Add(window);
-        await using var conn = await _dataSource!.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<OAuthTokenRow>(sql, new { Threshold = threshold });
-        return rows.Select(r => r.ToModel()).ToList();
+        return await _dataSource!.QueryListAsync(
+            sql,
+            p => p.Add(new NpgsqlParameter("Threshold", threshold)),
+            MapToken,
+            ct);
     }
 
-    private sealed class OAuthTokenRow
+    private static OAuthToken MapToken(NpgsqlDataReader r) => new()
     {
-        public string Id { get; init; } = string.Empty;
-        public string TenantId { get; init; } = string.Empty;
-        public string UserId { get; init; } = string.Empty;
-        public string Provider { get; init; } = string.Empty;
-        public string AccessToken { get; init; } = string.Empty;
-        public string RefreshToken { get; init; } = string.Empty;
-        public DateTime ExpiresAt { get; init; }
-        public string Scopes { get; init; } = string.Empty;
-        public DateTime CreatedAt { get; init; }
-        public DateTime UpdatedAt { get; init; }
-
-        public OAuthToken ToModel() => new()
-        {
-            Id = Id,
-            TenantId = TenantId,
-            UserId = UserId,
-            Provider = Provider,
-            AccessToken = AccessToken,
-            RefreshToken = RefreshToken,
-            ExpiresAt = ExpiresAt,
-            Scopes = Scopes,
-            CreatedAt = CreatedAt,
-            UpdatedAt = UpdatedAt,
-        };
-    }
+        Id = r.GetString("id"),
+        TenantId = r.GetString("tenant_id"),
+        UserId = r.GetString("user_id"),
+        Provider = r.GetString("provider"),
+        AccessToken = r.GetString("access_token"),
+        RefreshToken = r.GetString("refresh_token"),
+        ExpiresAt = r.GetDateTime("expires_at"),
+        Scopes = r.GetString("scopes"),
+        CreatedAt = r.GetDateTime("created_at"),
+        UpdatedAt = r.GetDateTime("updated_at"),
+    };
 }

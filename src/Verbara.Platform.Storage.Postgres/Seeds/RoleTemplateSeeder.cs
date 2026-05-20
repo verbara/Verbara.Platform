@@ -1,5 +1,5 @@
-using Dapper;
 using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Seeds;
 
@@ -25,8 +25,6 @@ public static class RoleTemplateSeeder
 
     public static async Task SeedAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-
         const string templateSql =
             "INSERT INTO role_templates (template_id, name, description, is_system, created_at) " +
             "VALUES (@TemplateId, @Name, @Description, true, now()) " +
@@ -37,12 +35,29 @@ public static class RoleTemplateSeeder
             "VALUES (@TemplateId, @PermissionId) " +
             "ON CONFLICT (template_id, permission_id) DO NOTHING";
 
+        // No transaction in the original — each INSERT auto-commits. We reproduce
+        // the per-row loop with the facade's connection-less ExecuteAsync.
         foreach (var (template, permissions) in GetTemplates())
         {
-            await conn.ExecuteAsync(templateSql, template);
+            await dataSource.ExecuteAsync(
+                templateSql,
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TemplateId", template.TemplateId));
+                    p.Add(new NpgsqlParameter("Name", template.Name));
+                    p.Add(new NpgsqlParameter("Description", template.Description));
+                },
+                ct);
             foreach (var permissionId in permissions)
             {
-                await conn.ExecuteAsync(permSql, new { template.TemplateId, PermissionId = permissionId });
+                await dataSource.ExecuteAsync(
+                    permSql,
+                    p =>
+                    {
+                        p.Add(new NpgsqlParameter("TemplateId", template.TemplateId));
+                        p.Add(new NpgsqlParameter("PermissionId", permissionId));
+                    },
+                    ct);
             }
         }
     }
@@ -93,12 +108,17 @@ public static class RoleTemplateSeeder
                 "SELECT 1 FROM tenant_roles " +
                 "WHERE tenant_id = @TenantId AND role_id = @RoleId LIMIT 1";
 
-            var exists = await conn.ExecuteScalarAsync<int?>(
-                new CommandDefinition(
-                    roleExistsSql,
-                    new { TenantId = tenantId, RoleId = PlatformAdminRoleId },
-                    transaction: tx,
-                    cancellationToken: ct));
+            // The facade has no connection-scoped scalar query; this scalar runs
+            // inside the per-tenant transaction, so we use a raw (AOT-safe)
+            // NpgsqlCommand directly.
+            int? exists;
+            await using (var existsCmd = new NpgsqlCommand(roleExistsSql, conn, tx))
+            {
+                existsCmd.Parameters.Add(new NpgsqlParameter("TenantId", tenantId));
+                existsCmd.Parameters.Add(new NpgsqlParameter("RoleId", PlatformAdminRoleId));
+                var scalar = await existsCmd.ExecuteScalarAsync(ct);
+                exists = scalar is null or DBNull ? null : (int)scalar;
+            }
 
             if (exists is null)
             {
@@ -114,16 +134,14 @@ public static class RoleTemplateSeeder
                 "  AND permission_id <> ALL(@Canonical)";
 
             var removed = await conn.ExecuteAsync(
-                new CommandDefinition(
-                    deleteSql,
-                    new
-                    {
-                        TenantId = tenantId,
-                        RoleId = PlatformAdminRoleId,
-                        Canonical = canonical,
-                    },
-                    transaction: tx,
-                    cancellationToken: ct));
+                deleteSql,
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId));
+                    p.Add(new NpgsqlParameter("RoleId", PlatformAdminRoleId));
+                    p.Add(new NpgsqlParameter("Canonical", canonical));
+                },
+                tx, ct);
 
             const string insertSql =
                 "INSERT INTO tenant_role_permissions (tenant_id, role_id, permission_id) " +
@@ -132,16 +150,14 @@ public static class RoleTemplateSeeder
                 "ON CONFLICT (tenant_id, role_id, permission_id) DO NOTHING";
 
             var added = await conn.ExecuteAsync(
-                new CommandDefinition(
-                    insertSql,
-                    new
-                    {
-                        TenantId = tenantId,
-                        RoleId = PlatformAdminRoleId,
-                        Canonical = canonical,
-                    },
-                    transaction: tx,
-                    cancellationToken: ct));
+                insertSql,
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId));
+                    p.Add(new NpgsqlParameter("RoleId", PlatformAdminRoleId));
+                    p.Add(new NpgsqlParameter("Canonical", canonical));
+                },
+                tx, ct);
 
             await tx.CommitAsync(ct);
             report[tenantId] = new ReseedResult(added, removed);

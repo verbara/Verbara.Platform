@@ -1,8 +1,9 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -18,22 +19,22 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
             ? JsonSerializer.Serialize(record.Metadata, PostgresJson.Ctx.DictionaryStringString)
             : null;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO usage_records (record_id, tenant_id, usage_type, quantity, unit, channel, reference_id, recorded_at, metadata) " +
             "VALUES (@RecordId, @TenantId, @UsageType, @Quantity, @Unit, @Channel, @ReferenceId, @RecordedAt, @Metadata::jsonb)",
-            new
+            p =>
             {
-                RecordId = record.RecordId.Value,
-                TenantId = record.TenantId.Value,
-                UsageType = (short)record.UsageType,
-                record.Quantity,
-                Unit = (short)record.Unit,
-                record.Channel,
-                record.ReferenceId,
-                record.RecordedAt,
-                Metadata = metadataJson,
-            });
+                p.Add(new NpgsqlParameter("RecordId", record.RecordId.Value));
+                p.Add(new NpgsqlParameter("TenantId", record.TenantId.Value));
+                p.Add(new NpgsqlParameter("UsageType", (short)record.UsageType));
+                p.Add(new NpgsqlParameter("Quantity", record.Quantity));
+                p.Add(new NpgsqlParameter("Unit", (short)record.Unit));
+                p.Add(new NpgsqlParameter("Channel", NpgsqlDbType.Text) { Value = (object?)record.Channel ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ReferenceId", NpgsqlDbType.Text) { Value = (object?)record.ReferenceId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("RecordedAt", record.RecordedAt));
+                p.Add(new NpgsqlParameter("Metadata", (object?)metadataJson ?? DBNull.Value));
+            },
+            ct);
     }
 
     public async Task SaveBatchAsync(IReadOnlyList<UsageRecord> records, CancellationToken ct)
@@ -52,19 +53,19 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
             await conn.ExecuteAsync(
                 "INSERT INTO usage_records (record_id, tenant_id, usage_type, quantity, unit, channel, reference_id, recorded_at, metadata) " +
                 "VALUES (@RecordId, @TenantId, @UsageType, @Quantity, @Unit, @Channel, @ReferenceId, @RecordedAt, @Metadata::jsonb)",
-                new
+                p =>
                 {
-                    RecordId = record.RecordId.Value,
-                    TenantId = record.TenantId.Value,
-                    UsageType = (short)record.UsageType,
-                    record.Quantity,
-                    Unit = (short)record.Unit,
-                    record.Channel,
-                    record.ReferenceId,
-                    record.RecordedAt,
-                    Metadata = metadataJson,
+                    p.Add(new NpgsqlParameter("RecordId", record.RecordId.Value));
+                    p.Add(new NpgsqlParameter("TenantId", record.TenantId.Value));
+                    p.Add(new NpgsqlParameter("UsageType", (short)record.UsageType));
+                    p.Add(new NpgsqlParameter("Quantity", record.Quantity));
+                    p.Add(new NpgsqlParameter("Unit", (short)record.Unit));
+                    p.Add(new NpgsqlParameter("Channel", NpgsqlDbType.Text) { Value = (object?)record.Channel ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("ReferenceId", NpgsqlDbType.Text) { Value = (object?)record.ReferenceId ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("RecordedAt", record.RecordedAt));
+                    p.Add(new NpgsqlParameter("Metadata", (object?)metadataJson ?? DBNull.Value));
                 },
-                tx);
+                tx, ct);
         }
 
         await tx.CommitAsync(ct);
@@ -72,12 +73,17 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
 
     public async Task<IReadOnlyList<UsageSummary>> GetSummaryAsync(TenantId tenantId, DateTimeOffset from, DateTimeOffset until, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<SummaryRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT usage_type, SUM(quantity) AS total_quantity, COUNT(*) AS record_count, MAX(recorded_at) AS last_updated_at " +
             "FROM usage_records WHERE tenant_id = @TenantId AND recorded_at >= @From AND recorded_at < @Until " +
             "GROUP BY usage_type",
-            new { TenantId = tenantId.Value, From = from, Until = until });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("From", from.UtcDateTime));
+                p.Add(new NpgsqlParameter("Until", until.UtcDateTime));
+            },
+            SummaryRow.Map, ct);
 
         return rows.Select(r => new UsageSummary
         {
@@ -93,12 +99,18 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
 
     public async Task<UsageSummary?> GetSummaryByTypeAsync(TenantId tenantId, UsageType type, DateTimeOffset from, DateTimeOffset until, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<SummaryRow?>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT usage_type, SUM(quantity) AS total_quantity, COUNT(*) AS record_count, MAX(recorded_at) AS last_updated_at " +
             "FROM usage_records WHERE tenant_id = @TenantId AND usage_type = @UsageType AND recorded_at >= @From AND recorded_at < @Until " +
             "GROUP BY usage_type",
-            new { TenantId = tenantId.Value, UsageType = (short)type, From = from, Until = until });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("UsageType", (short)type));
+                p.Add(new NpgsqlParameter("From", from.UtcDateTime));
+                p.Add(new NpgsqlParameter("Until", until.UtcDateTime));
+            },
+            SummaryRow.Map, ct);
 
         if (row is null) return null;
 
@@ -116,25 +128,42 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
 
     public async Task<IReadOnlyList<UsageRecord>> ListAsync(TenantId tenantId, DateTimeOffset from, DateTimeOffset until, UsageType? type, int page, int pageSize, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-
-        var sql = "SELECT record_id, tenant_id, usage_type, quantity, unit, channel, reference_id, recorded_at, metadata " +
-                  "FROM usage_records WHERE tenant_id = @TenantId AND recorded_at >= @From AND recorded_at < @Until";
+        List<RecordRow> rows;
 
         if (type is not null)
-            sql += " AND usage_type = @UsageType";
-
-        sql += " ORDER BY recorded_at DESC LIMIT @Limit OFFSET @Offset";
-
-        var rows = await conn.QueryAsync<RecordRow>(sql, new
         {
-            TenantId = tenantId.Value,
-            From = from,
-            Until = until,
-            UsageType = type is not null ? (short)type.Value : (short)0,
-            Limit = pageSize,
-            Offset = (page - 1) * pageSize,
-        });
+            rows = await _dataSource.QueryListAsync(
+                "SELECT record_id, tenant_id, usage_type, quantity, unit, channel, reference_id, recorded_at, metadata " +
+                "FROM usage_records WHERE tenant_id = @TenantId AND recorded_at >= @From AND recorded_at < @Until " +
+                "AND usage_type = @UsageType " +
+                "ORDER BY recorded_at DESC LIMIT @Limit OFFSET @Offset",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                    p.Add(new NpgsqlParameter("From", from.UtcDateTime));
+                    p.Add(new NpgsqlParameter("Until", until.UtcDateTime));
+                    p.Add(new NpgsqlParameter("UsageType", (short)type.Value));
+                    p.Add(new NpgsqlParameter("Limit", pageSize));
+                    p.Add(new NpgsqlParameter("Offset", (page - 1) * pageSize));
+                },
+                RecordRow.Map, ct);
+        }
+        else
+        {
+            rows = await _dataSource.QueryListAsync(
+                "SELECT record_id, tenant_id, usage_type, quantity, unit, channel, reference_id, recorded_at, metadata " +
+                "FROM usage_records WHERE tenant_id = @TenantId AND recorded_at >= @From AND recorded_at < @Until " +
+                "ORDER BY recorded_at DESC LIMIT @Limit OFFSET @Offset",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                    p.Add(new NpgsqlParameter("From", from.UtcDateTime));
+                    p.Add(new NpgsqlParameter("Until", until.UtcDateTime));
+                    p.Add(new NpgsqlParameter("Limit", pageSize));
+                    p.Add(new NpgsqlParameter("Offset", (page - 1) * pageSize));
+                },
+                RecordRow.Map, ct);
+        }
 
         return rows.Select(r => new UsageRecord
         {
@@ -154,10 +183,14 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
 
     public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteAsync(
+        return await _dataSource.ExecuteAsync(
             "DELETE FROM usage_records WHERE tenant_id = @TenantId AND recorded_at < @Cutoff",
-            new { TenantId = tenantId.Value, Cutoff = cutoff });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("Cutoff", cutoff.UtcDateTime));
+            },
+            ct);
     }
 
     private sealed class SummaryRow
@@ -166,6 +199,14 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
         public decimal total_quantity { get; init; }
         public int record_count { get; init; }
         public DateTime last_updated_at { get; init; }
+
+        public static SummaryRow Map(NpgsqlDataReader r) => new()
+        {
+            usage_type = r.GetInt16("usage_type"),
+            total_quantity = r.GetDecimal("total_quantity"),
+            record_count = r.GetInt32("record_count"),
+            last_updated_at = r.GetDateTime("last_updated_at"),
+        };
     }
 
     private sealed class RecordRow
@@ -179,5 +220,18 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
         public string? reference_id { get; init; }
         public DateTime recorded_at { get; init; }
         public string? metadata { get; init; }
+
+        public static RecordRow Map(NpgsqlDataReader r) => new()
+        {
+            record_id = r.GetString("record_id"),
+            tenant_id = r.GetString("tenant_id"),
+            usage_type = r.GetInt16("usage_type"),
+            quantity = r.GetDecimal("quantity"),
+            unit = r.GetInt16("unit"),
+            channel = r.GetStringOrNull("channel"),
+            reference_id = r.GetStringOrNull("reference_id"),
+            recorded_at = r.GetDateTime("recorded_at"),
+            metadata = r.GetStringOrNull("metadata"),
+        };
     }
 }

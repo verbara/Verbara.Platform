@@ -1,8 +1,8 @@
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -14,49 +14,49 @@ internal sealed class PostgresDispositionStore : IDispositionStore
 
     public async Task<Disposition?> GetByIdAsync(TenantId tenantId, EntityId dispositionId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<DispositionRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT disposition_id, tenant_id, name, category, is_active, created_at " +
             "FROM dispositions WHERE tenant_id = @TenantId AND disposition_id = @DispositionId",
-            new { TenantId = tenantId.Value, DispositionId = dispositionId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("DispositionId", dispositionId.Value)); },
+            DispositionRow.Map, ct);
         return row?.ToDisposition();
     }
 
     public async Task<IReadOnlyList<Disposition>> ListAsync(TenantId tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<DispositionRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT disposition_id, tenant_id, name, category, is_active, created_at " +
             "FROM dispositions WHERE tenant_id = @TenantId ORDER BY name",
-            new { TenantId = tenantId.Value });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
+            DispositionRow.Map, ct);
         return rows.Select(r => r.ToDisposition()).ToList();
     }
 
     public async Task SaveAsync(Disposition disposition, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO dispositions (disposition_id, tenant_id, name, category, is_active, created_at) " +
             "VALUES (@DispositionId, @TenantId, @Name, @Category, @IsActive, @CreatedAt) " +
             "ON CONFLICT (tenant_id, disposition_id) DO UPDATE SET " +
             "  name = EXCLUDED.name, category = EXCLUDED.category, is_active = EXCLUDED.is_active",
-            new
+            p =>
             {
-                DispositionId = disposition.DispositionId.Value,
-                TenantId = disposition.TenantId.Value,
-                disposition.Name,
-                Category = (int)disposition.Category,
-                disposition.IsActive,
-                disposition.CreatedAt,
-            });
+                p.Add(new NpgsqlParameter("DispositionId", disposition.DispositionId.Value));
+                p.Add(new NpgsqlParameter("TenantId", disposition.TenantId.Value));
+                p.Add(new NpgsqlParameter("Name", disposition.Name));
+                p.Add(new NpgsqlParameter("Category", (int)disposition.Category));
+                p.Add(new NpgsqlParameter("IsActive", disposition.IsActive));
+                p.Add(new NpgsqlParameter("CreatedAt", disposition.CreatedAt));
+            },
+            ct);
     }
 
     public async Task DeleteAsync(TenantId tenantId, EntityId dispositionId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "DELETE FROM dispositions WHERE tenant_id = @TenantId AND disposition_id = @DispositionId",
-            new { TenantId = tenantId.Value, DispositionId = dispositionId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("DispositionId", dispositionId.Value)); },
+            ct);
     }
 
     private sealed class DispositionRow
@@ -67,6 +67,16 @@ internal sealed class PostgresDispositionStore : IDispositionStore
         public int category { get; init; }
         public bool is_active { get; init; }
         public DateTime created_at { get; init; }
+
+        public static DispositionRow Map(NpgsqlDataReader r) => new()
+        {
+            disposition_id = r.GetString("disposition_id"),
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            category = r.GetInt32("category"),
+            is_active = r.GetBoolean("is_active"),
+            created_at = r.GetDateTime("created_at"),
+        };
 
         public Disposition ToDisposition() => new()
         {

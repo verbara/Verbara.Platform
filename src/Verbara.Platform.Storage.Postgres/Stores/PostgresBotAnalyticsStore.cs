@@ -1,7 +1,8 @@
+using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Core;
-using Dapper;
-using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -13,30 +14,30 @@ internal sealed class PostgresBotAnalyticsStore : IBotAnalyticsStore
 
     public async Task RecordEventAsync(TenantId tenantId, BotAnalyticsRecord record, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO bot_analytics (tenant_id, event_type, bot_id, conversation_id, turn_count, handoff_reason, created_at) " +
             "VALUES (@TenantId, @EventType, @BotId, @ConversationId, @TurnCount, @HandoffReason, @CreatedAt)",
-            new
+            p =>
             {
-                TenantId = tenantId.Value,
-                record.EventType,
-                record.BotId,
-                record.ConversationId,
-                record.TurnCount,
-                record.HandoffReason,
-                record.CreatedAt,
-            });
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("EventType", record.EventType));
+                p.Add(new NpgsqlParameter("BotId", record.BotId));
+                p.Add(new NpgsqlParameter("ConversationId", record.ConversationId));
+                p.Add(new NpgsqlParameter("TurnCount", record.TurnCount));
+                p.Add(new NpgsqlParameter("HandoffReason", NpgsqlDbType.Text) { Value = (object?)record.HandoffReason ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedAt", record.CreatedAt));
+            },
+            ct);
     }
 
     public async Task<BotAnalyticsSummary> GetSummaryAsync(
         TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = (await conn.QueryAsync<BotAnalyticsRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT event_type, turn_count FROM bot_analytics " +
             "WHERE tenant_id = @TenantId AND created_at >= @From AND created_at <= @To",
-            new { TenantId = tenantId.Value, From = periodStart, To = periodEnd })).ToList();
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("From", periodStart)); p.Add(new NpgsqlParameter("To", periodEnd)); },
+            BotAnalyticsRow.Map, ct);
 
         var started = rows.Count(r => r.EventType == nameof(BotAnalyticsEventType.ConversationStarted));
         var handedOff = rows.Count(r => r.EventType is nameof(BotAnalyticsEventType.HandedOff) or nameof(BotAnalyticsEventType.MaxTurnsReached));
@@ -63,5 +64,11 @@ internal sealed class PostgresBotAnalyticsStore : IBotAnalyticsStore
     {
         public string EventType { get; init; } = "";
         public int TurnCount { get; init; }
+
+        public static BotAnalyticsRow Map(NpgsqlDataReader r) => new()
+        {
+            EventType = r.GetString("event_type"),
+            TurnCount = r.GetInt32("turn_count"),
+        };
     }
 }

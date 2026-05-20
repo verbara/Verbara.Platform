@@ -1,49 +1,38 @@
 # =============================================================================
-# Verbara.Platform.Api Dockerfile
+# Verbara.Platform.Api Dockerfile — Native AOT (ADR-0022 Phase D, 2026-05-20)
 # =============================================================================
 #
-# !! IP-LEAK WARNING — read before changing the publish flags !!
+# This image ships a SELF-CONTAINED NATIVE-AOT single binary — NOT portable IL.
+# The /app directory contains the native ELF executable + a handful of native
+# .so deps; ZERO managed Verbara.* DLLs. Decompiling the closed-source
+# Verbara.Sdk.Pro.* IP now requires native reverse-engineering (IDA Pro), not
+# `ilspy` on a pulled image.
 #
-# This image currently ships as portable .NET IL DLLs (NOT Native AOT). The
-# /app directory contains ~108 .NET DLLs at runtime, 68 of which are Verbara.*
-# (including all of the closed-source Verbara.Sdk.Pro packages). Anyone with
-# `docker pull` access can extract + decompile them.
+# How we got here (ADR-0022): Phase A extracted the SignalR Hub to
+# Verbara.Platform.Realtime; Phase B replaced EF Core DataProtection with a
+# Dapper IXmlRepository (later raw Npgsql); Phase D removed Dapper entirely
+# (SDK + Pro + Platform → Verbara.Sdk.Data.Npgsql facade) — the last AOT
+# blocker. `dotnet publish -p:PublishAot=true` now emits 0 IL2026/IL3050/IL207x
+# diagnostics. See docs/operations/phase-d-validation/2026-05-19-pilot-aot-delta.md.
 #
-# Per ADR-0022 (docs/decisions/0022-platform-api-aot-shipping-path.md) every
-# PUBLIC ghcr.io/verbara/platform/* image MUST eventually be a Native-AOT
-# single-binary image. Two blockers remain before this Dockerfile can flip:
-#
-#   1. SignalR server-side dispatch (Services/PushToHubRelay.cs) uses
-#      `IHubContext<THub, T>.Clients.get` which is [RequiresDynamicCode].
-#      Plan: extract the SignalR Hub into a separate Verbara.Platform.Realtime
-#      microservice (ADR-0022 Phase A).
-#
-#   2. EF Core DataProtection (Program.cs:515,523,525) uses reflection over
-#      entity types. Plan: replace with a Dapper-based IXmlRepository
-#      (ADR-0022 Phase B).
-#
-# Once both blockers are resolved, swap the build + final stages to the AOT
-# pathway commented at the bottom of this file. UNTIL THEN this Dockerfile
-# remains non-AOT and the resulting image MUST NOT be pushed to a public
-# registry without the maintainer's explicit acknowledgment of the IP-leak
-# trade-off.
+# !! BUILD PREREQUISITE !! The Pro packages consumed here MUST be the
+# Dapper-free Verbara.Sdk.Pro.* 2.5.0-pro build. A Docker build restores Pro
+# from the `github` NuGet source, so those Dapper-free packages must be PUBLISHED
+# to GitHub Packages first (ADR-0022 Phase E cutover). Building against an older
+# Pro that still depends on Dapper will reintroduce Dapper.dll into the closure
+# and fail the AOT publish.
 # =============================================================================
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 ARG CACHEBUST=1
+# Native AOT needs a C toolchain + zlib to link the self-contained ELF.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang zlib1g-dev && rm -rf /var/lib/apt/lists/*
 COPY . .
-# Authenticate to GitHub Packages NuGet for private Verbara.Sdk.Pro.* packages.
-# The github source is declared in NuGet.Config; we inject credentials at restore
-# time via `dotnet nuget update source` (NOT a static packageSourceCredentials
-# block — %VAR% substitution is unreliable on .NET Core). CI passes the token as
-# BuildKit secret `nuget_auth_token`; local Docker builds pass the maintainer's
-# GITHUB_PACKAGES_PAT the same way. The local-nuget-feed source declared in
-# NuGet.Config is not available inside the build context — NuGet ignores missing
-# directories and falls through to `github` (private Pro packages) and
-# `nuget.org` (everything else) cleanly. Build stage is intermediate; the final
-# stage COPYs only /app, so any credentials written into NuGet.Config here are
-# discarded with the build layer.
+# Authenticate to GitHub Packages NuGet for private Verbara.Sdk.Pro.* packages
+# (see ADR-0022 / NuGet.Config). Credentials are injected at restore time as a
+# BuildKit secret and discarded with this intermediate build layer.
 RUN --mount=type=secret,id=nuget_auth_token,required=false \
     set -e; \
     dotnet nuget remove source local 2>/dev/null || true; \
@@ -54,74 +43,28 @@ RUN --mount=type=secret,id=nuget_auth_token,required=false \
             --store-password-in-clear-text; \
     fi; \
     dotnet nuget locals all --clear; \
-    dotnet publish src/Verbara.Platform.Api/Verbara.Platform.Api.csproj -c Release -o /app
+    dotnet publish src/Verbara.Platform.Api/Verbara.Platform.Api.csproj \
+        -c Release -r linux-x64 --self-contained true \
+        -p:PublishAot=true -p:InvariantGlobalization=true \
+        -o /app
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# runtime-deps carries libc + libssl + (optionally) ICU only — no CLR, no .NET
+# runtime. The published binary is a self-contained native ELF.
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0 AS final
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app .
-# Layer C in-process check (Pro v2.3.x ADR-0011) reads the running image's OCI
-# manifest-list digest from the IMAGE_DIGEST env var, NOT from a file baked
-# inside the image. Original two-pass build attempted to bake the digest into
-# /etc/verbara-image-digest, but an OCI image cannot self-reference its own
-# manifest digest (chicken-and-egg: pass-1 staging digest != pass-2 final
-# digest because content differs). Pivot documented in ADR-0011 Status update.
-#
-# Operator-side wiring of IMAGE_DIGEST:
-#   * Helm chart: api.image.digest value -> IMAGE_DIGEST env var on Deployment
-#   * docker-compose: environment: IMAGE_DIGEST=sha256:... in compose template
-#   * The digest value comes from verbara-website/data/authorized-digests.json
-#     (the registry the Worker reads when issuing licenses with
-#     AuthorizedImageDigests claims).
-#
-# When IMAGE_DIGEST is unset (local `dotnet run`, plain `docker run` for dev),
-# Pro's ContainerImageDigest.ReadFromEnvironment() returns null -> permissive
-# path applies -> license validation falls through to expiry check unchanged
-# (matches ADR-0011 dev-mode semantics).
+# Layer C in-process check (Pro ADR-0011) reads the running image's OCI
+# manifest-list digest from the IMAGE_DIGEST env var (set by the Helm chart's
+# api.image.digest / the compose template). When unset (local `docker run`,
+# dev), Pro's ContainerImageDigest.ReadFromEnvironment() returns null and
+# license validation falls through to the expiry check (dev-mode semantics).
 EXPOSE 5000
 ENV ASPNETCORE_URLS=http://+:5000
-ENTRYPOINT ["dotnet", "Verbara.Platform.Api.dll"]
+ENTRYPOINT ["./Verbara.Platform.Api"]
 
-# =============================================================================
-# AOT shipping pathway (ADR-0022) — DO NOT UNCOMMENT until Phases A+B+C are done
-# =============================================================================
-# Replace the two FROM stages above with:
-#
-# FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-# WORKDIR /src
-# ARG CACHEBUST=1
-# RUN apt-get update && apt-get install -y --no-install-recommends \
-#     clang zlib1g-dev && rm -rf /var/lib/apt/lists/*
-# COPY . .
-# RUN --mount=type=secret,id=nuget_auth_token,required=false \
-#     set -e; \
-#     dotnet nuget remove source local 2>/dev/null || true; \
-#     if [ -f /run/secrets/nuget_auth_token ]; then \
-#         dotnet nuget update source github \
-#             --username verbara \
-#             --password "$(cat /run/secrets/nuget_auth_token)" \
-#             --store-password-in-clear-text; \
-#     fi; \
-#     dotnet nuget locals all --clear; \
-#     dotnet publish src/Verbara.Platform.Api/Verbara.Platform.Api.csproj \
-#         -c Release -r linux-x64 --self-contained true \
-#         -p:PublishAot=true -p:InvariantGlobalization=true \
-#         -o /app
-#
-# # Runtime-deps image carries libc + libssl + ICU only — no CLR / no .NET
-# # runtime. The published binary is a self-contained native ELF.
-# FROM mcr.microsoft.com/dotnet/runtime-deps:10.0 AS final
-# RUN apt-get update && apt-get install -y --no-install-recommends curl \
-#     && rm -rf /var/lib/apt/lists/*
-# WORKDIR /app
-# COPY --from=build /app .
-# EXPOSE 5000
-# ENV ASPNETCORE_URLS=http://+:5000
-# ENTRYPOINT ["./Verbara.Platform.Api"]
-#
-# Post-flip verification (must hold before tagging the image):
-#   * `ls /app | wc -l` ≤ 5  (binary + maybe a libArgon2.so + license dir)
-#   * `ls /app/*.dll 2>/dev/null | wc -l` == 0
-#   * `file /app/Verbara.Platform.Api` reports `ELF 64-bit LSB executable`
-#   * Image size ≤ 100 MB (runtime-deps + binary; vs ~250 MB aspnet-runtime)
-# =============================================================================
+# Post-build verification (must hold before tagging + pushing the image):
+#   * `ls /app/*.dll 2>/dev/null | wc -l` == 0   (no managed DLLs)
+#   * `file /app/Verbara.Platform.Api` reports `ELF 64-bit LSB ... executable`
+#   * image size materially smaller than the prior ~250 MB aspnet-runtime image

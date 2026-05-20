@@ -19,6 +19,14 @@ public sealed class ManagementTenantIpAllowlistEndpointsTests
     private const string TenantId = "tenant-test";
     private const string BasePath = $"/api/v1/management/tenants/{TenantId}/ip-allowlist";
 
+    // Mirror Program.cs's ConfigureHttpJsonOptions so this isolated test host runs
+    // under the same source-gen-only JSON contract as the Native AOT image (no
+    // reflection fallback once JsonSerializerIsReflectionEnabledByDefault=false).
+    private static void ConfigureAotJson(IServiceCollection services) =>
+        services.ConfigureHttpJsonOptions(o =>
+            o.SerializerOptions.TypeInfoResolverChain.Insert(
+                0, Serialization.ApiJsonContext.Default));
+
     private static IHost BuildHost(
         ITenantIpAllowlistStore store,
         ITenantAuthConfigStore authConfigStore)
@@ -34,6 +42,7 @@ public sealed class ManagementTenantIpAllowlistEndpointsTests
                         services.AddSingleton(authConfigStore);
                         services.AddSingleton<IAuditService>(new NoopAuditService());
                         services.AddRouting();
+                        ConfigureAotJson(services);
                     })
                     .Configure(app =>
                     {
@@ -65,7 +74,8 @@ public sealed class ManagementTenantIpAllowlistEndpointsTests
         await host.StartAsync();
         var client = host.GetTestClient();
 
-        var response = await client.PostAsJsonAsync(BasePath, new { cidr = "10.0.0.0/8", description = "office" });
+        var response = await client.PostAsJsonAsync(
+            BasePath, new AddIpAllowlistEntryRequest("10.0.0.0/8", "office"));
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadAsStringAsync();
@@ -82,7 +92,8 @@ public sealed class ManagementTenantIpAllowlistEndpointsTests
         await host.StartAsync();
         var client = host.GetTestClient();
 
-        var response = await client.PostAsJsonAsync(BasePath, new { cidr = "not-a-cidr", description = (string?)null });
+        var response = await client.PostAsJsonAsync(
+            BasePath, new AddIpAllowlistEntryRequest("not-a-cidr", null));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var body = await response.Content.ReadAsStringAsync();
@@ -171,7 +182,11 @@ public sealed class ManagementTenantIpAllowlistEndpointsTests
             {
                 webHost
                     .UseTestServer()
-                    .ConfigureServices(services => services.AddRouting())
+                    .ConfigureServices(services =>
+                    {
+                        services.AddRouting();
+                        ConfigureAotJson(services);
+                    })
                     .Configure(app =>
                     {
                         app.UseRouting();

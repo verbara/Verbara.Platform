@@ -1,7 +1,8 @@
-using Dapper;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -16,31 +17,31 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
 
     public async Task<ApiKey?> GetByIdAsync(TenantId tenantId, EntityId keyId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ApiKeyRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {SelectColumns} FROM api_keys WHERE tenant_id = @TenantId AND key_id = @KeyId",
-            new { TenantId = tenantId.Value, KeyId = keyId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("KeyId", keyId.Value)); },
+            ApiKeyRow.Map, ct);
         return row?.ToApiKey();
     }
 
     public async Task<ApiKey?> GetByHashAsync(string hashedKey, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ApiKeyRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {SelectColumns} FROM api_keys WHERE key_hash = @KeyHash",
-            new { KeyHash = hashedKey });
+            p => { p.Add(new NpgsqlParameter("KeyHash", hashedKey)); },
+            ApiKeyRow.Map, ct);
         return row?.ToApiKey();
     }
 
     public async Task<PagedResult<ApiKey>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var total = await conn.ExecuteScalarAsync<int>(
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM api_keys WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId.Value });
-        var rows = await conn.QueryAsync<ApiKeyRow>(
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)), ct) ?? 0L);
+        var rows = await _dataSource.QueryListAsync(
             $"SELECT {SelectColumns} FROM api_keys WHERE tenant_id = @TenantId ORDER BY created_at LIMIT @Limit OFFSET @Offset",
-            new { TenantId = tenantId.Value, Limit = query.PageSize, Offset = query.Offset });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Limit", query.PageSize)); p.Add(new NpgsqlParameter("Offset", query.Offset)); },
+            ApiKeyRow.Map, ct);
         var items = rows.Select(r => r.ToApiKey()).ToList();
         return new PagedResult<ApiKey>(items, total, query.Page, query.PageSize);
     }
@@ -48,39 +49,39 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
     public async Task SaveAsync(ApiKey apiKey, CancellationToken ct)
     {
         var scopesCsv = string.Join(",", apiKey.Scopes);
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO api_keys (key_id, tenant_id, key_hash, name, scopes, rate_limit_per_minute, is_revoked, key_type, created_at, updated_at, expires_at, created_by, updated_by, user_id) " +
             "VALUES (@KeyId, @TenantId, @KeyHash, @Name, @Scopes, @RateLimitPerMinute, @IsRevoked, @KeyType, @CreatedAt, @UpdatedAt, @ExpiresAt, @CreatedBy, @UpdatedBy, @UserId) " +
             "ON CONFLICT (tenant_id, key_id) DO UPDATE SET " +
             "  name = EXCLUDED.name, scopes = EXCLUDED.scopes, rate_limit_per_minute = EXCLUDED.rate_limit_per_minute, " +
             "  is_revoked = EXCLUDED.is_revoked, key_type = EXCLUDED.key_type, updated_at = EXCLUDED.updated_at, expires_at = EXCLUDED.expires_at, " +
             "  updated_by = EXCLUDED.updated_by, user_id = EXCLUDED.user_id",
-            new
+            p =>
             {
-                KeyId = apiKey.KeyId.Value,
-                TenantId = apiKey.TenantId.Value,
-                KeyHash = apiKey.HashedKey,
-                apiKey.Name,
-                Scopes = scopesCsv,
-                apiKey.RateLimitPerMinute,
-                apiKey.IsRevoked,
-                KeyType = (int)apiKey.KeyType,
-                apiKey.CreatedAt,
-                apiKey.UpdatedAt,
-                apiKey.ExpiresAt,
-                apiKey.CreatedBy,
-                apiKey.UpdatedBy,
-                UserId = apiKey.UserId?.Value,
-            });
+                p.Add(new NpgsqlParameter("KeyId", apiKey.KeyId.Value));
+                p.Add(new NpgsqlParameter("TenantId", apiKey.TenantId.Value));
+                p.Add(new NpgsqlParameter("KeyHash", apiKey.HashedKey));
+                p.Add(new NpgsqlParameter("Name", apiKey.Name));
+                p.Add(new NpgsqlParameter("Scopes", scopesCsv));
+                p.Add(new NpgsqlParameter("RateLimitPerMinute", NpgsqlDbType.Integer) { Value = (object?)apiKey.RateLimitPerMinute ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("IsRevoked", apiKey.IsRevoked));
+                p.Add(new NpgsqlParameter("KeyType", (int)apiKey.KeyType));
+                p.Add(new NpgsqlParameter("CreatedAt", apiKey.CreatedAt));
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)apiKey.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ExpiresAt", NpgsqlDbType.TimestampTz) { Value = (object?)apiKey.ExpiresAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)apiKey.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)apiKey.UpdatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UserId", NpgsqlDbType.Text) { Value = (object?)apiKey.UserId?.Value ?? DBNull.Value });
+            },
+            ct);
     }
 
     public async Task RevokeAsync(TenantId tenantId, EntityId keyId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "UPDATE api_keys SET is_revoked = true WHERE tenant_id = @TenantId AND key_id = @KeyId",
-            new { TenantId = tenantId.Value, KeyId = keyId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("KeyId", keyId.Value)); },
+            ct);
     }
 
     public async Task UpdateLastUsedAsync(EntityId keyId, DateTimeOffset usedAt, CancellationToken ct)
@@ -88,10 +89,10 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
         // Tenant-scoped lookup is intentionally skipped: the auth middleware
         // already resolved the row by hash and the (tenant_id, key_id) pair is
         // unique. Stamping a global UPDATE keeps the hot path single-statement.
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "UPDATE api_keys SET last_used_at = @UsedAt WHERE key_id = @KeyId",
-            new { KeyId = keyId.Value, UsedAt = usedAt });
+            p => { p.Add(new NpgsqlParameter("KeyId", keyId.Value)); p.Add(new NpgsqlParameter("UsedAt", usedAt)); },
+            ct);
     }
 
     private sealed class ApiKeyRow
@@ -111,6 +112,25 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
         public string? updated_by { get; init; }
         public string? user_id { get; init; }
         public DateTime? last_used_at { get; init; }
+
+        public static ApiKeyRow Map(NpgsqlDataReader r) => new()
+        {
+            key_id = r.GetString("key_id"),
+            tenant_id = r.GetString("tenant_id"),
+            key_hash = r.GetString("key_hash"),
+            name = r.GetString("name"),
+            scopes = r.GetString("scopes"),
+            rate_limit_per_minute = r.GetInt32OrNull("rate_limit_per_minute"),
+            is_revoked = r.GetBoolean("is_revoked"),
+            key_type = r.GetInt32("key_type"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTimeOrNull("updated_at"),
+            expires_at = r.GetDateTimeOrNull("expires_at"),
+            created_by = r.GetStringOrNull("created_by"),
+            updated_by = r.GetStringOrNull("updated_by"),
+            user_id = r.GetStringOrNull("user_id"),
+            last_used_at = r.GetDateTimeOrNull("last_used_at"),
+        };
 
         public ApiKey ToApiKey()
         {

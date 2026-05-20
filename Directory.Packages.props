@@ -21,21 +21,11 @@
 
   <ItemGroup>
     <PackageVersion Include="Npgsql" Version="10.0.2" />
-    <!-- ADR-0022 Phase D.1: Dapper 2.1.72 stays for Platform's own storage
-         packages (Storage.Postgres) that have NOT yet migrated to the
-         stubs + Dapper.AOT pair. Dapper.Stubs is the same-identity Dapper
-         assembly with the AOT-hostile reflection paths annotated; consuming
-         packages that have migrated (Sessions.Postgres canary at 2.1.2)
-         transitively replace the real Dapper at restore time via assembly
-         identity. Phase D.2 sweep migrates the remaining 8 storage packages
-         cross-repo, after which the Dapper entry below can be removed. -->
-    <PackageVersion Include="Dapper" Version="2.1.72" />
-    <PackageVersion Include="Verbara.Sdk.Dapper.Stubs" Version="2.1.72-aotstub.1" />
-    <PackageVersion Include="Dapper.AOT" Version="1.0.52" />
+    <PackageVersion Include="Verbara.Sdk.Data.Npgsql" Version="2.1.2" />
   </ItemGroup>
 
   <!-- DataProtection consumed by Verbara.Platform.Identity (ADR-0003 + ADR-0022
-       Phase B). Dapper-backed IXmlRepository replaces the EF Core stack so the
+       Phase B/D). Raw-Npgsql IXmlRepository replaces the EF Core stack so the
        Platform.Api host can publish Native AOT. Versions match the .NET 10 SDK
        band. -->
   <ItemGroup>

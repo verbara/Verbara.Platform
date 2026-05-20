@@ -1,8 +1,9 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Flows;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -16,8 +17,7 @@ internal sealed class PostgresFlowExecutionStore : IFlowExecutionStore
     {
         var variablesJson = JsonSerializer.Serialize(execution.Variables, PostgresJson.Ctx.DictionaryStringString);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO flow_executions (execution_id, flow_id, flow_version, tenant_id, conversation_id, " +
             "current_node_id, status, variables, started_at, completed_at, step_count) " +
             "VALUES (@ExecutionId, @FlowId, @FlowVersion, @TenantId, @ConversationId, " +
@@ -25,50 +25,51 @@ internal sealed class PostgresFlowExecutionStore : IFlowExecutionStore
             "ON CONFLICT (execution_id) DO UPDATE SET " +
             "  current_node_id = EXCLUDED.current_node_id, status = EXCLUDED.status, " +
             "  variables = EXCLUDED.variables, completed_at = EXCLUDED.completed_at, step_count = EXCLUDED.step_count",
-            new
+            p =>
             {
-                ExecutionId = execution.ExecutionId.Value,
-                FlowId = execution.FlowId.Value,
-                execution.FlowVersion,
-                TenantId = execution.TenantId.Value,
-                ConversationId = execution.ConversationId.Value,
-                CurrentNodeId = execution.CurrentNodeId.Value,
-                Status = (int)execution.Status,
-                Variables = variablesJson,
-                execution.StartedAt,
-                execution.CompletedAt,
-                execution.StepCount,
-            });
+                p.Add(new NpgsqlParameter("ExecutionId",    execution.ExecutionId.Value));
+                p.Add(new NpgsqlParameter("FlowId",         execution.FlowId.Value));
+                p.Add(new NpgsqlParameter("FlowVersion",    execution.FlowVersion));
+                p.Add(new NpgsqlParameter("TenantId",       execution.TenantId.Value));
+                p.Add(new NpgsqlParameter("ConversationId", execution.ConversationId.Value));
+                p.Add(new NpgsqlParameter("CurrentNodeId",  execution.CurrentNodeId.Value));
+                p.Add(new NpgsqlParameter("Status",         (int)execution.Status));
+                p.Add(new NpgsqlParameter("Variables",      variablesJson));
+                p.Add(new NpgsqlParameter("StartedAt",      execution.StartedAt));
+                p.Add(new NpgsqlParameter("CompletedAt", NpgsqlDbType.TimestampTz) { Value = (object?)execution.CompletedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("StepCount",      execution.StepCount));
+            },
+            ct);
     }
 
     public async Task<FlowExecution?> GetByIdAsync(EntityId executionId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ExecutionRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT execution_id, flow_id, flow_version, tenant_id, conversation_id, current_node_id, " +
             "status, variables, started_at, completed_at, step_count " +
             "FROM flow_executions WHERE execution_id = @ExecutionId",
-            new { ExecutionId = executionId.Value });
+            p => p.Add(new NpgsqlParameter("ExecutionId", executionId.Value)),
+            ExecutionRow.Map, ct);
         return row?.ToExecution();
     }
 
     public async Task<FlowExecution?> GetActiveByConversationAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ExecutionRow>(
+        var row = await _dataSource.QueryFirstOrDefaultAsync(
             "SELECT execution_id, flow_id, flow_version, tenant_id, conversation_id, current_node_id, " +
             "status, variables, started_at, completed_at, step_count " +
             "FROM flow_executions " +
             "WHERE tenant_id = @TenantId AND conversation_id = @ConversationId " +
             "  AND status IN (@Running, @WaitingForInput) " +
             "LIMIT 1",
-            new
+            p =>
             {
-                TenantId = tenantId.Value,
-                ConversationId = conversationId.Value,
-                Running = (int)FlowExecutionStatus.Running,
-                WaitingForInput = (int)FlowExecutionStatus.WaitingForInput,
-            });
+                p.Add(new NpgsqlParameter("TenantId",        tenantId.Value));
+                p.Add(new NpgsqlParameter("ConversationId",  conversationId.Value));
+                p.Add(new NpgsqlParameter("Running",         (object)(int)FlowExecutionStatus.Running));
+                p.Add(new NpgsqlParameter("WaitingForInput", (object)(int)FlowExecutionStatus.WaitingForInput));
+            },
+            ExecutionRow.Map, ct);
         return row?.ToExecution();
     }
 
@@ -85,6 +86,21 @@ internal sealed class PostgresFlowExecutionStore : IFlowExecutionStore
         public DateTime started_at { get; init; }
         public DateTime? completed_at { get; init; }
         public int step_count { get; init; }
+
+        public static ExecutionRow Map(NpgsqlDataReader r) => new()
+        {
+            execution_id    = r.GetString("execution_id"),
+            flow_id         = r.GetString("flow_id"),
+            flow_version    = r.GetInt32("flow_version"),
+            tenant_id       = r.GetString("tenant_id"),
+            conversation_id = r.GetString("conversation_id"),
+            current_node_id = r.GetString("current_node_id"),
+            status          = r.GetInt32("status"),
+            variables       = r.GetString("variables"),
+            started_at      = r.GetDateTime("started_at"),
+            completed_at    = r.GetDateTimeOrNull("completed_at"),
+            step_count      = r.GetInt32("step_count"),
+        };
 
         public FlowExecution ToExecution()
         {

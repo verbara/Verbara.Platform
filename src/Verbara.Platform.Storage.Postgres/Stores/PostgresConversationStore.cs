@@ -1,8 +1,9 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Conversations;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -14,63 +15,72 @@ internal sealed class PostgresConversationStore : IConversationStore
 
     public async Task<Conversation?> GetByIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ConversationRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
             "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
             "FROM conversations WHERE tenant_id = @TenantId AND conversation_id = @ConversationId",
-            new { TenantId = tenantId.Value, ConversationId = conversationId.Value });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("ConversationId", conversationId.Value));
+            },
+            ConversationRow.Map, ct);
         return row?.ToConversation();
     }
 
     public async Task<PagedResult<Conversation>> ListAsync(TenantId tenantId, ConversationQuery query, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-
         var whereClauses = new List<string> { "tenant_id = @TenantId" };
-        var parameters = new DynamicParameters();
-        parameters.Add("TenantId", tenantId.Value);
+        var binders = new List<Action<NpgsqlParameterCollection>>
+        {
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
+        };
 
         if (query.State.HasValue)
         {
             whereClauses.Add("state = @State");
-            parameters.Add("State", (int)query.State.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("State", (int)query.State.Value)));
         }
         if (query.ContactId.HasValue)
         {
             whereClauses.Add("contact_id = @ContactId");
-            parameters.Add("ContactId", query.ContactId.Value.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("ContactId", query.ContactId.Value.Value)));
         }
         if (query.CaseId.HasValue)
         {
             whereClauses.Add("case_id = @CaseId");
-            parameters.Add("CaseId", query.CaseId.Value.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("CaseId", query.CaseId.Value.Value)));
         }
         if (query.AssignedAgentId.HasValue)
         {
             whereClauses.Add("owner_id = @OwnerId");
-            parameters.Add("OwnerId", query.AssignedAgentId.Value.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("OwnerId", query.AssignedAgentId.Value.Value)));
         }
         if (query.Channel.HasValue)
         {
             whereClauses.Add("channel = @Channel");
-            parameters.Add("Channel", (int)query.Channel.Value);
+            binders.Add(p => p.Add(new NpgsqlParameter("Channel", (int)query.Channel.Value)));
         }
 
         var where = string.Join(" AND ", whereClauses);
         var offset = (query.Page - 1) * query.PageSize;
 
-        var total = await conn.ExecuteScalarAsync<int>(
-            $"SELECT COUNT(*) FROM conversations WHERE {where}", parameters);
+        void BindFilters(NpgsqlParameterCollection p) { foreach (var b in binders) b(p); }
 
-        parameters.Add("Limit", query.PageSize);
-        parameters.Add("Offset", offset);
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
+            $"SELECT COUNT(*) FROM conversations WHERE {where}", BindFilters, ct) ?? 0L);
 
-        var rows = await conn.QueryAsync<ConversationRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
             $"metadata, created_at, closed_at, updated_at, created_by, updated_by " +
             $"FROM conversations WHERE {where} ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
-            parameters);
+            p =>
+            {
+                BindFilters(p);
+                p.Add(new NpgsqlParameter("Limit", query.PageSize));
+                p.Add(new NpgsqlParameter("Offset", offset));
+            },
+            ConversationRow.Map, ct);
 
         var items = rows.Select(r => r.ToConversation()).ToList();
         return new PagedResult<Conversation>(items, total, query.Page, query.PageSize);
@@ -82,8 +92,7 @@ internal sealed class PostgresConversationStore : IConversationStore
             (Dictionary<string, string>)conversation.Metadata,
             PostgresJson.Ctx.DictionaryStringString);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO conversations (conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
             "metadata, created_at, closed_at, updated_at, created_by, updated_by) " +
             "VALUES (@ConversationId, @TenantId, @ContactId, @Channel, @State, @OwnerKind, @OwnerId, @CaseId, " +
@@ -92,95 +101,118 @@ internal sealed class PostgresConversationStore : IConversationStore
             "  state = EXCLUDED.state, owner_kind = EXCLUDED.owner_kind, owner_id = EXCLUDED.owner_id, " +
             "  case_id = EXCLUDED.case_id, metadata = EXCLUDED.metadata, closed_at = EXCLUDED.closed_at, " +
             "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-            new
+            p =>
             {
-                ConversationId = conversation.ConversationId.Value,
-                TenantId = conversation.TenantId.Value,
-                ContactId = conversation.ContactId.Value,
-                Channel = (int)conversation.Channel,
-                State = (int)conversation.State,
-                OwnerKind = conversation.Owner != null ? (int?)conversation.Owner.Kind : null,
-                OwnerId = conversation.Owner?.OwnerId?.Value,
-                CaseId = conversation.CaseId?.Value,
-                Metadata = metadataJson,
-                conversation.CreatedAt,
-                conversation.ClosedAt,
-                conversation.UpdatedAt,
-                conversation.CreatedBy,
-                conversation.UpdatedBy,
-            });
+                p.Add(new NpgsqlParameter("ConversationId", conversation.ConversationId.Value));
+                p.Add(new NpgsqlParameter("TenantId", conversation.TenantId.Value));
+                p.Add(new NpgsqlParameter("ContactId", conversation.ContactId.Value));
+                p.Add(new NpgsqlParameter("Channel", (int)conversation.Channel));
+                p.Add(new NpgsqlParameter("State", (int)conversation.State));
+                p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = (object?)(conversation.Owner != null ? (int?)conversation.Owner.Kind : null) ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("OwnerId", NpgsqlDbType.Text) { Value = (object?)conversation.Owner?.OwnerId?.Value ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CaseId", NpgsqlDbType.Text) { Value = (object?)conversation.CaseId?.Value ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Metadata", metadataJson));
+                p.Add(new NpgsqlParameter("CreatedAt", conversation.CreatedAt));
+                p.Add(new NpgsqlParameter("ClosedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.ClosedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.UpdatedAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.CreatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.UpdatedBy ?? DBNull.Value });
+            },
+            ct);
     }
 
     public async Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
     {
         // Terminal states: Closed = 3, Abandoned = 4 (check ConversationStateMachine)
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<ConversationRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
             "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
             "FROM conversations " +
             "WHERE tenant_id = @TenantId AND contact_id = @ContactId AND channel = @Channel " +
             "  AND state NOT IN (SELECT unnest(@TerminalStates)) " +
             "ORDER BY created_at DESC LIMIT 1",
-            new
+            p =>
             {
-                TenantId = tenantId.Value,
-                ContactId = contactId.Value,
-                Channel = (int)channel,
-                TerminalStates = GetTerminalStateInts(),
-            });
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("ContactId", contactId.Value));
+                p.Add(new NpgsqlParameter("Channel", (int)channel));
+                p.Add(new NpgsqlParameter("TerminalStates", GetTerminalStateInts()));
+            },
+            ConversationRow.Map, ct);
         return row?.ToConversation();
     }
 
     public async Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<ConversationRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
             "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
             "FROM conversations WHERE tenant_id = @TenantId AND contact_id = @ContactId " +
             "ORDER BY created_at DESC",
-            new { TenantId = tenantId.Value, ContactId = contactId.Value });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("ContactId", contactId.Value));
+            },
+            ConversationRow.Map, ct);
         return rows.Select(r => r.ToConversation()).ToList();
     }
 
     public async Task<int> DeleteByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteAsync(
+        return await _dataSource.ExecuteAsync(
             "DELETE FROM conversations WHERE tenant_id = @TenantId AND contact_id = @ContactId",
-            new { TenantId = tenantId.Value, ContactId = contactId.Value });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("ContactId", contactId.Value));
+            },
+            ct);
     }
 
     public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteAsync(
+        return await _dataSource.ExecuteAsync(
             "DELETE FROM conversations WHERE tenant_id = @TenantId AND created_at < @Cutoff",
-            new { TenantId = tenantId.Value, Cutoff = cutoff });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("Cutoff", cutoff));
+            },
+            ct);
     }
 
     public async Task<IReadOnlyList<Conversation>> ListQueuedAsync(TenantId tenantId, int limit, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<ConversationRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
             "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
             "FROM conversations WHERE tenant_id = @TenantId AND state = @State " +
             "ORDER BY created_at ASC LIMIT @Limit",
-            new { TenantId = tenantId.Value, State = (int)ConversationState.Queued, Limit = limit });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("State", (object)(int)ConversationState.Queued));
+                p.Add(new NpgsqlParameter("Limit", limit));
+            },
+            ConversationRow.Map, ct);
         return rows.Select(r => r.ToConversation()).ToList();
     }
 
     public async Task<IReadOnlyList<Conversation>> ListByStateAsync(TenantId tenantId, ConversationState state, int limit, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<ConversationRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
             "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
             "FROM conversations WHERE tenant_id = @TenantId AND state = @State " +
             "ORDER BY created_at ASC LIMIT @Limit",
-            new { TenantId = tenantId.Value, State = (int)state, Limit = limit });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("State", (int)state));
+                p.Add(new NpgsqlParameter("Limit", limit));
+            },
+            ConversationRow.Map, ct);
         return rows.Select(r => r.ToConversation()).ToList();
     }
 
@@ -211,6 +243,24 @@ internal sealed class PostgresConversationStore : IConversationStore
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
+
+        public static ConversationRow Map(NpgsqlDataReader r) => new()
+        {
+            conversation_id = r.GetString("conversation_id"),
+            tenant_id = r.GetString("tenant_id"),
+            contact_id = r.GetString("contact_id"),
+            channel = r.GetInt32("channel"),
+            state = r.GetInt32("state"),
+            owner_kind = r.GetInt32OrNull("owner_kind"),
+            owner_id = r.GetStringOrNull("owner_id"),
+            case_id = r.GetStringOrNull("case_id"),
+            metadata = r.GetString("metadata"),
+            created_at = r.GetDateTime("created_at"),
+            closed_at = r.GetDateTimeOrNull("closed_at"),
+            updated_at = r.GetDateTimeOrNull("updated_at"),
+            created_by = r.GetStringOrNull("created_by"),
+            updated_by = r.GetStringOrNull("updated_by"),
+        };
 
         public Conversation ToConversation()
         {

@@ -1,7 +1,10 @@
 using System.Text.Json.Serialization;
 using Verbara.Platform.Api.Endpoints;
+using Verbara.Platform.Api.Endpoints.Audit;
 using Verbara.Platform.Api.Endpoints.Mfa;
+using Verbara.Platform.Api.Endpoints.Profile;
 using Verbara.Platform.Api.Endpoints.Retention;
+using Verbara.Platform.Api.Endpoints.Security;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Bot;
@@ -85,6 +88,9 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(List<CampaignMetricsDto>))]
 [JsonSerializable(typeof(WrapUpRequest))]
 [JsonSerializable(typeof(CreateConversationRequest))]
+// AOT (ADR-0022 Phase D): remaining ConversationEndpoints [FromBody] DTOs.
+[JsonSerializable(typeof(SendMessageRequest))]
+[JsonSerializable(typeof(TransferRequest))]
 [JsonSerializable(typeof(DashboardDto))]
 [JsonSerializable(typeof(DashboardKpisDto))]
 [JsonSerializable(typeof(TrendPointDto))]
@@ -289,6 +295,18 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(PagedDataResponse<CdrRowDto>))]
 [JsonSerializable(typeof(PagedDataResponse<QaRowDto>))]
 // Auth
+// AOT (ADR-0022 Phase D): request bodies deserialized by AuthEndpoints. Without
+// these the AOT host throws NotSupported(JsonTypeInfo metadata not provided) on
+// /auth/login etc. since STJ has no reflection fallback under PublishAot.
+[JsonSerializable(typeof(LoginRequest))]
+[JsonSerializable(typeof(ApiKeyLoginRequest))]
+[JsonSerializable(typeof(ChangePasswordRequest))]
+[JsonSerializable(typeof(ForgotPasswordRequest))]
+[JsonSerializable(typeof(ResetPasswordRequest))]
+[JsonSerializable(typeof(MfaVerifyRequest))]
+[JsonSerializable(typeof(MfaConfirmRequest))]
+[JsonSerializable(typeof(MfaDisableRequest))]
+[JsonSerializable(typeof(MfaSetupResponse))]
 [JsonSerializable(typeof(RevokedSessionsResponse))]
 // ADMIN-001 (PREPUB-2026-05-09): redacted projection of TenantAuthConfig
 // returned by /admin/auth/config — emits OidcClientSecretSet + fingerprint
@@ -420,6 +438,97 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(EmailAttachment))]
 [JsonSerializable(typeof(ReportData))]
 [JsonSerializable(typeof(ReportDataRow))]
+// ─── AOT (ADR-0022 Phase D): endpoint response collection types ──────────────
+// Results.Ok(collection) serializes the static (compile-time) type, so the exact
+// collection type returned by each handler needs a source-gen JsonTypeInfo, not
+// just its element type. These were emitted by GET endpoints that returned
+// store collections directly.
+[JsonSerializable(typeof(RoleTemplate))]
+[JsonSerializable(typeof(IReadOnlyList<RoleTemplate>))]
+[JsonSerializable(typeof(UserRoleAssignment))]
+[JsonSerializable(typeof(IReadOnlyList<UserRoleAssignment>))]
+[JsonSerializable(typeof(TenantRole))]
+[JsonSerializable(typeof(IReadOnlyList<TenantRole>))]
+[JsonSerializable(typeof(Disposition))]
+[JsonSerializable(typeof(IReadOnlyList<Disposition>))]
+[JsonSerializable(typeof(RateCardDto))]
+[JsonSerializable(typeof(List<RateCardDto>))]
+[JsonSerializable(typeof(IntervalDto[]))]
+[JsonSerializable(typeof(AuthEvent))]
+[JsonSerializable(typeof(PagedResult<AuthEvent>))]
+[JsonSerializable(typeof(IReadOnlyList<Message>))]
+[JsonSerializable(typeof(UsageSummaryDto))]
+[JsonSerializable(typeof(List<UsageSummaryDto>))]
+[JsonSerializable(typeof(JwtKeyListResponse))]
+[JsonSerializable(typeof(RotateKeyResponse))]
+[JsonSerializable(typeof(AuditEventDto))]
+[JsonSerializable(typeof(PagedResult<AuditEventDto>))]
+[JsonSerializable(typeof(Verbara.Platform.Media.MediaFile))]
+// ─── AOT (ADR-0022 Phase D): endpoint [FromBody] request DTOs ────────────────
+// Under PublishAot, System.Text.Json has NO reflection fallback, so every
+// request body deserialized by a Minimal API handler MUST have a source-gen
+// JsonTypeInfo. The DTOs below were missing from the manifest and threw
+// NotSupportedException at request time under the no-reflection contract. Grouped
+// by owning endpoint file.
+// Admin (users / agents / queues / teams)
+[JsonSerializable(typeof(CreateUserRequest))]
+[JsonSerializable(typeof(UpdateUserRequest))]
+[JsonSerializable(typeof(CreateQueueRequest))]
+[JsonSerializable(typeof(UpdateQueueRequest))]
+[JsonSerializable(typeof(CreateAgentRequest))]
+[JsonSerializable(typeof(UpdateAgentRequest))]
+[JsonSerializable(typeof(CreateTeamRequest))]
+[JsonSerializable(typeof(UpdateTeamRequest))]
+// Agent / Supervisor
+[JsonSerializable(typeof(UpdateAgentStateRequest))]
+[JsonSerializable(typeof(WhisperRequest))]
+[JsonSerializable(typeof(ListenRequest))]
+// Queue members
+[JsonSerializable(typeof(AddMemberBody))]
+[JsonSerializable(typeof(UpdateMemberBody))]
+[JsonSerializable(typeof(PauseMemberBody))]
+// Contacts
+[JsonSerializable(typeof(CreateContactRequest))]
+[JsonSerializable(typeof(UpdateContactRequest))]
+// RBAC (tenant roles)
+[JsonSerializable(typeof(CreateTenantRoleRequest))]
+[JsonSerializable(typeof(UpdateTenantRoleRequest))]
+[JsonSerializable(typeof(CloneTenantRoleRequest))]
+[JsonSerializable(typeof(ReplaceUserRolesRequest))]
+// KnowledgeBase
+[JsonSerializable(typeof(CreateArticleRequest))]
+[JsonSerializable(typeof(UpdateArticleRequest))]
+// Surveys
+[JsonSerializable(typeof(CreateSurveyRequest))]
+[JsonSerializable(typeof(UpdateSurveyRequest))]
+[JsonSerializable(typeof(ActivateSurveyRequest))]
+// Flows
+[JsonSerializable(typeof(CreateFlowRequest))]
+[JsonSerializable(typeof(UpdateFlowRequest))]
+// Campaigns (Dialer)
+[JsonSerializable(typeof(CreateCampaignRequest))]
+[JsonSerializable(typeof(UpdateCampaignRequest))]
+// Dispositions
+[JsonSerializable(typeof(CreateDispositionRequest))]
+// Scheduled reports
+[JsonSerializable(typeof(CreateScheduledReportRequest))]
+[JsonSerializable(typeof(UpdateScheduledReportRequest))]
+// Channel config
+[JsonSerializable(typeof(UpdateChannelConfigRequest))]
+// Management — billing
+[JsonSerializable(typeof(CreateRateCardRequest))]
+[JsonSerializable(typeof(GenerateInvoiceRequest))]
+[JsonSerializable(typeof(UpdateQuotaRequest))]
+// Management — system / license
+[JsonSerializable(typeof(UpdateLicenseRequest))]
+// Auth admin (tenant auth config)
+[JsonSerializable(typeof(UpdateTenantAuthConfigRequest))]
+// GDPR
+[JsonSerializable(typeof(GdprUserPurgeRequest))]
+// Profile-scoped MFA enrolment + recovery codes
+[JsonSerializable(typeof(MfaEnrollVerifyRequest))]
+[JsonSerializable(typeof(MfaEnrollCompleteRequest))]
+[JsonSerializable(typeof(ProfileRegenerateRecoveryCodesRequest))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

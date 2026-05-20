@@ -1,8 +1,8 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Automation;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -15,25 +15,25 @@ internal sealed class PostgresAutomationRuleStore : IAutomationRuleStore
     public async Task<IReadOnlyList<AutomationRule>> GetActiveByTriggerAsync(
         TenantId tenantId, AutomationTrigger trigger, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<RuleRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT rule_id, tenant_id, name, trigger, conditions, actions, is_active, priority, " +
             "max_executions_per_conversation, created_at " +
             "FROM automation_rules " +
             "WHERE tenant_id = @TenantId AND trigger = @Trigger AND is_active = true " +
             "ORDER BY priority",
-            new { TenantId = tenantId.Value, Trigger = (int)trigger });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Trigger", (int)trigger)); },
+            RuleRow.Map, ct);
         return rows.Select(r => r.ToRule()).ToList();
     }
 
     public async Task<AutomationRule?> GetByIdAsync(TenantId tenantId, EntityId ruleId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<RuleRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT rule_id, tenant_id, name, trigger, conditions, actions, is_active, priority, " +
             "max_executions_per_conversation, created_at " +
             "FROM automation_rules WHERE tenant_id = @TenantId AND rule_id = @RuleId",
-            new { TenantId = tenantId.Value, RuleId = ruleId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("RuleId", ruleId.Value)); },
+            RuleRow.Map, ct);
         return row?.ToRule();
     }
 
@@ -42,8 +42,7 @@ internal sealed class PostgresAutomationRuleStore : IAutomationRuleStore
         var conditionsJson = JsonSerializer.Serialize(rule.Conditions, PostgresJson.Ctx.IReadOnlyListAutomationCondition);
         var actionsJson = JsonSerializer.Serialize(rule.Actions, PostgresJson.Ctx.IReadOnlyListAutomationAction);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO automation_rules (rule_id, tenant_id, name, trigger, conditions, actions, is_active, " +
             "priority, max_executions_per_conversation, created_at) " +
             "VALUES (@RuleId, @TenantId, @Name, @Trigger, @Conditions::jsonb, @Actions::jsonb, @IsActive, " +
@@ -52,19 +51,20 @@ internal sealed class PostgresAutomationRuleStore : IAutomationRuleStore
             "  name = EXCLUDED.name, trigger = EXCLUDED.trigger, conditions = EXCLUDED.conditions, " +
             "  actions = EXCLUDED.actions, is_active = EXCLUDED.is_active, priority = EXCLUDED.priority, " +
             "  max_executions_per_conversation = EXCLUDED.max_executions_per_conversation",
-            new
+            p =>
             {
-                RuleId = rule.RuleId.Value,
-                TenantId = rule.TenantId.Value,
-                rule.Name,
-                Trigger = (int)rule.Trigger,
-                Conditions = conditionsJson,
-                Actions = actionsJson,
-                rule.IsActive,
-                rule.Priority,
-                MaxExecutionsPerConversation = rule.MaxExecutionsPerConversation,
-                rule.CreatedAt,
-            });
+                p.Add(new NpgsqlParameter("RuleId", rule.RuleId.Value));
+                p.Add(new NpgsqlParameter("TenantId", rule.TenantId.Value));
+                p.Add(new NpgsqlParameter("Name", rule.Name));
+                p.Add(new NpgsqlParameter("Trigger", (int)rule.Trigger));
+                p.Add(new NpgsqlParameter("Conditions", conditionsJson));
+                p.Add(new NpgsqlParameter("Actions", actionsJson));
+                p.Add(new NpgsqlParameter("IsActive", rule.IsActive));
+                p.Add(new NpgsqlParameter("Priority", rule.Priority));
+                p.Add(new NpgsqlParameter("MaxExecutionsPerConversation", rule.MaxExecutionsPerConversation));
+                p.Add(new NpgsqlParameter("CreatedAt", rule.CreatedAt));
+            },
+            ct);
     }
 
     private sealed class RuleRow
@@ -79,6 +79,20 @@ internal sealed class PostgresAutomationRuleStore : IAutomationRuleStore
         public int priority { get; init; }
         public int max_executions_per_conversation { get; init; }
         public DateTime created_at { get; init; }
+
+        public static RuleRow Map(NpgsqlDataReader r) => new()
+        {
+            rule_id = r.GetString("rule_id"),
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            trigger = r.GetInt32("trigger"),
+            conditions = r.GetString("conditions"),
+            actions = r.GetString("actions"),
+            is_active = r.GetBoolean("is_active"),
+            priority = r.GetInt32("priority"),
+            max_executions_per_conversation = r.GetInt32("max_executions_per_conversation"),
+            created_at = r.GetDateTime("created_at"),
+        };
 
         public AutomationRule ToRule()
         {

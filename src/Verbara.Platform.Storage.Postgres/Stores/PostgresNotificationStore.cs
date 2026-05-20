@@ -1,6 +1,7 @@
-using Dapper;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core.Notifications;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -16,10 +17,10 @@ internal sealed class PostgresNotificationStore : INotificationStore
 
     public async ValueTask<Notification?> GetAsync(string notificationId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<NotificationRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {SelectColumns} FROM notifications WHERE notification_id = @NotificationId",
-            new { NotificationId = notificationId });
+            p => p.Add(new NpgsqlParameter("NotificationId", notificationId)),
+            NotificationRow.Map, ct);
 
         return row?.ToModel();
     }
@@ -32,39 +33,54 @@ internal sealed class PostgresNotificationStore : INotificationStore
         int offset,
         CancellationToken ct = default)
     {
-        var sql = $"SELECT {SelectColumns} FROM notifications " +
-                  "WHERE tenant_id = @TenantId AND user_id = @UserId";
+        List<NotificationRow> rows;
 
         if (unreadOnly == true)
-            sql += " AND is_read = false";
-
-        sql += " ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset";
-
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<NotificationRow>(sql, new
         {
-            TenantId = tenantId,
-            UserId   = userId,
-            Limit    = limit,
-            Offset   = offset,
-        });
+            rows = await _dataSource.QueryListAsync(
+                $"SELECT {SelectColumns} FROM notifications " +
+                "WHERE tenant_id = @TenantId AND user_id = @UserId AND is_read = false " +
+                "ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId));
+                    p.Add(new NpgsqlParameter("UserId",   userId));
+                    p.Add(new NpgsqlParameter("Limit",    limit));
+                    p.Add(new NpgsqlParameter("Offset",   offset));
+                },
+                NotificationRow.Map, ct);
+        }
+        else
+        {
+            rows = await _dataSource.QueryListAsync(
+                $"SELECT {SelectColumns} FROM notifications " +
+                "WHERE tenant_id = @TenantId AND user_id = @UserId " +
+                "ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId));
+                    p.Add(new NpgsqlParameter("UserId",   userId));
+                    p.Add(new NpgsqlParameter("Limit",    limit));
+                    p.Add(new NpgsqlParameter("Offset",   offset));
+                },
+                NotificationRow.Map, ct);
+        }
 
         return rows.Select(r => r.ToModel()).ToList();
     }
 
     public async ValueTask<int> CountUnreadAsync(string tenantId, string userId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteScalarAsync<int>(
+        return (int)(await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM notifications " +
             "WHERE tenant_id = @TenantId AND user_id = @UserId AND is_read = false",
-            new { TenantId = tenantId, UserId = userId });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId)); p.Add(new NpgsqlParameter("UserId", userId)); },
+            ct) ?? 0L);
     }
 
     public async ValueTask SaveAsync(Notification notification, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO notifications " +
             "(notification_id, tenant_id, user_id, category, severity, type, title, body, " +
             " action_url, is_read, created_at, read_at) " +
@@ -73,39 +89,45 @@ internal sealed class PostgresNotificationStore : INotificationStore
             "ON CONFLICT (notification_id) DO UPDATE SET " +
             "  is_read = EXCLUDED.is_read, " +
             "  read_at = EXCLUDED.read_at",
-            new
+            p =>
             {
-                NotificationId = notification.NotificationId,
-                TenantId       = notification.TenantId,
-                UserId         = notification.UserId,
-                Category       = (int)notification.Category,
-                Severity       = (int)notification.Severity,
-                Type           = notification.Type,
-                Title          = notification.Title,
-                Body           = notification.Body,
-                ActionUrl      = notification.ActionUrl,
-                IsRead         = notification.IsRead,
-                CreatedAt      = notification.CreatedAt.UtcDateTime,
-                ReadAt         = notification.ReadAt?.UtcDateTime,
-            });
+                p.Add(new NpgsqlParameter("NotificationId", notification.NotificationId));
+                p.Add(new NpgsqlParameter("TenantId",       notification.TenantId));
+                p.Add(new NpgsqlParameter("UserId", NpgsqlDbType.Text) { Value = (object?)notification.UserId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Category",       (int)notification.Category));
+                p.Add(new NpgsqlParameter("Severity",       (int)notification.Severity));
+                p.Add(new NpgsqlParameter("Type",           notification.Type));
+                p.Add(new NpgsqlParameter("Title",          notification.Title));
+                p.Add(new NpgsqlParameter("Body",           notification.Body));
+                p.Add(new NpgsqlParameter("ActionUrl", NpgsqlDbType.Text) { Value = (object?)notification.ActionUrl ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("IsRead",         notification.IsRead));
+                p.Add(new NpgsqlParameter("CreatedAt",      notification.CreatedAt.UtcDateTime));
+                p.Add(new NpgsqlParameter("ReadAt", NpgsqlDbType.TimestampTz) { Value = (object?)notification.ReadAt?.UtcDateTime ?? DBNull.Value });
+            },
+            ct);
     }
 
     public async ValueTask MarkReadAsync(string notificationId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "UPDATE notifications SET is_read = true, read_at = @ReadAt " +
             "WHERE notification_id = @NotificationId",
-            new { NotificationId = notificationId, ReadAt = DateTime.UtcNow });
+            p => { p.Add(new NpgsqlParameter("NotificationId", notificationId)); p.Add(new NpgsqlParameter("ReadAt", DateTime.UtcNow)); },
+            ct);
     }
 
     public async ValueTask MarkAllReadAsync(string tenantId, string userId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "UPDATE notifications SET is_read = true, read_at = @ReadAt " +
             "WHERE tenant_id = @TenantId AND user_id = @UserId AND is_read = false",
-            new { TenantId = tenantId, UserId = userId, ReadAt = DateTime.UtcNow });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("UserId",   userId));
+                p.Add(new NpgsqlParameter("ReadAt",   DateTime.UtcNow));
+            },
+            ct);
     }
 
     private sealed class NotificationRow
@@ -122,6 +144,22 @@ internal sealed class PostgresNotificationStore : INotificationStore
         public bool is_read { get; init; }
         public DateTime created_at { get; init; }
         public DateTime? read_at { get; init; }
+
+        public static NotificationRow Map(NpgsqlDataReader r) => new()
+        {
+            notification_id = r.GetString("notification_id"),
+            tenant_id       = r.GetString("tenant_id"),
+            user_id         = r.GetStringOrNull("user_id"),
+            category        = r.GetInt32("category"),
+            severity        = r.GetInt32("severity"),
+            type            = r.GetString("type"),
+            title           = r.GetString("title"),
+            body            = r.GetString("body"),
+            action_url      = r.GetStringOrNull("action_url"),
+            is_read         = r.GetBoolean("is_read"),
+            created_at      = r.GetDateTime("created_at"),
+            read_at         = r.GetDateTimeOrNull("read_at"),
+        };
 
         public Notification ToModel() => new()
         {

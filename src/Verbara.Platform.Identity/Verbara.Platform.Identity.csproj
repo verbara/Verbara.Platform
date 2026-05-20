@@ -20,13 +20,14 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" />
     <PackageReference Include="Verbara.Sdk.Resilience" />
-    <!-- DataProtection DB-backed keyring (ADR-0003 + ADR-0022 Phase B —
-         Dapper IXmlRepository replaces the EF Core path so Platform.Api can
-         ship as Native AOT). -->
+    <!-- DataProtection DB-backed keyring (ADR-0003 + ADR-0022 Phase B/D —
+         raw-Npgsql IXmlRepository replaces the EF Core path so Platform.Api can
+         ship as Native AOT). Verbara.Sdk.Data.Npgsql supplies the name-based
+         reader getters used by NpgsqlXmlRepository. -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" />
     <PackageReference Include="Npgsql" />
-    <PackageReference Include="Dapper" />
+    <PackageReference Include="Verbara.Sdk.Data.Npgsql" />
   </ItemGroup>
 
 </Project>

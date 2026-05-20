@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
-using Dapper;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -60,30 +60,34 @@ internal sealed partial class OidcClientSecretEncryptionMigrator : IHostedServic
 
         try
         {
-            await using var conn = await _dataSource.OpenConnectionAsync(cancellationToken);
-
             // 024_EncryptOidcClientSecret.sql is a no-op marker — the table itself
             // has existed since 001 and the column since the OIDC feature shipped.
             // If the table is absent (fresh install), this query returns no rows
             // and the migrator is a no-op.
-            var rows = (await conn.QueryAsync<(string TenantId, string Value)>(
-                "SELECT tenant_id, oidc_client_secret FROM tenant_auth_config WHERE oidc_client_secret IS NOT NULL"))
-                .ToList();
+            var rows = await _dataSource.QueryListAsync(
+                "SELECT tenant_id, oidc_client_secret FROM tenant_auth_config WHERE oidc_client_secret IS NOT NULL",
+                static p => { },
+                OidcSecretRow.Map, cancellationToken);
 
-            foreach (var (tenantId, value) in rows)
+            foreach (var row in rows)
             {
                 if (cancellationToken.IsCancellationRequested) break;
 
-                if (TryUnprotect(value))
+                if (TryUnprotect(row.Value))
                 {
                     alreadyEncryptedCount++;
                     continue;
                 }
 
-                var encrypted = _protector.Protect(value);
-                await conn.ExecuteAsync(
+                var encrypted = _protector.Protect(row.Value);
+                await _dataSource.ExecuteAsync(
                     "UPDATE tenant_auth_config SET oidc_client_secret = @Value WHERE tenant_id = @TenantId",
-                    new { TenantId = tenantId, Value = encrypted });
+                    p =>
+                    {
+                        p.Add(new NpgsqlParameter("TenantId", row.TenantId));
+                        p.Add(new NpgsqlParameter("Value", encrypted));
+                    },
+                    cancellationToken);
                 encryptedCount++;
             }
 
@@ -139,4 +143,16 @@ internal sealed partial class OidcClientSecretEncryptionMigrator : IHostedServic
     [LoggerMessage(EventId = 4003, Level = LogLevel.Debug,
         Message = "tenant_auth_config not present yet — skipping OIDC secret migration")]
     private static partial void LogTableMissing(ILogger logger);
+
+    private sealed class OidcSecretRow
+    {
+        public string TenantId { get; init; } = null!;
+        public string Value { get; init; } = null!;
+
+        public static OidcSecretRow Map(NpgsqlDataReader r) => new()
+        {
+            TenantId = r.GetString("tenant_id"),
+            Value = r.GetString("oidc_client_secret"),
+        };
+    }
 }
