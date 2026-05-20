@@ -1,7 +1,7 @@
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -16,47 +16,46 @@ internal sealed class PostgresCannedResponseStore : ICannedResponseStore
 
     public async Task<CannedResponse?> GetByIdAsync(TenantId tenantId, EntityId responseId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<CannedResponseRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {SelectColumns} FROM canned_responses WHERE tenant_id = @TenantId AND response_id = @ResponseId",
-            new { TenantId = tenantId.Value, ResponseId = responseId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("ResponseId", responseId.Value)); },
+            CannedResponseRow.Map, ct);
 
         return row?.ToModel();
     }
 
     public async Task<IReadOnlyList<CannedResponse>> ListByTenantAsync(TenantId tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<CannedResponseRow>(
+        var rows = await _dataSource.QueryListAsync(
             $"SELECT {SelectColumns} FROM canned_responses WHERE tenant_id = @TenantId ORDER BY shortcut",
-            new { TenantId = tenantId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); },
+            CannedResponseRow.Map, ct);
 
         return rows.Select(r => r.ToModel()).ToList();
     }
 
     public async Task<IReadOnlyList<CannedResponse>> SearchAsync(TenantId tenantId, string query, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var pattern = $"%{query}%";
-        var rows = await conn.QueryAsync<CannedResponseRow>(
+        var rows = await _dataSource.QueryListAsync(
             $"SELECT {SelectColumns} FROM canned_responses " +
             "WHERE tenant_id = @TenantId AND (" +
             "  shortcut ILIKE @Pattern OR title ILIKE @Pattern OR body ILIKE @Pattern " +
             "  OR category ILIKE @Pattern OR tags ILIKE @Pattern" +
             ") ORDER BY shortcut",
-            new { TenantId = tenantId.Value, Pattern = pattern });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Pattern", pattern)); },
+            CannedResponseRow.Map, ct);
 
         return rows.Select(r => r.ToModel()).ToList();
     }
 
     public async Task SaveAsync(CannedResponse response, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var tagsJson = response.Tags.Count > 0
             ? PostgresJson.Serialize(response.Tags.ToList(), PostgresJson.Ctx.ListString)
             : null;
 
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO canned_responses " +
             "(response_id, tenant_id, shortcut, title, body, category, tags, created_by, created_at, updated_at) " +
             "VALUES (@ResponseId, @TenantId, @Shortcut, @Title, @Body, @Category, @Tags, @CreatedBy, @CreatedAt, @UpdatedAt) " +
@@ -67,27 +66,28 @@ internal sealed class PostgresCannedResponseStore : ICannedResponseStore
             "  category   = EXCLUDED.category, " +
             "  tags       = EXCLUDED.tags, " +
             "  updated_at = NOW()",
-            new
+            p =>
             {
-                ResponseId = response.ResponseId.Value,
-                TenantId = response.TenantId.Value,
-                Shortcut = response.Shortcut,
-                Title = response.Title,
-                Body = response.Body,
-                Category = response.Category,
-                Tags = tagsJson,
-                CreatedBy = response.CreatedBy,
-                CreatedAt = response.CreatedAt.UtcDateTime,
-                UpdatedAt = response.UpdatedAt?.UtcDateTime,
-            });
+                p.Add(new NpgsqlParameter("ResponseId", response.ResponseId.Value));
+                p.Add(new NpgsqlParameter("TenantId", response.TenantId.Value));
+                p.Add(new NpgsqlParameter("Shortcut", response.Shortcut));
+                p.Add(new NpgsqlParameter("Title", response.Title));
+                p.Add(new NpgsqlParameter("Body", response.Body));
+                p.Add(new NpgsqlParameter("Category", (object?)response.Category ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Tags", (object?)tagsJson ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("CreatedBy", response.CreatedBy));
+                p.Add(new NpgsqlParameter("CreatedAt", response.CreatedAt.UtcDateTime));
+                p.Add(new NpgsqlParameter("UpdatedAt", (object?)response.UpdatedAt?.UtcDateTime ?? DBNull.Value));
+            },
+            ct);
     }
 
     public async Task DeleteAsync(TenantId tenantId, EntityId responseId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "DELETE FROM canned_responses WHERE tenant_id = @TenantId AND response_id = @ResponseId",
-            new { TenantId = tenantId.Value, ResponseId = responseId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("ResponseId", responseId.Value)); },
+            ct);
     }
 
     private sealed class CannedResponseRow
@@ -102,6 +102,20 @@ internal sealed class PostgresCannedResponseStore : ICannedResponseStore
         public string created_by { get; init; } = null!;
         public DateTime created_at { get; init; }
         public DateTime? updated_at { get; init; }
+
+        public static CannedResponseRow Map(NpgsqlDataReader r) => new()
+        {
+            response_id = r.GetString("response_id"),
+            tenant_id = r.GetString("tenant_id"),
+            shortcut = r.GetString("shortcut"),
+            title = r.GetString("title"),
+            body = r.GetString("body"),
+            category = r.GetStringOrNull("category"),
+            tags = r.GetStringOrNull("tags"),
+            created_by = r.GetString("created_by"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTimeOrNull("updated_at"),
+        };
 
         public CannedResponse ToModel()
         {
