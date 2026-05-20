@@ -8,6 +8,18 @@
     <!-- AD0001 = Roslyn analyzer crashed (RouteHandlerAnalyzer flaky on this assembly's
          WebApplicationFactory route topology). Not a semantic issue with our code. -->
     <NoWarn>$(NoWarn);IL2026;IL3050;AD0001</NoWarn>
+    <!-- ADR-0022 Phase D: the IsReflectionEnabledByDefault feature switch is baked into
+         the ENTRY assembly's runtimeconfig — i.e. the test host. We deliberately leave
+         reflection ENABLED in the test process: the test HttpClient serializes request
+         bodies (including anonymous types) with System.Net.Http.Json's no-options
+         overloads, which legitimately need reflection and have no source-gen equivalent.
+         Set AOT_JSON_STRICT=true to flip the switch off for a gap-surfacing sweep — the
+         server-under-test (WebApplicationFactory) then runs with the same
+         no-reflection-fallback contract as the Native AOT image, turning any DTO missing
+         from ApiJsonContext into a loud NotSupportedException. (The Api project itself
+         hard-sets the switch off so the published host + `dotnet run` always behave like
+         AOT.) -->
+    <JsonSerializerIsReflectionEnabledByDefault Condition="'$(AOT_JSON_STRICT)' == 'true'">false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
   <ItemGroup>

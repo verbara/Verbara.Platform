@@ -39,6 +39,13 @@ public class IpAllowlistMiddlewareTests
                         services.AddSingleton(audit);
                         services.AddSingleton<IIpAllowlistEvaluator, DefaultIpAllowlistEvaluator>();
                         services.AddRouting();
+                        // Mirror Program.cs's ConfigureHttpJsonOptions so this isolated
+                        // test host serializes Results.Ok(...) under the same
+                        // source-gen-only contract as the Native AOT image (no
+                        // reflection fallback). System.String lives in ApiJsonContext.
+                        services.ConfigureHttpJsonOptions(o =>
+                            o.SerializerOptions.TypeInfoResolverChain.Insert(
+                                0, Serialization.ApiJsonContext.Default));
                     })
                     .Configure(app =>
                     {
