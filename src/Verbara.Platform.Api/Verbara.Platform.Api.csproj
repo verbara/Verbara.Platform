@@ -74,7 +74,7 @@
     <PackageReference Include="Otp.NET" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
-    <PackageReference Include="Dapper" />
+    <PackageReference Include="Verbara.Sdk.Data.Npgsql" />
     <PackageReference Include="Npgsql" />
     <!-- DataProtection moved off EF Core to Dapper in ADR-0022 Phase B — see
          Verbara.Platform.Identity.DataProtection.DapperXmlRepository. The

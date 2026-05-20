@@ -1,7 +1,7 @@
-using Dapper;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Api.Authz;
 
@@ -78,11 +78,9 @@ public class CachedAgentTenantResolver
 
     protected virtual async Task<string?> LookupTenantIdAsync(string agentId, CancellationToken cancellationToken)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        return await conn.QuerySingleOrDefaultAsync<string?>(
-            new CommandDefinition(
-                "SELECT tenant_id FROM agents WHERE agent_id = @AgentId LIMIT 1",
-                new { AgentId = agentId },
-                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return await _dataSource.ExecuteScalarAsync<string?>(
+            "SELECT tenant_id FROM agents WHERE agent_id = @AgentId LIMIT 1",
+            p => p.Add(new NpgsqlParameter("AgentId", agentId)),
+            cancellationToken).ConfigureAwait(false);
     }
 }

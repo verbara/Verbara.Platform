@@ -1,4 +1,3 @@
-using Dapper;
 using Npgsql;
 
 namespace Verbara.Platform.Api.Services;
@@ -15,11 +14,10 @@ internal static class DatabaseMigrationService
         var dataSource = NpgsqlDataSource.Create(connectionString);
         using var conn = dataSource.OpenConnection();
 
-        conn.Execute(
+        ExecuteNonQuery(conn, null,
             "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())");
 
-        var applied = conn.Query<string>("SELECT name FROM _migrations ORDER BY name")
-            .ToHashSet(StringComparer.Ordinal);
+        var applied = QueryMigrationNames(conn).ToHashSet(StringComparer.Ordinal);
 
         foreach (var migration in GetMigrationFiles().OrderBy(m => m.Name, StringComparer.Ordinal))
         {
@@ -29,10 +27,10 @@ internal static class DatabaseMigrationService
             using var tx = conn.BeginTransaction();
             try
             {
-                conn.Execute(migration.Sql, transaction: tx);
-                conn.Execute(
+                ExecuteNonQuery(conn, tx, migration.Sql);
+                ExecuteNonQuery(conn, tx,
                     "INSERT INTO _migrations (name) VALUES (@Name)",
-                    new { migration.Name }, tx);
+                    new NpgsqlParameter("Name", migration.Name));
                 tx.Commit();
             }
             catch (Exception ex)
@@ -48,6 +46,25 @@ internal static class DatabaseMigrationService
         }
 
         dataSource.Dispose();
+    }
+
+    private static void ExecuteNonQuery(
+        NpgsqlConnection conn, NpgsqlTransaction? tx, string sql, params NpgsqlParameter[] parameters)
+    {
+        using var cmd = new NpgsqlCommand(sql, conn, tx);
+        foreach (var p in parameters)
+            cmd.Parameters.Add(p);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static List<string> QueryMigrationNames(NpgsqlConnection conn)
+    {
+        var names = new List<string>();
+        using var cmd = new NpgsqlCommand("SELECT name FROM _migrations ORDER BY name", conn);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            names.Add(reader.GetString(0));
+        return names;
     }
 
     private static IEnumerable<(string Name, string Sql)> GetMigrationFiles()
