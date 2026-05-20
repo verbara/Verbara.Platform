@@ -2,14 +2,9 @@
 
 Project context for Claude Code working on **Verbara.Platform** — the API host and composition root for an omnichannel contact-center built on .NET 10. Read top-to-bottom for architecture; jump to **Critical Gotchas** for non-obvious pitfalls before editing code.
 
-> **AOT shipping caveat ([ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md)):** Platform.Api currently ships as portable IL DLLs, NOT Native AOT. Status by phase:
-> - ✅ **Phase A** (2026-05-18) — SignalR Hub extracted to `Verbara.Platform.Realtime`. 3 `IL3050` errors in `PushToHubRelay` eliminated.
-> - ✅ **Phase B** (2026-05-18) — EF Core DataProtection replaced by Dapper `IXmlRepository`. 5 EF Core diagnostics in `PlatformDataProtectionDbContext` + `Program.cs` eliminated. Zero EF Core in repo.
-> - ⏸️ **Phase C** (2026-05-19, empirical only) — re-ran the §3 AOT publish: §3 baseline blockers ALL eliminated. Residual surface unmasked: **Dapper 2.1.72 is not AOT-compatible** (uses `DynamicMethod` + `MakeGenericType` for IL emit; ~40 `IL3050`/`IL207x` diagnostics). The csproj still asserts `<IsAotCompatible>false</IsAotCompatible>` (truthful) until Phase D ships.
-> - 🚧 **Phase D** (future, multi-week, both repos) — Dapper.AOT source-generator migration across Verbara.Platform (~57 files) AND Verbara.Sdk.Pro (~120 files). Required to flip AOT.
-> - **Phase E** — image-digest regen + ghcr.io image cutover (renumbered from original "Phase D" in the §3 plan).
->
-> Non-AOT publishing keeps shipping Pro IP as decompilable IL. ADR-0011 image-binding is the mitigation in force.
+> **🔒 AOT shipping — Native AOT achieved ([ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md), Phase D shipped 2026-05-20):** `Verbara.Platform.Api` publishes **Native AOT** (`<IsAotCompatible>true>`; 0 `IL2026`/`IL3050`/`IL207x` diagnostics; native ELF, 0 managed Verbara DLLs). Phases A (SignalR Hub → `Verbara.Platform.Realtime`) + B (EF Core DataProtection → Dapper, then raw Npgsql) + C (empirical: Dapper was the last blocker) + **D (total Dapper removal cross-repo → `Verbara.Sdk.Data.Npgsql` facade)** are all closed. Validated end-to-end: the native binary boots + serves real HTTP (0 JSON 500s) with the migrated Npgsql data layer running under AOT — see `docs/operations/phase-d-validation/2026-05-19-pilot-aot-delta.md`.
+> - **HARD CONSTRAINT:** Dapper / Dapper.AOT / `Verbara.Sdk.Dapper.Stubs` are **permanently banned** — a `BanDapperPackageReferences` guard in `Directory.Build.props` fails the build if any is referenced. Use `Verbara.Sdk.Data.Npgsql`. `Verbara.Platform.Api` also sets `<JsonSerializerIsReflectionEnabledByDefault>false>`: every (de)serialized DTO MUST be in a `[JsonSerializable]` source-gen context (`ApiJsonContext` / `RealtimeContractsJsonContext`).
+> - **Remaining (release activities):** Phase 5 — publish Dapper-free Pro `2.5.0-pro` to GitHub Packages + AOT image to ghcr.io + digest regen. Phase 6 — 24h AOT soak (mandatory gate). The root `Dockerfile` is already the AOT pathway (`runtime-deps` final stage); a Docker AOT build requires the Dapper-free Pro packages published to `github` first.
 
 > **This repo is the authoritative workstream for Platform + Platform.Web.** Plans, specs, ADRs, and research that touch either the API **or** the React frontend are authored under this repo's `docs/` tree. `Verbara.Platform.Web` remains a separate git repo for frontend source, but its own `docs/` is secondary — open new plans here. Decision recorded 2026-04-19 (feedback memory `feedback_platform_web_consolidation.md`).
 
@@ -17,7 +12,7 @@ Project context for Claude Code working on **Verbara.Platform** — the API host
 
 ## Project Overview
 
-Verbara.Platform is the API host and composition root for the omnichannel contact center. .NET 10. Consumes SDK (MIT) and Pro packages via NuGet — versions pinned in `Directory.Packages.props`. The SDK + Pro libraries are AOT-compatible (`IsAotCompatible=true` per package csproj); the Api host project disables AOT — Phases A + B closed the historical §3 blockers (SignalR + EF Core DataProtection); the residual blocker is Dapper, scheduled as Phase D per [ADR-0022 Amendment §7](docs/decisions/0022-platform-api-aot-shipping-path.md).
+Verbara.Platform is the API host and composition root for the omnichannel contact center. .NET 10. Consumes SDK (MIT) and Pro packages via NuGet — versions pinned in `Directory.Packages.props`. The SDK + Pro libraries AND the Api host are all AOT-compatible (`IsAotCompatible=true`); Phase D (2026-05-20) removed the last blocker (Dapper) cross-repo, so `Verbara.Platform.Api` now publishes Native AOT — see the AOT shipping note above and [ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md).
 
 **`/api/v1/` (URL-segment versioning), 70 endpoint groups (14 with feature gates).** Current version in `Directory.Build.props`; package list under `src/`.
 
@@ -28,7 +23,7 @@ Verbara.Platform is the API host and composition root for the omnichannel contac
 - **AI / Workflow:** `Flows` (DAG, 11 node types, LLM abstraction), `Bot` (virtual agent + analytics), `KnowledgeBase`, `Automation` (triggers + conditions + actions), `Surveys`
 - **Cross-cutting:** `Audit`, `Media` (FileSystem + S3 backends), `Billing` (metering, quotas, rate cards, invoices, dunning)
 - **Microservices:** `Renderer` (`:5010` — QuestPDF + ScottPlot PDF/CSV), `Mail` (`:5020` — MailKit SMTP + MS Graph + OAuth PKCE)
-- **Storage:** `Storage.InMemory` (dev/test default), `Storage.Postgres` (Npgsql + Dapper, RBAC seeder)
+- **Storage:** `Storage.InMemory` (dev/test default), `Storage.Postgres` (raw Npgsql via `Verbara.Sdk.Data.Npgsql` facade — NOT Dapper, RBAC seeder)
 - **Host:** `Api` (this composition root)
 
 ## Build & Test
@@ -144,14 +139,14 @@ Exact lines live in `src/Verbara.Platform.Api/Program.cs` — this section only 
 - Test naming: `Method_ShouldExpected_WhenCondition`.
 - Test stack: xunit 2.9.3, FluentAssertions 7.1.0, NSubstitute 5.3.0.
 - `TreatWarningsAsErrors` ON, `WarningLevel 9999`. Central package management in `Directory.Packages.props`.
-- Key NuGet: Npgsql 9.0.3, Dapper 2.1.66, BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0, Asp.Versioning.Http, NCrontab. QuestPDF + ScottPlot in Renderer only. MailKit + Microsoft.Graph + Azure.Identity in Mail only.
+- Key NuGet: Npgsql 10.0.2 + `Verbara.Sdk.Data.Npgsql` (data access — NO Dapper, banned), BCrypt.Net-Next 4.0.3, System.IdentityModel.Tokens.Jwt 8.7.0, Asp.Versioning.Http, NCrontab. QuestPDF + ScottPlot in Renderer only. MailKit + Microsoft.Graph + Azure.Identity in Mail only.
 
 ### Critical Gotchas
 
 - **PostgreSQL 18 + Redis 8:** all compose files on `postgres:18-alpine` / `redis:8-alpine`.
 - **JWT claims:** `MapInboundClaims = false` + `RoleClaimType = "role"` + `NameClaimType = "sub"`. .NET 10 maps claims by default; without this, `FindFirst("tid")` fails and `RequireRole("Admin")` breaks.
 - **Tenant resolution:** `OnTokenValidated` only sets `TenantId` when middleware hasn't already — `X-Tenant-Id` header / subdomain wins over JWT `tid` for cross-tenant admin access.
-- **Npgsql 9 + Dapper:** Postgres row types MUST be class-based with `{ get; init; }`, NOT positional records. Npgsql 9 returns `DateTime` for `timestamptz`; Dapper constructor matching fails with nullable `DateTime?` params. All 43 stores converted.
+- **Npgsql via `Verbara.Sdk.Data.Npgsql` (Dapper banned — ADR-0022):** row types are class-based `{ get; init; }` + a hand-written `static Map(NpgsqlDataReader)` (name-based getters); params bound explicitly (no anon objects). **Every nullable param that can be `DBNull.Value` MUST set an explicit `NpgsqlDbType`** or Postgres throws `42P08` (jsonb string params with a `::jsonb` cast excepted). `COUNT(*)` → `ExecuteScalarAsync<long?>(...) ?? 0L`. `QuerySingleOrDefaultAsync` throws on >1 row (use `QueryFirstOrDefaultAsync` for first-of-many). Npgsql 10 returns `DateTime` for `timestamptz` (the `Npgsql.EnableLegacyTimestampBehavior` host config option is preserved via `RuntimeHostConfigurationOption`).
 - **DTO hardening (Plan 29A pattern):** never return anonymous `new {}`. Use typed sealed records registered in `ApiJsonContext`. DTO field is `id` (not `teamId`/`userId`/etc.) so frontend hooks work.
 - **E2E conventions:** locale-proof selectors (`data-*` over `toContainText`); `ConfirmDeleteDialog` (3s countdown) for destructive actions; shadcn `Select` uses `role=option` not `selectOption()`; always `data-table-search.fill(id)` before clicking a freshly created row.
 
