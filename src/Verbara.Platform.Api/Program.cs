@@ -482,7 +482,7 @@ builder.Services.AddHttpClient("EmailAttachments", c =>
 // PasswordService and MfaService are static — no DI registration needed
 
 // DataProtection must be registered before JwtTokenService so the factory can resolve it.
-// Per ADR-0003 + ADR-0022 Phase B: Postgres-backed via DapperXmlRepository (replaces
+// Per ADR-0003 + ADR-0022 Phase B: Postgres-backed via NpgsqlXmlRepository (replaces
 // the legacy EF Core PersistKeysToDbContext path so the host stays AOT-clean). Test
 // environments fall back to ephemeral keys so endpoint tests don't require a live
 // Postgres connection just to exercise non-encryption paths.

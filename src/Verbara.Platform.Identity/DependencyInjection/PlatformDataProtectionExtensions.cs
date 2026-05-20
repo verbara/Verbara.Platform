@@ -16,7 +16,7 @@ namespace Verbara.Platform.Identity.DependencyInjection;
 /// Verbara.Platform.Api).
 /// </summary>
 /// <remarks>
-/// Default behavior is Postgres-backed via <see cref="DapperXmlRepository"/>
+/// Default behavior is Postgres-backed via <see cref="NpgsqlXmlRepository"/>
 /// against the <c>data_protection_keys</c> table (migrations V018 + V022).
 /// Use <see cref="PlatformDataProtectionOptions.UseFileSystem"/> for single-node
 /// deploys or <see cref="PlatformDataProtectionOptions.UseEphemeralKeysForTesting"/>
@@ -29,7 +29,7 @@ public static partial class PlatformDataProtectionExtensions
     /// <summary>
     /// Registers the DataProtection stack with persistence as configured by
     /// <paramref name="configure"/>. Default is Postgres-backed via
-    /// <see cref="DapperXmlRepository"/>; the consumer MUST opt in by calling
+    /// <see cref="NpgsqlXmlRepository"/>; the consumer MUST opt in by calling
     /// <see cref="PlatformDataProtectionOptions.UsePostgres"/> (or
     /// <see cref="PlatformDataProtectionOptions.UseFileSystem"/> /
     /// <see cref="PlatformDataProtectionOptions.UseEphemeralKeysForTesting"/>).
@@ -57,16 +57,16 @@ public static partial class PlatformDataProtectionExtensions
         }
         else if (options.PostgresDataSource is not null)
         {
-            // ADR-0022 Phase B — Dapper-backed IXmlRepository replaces the
+            // ADR-0022 Phase B — raw-Npgsql-backed IXmlRepository replaces the
             // EF Core PersistKeysToDbContext path. The schema (V018 + V022) is
             // unchanged so existing keyrings transparently survive the cutover.
             var dataSource = options.PostgresDataSource;
-            services.AddSingleton(sp => new DapperXmlRepository(
+            services.AddSingleton(sp => new NpgsqlXmlRepository(
                 dataSource,
-                sp.GetRequiredService<ILogger<DapperXmlRepository>>()));
-            services.AddSingleton<IXmlRepository>(sp => sp.GetRequiredService<DapperXmlRepository>());
+                sp.GetRequiredService<ILogger<NpgsqlXmlRepository>>()));
+            services.AddSingleton<IXmlRepository>(sp => sp.GetRequiredService<NpgsqlXmlRepository>());
             services.AddOptions<KeyManagementOptions>()
-                .Configure<DapperXmlRepository>((opts, repo) => opts.XmlRepository = repo);
+                .Configure<NpgsqlXmlRepository>((opts, repo) => opts.XmlRepository = repo);
         }
         else
         {
