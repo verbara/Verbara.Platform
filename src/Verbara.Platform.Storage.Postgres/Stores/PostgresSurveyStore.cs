@@ -1,8 +1,8 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core;
 using Verbara.Platform.Surveys;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -14,31 +14,31 @@ internal sealed class PostgresSurveyStore : ISurveyStore
 
     public async Task<Survey?> GetByIdAsync(TenantId tenantId, EntityId surveyId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<SurveyRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT survey_id, tenant_id, name, type, questions, is_active " +
             "FROM surveys WHERE tenant_id = @TenantId AND survey_id = @SurveyId",
-            new { TenantId = tenantId.Value, SurveyId = surveyId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("SurveyId", surveyId.Value)); },
+            SurveyRow.Map, ct);
         return row?.ToSurvey();
     }
 
     public async Task<IReadOnlyList<Survey>> GetActiveAsync(TenantId tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<SurveyRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT survey_id, tenant_id, name, type, questions, is_active " +
             "FROM surveys WHERE tenant_id = @TenantId AND is_active = true",
-            new { TenantId = tenantId.Value });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
+            SurveyRow.Map, ct);
         return rows.Select(r => r.ToSurvey()).ToList();
     }
 
     public async Task<IReadOnlyList<Survey>> GetAllAsync(TenantId tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<SurveyRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT survey_id, tenant_id, name, type, questions, is_active " +
             "FROM surveys WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId.Value });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
+            SurveyRow.Map, ct);
         return rows.Select(r => r.ToSurvey()).ToList();
     }
 
@@ -46,30 +46,30 @@ internal sealed class PostgresSurveyStore : ISurveyStore
     {
         var questionsJson = JsonSerializer.Serialize(survey.Questions, PostgresJson.Ctx.IReadOnlyListSurveyQuestion);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO surveys (survey_id, tenant_id, name, type, questions, is_active) " +
             "VALUES (@SurveyId, @TenantId, @Name, @Type, @Questions::jsonb, @IsActive) " +
             "ON CONFLICT (tenant_id, survey_id) DO UPDATE SET " +
             "  name = EXCLUDED.name, type = EXCLUDED.type, questions = EXCLUDED.questions, " +
             "  is_active = EXCLUDED.is_active",
-            new
+            p =>
             {
-                SurveyId = survey.SurveyId.Value,
-                TenantId = survey.TenantId.Value,
-                survey.Name,
-                Type = (int)survey.Type,
-                Questions = questionsJson,
-                survey.IsActive,
-            });
+                p.Add(new NpgsqlParameter("SurveyId", survey.SurveyId.Value));
+                p.Add(new NpgsqlParameter("TenantId", survey.TenantId.Value));
+                p.Add(new NpgsqlParameter("Name", survey.Name));
+                p.Add(new NpgsqlParameter("Type", (int)survey.Type));
+                p.Add(new NpgsqlParameter("Questions", questionsJson));
+                p.Add(new NpgsqlParameter("IsActive", survey.IsActive));
+            },
+            ct);
     }
 
     public async Task DeleteAsync(TenantId tenantId, EntityId surveyId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "DELETE FROM surveys WHERE tenant_id = @TenantId AND survey_id = @SurveyId",
-            new { TenantId = tenantId.Value, SurveyId = surveyId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("SurveyId", surveyId.Value)); },
+            ct);
     }
 
     private sealed class SurveyRow
@@ -80,6 +80,16 @@ internal sealed class PostgresSurveyStore : ISurveyStore
         public int type { get; init; }
         public string questions { get; init; } = null!;
         public bool is_active { get; init; }
+
+        public static SurveyRow Map(NpgsqlDataReader r) => new()
+        {
+            survey_id = r.GetString("survey_id"),
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            type = r.GetInt32("type"),
+            questions = r.GetString("questions"),
+            is_active = r.GetBoolean("is_active"),
+        };
 
         public Survey ToSurvey()
         {
