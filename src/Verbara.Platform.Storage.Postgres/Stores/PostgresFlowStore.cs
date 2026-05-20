@@ -1,8 +1,8 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core;
 using Verbara.Platform.Flows;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -14,34 +14,34 @@ internal sealed class PostgresFlowStore : IFlowStore
 
     public async Task<IReadOnlyList<FlowDefinition>> ListAsync(TenantId tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<FlowRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT DISTINCT ON (flow_id) flow_id, tenant_id, name, version, is_published, entry_node_id, nodes, created_at " +
             "FROM flow_definitions WHERE tenant_id = @TenantId " +
             "ORDER BY flow_id, version DESC",
-            new { TenantId = tenantId.Value });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
+            FlowRow.Map, ct);
         return rows.Select(r => r.ToFlowDefinition()).ToList();
     }
 
     public async Task<FlowDefinition?> GetByIdAsync(TenantId tenantId, EntityId flowId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<FlowRow>(
+        var row = await _dataSource.QueryFirstOrDefaultAsync(
             "SELECT flow_id, tenant_id, name, version, is_published, entry_node_id, nodes, created_at " +
             "FROM flow_definitions WHERE tenant_id = @TenantId AND flow_id = @FlowId " +
             "ORDER BY version DESC LIMIT 1",
-            new { TenantId = tenantId.Value, FlowId = flowId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("FlowId", flowId.Value)); },
+            FlowRow.Map, ct);
         return row?.ToFlowDefinition();
     }
 
     public async Task<FlowDefinition?> GetPublishedAsync(TenantId tenantId, EntityId flowId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<FlowRow>(
+        var row = await _dataSource.QueryFirstOrDefaultAsync(
             "SELECT flow_id, tenant_id, name, version, is_published, entry_node_id, nodes, created_at " +
             "FROM flow_definitions WHERE tenant_id = @TenantId AND flow_id = @FlowId AND is_published = true " +
             "ORDER BY version DESC LIMIT 1",
-            new { TenantId = tenantId.Value, FlowId = flowId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("FlowId", flowId.Value)); },
+            FlowRow.Map, ct);
         return row?.ToFlowDefinition();
     }
 
@@ -49,24 +49,24 @@ internal sealed class PostgresFlowStore : IFlowStore
     {
         var nodesJson = JsonSerializer.Serialize(flow.Nodes, PostgresJson.Ctx.IReadOnlyListFlowNode);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO flow_definitions (flow_id, tenant_id, name, version, is_published, entry_node_id, nodes, created_at) " +
             "VALUES (@FlowId, @TenantId, @Name, @Version, @IsPublished, @EntryNodeId, @Nodes::jsonb, @CreatedAt) " +
             "ON CONFLICT (tenant_id, flow_id, version) DO UPDATE SET " +
             "  name = EXCLUDED.name, is_published = EXCLUDED.is_published, " +
             "  entry_node_id = EXCLUDED.entry_node_id, nodes = EXCLUDED.nodes",
-            new
+            p =>
             {
-                FlowId = flow.FlowId.Value,
-                TenantId = flow.TenantId.Value,
-                flow.Name,
-                flow.Version,
-                flow.IsPublished,
-                EntryNodeId = flow.EntryNodeId.Value,
-                Nodes = nodesJson,
-                flow.CreatedAt,
-            });
+                p.Add(new NpgsqlParameter("FlowId",      flow.FlowId.Value));
+                p.Add(new NpgsqlParameter("TenantId",    flow.TenantId.Value));
+                p.Add(new NpgsqlParameter("Name",        flow.Name));
+                p.Add(new NpgsqlParameter("Version",     flow.Version));
+                p.Add(new NpgsqlParameter("IsPublished", flow.IsPublished));
+                p.Add(new NpgsqlParameter("EntryNodeId", flow.EntryNodeId.Value));
+                p.Add(new NpgsqlParameter("Nodes",       nodesJson));
+                p.Add(new NpgsqlParameter("CreatedAt",   flow.CreatedAt));
+            },
+            ct);
     }
 
     private sealed class FlowRow
@@ -79,6 +79,18 @@ internal sealed class PostgresFlowStore : IFlowStore
         public string entry_node_id { get; init; } = null!;
         public string nodes { get; init; } = null!;
         public DateTime created_at { get; init; }
+
+        public static FlowRow Map(NpgsqlDataReader r) => new()
+        {
+            flow_id       = r.GetString("flow_id"),
+            tenant_id     = r.GetString("tenant_id"),
+            name          = r.GetString("name"),
+            version       = r.GetInt32("version"),
+            is_published  = r.GetBoolean("is_published"),
+            entry_node_id = r.GetString("entry_node_id"),
+            nodes         = r.GetString("nodes"),
+            created_at    = r.GetDateTime("created_at"),
+        };
 
         public FlowDefinition ToFlowDefinition()
         {
