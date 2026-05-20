@@ -12,6 +12,14 @@
          (-p:PublishAot=true -r linux-x64), not asserted unconditionally here so that
          `dotnet build/test/run` for local dev + CI keep using the portable JIT path. -->
     <IsAotCompatible>true</IsAotCompatible>
+    <!-- ADR-0022 Phase D: under PublishAot, System.Text.Json sets
+         IsReflectionEnabledByDefault=false so there is NO reflection fallback —
+         every (de)serialized type MUST be in a source-gen context (ApiJsonContext
+         / RealtimeContractsJsonContext). We force the switch off for the regular
+         JIT build/test/run too, so dev + the 1,180 Api.Tests surface any missing
+         [JsonSerializable] registration as a NotSupportedException instead of
+         silently filling the gap via reflection (which masks AOT-only 500s). -->
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
     <!-- Intercepts Configure<T>(IConfiguration) + ConfigurationBinder.GetValue<T> with
          AOT-safe generated binders. PublishAot auto-enables this; we set it explicitly so
