@@ -1,6 +1,6 @@
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core.Branding;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -17,28 +17,27 @@ internal sealed class PostgresTenantBrandingStore : ITenantBrandingStore
 
     public async ValueTask<TenantBranding?> GetAsync(string tenantId, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<BrandingRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {SelectColumns} FROM tenant_branding WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId)),
+            BrandingRow.Map, ct);
 
         return row?.ToModel();
     }
 
     public async ValueTask<TenantBranding?> GetBySubdomainAsync(string subdomain, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<BrandingRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {SelectColumns} FROM tenant_branding WHERE subdomain = @Subdomain",
-            new { Subdomain = subdomain });
+            p => p.Add(new NpgsqlParameter("Subdomain", subdomain)),
+            BrandingRow.Map, ct);
 
         return row?.ToModel();
     }
 
     public async ValueTask UpsertAsync(TenantBranding branding, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO tenant_branding " +
             "(tenant_id, display_name, logo_url, favicon_url, primary_color, secondary_color, " +
             " accent_color, locale, timezone, subdomain, support_email, support_url, " +
@@ -61,25 +60,26 @@ internal sealed class PostgresTenantBrandingStore : ITenantBrandingStore
             "  email_from_name    = EXCLUDED.email_from_name, " +
             "  email_from_address = EXCLUDED.email_from_address, " +
             "  updated_at         = EXCLUDED.updated_at",
-            new
+            p =>
             {
-                TenantId         = branding.TenantId,
-                DisplayName      = branding.DisplayName,
-                LogoUrl          = branding.LogoUrl,
-                FaviconUrl       = branding.FaviconUrl,
-                PrimaryColor     = branding.PrimaryColor,
-                SecondaryColor   = branding.SecondaryColor,
-                AccentColor      = branding.AccentColor,
-                Locale           = branding.Locale,
-                Timezone         = branding.Timezone,
-                Subdomain        = branding.Subdomain,
-                SupportEmail     = branding.SupportEmail,
-                SupportUrl       = branding.SupportUrl,
-                EmailFromName    = branding.EmailFromName,
-                EmailFromAddress = branding.EmailFromAddress,
-                CreatedAt        = branding.CreatedAt.UtcDateTime,
-                UpdatedAt        = branding.UpdatedAt.UtcDateTime,
-            });
+                p.Add(new NpgsqlParameter("TenantId", branding.TenantId));
+                p.Add(new NpgsqlParameter("DisplayName", (object?)branding.DisplayName ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("LogoUrl", (object?)branding.LogoUrl ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("FaviconUrl", (object?)branding.FaviconUrl ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("PrimaryColor", (object?)branding.PrimaryColor ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("SecondaryColor", (object?)branding.SecondaryColor ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("AccentColor", (object?)branding.AccentColor ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Locale", (object?)branding.Locale ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Timezone", (object?)branding.Timezone ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Subdomain", (object?)branding.Subdomain ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("SupportEmail", (object?)branding.SupportEmail ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("SupportUrl", (object?)branding.SupportUrl ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("EmailFromName", (object?)branding.EmailFromName ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("EmailFromAddress", (object?)branding.EmailFromAddress ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("CreatedAt", branding.CreatedAt.UtcDateTime));
+                p.Add(new NpgsqlParameter("UpdatedAt", branding.UpdatedAt.UtcDateTime));
+            },
+            ct);
     }
 
     private sealed class BrandingRow
@@ -100,6 +100,26 @@ internal sealed class PostgresTenantBrandingStore : ITenantBrandingStore
         public string? email_from_address { get; init; }
         public DateTime created_at { get; init; }
         public DateTime updated_at { get; init; }
+
+        public static BrandingRow Map(NpgsqlDataReader r) => new()
+        {
+            tenant_id = r.GetString("tenant_id"),
+            display_name = r.GetStringOrNull("display_name"),
+            logo_url = r.GetStringOrNull("logo_url"),
+            favicon_url = r.GetStringOrNull("favicon_url"),
+            primary_color = r.GetStringOrNull("primary_color"),
+            secondary_color = r.GetStringOrNull("secondary_color"),
+            accent_color = r.GetStringOrNull("accent_color"),
+            locale = r.GetStringOrNull("locale"),
+            timezone = r.GetStringOrNull("timezone"),
+            subdomain = r.GetStringOrNull("subdomain"),
+            support_email = r.GetStringOrNull("support_email"),
+            support_url = r.GetStringOrNull("support_url"),
+            email_from_name = r.GetStringOrNull("email_from_name"),
+            email_from_address = r.GetStringOrNull("email_from_address"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTime("updated_at"),
+        };
 
         public TenantBranding ToModel() => new()
         {

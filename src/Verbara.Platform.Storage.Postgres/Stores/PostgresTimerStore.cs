@@ -1,7 +1,7 @@
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Automation;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -13,39 +13,43 @@ internal sealed class PostgresTimerStore : ITimerStore
 
     public async Task SaveAsync(ScheduledTimer timer, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO scheduled_timers (timer_id, tenant_id, conversation_id, callback_rule_id, fire_at, is_fired, created_at) " +
             "VALUES (@TimerId, @TenantId, @ConversationId, @CallbackRuleId, @FireAt, @IsFired, @CreatedAt) " +
             "ON CONFLICT (timer_id) DO UPDATE SET is_fired = EXCLUDED.is_fired",
-            new
+            p =>
             {
-                TimerId = timer.TimerId.Value,
-                TenantId = timer.TenantId.Value,
-                ConversationId = timer.ConversationId.Value,
-                CallbackRuleId = timer.CallbackRuleId.Value,
-                timer.FireAt,
-                timer.IsFired,
-                timer.CreatedAt,
-            });
+                p.Add(new NpgsqlParameter("TimerId", timer.TimerId.Value));
+                p.Add(new NpgsqlParameter("TenantId", timer.TenantId.Value));
+                p.Add(new NpgsqlParameter("ConversationId", timer.ConversationId.Value));
+                p.Add(new NpgsqlParameter("CallbackRuleId", timer.CallbackRuleId.Value));
+                p.Add(new NpgsqlParameter("FireAt", timer.FireAt));
+                p.Add(new NpgsqlParameter("IsFired", timer.IsFired));
+                p.Add(new NpgsqlParameter("CreatedAt", timer.CreatedAt));
+            },
+            ct);
     }
 
     public async Task<IReadOnlyList<ScheduledTimer>> GetOverdueAsync(DateTimeOffset now, int limit, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<TimerRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT timer_id, tenant_id, conversation_id, callback_rule_id, fire_at, is_fired, created_at " +
             "FROM scheduled_timers WHERE NOT is_fired AND fire_at <= @Now ORDER BY fire_at LIMIT @Limit",
-            new { Now = now, Limit = limit });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("Now", now.UtcDateTime));
+                p.Add(new NpgsqlParameter("Limit", limit));
+            },
+            TimerRow.Map, ct);
         return rows.Select(r => r.ToTimer()).ToList();
     }
 
     public async Task MarkFiredAsync(ScheduledTimer timer, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "UPDATE scheduled_timers SET is_fired = true WHERE timer_id = @TimerId",
-            new { TimerId = timer.TimerId.Value });
+            p => p.Add(new NpgsqlParameter("TimerId", timer.TimerId.Value)),
+            ct);
     }
 
     private sealed class TimerRow
@@ -57,6 +61,17 @@ internal sealed class PostgresTimerStore : ITimerStore
         public DateTime fire_at { get; init; }
         public bool is_fired { get; init; }
         public DateTime created_at { get; init; }
+
+        public static TimerRow Map(NpgsqlDataReader r) => new()
+        {
+            timer_id = r.GetString("timer_id"),
+            tenant_id = r.GetString("tenant_id"),
+            conversation_id = r.GetString("conversation_id"),
+            callback_rule_id = r.GetString("callback_rule_id"),
+            fire_at = r.GetDateTime("fire_at"),
+            is_fired = r.GetBoolean("is_fired"),
+            created_at = r.GetDateTime("created_at"),
+        };
 
         public ScheduledTimer ToTimer() => new()
         {

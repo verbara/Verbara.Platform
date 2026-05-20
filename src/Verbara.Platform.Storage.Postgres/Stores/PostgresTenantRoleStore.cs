@@ -1,7 +1,7 @@
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -13,71 +13,88 @@ internal sealed class PostgresTenantRoleStore : ITenantRoleStore
 
     public async Task<IReadOnlyList<TenantRole>> ListAsync(TenantId tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<TenantRoleRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT role_id, tenant_id, name, description, source_template_id, is_default, created_at, updated_at " +
             "FROM tenant_roles WHERE tenant_id = @TenantId ORDER BY name",
-            new { TenantId = tenantId.Value });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
+            TenantRoleRow.Map, ct);
         return rows.Select(r => r.ToTenantRole()).ToList();
     }
 
     public async Task<TenantRole?> GetByIdAsync(TenantId tenantId, string roleId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<TenantRoleRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT role_id, tenant_id, name, description, source_template_id, is_default, created_at, updated_at " +
             "FROM tenant_roles WHERE tenant_id = @TenantId AND role_id = @RoleId",
-            new { TenantId = tenantId.Value, RoleId = roleId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+            },
+            TenantRoleRow.Map, ct);
         if (row is null) return null;
 
         var role = row.ToTenantRole();
-        var perms = await conn.QueryAsync<string>(
+        var perms = await _dataSource.QueryListAsync(
             "SELECT permission_id FROM tenant_role_permissions " +
             "WHERE tenant_id = @TenantId AND role_id = @RoleId ORDER BY permission_id",
-            new { TenantId = tenantId.Value, RoleId = roleId });
-        role.Permissions = perms.ToList();
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+            },
+            r => r.GetString("permission_id"), ct);
+        role.Permissions = perms;
         return role;
     }
 
     public async Task SaveAsync(TenantRole role, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO tenant_roles (role_id, tenant_id, name, description, source_template_id, is_default, created_at, updated_at) " +
             "VALUES (@RoleId, @TenantId, @Name, @Description, @SourceTemplateId, @IsDefault, @CreatedAt, @UpdatedAt) " +
             "ON CONFLICT (tenant_id, role_id) DO UPDATE SET " +
             "  name = EXCLUDED.name, description = EXCLUDED.description, " +
             "  is_default = EXCLUDED.is_default, updated_at = EXCLUDED.updated_at",
-            new
+            p =>
             {
-                role.RoleId,
-                TenantId = role.TenantId.Value,
-                role.Name,
-                role.Description,
-                role.SourceTemplateId,
-                role.IsDefault,
-                role.CreatedAt,
-                role.UpdatedAt,
-            });
+                p.Add(new NpgsqlParameter("RoleId", role.RoleId));
+                p.Add(new NpgsqlParameter("TenantId", role.TenantId.Value));
+                p.Add(new NpgsqlParameter("Name", role.Name));
+                p.Add(new NpgsqlParameter("Description", (object?)role.Description ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("SourceTemplateId", (object?)role.SourceTemplateId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("IsDefault", role.IsDefault));
+                p.Add(new NpgsqlParameter("CreatedAt", role.CreatedAt));
+                p.Add(new NpgsqlParameter("UpdatedAt", (object?)role.UpdatedAt ?? DBNull.Value));
+            },
+            ct);
     }
 
     public async Task DeleteAsync(TenantId tenantId, string roleId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         // CASCADE deletes tenant_role_permissions and user_roles entries
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "DELETE FROM tenant_roles WHERE tenant_id = @TenantId AND role_id = @RoleId",
-            new { TenantId = tenantId.Value, RoleId = roleId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+            },
+            ct);
     }
 
     public async Task<IReadOnlyList<string>> GetPermissionsAsync(TenantId tenantId, string roleId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var perms = await conn.QueryAsync<string>(
+        var perms = await _dataSource.QueryListAsync(
             "SELECT permission_id FROM tenant_role_permissions " +
             "WHERE tenant_id = @TenantId AND role_id = @RoleId ORDER BY permission_id",
-            new { TenantId = tenantId.Value, RoleId = roleId });
-        return perms.ToList();
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+            },
+            r => r.GetString("permission_id"), ct);
+        return perms;
     }
 
     public async Task SetPermissionsAsync(TenantId tenantId, string roleId,
@@ -88,15 +105,25 @@ internal sealed class PostgresTenantRoleStore : ITenantRoleStore
 
         await conn.ExecuteAsync(
             "DELETE FROM tenant_role_permissions WHERE tenant_id = @TenantId AND role_id = @RoleId",
-            new { TenantId = tenantId.Value, RoleId = roleId }, tx);
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+            },
+            tx, ct);
 
-        if (permissionIds.Count > 0)
+        foreach (var permissionId in permissionIds)
         {
             await conn.ExecuteAsync(
                 "INSERT INTO tenant_role_permissions (tenant_id, role_id, permission_id) " +
                 "VALUES (@TenantId, @RoleId, @PermissionId)",
-                permissionIds.Select(p => new { TenantId = tenantId.Value, RoleId = roleId, PermissionId = p }),
-                tx);
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                    p.Add(new NpgsqlParameter("RoleId", roleId));
+                    p.Add(new NpgsqlParameter("PermissionId", permissionId));
+                },
+                tx, ct);
         }
 
         await tx.CommitAsync(ct);
@@ -112,26 +139,41 @@ internal sealed class PostgresTenantRoleStore : ITenantRoleStore
         await conn.ExecuteAsync(
             "INSERT INTO tenant_roles (role_id, tenant_id, name, description, source_template_id, is_default, created_at) " +
             "VALUES (@RoleId, @TenantId, @Name, @Description, @TemplateId, false, now())",
-            new { RoleId = roleId, TenantId = tenantId.Value, Name = name, Description = description, TemplateId = templateId },
-            tx);
+            p =>
+            {
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("Name", name));
+                p.Add(new NpgsqlParameter("Description", (object?)description ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("TemplateId", templateId));
+            },
+            tx, ct);
 
         // Copy permissions from template
         await conn.ExecuteAsync(
             "INSERT INTO tenant_role_permissions (tenant_id, role_id, permission_id) " +
             "SELECT @TenantId, @RoleId, permission_id " +
             "FROM role_template_permissions WHERE template_id = @TemplateId",
-            new { TenantId = tenantId.Value, RoleId = roleId, TemplateId = templateId },
-            tx);
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+                p.Add(new NpgsqlParameter("TemplateId", templateId));
+            },
+            tx, ct);
 
         await tx.CommitAsync(ct);
     }
 
     public async Task<int> GetUserCountAsync(TenantId tenantId, string roleId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteScalarAsync<int>(
+        return (int)(await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM user_roles WHERE tenant_id = @TenantId AND role_id = @RoleId",
-            new { TenantId = tenantId.Value, RoleId = roleId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("RoleId", roleId));
+            }, ct) ?? 0L);
     }
 
     private sealed class TenantRoleRow
@@ -144,6 +186,18 @@ internal sealed class PostgresTenantRoleStore : ITenantRoleStore
         public bool is_default { get; init; }
         public DateTime created_at { get; init; }
         public DateTime? updated_at { get; init; }
+
+        public static TenantRoleRow Map(NpgsqlDataReader r) => new()
+        {
+            role_id = r.GetString("role_id"),
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            description = r.GetStringOrNull("description"),
+            source_template_id = r.GetStringOrNull("source_template_id"),
+            is_default = r.GetBoolean("is_default"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTimeOrNull("updated_at"),
+        };
 
         public TenantRole ToTenantRole() => new()
         {

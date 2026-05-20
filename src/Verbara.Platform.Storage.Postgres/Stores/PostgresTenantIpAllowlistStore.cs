@@ -1,6 +1,6 @@
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Identity;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -12,11 +12,11 @@ internal sealed class PostgresTenantIpAllowlistStore : ITenantIpAllowlistStore
 
     public async Task<IReadOnlyList<IpAllowlistEntry>> ListAsync(string tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<IpAllowlistRow>(
+        var rows = await _dataSource.QueryListAsync(
             "SELECT id, tenant_id, cidr::text AS cidr, description, created_at, created_by_user_id " +
             "FROM tenant_ip_allowlist WHERE tenant_id = @TenantId ORDER BY created_at",
-            new { TenantId = tenantId });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId)),
+            IpAllowlistRow.Map, ct);
         return rows.Select(r => r.ToEntry()).ToArray();
     }
 
@@ -27,42 +27,56 @@ internal sealed class PostgresTenantIpAllowlistStore : ITenantIpAllowlistStore
         string? createdByUserId,
         CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         try
         {
-            var row = await conn.QuerySingleAsync<IpAllowlistRow>(
+            var row = await _dataSource.QuerySingleAsync(
                 "INSERT INTO tenant_ip_allowlist (tenant_id, cidr, description, created_by_user_id) " +
                 "VALUES (@TenantId, @Cidr::cidr, @Description, @CreatedByUserId) " +
                 "RETURNING id, tenant_id, cidr::text AS cidr, description, created_at, created_by_user_id",
-                new { TenantId = tenantId, Cidr = cidr, Description = description, CreatedByUserId = createdByUserId });
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId));
+                    p.Add(new NpgsqlParameter("Cidr", cidr));
+                    p.Add(new NpgsqlParameter("Description", (object?)description ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("CreatedByUserId", (object?)createdByUserId ?? DBNull.Value));
+                },
+                IpAllowlistRow.Map, ct);
             return row.ToEntry();
         }
         catch (PostgresException ex) when (ex.SqlState == "23505")
         {
             // Unique violation on (tenant_id, cidr) — return the existing row instead of throwing.
-            var existing = await conn.QuerySingleAsync<IpAllowlistRow>(
+            var existing = await _dataSource.QuerySingleAsync(
                 "SELECT id, tenant_id, cidr::text AS cidr, description, created_at, created_by_user_id " +
                 "FROM tenant_ip_allowlist WHERE tenant_id = @TenantId AND cidr = @Cidr::cidr",
-                new { TenantId = tenantId, Cidr = cidr });
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId));
+                    p.Add(new NpgsqlParameter("Cidr", cidr));
+                },
+                IpAllowlistRow.Map, ct);
             return existing.ToEntry();
         }
     }
 
     public async Task<bool> RemoveAsync(string tenantId, Guid entryId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.ExecuteAsync(
+        var rows = await _dataSource.ExecuteAsync(
             "DELETE FROM tenant_ip_allowlist WHERE tenant_id = @TenantId AND id = @Id",
-            new { TenantId = tenantId, Id = entryId });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("Id", entryId));
+            },
+            ct);
         return rows > 0;
     }
 
     public async Task<int> CountAsync(string tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        return await conn.ExecuteScalarAsync<int>(
+        return (int)(await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM tenant_ip_allowlist WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId)), ct) ?? 0L);
     }
 
     private sealed class IpAllowlistRow
@@ -73,6 +87,16 @@ internal sealed class PostgresTenantIpAllowlistStore : ITenantIpAllowlistStore
         public string? description { get; init; }
         public DateTimeOffset created_at { get; init; }
         public string? created_by_user_id { get; init; }
+
+        public static IpAllowlistRow Map(NpgsqlDataReader r) => new()
+        {
+            id = r.GetGuid("id"),
+            tenant_id = r.GetString("tenant_id"),
+            cidr = r.GetString("cidr"),
+            description = r.GetStringOrNull("description"),
+            created_at = r.GetDateTimeOffset("created_at"),
+            created_by_user_id = r.GetStringOrNull("created_by_user_id"),
+        };
 
         public IpAllowlistEntry ToEntry() => new()
         {

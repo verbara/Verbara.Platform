@@ -1,6 +1,6 @@
 using System.Text.Json;
-using Dapper;
 using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
@@ -16,32 +16,31 @@ internal sealed class PostgresTenantStore : ITenantStore
 
     public async ValueTask<Tenant?> GetAsync(string tenantId, CancellationToken cancellationToken = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(cancellationToken);
-        var row = await conn.QuerySingleOrDefaultAsync<TenantRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {SelectColumns} FROM tenants WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId });
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId)),
+            TenantRow.Map, cancellationToken);
         return row?.ToTenant();
     }
 
     public async ValueTask<IReadOnlyList<Tenant>> GetAllActiveAsync(CancellationToken cancellationToken = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(cancellationToken);
-        var rows = await conn.QueryAsync<TenantRow>(
+        var rows = await _dataSource.QueryListAsync(
             $"SELECT {SelectColumns} FROM tenants WHERE status = @Status",
-            new { Status = (int)TenantStatus.Active });
+            p => p.Add(new NpgsqlParameter("Status", (object)(int)TenantStatus.Active)),
+            TenantRow.Map, cancellationToken);
         return rows.Select(r => r.ToTenant()).ToList();
     }
 
     public async ValueTask UpsertAsync(Tenant tenant, CancellationToken cancellationToken = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(cancellationToken);
-
         // Enforce: only one Platform tenant allowed
         if (tenant.Type == TenantType.Platform)
         {
-            var existing = await conn.QuerySingleOrDefaultAsync<string>(
+            var existing = await _dataSource.QuerySingleOrDefaultAsync(
                 "SELECT tenant_id FROM tenants WHERE type = @Type LIMIT 1",
-                new { Type = (int)TenantType.Platform });
+                p => p.Add(new NpgsqlParameter("Type", (object)(int)TenantType.Platform)),
+                r => r.GetString("tenant_id"), cancellationToken);
             if (existing is not null && existing != tenant.TenantId)
                 throw new InvalidOperationException("Only one Platform tenant is allowed.");
         }
@@ -49,14 +48,16 @@ internal sealed class PostgresTenantStore : ITenantStore
         // Enforce: max depth 3 (Platform -> Partner -> Customer)
         if (tenant.ParentTenantId is not null)
         {
-            var parentParentId = await conn.QuerySingleOrDefaultAsync<string?>(
+            var parentParentId = await _dataSource.QuerySingleOrDefaultAsync(
                 "SELECT parent_tenant_id FROM tenants WHERE tenant_id = @TenantId",
-                new { TenantId = tenant.ParentTenantId });
+                p => p.Add(new NpgsqlParameter("TenantId", tenant.ParentTenantId)),
+                r => r.GetStringOrNull("parent_tenant_id"), cancellationToken);
             if (parentParentId is not null)
             {
-                var grandparentParentId = await conn.QuerySingleOrDefaultAsync<string?>(
+                var grandparentParentId = await _dataSource.QuerySingleOrDefaultAsync(
                     "SELECT parent_tenant_id FROM tenants WHERE tenant_id = @TenantId",
-                    new { TenantId = parentParentId });
+                    p => p.Add(new NpgsqlParameter("TenantId", parentParentId)),
+                    r => r.GetStringOrNull("parent_tenant_id"), cancellationToken);
                 if (grandparentParentId is not null)
                     throw new InvalidOperationException("Maximum tenant hierarchy depth (3 levels) exceeded.");
             }
@@ -67,60 +68,70 @@ internal sealed class PostgresTenantStore : ITenantStore
             ? JsonSerializer.Serialize(tenant.Metadata, PostgresJson.Ctx.DictionaryStringString)
             : null;
 
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO tenants (tenant_id, name, status, type, parent_tenant_id, options, metadata, created_at, updated_at) " +
             "VALUES (@TenantId, @Name, @Status, @Type, @ParentTenantId, @Options::jsonb, @Metadata::jsonb, @CreatedAt, @UpdatedAt) " +
             "ON CONFLICT (tenant_id) DO UPDATE SET " +
             "  name = EXCLUDED.name, status = EXCLUDED.status, options = EXCLUDED.options, " +
             "  metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at",
-            new
+            p =>
             {
-                tenant.TenantId,
-                tenant.Name,
-                Status = (int)tenant.Status,
-                Type = (int)tenant.Type,
-                tenant.ParentTenantId,
-                Options = optionsJson,
-                Metadata = metadataJson,
-                CreatedAt = tenant.CreatedAt.UtcDateTime,
-                UpdatedAt = tenant.UpdatedAt.UtcDateTime,
-            });
+                p.Add(new NpgsqlParameter("TenantId", tenant.TenantId));
+                p.Add(new NpgsqlParameter("Name", tenant.Name));
+                p.Add(new NpgsqlParameter("Status", (object)(int)tenant.Status));
+                p.Add(new NpgsqlParameter("Type", (object)(int)tenant.Type));
+                p.Add(new NpgsqlParameter("ParentTenantId", (object?)tenant.ParentTenantId ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("Options", optionsJson));
+                p.Add(new NpgsqlParameter("Metadata", (object?)metadataJson ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("CreatedAt", tenant.CreatedAt.UtcDateTime));
+                p.Add(new NpgsqlParameter("UpdatedAt", tenant.UpdatedAt.UtcDateTime));
+            },
+            cancellationToken);
     }
 
     public async ValueTask UpdateStatusAsync(string tenantId, TenantStatus status, CancellationToken cancellationToken = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(cancellationToken);
-
         // Block deletion if active children exist
         if (status == TenantStatus.Deleted)
         {
-            var hasActiveChildren = await conn.ExecuteScalarAsync<bool>(
+            var hasActiveChildren = await _dataSource.ExecuteScalarAsync<bool?>(
                 "SELECT EXISTS(SELECT 1 FROM tenants WHERE parent_tenant_id = @TenantId AND status = @ActiveStatus)",
-                new { TenantId = tenantId, ActiveStatus = (int)TenantStatus.Active });
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId));
+                    p.Add(new NpgsqlParameter("ActiveStatus", (object)(int)TenantStatus.Active));
+                },
+                cancellationToken) ?? false;
             if (hasActiveChildren)
                 throw new InvalidOperationException("Cannot delete tenant with active children.");
         }
 
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "UPDATE tenants SET status = @Status, updated_at = @UpdatedAt WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId, Status = (int)status, UpdatedAt = DateTime.UtcNow });
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId));
+                p.Add(new NpgsqlParameter("Status", (object)(int)status));
+                p.Add(new NpgsqlParameter("UpdatedAt", DateTime.UtcNow));
+            },
+            cancellationToken);
     }
 
     public async ValueTask<Tenant?> GetHostTenantAsync(CancellationToken cancellationToken = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(cancellationToken);
-        var row = await conn.QuerySingleOrDefaultAsync<TenantRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {SelectColumns} FROM tenants WHERE type = @Type",
-            new { Type = (int)TenantType.Platform });
+            p => p.Add(new NpgsqlParameter("Type", (object)(int)TenantType.Platform)),
+            TenantRow.Map, cancellationToken);
         return row?.ToTenant();
     }
 
     public async ValueTask<IReadOnlyList<Tenant>> GetChildrenAsync(string parentTenantId, CancellationToken cancellationToken = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(cancellationToken);
-        var rows = await conn.QueryAsync<TenantRow>(
+        var rows = await _dataSource.QueryListAsync(
             $"SELECT {SelectColumns} FROM tenants WHERE parent_tenant_id = @ParentTenantId",
-            new { ParentTenantId = parentTenantId });
+            p => p.Add(new NpgsqlParameter("ParentTenantId", parentTenantId)),
+            TenantRow.Map, cancellationToken);
         return rows.Select(r => r.ToTenant()).ToList();
     }
 
@@ -135,6 +146,19 @@ internal sealed class PostgresTenantStore : ITenantStore
         public string? metadata { get; init; }
         public DateTime created_at { get; init; }
         public DateTime updated_at { get; init; }
+
+        public static TenantRow Map(NpgsqlDataReader r) => new()
+        {
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            status = r.GetInt32("status"),
+            type = r.GetInt32("type"),
+            parent_tenant_id = r.GetStringOrNull("parent_tenant_id"),
+            options = r.GetString("options"),
+            metadata = r.GetStringOrNull("metadata"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTime("updated_at"),
+        };
 
         public Tenant ToTenant()
         {
