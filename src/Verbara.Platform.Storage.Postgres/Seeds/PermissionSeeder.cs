@@ -1,5 +1,5 @@
-using Dapper;
 using Npgsql;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Seeds;
 
@@ -7,17 +7,33 @@ internal static class PermissionSeeder
 {
     public static async Task SeedAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-
         const string sql =
             "INSERT INTO permissions (permission_id, category, resource, action, description, implies) " +
             "VALUES (@PermissionId, @Category, @Resource, @Action, @Description, @Implies) " +
             "ON CONFLICT (permission_id) DO NOTHING";
 
-        await conn.ExecuteAsync(sql, GetPermissions());
+        // Dapper executed this INSERT once per element of the source sequence,
+        // binding by property name. We reproduce that loop explicitly with the
+        // facade's connection-less ExecuteAsync (each call opens/returns a pooled
+        // connection from the data source).
+        foreach (var p in GetPermissions())
+        {
+            await dataSource.ExecuteAsync(
+                sql,
+                ps =>
+                {
+                    ps.Add(new NpgsqlParameter("PermissionId", p.PermissionId));
+                    ps.Add(new NpgsqlParameter("Category", p.Category));
+                    ps.Add(new NpgsqlParameter("Resource", p.Resource));
+                    ps.Add(new NpgsqlParameter("Action", p.Action));
+                    ps.Add(new NpgsqlParameter("Description", p.Description));
+                    ps.Add(new NpgsqlParameter("Implies", p.Implies));
+                },
+                ct);
+        }
     }
 
-    private static IEnumerable<object> GetPermissions()
+    private static IEnumerable<PermissionRow> GetPermissions()
     {
         // ── contacts (8) ──
         yield return P("contacts:conversation:handle", "contacts", "conversation", "handle",
@@ -253,17 +269,17 @@ internal static class PermissionSeeder
             "Rotate JWT signing keys (issues a new active key + keeps the prior key valid for the grace window)");
     }
 
-    private static object P(string id, string category, string resource, string action,
+    private static PermissionRow P(string id, string category, string resource, string action,
         string description, string[]? implies = null)
     {
-        return new
-        {
-            PermissionId = id,
-            Category = category,
-            Resource = resource,
-            Action = action,
-            Description = description,
-            Implies = implies ?? Array.Empty<string>(),
-        };
+        return new PermissionRow(id, category, resource, action, description, implies ?? Array.Empty<string>());
     }
+
+    private sealed record PermissionRow(
+        string PermissionId,
+        string Category,
+        string Resource,
+        string Action,
+        string Description,
+        string[] Implies);
 }
