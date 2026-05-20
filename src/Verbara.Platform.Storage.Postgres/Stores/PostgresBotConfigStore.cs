@@ -1,7 +1,7 @@
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -17,38 +17,37 @@ internal sealed class PostgresBotConfigStore : IBotConfigStore
 
     public async Task<BotConfiguration?> GetByIdAsync(TenantId tenantId, EntityId botId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<BotRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             $"SELECT {SelectColumns} FROM bot_configurations WHERE tenant_id = @TenantId AND bot_id = @BotId",
-            new { TenantId = tenantId.Value, BotId = botId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("BotId", botId.Value)); },
+            BotRow.Map, ct);
         return row?.ToConfig();
     }
 
     public async Task<BotConfiguration?> GetDefaultAsync(TenantId tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QueryFirstOrDefaultAsync<BotRow>(
+        var row = await _dataSource.QueryFirstOrDefaultAsync(
             $"SELECT {SelectColumns} FROM bot_configurations " +
             "WHERE tenant_id = @TenantId AND is_active = true LIMIT 1",
-            new { TenantId = tenantId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); },
+            BotRow.Map, ct);
         return row?.ToConfig();
     }
 
     public async Task<IReadOnlyList<BotConfiguration>> ListAsync(TenantId tenantId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<BotRow>(
+        var rows = await _dataSource.QueryListAsync(
             $"SELECT {SelectColumns} FROM bot_configurations " +
             "WHERE tenant_id = @TenantId ORDER BY created_at ASC",
-            new { TenantId = tenantId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); },
+            BotRow.Map, ct);
         return rows.Select(r => r.ToConfig()).ToArray();
     }
 
     public async Task SaveAsync(BotConfiguration config, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var createdAt = config.CreatedAt == default ? DateTimeOffset.UtcNow : config.CreatedAt;
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO bot_configurations (bot_id, tenant_id, name, default_flow_id, fallback_queue_id, " +
             "confidence_threshold, max_turns_before_handoff, is_active, created_at) " +
             "VALUES (@BotId, @TenantId, @Name, @DefaultFlowId, @FallbackQueueId, " +
@@ -57,26 +56,27 @@ internal sealed class PostgresBotConfigStore : IBotConfigStore
             "  name = EXCLUDED.name, default_flow_id = EXCLUDED.default_flow_id, " +
             "  fallback_queue_id = EXCLUDED.fallback_queue_id, confidence_threshold = EXCLUDED.confidence_threshold, " +
             "  max_turns_before_handoff = EXCLUDED.max_turns_before_handoff, is_active = EXCLUDED.is_active",
-            new
+            p =>
             {
-                BotId = config.BotId.Value,
-                TenantId = config.TenantId.Value,
-                config.Name,
-                DefaultFlowId = config.DefaultFlowId?.Value,
-                FallbackQueueId = config.FallbackQueueId?.Value,
-                config.ConfidenceThreshold,
-                config.MaxTurnsBeforeHandoff,
-                config.IsActive,
-                CreatedAt = createdAt.UtcDateTime,
-            });
+                p.Add(new NpgsqlParameter("BotId", config.BotId.Value));
+                p.Add(new NpgsqlParameter("TenantId", config.TenantId.Value));
+                p.Add(new NpgsqlParameter("Name", config.Name));
+                p.Add(new NpgsqlParameter("DefaultFlowId", (object?)config.DefaultFlowId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("FallbackQueueId", (object?)config.FallbackQueueId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("ConfidenceThreshold", config.ConfidenceThreshold));
+                p.Add(new NpgsqlParameter("MaxTurnsBeforeHandoff", config.MaxTurnsBeforeHandoff));
+                p.Add(new NpgsqlParameter("IsActive", config.IsActive));
+                p.Add(new NpgsqlParameter("CreatedAt", createdAt.UtcDateTime));
+            },
+            ct);
     }
 
     public async Task<bool> DeleteAsync(TenantId tenantId, EntityId botId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var affected = await conn.ExecuteAsync(
+        var affected = await _dataSource.ExecuteAsync(
             "DELETE FROM bot_configurations WHERE tenant_id = @TenantId AND bot_id = @BotId",
-            new { TenantId = tenantId.Value, BotId = botId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("BotId", botId.Value)); },
+            ct);
         return affected > 0;
     }
 
@@ -91,6 +91,19 @@ internal sealed class PostgresBotConfigStore : IBotConfigStore
         public int max_turns_before_handoff { get; init; }
         public bool is_active { get; init; }
         public DateTime created_at { get; init; }
+
+        public static BotRow Map(NpgsqlDataReader r) => new()
+        {
+            bot_id = r.GetString("bot_id"),
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            default_flow_id = r.GetStringOrNull("default_flow_id"),
+            fallback_queue_id = r.GetStringOrNull("fallback_queue_id"),
+            confidence_threshold = r.GetDouble("confidence_threshold"),
+            max_turns_before_handoff = r.GetInt32("max_turns_before_handoff"),
+            is_active = r.GetBoolean("is_active"),
+            created_at = r.GetDateTime("created_at"),
+        };
 
         public BotConfiguration ToConfig() => new()
         {
