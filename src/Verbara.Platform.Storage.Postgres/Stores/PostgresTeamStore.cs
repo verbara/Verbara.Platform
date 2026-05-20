@@ -1,7 +1,7 @@
-using Dapper;
 using Npgsql;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
@@ -13,56 +13,56 @@ internal sealed class PostgresTeamStore : ITeamStore
 
     public async Task<Team?> GetByIdAsync(TenantId tenantId, EntityId teamId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<TeamRow>(
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT team_id, tenant_id, name, supervisor_id, created_at, updated_at, created_by, updated_by " +
             "FROM teams WHERE tenant_id = @TenantId AND team_id = @TeamId",
-            new { TenantId = tenantId.Value, TeamId = teamId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("TeamId", teamId.Value)); },
+            TeamRow.Map, ct);
         return row?.ToTeam();
     }
 
     public async Task<PagedResult<Team>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var total = await conn.ExecuteScalarAsync<int>(
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM teams WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId.Value });
-        var rows = await conn.QueryAsync<TeamRow>(
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)), ct) ?? 0L);
+        var rows = await _dataSource.QueryListAsync(
             "SELECT team_id, tenant_id, name, supervisor_id, created_at, updated_at, created_by, updated_by " +
             "FROM teams WHERE tenant_id = @TenantId ORDER BY name LIMIT @Limit OFFSET @Offset",
-            new { TenantId = tenantId.Value, Limit = query.PageSize, Offset = query.Offset });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Limit", query.PageSize)); p.Add(new NpgsqlParameter("Offset", query.Offset)); },
+            TeamRow.Map, ct);
         var items = rows.Select(r => r.ToTeam()).ToList();
         return new PagedResult<Team>(items, total, query.Page, query.PageSize);
     }
 
     public async Task SaveAsync(Team team, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "INSERT INTO teams (team_id, tenant_id, name, supervisor_id, created_at, updated_at, created_by, updated_by) " +
             "VALUES (@TeamId, @TenantId, @Name, @SupervisorId, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
             "ON CONFLICT (tenant_id, team_id) DO UPDATE SET " +
             "  name = EXCLUDED.name, supervisor_id = EXCLUDED.supervisor_id, " +
             "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-            new
+            p =>
             {
-                TeamId = team.TeamId.Value,
-                TenantId = team.TenantId.Value,
-                team.Name,
-                SupervisorId = team.SupervisorId?.Value,
-                team.CreatedAt,
-                team.UpdatedAt,
-                team.CreatedBy,
-                team.UpdatedBy,
-            });
+                p.Add(new NpgsqlParameter("TeamId", team.TeamId.Value));
+                p.Add(new NpgsqlParameter("TenantId", team.TenantId.Value));
+                p.Add(new NpgsqlParameter("Name", team.Name));
+                p.Add(new NpgsqlParameter("SupervisorId", (object?)team.SupervisorId?.Value ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("CreatedAt", team.CreatedAt));
+                p.Add(new NpgsqlParameter("UpdatedAt", (object?)team.UpdatedAt ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("CreatedBy", (object?)team.CreatedBy ?? DBNull.Value));
+                p.Add(new NpgsqlParameter("UpdatedBy", (object?)team.UpdatedBy ?? DBNull.Value));
+            },
+            ct);
     }
 
     public async Task DeleteAsync(TenantId tenantId, EntityId teamId, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.ExecuteAsync(
+        await _dataSource.ExecuteAsync(
             "DELETE FROM teams WHERE tenant_id = @TenantId AND team_id = @TeamId",
-            new { TenantId = tenantId.Value, TeamId = teamId.Value });
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("TeamId", teamId.Value)); },
+            ct);
     }
 
     private sealed class TeamRow
@@ -75,6 +75,18 @@ internal sealed class PostgresTeamStore : ITeamStore
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
+
+        public static TeamRow Map(NpgsqlDataReader r) => new()
+        {
+            team_id = r.GetString("team_id"),
+            tenant_id = r.GetString("tenant_id"),
+            name = r.GetString("name"),
+            supervisor_id = r.GetStringOrNull("supervisor_id"),
+            created_at = r.GetDateTime("created_at"),
+            updated_at = r.GetDateTimeOrNull("updated_at"),
+            created_by = r.GetStringOrNull("created_by"),
+            updated_by = r.GetStringOrNull("updated_by"),
+        };
 
         public Team ToTeam() => new()
         {
