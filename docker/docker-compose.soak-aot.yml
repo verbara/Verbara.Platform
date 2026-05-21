@@ -1,0 +1,52 @@
+# docker-compose.soak-aot.yml — Phase 6 AOT soak overlay (ADR-0022 Phase D).
+#
+# Overlays docker-compose.loadtest.yml to drive the soak against the published
+# Native AOT image (ghcr.io/verbara/platform/api:vX.Y.Z) instead of a locally
+# built IL image. Differences from the base loadtest stack:
+#   - platform-api uses the AOT image; ASPNETCORE_URLS pinned to :8080 (the AOT
+#     image defaults to :5000 via ASPNETCORE_URLS, which the harness/compose
+#     don't expect).
+#   - healthcheck uses the dotnet runtime's own TCP probe instead of curl
+#     (the runtime-deps base image has no curl).
+#   - asterisk dependency dropped: the HTTP soak scenarios (queues/presence/jwt/
+#     livequeue) don't exercise AMI/ARI, and asterisk:22-loadtest isn't required
+#     to validate the AOT HTTP hot path.
+#
+# Usage:
+#   IMAGE=ghcr.io/verbara/platform/api:v2.4.0 \
+#   docker compose -f docker/docker-compose.loadtest.yml \
+#                  -f docker/docker-compose.soak-aot.yml up -d postgres redis platform-api
+
+services:
+  asterisk:
+    # The HTTP soak doesn't exercise AMI/ARI and asterisk:22-loadtest isn't
+    # available, but platform-api's base depends_on (merged, not replaced) still
+    # references this service. Swap in a trivial no-op container so the
+    # service_started dependency is satisfied; the API tolerates an unreachable
+    # AMI/ARI endpoint (resilient SDK clients) and still serves the HTTP hot path.
+    image: busybox:1.37
+    command: ["sleep", "infinity"]
+
+  platform-api:
+    image: ${IMAGE:-ghcr.io/verbara/platform/api:v2.4.0}
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Database=verbara_loadtest;Username=loadtest;Password=loadtest"
+      ConnectionStrings__Redis: "redis:6379"
+      Loadtest__SeedTenant: "true"
+      ASPNETCORE_URLS: "http://+:8080"
+      # Production config guards (the published image runs in Production and
+      # validates these at boot). Soak-representative values:
+      Services__ServiceKey: "soak-aot-service-key-0x20260520"
+      CORS_ORIGINS: "http://localhost:8080"
+      Asterisk__Ami__Username: "loadtest"
+      Asterisk__Ami__Password: "loadtest"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # runtime-deps has neither curl nor a /dev/tcp-capable shell, so the
+    # in-container healthcheck is disabled; readiness is polled from the host
+    # (which has curl) before the load harness starts.
+    healthcheck:
+      test: ["NONE"]
