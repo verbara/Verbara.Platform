@@ -26,7 +26,7 @@
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/verbara/verbara-platform</RepositoryUrl>
     <PackageTags>verbara;platform;contact-center;omnichannel;native-aot</PackageTags>
-    <PackageVersion>2.4.0</PackageVersion>
+    <PackageVersion>2.4.1</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('src'))">
@@ -56,6 +56,28 @@
     </ItemGroup>
     <Error Condition="'@(_BannedDapperRef)' != ''"
            Text="ADR-0022: '@(_BannedDapperRef)' is a BANNED package — Dapper blocks Native AOT. Remove it from $(MSBuildProjectName) and use Verbara.Sdk.Data.Npgsql instead." />
+  </Target>
+
+  <!-- ADR-0023 — the non-AOT microservices (Realtime/Renderer/Mail) ship as decompilable
+       IL because their dependencies (SignalR server dispatch, QuestPDF/ScottPlot, MailKit/
+       Graph) can't be Native AOT. They MUST NOT carry crown-jewel Pro IP, so the only Pro
+       code that ever ships as IL is non-crown-jewel plumbing. This guard fails the build if
+       a crown-jewel Pro package is referenced by these microservices — keep that logic in
+       the AOT API instead. See docs/decisions/0023-publishing-non-aot-microservices.md. -->
+  <Target Name="BanCrownJewelProInNonAotMicroservices"
+          Condition="'$(MSBuildProjectName)' == 'Verbara.Platform.Realtime' Or '$(MSBuildProjectName)' == 'Verbara.Platform.Renderer' Or '$(MSBuildProjectName)' == 'Verbara.Platform.Mail'"
+          BeforeTargets="CollectPackageReferences;BeforeCompile">
+    <ItemGroup>
+      <_CrownJewelPro Include="@(PackageReference)" Condition="
+        $([System.String]::Copy('%(PackageReference.Identity)').StartsWith('Verbara.Sdk.Pro.Dialer')) Or
+        $([System.String]::Copy('%(PackageReference.Identity)').StartsWith('Verbara.Sdk.Pro.Analytics')) Or
+        $([System.String]::Copy('%(PackageReference.Identity)').StartsWith('Verbara.Sdk.Pro.CallAnalytics')) Or
+        $([System.String]::Copy('%(PackageReference.Identity)').StartsWith('Verbara.Sdk.Pro.AgentAssist')) Or
+        $([System.String]::Copy('%(PackageReference.Identity)').StartsWith('Verbara.Sdk.Pro.EventStore')) Or
+        $([System.String]::Copy('%(PackageReference.Identity)').StartsWith('Verbara.Sdk.Pro.Routing'))" />
+    </ItemGroup>
+    <Error Condition="'@(_CrownJewelPro)' != ''"
+           Text="ADR-0023: '@(_CrownJewelPro)' is a crown-jewel Pro package and MUST NOT ship as decompilable IL in the non-AOT microservice $(MSBuildProjectName). Keep that logic in the AOT Verbara.Platform.Api." />
   </Target>
 
 </Project>

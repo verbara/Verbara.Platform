@@ -2,14 +2,12 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 ARG CACHEBUST=1
 COPY . .
-RUN NUGET_FILE=$(find . -maxdepth 1 -iname "nuget.config" | head -1) \
-    && dotnet nuget locals all --clear \
-    && if [ -d local-nuget-feed ] && [ -n "$NUGET_FILE" ]; then \
-        sed -i "s|/media/Data/Source/IPcom/local-nuget-feed/|/src/local-nuget-feed/|" "$NUGET_FILE"; \
-    else \
-        dotnet nuget remove source local 2>/dev/null || true; \
-    fi \
-    && dotnet publish src/Verbara.Platform.Mail/Verbara.Platform.Mail.csproj -c Release -o /app
+# Mail has NO Pro dependencies — restore from nuget.org only. Drop the
+# maintainer-only `local` source (its host path doesn't exist in the build
+# context); the SDK packages resolve from nuget.org (mapped in NuGet.Config).
+RUN dotnet nuget remove source local 2>/dev/null || true; \
+    dotnet nuget locals all --clear; \
+    dotnet publish src/Verbara.Platform.Mail/Verbara.Platform.Mail.csproj -c Release -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*

@@ -1,20 +1,21 @@
-# Release workflow: build the Verbara.Platform.Api image, push to ghcr.io, and
-# Sigstore-cosign-sign it. Triggered by pushing a `v*` tag (e.g. `v2.0.1`, `v2.3.0`).
+# Release workflow: build the Verbara.Platform images, push to ghcr.io, and
+# Sigstore-cosign-sign them. Triggered by pushing a `v*` tag (e.g. `v2.4.1`).
 #
-# Single-pass build (since v2.1.0-rc4): an OCI image cannot self-reference its
-# own manifest digest, so the original two-pass build (rc1-rc3) was abandoned
-# in favour of operator-side IMAGE_DIGEST env-var injection (ADR-0011 Status
-# update of 2026-05-10). The Dockerfile no longer accepts VERBARA_IMAGE_DIGEST.
-# This workflow simply builds + pushes + cosign-signs the resulting image.
+# Builds a MATRIX of 4 images on the same Platform tag (ADR-0023):
+#   - api       — Native AOT (Dockerfile, runtime-deps). Carries the crown-jewel Pro IP.
+#   - realtime  — IL (SignalR can't be AOT). Non-crown-jewel Pro plumbing only (guarded).
+#   - renderer  — IL (QuestPDF/ScottPlot). No Pro deps.
+#   - mail      — IL (MailKit/Graph). No Pro deps.
+# All four are pushed PUBLIC + cosign-signed. Only the api image's digest feeds the
+# Layer-C authorized-digests allow-list (image-binding is API-only).
 #
-# Layer-B verification (the cosign signature on the OCI image): docker/verbara-verify-image.sh
-# Layer-C verification (Pro consumer reads IMAGE_DIGEST env var at runtime):
-#   Verbara.Sdk.Pro.Licensing.ContainerImageDigest.ReadFromEnvironment() ->
-#   compares against LicenseKey.AuthorizedImageDigests claims.
-# Operator wiring of IMAGE_DIGEST: Helm chart api.image.digest value OR
-# docker-compose environment block, value sourced from
-# verbara-website/data/authorized-digests.json (the registry the issuer Worker
-# reads when minting licenses).
+# Single-pass build (since v2.1.0-rc4): an OCI image cannot self-reference its own
+# manifest digest, so digest injection is operator-side (ADR-0011 Status update 2026-05-10).
+# Layer-B verification (cosign signature): docker/verbara-verify-image.sh
+# Layer-C verification (Pro reads IMAGE_DIGEST env at runtime):
+#   Verbara.Sdk.Pro.Licensing.ContainerImageDigest.ReadFromEnvironment() -> compares against
+#   LicenseKey.AuthorizedImageDigests. Operator wiring sourced from
+#   verbara-website/data/authorized-digests.json (issuer Worker reads it when minting licenses).
 
 name: Release
 
@@ -30,12 +31,23 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: verbara/platform/api
 
 jobs:
   release:
-    name: Build, push, and sign API image
+    name: Build, push, and sign ${{ matrix.name }} image
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            dockerfile: ./Dockerfile
+          - name: realtime
+            dockerfile: src/Verbara.Platform.Realtime/Dockerfile.realtime
+          - name: renderer
+            dockerfile: src/Verbara.Platform.Renderer/Dockerfile.renderer
+          - name: mail
+            dockerfile: src/Verbara.Platform.Mail/Dockerfile.mail
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -49,6 +61,7 @@ jobs:
             exit 1
           fi
           echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_name=verbara/platform/${{ matrix.name }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -65,20 +78,14 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.release_tag }}
-          # NUGET_AUTH_TOKEN — used inside the Dockerfile to authenticate to the
-          # GitHub Packages NuGet feed (private Verbara.Sdk.Pro.* packages).
-          # We use PACKAGES_PAT (a maintainer-owned PAT with read:packages scope
-          # for the verbara org) instead of GITHUB_TOKEN because the auto-
-          # provisioned workflow token's package access is gated per-package via
-          # "Manage Actions access" — packages pushed to the verbara org are
-          # linked by source-repo only (Verbara.Sdk.Pro), not auto-readable by
-          # workflows in sibling repos. Granting per-package access for 24+
-          # packages via UI is operationally noisy; PAT path is simpler. PAT
-          # rotation: every 90d, see operator runbook
-          # Verbara.Sdk.Pro/docs/operations/2026-05-10-pro-packages-to-github-packages.md.
+          tags: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}:${{ steps.tag.outputs.release_tag }}
+          # NUGET_AUTH_TOKEN authenticates to the private GitHub Packages NuGet feed
+          # (Verbara.Sdk.Pro.* packages). Needed by api + realtime (Pro deps); harmless
+          # for renderer/mail (their Dockerfiles don't mount it). PACKAGES_PAT = maintainer
+          # PAT with read:packages (workflow GITHUB_TOKEN isn't auto-readable for sibling-repo
+          # packages). Rotation 90d — see Verbara.Sdk.Pro/docs/operations/2026-05-10-*.md.
           secrets: |
             nuget_auth_token=${{ secrets.PACKAGES_PAT }}
           provenance: false
@@ -86,24 +93,17 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
         with:
-          # cosign-installer@v3 currently fails on cosign v3.x because v3 changed
-          # the detached-signature distribution model (no more cosign-linux-amd64.sig
-          # alongside the binary on GitHub releases — v3 uses bundled Sigstore tlog
-          # signatures only). Pin to v2.5.2 (the action's default bootstrap version)
-          # which is mature + has the .sig file. ECDSA P-256 PEM keypair generated
-          # by cosign v3.0.6 (Phase 0) is fully readable by cosign v2.5.2 — same key
-          # format, just different default behaviours around tlog.
+          # Pin v2.5.2: cosign-installer@v3 fails on cosign v3.x (changed detached-sig
+          # distribution). The ECDSA P-256 PEM keypair is readable by v2.5.2.
           cosign-release: 'v2.5.2'
 
       - name: Sign final image with cosign
         env:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}@${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
-          # Write the private key to a tmpfs-backed location and clean up immediately
-          # after signing.
           umask 077
           KEY_FILE="$(mktemp -t cosign-key.XXXXXX)"
           trap 'shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"' EXIT
@@ -116,7 +116,7 @@ jobs:
 
       - name: Verify cosign signature against committed public key
         env:
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}@${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
           cosign verify \
@@ -126,15 +126,16 @@ jobs:
 
       - name: Print final image reference
         env:
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}@${{ steps.build.outputs.digest }}
         run: |
-          echo "Signed image manifest-list digest: ${{ steps.build.outputs.digest }}"
+          echo "Signed ${{ matrix.name }} manifest-list digest: ${{ steps.build.outputs.digest }}"
           echo "Final image reference: $IMAGE_REF"
-          echo ""
-          echo "Next step: append a new entry to verbara-website's"
-          echo "data/authorized-digests.json with manifest_list_digest=${{ steps.build.outputs.digest }}"
+
+      - name: Authorized-digests reminder (API only)
+        if: matrix.name == 'api'
+        run: |
+          echo "Next step (API image only — Layer C image-binding):"
+          echo "append a new entry to verbara-website's data/authorized-digests.json with"
+          echo "manifest_list_digest=${{ steps.build.outputs.digest }}"
           echo "(see docs/operations/2026-05-10-update-authorized-digests-after-release.md)"
-          echo ""
-          echo "Operator wiring of IMAGE_DIGEST at deploy time:"
-          echo "  Helm: --set api.image.digest=${{ steps.build.outputs.digest }}"
-          echo "  Compose: environment: IMAGE_DIGEST=${{ steps.build.outputs.digest }}"
+          echo "Operator deploy: Helm --set api.image.digest=${{ steps.build.outputs.digest }}  |  Compose IMAGE_DIGEST=..."
