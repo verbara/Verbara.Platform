@@ -105,8 +105,24 @@ own `ghcr.io/verbara/platform/<name>` repo and cosign-signed. Images inherit pub
   clean nuget.org restore). CI-sim restore verified for both.
 - ✅ Task 3 — `release.yml` converted to a 4-image matrix (api/realtime/renderer/mail), each
   pushed to its own ghcr repo + cosign-signed; authorized-digests reminder gated to api. YAML valid.
-- ⏳ Task 4 — set ghcr package visibility public (post first publish).
-- ⏳ Task 6 — release v2.4.1 + verify.
+- ✅ Task 4 — package visibility: all 4 images came up **public** automatically (anon pull 200);
+  no manual step needed.
+- ✅ Task 6 — **SHIPPED v2.4.1** (2026-05-21). Matrix run published + cosign-signed all 4
+  (`api/realtime/renderer/mail`) at v2.4.1; api v2.4.1 digest
+  `sha256:ac900df6...506551` authorized in verbara-website (commit 4c6b49a).
+  First attempt: renderer/mail failed (transitive Pro.MultiTenant via Core needed github auth)
+  → fixed Dockerfiles (commit e4fc1a35) → tag moved → all 4 green.
+
+## Outcome
+ADR-0023 fully implemented + shipped. Publishing gap closed: all Platform images
+(api AOT + realtime/renderer/mail IL) are published, public, cosign-signed. Crown-jewel
+Pro guard live + verified. Only maintainer follow-up: redeploy the verbara-website issuer
+Worker so new licenses embed the v2.4.1 digest.
+
+### Follow-up (minor, future)
+The crown-jewel guard checks DIRECT PackageReferences only; a transitive crown-jewel via a
+shared project (e.g. Verbara.Platform.Core) would not be caught. Core pulls only
+Pro.MultiTenant (allowed) today. Consider a closure-level check if Core's Pro surface grows.
 
 ### Note: v2.4.1 re-builds the api image too
 The matrix tags all 4 at `v2.4.1`, including a fresh `api:v2.4.1` (functionally identical to
