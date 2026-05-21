@@ -2,10 +2,20 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 ARG CACHEBUST=1
 COPY . .
-# Mail has NO Pro dependencies — restore from nuget.org only. Drop the
-# maintainer-only `local` source (its host path doesn't exist in the build
-# context); the SDK packages resolve from nuget.org (mapped in NuGet.Config).
-RUN dotnet nuget remove source local 2>/dev/null || true; \
+# Drop the maintainer-only `local` source (its host path doesn't exist in the build
+# context). Mail has no DIRECT Pro deps, but it references Verbara.Platform.Core which
+# transitively pulls Verbara.Sdk.Pro.MultiTenant from the private GitHub Packages feed —
+# so github auth is required (same pattern as api/realtime). Credentials live only in
+# this intermediate build layer; the final stage COPYs just /app.
+RUN --mount=type=secret,id=nuget_auth_token,required=false \
+    set -e; \
+    dotnet nuget remove source local 2>/dev/null || true; \
+    if [ -f /run/secrets/nuget_auth_token ]; then \
+        dotnet nuget update source github \
+            --username verbara \
+            --password "$(cat /run/secrets/nuget_auth_token)" \
+            --store-password-in-clear-text; \
+    fi; \
     dotnet nuget locals all --clear; \
     dotnet publish src/Verbara.Platform.Mail/Verbara.Platform.Mail.csproj -c Release -o /app
 
