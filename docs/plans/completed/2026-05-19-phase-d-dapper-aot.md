@@ -1,4 +1,6 @@
-# Phase D — Dapper AOT-Shipping Path (ADR-0022) [APPROACH PIVOTED 2026-05-19]
+# Phase D — Dapper AOT-Shipping Path (ADR-0022) [✅ CLOSED 2026-05-22]
+
+> **✅ PHASE D CLOSED — gate passed 2026-05-22.** Final approach diverged from Option O (Stubs): instead of stub-shimming Dapper, Dapper was **removed entirely cross-repo** (SDK+Pro+Platform → `Verbara.Sdk.Data.Npgsql` facade; dead Stubs deleted in commit `ac01cb20`; permanent `BanDapperPackageReferences` guard added `09068bcd`). `Verbara.Platform.Api` now publishes **Native AOT** (45→0 IL diagnostics). Release v2.4.0 → v2.4.1 (4 images public+signed, ADR-0023). **Last gate — Phase 6/F 24h AOT soak — PASSED 2026-05-22 12:02Z** against `ghcr.io/verbara/platform/api:v2.4.1` (Docker, not Talos lab): 802,982,614 ok / **0 fail** · p99 **25.06 ms** · mem bounded 254–311 MiB (no leak) · pg_conns 11 flat · RestartCount 0. Soak artifacts: `tests/Verbara.Platform.LoadTests/soak-reports/soak-aot-v241-24h-20260521-1201.log` + `soak-24h-drift-20260521-1201.log`. See memory `project_phase_d_release_readiness.md`.
 
 **Created:** 2026-05-19 · **Approach pivoted:** 2026-05-19 (same day) per [Day 1 empirical findings](../../operations/phase-d-validation/2026-05-19-day-1-findings.md) · **Owner:** Maintainer · **Target tag:** Platform `2.4.0` (or `2.5.0` if major-bump for AOT cutover) · **Revised runway:** ~2-3 weeks · **Canonical spec:** [`docs/specs/2026-05-19-phase-d-dapper-aot-migration-design.md`](../../specs/2026-05-19-phase-d-dapper-aot-migration-design.md)
 
