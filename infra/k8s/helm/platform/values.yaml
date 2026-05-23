@@ -174,14 +174,29 @@ realtime:
       cpu: "1"
       memory: 1Gi
   hpa:
-    # Phase A.2+A.3 ships single-pod because Pro.Cluster does not yet expose a
-    # leader-election API to dedup the T27 → SignalR relay across pods. Multi-
-    # pod scaling lands in Phase A.5 once that abstraction is added; flip
-    # maxReplicas + adopt the leader-gate together.
+    # Post-Phase A.5 (CLOSED): Pro.Cluster now exposes a per-resource
+    # IClusterLeader (keyed `realtime:fanout:leader`); PushToHubRelay short-
+    # circuits forwards when !IsLeader so exactly one pod publishes to the
+    # SignalR backplane at any moment. Production cap is 4 replicas — gives
+    # HA + node-loss tolerance without inflating Postgres connection count
+    # from the renewal loop (4 pods × 0.1 qps = negligible).
     enabled: true
     minReplicas: 1
-    maxReplicas: 1
+    maxReplicas: 4
     targetCpuPercent: 70
+  # Phase A.5 cluster-leader-election wiring. Drives the env vars projected
+  # into the Realtime container (see realtime-deployment.yaml):
+  #   - connectionStringName: which ConnectionStrings__* key Pro.Cluster reads
+  #     for the distributed-lock backend (falls back to ConnectionStrings__Postgres
+  #     at runtime if the dedicated entry is unset).
+  #   - leaderResource: the keyed IClusterLeader registration string consumed
+  #     by PushToHubRelay via [FromKeyedServices(...)].
+  #   - instanceIdFromEnv: downward-API env var name that uniquely identifies
+  #     this pod as the lock owner (`Cluster__InstanceId = $(POD_NAME)`).
+  cluster:
+    connectionStringName: Cluster   # falls back to ConnectionStrings__Postgres if unset at runtime
+    leaderResource: realtime:fanout:leader  # IClusterLeader keyed registration
+    instanceIdFromEnv: POD_NAME      # downward-API field for unique instance ID per pod
   # ADR-0022 Phase A.2+A.3 — the SignalR Hub now lives ONLY in this
   # microservice. The Platform.Api HTTPRoute no longer matches /hubs/*, so the
   # Realtime HTTPRoute owns that prefix cleanly. Set to false on bring-up

@@ -41,6 +41,19 @@ spec:
                       operator: In
                       values: [platform-realtime]
                 topologyKey: kubernetes.io/hostname
+      # Phase A.5 multi-pod scheduling — complements the host-level
+      # podAntiAffinity above with an explicit hostname-keyed spread.
+      # ScheduleAnyway (soft) so a 3-worker cluster + replicas=4 still
+      # schedules without surfacing Unschedulable; the scheduler still
+      # prefers maximal spread when capacity allows.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway   # soft: allow co-scheduling on small clusters, prefer spread
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: platform-realtime
+              app.kubernetes.io/instance: {{ .Release.Name }}
       containers:
         - name: realtime
           image: "{{ .Values.realtime.image.repository }}{{ if .Values.realtime.image.digest }}@{{ .Values.realtime.image.digest }}{{ else }}:{{ .Values.realtime.image.tag }}{{ end }}"
@@ -71,6 +84,26 @@ spec:
               value: {{ .Values.api.serviceKey }}
             - name: Services__PlatformApi__BaseUrl
               value: "http://platform-api.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.api.port }}"
+            # Phase A.5 — Pro.Cluster leader election (per-resource).
+            # POD_NAME is the unique lock-owner identity surfaced via the
+            # downward API; Cluster__InstanceId aliases it for Pro.Cluster's
+            # ClusterLeadershipOptions.InstanceId. ConnectionStrings__Cluster
+            # selects the Postgres DataSource used for the distributed-lock
+            # backend — when the dedicated Secret entry is absent (optional:
+            # true), Pro.Cluster falls back to ConnectionStrings__Postgres at
+            # runtime.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: Cluster__InstanceId
+              value: $(POD_NAME)
+            - name: ConnectionStrings__Cluster
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "platform.fullname" . }}-postgres
+                  key: connection-string-cluster
+                  optional: true   # falls back to ConnectionStrings__Postgres if absent
           resources:
             requests:
               cpu: {{ .Values.realtime.resources.requests.cpu }}
