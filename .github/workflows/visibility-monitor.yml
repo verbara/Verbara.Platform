@@ -42,67 +42,57 @@ name: visibility-monitor
 
 permissions:
   contents: read
-  packages: read
   issues: write   # only for the auto-issue-on-failure step
+  # Note: `packages: read` is intentionally NOT requested. The org-scoped
+  # /orgs/verbara/packages/container/<svc> API requires `read:packages` (an
+  # org-admin scope), which neither GITHUB_TOKEN nor a default PAT has. We
+  # rely on anonymous `docker pull` instead — that's the actual customer UX
+  # test, and it needs no auth for public packages.
 
 jobs:
   check-visibility:
     name: Assert all 5 platform packages are public
     runs-on: ubuntu-24.04
     steps:
-      - name: Check package visibility via gh api
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          fail=0
-          for pkg in api realtime renderer mail web; do
-            visibility=$(gh api "/orgs/verbara/packages/container/platform%2F${pkg}" --jq .visibility 2>/dev/null || echo "ERROR")
-            if [ "$visibility" = "public" ]; then
-              echo "OK   platform/${pkg} = public"
-            else
-              echo "::error::platform/${pkg} visibility=${visibility} (expected public)"
-              fail=$((fail + 1))
-            fi
-          done
-          if [ $fail -gt 0 ]; then
-            echo
-            echo "::error::$fail of 5 platform packages are NOT public — ADR-0023 contract broken"
-            exit 1
-          fi
-
       - name: Assert anonymous docker pull works
+        # Tags are hardcoded here as the maintainer-of-record for "what's the
+        # current customer-facing release". Bump alongside Directory.Build.props
+        # on each release tag push. Verifying anonymous pull works against ONE
+        # signed tag per package is sufficient to detect a visibility flip —
+        # GHCR's visibility setting is per-package, not per-version.
+        #
+        # We dropped the prior gh-api visibility-poll because the org-scoped
+        # endpoint /orgs/verbara/packages/container/<svc> requires `read:packages`
+        # scope (an org-admin scope), which neither the workflow's auto-generated
+        # GITHUB_TOKEN nor the maintainer's standard PAT has. The docker-pull
+        # test is the actual customer UX check anyway — if `docker pull` works
+        # anonymously, the package is public regardless of what any API says.
+        env:
+          PLATFORM_TAG: v2.4.2
+          WEB_TAG: v3.1.3-web
         run: |
           set -e
           docker logout ghcr.io 2>/dev/null || true
-
-          # Discover the latest tag per package via the Packages API. ghcr.io
-          # versions API returns by-creation-date descending, so [0] is the
-          # most recent push. Skip cosign .sig entries (they're not real
-          # release tags).
           fail=0
-          for pkg in api realtime renderer mail web; do
-            tag=$(gh api "/orgs/verbara/packages/container/platform%2F${pkg}/versions" \
-                  --jq '[.[] | .metadata.container.tags[]?
-                          | select(startswith("v"))
-                          | select(test("\\.sig$") | not)] | first' \
-                  2>/dev/null || echo "")
-            if [ -z "$tag" ]; then
-              echo "::warning::no taggable version found for platform/${pkg} — skipping pull check"
-              continue
-            fi
-            if docker pull --quiet "ghcr.io/verbara/platform/${pkg}:${tag}" >/dev/null 2>&1; then
-              echo "OK   anonymous docker pull ghcr.io/verbara/platform/${pkg}:${tag}"
+          for pkg in api realtime renderer mail; do
+            if docker pull --quiet "ghcr.io/verbara/platform/${pkg}:${PLATFORM_TAG}" >/dev/null 2>&1; then
+              echo "OK   anonymous docker pull ghcr.io/verbara/platform/${pkg}:${PLATFORM_TAG}"
             else
-              echo "::error::anonymous docker pull FAILED for platform/${pkg}:${tag} (api says public but registry rejected)"
+              echo "::error::anonymous docker pull FAILED for ghcr.io/verbara/platform/${pkg}:${PLATFORM_TAG} (regressed to private?)"
               fail=$((fail + 1))
             fi
           done
+          if docker pull --quiet "ghcr.io/verbara/platform/web:${WEB_TAG}" >/dev/null 2>&1; then
+            echo "OK   anonymous docker pull ghcr.io/verbara/platform/web:${WEB_TAG}"
+          else
+            echo "::error::anonymous docker pull FAILED for ghcr.io/verbara/platform/web:${WEB_TAG} (regressed to private?)"
+            fail=$((fail + 1))
+          fi
           if [ $fail -gt 0 ]; then
+            echo
+            echo "::error::$fail of 5 platform packages are NOT anonymously pullable — ADR-0023 contract broken"
             exit 1
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Open issue on regression
         if: failure()
