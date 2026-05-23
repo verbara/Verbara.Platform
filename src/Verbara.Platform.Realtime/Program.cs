@@ -4,6 +4,8 @@ using Verbara.Platform.Realtime.Clients;
 using Verbara.Platform.Realtime.Contracts;
 using Verbara.Platform.Realtime.Endpoints;
 using Verbara.Platform.Realtime.Services;
+using Verbara.Sdk.Cluster.Postgres.DependencyInjection;
+using Verbara.Sdk.Pro.Cluster.DependencyInjection;
 using Verbara.Sdk.Pro.Push;
 using Verbara.Sdk.Pro.Push.SignalR.Authz;
 using Verbara.Sdk.Pro.Push.SignalR.DependencyInjection;
@@ -13,6 +15,7 @@ using Verbara.Sdk.Push.Hosting;
 using Verbara.Platform.Realtime.Authz;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.SignalR;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -148,7 +151,33 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("PlatformAdmin", p => p.RequireRole("PlatformAdmin"));
 });
 
-// ─── Push → Hub relay (single-pod for Phase A, multi-pod after leader-gate) ──
+// ─── Pro.Cluster leader election (ADR-0022 Phase A.5) ────────────────────────
+// Per-resource leader election lets PushToHubRelay short-circuit fanout on
+// non-leader pods, so only the leader publishes SignalR group broadcasts.
+// The Redis backplane (above) then fans the leader's broadcasts to clients
+// connected to every pod. Wiring sits between the auth + relay registrations
+// because the relay constructor injects the keyed IClusterLeader.
+//
+// ConnectionStrings:Cluster falls back to :Postgres so SMB / single-DB
+// deployments don't need to split the connection.
+var clusterConnectionString =
+    builder.Configuration.GetConnectionString("Cluster")
+    ?? builder.Configuration.GetConnectionString("Postgres")
+    ?? throw new InvalidOperationException(
+        "ConnectionStrings:Cluster (or :Postgres fallback) is required for leader election.");
+
+builder.Services.AddKeyedSingleton<NpgsqlDataSource>("Cluster", (_, _) =>
+    NpgsqlDataSource.Create(clusterConnectionString));
+
+builder.Services.AddPostgresDistributedLock(connectionStringName: "Cluster");
+
+builder.Services.AddVerbaraCluster(opts =>
+{
+    opts.UsePostgresLockBackend(connectionStringName: "Cluster");
+    opts.RegisterLeader(RealtimeLeaderResources.Fanout);
+});
+
+// ─── Push → Hub relay (leader-gated cross-pod fanout, ADR-0022 Phase A.5) ────
 builder.Services.AddHostedService<PushToHubRelay>();
 
 // ─── OpenTelemetry parity (optional) ─────────────────────────────────────────
