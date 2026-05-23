@@ -149,7 +149,7 @@ jobs:
             exit 1
           fi
 
-      - name: Assert public cosign.pub URL matches in-repo key
+      - name: Assert public cosign.pub URL matches in-repo PEM key
         # The customer-facing verify command in the SMB manuales uses
         # `--key https://verbara.io/keys/cosign.pub` (the published static
         # asset served by verbara-website). If the website serves a stale
@@ -158,20 +158,42 @@ jobs:
         #
         # The original cosign.pub publication gap (verbara-website PR #16)
         # was caught during the v2.4.2 audit when the URL returned HTTP 404.
+        #
+        # Compares ONLY the PEM block (-----BEGIN/END PUBLIC KEY-----), NOT
+        # the surrounding comments. Both files intentionally carry different
+        # comment headers — `.github/cosign.pub` is the release.yml-internal
+        # pointer (3 short lines: name + custody pointer + ops runbook),
+        # while `verbara-website/public/keys/cosign.pub` is the customer-
+        # facing document (image inventory + verify command + diff-vs-repo
+        # instruction + custody pointer + signing-posture note). Comparing
+        # full-file sha256 would always fail by design. Comparing the PEM
+        # block verifies the only bytes cosign actually consumes — the ones
+        # that produce an equivalent verifier.
         run: |
           set -e
-          local_sha=$(sha256sum .github/cosign.pub | awk '{print $1}')
-          remote_sha=$(curl -fsSL https://verbara.io/keys/cosign.pub 2>/dev/null | sha256sum | awk '{print $1}')
-          if [ -z "$remote_sha" ] || [ "$remote_sha" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
-            echo "::error::https://verbara.io/keys/cosign.pub is empty or returns 404 (verbara-website regression)"
+          # Stream curl → sed → sha256sum directly (no intermediate variable):
+          # capturing curl output into `$(...)` strips trailing newlines (bash
+          # semantics), causing a spurious sha256 mismatch against the local
+          # file which retains them. Direct pipelines preserve byte-for-byte.
+          local_pem=$(sed -n '/BEGIN PUBLIC KEY/,/END PUBLIC KEY/p' .github/cosign.pub | sha256sum | awk '{print $1}')
+          remote_http=$(curl -fsSL -o /tmp/remote-cosign.pub -w '%{http_code}' https://verbara.io/keys/cosign.pub 2>/dev/null || echo 'curl-fail')
+          if [ "$remote_http" != "200" ] || [ ! -s /tmp/remote-cosign.pub ]; then
+            echo "::error::https://verbara.io/keys/cosign.pub returned http=${remote_http} or empty body (verbara-website regression)"
             exit 1
           fi
-          if [ "$local_sha" != "$remote_sha" ]; then
-            echo "::error::cosign.pub MISMATCH: in-repo sha=$local_sha vs verbara.io sha=$remote_sha"
-            echo "::error::Customers running 'cosign verify --key https://verbara.io/keys/cosign.pub ...' will fail."
+          remote_pem=$(sed -n '/BEGIN PUBLIC KEY/,/END PUBLIC KEY/p' /tmp/remote-cosign.pub | sha256sum | awk '{print $1}')
+          if [ -z "$remote_pem" ] || [ "$remote_pem" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+            echo "::error::https://verbara.io/keys/cosign.pub does not contain a PEM block (wrong content served)"
+            echo "::error::Raw response (first 200 bytes):"
+            head -c 200 /tmp/remote-cosign.pub
             exit 1
           fi
-          echo "OK   cosign.pub at https://verbara.io/keys/ matches .github/cosign.pub (sha=$local_sha)"
+          if [ "$local_pem" != "$remote_pem" ]; then
+            echo "::error::cosign.pub PEM MISMATCH: in-repo PEM sha=$local_pem vs verbara.io PEM sha=$remote_pem"
+            echo "::error::Customers running 'cosign verify --key https://verbara.io/keys/cosign.pub ...' will fail with key mismatch."
+            exit 1
+          fi
+          echo "OK   PEM key at https://verbara.io/keys/cosign.pub matches .github/cosign.pub (PEM sha=$local_pem)"
 
       - name: Open issue on regression
         if: failure()
