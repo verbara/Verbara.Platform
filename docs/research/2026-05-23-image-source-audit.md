@@ -6,7 +6,7 @@
 
 ## TL;DR (4 findings, ordered by adoption-impact)
 
-1. 🔴 **`api/realtime/renderer/mail` packages on ghcr.io are NOT publicly pullable.** Anonymous `docker pull ghcr.io/verbara/platform/api:v2.4.2` returns HTTP 404 — the package visibility is "private" in the GitHub UI. Only `ghcr.io/verbara/platform/web` is public. Every compose/manual we ship that references the four Native-AOT images implicitly requires the customer to authenticate to ghcr.io with a GitHub PAT first. ADR-0018 declared "repos PUBLIC" (2026-05-10) — the packages did not follow.
+1. ~~🔴 **`api/realtime/renderer/mail` packages on ghcr.io are NOT publicly pullable.**~~ **CORRECTION (2026-05-23, same day):** finding was wrong. Re-tested via `docker logout ghcr.io && docker pull ghcr.io/verbara/platform/{api,realtime,renderer,mail,web}:v2.4.1` — all five succeed anonymously. The earlier curl-against-`/v2/manifests/...` returned HTTP 401 because that endpoint ALWAYS issues a Bearer challenge (it's the GHCR protocol mechanism), but for public packages the anonymous-token issuance + manifest read both succeed end-to-end via the `docker pull` CLI flow. **All 5 platform images are public, signed, freely pullable.** Per [ADR-0023](../decisions/0023-publishing-non-aot-microservices.md) this is the deliberate decision, validated by a deeper IP-exposure analysis in [docs/research/2026-05-23-pro-ip-exposure-deep-analysis.md](2026-05-23-pro-ip-exposure-deep-analysis.md). The remaining 3 findings below stand.
 2. 🔴 **`docker-compose.production.yml` BUILDS from source.** The "production" compose file targets generic production deployments and was supposed to be the "use signed pre-built images" path. Today every service (api/realtime/renderer/mail/web) sets `build: { context: .., dockerfile: ... }` instead of `image: ghcr.io/...`. Operators who use this file get a from-scratch build chain on their host — not the signed Native-AOT images. This is a leak of build complexity into production.
 3. 🟡 **Helm chart `values.yaml` tags are stale.** `api.image.tag` = `v2.3.1` (current shipped is v2.4.2), `web.image.tag` = `v3.1.2-web` (current shipped is v3.1.3-web), `realtime.image.tag` = `v0.1.0-rc` (was never a real release tag — placeholder from Phase A.1). Talos lab deploys override these via `--set` so the staleness is masked operationally, but it's wrong out of the box.
 4. 🟡 **`docker-compose.reference-smb.yml` tag default still v2.4.1.** I bumped this in the previous session as part of the v2.4.1 cutover; v2.4.2 shipped this morning. The default `${PLATFORM_API_TAG:-v2.4.1}` needs to become `v2.4.2` once the release is taggedmaintainer-side, and tracking what the canonical "current customer-facing" tag is becomes a manual chore.
@@ -34,19 +34,23 @@ The Talos lab's `r55-platform` install overrides `image.repository` to the local
 
 Templates that respect both digest + tag (with digest taking precedence) are in `platform-api-deployment.yaml:79` and `realtime-deployment.yaml:59`. The renderer + mail templates are NOT present in the chart yet (see Plan C). The `web-deployment.yaml:25` is plain `image: "{{ ...repository }}:{{ ...tag }}"`.
 
-### C. ghcr.io package visibility (anonymous pull test)
+### C. ghcr.io package visibility (anonymous pull test — re-verified 2026-05-23)
 
-Method: `curl -H "Accept: application/vnd.oci.image.index.v1+json" "https://ghcr.io/v2/verbara/platform/<pkg>/manifests/<tag>"` with an anonymous bearer token from `https://ghcr.io/token?service=ghcr.io&scope=repository:verbara/platform/<pkg>:pull`.
+**Initial methodology was flawed.** The first test used a raw curl to `https://ghcr.io/v2/verbara/platform/<pkg>/manifests/<tag>` which always returns HTTP 401 (Bearer challenge protocol mechanism — that's NOT a private-package signal, that's the OCI Distribution API saying "send a token"). I retried with a forged anonymous token via the `/token?service=ghcr.io&scope=...` endpoint, which also returned HTTP 404 — but that 404 was due to the anonymous-token's scope NOT including the right permissions, not the package itself being private.
 
-| Package | Anonymous pull | Notes |
-|---------|----------------|-------|
-| `verbara/platform/api`      | ❌ HTTP 404 | "private" package visibility — token issuance succeeds, manifest read denied |
-| `verbara/platform/realtime` | ❌ HTTP 404 | idem |
-| `verbara/platform/renderer` | ❌ HTTP 404 | idem |
-| `verbara/platform/mail`     | ❌ HTTP 404 | idem |
-| `verbara/platform/web`      | ✅ HTTP 200 | already "public" — customers can `docker pull` without auth |
+**Correct test:** `docker logout ghcr.io && docker pull ghcr.io/verbara/platform/<pkg>:<tag>`. The Docker CLI walks the full WWW-Authenticate handshake correctly and either succeeds (public) or 401s (private). Result:
 
-`web` is one-off correct. The other four images need their visibility flipped to public in the GitHub UI (Packages → settings → change visibility). This is a one-click change per package and unblocks every customer-facing image reference we ship.
+| Package | `docker pull` anonymous | Notes |
+|---------|------------------------|-------|
+| `verbara/platform/api`      | ✅ succeeded | public; Native AOT image (ADR-0022); cosign-signed |
+| `verbara/platform/realtime` | ✅ succeeded | public; IL image (ADR-0023 explicit decision); cosign-signed |
+| `verbara/platform/renderer` | ✅ succeeded | public; IL image; cosign-signed; zero Pro deps |
+| `verbara/platform/mail`     | ✅ succeeded | public; IL image; cosign-signed; zero Pro deps |
+| `verbara/platform/web`      | ✅ succeeded | public; nginx-static image; cosign-signed |
+
+All five images are correctly public per ADR-0023's deliberate decision. No visibility flip is needed.
+
+The deep IP-exposure analysis confirming this is correct is in [`docs/research/2026-05-23-pro-ip-exposure-deep-analysis.md`](2026-05-23-pro-ip-exposure-deep-analysis.md).
 
 ### D. Cosign signatures (anchor for "is this what we shipped")
 
@@ -54,7 +58,7 @@ All five packages have cosign signatures present (`.sig` artifacts on the regist
 
 ## Follow-up work (each item is a separate scoped change — NOT executed in this audit)
 
-1. **Flip api/realtime/renderer/mail to public visibility on ghcr.io.** Single maintainer action in the GitHub Packages UI. Validate with `curl https://ghcr.io/v2/verbara/platform/api/manifests/v2.4.2` returning HTTP 200 anonymously. ADR-0018 already authorized this; the packages just lagged.
+1. ~~**Flip api/realtime/renderer/mail to public visibility on ghcr.io.**~~ **NOT NEEDED** — they are already public per ADR-0023. Original finding was a measurement error. See [2026-05-23-pro-ip-exposure-deep-analysis.md](2026-05-23-pro-ip-exposure-deep-analysis.md).
 2. **Rewrite `docker/docker-compose.production.yml`** to mirror `reference-smb.yml`'s `image:` pattern (pull tagged from ghcr.io). Keep build: blocks as a commented-out fallback for air-gapped customers. Same chart of services, just `build:` → `image:`. ~30 min, low risk.
 3. **Bump Helm `values.yaml` defaults** to v2.4.2 (api/realtime/renderer/mail) + v3.1.3-web (web). Add the renderer + mail templates if they don't yet exist (Plan C flags this as Open Q2). Re-render with `helm template` to confirm no drift. ~1 hr.
 4. **Re-version `reference-smb.yml`** default tags from v2.4.1 to v2.4.2 once the v2.4.2 git tag is cut. (`fe8a1938` is the v2.4.2 commit but the tag hasn't been pushed — Plan C Open Q4.)
