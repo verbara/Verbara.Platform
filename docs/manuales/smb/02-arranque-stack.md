@@ -14,7 +14,7 @@ $ sudo mkdir -p /opt/verbara && sudo chown $USER:$USER /opt/verbara
 $ cd /opt/verbara
 $ git clone https://github.com/verbara/platform.git
 $ cd platform
-$ git checkout v2.1.0      # el tag de la release a deployar
+$ git checkout v2.4.1      # el tag de la release a deployar
 ```
 
 > 💡 Si querés un workdir distinto (ej. `/srv/verbara` o `/home/operator/verbara`), reemplazá `/opt/verbara` por lo que prefieras — el manual asume `/opt/verbara/platform` de aquí en adelante.
@@ -28,11 +28,11 @@ docker/docker-compose.reference-smb.yml
 scripts/quickstart-smb.sh
 ```
 
-Si alguno no aparece, estás en un commit/tag viejo — re-checkout a `v2.1.0` o superior.
+Si alguno no aparece, estás en un commit/tag viejo — re-checkout a `v2.4.1` o superior.
 
 ## 2. Verificar firmas de las imágenes (opcional pero recomendado)
 
-Las imágenes públicas `ghcr.io/verbara/platform/api` y `ghcr.io/verbara/platform/web` están firmadas con [cosign](https://docs.sigstore.dev/cosign/overview/). Validar antes del primer pull asegura que la imagen no fue tampered y viene del workflow oficial.
+Las imágenes públicas `ghcr.io/verbara/platform/{api,realtime,renderer,mail,web}` están firmadas con [cosign](https://docs.sigstore.dev/cosign/overview/) (ADR-0023). Validar antes del primer pull asegura que la imagen no fue tampered y viene del workflow oficial.
 
 Instalar cosign una sola vez:
 
@@ -43,20 +43,22 @@ $ curl -L "https://github.com/sigstore/cosign/releases/download/${COSIGN_VER}/co
 $ cosign version
 ```
 
-Verificar las dos imágenes:
+Verificar las cinco imágenes:
 
 ```bash
 $ cd /opt/verbara/platform
-$ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/api:v2.1.0
+$ for img in api realtime renderer mail; do
+    cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
+        ghcr.io/verbara/platform/$img:v2.4.1
+  done
 
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
     ghcr.io/verbara/platform/web:v3.0.3-web
 ```
 
-Esperado en ambos casos:
+Esperado en cada caso:
 ```
-Verification for ghcr.io/verbara/platform/api:v2.1.0 --
+Verification for ghcr.io/verbara/platform/api:v2.4.1 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key
@@ -298,8 +300,8 @@ $ dc down
 # Detener + borrar volúmenes (DATA LOSS — sólo para reset completo)
 $ dc down -v
 
-# Actualizar a una nueva release
-$ git fetch --tags && git checkout v2.2.0
+# Actualizar a una nueva release (ej. v2.5.0 cuando salga)
+$ git fetch --tags && git checkout v2.5.0
 $ dc pull && dc up -d --wait
 
 # Backup de Postgres
