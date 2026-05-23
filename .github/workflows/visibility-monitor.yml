@@ -1,21 +1,26 @@
-# Verbara platform image visibility-regression monitor.
+# Verbara platform image visibility + signature regression monitor.
 # Per ADR-0023 (Accepted 2026-05-23), all 5 ghcr.io/verbara/platform/* packages
-# (api, realtime, renderer, mail, web) MUST be publicly pullable. Customers
-# consuming our compose / Helm chart depend on anonymous `docker pull` working.
-# This workflow detects regressions where someone accidentally flips a package
-# back to "private" visibility in the GitHub Packages UI, or where ghcr.io
-# changes the anonymous-pull semantics in a way that breaks our customer flow.
+# (api, realtime, renderer, mail, web) MUST be (1) publicly pullable AND (2)
+# cosign-signed against the keypair committed at `.github/cosign.pub`.
+# Customers consuming our compose / Helm chart depend on:
+#   - anonymous `docker pull` working (the UX);
+#   - `cosign verify --key https://verbara.io/keys/cosign.pub ...` passing
+#     (the supply-chain trust contract).
+# This workflow detects regressions on either dimension:
+#   - someone flips a package to "private" in the GitHub Packages UI,
+#   - ghcr.io changes anonymous-pull semantics,
+#   - someone pushes a tag via `docker buildx push` directly (bypassing
+#     `release.yml`) → image lands unsigned, breaks ADR-0023.
 #
 # Belt-and-suspenders coverage:
-#   1. `gh api` against /orgs/verbara/packages/container/platform%2F<svc>
-#      reads the .visibility field directly — most reliable signal.
-#   2. `docker pull` after `docker logout ghcr.io` replicates the actual
-#      customer UX — catches edge cases where the API says "public" but
-#      the registry's anonymous-token issuance is misconfigured.
+#   1. `docker pull` after `docker logout ghcr.io` replicates the actual
+#      customer UX — catches anonymous-token issuance regressions.
+#   2. `cosign verify --key .github/cosign.pub` against each tag catches
+#      the "unsigned image at signed tag" regression (the v2.4.2 anomaly
+#      that motivated this hardening — see ADR-0024).
 #
-# If either check fails for any of the 5 packages, the workflow fails. A
-# notification opens to the maintainer (default GitHub Actions failure email
-# + an issue auto-created on the repo via the closing step).
+# If either check fails for any of the 5 packages, the workflow fails and
+# auto-opens an issue (default GitHub Actions failure email also fires).
 #
 # Triggers:
 #   - schedule: daily at 06:00 UTC (catches manual UI flips within ~24 h)
@@ -51,25 +56,29 @@ permissions:
 
 jobs:
   check-visibility:
-    name: Assert all 5 platform packages are public
+    name: Assert all 5 platform packages are public AND signed
     runs-on: ubuntu-24.04
+    env:
+      # Tags hardcoded as the maintainer-of-record for "what's the current
+      # customer-facing release". Bump alongside Directory.Build.props (and
+      # Platform.Web's package.json for WEB_TAG) on each release tag push.
+      # Verifying ONE signed tag per package is sufficient to detect both
+      # visibility-flip AND signature-drop regressions — GHCR's visibility
+      # setting is per-package (not per-version), and cosign signatures are
+      # attached per-digest so an unsigned push to a known tag is detectable.
+      PLATFORM_TAG: v2.4.2
+      WEB_TAG: v3.1.3-web
     steps:
+      - name: Checkout source (for .github/cosign.pub)
+        uses: actions/checkout@v4
+
       - name: Assert anonymous docker pull works
-        # Tags are hardcoded here as the maintainer-of-record for "what's the
-        # current customer-facing release". Bump alongside Directory.Build.props
-        # on each release tag push. Verifying anonymous pull works against ONE
-        # signed tag per package is sufficient to detect a visibility flip —
-        # GHCR's visibility setting is per-package, not per-version.
-        #
         # We dropped the prior gh-api visibility-poll because the org-scoped
         # endpoint /orgs/verbara/packages/container/<svc> requires `read:packages`
         # scope (an org-admin scope), which neither the workflow's auto-generated
         # GITHUB_TOKEN nor the maintainer's standard PAT has. The docker-pull
         # test is the actual customer UX check anyway — if `docker pull` works
         # anonymously, the package is public regardless of what any API says.
-        env:
-          PLATFORM_TAG: v2.4.2
-          WEB_TAG: v3.1.3-web
         run: |
           set -e
           docker logout ghcr.io 2>/dev/null || true
@@ -94,6 +103,76 @@ jobs:
             exit 1
           fi
 
+      - name: Install cosign
+        # Pin v2.5.2 — matches release.yml (`cosign v3.x` changed the
+        # detached-signature distribution model and breaks the installer
+        # action's bootstrap). The Verbara signing posture skips Rekor
+        # (`--tlog-upload=false`); verification consumers must pass
+        # `--insecure-ignore-tlog` to match — see ADR-0023 §Signing Posture.
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.5.2'
+
+      - name: Assert cosign signatures present on all 5 packages
+        # Per ADR-0023: every public image MUST be cosign-signed against the
+        # keypair committed at `.github/cosign.pub` (same key shared with
+        # `Verbara.Platform.Web/.github/cosign.pub` by design — see Web
+        # release.yml header). An unsigned tag is an ADR-0023 violation.
+        #
+        # The v2.4.2 anomaly (caught 2026-05-23, see ADR-0024) was: a
+        # maintainer ran `docker buildx build --push` directly to ghcr.io,
+        # bypassing release.yml, and the visibility-monitor at the time only
+        # checked anonymous pull — not signature — so the unsigned state
+        # went undetected for ~13 hours. This step closes that hole.
+        run: |
+          set -e
+          fail=0
+          for pkg in api realtime renderer mail; do
+            ref="ghcr.io/verbara/platform/${pkg}:${PLATFORM_TAG}"
+            if cosign verify --key .github/cosign.pub --insecure-ignore-tlog "$ref" >/dev/null 2>&1; then
+              echo "OK   cosign verify $ref"
+            else
+              echo "::error::cosign verify FAILED for $ref (unsigned or wrong key — ADR-0023 violation)"
+              fail=$((fail + 1))
+            fi
+          done
+          ref="ghcr.io/verbara/platform/web:${WEB_TAG}"
+          if cosign verify --key .github/cosign.pub --insecure-ignore-tlog "$ref" >/dev/null 2>&1; then
+            echo "OK   cosign verify $ref"
+          else
+            echo "::error::cosign verify FAILED for $ref (unsigned or wrong key — ADR-0023 violation)"
+            fail=$((fail + 1))
+          fi
+          if [ $fail -gt 0 ]; then
+            echo
+            echo "::error::$fail of 5 platform packages FAILED cosign verification — ADR-0023 contract broken"
+            exit 1
+          fi
+
+      - name: Assert public cosign.pub URL matches in-repo key
+        # The customer-facing verify command in the SMB manuales uses
+        # `--key https://verbara.io/keys/cosign.pub` (the published static
+        # asset served by verbara-website). If the website serves a stale
+        # or different key, customers' verify commands fail even though our
+        # CI passes. This step catches that drift.
+        #
+        # The original cosign.pub publication gap (verbara-website PR #16)
+        # was caught during the v2.4.2 audit when the URL returned HTTP 404.
+        run: |
+          set -e
+          local_sha=$(sha256sum .github/cosign.pub | awk '{print $1}')
+          remote_sha=$(curl -fsSL https://verbara.io/keys/cosign.pub 2>/dev/null | sha256sum | awk '{print $1}')
+          if [ -z "$remote_sha" ] || [ "$remote_sha" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+            echo "::error::https://verbara.io/keys/cosign.pub is empty or returns 404 (verbara-website regression)"
+            exit 1
+          fi
+          if [ "$local_sha" != "$remote_sha" ]; then
+            echo "::error::cosign.pub MISMATCH: in-repo sha=$local_sha vs verbara.io sha=$remote_sha"
+            echo "::error::Customers running 'cosign verify --key https://verbara.io/keys/cosign.pub ...' will fail."
+            exit 1
+          fi
+          echo "OK   cosign.pub at https://verbara.io/keys/ matches .github/cosign.pub (sha=$local_sha)"
+
       - name: Open issue on regression
         if: failure()
         env:
@@ -102,7 +181,7 @@ jobs:
           # Idempotent: only file a new issue if there isn't already an open
           # one with the same title prefix. Avoids spamming on multi-day
           # regressions.
-          title="visibility-monitor: platform image regressed to private (ADR-0023)"
+          title="visibility-monitor: ADR-0023 contract violation (visibility, signature, or cosign.pub drift)"
           existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq 'length')
           if [ "$existing" -gt 0 ]; then
             echo "open issue already exists; not duplicating"
@@ -113,21 +192,34 @@ jobs:
           # block scalar terminates at the first column-1 line and the whole
           # workflow file fails to parse (see git log for the 2026-05-23 fix).
           body=$(cat <<EOF
-          The daily visibility monitor (\`.github/workflows/visibility-monitor.yml\`) detected that one or more \`ghcr.io/verbara/platform/*\` packages are no longer publicly pullable.
+          The daily visibility + signature monitor (\`.github/workflows/visibility-monitor.yml\`) detected that one or more \`ghcr.io/verbara/platform/*\` packages broke the ADR-0023 contract. Check failed in run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
 
-          ADR-0023 mandates all 5 platform packages remain public (\`api\`, \`realtime\`, \`renderer\`, \`mail\`, \`web\`). The check failed in run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+          ADR-0023 mandates all 5 platform packages (\`api\`, \`realtime\`, \`renderer\`, \`mail\`, \`web\`) be:
+          1. Publicly anonymously-pullable, AND
+          2. Cosign-signed against \`.github/cosign.pub\`, AND
+          3. Verifiable using the customer-facing URL \`https://verbara.io/keys/cosign.pub\`.
 
-          Likely causes:
-          - Manual visibility flip in GitHub Packages UI (Settings -> Change package visibility -> Private)
-          - A recent release workflow change altered the upload \`visibility\` default
-          - ghcr.io changed anonymous-pull semantics
+          The 3 step names in the failing run identify which dimension regressed:
+          - "Assert anonymous docker pull works" → visibility flipped to private.
+          - "Assert cosign signatures present" → unsigned push (release.yml bypass), or someone overwrote a signed tag with an unsigned build.
+          - "Assert public cosign.pub URL matches in-repo key" → \`verbara-website\` regressed (key removed or replaced).
 
-          Fix:
+          Fix by failing dimension:
+
+          **Visibility regression:**
           1. Open https://github.com/orgs/verbara/packages?repo_name=Verbara.Platform
-          2. For any package listed as 'Internal' or 'Private', click -> Package settings -> Change visibility -> Public.
-          3. Re-run this workflow to confirm.
+          2. For any package listed as 'Internal' or 'Private', click → Package settings → Change visibility → Public.
+          3. Re-run this workflow.
 
-          Cross-references: [ADR-0023](docs/decisions/0023-publishing-non-aot-microservices.md), [Deep IP-exposure analysis](docs/research/2026-05-23-pro-ip-exposure-deep-analysis.md), [Image source audit](docs/research/2026-05-23-image-source-audit.md).
+          **Signature regression:**
+          1. Re-tag and push (\`git tag v<version> && git push origin v<version>\`) to trigger \`release.yml\` which signs via cosign. Never \`docker buildx push\` directly to \`ghcr.io/verbara/platform/*\` tags — see ADR-0024 for the v2.4.2 anomaly that motivated this check.
+          2. If the existing digests are signed but the wrong key was used, rotate \`.github/cosign.pub\` (operator runbook: \`Verbara.Sdk.Pro/docs/operations/2026-05-10-cosign-keypair-bootstrap.md\`).
+
+          **cosign.pub URL drift:**
+          1. Verify \`verbara-website/public/keys/cosign.pub\` exists and matches \`Verbara.Platform/.github/cosign.pub\`.
+          2. Check CF Workers deployment for \`verbara-website\` succeeded.
+
+          Cross-references: [ADR-0023](docs/decisions/0023-publishing-non-aot-microservices.md), [ADR-0024 (anomaly + hardening)](docs/decisions/0024-v242-shipping-anomaly-and-process-hardening.md), [Deep IP-exposure analysis](docs/research/2026-05-23-pro-ip-exposure-deep-analysis.md).
           EOF
           )
           gh issue create \
