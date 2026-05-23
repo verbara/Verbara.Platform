@@ -1,0 +1,138 @@
+# Verbara platform image visibility-regression monitor.
+# Per ADR-0023 (Accepted 2026-05-23), all 5 ghcr.io/verbara/platform/* packages
+# (api, realtime, renderer, mail, web) MUST be publicly pullable. Customers
+# consuming our compose / Helm chart depend on anonymous `docker pull` working.
+# This workflow detects regressions where someone accidentally flips a package
+# back to "private" visibility in the GitHub Packages UI, or where ghcr.io
+# changes the anonymous-pull semantics in a way that breaks our customer flow.
+#
+# Belt-and-suspenders coverage:
+#   1. `gh api` against /orgs/verbara/packages/container/platform%2F<svc>
+#      reads the .visibility field directly — most reliable signal.
+#   2. `docker pull` after `docker logout ghcr.io` replicates the actual
+#      customer UX — catches edge cases where the API says "public" but
+#      the registry's anonymous-token issuance is misconfigured.
+#
+# If either check fails for any of the 5 packages, the workflow fails. A
+# notification opens to the maintainer (default GitHub Actions failure email
+# + an issue auto-created on the repo via the closing step).
+#
+# Triggers:
+#   - schedule: daily at 06:00 UTC (catches manual UI flips within ~24 h)
+#   - workflow_dispatch: maintainer can run on demand after a release
+#   - push to main on Dockerfile / .github/workflows/release.yml / this file
+#     (early warning if a release pipeline change accidentally changes the
+#      upload visibility default)
+
+name: visibility-monitor
+
+"on":
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "src/Verbara.Platform.Realtime/Dockerfile.realtime"
+      - "src/Verbara.Platform.Renderer/Dockerfile.renderer"
+      - "src/Verbara.Platform.Mail/Dockerfile.mail"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/visibility-monitor.yml"
+
+permissions:
+  contents: read
+  packages: read
+  issues: write   # only for the auto-issue-on-failure step
+
+jobs:
+  check-visibility:
+    name: Assert all 5 platform packages are public
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check package visibility via gh api
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          fail=0
+          for pkg in api realtime renderer mail web; do
+            visibility=$(gh api "/orgs/verbara/packages/container/platform%2F${pkg}" --jq .visibility 2>/dev/null || echo "ERROR")
+            if [ "$visibility" = "public" ]; then
+              echo "OK   platform/${pkg} = public"
+            else
+              echo "::error::platform/${pkg} visibility=${visibility} (expected public)"
+              fail=$((fail + 1))
+            fi
+          done
+          if [ $fail -gt 0 ]; then
+            echo
+            echo "::error::$fail of 5 platform packages are NOT public — ADR-0023 contract broken"
+            exit 1
+          fi
+
+      - name: Assert anonymous docker pull works
+        run: |
+          set -e
+          docker logout ghcr.io 2>/dev/null || true
+
+          # Discover the latest tag per package via the Packages API. ghcr.io
+          # versions API returns by-creation-date descending, so [0] is the
+          # most recent push. Skip cosign .sig entries (they're not real
+          # release tags).
+          fail=0
+          for pkg in api realtime renderer mail web; do
+            tag=$(gh api "/orgs/verbara/packages/container/platform%2F${pkg}/versions" \
+                  --jq '[.[] | .metadata.container.tags[]?
+                          | select(startswith("v"))
+                          | select(test("\\.sig$") | not)] | first' \
+                  2>/dev/null || echo "")
+            if [ -z "$tag" ]; then
+              echo "::warning::no taggable version found for platform/${pkg} — skipping pull check"
+              continue
+            fi
+            if docker pull --quiet "ghcr.io/verbara/platform/${pkg}:${tag}" >/dev/null 2>&1; then
+              echo "OK   anonymous docker pull ghcr.io/verbara/platform/${pkg}:${tag}"
+            else
+              echo "::error::anonymous docker pull FAILED for platform/${pkg}:${tag} (api says public but registry rejected)"
+              fail=$((fail + 1))
+            fi
+          done
+          if [ $fail -gt 0 ]; then
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Open issue on regression
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Idempotent: only file a new issue if there isn't already an open
+          # one with the same title prefix. Avoids spamming on multi-day
+          # regressions.
+          title="visibility-monitor: platform image regressed to private (ADR-0023)"
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq 'length')
+          if [ "$existing" -gt 0 ]; then
+            echo "open issue already exists; not duplicating"
+            exit 0
+          fi
+          gh issue create \
+            --title "$title" \
+            --label "security,priority/high" \
+            --body "The daily visibility monitor (\`.github/workflows/visibility-monitor.yml\`) detected that one or more \`ghcr.io/verbara/platform/*\` packages are no longer publicly pullable.
+
+ADR-0023 mandates all 5 platform packages remain public (\`api\`, \`realtime\`, \`renderer\`, \`mail\`, \`web\`). The check failed in run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+Likely causes:
+- Manual visibility flip in GitHub Packages UI (Settings → Change package visibility → Private)
+- A recent release workflow change altered the upload \`visibility\` default
+- ghcr.io changed anonymous-pull semantics
+
+Fix:
+1. Open https://github.com/orgs/verbara/packages?repo_name=Verbara.Platform
+2. For any package listed as 'Internal' or 'Private', click → Package settings → Change visibility → Public.
+3. Re-run this workflow to confirm.
+
+Cross-references: [ADR-0023](docs/decisions/0023-publishing-non-aot-microservices.md), [Deep IP-exposure analysis](docs/research/2026-05-23-pro-ip-exposure-deep-analysis.md), [Image source audit](docs/research/2026-05-23-image-source-audit.md)."

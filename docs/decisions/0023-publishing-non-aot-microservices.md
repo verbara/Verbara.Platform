@@ -1,9 +1,21 @@
 # ADR-0023 — Publishing the non-AOT microservices (Realtime / Renderer / Mail)
 
-**Status:** Proposed
-**Date:** 2026-05-20
+**Status:** Accepted
+**Date:** 2026-05-20 (Proposed) · 2026-05-23 (Accepted — implementation complete + empirically validated)
 **Supersedes / extends:** [ADR-0022 — Platform.Api Native AOT shipping path](0022-platform-api-aot-shipping-path.md)
-**Evidence:** [Microservices publishing & Pro-IP risk analysis](../research/2026-05-20-microservices-publishing-ip-risk.md)
+**Evidence:**
+- Initial proposal: [Microservices publishing & Pro-IP risk analysis](../research/2026-05-20-microservices-publishing-ip-risk.md) (2026-05-20)
+- Acceptance validation: [Deep IP-exposure analysis](../research/2026-05-23-pro-ip-exposure-deep-analysis.md) (2026-05-23) — re-grounds the reasoning against the live codebase (incl. Phase A.5 additions) and rejects two plausible counter-arguments
+
+## Status history
+
+- **2026-05-20 — Proposed.** Phase 5 cutover (v2.4.1 shipped 4 cosigned images: api/realtime/renderer/mail). Decision authored alongside the release.
+- **2026-05-23 — Accepted.** Implementation verified end-to-end:
+  - All 5 packages (`api`, `realtime`, `renderer`, `mail`, `web`) confirmed anonymously pullable via `docker pull ghcr.io/verbara/platform/<svc>:v2.4.1` after `docker logout ghcr.io`.
+  - `BanCrownJewelProInNonAotMicroservices` build guard present + active in [Directory.Build.props:67-80](../../Directory.Build.props#L67) — fires only for `Verbara.Platform.{Realtime,Renderer,Mail}` projects, blocks Dialer/Analytics/CallAnalytics/AgentAssist/EventStore/Routing PackageReferences.
+  - API Native AOT publish output verified: 0 managed Verbara DLLs in `publish/`, native ELF 67 MB stripped (matches `file Verbara.Platform.Api` → "ELF 64-bit LSB pie executable, x86-64, ..., stripped").
+  - Phase A.5 (shipped same day in `v2.4.2` train) added new code to `Verbara.Sdk.Pro.Cluster` (`IClusterLeader` + `LeaderElectionService` + `PostgresDistributedLock`-via-IDistributedLock) — all non-crown-jewel per this ADR's classification; guard remains green; no IP-exposure regression.
+  - Counter-arguments validated and rejected (private-for-IP-protection: zero IP gain, real friction cost; ECDSA-public-key-as-IL: cryptographically safe by Kerckhoffs; tampered binary: defeated by ADR-0011 Layer C digest binding; CI/CD friction tax: real, would harm ADR-0016 funnel economics).
 
 ## Context
 
@@ -71,3 +83,28 @@ Key measured facts (see evidence doc):
 - **Future:** if Realtime's leader-election (Phase A.5) or other features later pull a
   crown-jewel package, the guard will fail the build — forcing a conscious decision (keep that
   logic AOT-side) rather than a silent IP leak.
+
+## Post-acceptance verification (2026-05-23)
+
+Phase A.5 (Realtime per-resource leader election) shipped today. The new package references in
+`Verbara.Platform.Realtime.csproj` are `Verbara.Sdk.Cluster.Primitives` (SDK MIT, public on
+nuget.org) and `Verbara.Sdk.Cluster.Postgres` (SDK MIT, new in 2.2.1, public on nuget.org), plus
+the existing `Verbara.Sdk.Pro.Cluster` reference at 2.5.1-pro which now carries the new
+`IClusterLeader` API. The build guard's classification holds:
+
+| New surface | Where it ships | Classification | Verdict |
+|-------------|----------------|----------------|---------|
+| `Verbara.Sdk.Cluster.Postgres.PostgresDistributedLock` | SDK MIT package on nuget.org | open-source primitive | ✅ public by license |
+| `Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader` + `LeaderElectionService` | Realtime image (as IL); also reachable through Pro.Cluster everywhere | non-crown-jewel Pro plumbing | ✅ acceptable as IL per this ADR |
+| `cluster_distributed_lock` Postgres table | runtime artifact, not in any image | n/a | ✅ |
+
+The leader-election implementation is a textbook TTL-upsert renewal loop on top of the existing
+`IDistributedLock` primitive. Decompiling it reveals a well-known pattern (Hangfire, Akka.NET
+cluster singleton, K8s leases all use functionally identical algorithms). Not a competitive
+moat. The empirical IP-exposure picture is unchanged.
+
+## Pending follow-up (optional, not blocking acceptance)
+
+1. **Threat model document.** [ADR-0018 Trigger #4](0018-visibility-decision-3-private-now-public-on-trigger.md#trigger-checklist-must-all-be--before-flipping) requires a `docs/security/threat-model.md` before the repo-public flip. The deep IP-exposure analysis [`2026-05-23-pro-ip-exposure-deep-analysis.md`](../research/2026-05-23-pro-ip-exposure-deep-analysis.md) is a strong precursor for the "What public images expose vs what stays protected" section.
+2. **CI visibility-regression self-test.** A 30-minute workflow step that calls `GET /orgs/verbara/packages/container/platform%2F<svc>` via `gh api` and asserts `.visibility == "public"`. Detects accidental private-flips on any of the 5 packages. Cheap insurance.
+3. **Pro EULA wording alignment.** Confirm the Pro license agreement explicitly grants right-to-run for the public compiled image while gating commercial-feature use to a paid license. Tracked in [`Verbara.Sdk.Pro/docs/plans/active/2026-05-08-pro-licensing-eula-overhaul.md`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/plans/active/2026-05-08-pro-licensing-eula-overhaul.md) (private repo).
