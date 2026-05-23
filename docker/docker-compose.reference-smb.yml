@@ -25,18 +25,26 @@
 #      the host NIC. The cost is that Asterisk reclaims 5060/5061/8088/
 #      8089/5038/8180/9092 of the HOST (no other PBX may run there).
 #
-#   2) Platform.Api + Web + Postgres + Redis stay on a docker bridge
-#      (`default` network). The Api reaches Asterisk via
+#   2) Platform.Api + Realtime + Web + Postgres + Redis stay on a docker
+#      bridge (`default` network). The Api reaches Asterisk via
 #      `host.docker.internal:{8088,5038}` thanks to
 #      `extra_hosts: ["host.docker.internal:host-gateway"]`.
 #
-#   3) Postgres is bound to the host on `127.0.0.1:5432` (loopback only,
+#   3) `nginx-gateway` fronts Web + Api + Realtime under a single host port
+#      (default :80), mirroring the K8s Cilium HTTPRoute topology
+#      (ADR-0022 Phase A): `/hubs/*` → realtime:5030 (SignalR WebSocket),
+#      `/api/*` → platform-api:5000, everything else → web:80.
+#      Web + Api + Realtime are internal-only (no host port exposure).
+#
+#   4) Postgres is bound to the host on `127.0.0.1:5432` (loopback only,
 #      NOT the LAN). This lets Asterisk-on-host-network reach the realtime
 #      DB while keeping the DB invisible from the LAN.
 #
-#   4) Images are tag-pinned to the latest signed release at the time this
-#      file ships. Operators who want byte-for-byte content addressing
-#      should use `docker-compose.verified.yml` instead (digest-pinned).
+#   5) Images are tag-pinned to the latest signed release at the time this
+#      file ships (ADR-0023: api/realtime/renderer/mail published to
+#      ghcr.io/verbara/platform/* as cosign-signed Native AOT images).
+#      Operators who want byte-for-byte content addressing should use
+#      `docker-compose.verified.yml` instead (digest-pinned).
 #
 # Capacity envelope (with default .env values):
 #   SMB Standard tier (target sweet-spot): 8 vCPU / 32 GB / 250 GB SSD
@@ -133,7 +141,7 @@ services:
   # Platform.Api — composition root. Pinned to the latest signed release.
   # ──────────────────────────────────────────────────────────────────────
   platform-api:
-    image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.1.0}
+    image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.4.1}
     container_name: verbara-platform-api
     logging: *default-logging
     extra_hosts:
@@ -193,8 +201,10 @@ services:
         condition: service_healthy
       mail:
         condition: service_healthy
-    ports:
-      - "${API_PORT:-5000}:5000"
+    # Internal-only — nginx-gateway proxies /api/* on the customer-facing port.
+    # The host-port mapping is intentionally absent.
+    expose:
+      - "5000"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:5000/health/ready || exit 1"]
       interval: 30s
@@ -209,16 +219,55 @@ services:
           memory: ${PLATFORM_API_MEM_LIMIT:-1500M}
 
   # ──────────────────────────────────────────────────────────────────────
+  # Platform.Realtime — SignalR Hub microservice (ADR-0022 Phase A).
+  # Owns presence + Hub broadcast; non-AOT by design. Internal-only;
+  # nginx-gateway proxies /hubs/* to port 5030. Single-pod by default;
+  # multi-pod scaling requires Pro.Cluster IsLeader (Phase A.5) + Redis
+  # backplane (uncomment ConnectionStrings__Redis below and enable the
+  # `identity-redis` profile).
+  # ──────────────────────────────────────────────────────────────────────
+  realtime:
+    image: ghcr.io/verbara/platform/realtime:${PLATFORM_API_TAG:-v2.4.1}
+    container_name: verbara-realtime
+    logging: *default-logging
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5030
+      Services__ServiceKey: ${SERVICE_KEY:?SERVICE_KEY required (32+ chars)}
+      Services__PlatformApi__BaseUrl: http://platform-api:5000
+      Asterisk__ClusterNodeId: ${REALTIME_CLUSTER_NODE_ID:-realtime-1}
+      # Multi-pod backplane (opt-in). Uncomment when scaling out:
+      # ConnectionStrings__Redis: redis:6379
+      # ConnectionStrings__IdentityRedis: redis:6379
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    expose:
+      - "5030"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5030/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${REALTIME_CPU_LIMIT:-0.5}"
+          memory: ${REALTIME_MEM_LIMIT:-512M}
+
+  # ──────────────────────────────────────────────────────────────────────
   # Platform.Web — React SPA + nginx. Pinned to the latest signed release.
+  # Internal-only — port 80 belongs to `nginx-gateway` below, which fronts
+  # web + api + realtime under one hostname (ADR-0022 Phase A).
   # ──────────────────────────────────────────────────────────────────────
   web:
     image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.0.3-web}
     container_name: verbara-web
     logging: *default-logging
-    ports:
-      - "${WEB_HTTP_PORT:-80}:80"
-      # Uncomment for TLS termination at nginx (requires WEB_TLS_CERT/KEY).
-      # - "${WEB_HTTPS_PORT:-443}:443"
+    expose:
+      - "80"
     depends_on:
       platform-api:
         condition: service_healthy
@@ -228,6 +277,41 @@ services:
         limits:
           cpus: "${WEB_CPU_LIMIT:-0.5}"
           memory: ${WEB_MEM_LIMIT:-256M}
+
+  # ──────────────────────────────────────────────────────────────────────
+  # nginx-gateway — single ingress that mirrors the K8s Cilium HTTPRoute
+  # topology so the frontend connects to one host whether running here or
+  # in K8s. Routes:
+  #   /hubs/*  → realtime:5030  (SignalR WebSocket — long-lived upgrade)
+  #   /api/*   → platform-api:5000
+  #   /health  → platform-api:5000
+  #   /        → web:80 (React SPA served by nginx inside the web image)
+  # See `docker/nginx-gateway.conf` for the full upstream + WebSocket config.
+  # ──────────────────────────────────────────────────────────────────────
+  nginx-gateway:
+    image: nginx:1.27-alpine
+    container_name: verbara-nginx-gateway
+    logging: *default-logging
+    volumes:
+      - ./nginx-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${WEB_HTTP_PORT:-80}:80"
+      # Uncomment for TLS termination at the gateway (mount cert+key into
+      # /etc/nginx/certs and amend nginx-gateway.conf with a 443 server block).
+      # - "${WEB_HTTPS_PORT:-443}:443"
+    depends_on:
+      platform-api:
+        condition: service_healthy
+      realtime:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${GATEWAY_CPU_LIMIT:-0.5}"
+          memory: ${GATEWAY_MEM_LIMIT:-128M}
 
   # ──────────────────────────────────────────────────────────────────────
   # Postgres 18 — main store. Bound on the docker bridge AND on the host
@@ -307,14 +391,10 @@ services:
 
   # ──────────────────────────────────────────────────────────────────────
   # Renderer microservice — QuestPDF + ScottPlot for reports/charts.
-  # Built locally from the monorepo (not yet published to ghcr). First boot
-  # takes ~5 min for the build; subsequent boots reuse the cached image.
+  # Pinned to the latest signed release on ghcr.io (ADR-0023, Native AOT).
   # ──────────────────────────────────────────────────────────────────────
   renderer:
-    build:
-      context: ..
-      dockerfile: src/Verbara.Platform.Renderer/Dockerfile.renderer
-    image: verbara/renderer-local:${PLATFORM_API_TAG:-v2.1.0}
+    image: ghcr.io/verbara/platform/renderer:${PLATFORM_API_TAG:-v2.4.1}
     container_name: verbara-renderer
     logging: *default-logging
     environment:
@@ -336,13 +416,10 @@ services:
 
   # ──────────────────────────────────────────────────────────────────────
   # Mail microservice — MailKit SMTP + IMAP + Microsoft Graph OAuth.
-  # Built locally from the monorepo (not yet published to ghcr).
+  # Pinned to the latest signed release on ghcr.io (ADR-0023, Native AOT).
   # ──────────────────────────────────────────────────────────────────────
   mail:
-    build:
-      context: ..
-      dockerfile: src/Verbara.Platform.Mail/Dockerfile.mail
-    image: verbara/mail-local:${PLATFORM_API_TAG:-v2.1.0}
+    image: ghcr.io/verbara/platform/mail:${PLATFORM_API_TAG:-v2.4.1}
     container_name: verbara-mail
     logging: *default-logging
     environment:

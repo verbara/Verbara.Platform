@@ -6,13 +6,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.7" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.8" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,7 +21,9 @@
 
   <ItemGroup>
     <PackageVersion Include="Npgsql" Version="10.0.2" />
-    <PackageVersion Include="Verbara.Sdk.Data.Npgsql" Version="2.2.0" />
+    <PackageVersion Include="Verbara.Sdk.Data.Npgsql" Version="2.2.1" />
+    <PackageVersion Include="Verbara.Sdk.Cluster.Primitives" Version="2.2.1" />
+    <PackageVersion Include="Verbara.Sdk.Cluster.Postgres" Version="2.2.1" />
   </ItemGroup>
 
   <!-- DataProtection consumed by Verbara.Platform.Identity (ADR-0003 + ADR-0022
@@ -38,34 +40,34 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Verbara.Sdk.Hosting" Version="2.2.0" />
-    <PackageVersion Include="Verbara.Sdk.Push" Version="2.2.0" />
-    <PackageVersion Include="Verbara.Sdk.Resilience" Version="2.2.0" />
-    <PackageVersion Include="Verbara.Sdk.OpenTelemetry" Version="2.2.0" />
+    <PackageVersion Include="Verbara.Sdk.Hosting" Version="2.2.1" />
+    <PackageVersion Include="Verbara.Sdk.Push" Version="2.2.1" />
+    <PackageVersion Include="Verbara.Sdk.Resilience" Version="2.2.1" />
+    <PackageVersion Include="Verbara.Sdk.OpenTelemetry" Version="2.2.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Verbara.Sdk.Pro.EventStore" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Analytics" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Dialer" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Dialer.Storage.Postgres" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.EventStore.Postgres" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Analytics.Storage.Postgres" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Licensing" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist.Storage.Postgres" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Routing" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Realtime" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Realtime.Storage.Postgres" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Cluster" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Cluster.Storage.Postgres" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.MultiTenant" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Push" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Push.SignalR" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Storage.Common" Version="2.5.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.OpenTelemetry" Version="2.5.0-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.EventStore" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Analytics" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Dialer" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Dialer.Storage.Postgres" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.EventStore.Postgres" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Analytics.Storage.Postgres" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Licensing" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist.Storage.Postgres" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Routing" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Realtime" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Realtime.Storage.Postgres" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Cluster" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Cluster.Storage.Postgres" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.MultiTenant" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Push" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Push.SignalR" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.Storage.Common" Version="2.5.1-pro" />
+    <PackageVersion Include="Verbara.Sdk.Pro.OpenTelemetry" Version="2.5.1-pro" />
   </ItemGroup>
 
   <ItemGroup>

@@ -33,6 +33,8 @@
     <PackageReference Include="Verbara.Sdk.Push" />
     <PackageReference Include="Verbara.Sdk.Pro.Push" />
     <PackageReference Include="Verbara.Sdk.Pro.Push.SignalR" />
+    <PackageReference Include="Verbara.Sdk.Cluster.Primitives" />
+    <PackageReference Include="Verbara.Sdk.Cluster.Postgres" />
     <PackageReference Include="Verbara.Sdk.Pro.Cluster" />
     <PackageReference Include="Verbara.Sdk.Pro.Cluster.Storage.Postgres" />
   </ItemGroup>

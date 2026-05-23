@@ -1,7 +1,9 @@
+using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.Push.SignalR.Events;
 using Verbara.Sdk.Pro.Push.SignalR.Hubs;
 using Verbara.Sdk.Push.Bus;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -36,19 +38,20 @@ internal static partial class PushToHubRelayLog
 /// conversation, agent, and cluster node state transitions.
 ///
 /// <para>
-/// <b>Multi-pod note (ADR-0022 Phase A):</b> Realtime currently ships
-/// single-pod (Helm values <c>realtime.hpa.maxReplicas: 1</c>) because
-/// Pro.Cluster does not yet expose a leader-election API. When the
-/// follow-up phase adds an <c>IClusterLeadershipGate</c> abstraction, the
-/// relay will short-circuit on non-leader pods and the SignalR Redis
-/// backplane (already wired in <c>Program.cs</c>) will fan the leader's
-/// broadcasts to every pod's connected clients.
+/// <b>Multi-pod (ADR-0022 Phase A.5):</b> the relay subscribes on every pod
+/// but short-circuits the <see cref="IHubContext{THub,T}.Clients"/> call when
+/// this pod is not the elected leader for
+/// <see cref="RealtimeLeaderResources.Fanout"/>. The SignalR Redis backplane
+/// (wired in <c>Program.cs</c>) then fans the leader's broadcasts to clients
+/// connected to every pod, so each event is delivered exactly once
+/// platform-wide regardless of replica count.
 /// </para>
 /// </summary>
 public sealed class PushToHubRelay : IHostedService
 {
     private readonly IPushEventBus _bus;
     private readonly IHubContext<PlatformHub, IPlatformHubClient> _hubContext;
+    private readonly IClusterLeader _fanoutLeader;
     private readonly ILogger<PushToHubRelay> _logger;
 
     private IDisposable? _conversationSubscription;
@@ -58,10 +61,12 @@ public sealed class PushToHubRelay : IHostedService
     public PushToHubRelay(
         IPushEventBus bus,
         IHubContext<PlatformHub, IPlatformHubClient> hubContext,
+        [FromKeyedServices(RealtimeLeaderResources.Fanout)] IClusterLeader fanoutLeader,
         ILogger<PushToHubRelay> logger)
     {
         _bus = bus;
         _hubContext = hubContext;
+        _fanoutLeader = fanoutLeader;
         _logger = logger;
     }
 
@@ -92,6 +97,12 @@ public sealed class PushToHubRelay : IHostedService
 
     private void ForwardConversation(ConversationStateChangedEvent evt)
     {
+        if (!_fanoutLeader.IsLeader)
+        {
+            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, _fanoutLeader.Resource);
+            return;
+        }
+
         var tenantId = evt.Metadata?.TenantId;
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -111,6 +122,12 @@ public sealed class PushToHubRelay : IHostedService
 
     private void ForwardAgent(AgentStateChangedEvent evt)
     {
+        if (!_fanoutLeader.IsLeader)
+        {
+            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, _fanoutLeader.Resource);
+            return;
+        }
+
         var tenantId = evt.Metadata?.TenantId;
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -131,6 +148,12 @@ public sealed class PushToHubRelay : IHostedService
 
     private void ForwardClusterNode(ClusterNodeStateChangedEvent evt)
     {
+        if (!_fanoutLeader.IsLeader)
+        {
+            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, _fanoutLeader.Resource);
+            return;
+        }
+
         if (string.IsNullOrEmpty(evt.NodeId))
         {
             PushToHubRelayLog.SkippedNullNodeId(_logger, evt.EventType);

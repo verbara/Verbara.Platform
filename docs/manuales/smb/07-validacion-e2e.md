@@ -207,8 +207,11 @@ $ docker exec verbara-postgres psql -U platform -d verbara -c "\dt" >> /tmp/verb
 $ npx playwright test --grep @reference-deployment --reporter=html
 # → playwright-report/index.html
 
-# Sign del Web + API images (proof de imagen no-tampered)
-$ cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/api:v2.1.0 > /tmp/sig-api.txt 2>&1
+# Sign de las 5 imágenes (proof de imagen no-tampered, ADR-0023)
+$ for img in api realtime renderer mail; do
+    cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/$img:v2.4.1 \
+      > /tmp/sig-$img.txt 2>&1
+  done
 $ cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/web:v3.0.3-web > /tmp/sig-web.txt 2>&1
 
 # Bundle todo

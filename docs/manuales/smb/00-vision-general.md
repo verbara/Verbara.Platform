@@ -126,15 +126,21 @@ Verbara SMB se distribuye en **3 tiers** que comparten el mismo binario. Pasás 
 ## Versionado y soporte
 
 Esta guía aplica a:
-- **Verbara.Platform.Api** `v2.1.0` (imagen `ghcr.io/verbara/platform/api:v2.1.0`)
+- **Verbara.Platform.Api** `v2.4.1` (imagen `ghcr.io/verbara/platform/api:v2.4.1`, Native AOT)
+- **Verbara.Platform.Realtime** `v2.4.1` (imagen `ghcr.io/verbara/platform/realtime:v2.4.1`) — microservicio SignalR Hub (ADR-0022 Phase A)
+- **Verbara.Platform.Renderer** `v2.4.1` (imagen `ghcr.io/verbara/platform/renderer:v2.4.1`, Native AOT)
+- **Verbara.Platform.Mail** `v2.4.1` (imagen `ghcr.io/verbara/platform/mail:v2.4.1`, Native AOT)
 - **Verbara.Platform.Web** `v3.0.3-web` (imagen `ghcr.io/verbara/platform/web:v3.0.3-web`)
+- **nginx** `1.27-alpine` — actúa de gateway frente a Web + Api + Realtime, sirviendo el host port 80 (refleja la topología K8s Cilium HTTPRoute)
 - **Asterisk** 22 (build local desde `docker/Dockerfile.asterisk`)
 - **Postgres** 18-alpine
-- **Redis** 8-alpine (opt)
+- **Redis** 8-alpine (opt — solo necesario para multi-pod Realtime + JWT rotation pool)
 
-Ambas imágenes están **firmadas con cosign** — antes del primer pull, validá con:
+Las cinco imágenes Verbara están **firmadas con cosign** (ADR-0023) — antes del primer pull, validá con:
 ```bash
-$ cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/api:v2.1.0
+$ for img in api realtime renderer mail; do \
+    cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/$img:v2.4.1; \
+  done
 $ cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/web:v3.0.3-web
 ```
 
