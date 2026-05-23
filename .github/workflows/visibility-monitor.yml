@@ -118,21 +118,29 @@ jobs:
             echo "open issue already exists; not duplicating"
             exit 0
           fi
+          # Body assembled via heredoc to keep every continuation line within
+          # the run-block's 10-space indentation — otherwise YAML's literal
+          # block scalar terminates at the first column-1 line and the whole
+          # workflow file fails to parse (see git log for the 2026-05-23 fix).
+          body=$(cat <<EOF
+          The daily visibility monitor (\`.github/workflows/visibility-monitor.yml\`) detected that one or more \`ghcr.io/verbara/platform/*\` packages are no longer publicly pullable.
+
+          ADR-0023 mandates all 5 platform packages remain public (\`api\`, \`realtime\`, \`renderer\`, \`mail\`, \`web\`). The check failed in run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+          Likely causes:
+          - Manual visibility flip in GitHub Packages UI (Settings -> Change package visibility -> Private)
+          - A recent release workflow change altered the upload \`visibility\` default
+          - ghcr.io changed anonymous-pull semantics
+
+          Fix:
+          1. Open https://github.com/orgs/verbara/packages?repo_name=Verbara.Platform
+          2. For any package listed as 'Internal' or 'Private', click -> Package settings -> Change visibility -> Public.
+          3. Re-run this workflow to confirm.
+
+          Cross-references: [ADR-0023](docs/decisions/0023-publishing-non-aot-microservices.md), [Deep IP-exposure analysis](docs/research/2026-05-23-pro-ip-exposure-deep-analysis.md), [Image source audit](docs/research/2026-05-23-image-source-audit.md).
+          EOF
+          )
           gh issue create \
             --title "$title" \
             --label "security,priority/high" \
-            --body "The daily visibility monitor (\`.github/workflows/visibility-monitor.yml\`) detected that one or more \`ghcr.io/verbara/platform/*\` packages are no longer publicly pullable.
-
-ADR-0023 mandates all 5 platform packages remain public (\`api\`, \`realtime\`, \`renderer\`, \`mail\`, \`web\`). The check failed in run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
-
-Likely causes:
-- Manual visibility flip in GitHub Packages UI (Settings → Change package visibility → Private)
-- A recent release workflow change altered the upload \`visibility\` default
-- ghcr.io changed anonymous-pull semantics
-
-Fix:
-1. Open https://github.com/orgs/verbara/packages?repo_name=Verbara.Platform
-2. For any package listed as 'Internal' or 'Private', click → Package settings → Change visibility → Public.
-3. Re-run this workflow to confirm.
-
-Cross-references: [ADR-0023](docs/decisions/0023-publishing-non-aot-microservices.md), [Deep IP-exposure analysis](docs/research/2026-05-23-pro-ip-exposure-deep-analysis.md), [Image source audit](docs/research/2026-05-23-image-source-audit.md)."
+            --body "$body"
