@@ -51,8 +51,43 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 so we can read the annotated tag message in the
+          # retroactive-tag guard below. Default depth=1 has no tag annotations.
+          fetch-depth: 0
+
+      - name: Check for retroactive-tag marker (ADR-0024)
+        id: retro
+        # Retroactive tags carry the literal marker `RETROACTIVE-TAG` in their
+        # annotated message. When present, all subsequent build/push/sign/verify
+        # steps are skipped — the registry tag was produced via an alternate
+        # path (e.g. direct `docker buildx push` from a maintainer machine,
+        # documented in ADR-0024 §v2.4.2 anomaly) and re-running this workflow
+        # would overwrite the existing image digest, breaking Layer C image-
+        # binding for every customer that already pulled the original digest.
+        #
+        # To use:
+        #   git tag -a v2.4.2 <commit> -m "RETROACTIVE-TAG: rationale + digests"
+        #   git push origin v2.4.2
+        # This workflow then fires, sees the marker, exits cleanly with a
+        # notice annotation, and ghcr.io is untouched.
+        #
+        # Normal releases get no marker and follow the original build-and-sign
+        # path. The guard is backward-compatible.
+        run: |
+          set -euo pipefail
+          annotation=$(git for-each-ref --format='%(contents)' "refs/tags/${GITHUB_REF_NAME}" 2>/dev/null || true)
+          if printf '%s' "$annotation" | grep -qF 'RETROACTIVE-TAG'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Retroactive tag ${GITHUB_REF_NAME} detected — skipping build/push/sign/verify."
+            echo "::notice::Existing ghcr.io digest preserved. Tag annotation:"
+            printf '%s' "$annotation" | sed 's/^/  /'
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Resolve release tag
+        if: steps.retro.outputs.skip != 'true'
         id: tag
         run: |
           TAG="${GITHUB_REF_NAME}"
@@ -64,9 +99,11 @@ jobs:
           echo "image_name=verbara/platform/${{ matrix.name }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
+        if: steps.retro.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
+        if: steps.retro.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -74,6 +111,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push final image
+        if: steps.retro.outputs.skip != 'true'
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -91,6 +129,7 @@ jobs:
           provenance: false
 
       - name: Install cosign
+        if: steps.retro.outputs.skip != 'true'
         uses: sigstore/cosign-installer@v3
         with:
           # Pin v2.5.2: cosign-installer@v3 fails on cosign v3.x (changed detached-sig
@@ -98,6 +137,7 @@ jobs:
           cosign-release: 'v2.5.2'
 
       - name: Sign final image with cosign
+        if: steps.retro.outputs.skip != 'true'
         env:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
@@ -115,6 +155,7 @@ jobs:
             "$IMAGE_REF"
 
       - name: Verify cosign signature against committed public key
+        if: steps.retro.outputs.skip != 'true'
         env:
           IMAGE_REF: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}@${{ steps.build.outputs.digest }}
         run: |
@@ -125,6 +166,7 @@ jobs:
             "$IMAGE_REF"
 
       - name: Print final image reference
+        if: steps.retro.outputs.skip != 'true'
         env:
           IMAGE_REF: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}@${{ steps.build.outputs.digest }}
         run: |
@@ -132,7 +174,7 @@ jobs:
           echo "Final image reference: $IMAGE_REF"
 
       - name: Authorized-digests reminder (API only)
-        if: matrix.name == 'api'
+        if: steps.retro.outputs.skip != 'true' && matrix.name == 'api'
         run: |
           echo "Next step (API image only — Layer C image-binding):"
           echo "append a new entry to verbara-website's data/authorized-digests.json with"

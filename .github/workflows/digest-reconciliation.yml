@@ -1,0 +1,170 @@
+# Authorized-digest ↔ registry reconciliation monitor.
+#
+# `verbara-website/data/authorized-digests.json` is the source of truth for
+# image-digest binding (ADR-0011 Layer C — Pro licensing image binding).
+# Every entry (current + deprecated) MUST satisfy three properties:
+#   1. The `image_ref` resolves in ghcr.io (anonymous pull).
+#   2. The current registry digest matches the recorded `manifest_list_digest`
+#      (no one overwrote the tag with a different build).
+#   3. The pinned digest is cosign-signed against `.github/cosign.pub`.
+#
+# This workflow runs daily 1 hour after `visibility-monitor.yml` (06:00 → 07:00
+# UTC) so that a fault detected in either workflow produces a clear, ordered
+# audit trail. Drift on ANY entry fails the run and auto-opens an issue.
+#
+# Motivating incident (2026-05-23): the v2.4.2 audit revealed
+#   - `deprecated[v2.4.1] api` digest `ac900df6...` no longer resolved (the tag
+#     had been overwritten by a manual `docker buildx push`, then the new build
+#     was bound to v2.4.2 — leaving v2.4.1's authorized digest as a ghost).
+#   - The `current[v2.4.2]` entry pointed to a digest that was signed but had
+#     no git tag / no release.yml run backing it (process gap, see ADR-0024).
+# The first symptom is exactly what this workflow catches. The second symptom
+# (no git tag) is caught by Phase 4 of the hardening (release-source audit —
+# tracked separately under ADR-0024 §Process Hardening).
+#
+# Triggers:
+#   - schedule: daily 07:00 UTC
+#   - workflow_dispatch: maintainer can run on demand after a release / digest update
+#   - push: catches accidental authorized-digests.json desync if someone commits
+#     a tampered entry to either Platform or website repo via PR (defensive)
+
+name: digest-reconciliation
+
+"on":
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/digest-reconciliation.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  reconcile:
+    name: Reconcile authorized-digests.json against ghcr.io reality
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Platform (for .github/cosign.pub)
+        uses: actions/checkout@v4
+        with:
+          path: platform
+
+      - name: Checkout verbara-website (for data/authorized-digests.json)
+        uses: actions/checkout@v4
+        with:
+          repository: verbara/verbara-website
+          path: website
+          # verbara-website is a public repo; no token needed. If it ever
+          # becomes private, add a PAT with `repo:read` scope to a secret.
+
+      - name: Install cosign
+        # Pin v2.5.2 — matches release.yml + visibility-monitor.yml. The
+        # Verbara signing posture skips Rekor; verification needs
+        # `--insecure-ignore-tlog` to match.
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.5.2'
+
+      - name: Reconcile every authorized entry
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io 2>/dev/null || true
+
+          fail=0
+
+          # Stream every entry (current[] + deprecated[]) as one TSV per line:
+          #   <bucket>\t<version>\t<image_ref>\t<authorized_digest>
+          # The here-doc style with jq -r keeps shell parsing simple.
+          entries=$(jq -r '
+            (.current[]?    | "current\t"    + .platform_version + "\t" + .image_ref + "\t" + .manifest_list_digest),
+            (.deprecated[]? | "deprecated\t" + .platform_version + "\t" + .image_ref + "\t" + .manifest_list_digest)
+          ' website/data/authorized-digests.json)
+
+          while IFS=$'\t' read -r bucket version image_ref authorized_digest; do
+            [ -z "$bucket" ] && continue
+            echo
+            echo "── [${bucket}] ${version} ── ${image_ref}"
+            echo "   authorized: ${authorized_digest}"
+
+            # Property 1: image_ref resolves in ghcr.io (anonymous)
+            actual_digest=$(docker buildx imagetools inspect "$image_ref" --format '{{.Manifest.Digest}}' 2>/dev/null || true)
+            if [ -z "$actual_digest" ]; then
+              echo "   ::error::ghcr.io does not resolve ${image_ref} (deleted or never published) — REMOVE from authorized-digests.json"
+              fail=$((fail + 1))
+              continue
+            fi
+            echo "   actual:     ${actual_digest}"
+
+            # Property 2: actual digest matches authorized digest
+            if [ "$actual_digest" != "$authorized_digest" ]; then
+              echo "   ::error::DIGEST MISMATCH on ${image_ref} — tag was overwritten in ghcr.io after authorization"
+              echo "   ::error::  expected: ${authorized_digest}"
+              echo "   ::error::  actual:   ${actual_digest}"
+              fail=$((fail + 1))
+              continue
+            fi
+
+            # Property 3: cosign-signed against .github/cosign.pub
+            # Verify by-digest (not by-tag) for absolute reproducibility — the
+            # tag could in theory move between resolve and verify on a flaky
+            # registry, the digest is immutable.
+            pinned_ref="${image_ref%%:*}@${authorized_digest}"
+            if ! cosign verify --key platform/.github/cosign.pub --insecure-ignore-tlog "$pinned_ref" >/dev/null 2>&1; then
+              echo "   ::error::cosign verify FAILED for ${pinned_ref} (unsigned or wrong key — ADR-0023 violation)"
+              fail=$((fail + 1))
+              continue
+            fi
+
+            echo "   OK   resolves, digest matches, signature valid"
+          done <<< "$entries"
+
+          echo
+          if [ $fail -gt 0 ]; then
+            echo "::error::$fail authorized-digest entries failed reconciliation — see drift report above"
+            exit 1
+          fi
+          echo "All authorized-digest entries reconcile cleanly with ghcr.io reality."
+
+      - name: Open issue on regression
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Idempotent: only file a new issue if there isn't already an open
+          # one with the same title prefix. Same heredoc-indentation trick as
+          # visibility-monitor.yml — every continuation line stays within the
+          # run-block's 10-space indentation or the YAML literal block scalar
+          # terminates early and the whole workflow fails to parse.
+          title="digest-reconciliation: authorized-digests.json drift detected (ADR-0011 Layer C)"
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq 'length')
+          if [ "$existing" -gt 0 ]; then
+            echo "open issue already exists; not duplicating"
+            exit 0
+          fi
+          body=$(cat <<EOF
+          The daily authorized-digest reconciliation workflow detected drift between \`verbara-website/data/authorized-digests.json\` and ghcr.io reality. Check failed in run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+          This breaks ADR-0011 Layer C (Pro licensing image-digest binding). Customers running a Pro image whose digest matches an entry in \`current[]\` or \`deprecated[]\` expect that entry to remain valid; drift means a customer with the older digest in their pull-cache may suddenly fail license validation (or worse, validate against a different binary than the one originally authorized).
+
+          The run log identifies which dimension drifted per entry:
+          - "ghcr.io does not resolve" → entry should be REMOVED from \`authorized-digests.json\` (the tag was deleted or overwritten; the digest is a ghost).
+          - "DIGEST MISMATCH" → the tag was overwritten in ghcr.io with a different build. Either restore the original digest by re-pushing or revoke the authorization.
+          - "cosign verify FAILED" → the binary was signed with a different key than \`.github/cosign.pub\`, or never signed. Either re-sign or revoke.
+
+          Fix:
+          1. Open the failing run log to see per-entry diagnostic.
+          2. Decide per drift: restore registry state vs revoke authorization.
+          3. PR against \`verbara-website/data/authorized-digests.json\` if revoking.
+          4. Re-run this workflow to confirm.
+
+          Cross-references: [ADR-0011 Layer C — image-digest binding](docs/decisions/0011-auth-write-deferral.md), [ADR-0023 — non-AOT microservice publishing](docs/decisions/0023-publishing-non-aot-microservices.md), [ADR-0024 — v2.4.2 anomaly + process hardening](docs/decisions/0024-v242-shipping-anomaly-and-process-hardening.md).
+          EOF
+          )
+          gh issue create \
+            --title "$title" \
+            --label "security,priority/high" \
+            --body "$body"
