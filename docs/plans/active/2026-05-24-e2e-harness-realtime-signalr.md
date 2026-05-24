@@ -161,6 +161,45 @@ La decisión correcta — alineada con un CCaaS tier-1 y con "esta imagen siempr
 
 ---
 
+## Live execution log + v2.4.8 amendment (2026-05-24)
+
+### What shipped this session (8 PRs, tags v2.4.4 → v2.4.7)
+
+Phases 1 + 3 of this plan landed end-to-end against the Talos lab. Detailed escalation chain documented in the appendix of [the smoke report](../../operations/phase-a5-talos-smoke-test-2026-05-24.md#appendix--test-5-escalation-chain-2026-05-24-post-closure-session).
+
+| Phase | Deliverable | PR | Outcome |
+|---|---|---|---|
+| 1 | Audit endpoint + sink + counter | #18 | Shipped — verified live 200 OK with `RelayOutcomePage` JSON after the v2.4.5-7 chain |
+| 3 walking-skeleton | Console harness + `ExactlyOnceScenario` + Talos wrapper | #19 | Shipped — ran end-to-end against 4 v2.4.7 Realtime pods |
+| 5 chart hardening side-effects | 4 chart/code fixes surfaced by harness | #21, #22, #23, #24, #25 | All shipped; lab on v2.4.7 rev 23 |
+
+### What Test 5 PARTIAL still blocks on — v2.4.8 backplane closure
+
+Layer 6 of the 6-layer mismatch stack: Pro.Push.Redis backplane channel topic naming uses each event's `EventType` string. API events publish to `verbara:push:agent.state_changed` (Core type's `Type` field), Realtime subscribes to `verbara:push:agent.state.changed` (Pro type's `EventType` getter — note the second `.` vs `_`). Result: even after v2.4.7's dual-subscriber relay, events from the API never reach the Realtime in-process `IPushEventBus` because the Redis backplane doesn't route them.
+
+**Verification (next session):** `kubectl exec redis-0 -- redis-cli PSUBSCRIBE 'verbara:push:*'` while running the harness — expect to see `agent.state_changed` topic from API + `agent.state.changed` topic missing.
+
+**Fix candidates (pick one in v2.4.8):**
+
+| Option | Scope | Risk |
+|---|---|---|
+| **A. Dedicated `CoreToProEventBridge` HostedService** in Realtime: subscribes to `Verbara.Platform.Core.{Agent,Conversation}StateChangedEvent` from the LOCAL `IPushEventBus`, re-publishes as the corresponding `Verbara.Sdk.Pro.Push.SignalR.Events.*` type. The bridge ONLY runs if the Core types were already accepted by the backplane (they're not, today). | Requires fixing the backplane channel routing FIRST — chicken-egg | Med |
+| **B. Bridge in `PlatformEventBus` on the API side** — when publishing a Core event, ALSO publish the Pro-typed equivalent. Both flow to backplane; Realtime's existing Pro subscription matches. | Cleanest. Single locus of translation. ~100 LOC + 3 mapping tests. | Low |
+| **C. Unify event types in SDK Pro** — deprecate the divergent Core records. Long-term right answer. | Major cross-repo refactor (Pro v2.6.0-pro). Out of scope for v2.4.x. | High |
+
+**Recommended:** Option B. New `Verbara.Platform.Api.Services.PlatformToProEventBridge` HostedService that subscribes to `PlatformEventBus.Events` and `_pushBus.PublishAsync(MapToPro(evt))`. Mapping table: Core.AgentStateChangedEvent → Pro.AgentStateChangedEvent (OldState→PreviousState, Timestamp→ChangedAt, no ReasonCode); Core.ConversationStateChangedEvent → Pro.ConversationStateChangedEvent (same shape). Cluster events stay Pro-only (single source).
+
+After Option B ships in v2.4.8 + helm upgrade, re-running `bash /tmp/run-harness.sh` should produce: 10 Forwarded on the leader pod, 30 SkippedNotLeader across 3 followers, 10 receives per client. Plan B smoke report Test 5 PARTIAL → **PASS** at that point.
+
+### Decisions for next session
+
+1. Keep this plan in `docs/plans/active/` until v2.4.8 ships + Test 5 PASS verified.
+2. v2.4.8 PR scope = Option B bridge ONLY. Don't bundle other improvements.
+3. Phases 2 (Aspire AppHost), 4 (CI cascade), and 3-extension (7 remaining scenarios) all remain deferred — proven contract via PR #18+#19+v2.4.7 is the foundation.
+4. Once Test 5 PASS, this plan moves to `docs/plans/completed/`.
+
+---
+
 ## Cross-references
 
 - [ADR-0022 — Platform.Api AOT shipping path](file:///media/Data/Source/Verbara/Verbara.Platform/docs/decisions/0022-platform-api-aot-shipping-path.md) — Phase A.5 leader election scaffold
