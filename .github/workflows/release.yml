@@ -152,12 +152,23 @@ jobs:
           set -euo pipefail
           umask 077
           KEY_FILE="$(mktemp -t cosign-key.XXXXXX)"
-          trap 'shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"' EXIT
+          SIGNING_CONFIG="$(mktemp -t signing-config.XXXXXX).json"
+          trap 'shred -u "$KEY_FILE" "$SIGNING_CONFIG" 2>/dev/null || rm -f "$KEY_FILE" "$SIGNING_CONFIG"' EXIT
           printf '%s' "$COSIGN_PRIVATE_KEY" > "$KEY_FILE"
+          # Verbara's signing posture skips Rekor (the public transparency log).
+          # In cosign v2.x this was a simple `--tlog-upload=false` flag. cosign
+          # v3.x deprecated that flag and now requires either signing-config
+          # discipline or an explicit `--signing-config <file>` whose
+          # rekorTlogUrls field is empty. We generate that file inline from the
+          # public sigstore signing-config (v0.2 schema) with the rekorTlogUrls
+          # array stripped via jq. See cosign v3.x release notes + ADR-0024
+          # §"Cosign v3 signing-config requirement" for the full migration trail.
+          curl -fsSL https://raw.githubusercontent.com/sigstore/root-signing/refs/heads/main/targets/signing_config.v0.2.json \
+            | jq 'del(.rekorTlogUrls)' > "$SIGNING_CONFIG"
           cosign sign \
             --key "$KEY_FILE" \
             --yes \
-            --tlog-upload=false \
+            --signing-config "$SIGNING_CONFIG" \
             "$IMAGE_REF"
 
       - name: Verify cosign signature against committed public key
