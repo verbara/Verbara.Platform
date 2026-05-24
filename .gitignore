@@ -30,6 +30,10 @@ tests/Verbara.Platform.LoadTests/load-test-reports/nbomber-log-*.txt
 chaos-reports/[0-9]*/
 sipp-reports/
 chaos-snapshots/
+# E2E harness run artifacts — verbose logs from
+# tests/Verbara.Platform.E2E.Harness/ runs (canonical PASS evidence lives
+# under docs/operations/harness-evidence/*.md).
+harness-reports/
 .playwright-mcp/
 # AHH Phase 0 BenchmarkDotNet output (re-creatable via
 # scripts/profiling/run-benchmarks.sh; the canonical numbers live in
