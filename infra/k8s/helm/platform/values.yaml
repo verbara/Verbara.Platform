@@ -12,7 +12,7 @@ api:
     # the maintainer's k3s/Talos lab:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
-    tag: "v2.4.3"
+    tag: "v2.4.4"
     # Manifest-list digest of the `repository:tag` image, used for Layer-C
     # in-process image verification (ADR-0011, Pro v2.3.x). When set, the
     # Deployment template injects IMAGE_DIGEST env var that
@@ -20,7 +20,12 @@ api:
     # license's AuthorizedImageDigests claim. Source: the corresponding entry
     # in verbara-website/data/authorized-digests.json. Leave empty to opt out
     # (Pro falls through to permissive path; matches dev-mode semantics).
-    digest: "sha256:e596a8d684c43f4d661a3bb098edf4dd9f0321d9261fcbf9a8c3672e1b22b555"
+    #
+    # v2.4.4 chart bump (Phase 1 audit endpoint + Phase 3 harness) intentionally
+    # ships with digest="" — a follow-up PR fills the field once release.yml has
+    # published the actual digests AND verbara-website/data/authorized-digests.json
+    # registers them. This avoids a chicken-and-egg between chart bump + release.yml run.
+    digest: ""
   replicas: 2
   port: 5000
   resources:
@@ -159,11 +164,15 @@ realtime:
     # registry when validating against the maintainer's k3s/Talos lab:
     #   --set realtime.image.repository=192.168.122.1:5050/verbara-platform/realtime
     repository: ghcr.io/verbara/platform/realtime
-    tag: "v2.4.3"
+    tag: "v2.4.4"
     # Image-digest binding (ADR-0011 Layer C) — Pro license verification
     # extends to the Realtime image via the AuthorizedImageDigests claim.
     # Leave empty for tag-only references (dev / local registry).
-    digest: "sha256:547162167a314ae82ce5ffce0ac158a83a9c45f95c88692768956204528d5a4d"
+    #
+    # v2.4.4 chart bump: digest cleared while waiting on release.yml run; same
+    # follow-up PR as the api digest above will re-populate this field once the
+    # new digests are authorized.
+    digest: ""
   replicas: 1
   port: 5030
   resources:
