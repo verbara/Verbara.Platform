@@ -4,7 +4,7 @@
 > **Predecessor:** Plan C ([docs/plans/completed/2026-05-23-lab-migration-v2.3.1-to-v2.4.3.md](../plans/completed/2026-05-23-lab-migration-v2.3.1-to-v2.4.3.md)) ✅ CLOSED
 > **Cluster:** Talos `admin@asterisk-platform`, helm release `platform` rev 18 (chart 0.2.2 / appVersion 2.4.3)
 > **Executor:** Maintainer (kubectl operations) + Claude (observation/measurement/aggregation)
-> **Verdict:** ✅ **PASS** (5/6 PASS + 1/6 PARTIAL with documented deferral)
+> **Verdict:** ✅ **FULL PASS — 6/6 PASS** (Test 5 closed 2026-05-24 19:48 UTC via v2.5.1 harness run — see [Appendix update](#test-5-closed-via-harness-against-v251))
 
 ## Environment
 
@@ -35,7 +35,7 @@ After Test 3 (rollout): all 4 pods in new ReplicaSet `d7dc9d679`. Same 1+1+2 spr
 | 2 | Distributed pod placement | 4 pods spread ≥2 nodes | 1+1+2 across w1/w2/w3 — all 3 worker nodes hit | ✅ PASS |
 | 3 | Graceful failover (rollout restart) | ≤ 15 s leaderless per swap; no multi-leader window | **36 s** total rollout (08:15:37Z → 08:16:13Z); **~5 s** leaderless gap; single clean transition `-mfcgt` (old) → `-pkzqj` (new) | ✅ PASS (3x under) |
 | 4 | Ungraceful failover (single-pod kill with `--grace-period=0 --force`) | ≤ 40 s before successor elected | **1.85 s** (kill 08:17:10Z → leader transition 08:17:11.851Z on `-nmwvm`, a fresh replacement pod) | ✅ PASS (20x under) |
-| 5 | SignalR exactly-once delivery via Gateway | exactly 1 receive per client per event, 5/5 trials | **PARTIAL** — see notes below | ⚠️ PARTIAL |
+| 5 | SignalR exactly-once delivery via Gateway | exactly 1 receive per client per event, 5/5 trials | **PASS** via v2.5.1 harness run (5/5 clients × 10 events each, 1 leader pod forwarded 10, 3 followers each skipped 10) — see [closure appendix](#test-5-closed-via-harness-against-v251) | ✅ PASS |
 | 6 | Postgres connection-storm sanity | `pg_stat_activity` stable | **5 idle conns** stable across 60 s window from `platform` user (4 realtime + 2 api routed via `postgres-pooler`); no leak, no spike | ✅ PASS |
 
 ### Test 5 deferral rationale
@@ -114,7 +114,50 @@ After v2.4.7 helm upgrade + harness re-run:
 - v2.4.7's dual-subscribe (PR #25) is a no-op for cross-node fanout because `OfType<Core.X>` AND `OfType<Pro.X>` both fail when the bus only contains `RemotePushEvent`. Only useful for in-process Pro.Cluster local events on the same pod.
 - Additionally: `[PRESENCE] Remote PayloadJson empty (check PushProOptions.PayloadSerializerOptions)` log on Realtime confirms API doesn't configure the payload serializer — `RawPayload` arrives empty.
 
-**Test 5 remains PARTIAL** with the diagnostic chain documented. The full PASS gate is the v2.5.0 plan (paired PRs: API `PushPayloadJsonContext` + Realtime `RemoteEventDispatcher` HostedService) tracked in [docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md] §"v2.5.0 ACTUAL plan".
+**Test 5 was PARTIAL** at the end of the audit-endpoint shipping chain (v2.4.4-v2.4.7). The v2.5.0 paired bridge (PR #28) + v2.5.1 PascalCase fix (PR #29) closed the remaining gaps.
+
+## Test 5 closed via harness against v2.5.1
+
+**Run timestamp:** 2026-05-24 19:48 UTC
+**Build:** Platform v2.5.1 (`ghcr.io/verbara/platform/{api,realtime}:v2.5.1`), helm release `platform` rev 25, 4 Realtime pods on chart 0.2.10.
+**Harness:** [`tests/Verbara.Platform.E2E.Harness`](../../tests/Verbara.Platform.E2E.Harness/) (PR #19) via [`scripts/run-harness-talos.sh`](../../scripts/run-harness-talos.sh) wrapper.
+**Evidence:** [harness-evidence/exactly-once-v2.5.1-2026-05-24.md](harness-evidence/exactly-once-v2.5.1-2026-05-24.md)
+
+```
+Total Forwarded:        10 ✅ (expected 10)
+Total SkippedNotLeader: 30 ✅ (expected 10 × 3 followers)
+Leader pod(s):           1 ✅ (platform-realtime-5f457cc9db-kfnt6)
+Receives per client:    10 ✅ (5/5 clients exact match)
+Exit code:               0 ✅
+```
+
+**All 4 invariants satisfied:**
+1. Every connected SignalR client received exactly N events (5/5 × 10) — no duplicates, no drops
+2. Aggregated across pods: exactly N Forwarded outcomes (10) — only leader pod contributed
+3. Aggregated across pods: exactly N × (pods-1) SkippedNotLeader outcomes (30) — every follower short-circuited
+4. Exactly one pod identified as leader — broken lock semantics would have shown multi-leader
+
+**Final escalation chain — all 7 layers closed:**
+
+| # | Defect | Closure |
+|---|---|---|
+| 1 | Realtime audit policy unsatisfiable | v2.4.5 PR #21 |
+| 2 | Chart missing Redis env on Realtime | Chart 0.2.5 PR #22 |
+| 3 | Identity Redis KeyPrefix mismatch | Chart 0.2.6 PR #23 |
+| 4 | API `GetCurrentUserId` claims `sub`-fallback in 4 endpoints | v2.4.6 PR #24 |
+| 5 | Relay subscribed only to Pro types (in-process Pro.Cluster path) | v2.4.7 PR #25 |
+| 6 | SDK `RemotePushEvent` envelope not bridged to typed events on receiver | v2.5.0 PR #28 |
+| 7 | `JsonSerializer.Serialize(obj, type, options)` ignores source-gen CamelCase | v2.5.1 PR #29 |
+
+**Architectural artifacts produced:**
+
+- `Verbara.Platform.Core/Push/PlatformPushJsonContext.cs` — single source of truth for cross-node push event JSON contract
+- `Verbara.Platform.Realtime/Services/RemoteEventDispatcher.cs` — HostedService that decodes `RemotePushEvent` envelopes per ADR-0025 contract
+- `Verbara.Platform.Realtime/Services/IRelayOutcomeSink.cs` + `RelayOutcomeSink.cs` + `RelayOutcomeRingBuffer.cs` (PR #18) — relay observability + audit endpoint contract
+- `Verbara.Platform.Realtime/Endpoints/AdminRealtimeAuditEndpoint.cs` (PR #18) — single source of truth for harness assertions
+- `Verbara.Platform.E2E.Harness/*` (PR #19) — reusable walking-skeleton harness for current + future SignalR/cluster scenarios
+
+The plan [docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md](../../docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md) closes with this run and moves to `docs/plans/completed/` in this same commit.
 
 ### What this session DID validate
 
