@@ -62,12 +62,14 @@ jobs:
           # becomes private, add a PAT with `repo:read` scope to a secret.
 
       - name: Install cosign
-        # Pin v2.5.2 — matches release.yml + visibility-monitor.yml. The
-        # Verbara signing posture skips Rekor; verification needs
-        # `--insecure-ignore-tlog` to match.
+        # Pin v3.0.6 — matches the maintainer-side cosign on local builds.
+        # See visibility-monitor.yml § Install cosign for the v2.5.2 ↔ v3.0.6
+        # incompat rationale (signatures produced by cosign v3.x cannot be
+        # read by v2.5.2). The Verbara signing posture still skips Rekor;
+        # verification needs `--insecure-ignore-tlog` to match.
         uses: sigstore/cosign-installer@v3
         with:
-          cosign-release: 'v2.5.2'
+          cosign-release: 'v3.0.6'
 
       - name: Reconcile every authorized entry
         run: |
@@ -166,5 +168,4 @@ jobs:
           )
           gh issue create \
             --title "$title" \
-            --label "security,priority/high" \
             --body "$body"

@@ -104,14 +104,18 @@ jobs:
           fi
 
       - name: Install cosign
-        # Pin v2.5.2 — matches release.yml (`cosign v3.x` changed the
-        # detached-signature distribution model and breaks the installer
-        # action's bootstrap). The Verbara signing posture skips Rekor
-        # (`--tlog-upload=false`); verification consumers must pass
-        # `--insecure-ignore-tlog` to match — see ADR-0023 §Signing Posture.
+        # Pin v3.0.6 — matches the maintainer-side cosign on local builds.
+        # The v2.4.2 anomaly traced (in part) to a v2.5.2 ↔ v3.0.6 incompat:
+        # signatures produced by cosign v3.x use a refactored detached-sig
+        # distribution layout that cosign v2.5.2 cannot read (verify returns
+        # "no matching signatures"). The 2026-05-23 sweep aligns monitor +
+        # reconciliation + release.yml all on cosign v3.0.6.
+        # See ADR-0024 §Process Hardening for the version-drift incident.
+        # The Verbara signing posture still skips Rekor (`--tlog-upload=false`);
+        # verification consumers must pass `--insecure-ignore-tlog` to match.
         uses: sigstore/cosign-installer@v3
         with:
-          cosign-release: 'v2.5.2'
+          cosign-release: 'v3.0.6'
 
       - name: Assert cosign signatures present on all 5 packages
         # Per ADR-0023: every public image MUST be cosign-signed against the
@@ -246,5 +250,4 @@ jobs:
           )
           gh issue create \
             --title "$title" \
-            --label "security,priority/high" \
             --body "$body"
