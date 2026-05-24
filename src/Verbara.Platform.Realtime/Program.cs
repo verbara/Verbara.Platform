@@ -143,12 +143,26 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
         opts.TokenValidationParameters = JwtValidationConfigurator.BuildValidationParameters(sp);
     });
 
-// Hub method-level policies, copied verbatim from Verbara.Platform.Api Program.cs.
+// Hub method-level policies — Supervisor/Agent mirror the role names used by
+// Verbara.Platform.Api's "AdminOnly"/"SupervisorPlus" policies.
+//
+// PlatformAdmin: v2.4.4 shipped this as `RequireRole("PlatformAdmin")` which is
+// permanently unsatisfiable — UserRole.Admin is the only role string the JWT
+// ever carries for host-tenant admins (Verbara.Platform.Api/Services/
+// JwtTokenService.cs:155). The v2.4.5 fix accepts "Admin" (host-tenant admin
+// created by POST /api/setup) AND keeps "PlatformAdmin" for future-proofing
+// the dedicated role name if/when introduced.
+//
+// TODO (production hardening): port Verbara.Platform.Api's
+// PlatformAdminRequirement + handler into a shared Identity-namespaced package
+// so the Realtime audit endpoint can enforce "host-tenant Admin", not "any
+// tenant Admin" (current v2.4.5 widening is acceptable because /admin/realtime/
+// audit is an internal observability surface, not customer-tenant-facing).
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Supervisor", p => p.RequireRole("Supervisor", "Admin"));
     options.AddPolicy("Agent", p => p.RequireRole("Agent", "Supervisor", "Admin"));
-    options.AddPolicy("PlatformAdmin", p => p.RequireRole("PlatformAdmin"));
+    options.AddPolicy("PlatformAdmin", p => p.RequireRole("Admin", "PlatformAdmin"));
 });
 
 // ─── Pro.Cluster leader election (ADR-0022 Phase A.5) ────────────────────────
