@@ -1,0 +1,37 @@
+2026-05-24T22:30:02Z
+---kubectl get hpa---
+NAME                REFERENCE                      TARGETS        MINPODS   MAXPODS   REPLICAS   AGE
+platform-api        Deployment/platform-api        cpu: 66%/70%   2         8         5          19d
+platform-realtime   Deployment/platform-realtime   cpu: 1%/70%    1         4         1          14h
+---kubectl top nodes---
+NAME        CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+talos-cp1   96m          4%       1905Mi          58%         
+talos-w1    113m         2%       3535Mi          47%         
+talos-w2    96m          2%       2957Mi          39%         
+talos-w3    114m         2%       2848Mi          38%         
+---kubectl top pods r55-platform---
+NAME                                 CPU(cores)   MEMORY(bytes)   
+platform-api-76d9f99d8f-2jv9t        297m         136Mi           
+platform-api-76d9f99d8f-7m4m4        5m           94Mi            
+platform-api-76d9f99d8f-9j4vd        80m          131Mi           
+platform-api-76d9f99d8f-hvtcb        7m           131Mi           
+platform-api-76d9f99d8f-w2nqh        6m           80Mi            
+platform-realtime-5f457cc9db-rlrhv   3m           82Mi            
+web-6b9ccdb796-c77tj                 1m           4Mi             
+---kubectl top pods r55-data---
+NAME                               CPU(cores)   MEMORY(bytes)   
+postgres-1                         3m           131Mi           
+postgres-2                         5m           130Mi           
+postgres-3                         123m         299Mi           
+postgres-pooler-5876fc5fb5-lxtpp   171m         12Mi            
+postgres-pooler-5876fc5fb5-tn2fl   4m           21Mi            
+redis-0                            7m           68Mi            
+---kubectl get pods r55-platform (current replica count)---
+NAME                                 READY   STATUS    RESTARTS      AGE
+platform-api-76d9f99d8f-2jv9t        1/1     Running   1 (27m ago)   162m
+platform-api-76d9f99d8f-7m4m4        1/1     Running   3 (67s ago)   26m
+platform-api-76d9f99d8f-9j4vd        1/1     Running   0             6m6s
+platform-api-76d9f99d8f-hvtcb        1/1     Running   0             15m
+platform-api-76d9f99d8f-w2nqh        1/1     Running   1 (50s ago)   5m6s
+platform-realtime-5f457cc9db-rlrhv   1/1     Running   0             162m
+web-6b9ccdb796-c77tj                 1/1     Running   0             162m

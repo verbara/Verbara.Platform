@@ -1,0 +1,25 @@
+22:07:09Z archives=3 last=jwt-LOADTEST_RATE-50-60s api_pods=7 hpa_replicas=7 max_pod_cpu=6m w1=2%
+22:08:04Z archives=3 last=jwt-LOADTEST_RATE-50-60s api_pods=7 hpa_replicas=7 max_pod_cpu=11m w1=3%
+22:09:25Z [NEW] archives=3 last=jwt-LOADTEST_RATE-100-60s hpa=7 max_pod=7m w1=2% w2=2% w3=2%
+22:10:20Z [--] archives=3 last=jwt-LOADTEST_RATE-100-60s hpa=6 max_pod=13m w1=4% w2=2% w3=3%
+22:11:15Z [NEW] archives=4 last=queues-LOADTEST_RATE-10-60s hpa=5 max_pod=39m w1=7% w2=3% w3=4%
+22:12:10Z [NEW] archives=5 last=queues-LOADTEST_RATE-50-60s hpa=4 max_pod=80m w1=10% w2=5% w3=8%
+22:13:05Z [NEW] archives=6 last=queues-LOADTEST_RATE-100-60s hpa=3 max_pod=152m w1=12% w2=7% w3=9%
+22:14:00Z [NEW] archives=7 last=queues-LOADTEST_RATE-250-60s hpa=2 max_pod=310m w1=6% w2=6% w3=13%
+22:14:56Z [NEW] archives=8 last=queues-LOADTEST_RATE-500-60s hpa=3 max_pod=613m w1=28% w2=28% w3=30%
+22:15:51Z [--] archives=8 last=queues-LOADTEST_RATE-500-60s hpa=4 max_pod=44m w1=5% w2=3% w3=5%
+22:16:46Z [NEW] archives=9 last=livequeue-LOADTEST_RATE-50-60s hpa=4 max_pod=83m w1=10% w2=5% w3=9%
+22:17:41Z [NEW] archives=11 last=livequeue-LOADTEST_RATE-250-60s hpa=4 max_pod=179m w1=16% w2=10% w3=18%
+22:18:36Z [NEW] archives=13 last=livequeue-LOADTEST_RATE-1000-60s hpa=4 max_pod=303m w1=11% w2=2% w3=3%
+22:19:31Z [NEW] archives=14 last=agentassist-LOADTEST_RATE-10-60s hpa=4 max_pod=14m w1=3% w2=2% w3=3%
+22:20:26Z [--] archives=14 last=agentassist-LOADTEST_RATE-10-60s hpa=3 max_pod=44m w1=6% w2=4% w3=5%
+22:21:22Z [NEW] archives=15 last=agentassist-LOADTEST_RATE-50-60s hpa=3 max_pod=98m w1=10% w2=7% w3=6%
+22:22:17Z [NEW] archives=16 last=agentassist-LOADTEST_RATE-100-60s hpa=3 max_pod=264m w1=18% w2=13% w3=5%
+22:23:12Z [NEW] archives=17 last=agentassist-LOADTEST_RATE-250-60s hpa=3 max_pod=283m w1=19% w2=6% w3=5%
+22:24:07Z [NEW] archives=18 last=agentassist-LOADTEST_RATE-500-60s hpa=3 max_pod=402m w1=26% w2=18% w3=13%
+22:25:02Z [--] archives=18 last=agentassist-LOADTEST_RATE-500-60s hpa=4 max_pod=466m w1=51% w2=27% w3=36%
+22:25:57Z [NEW] archives=19 last=presence-LOADTEST_VU-100-60s hpa=5 max_pod=150m w1=2% w2=2% w3=1%
+22:26:53Z [NEW] archives=20 last=presence-LOADTEST_VU-250-60s hpa=5 max_pod=464m w1=51% w2=37% w3=26%
+22:27:48Z [NEW] archives=21 last=presence-LOADTEST_VU-500-60s hpa=5 max_pod=196m w1=9% w2=10% w3=6%
+22:28:43Z [NEW] archives=22 last=presence-LOADTEST_VU-1000-60s hpa=5 max_pod=455m w1=28% w2=16% w3=16%
+22:29:38Z [--] archives=22 last=presence-LOADTEST_VU-1000-60s hpa=5 max_pod=549m w1=51% w2=27% w3=31%

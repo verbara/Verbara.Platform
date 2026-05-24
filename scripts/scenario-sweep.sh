@@ -180,11 +180,21 @@ for step in $ladder; do
         PLATFORM_API_URL="$PLATFORM_API_URL" \
         "$ladder_env=$step" \
         dotnet run -c Release --no-build > "$log" 2>&1
+    # Preserve this step's report before NBomber's next run wipes it. Sibling
+    # dir under load-test-reports/ named by scenario+ladder-value+duration.
+    # Confirmed 2026-05-24: NBomber 6.x clears load-test-reports/ at run-start
+    # (recursive), including any subdirs, so the preserve sibling must live
+    # OUTSIDE load-test-reports/. See docs/operations/r55-blk-evidence/.
+    preserve_dir="$ROOT/tests/Verbara.Platform.LoadTests/load-test-reports-archive/${scenario}-${ladder_env}-${step}-${SWEEP_DURATION}s"
+    mkdir -p "$preserve_dir"
+    mv load-test-reports/nbomber_report_*.{csv,html,md} "$preserve_dir/" 2>/dev/null || true
+    mv load-test-reports/nbomber-log-*.txt "$preserve_dir/" 2>/dev/null || true
     grep -E "ok count:|fail count:|p99 =|status code|^│ +Unauthorized|^│ +OK +│|^│ +InternalServerError|^│ +-101" "$log" | head -15 || true
     echo "[scenario-sweep] Step ${ladder_env}=${step} log: $log"
+    echo "[scenario-sweep] Step ${ladder_env}=${step} report: $preserve_dir"
     sleep "$COOLDOWN"
 done
 
 echo ""
 echo "[scenario-sweep] DONE. Per-step logs in /tmp/scenario-sweep-${scenario}-*.log."
-echo "[scenario-sweep] NBomber reports under tests/Verbara.Platform.LoadTests/load-test-reports/."
+echo "[scenario-sweep] NBomber per-step reports preserved under tests/Verbara.Platform.LoadTests/load-test-reports-archive/."

@@ -1,0 +1,15 @@
+2026-05-24 17:17:57.563 -05:00 [INF] [ThreadId:1] NBomber 6.1.0 started a new session: 2026-05-24_22.17.53_session_6889acd2
+2026-05-24 17:17:57.587 -05:00 [INF] [ThreadId:1] NBomber started as single node
+2026-05-24 17:17:57.589 -05:00 [INF] [ThreadId:1] License validation....
+2026-05-24 17:17:57.589 -05:00 [WRN] [ThreadId:1] THIS VERSION IS FREE ONLY FOR PERSONAL USE. You can't use it for an organization.
+2026-05-24 17:17:57.597 -05:00 [INF] [ThreadId:1] Reports folder: /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/bin/Release/net10.0/load-test-reports
+2026-05-24 17:17:57.597 -05:00 [INF] [ThreadId:1] Plugins: no plugins were loaded
+2026-05-24 17:17:57.597 -05:00 [INF] [ThreadId:1] Reporting sinks: no reporting sinks were loaded
+2026-05-24 17:17:57.597 -05:00 [INF] [ThreadId:1] Starting init...
+2026-05-24 17:17:57.601 -05:00 [INF] [ThreadId:1] Target scenarios: live_queue_snapshot_write
+2026-05-24 17:17:57.602 -05:00 [INF] [ThreadId:1] Init finished
+2026-05-24 17:17:57.610 -05:00 [INF] [ThreadId:1] Starting bombing...
+2026-05-24 17:18:05.619 -05:00 [WRN] [ThreadId:31] Stopping test early: Stopping test because of too many fails. Scenario 'live_queue_snapshot_write' contains '5229' fails.
+2026-05-24 17:18:08.623 -05:00 [INF] [ThreadId:7] Calculating final statistics...
+2026-05-24 17:18:08.937 -05:00 [INF] [ThreadId:7] Reports saved in folder: /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/load-test-reports
+2026-05-24 17:18:08.937 -05:00 [WRN] [ThreadId:7] THIS VERSION IS FREE ONLY FOR PERSONAL USE. You can't use it for an organization.
