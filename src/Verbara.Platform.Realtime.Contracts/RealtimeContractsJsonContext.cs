@@ -12,4 +12,6 @@ namespace Verbara.Platform.Realtime.Contracts;
 /// </summary>
 [JsonSerializable(typeof(AgentTenantResponse))]
 [JsonSerializable(typeof(HubAuditEntry))]
+[JsonSerializable(typeof(RelayOutcomeEntry))]
+[JsonSerializable(typeof(RelayOutcomePage))]
 public partial class RealtimeContractsJsonContext : JsonSerializerContext;

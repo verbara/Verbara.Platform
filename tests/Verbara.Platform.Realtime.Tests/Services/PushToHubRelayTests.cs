@@ -1,4 +1,5 @@
 using System.Reactive.Subjects;
+using Verbara.Platform.Realtime.Contracts.Dtos;
 using Verbara.Platform.Realtime.Services;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.Push.SignalR.Events;
@@ -93,18 +94,24 @@ public sealed class PushToHubRelayTests
         return new HubMocks(hubContext, hubClients, groupClient);
     }
 
-    private static (PushToHubRelay relay, FakePushEventBus bus, HubMocks mocks, FakeClusterLeader leader)
+    private static (PushToHubRelay relay, FakePushEventBus bus, HubMocks mocks, FakeClusterLeader leader, RelayOutcomeSink sink)
         BuildSut(string group, bool isLeader = true, ILogger<PushToHubRelay>? logger = null)
     {
         var bus = new FakePushEventBus();
         var mocks = CreateMockHubContext(group);
         var leader = new FakeClusterLeader { IsLeader = isLeader };
+        var sink = new RelayOutcomeSink(new RelayOutcomeSinkOptions
+        {
+            Capacity = 1_000,
+            PodInstanceId = "test-pod",
+        });
         var relay = new PushToHubRelay(
             bus,
             mocks.HubContext,
             leader,
+            sink,
             logger ?? NullLogger<PushToHubRelay>.Instance);
-        return (relay, bus, mocks, leader);
+        return (relay, bus, mocks, leader, sink);
     }
 
     private static PushEventMetadata MakeMetadata(string tenantId) =>
@@ -113,7 +120,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task StartAsync_ShouldForwardToTenantGroup_WhenConversationStateChangedEventIsPublished()
     {
-        var (relay, bus, mocks, _) = BuildSut("tenant:acme");
+        var (relay, bus, mocks, _, _) = BuildSut("tenant:acme");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new ConversationStateChangedEvent
@@ -142,7 +149,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task StartAsync_ShouldForwardToTenantGroup_WhenAgentStateChangedEventIsPublished()
     {
-        var (relay, bus, mocks, _) = BuildSut("tenant:acme");
+        var (relay, bus, mocks, _, _) = BuildSut("tenant:acme");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new AgentStateChangedEvent
@@ -173,7 +180,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task StartAsync_ShouldSkipForward_WhenConversationEventTenantIdIsNullOrEmpty()
     {
-        var (relay, bus, mocks, _) = BuildSut("tenant:");
+        var (relay, bus, mocks, _, _) = BuildSut("tenant:");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new ConversationStateChangedEvent
@@ -196,7 +203,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task StartAsync_ShouldSkipForward_WhenAgentEventTenantIdIsNullOrEmpty()
     {
-        var (relay, bus, mocks, _) = BuildSut("tenant:");
+        var (relay, bus, mocks, _, _) = BuildSut("tenant:");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new AgentStateChangedEvent
@@ -220,7 +227,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task StopAsync_ShouldDisposeSubscriptions_SoNoMoreForwardingAfterStop()
     {
-        var (relay, bus, mocks, _) = BuildSut("tenant:tenant-x");
+        var (relay, bus, mocks, _, _) = BuildSut("tenant:tenant-x");
         await relay.StartAsync(CancellationToken.None);
         await relay.StopAsync(CancellationToken.None);
 
@@ -242,7 +249,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task StartAsync_ShouldForwardToAdminsPlatformGroup_WhenClusterNodeStateChangedEventIsPublished()
     {
-        var (relay, bus, mocks, _) = BuildSut("admins:platform");
+        var (relay, bus, mocks, _, _) = BuildSut("admins:platform");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new ClusterNodeStateChangedEvent
@@ -269,7 +276,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task StartAsync_ShouldSkipForward_WhenClusterEventNodeIdIsNullOrEmpty()
     {
-        var (relay, bus, mocks, _) = BuildSut("admins:platform");
+        var (relay, bus, mocks, _, _) = BuildSut("admins:platform");
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new ClusterNodeStateChangedEvent
@@ -295,7 +302,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task Forward_ShouldNotInvokeHubContext_WhenNotLeader()
     {
-        var (relay, bus, mocks, _) = BuildSut("tenant:acme", isLeader: false);
+        var (relay, bus, mocks, _, _) = BuildSut("tenant:acme", isLeader: false);
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new ConversationStateChangedEvent
@@ -319,7 +326,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task Forward_ShouldInvokeHubContext_WhenLeader()
     {
-        var (relay, bus, mocks, _) = BuildSut("tenant:acme", isLeader: true);
+        var (relay, bus, mocks, _, _) = BuildSut("tenant:acme", isLeader: true);
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new ConversationStateChangedEvent
@@ -343,7 +350,7 @@ public sealed class PushToHubRelayTests
     [Fact]
     public async Task Forward_ShouldRecover_AfterLeadershipRegained()
     {
-        var (relay, bus, mocks, leader) = BuildSut("tenant:acme", isLeader: false);
+        var (relay, bus, mocks, leader, _) = BuildSut("tenant:acme", isLeader: false);
         await relay.StartAsync(CancellationToken.None);
 
         var template = new ConversationStateChangedEvent
@@ -380,7 +387,7 @@ public sealed class PushToHubRelayTests
     {
         var capturingLogger = new CapturingLogger<PushToHubRelay>();
 
-        var (relay, bus, _, _) = BuildSut("tenant:acme", isLeader: false, logger: capturingLogger);
+        var (relay, bus, _, _, _) = BuildSut("tenant:acme", isLeader: false, logger: capturingLogger);
         await relay.StartAsync(CancellationToken.None);
 
         var evt = new ConversationStateChangedEvent
@@ -405,6 +412,152 @@ public sealed class PushToHubRelayTests
             e.EventId.Id == 3001 &&
             e.Message.Contains(evt.EventType, StringComparison.Ordinal) &&
             e.Message.Contains(RealtimeLeaderResources.Fanout, StringComparison.Ordinal));
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR-0022 Phase A.5 — outcome sink wiring (audit endpoint source of truth)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Forward_ShouldRecordForwardedOutcomeInSink_WhenLeader()
+    {
+        var (relay, bus, _, _, sink) = BuildSut("tenant:acme", isLeader: true);
+        await relay.StartAsync(CancellationToken.None);
+
+        var evt = new ConversationStateChangedEvent
+        {
+            ConversationId = "conv-sink-1",
+            PreviousState = "queued",
+            NewState = "active",
+            ChangedAt = DateTimeOffset.UtcNow,
+            Metadata = MakeMetadata("acme")
+        };
+
+        bus.Emit(evt);
+        await Task.Delay(150);
+
+        var page = sink.Snapshot(since: null, limit: 100);
+        page.PodInstanceId.Should().Be("test-pod");
+        page.Entries.Should().ContainSingle(e =>
+            e.EventType == evt.EventType &&
+            e.TenantId == "acme" &&
+            e.Outcome == RelayOutcomeKind.Forwarded &&
+            e.IsLeaderAtTime &&
+            e.Resource == RealtimeLeaderResources.Fanout &&
+            e.PodInstanceId == "test-pod");
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Forward_ShouldRecordSkippedNotLeaderOutcomeInSink_WhenNotLeader()
+    {
+        var (relay, bus, _, _, sink) = BuildSut("tenant:acme", isLeader: false);
+        await relay.StartAsync(CancellationToken.None);
+
+        var evt = new ConversationStateChangedEvent
+        {
+            ConversationId = "conv-sink-2",
+            PreviousState = "queued",
+            NewState = "active",
+            ChangedAt = DateTimeOffset.UtcNow,
+            Metadata = MakeMetadata("acme")
+        };
+
+        bus.Emit(evt);
+        await Task.Delay(100);
+
+        var page = sink.Snapshot(since: null, limit: 100);
+        page.Entries.Should().ContainSingle(e =>
+            e.EventType == evt.EventType &&
+            e.TenantId == "acme" &&
+            e.Outcome == RelayOutcomeKind.SkippedNotLeader &&
+            !e.IsLeaderAtTime &&
+            e.Resource == RealtimeLeaderResources.Fanout);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Forward_ShouldRecordSkippedNullTenantOutcomeInSink_WhenTenantMissing()
+    {
+        var (relay, bus, _, _, sink) = BuildSut("tenant:acme", isLeader: true);
+        await relay.StartAsync(CancellationToken.None);
+
+        var evt = new ConversationStateChangedEvent
+        {
+            ConversationId = "conv-sink-3",
+            PreviousState = "queued",
+            NewState = "active",
+            ChangedAt = DateTimeOffset.UtcNow,
+            Metadata = MakeMetadata(string.Empty)
+        };
+
+        bus.Emit(evt);
+        await Task.Delay(100);
+
+        var page = sink.Snapshot(since: null, limit: 100);
+        page.Entries.Should().ContainSingle(e =>
+            e.EventType == evt.EventType &&
+            string.IsNullOrEmpty(e.TenantId) &&
+            e.Outcome == RelayOutcomeKind.SkippedNullTenant &&
+            e.IsLeaderAtTime);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Forward_ShouldRecordSkippedNullNodeIdOutcomeInSink_WhenClusterNodeIdMissing()
+    {
+        var (relay, bus, _, _, sink) = BuildSut("admins:platform", isLeader: true);
+        await relay.StartAsync(CancellationToken.None);
+
+        var evt = new ClusterNodeStateChangedEvent
+        {
+            NodeId = string.Empty,
+            PreviousState = "Healthy",
+            NewState = "Degraded",
+            ChangedAt = DateTimeOffset.UtcNow,
+        };
+
+        bus.Emit(evt);
+        await Task.Delay(100);
+
+        var page = sink.Snapshot(since: null, limit: 100);
+        page.Entries.Should().ContainSingle(e =>
+            e.EventType == evt.EventType &&
+            e.TenantId == null &&
+            e.Outcome == RelayOutcomeKind.SkippedNullNodeId &&
+            e.IsLeaderAtTime);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Forward_ShouldRecordClusterForwardedOutcomeWithNullTenantId_WhenLeader()
+    {
+        var (relay, bus, _, _, sink) = BuildSut("admins:platform", isLeader: true);
+        await relay.StartAsync(CancellationToken.None);
+
+        var evt = new ClusterNodeStateChangedEvent
+        {
+            NodeId = "node-1",
+            PreviousState = "Healthy",
+            NewState = "Degraded",
+            ChangedAt = DateTimeOffset.UtcNow,
+        };
+
+        bus.Emit(evt);
+        await Task.Delay(150);
+
+        var page = sink.Snapshot(since: null, limit: 100);
+        page.Entries.Should().ContainSingle(e =>
+            e.EventType == evt.EventType &&
+            e.TenantId == null &&
+            e.Outcome == RelayOutcomeKind.Forwarded &&
+            e.IsLeaderAtTime);
 
         await relay.StopAsync(CancellationToken.None);
     }

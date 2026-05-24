@@ -1,3 +1,4 @@
+using Verbara.Platform.Realtime.Contracts.Dtos;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.Push.SignalR.Events;
 using Verbara.Sdk.Pro.Push.SignalR.Hubs;
@@ -46,12 +47,22 @@ internal static partial class PushToHubRelayLog
 /// connected to every pod, so each event is delivered exactly once
 /// platform-wide regardless of replica count.
 /// </para>
+/// <para>
+/// <b>Observability (2026-05-24 audit endpoint):</b> every outcome
+/// (Forwarded / SkippedNotLeader / SkippedNullTenant / SkippedNullNodeId /
+/// ForwardError) is also pushed to <see cref="IRelayOutcomeSink"/>, which
+/// powers (a) the in-memory ring buffer exposed by
+/// <c>GET /admin/realtime/audit</c> for E2E harness assertions and (b) the
+/// <c>verbara_realtime_relay_outcomes_total</c> counter consumed by
+/// Prometheus / OpenTelemetry exporters.
+/// </para>
 /// </summary>
-public sealed class PushToHubRelay : IHostedService
+internal sealed class PushToHubRelay : IHostedService
 {
     private readonly IPushEventBus _bus;
     private readonly IHubContext<PlatformHub, IPlatformHubClient> _hubContext;
     private readonly IClusterLeader _fanoutLeader;
+    private readonly IRelayOutcomeSink _outcomeSink;
     private readonly ILogger<PushToHubRelay> _logger;
 
     private IDisposable? _conversationSubscription;
@@ -62,11 +73,13 @@ public sealed class PushToHubRelay : IHostedService
         IPushEventBus bus,
         IHubContext<PlatformHub, IPlatformHubClient> hubContext,
         [FromKeyedServices(RealtimeLeaderResources.Fanout)] IClusterLeader fanoutLeader,
+        IRelayOutcomeSink outcomeSink,
         ILogger<PushToHubRelay> logger)
     {
         _bus = bus;
         _hubContext = hubContext;
         _fanoutLeader = fanoutLeader;
+        _outcomeSink = outcomeSink;
         _logger = logger;
     }
 
@@ -97,16 +110,20 @@ public sealed class PushToHubRelay : IHostedService
 
     private void ForwardConversation(ConversationStateChangedEvent evt)
     {
-        if (!_fanoutLeader.IsLeader)
+        var leaderSnapshot = SnapshotLeader();
+        var tenantId = evt.Metadata?.TenantId;
+
+        if (!leaderSnapshot.IsLeader)
         {
-            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, _fanoutLeader.Resource);
+            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, leaderSnapshot.Resource);
+            RecordOutcome(evt.EventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNotLeader);
             return;
         }
 
-        var tenantId = evt.Metadata?.TenantId;
         if (string.IsNullOrEmpty(tenantId))
         {
             PushToHubRelayLog.SkippedNullTenant(_logger, evt.EventType);
+            RecordOutcome(evt.EventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNullTenant);
             return;
         }
 
@@ -117,21 +134,25 @@ public sealed class PushToHubRelay : IHostedService
             ChangedAt: evt.ChangedAt,
             TenantId: tenantId);
 
-        _ = SendConversationAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType);
+        _ = SendConversationAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType, leaderSnapshot);
     }
 
     private void ForwardAgent(AgentStateChangedEvent evt)
     {
-        if (!_fanoutLeader.IsLeader)
+        var leaderSnapshot = SnapshotLeader();
+        var tenantId = evt.Metadata?.TenantId;
+
+        if (!leaderSnapshot.IsLeader)
         {
-            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, _fanoutLeader.Resource);
+            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, leaderSnapshot.Resource);
+            RecordOutcome(evt.EventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNotLeader);
             return;
         }
 
-        var tenantId = evt.Metadata?.TenantId;
         if (string.IsNullOrEmpty(tenantId))
         {
             PushToHubRelayLog.SkippedNullTenant(_logger, evt.EventType);
+            RecordOutcome(evt.EventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNullTenant);
             return;
         }
 
@@ -143,20 +164,24 @@ public sealed class PushToHubRelay : IHostedService
             ChangedAt: evt.ChangedAt,
             TenantId: tenantId);
 
-        _ = SendAgentAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType);
+        _ = SendAgentAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType, leaderSnapshot);
     }
 
     private void ForwardClusterNode(ClusterNodeStateChangedEvent evt)
     {
-        if (!_fanoutLeader.IsLeader)
+        var leaderSnapshot = SnapshotLeader();
+
+        if (!leaderSnapshot.IsLeader)
         {
-            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, _fanoutLeader.Resource);
+            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, leaderSnapshot.Resource);
+            RecordOutcome(evt.EventType, tenantId: null, leaderSnapshot, RelayOutcomeKind.SkippedNotLeader);
             return;
         }
 
         if (string.IsNullOrEmpty(evt.NodeId))
         {
             PushToHubRelayLog.SkippedNullNodeId(_logger, evt.EventType);
+            RecordOutcome(evt.EventType, tenantId: null, leaderSnapshot, RelayOutcomeKind.SkippedNullNodeId);
             return;
         }
 
@@ -166,10 +191,15 @@ public sealed class PushToHubRelay : IHostedService
             NewState: evt.NewState,
             ChangedAt: evt.ChangedAt);
 
-        _ = SendClusterAsync(payload, evt.NodeId, evt.EventType);
+        _ = SendClusterAsync(payload, evt.NodeId, evt.EventType, leaderSnapshot);
     }
 
-    private async Task SendConversationAsync(string group, ConversationStatePayload payload, string tenantId, string eventType)
+    private async Task SendConversationAsync(
+        string group,
+        ConversationStatePayload payload,
+        string tenantId,
+        string eventType,
+        LeaderSnapshot leaderSnapshot)
     {
         try
         {
@@ -178,14 +208,21 @@ public sealed class PushToHubRelay : IHostedService
                 .ConfigureAwait(false);
 
             PushToHubRelayLog.Forwarded(_logger, eventType, tenantId);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.Forwarded);
         }
         catch (Exception ex)
         {
             PushToHubRelayLog.ForwardError(_logger, eventType, ex.Message);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.ForwardError, ex.Message);
         }
     }
 
-    private async Task SendAgentAsync(string group, AgentStatePayload payload, string tenantId, string eventType)
+    private async Task SendAgentAsync(
+        string group,
+        AgentStatePayload payload,
+        string tenantId,
+        string eventType,
+        LeaderSnapshot leaderSnapshot)
     {
         try
         {
@@ -194,14 +231,20 @@ public sealed class PushToHubRelay : IHostedService
                 .ConfigureAwait(false);
 
             PushToHubRelayLog.Forwarded(_logger, eventType, tenantId);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.Forwarded);
         }
         catch (Exception ex)
         {
             PushToHubRelayLog.ForwardError(_logger, eventType, ex.Message);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.ForwardError, ex.Message);
         }
     }
 
-    private async Task SendClusterAsync(ClusterNodeStatePayload payload, string nodeId, string eventType)
+    private async Task SendClusterAsync(
+        ClusterNodeStatePayload payload,
+        string nodeId,
+        string eventType,
+        LeaderSnapshot leaderSnapshot)
     {
         try
         {
@@ -210,10 +253,38 @@ public sealed class PushToHubRelay : IHostedService
                 .ConfigureAwait(false);
 
             PushToHubRelayLog.ForwardedCluster(_logger, eventType, nodeId);
+            RecordOutcome(eventType, tenantId: null, leaderSnapshot, RelayOutcomeKind.Forwarded);
         }
         catch (Exception ex)
         {
             PushToHubRelayLog.ForwardError(_logger, eventType, ex.Message);
+            RecordOutcome(eventType, tenantId: null, leaderSnapshot, RelayOutcomeKind.ForwardError, ex.Message);
         }
     }
+
+    private LeaderSnapshot SnapshotLeader() => new(
+        Resource: _fanoutLeader.Resource,
+        IsLeader: _fanoutLeader.IsLeader,
+        LeaderInstanceId: _fanoutLeader.CurrentLeaderInstanceId);
+
+    private void RecordOutcome(
+        string eventType,
+        string? tenantId,
+        LeaderSnapshot leaderSnapshot,
+        RelayOutcomeKind outcome,
+        string? detailMessage = null)
+    {
+        _outcomeSink.Record(new RelayOutcomeEntry(
+            Ts: DateTimeOffset.UtcNow,
+            EventType: eventType,
+            TenantId: tenantId,
+            Resource: leaderSnapshot.Resource,
+            Outcome: outcome,
+            IsLeaderAtTime: leaderSnapshot.IsLeader,
+            LeaderInstanceId: leaderSnapshot.LeaderInstanceId,
+            PodInstanceId: null,
+            DetailMessage: detailMessage));
+    }
+
+    private readonly record struct LeaderSnapshot(string Resource, bool IsLeader, string? LeaderInstanceId);
 }
