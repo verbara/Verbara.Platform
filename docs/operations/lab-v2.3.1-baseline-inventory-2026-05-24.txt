@@ -1,0 +1,179 @@
+# Lab v2.3.1 baseline inventory — captured 2026-05-24 (pre-C.5 helm upgrade)
+
+Captured as Plan C C.2 rollback evidence. If C.5 fails and full rollback
+needed, this is the canonical reference for what the lab looked like before
+the v2.4.3 deploy.
+
+Plan C: docs/plans/active/2026-05-23-lab-migration-v2.3.1-to-v2.4.3.md
+Plan B: docs/plans/active/2026-05-23-phase-a5-talos-smoke-test.md
+
+=== 1. Helm release state ===
+NAME      	NAMESPACE  	REVISION	UPDATED                                	STATUS  	CHART                              	APP VERSION
+asterisk  	default    	14      	2026-05-17 04:26:54.070029597 -0500 -05	deployed	asterisk-0.1.0                     	22         
+blackbox  	monitoring 	1       	2026-05-04 22:09:45.234317308 -0500 -05	deployed	prometheus-blackbox-exporter-11.9.2	v0.28.0    
+chaos-mesh	chaos-mesh 	1       	2026-05-16 23:13:12.944655492 -0500 -05	failed  	chaos-mesh-2.7.0                   	2.7.0      
+cilium    	kube-system	1       	2026-05-04 05:40:25.253610597 -0500 -05	deployed	cilium-1.19.3                      	1.19.3     
+loki      	monitoring 	2       	2026-05-04 22:09:31.475115482 -0500 -05	deployed	loki-6.55.0                        	3.6.7      
+platform  	default    	15      	2026-05-18 16:18:38.393692931 -0500 -05	deployed	platform-0.2.1                     	2.3.1      
+prometheus	monitoring 	5       	2026-05-16 23:06:11.319159756 -0500 -05	deployed	kube-prometheus-stack-84.5.0       	v0.90.1    
+
+
+=== 2. Platform release values (effective) ===
+COMPUTED VALUES:
+api:
+  aspnetcoreEnvironment: Production
+  asterisk:
+    ami:
+      hostname: asterisk-sip.r55-asterisk.svc.cluster.local
+      password: r55-staging-only-change-prod
+      port: 5038
+      username: platform
+    ari:
+      application: verbara
+      baseUrl: http://asterisk-ari.r55-asterisk.svc.cluster.local:8088
+      password: r55-staging-only-change-prod
+      username: verbara
+  corsOrigins: http://r55.local,http://api.r55.local
+  hpa:
+    enabled: true
+    maxReplicas: 8
+    minReplicas: 2
+    targetCpuPercent: 70
+  identityRedis:
+    host: redis-0.redis.r55-data.svc.cluster.local
+    port: 6379
+    requireRedisStore: true
+    useRotationPool: true
+  image:
+    digest: sha256:e0c876329fbeb24cfa1fd2c3a14da905ba45953ea12e19f8756b03b313fe0a8d
+    repository: 192.168.122.1:5050/verbara-platform/api
+    tag: v2.3.1
+  jwt:
+    audience: r55-staging
+    issuer: r55-staging
+    keyField: key
+    keySecret: jwt-signing-key
+  licensing:
+    enforcementMode: ""
+    licenseFilePath: /etc/verbara/license.lic
+    licenseSecret:
+      enabled: true
+      key: license.lic
+      name: verbara-lab-license
+  port: 5000
+  postgres:
+    database: verbara
+    host: postgres-pooler.r55-data.svc.cluster.local
+    passwordKey: password
+    passwordSecret: platform-pg-credentials
+    port: 5432
+    user: platform
+  prometheus:
+    enabled: false
+  redis:
+    host: redis-0.redis.r55-data.svc.cluster.local
+    port: 6379
+  replicas: 2
+  resources:
+    limits:
+      cpu: "2"
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  serviceKey: r55-staging-service-key-change-in-prod
+imageVerification:
+  cosignPublicKey: ""
+  enabled: false
+ingress:
+  enabled: true
+  hostnameApi: api.r55.local
+  hostnameWeb: r55.local
+  tlsEnabled: false
+namespace: r55-platform
+web:
+  image:
+    repository: 192.168.122.1:5050/verbara-platform/web
+    tag: v3.1.2-web
+  port: 80
+  replicas: 1
+  resources:
+    limits:
+      cpu: 200m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+
+=== 3. r55-platform namespace inventory ===
+NAME                               READY   STATUS    RESTARTS      AGE
+pod/platform-api-7c8b68dfc-42d7q   1/1     Running   2 (33h ago)   5d11h
+pod/platform-api-7c8b68dfc-8z8p9   1/1     Running   2 (33h ago)   5d10h
+pod/web-6787d544c4-qhsvk           1/1     Running   1 (33h ago)   5d10h
+
+NAME                   TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+service/platform-api   ClusterIP   10.107.17.168   <none>        5000/TCP   19d
+service/web            ClusterIP   10.98.198.196   <none>        80/TCP     19d
+
+NAME                           READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/platform-api   2/2     2            2           19d
+deployment.apps/web            1/1     1            1           19d
+
+NAME                                      DESIRED   CURRENT   READY   AGE
+replicaset.apps/platform-api-558f699fc9   0         0         0       7d7h
+replicaset.apps/platform-api-58cc664484   0         0         0       5d13h
+replicaset.apps/platform-api-59ff8b598f   0         0         0       19d
+replicaset.apps/platform-api-5c6469bcf9   0         0         0       5d12h
+replicaset.apps/platform-api-5c64d66bf4   0         0         0       5d11h
+replicaset.apps/platform-api-5d4b65566d   0         0         0       19d
+replicaset.apps/platform-api-659d7cb645   0         0         0       5d14h
+replicaset.apps/platform-api-66c96b6f79   0         0         0       19d
+replicaset.apps/platform-api-7946bcd9f4   0         0         0       7d7h
+replicaset.apps/platform-api-7c8b68dfc    2         2         2       5d11h
+replicaset.apps/web-56c96c988b            0         0         0       5d14h
+replicaset.apps/web-5748c5b97b            0         0         0       5d11h
+replicaset.apps/web-5866dc8559            0         0         0       19d
+replicaset.apps/web-6787d544c4            1         1         1       5d10h
+replicaset.apps/web-6fb44d67d9            0         0         0       5d10h
+replicaset.apps/web-8475654d45            0         0         0       5d12h
+replicaset.apps/web-98c4576fd             0         0         0       5d11h
+
+NAME                                               REFERENCE                 TARGETS              MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/platform-api   Deployment/platform-api   cpu: <unknown>/70%   2         8         2          19d
+
+NAME                         DATA   AGE
+configmap/kube-root-ca.crt   1      19d
+
+NAME                             TYPE                       DATA   AGE
+secret/jwt-signing-key           Opaque                     1      19d
+secret/platform-pg-credentials   kubernetes.io/basic-auth   2      19d
+secret/verbara-lab-license       Opaque                     1      5d12h
+
+NAME                                      MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+poddisruptionbudget.policy/platform-api   1               N/A               1                     19d
+
+NAME                                               HOSTNAMES           AGE
+httproute.gateway.networking.k8s.io/platform-api   ["api.r55.local"]   7d7h
+httproute.gateway.networking.k8s.io/web            ["r55.local"]       7d7h
+
+
+=== 4. r55-data namespace inventory (CNPG + redis) ===
+NAME                                   READY   STATUS    RESTARTS      AGE
+pod/postgres-1                         1/1     Running   1 (33h ago)   7d2h
+pod/postgres-2                         1/1     Running   1 (33h ago)   7d3h
+pod/postgres-3                         1/1     Running   1 (33h ago)   7d3h
+pod/postgres-pooler-6444f88557-8ftwn   1/1     Running   2 (33h ago)   19d
+pod/postgres-pooler-6444f88557-gkcqk   1/1     Running   2 (33h ago)   19d
+pod/redis-0                            1/1     Running   1 (33h ago)   7d3h
+
+NAME                      TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE
+service/postgres-pooler   ClusterIP   10.110.47.71     <none>        5432/TCP   19d
+service/postgres-r        ClusterIP   10.99.240.199    <none>        5432/TCP   19d
+service/postgres-ro       ClusterIP   10.109.216.142   <none>        5432/TCP   19d
+service/postgres-rw       ClusterIP   10.99.184.86     <none>        5432/TCP   19d
+service/redis             ClusterIP   None             <none>        6379/TCP   19d
+
+NAME                                DATA   AGE
+configmap/cnpg-default-monitoring   1      19d
+configmap/kube-root-ca.crt          1      19d
