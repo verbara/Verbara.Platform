@@ -39,9 +39,17 @@
 # Token freshness: the platform admin JWT lifetime is 15 minutes by default,
 # while a full per-scenario sweep runs ~5.5 min and `all-reads` runs ~22 min.
 # To guarantee no Unauthorized noise mid-sweep, this script refreshes the
-# admin token via `/auth/login` BEFORE every step. Cost: one extra POST per
-# step (~50 ms). The refreshed token is rewritten to docker/.staging-admin-
-# token so subsequent invocations stay in sync.
+# admin token via `/auth/login` BEFORE every step *that needs it*. Cost: zero
+# extra POSTs when the cached token is still > TOKEN_STALENESS_SEC away from
+# its exp claim; one POST otherwise. The refreshed token is rewritten to
+# docker/.staging-admin-token so subsequent invocations stay in sync.
+#
+# Resilience: when the JwtScenario itself hammers /auth/login, the rate-limiter
+# may transiently 503-throttle subsequent admin logins between steps. In that
+# case refresh_admin_token falls back to the cached token if it has ANY
+# remaining lifetime (logs a WARN). The sweep continues; tokens issued before
+# the burst remain valid for their full TTL. R5.5 Phase B-LK 2026-05-24
+# documented this failure mode and motivated the fallback.
 #
 # Output:
 # - One NBomber report directory per step under
@@ -54,6 +62,8 @@
 #   ADMIN_PASSWORD                  default PlatformAdmin2026!
 #   SCENARIO_SWEEP_DURATION_SEC     default 60
 #   SCENARIO_COOLDOWN_SEC           default 5
+#   TOKEN_STALENESS_SEC             default 60 — skip refresh if cached token
+#                                   exp is more than this many seconds away
 
 set -euo pipefail
 
@@ -66,15 +76,75 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-PlatformAdmin2026!}"
 SWEEP_DURATION="${SCENARIO_SWEEP_DURATION_SEC:-60}"
 COOLDOWN="${SCENARIO_COOLDOWN_SEC:-5}"
 
+# Token-staleness threshold (seconds before exp). Default 60s headroom so the
+# 60-second sweep step never races against access-token expiry. Override via
+# env if the configured access-token TTL is shorter than 60s.
+TOKEN_STALENESS_SEC="${TOKEN_STALENESS_SEC:-60}"
+
+# Decode a JWT's `exp` claim (epoch seconds) without external dependencies.
+# Returns 0 on a token whose exp is missing/unparseable so the caller treats
+# it as expired (forces refresh).
+jwt_exp_seconds() {
+    local token="$1"
+    local payload
+    # JWT format: header.payload.signature — base64url-encoded payload, may
+    # need padding before base64 -d. Tr swaps URL-safe chars; sed pads.
+    payload=$(printf '%s' "$token" | awk -F. '{print $2}' | tr '_-' '/+' | sed -E 's/$/===/' | cut -c1-$((($(printf '%s' "$token" | awk -F. '{print $2}' | wc -c) + 3) / 4 * 4))) || return 0
+    [ -z "$payload" ] && { echo 0; return 0; }
+    echo "$payload" | base64 -d 2>/dev/null | jq -r '.exp // 0' 2>/dev/null || echo 0
+}
+
+# Check whether a cached token is still safe to reuse: present, parseable,
+# and exp > now + TOKEN_STALENESS_SEC.
+token_is_fresh() {
+    local token="$1" exp now
+    [ -z "$token" ] && return 1
+    exp=$(jwt_exp_seconds "$token")
+    [ "$exp" -lt 1 ] 2>/dev/null && return 1
+    now=$(date -u +%s)
+    [ $((exp - now)) -gt "$TOKEN_STALENESS_SEC" ]
+}
+
 # Refresh platform admin JWT via /auth/login. Writes to docker/.staging-admin-
-# token + echoes to stdout. Exits non-zero on login failure.
+# token + echoes to stdout.
+#
+# Resilience: if a cached token in docker/.staging-admin-token is still fresh
+# (exp > now + TOKEN_STALENESS_SEC), reuse it WITHOUT hitting /auth/login.
+# If a fresh refresh is needed but the network call fails (e.g., rate-limiter
+# throttling /auth/login mid-sweep — R5.5 Phase B-LK 2026-05-24 JWT scenario
+# self-DoS at rate=250), fall back to the cached token when it has ANY
+# remaining lifetime. Only exits non-zero if BOTH the refresh AND the cached
+# token are unusable.
 refresh_admin_token() {
-    local resp token
+    local cached resp token cached_exp now remaining
+    local cache_file="$ROOT/docker/.staging-admin-token"
+
+    # ---- Fast path: cached token still fresh ----
+    if [ -f "$cache_file" ]; then
+        cached=$(cat "$cache_file")
+        if token_is_fresh "$cached"; then
+            printf '%s' "$cached"
+            return 0
+        fi
+    fi
+
+    # ---- Refresh path: try /auth/login ----
     resp=$(curl -fsS -X POST "$PLATFORM_API_URL/api/v1/auth/login" \
         -H "Content-Type: application/json" \
         -H "X-Tenant-Id: platform" \
         -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" 2>/dev/null) || {
-        echo "[scenario-sweep] FAIL: /auth/login returned non-2xx for $ADMIN_EMAIL." >&2
+        # ---- Fallback path: refresh failed, reuse cached token if any life left ----
+        if [ -n "${cached:-}" ]; then
+            cached_exp=$(jwt_exp_seconds "$cached")
+            now=$(date -u +%s)
+            remaining=$((cached_exp - now))
+            if [ "$remaining" -gt 0 ] 2>/dev/null; then
+                echo "[scenario-sweep] WARN: /auth/login refresh failed, reusing cached token (${remaining}s remaining)." >&2
+                printf '%s' "$cached"
+                return 0
+            fi
+        fi
+        echo "[scenario-sweep] FAIL: /auth/login returned non-2xx for $ADMIN_EMAIL AND no usable cached token." >&2
         exit 5
     }
     token=$(echo "$resp" | jq -r '.accessToken // empty')
@@ -83,8 +153,8 @@ refresh_admin_token() {
         echo "[scenario-sweep]       Body: $resp" >&2
         exit 6
     fi
-    printf '%s' "$token" > "$ROOT/docker/.staging-admin-token"
-    chmod 600 "$ROOT/docker/.staging-admin-token"
+    printf '%s' "$token" > "$cache_file"
+    chmod 600 "$cache_file"
     printf '%s' "$token"
 }
 
