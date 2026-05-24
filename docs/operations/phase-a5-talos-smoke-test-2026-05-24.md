@@ -107,9 +107,14 @@ After v2.4.7 helm upgrade + harness re-run:
 - Trigger + hub connection paths validated ✅ (10 PUTs 200 OK, 5 `[HUB] Connected` logs)
 - Still 0 relay activity on any pod ❌
 
-**Remaining suspected gap (Layer 6, not yet fixed):** the Pro.Push.Redis backplane channel topic is computed from the event's `EventType` string. API publishes to channel `"verbara:push:agent.state_changed"`, Realtime subscribes to channel `"verbara:push:agent.state.changed"` (or analogous). Events published by the API never reach the Realtime in-process `IPushEventBus` even with v2.4.7's dual-subscribe relay, because the Redis pub/sub doesn't route them. Verifiable post-session via `redis-cli MONITOR` during a fresh harness run.
+**Remaining gap (Layer 6, post-session re-diagnosis):** my immediate-post-session hypothesis ("channel topic name mismatch") was wrong. After reading [`RedisEventRelay.cs`](file:///media/Data/Source/Verbara/Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push/Backplane/RedisEventRelay.cs):
 
-**Test 5 remains PARTIAL** with the diagnostic chain above documented. The full PASS gate is bundled into the follow-up [docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md] §"v2.4.8 backplane closure" amendment.
+- Backplane channels are `asterisk:push:{tenantId}` (one per tenant, NOT per event type).
+- All inbound events on receiving nodes arrive as `RemotePushEvent` envelope — concrete type NOT reconstructed (ADR-0025 explicitly rejects typed round-trip).
+- v2.4.7's dual-subscribe (PR #25) is a no-op for cross-node fanout because `OfType<Core.X>` AND `OfType<Pro.X>` both fail when the bus only contains `RemotePushEvent`. Only useful for in-process Pro.Cluster local events on the same pod.
+- Additionally: `[PRESENCE] Remote PayloadJson empty (check PushProOptions.PayloadSerializerOptions)` log on Realtime confirms API doesn't configure the payload serializer — `RawPayload` arrives empty.
+
+**Test 5 remains PARTIAL** with the diagnostic chain documented. The full PASS gate is the v2.5.0 plan (paired PRs: API `PushPayloadJsonContext` + Realtime `RemoteEventDispatcher` HostedService) tracked in [docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md] §"v2.5.0 ACTUAL plan".
 
 ### What this session DID validate
 

@@ -173,28 +173,32 @@ Phases 1 + 3 of this plan landed end-to-end against the Talos lab. Detailed esca
 | 3 walking-skeleton | Console harness + `ExactlyOnceScenario` + Talos wrapper | #19 | Shipped — ran end-to-end against 4 v2.4.7 Realtime pods |
 | 5 chart hardening side-effects | 4 chart/code fixes surfaced by harness | #21, #22, #23, #24, #25 | All shipped; lab on v2.4.7 rev 23 |
 
-### What Test 5 PARTIAL still blocks on — v2.4.8 backplane closure
+### What Test 5 PARTIAL still blocks on — v2.5.0 (REVISED, was "v2.4.8 Option B")
 
-Layer 6 of the 6-layer mismatch stack: Pro.Push.Redis backplane channel topic naming uses each event's `EventType` string. API events publish to `verbara:push:agent.state_changed` (Core type's `Type` field), Realtime subscribes to `verbara:push:agent.state.changed` (Pro type's `EventType` getter — note the second `.` vs `_`). Result: even after v2.4.7's dual-subscriber relay, events from the API never reach the Realtime in-process `IPushEventBus` because the Redis backplane doesn't route them.
+**⚠️ This subsection's first version (committed 2026-05-24 with PR #26) hypothesised a "Pro.Push.Redis backplane channel topic naming mismatch" + proposed a ~100 LOC Option B `PlatformToProEventBridge` in the API. That diagnosis was WRONG.** Reading the SDK Pro.Push.Redis source ([`RedisEventRelay.cs`](file:///media/Data/Source/Verbara/Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push/Backplane/RedisEventRelay.cs)) the same evening reveals the actual architecture:
 
-**Verification (next session):** `kubectl exec redis-0 -- redis-cli PSUBSCRIBE 'verbara:push:*'` while running the harness — expect to see `agent.state_changed` topic from API + `agent.state.changed` topic missing.
+- **Backplane channels are `asterisk:push:{tenantId}`** (one per tenant — NOT per event type). Pattern subscribe `asterisk:push:*`.
+- **All inbound events on receiving nodes arrive wrapped as [`RemotePushEvent`](file:///media/Data/Source/Verbara/Verbara.Sdk/src/Verbara.Sdk.Push/Events/RemotePushEvent.cs)** — an envelope with `OriginalEventType` discriminator + `RawPayload` bytes. The concrete type is NOT reconstructed.
+- **[ADR-0025](file:///media/Data/Source/Verbara/Verbara.Sdk/docs/decisions/0025-push-nats-subscribe-and-loop-prevention.md) explicitly rejects typed round-trip:** *"Rechazo de tipado fuerte de eventos cross-node — `RemotePushEvent` envelope es la API pública; consumers que necesiten más registran un deserializer custom."*
+- **PR #25's dual-subscribe is a no-op for cross-node fanout** — `OfType<Core.X>()` AND `OfType<Pro.X>()` BOTH fail because the bus only contains `RemotePushEvent`. Only useful for in-process Pro.Cluster local events on the same pod.
+- **Additionally**: lab logs show `[PRESENCE] Remote PayloadJson empty (check PushProOptions.PayloadSerializerOptions)` — API doesn't configure the payload serializer, so `RawPayload` arrives as empty bytes. Even a typed dispatcher can't decode nothing.
 
-**Fix candidates (pick one in v2.4.8):**
+### v2.5.0 ACTUAL plan (paired PRs)
 
-| Option | Scope | Risk |
+| PR | Scope | LOC |
 |---|---|---|
-| **A. Dedicated `CoreToProEventBridge` HostedService** in Realtime: subscribes to `Verbara.Platform.Core.{Agent,Conversation}StateChangedEvent` from the LOCAL `IPushEventBus`, re-publishes as the corresponding `Verbara.Sdk.Pro.Push.SignalR.Events.*` type. The bridge ONLY runs if the Core types were already accepted by the backplane (they're not, today). | Requires fixing the backplane channel routing FIRST — chicken-egg | Med |
-| **B. Bridge in `PlatformEventBus` on the API side** — when publishing a Core event, ALSO publish the Pro-typed equivalent. Both flow to backplane; Realtime's existing Pro subscription matches. | Cleanest. Single locus of translation. ~100 LOC + 3 mapping tests. | Low |
-| **C. Unify event types in SDK Pro** — deprecate the divergent Core records. Long-term right answer. | Major cross-repo refactor (Pro v2.6.0-pro). Out of scope for v2.4.x. | High |
+| **#1 — API side** | Configure `PushProOptions.PayloadSerializerOptions` with a source-gen `JsonSerializerContext` (`PushPayloadJsonContext`) that knows every `Verbara.Platform.Core` push-event record. Without this `RawPayload` is empty. AOT-clean. | ~100 |
+| **#2 — Realtime side** | New `RemoteEventDispatcher` `IHostedService`: subscribes to `_bus.OfType<RemotePushEvent>()`, switches on `OriginalEventType`, deserializes `RawPayload` via the same source-gen context (shared via `Verbara.Platform.Realtime.Contracts`), maps Core records to Pro Payloads, re-publishes the Pro-typed event so existing relay subscriptions fire. Loop-safe — `RedisEventRelay.ForwardToRedisAsync` already short-circuits `RemotePushEvent` so re-publishes don't echo. | ~200 + 100 tests |
+| **#3 (optional, can defer to Pro v2.6.0-pro)** | Add `IPushPayloadDeserializer` extension point on `RedisEventRelay` (analog to `INatsPayloadDeserializer` mentioned in ADR-0025). Consumers register typed mappers via DI. Replaces PR #2's HostedService with a small registration. Out of scope for closing Test 5. | ~50 SDK + 10 consumer |
 
-**Recommended:** Option B. New `Verbara.Platform.Api.Services.PlatformToProEventBridge` HostedService that subscribes to `PlatformEventBus.Events` and `_pushBus.PublishAsync(MapToPro(evt))`. Mapping table: Core.AgentStateChangedEvent → Pro.AgentStateChangedEvent (OldState→PreviousState, Timestamp→ChangedAt, no ReasonCode); Core.ConversationStateChangedEvent → Pro.ConversationStateChangedEvent (same shape). Cluster events stay Pro-only (single source).
+**Effort estimate:** 4-6 hours focused work + 1 release.yml cycle.
 
-After Option B ships in v2.4.8 + helm upgrade, re-running `bash /tmp/run-harness.sh` should produce: 10 Forwarded on the leader pod, 30 SkippedNotLeader across 3 followers, 10 receives per client. Plan B smoke report Test 5 PARTIAL → **PASS** at that point.
+After PR #1 + PR #2 ship in v2.5.0 + helm upgrade + harness re-run → expect 10 Forwarded on leader pod + 30 SkippedNotLeader across 3 followers + 10 receives per client → **Test 5 PARTIAL → PASS** → plan moves to `docs/plans/completed/`.
 
 ### Decisions for next session
 
-1. Keep this plan in `docs/plans/active/` until v2.4.8 ships + Test 5 PASS verified.
-2. v2.4.8 PR scope = Option B bridge ONLY. Don't bundle other improvements.
+1. Keep this plan in `docs/plans/active/` until v2.5.0 ships + Test 5 PASS verified.
+2. v2.5.0 PR scope = paired API serializer + Realtime dispatcher ONLY. Don't bundle the optional SDK extension point.
 3. Phases 2 (Aspire AppHost), 4 (CI cascade), and 3-extension (7 remaining scenarios) all remain deferred — proven contract via PR #18+#19+v2.4.7 is the foundation.
 4. Once Test 5 PASS, this plan moves to `docs/plans/completed/`.
 
