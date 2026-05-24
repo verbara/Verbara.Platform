@@ -58,6 +58,41 @@ Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/
 
 > Las "En planificación" originales (1.9.x sub-releases + 2.0.0 arquitectónico + v2.1.0 image-binding + visibility flip) **YA SHIPPEARON** entre 2026-04-20 y 2026-05-10 — ver tabla "Shipped" arriba. Sección reescrita 2026-05-10 (post-flip) reflejando el estado real.
 
+### 🔥 Próximo ship: Platform v2.4.3 "Realtime startup migration hotfix" — Plan C activo, NO ejecutado (2026-05-23)
+
+**Status verificado 2026-05-23 contra working tree de Platform `main`:**
+
+| Indicador | Plan C target | Repo real | Hecho |
+|---|---|---|---|
+| `Directory.Build.props` | `<PackageVersion>2.4.3</PackageVersion>` | `2.4.2` | ❌ |
+| `Chart.yaml` `version` / `appVersion` | `0.2.2` / `"2.4.3"` | `0.2.1` / `"2.3.1"` | ❌ |
+| `values.yaml` `api.image.tag` | `v2.4.3` | `v2.3.1` | ❌ |
+| `values.yaml` `realtime.image.tag` | `v2.4.3` | `v0.1.0-rc` | ❌ |
+| `src/Verbara.Platform.Realtime/Program.cs` `EnsureSchemaAsync` call | presente | **ausente** | ❌ |
+| Test `RealtimeStartupMigrationTests` | presente | dir no existe | ❌ |
+| Git tag `v2.4.3` | existe | último tag = `v2.4.1` | ❌ |
+| `authorized-digests.json` `v2.4.3` entry | `current[]` | último = `v2.4.2` | ❌ |
+| **Plan C escrito y commiteado** | sí | sí (`305c36d6`) | ✅ |
+
+**Scope del hotfix v2.4.3**: ONE-FILE source change en `src/Verbara.Platform.Realtime/Program.cs` — invocar `Verbara.Sdk.Cluster.Postgres.Migrations.MigrationRunner.EnsureSchemaAsync(...)` entre `var app = builder.Build()` y `app.UseAuthentication()`. Sin esa llamada el pod Realtime crash-loopea con `relation "cluster_distributed_lock" does not exist` (Gap-1 documentado en `docs/operations/phase-a5-smoke-test-2026-05-23.md`).
+
+**3 plans en `docs/plans/active/`** se orquestan en orden:
+
+1. [`2026-05-23-lab-migration-v2.3.1-to-v2.4.3.md`](plans/active/2026-05-23-lab-migration-v2.3.1-to-v2.4.3.md) — **Plan C** lab migration (este). 7 fases C.0 → C.6 + rollback gates + 7 open questions para el maintainer.
+2. [`2026-05-22-phase-a5-cluster-leader-election.md`](plans/active/2026-05-22-phase-a5-cluster-leader-election.md) — **Plan A** consume `LeaderElectionService` en Realtime/Cluster hot paths.
+3. [`2026-05-23-phase-a5-talos-smoke-test.md`](plans/active/2026-05-23-phase-a5-talos-smoke-test.md) — **Plan B** Talos K8s smoke test (leader failover + zero-duplicate-SignalR-delivery) — se ejecuta inmediatamente después de C.6 PASS.
+
+**⚠️ Plan C necesita REVISIÓN antes de ejecutar** — fue redactado el 2026-05-23 AM, antes de que mergearas PR #5 (tarde 2026-05-23) + PR #6 (mismo día):
+
+- **PR #5** (`c21c8a97` + `756f243f` + `cabc1e55`): `release.yml` ahora **obligatorio** para builds que no sean `RETROACTIVE-TAG`. Plan C §4.5 paso 3-7 hace `docker build` + `cosign sign` manuales (path bypass-release.yml). DEBE ajustarse a una de dos rutas: (a) re-escribir §4.5 para usar `gh workflow run release.yml -f tag=v2.4.3`, o (b) anotar el tag con `RETROACTIVE-TAG: <razón>` para que `release.yml` se skipée + manualmente registrar digest en `authorized-digests.json`.
+- **PR #6** (`c60c3c53` + `82862310` + `d09b70ca`): cosign bumped **v2.5.2 → v3.0.6** + `sigstore/cosign-installer@v3 → @v4.1.2`. Plan C §4.5 paso 6-7 comandos `cosign sign` / `cosign verify` deben asumir v3 (sin `--insecure-ignore-tlog` legacy flag — verificar sintaxis v3).
+
+**ADR-0024 sigue pendiente** — canonicalizaría el contrato cosign-verify-or-RETROACTIVE-TAG. Idealmente file antes de ejecutar Plan C para que el path tomado quede grabado.
+
+**Acceptance criteria** (§9 de Plan C): 15 check-boxes. Cuando todos verdes → Plan B arranca → si Plan B pasa → Phase A.5 CLOSED → ADR-0022 track FULLY CLOSED → R5.5 Phase B-LK desbloqueado.
+
+---
+
 ### SMB Reference Deployment + Manuales — ✅ Fase 1 COMPLETE 2026-05-17
 
 **Contexto.** Tras el visibility flip (2026-05-10), el producto necesitaba pivotar desde validación de producción interna (R5.5) hacia entregables customer-facing. Decisión 2026-05-17: priorizar **reference deployment + manuales paso a paso** para que un cliente final (o equipo de implementación) pueda instalar Verbara desde cero y configurar los 3 canales V1 (Voz/SIP + WebChat + Email) sin acompañamiento del equipo Verbara.
