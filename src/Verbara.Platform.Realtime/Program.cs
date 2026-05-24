@@ -210,6 +210,17 @@ builder.Services.AddSingleton(new RelayOutcomeSinkOptions
 builder.Services.AddSingleton<RelayOutcomeSink>();
 builder.Services.AddSingleton<IRelayOutcomeSink>(sp => sp.GetRequiredService<RelayOutcomeSink>());
 
+// ─── Remote-event dispatcher (v2.5.0) — decodes Pro.Push.Redis envelopes ────
+// RedisEventRelay (in Pro.Push) wraps every cross-node event in a
+// RemotePushEvent envelope on the receiving side (ADR-0025 — rejects typed
+// round-trip by design). Without this dispatcher, the relay's OfType<TConcrete>()
+// filters never matched cross-node events because the bus only contained
+// RemotePushEvent; v2.4.7's dual-subscribe relay was a no-op for cross-node
+// fanout (only in-process events fired). Dispatcher MUST be registered BEFORE
+// PushToHubRelay so its subscription is in place by the time the relay starts
+// publishing typed events back onto the bus.
+builder.Services.AddHostedService<RemoteEventDispatcher>();
+
 // ─── Push → Hub relay (leader-gated cross-pod fanout, ADR-0022 Phase A.5) ────
 builder.Services.AddHostedService<PushToHubRelay>();
 
