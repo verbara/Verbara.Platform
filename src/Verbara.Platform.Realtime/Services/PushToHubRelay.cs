@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using CoreEvents = Verbara.Platform.Core;
 
 namespace Verbara.Platform.Realtime.Services;
 
@@ -68,6 +69,14 @@ internal sealed class PushToHubRelay : IHostedService
     private IDisposable? _conversationSubscription;
     private IDisposable? _agentSubscription;
     private IDisposable? _clusterSubscription;
+    // v2.4.7 — Platform.Api PlatformEventBus publishes Verbara.Platform.Core
+    // event types directly (no Core→Pro translator exists), so the Pro-typed
+    // subscriptions above never matched anything from the Api side. The Core
+    // subscriptions below map field shapes to the same Pro Payloads and fan
+    // out through the same SendXxxAsync helpers. Cluster events stay
+    // single-source (Pro.Cluster publishes the Pro-typed event internally).
+    private IDisposable? _coreConversationSubscription;
+    private IDisposable? _coreAgentSubscription;
 
     public PushToHubRelay(
         IPushEventBus bus,
@@ -94,6 +103,12 @@ internal sealed class PushToHubRelay : IHostedService
         _clusterSubscription = _bus.OfType<ClusterNodeStateChangedEvent>()
             .Subscribe(evt => ForwardClusterNode(evt));
 
+        _coreConversationSubscription = _bus.OfType<CoreEvents.ConversationStateChangedEvent>()
+            .Subscribe(evt => ForwardCoreConversation(evt));
+
+        _coreAgentSubscription = _bus.OfType<CoreEvents.AgentStateChangedEvent>()
+            .Subscribe(evt => ForwardCoreAgent(evt));
+
         return Task.CompletedTask;
     }
 
@@ -102,9 +117,13 @@ internal sealed class PushToHubRelay : IHostedService
         _conversationSubscription?.Dispose();
         _agentSubscription?.Dispose();
         _clusterSubscription?.Dispose();
+        _coreConversationSubscription?.Dispose();
+        _coreAgentSubscription?.Dispose();
         _conversationSubscription = null;
         _agentSubscription = null;
         _clusterSubscription = null;
+        _coreConversationSubscription = null;
+        _coreAgentSubscription = null;
         return Task.CompletedTask;
     }
 
@@ -260,6 +279,72 @@ internal sealed class PushToHubRelay : IHostedService
             PushToHubRelayLog.ForwardError(_logger, eventType, ex.Message);
             RecordOutcome(eventType, tenantId: null, leaderSnapshot, RelayOutcomeKind.ForwardError, ex.Message);
         }
+    }
+
+    // ─── Core event handlers (v2.4.7) ─────────────────────────────────────
+    // Platform.Api's PlatformEventBus publishes Verbara.Platform.Core event
+    // records (the legacy/canonical shape). These handlers translate field
+    // shapes to the Pro.Push.SignalR Payload records the hub clients expect.
+
+    private void ForwardCoreConversation(CoreEvents.ConversationStateChangedEvent evt)
+    {
+        var leaderSnapshot = SnapshotLeader();
+        var tenantId = evt.TenantId;
+        var eventType = evt.Type;
+
+        if (!leaderSnapshot.IsLeader)
+        {
+            RealtimeLog.SkippedForwardNotLeader(_logger, eventType, leaderSnapshot.Resource);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNotLeader);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            PushToHubRelayLog.SkippedNullTenant(_logger, eventType);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNullTenant);
+            return;
+        }
+
+        var payload = new ConversationStatePayload(
+            ConversationId: evt.ConversationId,
+            PreviousState: evt.OldState,
+            NewState: evt.NewState,
+            ChangedAt: evt.Timestamp,
+            TenantId: tenantId);
+
+        _ = SendConversationAsync($"tenant:{tenantId}", payload, tenantId, eventType, leaderSnapshot);
+    }
+
+    private void ForwardCoreAgent(CoreEvents.AgentStateChangedEvent evt)
+    {
+        var leaderSnapshot = SnapshotLeader();
+        var tenantId = evt.TenantId;
+        var eventType = evt.Type;
+
+        if (!leaderSnapshot.IsLeader)
+        {
+            RealtimeLog.SkippedForwardNotLeader(_logger, eventType, leaderSnapshot.Resource);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNotLeader);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            PushToHubRelayLog.SkippedNullTenant(_logger, eventType);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNullTenant);
+            return;
+        }
+
+        var payload = new AgentStatePayload(
+            AgentId: evt.AgentId,
+            PreviousState: evt.OldState,
+            NewState: evt.NewState,
+            ReasonCode: null,
+            ChangedAt: evt.Timestamp,
+            TenantId: tenantId);
+
+        _ = SendAgentAsync($"tenant:{tenantId}", payload, tenantId, eventType, leaderSnapshot);
     }
 
     private LeaderSnapshot SnapshotLeader() => new(
