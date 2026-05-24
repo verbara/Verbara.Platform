@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Verbara.Platform.E2E.Harness (Plan 2026-05-24, Phase 3 walking skeleton)
+
+    OPT-IN end-to-end harness. NOT included in Verbara.Platform.slnx —
+    runs via scripts/run-harness-talos.sh which prepares kubectl
+    port-forwards to each Realtime pod and then hands the per-pod
+    audit URLs to this binary via the HARNESS_AUDIT_BASE_URLS env var.
+
+    Same NO-AOT envelope as Verbara.Platform.LoadTests: the SignalR
+    .NET client (Microsoft.AspNetCore.SignalR.Client) is reflection-based
+    and incompatible with Native AOT publish. ADR-0023 explicitly allows
+    NO-AOT microservice/harness binaries — the deliverables (Api +
+    Realtime images) remain AOT-clean.
+
+    Single source of truth for assertions: the /admin/realtime/audit
+    endpoint shipped in PR #18 (Phase 1). The harness queries every
+    Realtime pod's audit endpoint and asserts the per-event leader-gate
+    invariant (exactly 1 Forwarded + N-1 SkippedNotLeader per outcome
+    set) — the harness is independent of topology (Aspire dev-loop or
+    Talos pre-release) by virtue of consuming pre-resolved base URLs.
+
+    Plan: docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md
+    Walking-skeleton scope: scenario "exactly-once" only. Additional
+    scenarios (leader-failover, multi-pod fanout scale, security suite,
+    chaos pod-kill, multi-leader independence) ship in subsequent PRs.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Verbara.Platform.E2E.Harness</RootNamespace>
+    <AssemblyName>Verbara.Platform.E2E.Harness</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <!-- CA1305 (IFormatProvider): the harness emits ISO-8601 timestamps + JSON
+         + ASCII markdown — locale-neutral by construction; threading
+         CultureInfo.InvariantCulture through every interpolated AppendLine in
+         a tooling project is noise. Same rationale as Verbara.Platform.LoadTests. -->
+    <NoWarn>$(NoWarn);CA1305</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Verbara.Platform.Realtime.Contracts\Verbara.Platform.Realtime.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+  </ItemGroup>
+
+</Project>

@@ -102,6 +102,11 @@
     <!-- Pinned same version as Microsoft.AspNetCore.Authentication.JwtBearer to keep the
          ASP.NET Core 10.x band consistent across Verbara.Platform.Realtime (ADR-0022 Phase A). -->
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.5" />
+    <!-- Client-side SignalR consumed by tests/Verbara.Platform.E2E.Harness (NO-AOT
+         walking-skeleton harness for ADR-0022 Phase A.5 exactly-once verification).
+         Reflection-based — incompatible with Native AOT, but the harness itself is
+         NO-AOT per ADR-0023; deliverables (Api + Realtime images) remain AOT-clean. -->
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.5" />
   </ItemGroup>
 
   <ItemGroup>
