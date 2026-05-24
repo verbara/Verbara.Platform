@@ -133,8 +133,21 @@ spec:
             # real state report (chart-gap closure).
             - name: ConnectionStrings__IdentityRedis
               value: "{{ .Values.api.identityRedis.host }}:{{ .Values.api.identityRedis.port }}"
+            # KeyPrefix MUST match Platform.Api's RedisIdentityOptions.KeyPrefix.
+            # Api doesn't set Identity:Redis:KeyPrefix in its env, so it falls
+            # through to the SDK default `asterisk:identity:` (legacy from
+            # pre-rebrand — see src/Verbara.Platform.Identity.Redis/
+            # RedisIdentityOptions.cs:27). Realtime Program.cs:104 hardcodes a
+            # different default (`verbara:platform:identity:`) which would
+            # cause the IJwtKeyStore to look at the WRONG Redis keys → JWT
+            # validation always returns IDX10500 even with IdentityRedis wired.
+            # Verified live 2026-05-24 by curling /admin/realtime/audit with a
+            # valid platform-admin JWT against the v0.2.5 chart — same 401 as
+            # without the env. Aligning to Api's prefix here is the chart-side
+            # fix; a future code change should also normalise Realtime
+            # Program.cs default to "asterisk:identity:".
             - name: Identity__Redis__KeyPrefix
-              value: "verbara:platform:identity:"
+              value: "asterisk:identity:"
           resources:
             requests:
               cpu: {{ .Values.realtime.resources.requests.cpu }}
