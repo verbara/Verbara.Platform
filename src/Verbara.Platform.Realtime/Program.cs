@@ -177,13 +177,27 @@ builder.Services.AddVerbaraCluster(opts =>
     opts.RegisterLeader(RealtimeLeaderResources.Fanout);
 });
 
+// ─── Relay outcome sink (ring buffer + Meter counters, ADR-0022 Phase A.5) ───
+// IRelayOutcomeSink backs both (a) the in-memory ring buffer surfaced via
+// GET /admin/realtime/audit — single source of truth for E2E harness
+// exactly-once assertions — and (b) the verbara_realtime_relay_outcomes_total
+// counter under the "Verbara.Platform.Realtime" Meter, which any Prometheus /
+// OpenTelemetry collector can subscribe to via AddMeter(...). PushToHubRelay
+// injects the sink and calls Record() on every Forward / Skip / Error path.
+//
+// PodInstanceId resolves to Cluster:InstanceId (aliased to $(POD_NAME) via the
+// K8s downward API — see infra/k8s/helm/platform/templates/realtime-deployment.yaml)
+// and falls back to MachineName for Aspire dev-loop / xunit fixtures.
+builder.Services.AddSingleton(new RelayOutcomeSinkOptions
+{
+    Capacity = builder.Configuration.GetValue<int?>("RealtimeAudit:Capacity") ?? 10_000,
+    PodInstanceId = builder.Configuration["Cluster:InstanceId"] ?? Environment.MachineName,
+});
+builder.Services.AddSingleton<RelayOutcomeSink>();
+builder.Services.AddSingleton<IRelayOutcomeSink>(sp => sp.GetRequiredService<RelayOutcomeSink>());
+
 // ─── Push → Hub relay (leader-gated cross-pod fanout, ADR-0022 Phase A.5) ────
 builder.Services.AddHostedService<PushToHubRelay>();
-
-// ─── OpenTelemetry parity (optional) ─────────────────────────────────────────
-// Realtime intentionally skips the heavyweight observability stack; Platform.Api
-// remains the canonical telemetry surface. Future iteration may add a minimal
-// SignalR connection-count gauge here.
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -215,6 +229,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapHealthEndpoint();
+app.MapAdminRealtimeAuditEndpoint();
 app.MapHub<PlatformHub>("/hubs/platform");
 
 await app.RunAsync();
