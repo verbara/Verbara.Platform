@@ -87,3 +87,45 @@ The 1.85 s ungraceful result is significantly better than the 30-40 s prediction
 - [Plan B](../plans/active/2026-05-23-phase-a5-talos-smoke-test.md)
 - [Option A docker-compose predecessor smoke test (PASS 2026-05-23)](phase-a5-smoke-test-2026-05-23.md)
 - [lab v2.3.1 baseline inventory (Plan C C.2)](lab-v2.3.1-baseline-inventory-2026-05-24.txt)
+
+---
+
+## Appendix — Test 5 escalation chain (2026-05-24, post-closure session)
+
+Plan [`docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md`](../plans/active/2026-05-24-e2e-harness-realtime-signalr.md) was opened to close Test 5 PARTIAL via a dedicated `Verbara.Platform.E2E.Harness` walking-skeleton. The harness shipped + ran end-to-end against the Talos lab, but the run **uncovered a 5-layer latent gap stack** in the SignalR fanout pipeline that was masked by Plan B's "zero clients connected" precondition:
+
+| # | Defect | Surfaced via | Closure |
+|---|---|---|---|
+| 1 | Realtime audit endpoint policy permanently unsatisfiable (`RequireRole("PlatformAdmin")` against a role string no JWT carries) | `curl /admin/realtime/audit` → 403 with valid PlatformAdmin JWT | PR #21 → v2.4.5 — `RequireRole("Admin", "PlatformAdmin")` |
+| 2 | Chart template missing `ConnectionStrings__Redis` + `ConnectionStrings__IdentityRedis` on Realtime container — Realtime falls back to `InMemoryJwtKeyStore` per pod boot | `curl` → 401 IDX10500 SignatureKeyNotFoundException | PR #22 → chart 0.2.5 |
+| 3 | API + Realtime `IJwtKeyStore` use **different** Redis key prefixes (`asterisk:identity:` legacy default vs `verbara:platform:identity:` Realtime hardcode) | `redis-cli KEYS "*identity*"` showed only legacy prefix entries; Realtime saw empty store | PR #23 → chart 0.2.6 |
+| 4 | Platform.Api `GetCurrentUserId` in 4 endpoints only reads `ClaimTypes.NameIdentifier`, ignores `sub` claim (incompatible with `MapInboundClaims=false`). Affected `AgentEndpoints`/`ConversationEndpoints`/`MediaEndpoints`/`ManagementTenantIpAllowlistEndpoints`. | Harness trigger `PUT /agents/me/state` → 404 with valid Agent JWT | PR #24 → v2.4.6 |
+| 5 | **Dual event-type ecosystem unbridged.** `PlatformEventBus` publishes `Verbara.Platform.Core.{Agent,Conversation}StateChangedEvent` (canonical legacy shape); `PushToHubRelay` subscribed only to `Verbara.Sdk.Pro.Push.SignalR.Events.*` (different C# records, different `EventType` strings — `"agent.state_changed"` vs `"agent.state.changed"`). No translator existed at either end. **Latent dead code in production fanout for any deployment with real SignalR clients.** | Harness trigger PUT 200 OK + 5 clients connected + audit endpoint 200 OK BUT 0 forwards / 0 skips / 0 receives. | PR #25 → v2.4.7 — dual-subscribe to both Core+Pro types in relay |
+
+After v2.4.7 helm upgrade + harness re-run:
+- Audit endpoint contract validated end-to-end ✅ (`RelayOutcomePage` JSON with correct pod identity + ring-buffer metadata)
+- Trigger + hub connection paths validated ✅ (10 PUTs 200 OK, 5 `[HUB] Connected` logs)
+- Still 0 relay activity on any pod ❌
+
+**Remaining suspected gap (Layer 6, not yet fixed):** the Pro.Push.Redis backplane channel topic is computed from the event's `EventType` string. API publishes to channel `"verbara:push:agent.state_changed"`, Realtime subscribes to channel `"verbara:push:agent.state.changed"` (or analogous). Events published by the API never reach the Realtime in-process `IPushEventBus` even with v2.4.7's dual-subscribe relay, because the Redis pub/sub doesn't route them. Verifiable post-session via `redis-cli MONITOR` during a fresh harness run.
+
+**Test 5 remains PARTIAL** with the diagnostic chain above documented. The full PASS gate is bundled into the follow-up [docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md] §"v2.4.8 backplane closure" amendment.
+
+### What this session DID validate
+
+1. **Audit endpoint contract** (PR #18, lifted via PR #21/22/23/24) — `/admin/realtime/audit` is reachable, AOT-clean serialization, ring buffer behaves correctly under concurrent writes (10 LoC of harness sanity checks already proved this).
+2. **Harness walking-skeleton** (PR #19) — login + multi-tenant auth + SignalR client pool + per-pod audit aggregator + Markdown/JSON report writer all work against real K8s. Reusable surface for the 7 remaining scenarios in the parent plan.
+3. **Chart hardening** — 4 chart fixes (PR #22, #23) closed long-standing Identity Redis projection gaps that would have silently broken multi-replica deployments regardless of the harness work.
+4. **API claims bug** (PR #24) — `sub`-fallback applied to 4 endpoints; harness wouldn't have surfaced this without making real JWT-authenticated PUT/POST calls.
+5. **Relay dual-typed subscription** (PR #25) — first deliberate Core+Pro event-type bridge in the codebase; codifies the contract that future fanout-relevant events MUST publish via the Pro type family (or get added to the Core handler explicit-translation list).
+
+### Released artefacts (8 PRs, 4 release.yml runs)
+
+| Tag | Build | Date | Scope |
+|---|---|---|---|
+| v2.4.4 | 4 cosign-signed images | 2026-05-24 14:56 UTC | Audit endpoint shipped (broken policy — superseded immediately) |
+| v2.4.5 | 4 cosign-signed images | 2026-05-24 15:30 UTC | Auth policy fix |
+| v2.4.6 | 4 cosign-signed images | 2026-05-24 16:40 UTC | API claims bug + harness enum + tenant split |
+| v2.4.7 | 4 cosign-signed images | 2026-05-24 17:50 UTC | Relay Core+Pro dual-subscribe |
+
+PRs: #18 (audit), #19 (harness), #20 (v2.4.4 chart bump), #21 (v2.4.5 auth fix), #22 (chart Redis env), #23 (chart KeyPrefix), #24 (v2.4.6 claims+harness), #25 (v2.4.7 relay dual-subscribe).
