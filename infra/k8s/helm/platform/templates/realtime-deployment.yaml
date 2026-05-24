@@ -87,23 +87,31 @@ spec:
             # Phase A.5 — Pro.Cluster leader election (per-resource).
             # POD_NAME is the unique lock-owner identity surfaced via the
             # downward API; Cluster__InstanceId aliases it for Pro.Cluster's
-            # ClusterLeadershipOptions.InstanceId. ConnectionStrings__Cluster
-            # selects the Postgres DataSource used for the distributed-lock
-            # backend — when the dedicated Secret entry is absent (optional:
-            # true), Pro.Cluster falls back to ConnectionStrings__Postgres at
-            # runtime.
+            # ClusterLeadershipOptions.InstanceId.
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
             - name: Cluster__InstanceId
               value: $(POD_NAME)
-            - name: ConnectionStrings__Cluster
+            # ConnectionStrings__Cluster selects the Postgres DataSource used
+            # for the distributed-lock backend. Built inline from the same
+            # api.postgres values + secret as platform-api so realtime shares
+            # the same DB instance (the lock table lives next to the rest of
+            # the Platform schema). The previous "optional secretKeyRef →
+            # fallback to ConnectionStrings__Postgres" pattern was broken:
+            # secretKeyRef.optional:true with no source leaves the env var
+            # with an EMPTY string (not unset), and `IConfiguration.
+            # GetConnectionString("Cluster") ?? GetConnectionString("Postgres")`
+            # in Program.cs does NOT fall through on empty (only on null) →
+            # boot exception. See realtime Program.cs line ~163.
+            - name: PG_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "platform.fullname" . }}-postgres
-                  key: connection-string-cluster
-                  optional: true   # falls back to ConnectionStrings__Postgres if absent
+                  name: {{ .Values.api.postgres.passwordSecret }}
+                  key: {{ .Values.api.postgres.passwordKey }}
+            - name: ConnectionStrings__Cluster
+              value: "Host={{ .Values.api.postgres.host }};Port={{ .Values.api.postgres.port }};Database={{ .Values.api.postgres.database }};Username={{ .Values.api.postgres.user }};Password=$(PG_PASSWORD)"
           resources:
             requests:
               cpu: {{ .Values.realtime.resources.requests.cpu }}
