@@ -21,11 +21,11 @@ api:
     # in verbara-website/data/authorized-digests.json. Leave empty to opt out
     # (Pro falls through to permissive path; matches dev-mode semantics).
     #
-    # v2.4.4 chart bump (Phase 1 audit endpoint + Phase 3 harness) intentionally
-    # ships with digest="" — a follow-up PR fills the field once release.yml has
-    # published the actual digests AND verbara-website/data/authorized-digests.json
-    # registers them. This avoids a chicken-and-egg between chart bump + release.yml run.
-    digest: ""
+    # Phase A.5 closure follow-up (2026-05-24): v2.5.1 api digest restored
+    # after the chicken-and-egg between chart bump + release.yml run + the
+    # verbara-website authorization PR. Paired with verbara-website PR #18
+    # which adds this digest to authorized-digests.json `current[]`.
+    digest: "sha256:b61b062f80a3f280a3465a3e00bc13ca04a4d3d45599e4f6eae5ebc431a5da12"
   replicas: 2
   port: 5000
   resources:
@@ -169,10 +169,10 @@ realtime:
     # extends to the Realtime image via the AuthorizedImageDigests claim.
     # Leave empty for tag-only references (dev / local registry).
     #
-    # v2.4.4 chart bump: digest cleared while waiting on release.yml run; same
-    # follow-up PR as the api digest above will re-populate this field once the
-    # new digests are authorized.
-    digest: ""
+    # Phase A.5 closure follow-up (2026-05-24): v2.5.1 realtime digest restored.
+    # Paired with the api digest above and verbara-website PR #18 which adds
+    # this digest to authorized-digests.json `current[]`.
+    digest: "sha256:46414e468fa625caf2dc81dce3e34ddd4306302c0cbbb7a01cd5b1e5342d037c"
   replicas: 1
   port: 5030
   resources:
