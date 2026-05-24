@@ -322,7 +322,15 @@ internal static class ConversationEndpoints
 
     private static EntityId GetCurrentAgentId(HttpContext context)
     {
-        var nameId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        // Same `sub`-first ordering as AgentEndpoints.GetCurrentUserId — the JWT
+        // emitted by JwtTokenService carries the user id in `sub`, and
+        // MapInboundClaims=false on the JwtBearerOptions means it is NOT
+        // auto-remapped to NameIdentifier. Without `sub` first, every
+        // /conversations/{id}/* call from a JWT-authenticated agent gets a
+        // fresh random EntityId and downstream Switchboard guards (e.g.
+        // AcceptAsync's "only the assigned agent can accept") reject the call.
+        var nameId = context.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+            ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         return nameId is not null ? EntityId.From(nameId) : EntityId.New();
     }
 }

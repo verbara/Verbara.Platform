@@ -20,7 +20,12 @@ internal sealed class AgentStateTrigger : IDisposable
 {
     private readonly HttpClient _http;
     private readonly string _tenant;
-    private static readonly string[] States = ["Ready", "Busy"];
+    // Valid AgentState enum values (src/Verbara.Platform.Queues/AgentState.cs):
+    // Offline, Available, Busy, Break, Lunch, Training, ACW, DND. Alternating
+    // Available ↔ Busy guarantees a state transition on every PUT (the API
+    // publishes ConversationStateChangedEvent only when oldState != newState
+    // — same Switchboard.AcceptAsync pattern).
+    private static readonly string[] States = ["Available", "Busy"];
 
     public AgentStateTrigger(string apiBaseUrl, string accessToken, string tenant)
     {

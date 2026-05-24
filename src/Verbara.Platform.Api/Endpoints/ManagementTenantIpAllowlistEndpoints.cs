@@ -65,7 +65,10 @@ internal static class ManagementTenantIpAllowlistEndpoints
             return Results.BadRequest(new ErrorResponse("ip_allowlist_invalid_cidr"));
         }
 
-        var actorId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // `sub` first, NameIdentifier fallback — same MapInboundClaims=false
+        // workaround as AgentEndpoints/ConversationEndpoints/MediaEndpoints.
+        var actorId = httpContext.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         var entry = await store.AddAsync(tenantId, request.Cidr, request.Description, actorId, ct);
 

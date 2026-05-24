@@ -31,7 +31,10 @@ internal static class MediaEndpoints
         if (file is null || file.Length == 0)
             return Results.BadRequest(new ErrorResponse("No file provided or file is empty"));
 
-        var uploadedBy = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        // `sub` first, NameIdentifier fallback — JwtBearerOptions.MapInboundClaims=false
+        // (Program.cs:118) means the JWT `sub` claim is not auto-remapped.
+        var uploadedBy = context.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+            ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
         try
         {
