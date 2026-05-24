@@ -64,7 +64,15 @@ internal static class AgentEndpoints
 
     private static EntityId GetCurrentUserId(HttpContext context)
     {
-        var nameId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        // ClaimTypes.NameIdentifier is the long-form claim name; with
+        // JwtBearerOptions.MapInboundClaims=false (Program.cs:118) the JWT's
+        // `sub` claim is NOT auto-remapped, so we MUST check the short-form
+        // `sub` as the primary source for the user ID. Same pattern as
+        // PermissionAuthorizationHandler.cs + OidcEndpoints.cs and friends.
+        // Without this, GetByUserIdAsync gets a fresh random EntityId and
+        // returns null → every authenticated /agents/me* call returns 404.
+        var nameId = context.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+            ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         return nameId is not null ? EntityId.From(nameId) : EntityId.New();
     }
 }

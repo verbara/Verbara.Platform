@@ -19,6 +19,7 @@ internal sealed record HarnessConfig(
     string ApiBaseUrl,
     string RealtimeHubUrl,
     string Tenant,
+    string AdminTenant,
     string Email,
     string Password,
     string PlatformAdminEmail,
@@ -34,6 +35,11 @@ internal sealed record HarnessConfig(
         var apiBaseUrl = Required("HARNESS_API_BASE_URL");
         var hubUrl = Required("HARNESS_REALTIME_HUB_URL");
         var tenant = Required("HARNESS_TENANT");
+        // PlatformAdmin users typically live in the host tenant (default "platform"),
+        // not in the customer tenant the agent + hub clients operate on. Separate
+        // env var so an integrator can override (e.g. when the admin user is
+        // shared across two host tenants in a partner-reseller deployment).
+        var adminTenant = Environment.GetEnvironmentVariable("HARNESS_ADMIN_TENANT") ?? "platform";
         var email = Required("HARNESS_AGENT_EMAIL");
         var password = Required("HARNESS_AGENT_PASSWORD");
         var adminEmail = Required("HARNESS_PLATFORMADMIN_EMAIL");
@@ -57,6 +63,7 @@ internal sealed record HarnessConfig(
             ApiBaseUrl: apiBaseUrl.TrimEnd('/'),
             RealtimeHubUrl: hubUrl,
             Tenant: tenant,
+            AdminTenant: adminTenant,
             Email: email,
             Password: password,
             PlatformAdminEmail: adminEmail,

@@ -46,8 +46,8 @@ internal static class ExactlyOnceScenario
 
         // 1. Login twice — PlatformAdmin for audit endpoint, Agent for hub + trigger
         var auth = new PlatformAuthClient(config.ApiBaseUrl);
-        Log($"Logging in as PlatformAdmin '{config.PlatformAdminEmail}' (tenant '{config.Tenant}')...");
-        var adminToken = await auth.LoginAsync(config.PlatformAdminEmail, config.PlatformAdminPassword, config.Tenant, ct).ConfigureAwait(false);
+        Log($"Logging in as PlatformAdmin '{config.PlatformAdminEmail}' (tenant '{config.AdminTenant}')...");
+        var adminToken = await auth.LoginAsync(config.PlatformAdminEmail, config.PlatformAdminPassword, config.AdminTenant, ct).ConfigureAwait(false);
         Log($"Logging in as Agent '{config.Email}' (tenant '{config.Tenant}')...");
         var agentToken = await auth.LoginAsync(config.Email, config.Password, config.Tenant, ct).ConfigureAwait(false);
 
