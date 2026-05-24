@@ -67,7 +67,7 @@ jobs:
         # incompat rationale (signatures produced by cosign v3.x cannot be
         # read by v2.5.2). The Verbara signing posture still skips Rekor;
         # verification needs `--insecure-ignore-tlog` to match.
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.2
         with:
           cosign-release: 'v3.0.6'
 

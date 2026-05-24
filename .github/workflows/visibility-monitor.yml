@@ -113,7 +113,7 @@ jobs:
         # See ADR-0024 §Process Hardening for the version-drift incident.
         # The Verbara signing posture still skips Rekor (`--tlog-upload=false`);
         # verification consumers must pass `--insecure-ignore-tlog` to match.
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.2
         with:
           cosign-release: 'v3.0.6'
 

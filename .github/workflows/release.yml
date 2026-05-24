@@ -130,11 +130,11 @@ jobs:
 
       - name: Install cosign
         if: steps.retro.outputs.skip != 'true'
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.2
         with:
           # Pin v3.0.6 — matches the maintainer-side cosign on local builds.
           # The prior comment claimed "cosign v3.x changes break the installer
-          # action's bootstrap"; in practice sigstore/cosign-installer@v3 has
+          # action's bootstrap"; in practice sigstore/cosign-installer@v4.1.2 has
           # supported cosign v3.x cleanly since installer v3.5+. The 2026-05-23
           # v2.4.2 anomaly traced (in part) to the v2.5.2 ↔ v3.0.6 verify
           # incompat — see ADR-0024 §Process Hardening. Keep cosign aligned
