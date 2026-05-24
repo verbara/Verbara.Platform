@@ -112,6 +112,29 @@ spec:
                   key: {{ .Values.api.postgres.passwordKey }}
             - name: ConnectionStrings__Cluster
               value: "Host={{ .Values.api.postgres.host }};Port={{ .Values.api.postgres.port }};Database={{ .Values.api.postgres.database }};Username={{ .Values.api.postgres.user }};Password=$(PG_PASSWORD)"
+            # Redis connection — drives BOTH the Pro.Push.Redis backplane (so
+            # T27 events emitted by Platform.Api land in this pod's IPushEventBus
+            # and PushToHubRelay can fan them out) AND the SignalR Redis backplane
+            # (so a broadcast on the leader pod reaches clients connected to any
+            # follower pod). Without this env, redisConnectionString resolves to
+            # null in Program.cs:45 → no backplane wiring → cross-pod fanout
+            # silently broken even though the relay leader-gate logs Forwarded.
+            - name: ConnectionStrings__Redis
+              value: "{{ .Values.api.redis.host }}:{{ .Values.api.redis.port }}"
+            # ADR-0012 JWT rotation pool — required for ANY multi-replica
+            # Realtime deployment + for cross-microservice JWT validation
+            # (Platform.Api mints the token, Realtime validates it; they MUST
+            # share the same IJwtKeyStore). Without IdentityRedis, Realtime
+            # Program.cs:97-111 falls back to InMemoryJwtKeyStore which
+            # generates its own key per pod boot — every token signed by API
+            # is rejected with `SecurityTokenSignatureKeyNotFoundException`
+            # (IDX10500). Surfaced 2026-05-24 during Phase A.5 audit-endpoint
+            # smoke against the Talos lab. See ADR-0012 + R5.5 K8s Phase 0LK
+            # real state report (chart-gap closure).
+            - name: ConnectionStrings__IdentityRedis
+              value: "{{ .Values.api.identityRedis.host }}:{{ .Values.api.identityRedis.port }}"
+            - name: Identity__Redis__KeyPrefix
+              value: "verbara:platform:identity:"
           resources:
             requests:
               cpu: {{ .Values.realtime.resources.requests.cpu }}
