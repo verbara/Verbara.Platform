@@ -121,6 +121,27 @@ var pushBackplaneRedis = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrWhiteSpace(pushBackplaneRedis))
 {
     builder.Services.AddVerbaraProPushRedis(pushBackplaneRedis);
+
+    // v2.5.0 — supply the source-gen JsonSerializerContext that knows every
+    // Verbara.Platform.Core push-event record. Without this,
+    // RedisEventRelay.SerializePayload returns string.Empty (the Pro SDK
+    // intentionally refuses reflection-based serialisation on the AOT-clean
+    // path), the cross-node envelope's PayloadJson arrives empty on receiving
+    // nodes, and the Verbara.Platform.Realtime RemoteEventDispatcher has
+    // nothing to deserialise. Symptom in lab logs:
+    //   "[PRESENCE] Remote PayloadJson empty
+    //    (check PushProOptions.PayloadSerializerOptions)"
+    // Pairs with the dispatcher registered in Verbara.Platform.Realtime
+    // Program.cs — both sides MUST consume the same PlatformPushJsonContext
+    // so a field-shape change is a compile-time error, not a runtime
+    // silent message drop.
+    builder.Services.Configure<Verbara.Sdk.Pro.Push.Options.PushProOptions>(o =>
+    {
+        o.PayloadSerializerOptions = new System.Text.Json.JsonSerializerOptions
+        {
+            TypeInfoResolver = Verbara.Platform.Core.Push.PlatformPushJsonContext.Default,
+        };
+    });
 }
 
 builder.Services
