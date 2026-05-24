@@ -132,9 +132,15 @@ jobs:
         if: steps.retro.outputs.skip != 'true'
         uses: sigstore/cosign-installer@v3
         with:
-          # Pin v2.5.2: cosign-installer@v3 fails on cosign v3.x (changed detached-sig
-          # distribution). The ECDSA P-256 PEM keypair is readable by v2.5.2.
-          cosign-release: 'v2.5.2'
+          # Pin v3.0.6 — matches the maintainer-side cosign on local builds.
+          # The prior comment claimed "cosign v3.x changes break the installer
+          # action's bootstrap"; in practice sigstore/cosign-installer@v3 has
+          # supported cosign v3.x cleanly since installer v3.5+. The 2026-05-23
+          # v2.4.2 anomaly traced (in part) to the v2.5.2 ↔ v3.0.6 verify
+          # incompat — see ADR-0024 §Process Hardening. Keep cosign aligned
+          # cross-context (release.yml + visibility-monitor.yml + digest-
+          # reconciliation.yml + maintainer-local) at v3.0.6.
+          cosign-release: 'v3.0.6'
 
       - name: Sign final image with cosign
         if: steps.retro.outputs.skip != 'true'
