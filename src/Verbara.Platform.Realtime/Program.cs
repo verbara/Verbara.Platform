@@ -192,6 +192,25 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 var app = builder.Build();
 
+// Phase A.5 Gap-1 (v2.4.3): ensure cluster_distributed_lock table exists at
+// startup. AddVerbaraCluster + AddPostgresDistributedLock register DI for the
+// lock primitive but do NOT auto-create the schema — the SDK ships
+// MigrationRunner.EnsureSchemaAsync as an explicit opt-in. Without this call
+// the leader-election TryAcquireAsync fails on first request with relation
+// "cluster_distributed_lock" does not exist and the pod restart-loops. See
+// docs/operations/phase-a5-smoke-test-2026-05-23.md §5 for the original gap.
+using (var migrationScope = app.Services.CreateScope())
+{
+    var migrationDataSource = migrationScope.ServiceProvider
+        .GetRequiredKeyedService<NpgsqlDataSource>("Cluster");
+    var migrationLogger = migrationScope.ServiceProvider
+        .GetRequiredService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    await Verbara.Sdk.Cluster.Postgres.Migrations.MigrationRunner.EnsureSchemaAsync(
+        migrationDataSource,
+        migrationLogger,
+        app.Lifetime.ApplicationStopping);
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
 
