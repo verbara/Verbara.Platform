@@ -34,8 +34,15 @@ namespace Verbara.Platform.Core.Push;
 /// silent message loss in production).
 /// </para>
 /// </remarks>
+// v2.5.1: keep PropertyNamingPolicy DEFAULT (PascalCase). The previous
+// CamelCase setting was ignored by `JsonSerializer.Serialize(obj, runtimeType,
+// options)` — the 3-arg overload SDK Pro.Push.Redis.RedisEventRelay calls in
+// SerializePayload(). Result: serialised JSON came out PascalCase (driven by
+// options' identity naming policy) while the deserialise side via TypeInfo
+// used CamelCase → every field arrived null on the receiver. PascalCase on
+// both ends is the SDK-overload-safe contract; the SDK doesn't care about
+// naming, only consistency.
 [JsonSourceGenerationOptions(
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(AgentStateChangedEvent))]
 [JsonSerializable(typeof(ConversationStateChangedEvent))]
