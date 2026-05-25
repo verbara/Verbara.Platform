@@ -1,0 +1,90 @@
+=== T=1 2026-05-25T12:20:57Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 1%/70%   2     8     2     20d
+
+=== T=2 2026-05-25T12:21:17Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 16%/70%   2     8     2     20d
+
+=== T=3 2026-05-25T12:21:32Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 51%/70%   2     8     2     20d
+
+=== T=4 2026-05-25T12:21:47Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 146%/70%   2     8     2     20d
+
+=== T=5 2026-05-25T12:22:03Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 148%/70%   2     8     2     20d
+
+=== T=6 2026-05-25T12:22:19Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 153%/70%   2     8     4     20d
+
+=== T=7 2026-05-25T12:22:35Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 158%/70%   2     8     4     20d
+
+=== T=8 2026-05-25T12:22:50Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 121%/70%   2     8     4     20d
+
+=== T=9 2026-05-25T12:23:06Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 95%/70%   2     8     4     20d
+
+=== T=10 2026-05-25T12:23:21Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 95%/70%   2     8     4     20d
+
+=== T=11 2026-05-25T12:23:36Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 96%/70%   2     8     4     20d
+
+=== T=12 2026-05-25T12:23:51Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 98%/70%   2     8     6     20d
+
+=== T=13 2026-05-25T12:24:06Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 90%/70%   2     8     6     20d
+
+=== T=14 2026-05-25T12:24:21Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 83%/70%   2     8     6     20d
+
+=== T=15 2026-05-25T12:24:36Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 66%/70%   2     8     6     20d
+
+=== T=16 2026-05-25T12:24:51Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 65%/70%   2     8     6     20d
+
+=== T=17 2026-05-25T12:25:06Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 67%/70%   2     8     6     20d
+
+=== T=18 2026-05-25T12:25:21Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 65%/70%   2     8     6     20d
+
+=== T=19 2026-05-25T12:25:36Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 67%/70%   2     8     6     20d
+
+=== T=20 2026-05-25T12:25:52Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 67%/70%   2     8     6     20d
+
+=== T=21 2026-05-25T12:26:07Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 67%/70%   2     8     6     20d
+
+=== T=22 2026-05-25T12:26:22Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 38%/70%   2     8     6     20d
+
+=== T=23 2026-05-25T12:26:37Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 5%/70%   2     8     6     20d
+
+=== T=24 2026-05-25T12:26:52Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 1%/70%   2     8     6     20d
+
+=== T=25 2026-05-25T12:27:07Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 1%/70%   2     8     6     20d
+
+=== T=26 2026-05-25T12:27:22Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 1%/70%   2     8     6     20d
+
+=== T=27 2026-05-25T12:27:37Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 1%/70%   2     8     6     20d
+
+=== T=28 2026-05-25T12:27:52Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 1%/70%   2     8     6     20d
+
+=== T=29 2026-05-25T12:28:07Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 1%/70%   2     8     6     20d
+
+=== T=30 2026-05-25T12:28:22Z ===
+HPA: platform-api   Deployment/platform-api   cpu: 1%/70%   2     8     6     20d
+

@@ -1,0 +1,12 @@
+2026-05-25T12:28:58Z
+platform-api-7c64f8c5f9-768ws: restarts=0
+platform-api-7c64f8c5f9-bq4xz: restarts=0
+platform-api-7c64f8c5f9-lmmr2: restarts=0
+platform-api-7c64f8c5f9-v6cs4: restarts=0
+platform-api-7c64f8c5f9-vzk7g: restarts=0
+platform-api-7c64f8c5f9-wlk68: restarts=0
+NAME                REFERENCE                      TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
+platform-api        Deployment/platform-api        cpu: 1%/70%   2         8         6          20d
+platform-realtime   Deployment/platform-realtime   cpu: 1%/70%   1         4         4          28h
+---jwt_* counters FINAL---
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="validation"} 1 1779712138679

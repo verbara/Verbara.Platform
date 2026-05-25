@@ -1,0 +1,8 @@
+2026-05-25T12:20:52Z
+platform-api-7c64f8c5f9-lmmr2: image=ghcr.io/verbara/platform/api@sha256:05ccb4fb00b50f71d302af4db26461e37ea8595dc54a6ab29e0690f07e5a0c48, restarts=0
+platform-api-7c64f8c5f9-wlk68: image=ghcr.io/verbara/platform/api@sha256:05ccb4fb00b50f71d302af4db26461e37ea8595dc54a6ab29e0690f07e5a0c48, restarts=0
+NAME                REFERENCE                      TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
+platform-api        Deployment/platform-api        cpu: 2%/70%   2         8         2          20d
+platform-realtime   Deployment/platform-realtime   cpu: 3%/70%   1         4         4          28h
+---jwt_* baseline (post-warmup, pre-load)---
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="validation"} 1 1779711652206

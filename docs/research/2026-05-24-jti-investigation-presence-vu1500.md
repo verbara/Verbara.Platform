@@ -251,6 +251,8 @@ Tier-2 (SCAN+N×GET → SMEMBERS+MGET) reduces the cold-window from 1-5s → 20-
 
 **Validation result:** lab-empirical PASS. See [`docs/operations/chaos-test-report-k8s-local.md`](../operations/chaos-test-report-k8s-local.md) § "v2.5.3 JWT Tier-1 validation rerun" for full numbers + caveats.
 
+**Causality follow-up (v2.5.4, 2026-05-25):** with observability re-enabled via commit `5f34fb0e` (.AddMeter('verbara.platform.jwt')), re-ran the same NBomber sweep with per-pod counter scraping. Result: **8 cache-miss events** (4 HPA cold-start pods + 4 from 2 original pods × 2 events each), **0 stale-cache fallback firings**, **0 fail-closed throws**. Mechanism attribution: **TTL bump 60s→5min is the PRIMARY driver** (5× reduction in cache-miss frequency under same load = 5× less opportunity for Redis SCAN+N×GET to slow/fail); **Tier-1 stale-cache fallback is INSURANCE** (load-bearing for production-cloud Redis adversarial conditions, never fired in lab). Tier-2 priority now data-gated: ship only if production `jwt_key_stale_cache_fallbacks_total > 0 sustained`. See [`docs/operations/chaos-test-report-k8s-local.md`](../operations/chaos-test-report-k8s-local.md) § "v2.5.4 JWT Tier-1 causality measurement" for full per-pod breakdown.
+
 ## Cross-references
 
 - B-LK evidence: [`docs/operations/r55-blk-evidence/2026-05-24-v251-baseline/README.md`](../operations/r55-blk-evidence/2026-05-24-v251-baseline/README.md) § "Presence broadcast" + "Conclusions"

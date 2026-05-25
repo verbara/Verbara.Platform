@@ -1,0 +1,21 @@
+===per-pod jwt_* scrape (port-forward each pod)===
+--- pod: platform-api-7c64f8c5f9-768ws ---
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="validation"} 1 1779712176717
+  pod startTime: 2026-05-25T12:22:02Z
+--- pod: platform-api-7c64f8c5f9-bq4xz ---
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="validation"} 1 1779712178758
+  pod startTime: 2026-05-25T12:22:02Z
+--- pod: platform-api-7c64f8c5f9-lmmr2 ---
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="validation"} 2 1779712180802
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="signing"} 1 1779712180802
+  pod startTime: 2026-05-25T12:19:36Z
+--- pod: platform-api-7c64f8c5f9-v6cs4 ---
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="validation"} 1 1779712182851
+  pod startTime: 2026-05-25T12:23:32Z
+--- pod: platform-api-7c64f8c5f9-vzk7g ---
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="validation"} 1 1779712184894
+  pod startTime: 2026-05-25T12:23:32Z
+--- pod: platform-api-7c64f8c5f9-wlk68 ---
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="signing"} 1 1779712186937
+jwt_key_cache_misses_total{otel_scope_name="verbara.platform.jwt",path="validation"} 2 1779712186937
+  pod startTime: 2026-05-25T12:19:57Z

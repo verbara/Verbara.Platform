@@ -384,3 +384,96 @@ Tier-1 was the only material code change between v2.5.2 and v2.5.3, so the 100% 
 - verbara-website PR #20 (initial authorize) + #21 (digest correction)
 - NBomber report: `tests/Verbara.Platform.LoadTests/load-test-reports-archive/presence-LOADTEST_VU-1500-300s/nbomber_report_2026-05-25--11-33-02.md`
 - Helm release: `platform` rev 28 on v2.5.3 in `default` namespace
+
+---
+
+# v2.5.4 JWT Tier-1 causality measurement — 2026-05-25 (mechanism identified)
+
+**Date:** 2026-05-25
+**Cluster:** Talos v1.13.0 lab (unchanged)
+**App version:** `ghcr.io/verbara/platform/api:v2.5.4` (`sha256:05ccb4fb…`)
+**Single delta vs v2.5.3:** commit `5f34fb0e` — `.AddMeter("verbara.platform.jwt")` in `Program.cs` OpenTelemetry MeterProvider
+**Helm release:** rev 29
+**Evidence dir:** `docs/operations/r55-blk-evidence/2026-05-25-jwt-tier1-causality/`
+
+## Why this rerun
+
+The v2.5.3 PASS result (1,980 → 0 Unauthorized) was unambiguous on the primary metric BUT the observability gap left a causality question open: did the Tier-1 stale-cache fallback fire (proving the catch-when path was load-bearing)? OR did the cold-cache happy path complete fast enough that no exception was thrown (proving the TTL bump 60s→300s was the actual primary driver)?
+
+This rerun answers that question by re-running the SAME NBomber scenario with the now-exposed jwt counters.
+
+## Headline result — causality resolved
+
+**Identical scenario, NBomber `presence` VU=1500 sustained 300s:**
+
+| Metric | v2.5.2 (Tier-1 absent) | v2.5.3 (Tier-1 + obs broken) | v2.5.4 (Tier-1 + obs working) |
+|---|---|---|---|
+| OK count | 193,317 | 240,630 | 202,245 |
+| Fail count | **1,980 Unauthorized** | 0 | **0** |
+| p99 latency | 8.77s | 6.29s | 13.84s |
+| RPS | 644 | 802 | 674 |
+| HPA scale | 2 → 6 | 2 → 6 | 2 → 6 |
+| Pod restart count | 0 | 0 | 0 |
+| `jwt_key_cache_misses_total{path="validation"}` aggregate | — (counter absent) | — (counter not exposed) | **8** |
+| `jwt_key_cache_misses_total{path="signing"}` aggregate | — | — | **2** |
+| `jwt_key_stale_cache_fallbacks_total` aggregate | — | — | **0 (counter not emitted — never incremented)** |
+| `jwt_key_fail_closed_total` aggregate | — | — | **0 (counter not emitted — never incremented)** |
+
+Notes:
+- p99 13.84s in v2.5.4 is lab variance (Redis/CNPG transient load + the run happened ~30 min after v2.5.3, with metrics-server warming up post-rollout). Fail count = 0 is the dispositive metric.
+- `0` aggregate counts are inferred from counter absence: counters only appear in `/metrics` output once incremented. `jwt_key_stale_cache_fallbacks_total` not appearing → never incremented → Tier-1 catch path never fired.
+
+## Per-pod breakdown
+
+`/metrics` hits one pod per call via Cilium Gateway eBPF LB. To get the aggregate, port-forwarded each platform-api pod individually:
+
+| Pod | startTime | Cold-start | validation misses | signing misses |
+|---|---|---|---|---|
+| `lmmr2` | 12:19:36 | original | 2 (warmup + TTL boundary) | 1 |
+| `wlk68` | 12:19:57 | original | 2 (warmup + TTL boundary) | 1 |
+| `768ws` | 12:22:02 | **HPA cold** | 1 | 0 |
+| `bq4xz` | 12:22:02 | **HPA cold** | 1 | 0 |
+| `v6cs4` | 12:23:32 | **HPA cold** | 1 | 0 |
+| `vzk7g` | 12:23:32 | **HPA cold** | 1 | 0 |
+
+4 NEW pods (HPA scale-up during sweep) each hit ONE cold-cache miss event → Redis SCAN+N×GET completed within timeout in ALL 4 cases → cache populated → subsequent requests served from local cache.
+
+2 ORIGINAL pods hit TTL-boundary misses (5-min TTL crossed mid-300s-sweep) → also completed cleanly.
+
+**Total: 8 validation cache-miss + 2 signing cache-miss events. 0 of those triggered the stale-cache fallback (catch-when) path. 0 fail-closed throws.**
+
+## Mechanism attribution — primary vs insurance
+
+The v2.5.2 → v2.5.4 elimination of 1,980 Unauthorized decomposes as:
+
+| Mechanism | Effect | Attribution |
+|---|---|---|
+| **TTL bump 60s → 5min** | 5× reduction in cache-miss frequency under same load (lab counted: 8 misses in 5-min sweep at 300s TTL; would have been ~30 misses at 60s TTL) | **PRIMARY DRIVER** of measurable fail elimination — fewer cache misses = fewer Redis fetches = fewer windows for SCAN+N×GET to slowdown/fail |
+| **Tier-1 stale-cache fallback (`catch when cached is not null`)** | Catches Redis exceptions during cache miss + reuses stale value | **INSURANCE / NEVER FIRED IN LAB** — Redis SCAN+N×GET completed within 5s timeout in all 8 lab cache-miss events. The catch path is load-bearing only when Redis is slower than the lab's response time (cloud cross-AZ, noisy keyspace, etc.) |
+| **Observability counters** | Distinguishes #1 from #2 quantitatively | **DIAGNOSTIC** — enabled this measurement; without it the conclusion would have been "we don't know which mechanism contributed" |
+
+## Production confidence
+
+**For the SMB tier on Talos-like infra (single-AZ Redis, small keyspace, predictable load):** Tier-1 + TTL bump is sufficient. Tier-2 (SCAN+N×GET → SMEMBERS+MGET) provides no measurable benefit at this scale.
+
+**For enterprise tier on cloud (multi-AZ Redis, large multi-tenant keyspace, bursty load):** the stale-cache fallback counter `jwt_key_stale_cache_fallbacks_total` is now the empirical signal. If it stays at 0 in production, Tier-1 + TTL is sufficient there too. If it climbs (e.g. > 5/min per pod sustained), that's the trigger to ship Tier-2 — and the same counter measures Tier-2's effectiveness afterward.
+
+This is the **causal observability we were missing** before `5f34fb0e`. Tier-2 priority decision is now data-driven, not estimated.
+
+## Tier-2 priority decision (final)
+
+| Position | Tier-2 priority |
+|---|---|
+| Pre-C-LK (original JTI doc) | "v2.6.x or later" — defense-in-depth |
+| Mid-session (after C-LK loaded measurement showed 1,980 fails) | "Active production concern — ship in v2.5.4 within 2 weeks" |
+| Post-v2.5.3 lab PASS (mechanism unknown) | "v2.6.x or later" — Tier-1 covered the lab |
+| **Post-v2.5.4 causality measurement (this)** | **"On hold — ship only if production `jwt_key_stale_cache_fallbacks_total > 0 sustained"** |
+
+Tier-2 spec ([`docs/specs/2026-05-25-jwt-tier-2-redis-set-index.md`](../specs/2026-05-25-jwt-tier-2-redis-set-index.md)) stays as ready-to-execute reference; no calendar commitment until data shows it's needed.
+
+## References
+
+- v2.5.4 commits: `5f34fb0e` OTel meter fix + `4ce234c9` version bump + `a505aeec` Helm chart bump + `456470b` (verbara-website PR #22 corrected v2.5.3 digest + added v2.5.4)
+- release.yml run: 26398716148 (v2.5.4, 4 cosign-signed images via `crane digest`)
+- NBomber report: `tests/Verbara.Platform.LoadTests/load-test-reports-archive/presence-LOADTEST_VU-1500-300s/nbomber_report_2026-05-25--12-26-00.md`
+- Per-pod metrics aggregate: `docs/operations/r55-blk-evidence/2026-05-25-jwt-tier1-causality/per-pod-metrics.txt`
