@@ -1254,7 +1254,31 @@ if (openApiEnabled)
     // /scalar/v1 — Scalar UI rendering the spec.
     app.MapScalarApiReference();
 }
-app.MapHealthChecks("/health");
+// K8s liveness vs readiness contract:
+//   /health (liveness) → process-alive only. NO dependency checks. Returns
+//     200 OK in <1 ms as long as the .NET host is responsive. Kubernetes
+//     uses this to decide whether to RESTART the pod — restarting because a
+//     dependency (Postgres / Asterisk / Redis) is degraded never helps; it
+//     just amplifies the outage by cycling pods that would have recovered.
+//   /health/ready (readiness) → process AND its dependencies. Returns 200
+//     only if all "ready"-tagged checks pass. Kubernetes uses this to
+//     decide whether to ROUTE TRAFFIC to the pod. Failures stop traffic but
+//     leave the pod alive to recover.
+//
+// Before this split, both endpoints ran the FULL check suite (Postgres SQL
+// ping, Asterisk AMI ping, background-service heartbeats, retention). Under
+// burst load, the per-request /health latency exceeded the chart's default
+// `livenessProbe.timeoutSeconds: 1` and Kubernetes restart-cascaded pods
+// during otherwise-survivable traffic spikes (R5.5 Phase B-LK 2026-05-24:
+// 4 pod restarts during VU=1500 presence + 250-500 RPS bursts, evidence
+// `docs/operations/r55-blk-evidence/2026-05-24-v251-baseline/`).
+//
+// Predicate = _ => false → run NO checks; default formatter returns plain
+// text "Healthy" with HTTP 200. <1 ms response, immune to dependency state.
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = _ => false,
+});
 app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = r => r.Tags.Contains("ready"),

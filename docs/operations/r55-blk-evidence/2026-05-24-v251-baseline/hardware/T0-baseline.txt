@@ -1,0 +1,40 @@
+2026-05-24T21:59:38Z
+---kubectl top---
+NAME        CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+talos-cp1   109m         5%       1867Mi          56%         
+talos-w1    108m         2%       3278Mi          44%         
+talos-w2    127m         3%       2834Mi          38%         
+talos-w3    83m          2%       2797Mi          37%         
+---kubectl top pods---
+NAMESPACE            NAME                                                    CPU(cores)   MEMORY(bytes)   
+chaos-mesh           chaos-controller-manager-7f78fb54b9-h62zg               2m           93Mi            
+chaos-mesh           chaos-daemon-bjszr                                      1m           71Mi            
+chaos-mesh           chaos-daemon-d2779                                      1m           71Mi            
+chaos-mesh           chaos-daemon-jt9x7                                      1m           71Mi            
+chaos-mesh           chaos-dashboard-b56775cc-ll2vb                          1m           33Mi            
+chaos-mesh           chaos-dns-server-7cdff5d7b9-57srv                       2m           54Mi            
+cnpg-system          cnpg-controller-manager-6f488cd599-lfjfv                2m           32Mi            
+kube-system          cilium-49b4f                                            21m          434Mi           
+kube-system          cilium-envoy-8t4hb                                      3m           196Mi           
+kube-system          cilium-envoy-c95jg                                      2m           17Mi            
+kube-system          cilium-envoy-j4r7m                                      3m           83Mi            
+kube-system          cilium-envoy-pc5k8                                      3m           83Mi            
+kube-system          cilium-k7zd2                                            15m          196Mi           
+kube-system          cilium-n8wfl                                            31m          441Mi           
+kube-system          cilium-operator-9c8749c7b-zzgfj                         2m           42Mi            
+kube-system          cilium-zf9nr                                            25m          452Mi           
+kube-system          coredns-6dc87b5c58-6vnnp                                2m           17Mi            
+kube-system          coredns-6dc87b5c58-k5g97                                2m           17Mi            
+kube-system          hubble-relay-599d47597b-zx8tr                           1m           81Mi            
+NAME                                 CPU(cores)   MEMORY(bytes)   
+platform-api-76d9f99d8f-2jv9t        75m          118Mi           
+platform-api-76d9f99d8f-t9sns        321m         115Mi           
+platform-realtime-5f457cc9db-rlrhv   2m           82Mi            
+web-6b9ccdb796-c77tj                 1m           4Mi             
+NAME                               CPU(cores)   MEMORY(bytes)   
+postgres-1                         15m          125Mi           
+postgres-2                         11m          127Mi           
+postgres-3                         34m          155Mi           
+postgres-pooler-5876fc5fb5-lxtpp   5m           11Mi            
+postgres-pooler-5876fc5fb5-tn2fl   4m           20Mi            
+redis-0                            8m           68Mi            

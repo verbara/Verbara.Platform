@@ -188,26 +188,39 @@ spec:
             limits:
               cpu: {{ .Values.api.resources.limits.cpu }}
               memory: {{ .Values.api.resources.limits.memory }}
+          # K8s liveness vs readiness contract (R5.5 Phase B-LK 2026-05-24
+          # hardening — ADR-0026): /health (liveness) is a no-op check after
+          # the matching Program.cs change; /health/ready runs the full
+          # "ready"-tagged suite (Postgres ping, Asterisk AMI ping, background
+          # service heartbeats). Probe timeouts widened defensively:
+          #   timeoutSeconds: 3 — gives /health/ready headroom under burst
+          #     when Postgres pool is hot. /health responds <1 ms so the 3 s
+          #     ceiling never bites for liveness.
+          #   failureThreshold: 5 — 5 consecutive failures (vs default 3)
+          #     before pod kill; absorbs transient blips without restarts.
           readinessProbe:
             httpGet:
               path: /health/ready
               port: {{ .Values.api.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
-            failureThreshold: 3
+            timeoutSeconds: 3
+            failureThreshold: 5
           livenessProbe:
             httpGet:
               path: /health
               port: {{ .Values.api.port }}
             initialDelaySeconds: 30
             periodSeconds: 15
-            failureThreshold: 3
+            timeoutSeconds: 3
+            failureThreshold: 5
           startupProbe:
             httpGet:
               path: /health
               port: {{ .Values.api.port }}
             initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 3
             failureThreshold: 12
       {{- if and .Values.api.licensing.licenseFilePath .Values.api.licensing.licenseSecret.enabled }}
       volumes:
