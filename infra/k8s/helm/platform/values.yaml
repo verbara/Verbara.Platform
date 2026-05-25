@@ -12,7 +12,7 @@ api:
     # the maintainer's k3s/Talos lab:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
-    tag: "v2.5.1"
+    tag: "v2.5.2"
     # Manifest-list digest of the `repository:tag` image, used for Layer-C
     # in-process image verification (ADR-0011, Pro v2.3.x). When set, the
     # Deployment template injects IMAGE_DIGEST env var that
@@ -21,11 +21,12 @@ api:
     # in verbara-website/data/authorized-digests.json. Leave empty to opt out
     # (Pro falls through to permissive path; matches dev-mode semantics).
     #
-    # Phase A.5 closure follow-up (2026-05-24): v2.5.1 api digest restored
-    # after the chicken-and-egg between chart bump + release.yml run + the
-    # verbara-website authorization PR. Paired with verbara-website PR #18
-    # which adds this digest to authorized-digests.json `current[]`.
-    digest: "sha256:b61b062f80a3f280a3465a3e00bc13ca04a4d3d45599e4f6eae5ebc431a5da12"
+    # v2.5.2 patch — K8s liveness/readiness contract fix (ADR-0025).
+    # Paired with verbara-website PR #19 which adds this digest to
+    # authorized-digests.json `current[]`. Verified via `crane digest`
+    # + `cosign verify --key .github/cosign.pub --insecure-ignore-tlog`
+    # against the published v2.5.2 tag at release.yml run 26377321843.
+    digest: "sha256:0e8cc50d3b4c1ef4643d7b1709a4636b6fa0a7d3b664009bbe74c4cd25d8ef1c"
   replicas: 2
   port: 5000
   resources:
@@ -164,15 +165,16 @@ realtime:
     # registry when validating against the maintainer's k3s/Talos lab:
     #   --set realtime.image.repository=192.168.122.1:5050/verbara-platform/realtime
     repository: ghcr.io/verbara/platform/realtime
-    tag: "v2.5.1"
+    tag: "v2.5.2"
     # Image-digest binding (ADR-0011 Layer C) — Pro license verification
     # extends to the Realtime image via the AuthorizedImageDigests claim.
     # Leave empty for tag-only references (dev / local registry).
     #
-    # Phase A.5 closure follow-up (2026-05-24): v2.5.1 realtime digest restored.
-    # Paired with the api digest above and verbara-website PR #18 which adds
-    # this digest to authorized-digests.json `current[]`.
-    digest: "sha256:46414e468fa625caf2dc81dce3e34ddd4306302c0cbbb7a01cd5b1e5342d037c"
+    # v2.5.2 patch — paired with the api digest above and verbara-website
+    # PR #19. Realtime has no semantic change in v2.5.2 (the K8s health
+    # contract fix only touched Platform.Api); rebuild captures the
+    # SDK/Pro restore + 0-warning compile against current main.
+    digest: "sha256:7b2f54c0943d8373aed5e802817469b9cd4744a11d13af04efb89c44214b6e28"
   replicas: 1
   port: 5030
   resources:
