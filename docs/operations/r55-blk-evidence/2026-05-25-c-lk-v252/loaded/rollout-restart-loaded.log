@@ -1,0 +1,217 @@
+===rollout restart UNDER LOAD (09:33:06)===
+---waiting 60s for HPA to settle into sustained load---
+---HPA + replicas right before rollout---
+NAME           REFERENCE                 TARGETS        MINPODS   MAXPODS   REPLICAS   AGE
+platform-api   Deployment/platform-api   cpu: 69%/70%   2         8         6          20d
+NAME                            READY   STATUS    RESTARTS        AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-57f8d6c7b6-5hjw9   1/1     Running   0               15m     10.244.3.222   talos-w3   <none>           <none>
+platform-api-57f8d6c7b6-8nlr7   1/1     Running   0               11m     10.244.0.173   talos-w1   <none>           <none>
+platform-api-57f8d6c7b6-f8s5d   1/1     Running   0               24m     10.244.1.103   talos-w2   <none>           <none>
+platform-api-57f8d6c7b6-gjkpt   1/1     Running   0               15m     10.244.1.33    talos-w2   <none>           <none>
+platform-api-57f8d6c7b6-jr6ch   1/1     Running   1 (9m39s ago)   13m     10.244.0.115   talos-w1   <none>           <none>
+platform-api-57f8d6c7b6-nhgwx   1/1     Running   0               7h44m   10.244.3.39    talos-w3   <none>           <none>
+T0_ROLL=1779701646 (09:34:06)
+---firing kubectl rollout restart---
+deployment.apps/platform-api restarted
+---probing /health + /health/ready + rollout status for 180s---
+t+0s liveness=200 ready=200
+t+2s liveness=200 ready=200
+t+3s liveness=200 ready=200
+t+4s liveness=200 ready=200
+t+9s liveness=000 ready=200
+t+10s liveness=200 ready=200
+t+11s liveness=200 ready=200
+t+12s liveness=200 ready=200
+t+13s liveness=200 ready=200
+t+16s liveness=200 ready=200
+t+17s liveness=200 ready=200
+t+18s liveness=200 ready=200
+t+19s liveness=200 ready=200
+t+20s liveness=200 ready=200
+t+21s liveness=200 ready=503
+  ready_states: false,true,true,true,true,true,true,
+t+22s liveness=200 ready=200
+t+25s liveness=200 ready=200
+t+26s liveness=200 ready=200
+t+27s liveness=200 ready=200
+t+28s liveness=200 ready=200
+t+31s liveness=000 ready=200
+t+32s liveness=200 ready=200
+t+33s liveness=200 ready=200
+t+35s liveness=200 ready=200
+t+36s liveness=200 ready=200
+t+37s liveness=200 ready=200
+t+41s liveness=200 ready=503
+t+42s liveness=200 ready=200
+t+45s liveness=200 ready=200
+t+46s liveness=200 ready=200
+  ready_states: true,true,false,true,true,true,
+t+47s liveness=200 ready=200
+t+48s liveness=200 ready=200
+t+49s liveness=200 ready=200
+t+54s liveness=000 ready=000
+t+55s liveness=200 ready=200
+t+56s liveness=200 ready=200
+t+59s liveness=200 ready=000
+t+62s liveness=000 ready=200
+t+64s liveness=200 ready=200
+t+66s liveness=200 ready=200
+t+69s liveness=000 ready=200
+t+70s liveness=200 ready=200
+t+74s liveness=200 ready=000
+t+75s liveness=200 ready=200
+t+78s liveness=000 ready=200
+  ready_states: true,false,true,true,true,true,
+t+79s liveness=200 ready=200
+t+82s liveness=000 ready=200
+t+83s liveness=200 ready=200
+t+85s liveness=200 ready=200
+t+86s liveness=200 ready=200
+t+87s liveness=200 ready=200
+t+88s liveness=200 ready=200
+t+90s liveness=200 ready=200
+t+91s liveness=200 ready=200
+t+95s liveness=000 ready=200
+t+98s liveness=200 ready=000
+t+102s liveness=200 ready=000
+t+103s liveness=200 ready=200
+t+104s liveness=200 ready=200
+t+107s liveness=200 ready=000
+  ready_states: true,true,true,true,true,false,
+t+108s liveness=200 ready=200
+t+109s liveness=200 ready=200
+t+112s liveness=000 ready=200
+t+113s liveness=200 ready=200
+t+114s liveness=200 ready=200
+t+115s liveness=200 ready=200
+t+118s liveness=200 ready=000
+t+119s liveness=200 ready=200
+t+120s liveness=200 ready=200
+t+121s liveness=200 ready=200
+t+126s liveness=000 ready=000
+t+127s liveness=200 ready=200
+t+130s liveness=200 ready=000
+t+133s liveness=200 ready=000
+t+136s liveness=200 ready=000
+  ready_states: true,true,true,true,true,true,
+t+137s liveness=200 ready=200
+t+140s liveness=200 ready=000
+t+143s liveness=000 ready=200
+t+144s liveness=200 ready=200
+t+145s liveness=200 ready=200
+t+149s liveness=000 ready=200
+t+154s liveness=000 ready=000
+t+157s liveness=000 ready=200
+t+158s liveness=200 ready=200
+t+161s liveness=200 ready=000
+t+164s liveness=200 ready=200
+t+165s liveness=200 ready=200
+t+168s liveness=000 ready=200
+t+169s liveness=200 ready=200
+t+170s liveness=200 ready=200
+  ready_states: true,true,true,true,true,true,
+t+173s liveness=200 ready=200
+t+174s liveness=200 ready=200
+t+178s liveness=000 ready=200
+t+179s liveness=200 ready=200
+t+182s liveness=200 ready=000
+t+183s liveness=200 ready=200
+t+186s liveness=000 ready=200
+t+187s liveness=200 ready=200
+t+188s liveness=200 ready=200
+t+190s liveness=200 ready=200
+t+193s liveness=200 ready=000
+t+194s liveness=200 ready=200
+t+196s liveness=200 ready=200
+t+197s liveness=200 ready=200
+t+198s liveness=200 ready=200
+  ready_states: true,true,true,true,true,true,
+t+200s liveness=200 ready=200
+t+201s liveness=200 ready=200
+t+202s liveness=200 ready=200
+t+203s liveness=200 ready=200
+t+204s liveness=200 ready=200
+t+205s liveness=200 ready=200
+t+206s liveness=200 ready=200
+t+207s liveness=200 ready=200
+t+208s liveness=200 ready=200
+t+209s liveness=200 ready=200
+t+210s liveness=200 ready=200
+t+211s liveness=200 ready=200
+t+212s liveness=200 ready=200
+t+213s liveness=200 ready=200
+t+214s liveness=200 ready=200
+  ready_states: true,true,true,true,true,true,
+t+215s liveness=200 ready=200
+t+216s liveness=200 ready=200
+t+217s liveness=200 ready=200
+t+218s liveness=200 ready=200
+t+219s liveness=200 ready=200
+t+220s liveness=200 ready=200
+t+221s liveness=200 ready=200
+t+222s liveness=200 ready=200
+t+223s liveness=200 ready=200
+t+224s liveness=200 ready=200
+t+225s liveness=200 ready=200
+t+226s liveness=200 ready=200
+t+227s liveness=200 ready=200
+t+228s liveness=200 ready=200
+t+229s liveness=200 ready=200
+  ready_states: true,true,true,true,true,true,
+t+230s liveness=200 ready=200
+t+231s liveness=200 ready=200
+t+232s liveness=200 ready=200
+t+233s liveness=200 ready=200
+t+234s liveness=200 ready=200
+t+235s liveness=200 ready=200
+t+236s liveness=200 ready=200
+t+237s liveness=200 ready=200
+t+239s liveness=200 ready=200
+t+240s liveness=200 ready=200
+t+241s liveness=200 ready=200
+t+242s liveness=200 ready=200
+t+243s liveness=200 ready=200
+t+244s liveness=200 ready=200
+t+245s liveness=200 ready=200
+  ready_states: true,true,true,true,true,true,
+t+246s liveness=200 ready=200
+t+247s liveness=200 ready=200
+t+248s liveness=200 ready=200
+t+249s liveness=200 ready=200
+t+250s liveness=200 ready=200
+t+251s liveness=200 ready=200
+t+252s liveness=200 ready=200
+t+253s liveness=200 ready=200
+t+254s liveness=200 ready=200
+t+255s liveness=200 ready=200
+t+256s liveness=200 ready=200
+t+257s liveness=200 ready=200
+t+258s liveness=200 ready=200
+t+259s liveness=200 ready=200
+t+260s liveness=200 ready=200
+  ready_states: true,true,true,true,true,true,
+t+261s liveness=200 ready=200
+t+262s liveness=200 ready=200
+t+263s liveness=200 ready=200
+t+264s liveness=200 ready=200
+t+265s liveness=200 ready=200
+t+266s liveness=200 ready=200
+t+267s liveness=200 ready=200
+t+268s liveness=200 ready=200
+t+269s liveness=200 ready=200
+t+270s liveness=200 ready=200
+t+271s liveness=200 ready=200
+t+272s liveness=200 ready=200
+t+273s liveness=200 ready=200
+t+274s liveness=200 ready=200
+t+275s liveness=200 ready=200
+  ready_states: true,true,true,true,true,true,
+---rollout status final---
+deployment "platform-api" successfully rolled out
+NAME                            READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-567c98f65c-89fqs   1/1     Running   0          4m15s   10.244.1.222   talos-w2   <none>           <none>
+platform-api-567c98f65c-8mmk5   1/1     Running   0          3m34s   10.244.3.69    talos-w3   <none>           <none>
+platform-api-567c98f65c-hqf7z   1/1     Running   0          3m13s   10.244.0.75    talos-w1   <none>           <none>
+platform-api-567c98f65c-jmqzp   1/1     Running   0          4m36s   10.244.3.231   talos-w3   <none>           <none>
+platform-api-567c98f65c-qfzgs   1/1     Running   0          3m54s   10.244.0.105   talos-w1   <none>           <none>
+platform-api-567c98f65c-tgbnc   1/1     Running   0          2m52s   10.244.1.117   talos-w2   <none>           <none>

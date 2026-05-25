@@ -1,0 +1,124 @@
+2026-05-25T01:49:08Z applying
+podchaos.chaos-mesh.org/platform-api-pod-kill created
+
+=== Chaos object status ===
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"chaos-mesh.org/v1alpha1","kind":"PodChaos","metadata":{"annotations":{},"name":"platform-api-pod-kill","namespace":"r55-platform"},"spec":{"action":"pod-kill","duration":"0s","mode":"one","selector":{"labelSelectors":{"app.kubernetes.io/name":"platform-api"},"namespaces":["r55-platform"]}}}
+  creationTimestamp: "2026-05-25T01:49:08Z"
+  finalizers:
+  - chaos-mesh/records
+  generation: 5
+  name: platform-api-pod-kill
+  namespace: r55-platform
+  resourceVersion: "3502985"
+  uid: f837c084-a30a-4462-bef0-b56e964d92d6
+spec:
+  action: pod-kill
+  duration: 0s
+  mode: one
+  selector:
+    labelSelectors:
+      app.kubernetes.io/name: platform-api
+    namespaces:
+    - r55-platform
+status:
+  conditions:
+  - status: "True"
+    type: Selected
+  - status: "True"
+    type: AllInjected
+  - status: "False"
+    type: AllRecovered
+  - status: "False"
+    type: Paused
+  experiment:
+    containerRecords:
+    - events:
+      - operation: Apply
+        timestamp: "2026-05-25T01:49:08Z"
+        type: Succeeded
+      id: r55-platform/platform-api-57f8d6c7b6-8k7tb
+      injectedCount: 1
+      phase: Injected
+      recoveredCount: 0
+      selectorKey: .
+    desiredPhase: Run
+
+=== Pods after observation ===
+NAMESPACE            NAME                                                    READY   STATUS      RESTARTS       AGE     IP               NODE        NOMINATED NODE   READINESS GATES
+chaos-mesh           chaos-controller-manager-7f78fb54b9-h62zg               1/1     Running     2 (15h ago)    7d21h   10.244.3.26      talos-w3    <none>           <none>
+chaos-mesh           chaos-daemon-bjszr                                      1/1     Running     0              15h     10.244.0.145     talos-w1    <none>           <none>
+chaos-mesh           chaos-daemon-d2779                                      1/1     Running     0              15h     10.244.1.58      talos-w2    <none>           <none>
+chaos-mesh           chaos-daemon-jt9x7                                      1/1     Running     0              15h     10.244.3.87      talos-w3    <none>           <none>
+chaos-mesh           chaos-dashboard-b56775cc-ll2vb                          1/1     Running     0              15h     10.244.0.205     talos-w1    <none>           <none>
+chaos-mesh           chaos-dashboard-b56775cc-xp49j                          0/1     Completed   1 (2d3h ago)   7d21h   <none>           talos-w2    <none>           <none>
+chaos-mesh           chaos-dns-server-7cdff5d7b9-57srv                       1/1     Running     0              15h     10.244.0.171     talos-w1    <none>           <none>
+chaos-mesh           chaos-dns-server-7cdff5d7b9-gxff8                       0/1     Completed   0              16h     <none>           talos-w3    <none>           <none>
+cnpg-system          cnpg-controller-manager-6f488cd599-4xrvm                0/1     Completed   5 (2d3h ago)   20d     <none>           talos-w3    <none>           <none>
+cnpg-system          cnpg-controller-manager-6f488cd599-lfjfv                1/1     Running     0              15h     10.244.0.9       talos-w1    <none>           <none>
+kube-system          cilium-49b4f                                            1/1     Running     0              15h     192.168.122.12   talos-w2    <none>           <none>
+kube-system          cilium-envoy-8t4hb                                      1/1     Running     0              15h     192.168.122.11   talos-w1    <none>           <none>
+kube-system          cilium-envoy-c95jg                                      1/1     Running     2 (2d3h ago)   20d     192.168.122.10   talos-cp1   <none>           <none>
+kube-system          cilium-envoy-j4r7m                                      1/1     Running     0              15h     192.168.122.12   talos-w2    <none>           <none>
+kube-system          cilium-envoy-pc5k8                                      1/1     Running     0              15h     192.168.122.13   talos-w3    <none>           <none>
+kube-system          cilium-k7zd2                                            1/1     Running     2 (2d3h ago)   20d     192.168.122.10   talos-cp1   <none>           <none>
+kube-system          cilium-n8wfl                                            1/1     Running     0              15h     192.168.122.13   talos-w3    <none>           <none>
+kube-system          cilium-operator-9c8749c7b-zzgfj                         1/1     Running     0              15h     192.168.122.10   talos-cp1   <none>           <none>
+kube-system          cilium-zf9nr                                            1/1     Running     0              15h     192.168.122.11   talos-w1    <none>           <none>
+kube-system          coredns-6dc87b5c58-6vnnp                                1/1     Running     2 (2d3h ago)   20d     10.244.2.109     talos-cp1   <none>           <none>
+kube-system          coredns-6dc87b5c58-k5g97                                1/1     Running     2 (2d3h ago)   20d     10.244.2.217     talos-cp1   <none>           <none>
+kube-system          hubble-relay-599d47597b-zx8tr                           1/1     Running     0              15h     10.244.0.26      talos-w1    <none>           <none>
+kube-system          hubble-ui-6b4f8fcff9-dnvsw                              2/2     Running     0              15h     10.244.0.156     talos-w1    <none>           <none>
+kube-system          hubble-ui-6b4f8fcff9-vkzhp                              0/2     Completed   0              16h     <none>           talos-w3    <none>           <none>
+kube-system          kube-apiserver-talos-cp1                                1/1     Running     0              2d3h    192.168.122.10   talos-cp1   <none>           <none>
+kube-system          kube-controller-manager-talos-cp1                       1/1     Running     2 (2d3h ago)   2d3h    192.168.122.10   talos-cp1   <none>           <none>
+kube-system          kube-scheduler-talos-cp1                                1/1     Running     2 (2d3h ago)   2d3h    192.168.122.10   talos-cp1   <none>           <none>
+kube-system          metrics-server-64d84f5944-vwmtk                         1/1     Running     1 (15h ago)    16h     10.244.3.35      talos-w3    <none>           <none>
+local-path-storage   local-path-provisioner-785fc5d6cf-mt99h                 1/1     Running     0              15h     10.244.0.17      talos-w1    <none>           <none>
+local-path-storage   local-path-provisioner-785fc5d6cf-nnd6b                 0/1     Completed   2 (2d3h ago)   20d     <none>           talos-w3    <none>           <none>
+monitoring           alertmanager-prometheus-alertmanager-0                  2/2     Running     0              15h     10.244.0.65      talos-w1    <none>           <none>
+monitoring           blackbox-prometheus-blackbox-exporter-69667fddc-fh5wr   0/1     Completed   0              15h     <none>           talos-w3    <none>           <none>
+monitoring           blackbox-prometheus-blackbox-exporter-69667fddc-tgckp   1/1     Running     0              15h     10.244.0.64      talos-w1    <none>           <none>
+monitoring           blackbox-prometheus-blackbox-exporter-69667fddc-wczxm   0/1     Completed   2 (2d3h ago)   19d     <none>           talos-w2    <none>           <none>
+monitoring           loki-0                                                  2/2     Running     0              15h     10.244.3.220     talos-w3    <none>           <none>
+monitoring           loki-canary-fxsnp                                       1/1     Running     0              15h     10.244.1.129     talos-w2    <none>           <none>
+monitoring           loki-canary-q67v5                                       1/1     Running     0              15h     10.244.3.98      talos-w3    <none>           <none>
+monitoring           loki-canary-wgwvv                                       1/1     Running     0              15h     10.244.0.111     talos-w1    <none>           <none>
+monitoring           loki-chunks-cache-0                                     2/2     Running     0              15h     10.244.0.121     talos-w1    <none>           <none>
+monitoring           prometheus-grafana-7986b879bb-fd7x8                     0/3     Completed   3 (2d3h ago)   7d21h   <none>           talos-w2    <none>           <none>
+monitoring           prometheus-grafana-7986b879bb-vbd42                     3/3     Running     0              15h     10.244.1.44      talos-w2    <none>           <none>
+monitoring           prometheus-kube-state-metrics-5d4654dd56-l6pld          1/1     Running     0              15h     10.244.0.188     talos-w1    <none>           <none>
+monitoring           prometheus-operator-5c9b6659d5-5gtvb                    1/1     Running     0              15h     10.244.0.165     talos-w1    <none>           <none>
+monitoring           prometheus-operator-5c9b6659d5-j2gwt                    0/1     Completed   2 (2d3h ago)   19d     <none>           talos-w2    <none>           <none>
+monitoring           prometheus-operator-5c9b6659d5-pq2c2                    0/1     Completed   0              15h     <none>           talos-w3    <none>           <none>
+monitoring           prometheus-prometheus-node-exporter-h55zr               1/1     Running     0              15h     192.168.122.13   talos-w3    <none>           <none>
+monitoring           prometheus-prometheus-node-exporter-hpxzc               1/1     Running     1 (2d3h ago)   8d      192.168.122.10   talos-cp1   <none>           <none>
+monitoring           prometheus-prometheus-node-exporter-krgtd               1/1     Running     0              15h     192.168.122.11   talos-w1    <none>           <none>
+monitoring           prometheus-prometheus-node-exporter-l2w6p               1/1     Running     0              15h     192.168.122.12   talos-w2    <none>           <none>
+monitoring           prometheus-prometheus-prometheus-0                      2/2     Running     0              15h     10.244.0.45      talos-w1    <none>           <none>
+r55-asterisk         asterisk-0                                              1/1     Running     0              6d3h    10.244.1.40      talos-w2    <none>           <none>
+r55-asterisk         asterisk-1                                              1/1     Running     0              15h     10.244.0.106     talos-w1    <none>           <none>
+r55-asterisk         kamailio-2wfmg                                          1/1     Running     0              15h     192.168.122.13   talos-w3    <none>           <none>
+r55-asterisk         kamailio-w4fd5                                          1/1     Running     0              15h     192.168.122.12   talos-w2    <none>           <none>
+r55-asterisk         kamailio-z7zsw                                          1/1     Running     0              15h     192.168.122.11   talos-w1    <none>           <none>
+r55-asterisk         rtpengine-bpw7z                                         1/1     Running     0              15h     192.168.122.13   talos-w3    <none>           <none>
+r55-asterisk         rtpengine-rjwjn                                         1/1     Running     0              15h     192.168.122.12   talos-w2    <none>           <none>
+r55-asterisk         rtpengine-znkxz                                         1/1     Running     0              15h     192.168.122.11   talos-w1    <none>           <none>
+r55-data             postgres-1                                              1/1     Running     0              3m      10.244.1.142     talos-w2    <none>           <none>
+r55-data             postgres-2                                              1/1     Running     0              15h     10.244.3.100     talos-w3    <none>           <none>
+r55-data             postgres-3                                              1/1     Running     0              15h     10.244.0.242     talos-w1    <none>           <none>
+r55-data             postgres-pooler-5876fc5fb5-lxtpp                        1/1     Running     0              15h     10.244.3.158     talos-w3    <none>           <none>
+r55-data             postgres-pooler-5876fc5fb5-tn2fl                        1/1     Running     0              15h     10.244.1.27      talos-w2    <none>           <none>
+r55-data             postgres-pooler-6444f88557-8ftwn                        0/1     Completed   2 (2d3h ago)   20d     <none>           talos-w2    <none>           <none>
+r55-data             postgres-pooler-6444f88557-gkcqk                        0/1     Completed   2 (2d3h ago)   20d     <none>           talos-w3    <none>           <none>
+r55-data             redis-0                                                 1/1     Running     0              15h     10.244.1.59      talos-w2    <none>           <none>
+r55-platform         platform-api-57f8d6c7b6-nhgwx                           1/1     Running     0              90s     10.244.3.39      talos-w3    <none>           <none>
+r55-platform         platform-api-57f8d6c7b6-vtgk9                           1/1     Running     0              49m     10.244.0.218     talos-w1    <none>           <none>
+r55-platform         platform-realtime-f485db766-t8msj                       1/1     Running     0              50m     10.244.1.221     talos-w2    <none>           <none>
+r55-platform         web-6b9ccdb796-c77tj                                    1/1     Running     0              6h2m    10.244.3.45      talos-w3    <none>           <none>
+podchaos.chaos-mesh.org "platform-api-pod-kill" deleted from r55-platform namespace
+2026-05-25T01:50:38Z cleaned

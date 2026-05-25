@@ -1,0 +1,54 @@
+T0=1779700948 (09:22:28)
+platform-api-57f8d6c7b6-5hjw9: ready=true, restarts=0
+platform-api-57f8d6c7b6-f8s5d: ready=true, restarts=0
+platform-api-57f8d6c7b6-gjkpt: ready=true, restarts=0
+platform-api-57f8d6c7b6-jr6ch: ready=true, restarts=0
+platform-api-57f8d6c7b6-nhgwx: ready=true, restarts=0
+platform-api-57f8d6c7b6-vtgk9: ready=true, restarts=0
+platform-realtime-f485db766-t8msj: ready=true, restarts=0
+web-6b9ccdb796-c77tj: ready=true, restarts=0
+---applying chaos #02---
+podchaos.chaos-mesh.org/platform-api-pod-kill created
+---probing /health and /health/ready for 30s---
+09:22:29 liveness=200 ready=200
+09:22:30 liveness=200 ready=200
+09:22:31 liveness=200 ready=200
+09:22:34 liveness=200 ready=000
+09:22:35 liveness=200 ready=200
+09:22:38 liveness=200 ready=000
+09:22:39 liveness=200 ready=200
+09:22:40 liveness=200 ready=200
+09:22:41 liveness=200 ready=200
+09:22:44 liveness=000 ready=200
+09:22:47 liveness=000 ready=200
+09:22:48 liveness=200 ready=200
+09:22:49 liveness=200 ready=200
+09:22:52 liveness=000 ready=200
+09:22:55 liveness=000 ready=200
+09:22:56 liveness=200 ready=200
+09:22:57 liveness=200 ready=200
+09:22:58 liveness=200 ready=200
+09:22:59 liveness=200 ready=200
+09:23:00 liveness=200 ready=200
+09:23:01 liveness=200 ready=200
+09:23:04 liveness=000 ready=200
+09:23:07 liveness=200 ready=000
+09:23:08 liveness=200 ready=200
+09:23:09 liveness=200 ready=200
+09:23:10 liveness=200 ready=200
+09:23:11 liveness=200 ready=200
+09:23:12 liveness=200 ready=200
+09:23:13 liveness=200 ready=200
+09:23:14 liveness=200 ready=200
+---cleanup chaos #02---
+podchaos.chaos-mesh.org "platform-api-pod-kill" deleted from r55-platform namespace
+---post-chaos pods---
+NAME                                READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-57f8d6c7b6-5hjw9       1/1     Running   0          4m37s   10.244.3.222   talos-w3   <none>           <none>
+platform-api-57f8d6c7b6-8nlr7       1/1     Running   0          46s     10.244.0.173   talos-w1   <none>           <none>
+platform-api-57f8d6c7b6-f8s5d       1/1     Running   0          13m     10.244.1.103   talos-w2   <none>           <none>
+platform-api-57f8d6c7b6-gjkpt       1/1     Running   0          4m37s   10.244.1.33    talos-w2   <none>           <none>
+platform-api-57f8d6c7b6-jr6ch       0/1     Running   0          2m21s   10.244.0.115   talos-w1   <none>           <none>
+platform-api-57f8d6c7b6-nhgwx       1/1     Running   0          7h34m   10.244.3.39    talos-w3   <none>           <none>
+platform-realtime-f485db766-t8msj   1/1     Running   0          8h      10.244.1.221   talos-w2   <none>           <none>
+web-6b9ccdb796-c77tj                1/1     Running   0          13h     10.244.3.45    talos-w3   <none>           <none>

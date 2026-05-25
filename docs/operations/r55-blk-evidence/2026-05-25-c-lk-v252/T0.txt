@@ -1,0 +1,57 @@
+===T0 timestamp===
+2026-05-25T01:47:10Z
+===nodes===
+NAME        STATUS   ROLES           AGE   VERSION   INTERNAL-IP      EXTERNAL-IP   OS-IMAGE          KERNEL-VERSION          CONTAINER-RUNTIME
+talos-cp1   Ready    control-plane   20d   v1.36.0   192.168.122.10   <none>        Talos (v1.13.0)   6.18.24-talos (amd64)   containerd://2.2.3
+talos-w1    Ready    <none>          20d   v1.36.0   192.168.122.11   <none>        Talos (v1.13.0)   6.18.24-talos (amd64)   containerd://2.2.3
+talos-w2    Ready    <none>          20d   v1.36.0   192.168.122.12   <none>        Talos (v1.13.0)   6.18.24-talos (amd64)   containerd://2.2.3
+talos-w3    Ready    <none>          20d   v1.36.0   192.168.122.13   <none>        Talos (v1.13.0)   6.18.24-talos (amd64)   containerd://2.2.3
+===helm release platform===
+platform  	default    	26      	2026-05-24 20:00:23.981853455 -0500 -05	deployed	platform-0.2.10                    	2.5.1      
+===all platform pods===
+NAME                                READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-57f8d6c7b6-8k7tb       1/1     Running   0          43m     10.244.3.86    talos-w3   <none>           <none>
+platform-api-57f8d6c7b6-vtgk9       1/1     Running   0          46m     10.244.0.218   talos-w1   <none>           <none>
+platform-realtime-f485db766-t8msj   1/1     Running   0          46m     10.244.1.221   talos-w2   <none>           <none>
+web-6b9ccdb796-c77tj                1/1     Running   0          5h59m   10.244.3.45    talos-w3   <none>           <none>
+===restart counts platform===
+platform-api-57f8d6c7b6-8k7tb: restarts=0
+platform-api-57f8d6c7b6-vtgk9: restarts=0
+platform-realtime-f485db766-t8msj: restarts=0
+web-6b9ccdb796-c77tj: restarts=0
+===all data pods===
+NAME                               READY   STATUS      RESTARTS       AGE   IP             NODE       NOMINATED NODE   READINESS GATES
+postgres-1                         1/1     Running     0              15h   10.244.1.250   talos-w2   <none>           <none>
+postgres-2                         1/1     Running     0              15h   10.244.3.100   talos-w3   <none>           <none>
+postgres-3                         1/1     Running     0              15h   10.244.0.242   talos-w1   <none>           <none>
+postgres-pooler-5876fc5fb5-lxtpp   1/1     Running     0              15h   10.244.3.158   talos-w3   <none>           <none>
+postgres-pooler-5876fc5fb5-tn2fl   1/1     Running     0              15h   10.244.1.27    talos-w2   <none>           <none>
+postgres-pooler-6444f88557-8ftwn   0/1     Completed   2 (2d3h ago)   20d   <none>         talos-w2   <none>           <none>
+postgres-pooler-6444f88557-gkcqk   0/1     Completed   2 (2d3h ago)   20d   <none>         talos-w3   <none>           <none>
+redis-0                            1/1     Running     0              15h   10.244.1.59    talos-w2   <none>           <none>
+===restart counts data===
+postgres-1: restarts=0
+postgres-2: restarts=0
+postgres-3: restarts=0
+postgres-pooler-5876fc5fb5-lxtpp: restarts=0
+postgres-pooler-5876fc5fb5-tn2fl: restarts=0
+postgres-pooler-6444f88557-8ftwn: restarts=2
+postgres-pooler-6444f88557-gkcqk: restarts=2
+redis-0: restarts=0
+===CNPG cluster===
+NAME       AGE   INSTANCES   READY   STATUS                     PRIMARY
+postgres   20d   3           3       Cluster in healthy state   postgres-3
+===HPA===
+NAME                REFERENCE                      TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
+platform-api        Deployment/platform-api        cpu: 1%/70%   2         8         2          19d
+platform-realtime   Deployment/platform-realtime   cpu: 1%/70%   1         4         1          17h
+===image of platform-api===
+platform-api-57f8d6c7b6-8k7tb: ghcr.io/verbara/platform/api@sha256:0e8cc50d3b4c1ef4643d7b1709a4636b6fa0a7d3b664009bbe74c4cd25d8ef1c
+platform-api-57f8d6c7b6-vtgk9: ghcr.io/verbara/platform/api@sha256:0e8cc50d3b4c1ef4643d7b1709a4636b6fa0a7d3b664009bbe74c4cd25d8ef1c
+===pre-existing alerts (baseline)===
+BlackboxJourneyDown P0 state=firing target=asterisk-ari
+BlackboxJourneyDown P0 state=firing target=asterisk-ami
+TargetDown warning state=firing target=-
+TargetDown warning state=firing target=-
+TargetDown warning state=firing target=-
+Watchdog none state=firing target=-

@@ -1,0 +1,96 @@
+===chaos #10 CNPG primary failover UNDER LOAD (09:29:50)===
+NAME       AGE   INSTANCES   READY   STATUS                     PRIMARY
+postgres   20d   3           3       Cluster in healthy state   postgres-1
+---NBomber active: HPA target/replicas---
+platform-api   Deployment/platform-api   cpu: 71%/70%   2     8     6     20d
+---applying chaos #10 (kills postgres-1 PRIMARY)---
+podchaos.chaos-mesh.org/cnpg-primary-failover created
+T0_KILL=1779701390 (09:29:50)
+---probing /health + /health/ready for 90s + CNPG state---
+t+0s liveness=200 ready=200
+t+1s liveness=200 ready=200
+t+2s liveness=200 ready=503
+t+5s liveness=200 ready=000
+t+7s liveness=200 ready=503
+t+8s liveness=200 ready=503
+t+9s liveness=200 ready=503
+t+10s liveness=200 ready=503
+t+11s liveness=200 ready=503
+t+12s liveness=200 ready=503
+---continuing post-bug at 09:30:43---
+t+53s liveness=200 ready=200
+t+54s liveness=200 ready=200
+t+55s liveness=200 ready=200
+t+56s liveness=200 ready=200
+t+57s liveness=200 ready=200
+t+58s liveness=200 ready=200
+t+59s liveness=200 ready=200
+t+60s liveness=200 ready=200
+t+61s liveness=200 ready=200
+t+62s liveness=200 ready=200
+t+63s liveness=200 ready=200
+t+64s liveness=200 ready=200
+t+65s liveness=200 ready=200
+t+66s liveness=200 ready=200
+t+67s liveness=200 ready=200
+  CNPG primary=postgres-2 phase=Cluster in healthy state
+t+68s liveness=200 ready=200
+t+69s liveness=200 ready=200
+t+70s liveness=200 ready=200
+t+71s liveness=200 ready=200
+t+72s liveness=200 ready=200
+t+73s liveness=200 ready=200
+t+74s liveness=200 ready=200
+t+75s liveness=200 ready=200
+t+76s liveness=200 ready=200
+t+77s liveness=200 ready=200
+t+78s liveness=200 ready=200
+t+79s liveness=200 ready=200
+t+80s liveness=200 ready=200
+t+81s liveness=200 ready=200
+t+82s liveness=200 ready=200
+  CNPG primary=postgres-2 phase=Cluster in healthy state
+t+83s liveness=200 ready=200
+t+84s liveness=200 ready=200
+t+85s liveness=200 ready=200
+t+86s liveness=200 ready=200
+t+87s liveness=200 ready=200
+t+88s liveness=200 ready=200
+t+89s liveness=200 ready=200
+t+90s liveness=200 ready=200
+t+91s liveness=200 ready=200
+t+92s liveness=200 ready=200
+t+93s liveness=200 ready=200
+t+94s liveness=200 ready=200
+t+95s liveness=200 ready=200
+t+96s liveness=200 ready=200
+t+97s liveness=200 ready=200
+  CNPG primary=postgres-2 phase=Cluster in healthy state
+t+98s liveness=200 ready=200
+t+100s liveness=200 ready=200
+t+101s liveness=200 ready=200
+t+102s liveness=200 ready=200
+t+103s liveness=200 ready=200
+t+104s liveness=200 ready=200
+t+105s liveness=200 ready=200
+t+106s liveness=200 ready=200
+t+107s liveness=200 ready=200
+t+108s liveness=200 ready=200
+t+109s liveness=200 ready=200
+t+110s liveness=200 ready=200
+t+111s liveness=200 ready=200
+t+112s liveness=200 ready=200
+t+113s liveness=200 ready=200
+  CNPG primary=postgres-2 phase=Cluster in healthy state
+---final state---
+NAME       AGE   INSTANCES   READY   STATUS                     PRIMARY
+postgres   20d   3           3       Cluster in healthy state   postgres-2
+NAME                               READY   STATUS      RESTARTS        AGE
+postgres-1                         1/1     Running     0               110s
+postgres-2                         1/1     Running     0               23h
+postgres-3                         1/1     Running     0               20m
+postgres-pooler-5876fc5fb5-lxtpp   1/1     Running     0               23h
+postgres-pooler-5876fc5fb5-tn2fl   1/1     Running     0               23h
+postgres-pooler-6444f88557-8ftwn   0/1     Completed   2 (2d11h ago)   20d
+postgres-pooler-6444f88557-gkcqk   0/1     Completed   2 (2d11h ago)   20d
+podchaos.chaos-mesh.org "cnpg-primary-failover" deleted from r55-data namespace

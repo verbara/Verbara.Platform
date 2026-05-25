@@ -1,0 +1,59 @@
+2026-05-25T09:17:00Z
+---all platform pods---
+NAME                                READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-57f8d6c7b6-7n2km       1/1     Running   0          7m37s   10.244.3.99    talos-w3   <none>           <none>
+platform-api-57f8d6c7b6-f8s5d       1/1     Running   0          7m37s   10.244.1.103   talos-w2   <none>           <none>
+platform-api-57f8d6c7b6-nhgwx       1/1     Running   0          7h27m   10.244.3.39    talos-w3   <none>           <none>
+platform-api-57f8d6c7b6-vtgk9       1/1     Running   0          8h      10.244.0.218   talos-w1   <none>           <none>
+platform-realtime-f485db766-t8msj   1/1     Running   0          8h      10.244.1.221   talos-w2   <none>           <none>
+web-6b9ccdb796-c77tj                1/1     Running   0          13h     10.244.3.45    talos-w3   <none>           <none>
+---restart counts platform---
+platform-api-57f8d6c7b6-7n2km: restarts=0
+platform-api-57f8d6c7b6-f8s5d: restarts=0
+platform-api-57f8d6c7b6-nhgwx: restarts=0
+platform-api-57f8d6c7b6-vtgk9: restarts=0
+platform-realtime-f485db766-t8msj: restarts=0
+web-6b9ccdb796-c77tj: restarts=0
+---data pods---
+NAME                               READY   STATUS      RESTARTS        AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+postgres-1                         1/1     Running     0               7h29m   10.244.1.142   talos-w2   <none>           <none>
+postgres-2                         1/1     Running     0               23h     10.244.3.100   talos-w3   <none>           <none>
+postgres-3                         1/1     Running     0               5m18s   10.244.0.102   talos-w1   <none>           <none>
+postgres-pooler-5876fc5fb5-lxtpp   1/1     Running     0               23h     10.244.3.158   talos-w3   <none>           <none>
+postgres-pooler-5876fc5fb5-tn2fl   1/1     Running     0               23h     10.244.1.27    talos-w2   <none>           <none>
+postgres-pooler-6444f88557-8ftwn   0/1     Completed   2 (2d10h ago)   20d     <none>         talos-w2   <none>           <none>
+postgres-pooler-6444f88557-gkcqk   0/1     Completed   2 (2d10h ago)   20d     <none>         talos-w3   <none>           <none>
+redis-0                            1/1     Running     0               7h26m   10.244.1.122   talos-w2   <none>           <none>
+---restart counts data---
+postgres-1: restarts=0
+postgres-2: restarts=0
+postgres-3: restarts=0
+postgres-pooler-5876fc5fb5-lxtpp: restarts=0
+postgres-pooler-5876fc5fb5-tn2fl: restarts=0
+postgres-pooler-6444f88557-8ftwn: restarts=2
+postgres-pooler-6444f88557-gkcqk: restarts=2
+redis-0: restarts=0
+---asterisk pods---
+NAME              READY   STATUS    RESTARTS        AGE     IP               NODE       NOMINATED NODE   READINESS GATES
+asterisk-0        1/1     Running   0               7h24m   10.244.1.161     talos-w2   <none>           <none>
+asterisk-1        1/1     Running   0               23h     10.244.0.106     talos-w1   <none>           <none>
+kamailio-2wfmg    1/1     Running   0               23h     192.168.122.13   talos-w3   <none>           <none>
+kamailio-gbv9p    1/1     Running   0               7h23m   192.168.122.11   talos-w1   <none>           <none>
+kamailio-w4fd5    1/1     Running   1 (7h24m ago)   23h     192.168.122.12   talos-w2   <none>           <none>
+rtpengine-bpw7z   1/1     Running   0               23h     192.168.122.13   talos-w3   <none>           <none>
+rtpengine-rjwjn   1/1     Running   0               23h     192.168.122.12   talos-w2   <none>           <none>
+rtpengine-znkxz   1/1     Running   0               23h     192.168.122.11   talos-w1   <none>           <none>
+---CNPG cluster---
+NAME       AGE   INSTANCES   READY   STATUS                     PRIMARY
+postgres   20d   3           3       Cluster in healthy state   postgres-1
+---HPA---
+NAME                REFERENCE                      TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
+platform-api        Deployment/platform-api        cpu: 1%/70%   2         8         4          20d
+platform-realtime   Deployment/platform-realtime   cpu: 1%/70%   1         4         1          25h
+---firing alerts (delta vs T0)---
+BlackboxJourneyDown sev=P0 state=firing tgt=asterisk-ami
+BlackboxJourneyDown sev=P0 state=firing tgt=asterisk-ari
+TargetDown sev=warning state=firing tgt=-
+TargetDown sev=warning state=firing tgt=-
+TargetDown sev=warning state=firing tgt=-
+Watchdog sev=none state=firing tgt=-
