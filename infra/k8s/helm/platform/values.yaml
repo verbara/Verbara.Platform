@@ -12,7 +12,7 @@ api:
     # the maintainer's k3s/Talos lab:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
-    tag: "v2.5.2"
+    tag: "v2.5.3"
     # Manifest-list digest of the `repository:tag` image, used for Layer-C
     # in-process image verification (ADR-0011, Pro v2.3.x). When set, the
     # Deployment template injects IMAGE_DIGEST env var that
@@ -21,12 +21,12 @@ api:
     # in verbara-website/data/authorized-digests.json. Leave empty to opt out
     # (Pro falls through to permissive path; matches dev-mode semantics).
     #
-    # v2.5.2 patch — K8s liveness/readiness contract fix (ADR-0025).
-    # Paired with verbara-website PR #19 which adds this digest to
-    # authorized-digests.json `current[]`. Verified via `crane digest`
-    # + `cosign verify --key .github/cosign.pub --insecure-ignore-tlog`
-    # against the published v2.5.2 tag at release.yml run 26377321843.
-    digest: "sha256:0e8cc50d3b4c1ef4643d7b1709a4636b6fa0a7d3b664009bbe74c4cd25d8ef1c"
+    # v2.5.3 patch — JWT Tier-1 hardening (stale-cache fallback + TTL 60s→300s
+    # + observability counters) per docs/research/2026-05-24-jti-investigation-
+    # presence-vu1500.md § Tier 1. Paired with verbara-website PR #20 which
+    # adds this digest to authorized-digests.json `current[]`. release.yml
+    # run 26396711953, 4 cosign-signed images.
+    digest: "sha256:a60b40ee6d08205cdd79ea21d9973cde458b3aad6e631e5952cc4933ab26c1e7"
   replicas: 2
   port: 5000
   resources:
@@ -165,16 +165,16 @@ realtime:
     # registry when validating against the maintainer's k3s/Talos lab:
     #   --set realtime.image.repository=192.168.122.1:5050/verbara-platform/realtime
     repository: ghcr.io/verbara/platform/realtime
-    tag: "v2.5.2"
+    tag: "v2.5.3"
     # Image-digest binding (ADR-0011 Layer C) — Pro license verification
     # extends to the Realtime image via the AuthorizedImageDigests claim.
     # Leave empty for tag-only references (dev / local registry).
     #
-    # v2.5.2 patch — paired with the api digest above and verbara-website
-    # PR #19. Realtime has no semantic change in v2.5.2 (the K8s health
-    # contract fix only touched Platform.Api); rebuild captures the
-    # SDK/Pro restore + 0-warning compile against current main.
-    digest: "sha256:7b2f54c0943d8373aed5e802817469b9cd4744a11d13af04efb89c44214b6e28"
+    # v2.5.3 patch — paired with the api digest above and verbara-website
+    # PR #20. Realtime has no semantic change in v2.5.3 (Tier-1 hardening
+    # only touched Platform.Api); rebuild captures the SDK/Pro restore +
+    # 0-warning compile against current main.
+    digest: "sha256:fe9b92a70b8cb773da4039c0b9a7b95239912b8086bae416c1aa390ca4d0dc5a"
   replicas: 1
   port: 5030
   resources:
