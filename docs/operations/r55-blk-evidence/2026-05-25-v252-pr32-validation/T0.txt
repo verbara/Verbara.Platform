@@ -1,0 +1,17 @@
+2026-05-25T01:03:03Z
+NAME                                READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-57f8d6c7b6-vtgk9       1/1     Running   0          2m14s   10.244.0.218   talos-w1   <none>           <none>
+platform-api-57f8d6c7b6-wclhq       1/1     Running   0          2m39s   10.244.3.148   talos-w3   <none>           <none>
+platform-realtime-f485db766-blksb   1/1     Running   0          2m11s   10.244.3.61    talos-w3   <none>           <none>
+platform-realtime-f485db766-lmspk   1/1     Running   0          2m29s   10.244.1.43    talos-w2   <none>           <none>
+platform-realtime-f485db766-t89s8   1/1     Running   0          2m22s   10.244.0.225   talos-w1   <none>           <none>
+platform-realtime-f485db766-t8msj   1/1     Running   0          2m39s   10.244.1.221   talos-w2   <none>           <none>
+web-6b9ccdb796-c77tj                1/1     Running   0          5h15m   10.244.3.45    talos-w3   <none>           <none>
+---restartCount baseline---
+platform-api-57f8d6c7b6-vtgk9: restarts=0
+platform-api-57f8d6c7b6-wclhq: restarts=0
+platform-realtime-f485db766-blksb: restarts=0
+platform-realtime-f485db766-lmspk: restarts=0
+platform-realtime-f485db766-t89s8: restarts=0
+platform-realtime-f485db766-t8msj: restarts=0
+web-6b9ccdb796-c77tj: restarts=0

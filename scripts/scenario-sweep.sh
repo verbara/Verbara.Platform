@@ -86,12 +86,25 @@ TOKEN_STALENESS_SEC="${TOKEN_STALENESS_SEC:-60}"
 # it as expired (forces refresh).
 jwt_exp_seconds() {
     local token="$1"
-    local payload
-    # JWT format: header.payload.signature — base64url-encoded payload, may
-    # need padding before base64 -d. Tr swaps URL-safe chars; sed pads.
-    payload=$(printf '%s' "$token" | awk -F. '{print $2}' | tr '_-' '/+' | sed -E 's/$/===/' | cut -c1-$((($(printf '%s' "$token" | awk -F. '{print $2}' | wc -c) + 3) / 4 * 4))) || return 0
-    [ -z "$payload" ] && { echo 0; return 0; }
-    echo "$payload" | base64 -d 2>/dev/null | jq -r '.exp // 0' 2>/dev/null || echo 0
+    local b64 padded decoded exp
+    # JWT format: header.payload.signature. The payload is base64url-encoded
+    # (URL-safe alphabet, no padding). base64(1) needs `=` padding back +
+    # standard alphabet (`_`→`/`, `-`→`+`). Step-by-step avoids the
+    # `set -o pipefail` trap where a downstream pipe failure forces the
+    # `|| echo 0` fallback to fire AFTER a successful upstream emit and
+    # injects a second line into the function's stdout.
+    b64=$(printf '%s' "$token" | awk -F. '{print $2}')
+    [ -z "$b64" ] && { echo 0; return 0; }
+    # Pad to a multiple of 4 with '='.
+    local len=${#b64}
+    local pad=$(( (4 - len % 4) % 4 ))
+    padded="$b64$(printf '%*s' "$pad" '' | tr ' ' '=')"
+    # tr '_-' '/+' is symmetric; safe even when no special chars present.
+    decoded=$(printf '%s' "$padded" | tr '_-' '/+' | base64 -d 2>/dev/null) || decoded=""
+    [ -z "$decoded" ] && { echo 0; return 0; }
+    exp=$(printf '%s' "$decoded" | jq -r '.exp // 0' 2>/dev/null) || exp=0
+    [ -z "$exp" ] && exp=0
+    echo "$exp"
 }
 
 # Check whether a cached token is still safe to reuse: present, parseable,

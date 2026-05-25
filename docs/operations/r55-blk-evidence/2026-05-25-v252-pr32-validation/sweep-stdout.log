@@ -1,0 +1,19 @@
+[scenario-sweep] Scenario:     presence (mode=presence-only)
+[scenario-sweep] Ladder var:   LOADTEST_VU
+[scenario-sweep] Ladder:       1500
+[scenario-sweep] Per-step:     60s execution + 5s cooldown
+[scenario-sweep] Target URL:   http://api.r55.local
+[scenario-sweep] Admin login:  platform-admin@r55-staging.local
+
+[scenario-sweep] === step LOADTEST_VU=1500 × 60s ===
+  - ok count: 43184
+  - fail count: 0
+│ latency percentile (ms) │ p50 = 1731.58, p75 = 3391.49, p95 = 3710.98, p99 = │
+status codes for scenario: presence_broadcast
+│ status code │ count │ message │
+│          OK │ 43184 │         │
+[scenario-sweep] Step LOADTEST_VU=1500 log: /tmp/scenario-sweep-presence-r1500.log
+[scenario-sweep] Step LOADTEST_VU=1500 report: /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/load-test-reports-archive/presence-LOADTEST_VU-1500-60s
+
+[scenario-sweep] DONE. Per-step logs in /tmp/scenario-sweep-presence-*.log.
+[scenario-sweep] NBomber per-step reports preserved under tests/Verbara.Platform.LoadTests/load-test-reports-archive/.

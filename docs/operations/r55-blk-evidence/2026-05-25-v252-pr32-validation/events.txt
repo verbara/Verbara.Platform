@@ -1,0 +1,10 @@
+3m49s       Normal    Killing                        pod/platform-api-76d9f99d8f-hvtcb         Stopping container api
+3m39s       Normal    Killing                        pod/platform-realtime-5f457cc9db-xnr9x    Stopping container realtime
+3m32s       Normal    Killing                        pod/platform-realtime-5f457cc9db-hcjw5    Stopping container realtime
+3m24s       Normal    Killing                        pod/platform-api-76d9f99d8f-2jv9t         Stopping container api
+3m21s       Normal    Killing                        pod/platform-realtime-5f457cc9db-rlrhv    Stopping container realtime
+3m11s       Warning   FailedComputeMetricsReplicas   horizontalpodautoscaler/platform-api      invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: did not receive metrics for targeted pods (pods might be unready)
+3m11s       Warning   FailedGetResourceMetric        horizontalpodautoscaler/platform-api      failed to get cpu utilization: did not receive metrics for targeted pods (pods might be unready)
+5s          Warning   Unhealthy                      pod/platform-api-57f8d6c7b6-vtgk9         Liveness probe failed: Get "http://10.244.0.218:5000/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+1s          Warning   Unhealthy                      pod/platform-api-57f8d6c7b6-wclhq         Readiness probe failed: Get "http://10.244.3.148:5000/health/ready": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+1s          Warning   Unhealthy                      pod/platform-api-57f8d6c7b6-wclhq         Liveness probe failed: Get "http://10.244.3.148:5000/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)

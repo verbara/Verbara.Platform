@@ -1,0 +1,21 @@
+2026-05-25T01:04:12Z
+NAME                                READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-57f8d6c7b6-8k7tb       1/1     Running   0          25s     10.244.3.86    talos-w3   <none>           <none>
+platform-api-57f8d6c7b6-dssr6       0/1     Running   0          25s     10.244.1.45    talos-w2   <none>           <none>
+platform-api-57f8d6c7b6-vtgk9       1/1     Running   0          3m23s   10.244.0.218   talos-w1   <none>           <none>
+platform-api-57f8d6c7b6-wclhq       1/1     Running   0          3m48s   10.244.3.148   talos-w3   <none>           <none>
+platform-realtime-f485db766-blksb   1/1     Running   0          3m20s   10.244.3.61    talos-w3   <none>           <none>
+platform-realtime-f485db766-lmspk   1/1     Running   0          3m38s   10.244.1.43    talos-w2   <none>           <none>
+platform-realtime-f485db766-t89s8   1/1     Running   0          3m31s   10.244.0.225   talos-w1   <none>           <none>
+platform-realtime-f485db766-t8msj   1/1     Running   0          3m48s   10.244.1.221   talos-w2   <none>           <none>
+web-6b9ccdb796-c77tj                1/1     Running   0          5h16m   10.244.3.45    talos-w3   <none>           <none>
+---restartCount delta---
+platform-api-57f8d6c7b6-8k7tb: restarts=0
+platform-api-57f8d6c7b6-dssr6: restarts=0
+platform-api-57f8d6c7b6-vtgk9: restarts=0
+platform-api-57f8d6c7b6-wclhq: restarts=0
+platform-realtime-f485db766-blksb: restarts=0
+platform-realtime-f485db766-lmspk: restarts=0
+platform-realtime-f485db766-t89s8: restarts=0
+platform-realtime-f485db766-t8msj: restarts=0
+web-6b9ccdb796-c77tj: restarts=0
