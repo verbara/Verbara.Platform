@@ -26,7 +26,7 @@ api:
     # presence-vu1500.md § Tier 1. Paired with verbara-website PR #20 which
     # adds this digest to authorized-digests.json `current[]`. release.yml
     # run 26396711953, 4 cosign-signed images.
-    digest: "sha256:a60b40ee6d08205cdd79ea21d9973cde458b3aad6e631e5952cc4933ab26c1e7"
+    digest: "sha256:b7a75c8ce2e70021112492a886184d8a9fbe1a42d524109100668004e8297649"
   replicas: 2
   port: 5000
   resources:
@@ -174,7 +174,7 @@ realtime:
     # PR #20. Realtime has no semantic change in v2.5.3 (Tier-1 hardening
     # only touched Platform.Api); rebuild captures the SDK/Pro restore +
     # 0-warning compile against current main.
-    digest: "sha256:fe9b92a70b8cb773da4039c0b9a7b95239912b8086bae416c1aa390ca4d0dc5a"
+    digest: "sha256:6cfdfead2a117036d3e42120de81742e830060f83bd4f858a1b7459b4ee17cb5"
   replicas: 1
   port: 5030
   resources:
