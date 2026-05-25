@@ -1,0 +1,13 @@
+# Verbara cosign public key (ECDSA P-256). Used by .github/workflows/release.yml verify-after-sign step.
+# Private key in GitHub secret COSIGN_PRIVATE_KEY + Cloudflare Worker secret VERBARA_COSIGN_PRIVATE_KEY.
+# See Verbara.Sdk.Pro/docs/operations/2026-05-10-cosign-keypair-bootstrap.md for custody.
+#
+# Mirror of .github/cosign.pub kept under docker/ because the customer-facing
+# SMB manuales reference `cosign verify --key docker/cosign.pub` (a relative
+# path that resolves from any subdirectory under the repo root). Authoritative
+# source is .github/cosign.pub + https://verbara.io/keys/cosign.pub — both
+# must remain byte-identical (CI digest-reconciliation enforces parity).
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEBKvVcEKiEr1VKAlS2tnnaBOymdBY
+Il+bfvD2YMK7KQe+QdziuA1dVa8TGmg0NGM082ScomxlxxNI8aMRAGN0aQ==
+-----END PUBLIC KEY-----
