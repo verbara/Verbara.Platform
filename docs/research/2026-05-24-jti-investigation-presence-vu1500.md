@@ -154,7 +154,22 @@ If 3 of the 5 pods cross their 60s cache boundary within the 60-second burst win
 
 ## Recommended fix path (layered, ranked by risk × impact)
 
-### Tier 1 — ship in v2.5.2 or v2.5.3 (~1 day, low risk)
+### Tier 1 — ✅ SHIPPED 2026-05-25 (post C-LK validation)
+
+> **Implementation status:** Both Fix A (stale-cache fallback) and Fix B
+> (`ActiveKeyCacheTtl 60s → 300s`) shipped in [`src/Verbara.Platform.Api/Services/JwtTokenService.cs`](../../src/Verbara.Platform.Api/Services/JwtTokenService.cs).
+> Stale-cache fallback was applied to BOTH `GetActiveSigningCredentials`
+> and `GetCachedValidationKeys` (symmetric blast-radius coverage).
+> Test coverage added in
+> [`tests/Verbara.Platform.Api.Tests/Services/JwtTokenServiceRotationTests.cs`](../../tests/Verbara.Platform.Api.Tests/Services/JwtTokenServiceRotationTests.cs):
+> `ValidateToken_ShouldReuseStaleCache_WhenGetValidationKeysAsyncThrows`,
+> `GenerateAccessToken_ShouldReuseStaleCachedCredentials_WhenGetActiveSigningKeyAsyncThrows`,
+> `GenerateAccessToken_ShouldFailClosed_WhenRotationServiceAlwaysThrowsAndNoCacheYet`
+> (946/946 Api.Tests pass, was 943 baseline).
+> Trigger reframing: [[project-c-lk-validation-v252]] showed the same
+> failure mode is also produced by HPA scale-up cold caches (not just
+> Redis blips). Tier-1 fix covers both triggers because the catch
+> handler is independent of why the refresh failed.
 
 **Fix A: Stale-cache fallback.** If `GetValidationKeysAsync` throws inside the critical section, fall back to the previously-cached keys (even if past TTL) instead of bubbling the exception:
 

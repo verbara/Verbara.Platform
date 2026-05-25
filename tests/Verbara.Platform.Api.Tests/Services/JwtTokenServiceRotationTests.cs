@@ -297,4 +297,130 @@ public sealed class JwtTokenServiceRotationTests
                 Directory.Delete(tempDir, recursive: true);
         }
     }
+
+    // ─── R5.5 Phase C-LK Tier-1 hardening: stale-cache fallback ─────────────
+    // Cover the catch-when-cached path added to GetCachedValidationKeys +
+    // GetActiveSigningCredentials. Forcing cache staleness uses reflection
+    // because TTL is a private const and a real 5-min wait is unfit for a
+    // unit test.
+
+    private sealed class ToggleableRotationService : IJwtKeyRotationService
+    {
+        private readonly IJwtKeyRotationService _inner;
+        public bool ThrowOnNext { get; set; }
+
+        public ToggleableRotationService(IJwtKeyRotationService inner) => _inner = inner;
+
+        public Task<JwtKeyEntry> GetActiveSigningKeyAsync(CancellationToken ct = default)
+        {
+            if (ThrowOnNext) throw new InvalidOperationException("simulated Redis blip");
+            return _inner.GetActiveSigningKeyAsync(ct);
+        }
+
+        public Task<IReadOnlyList<JwtKeyEntry>> GetValidationKeysAsync(CancellationToken ct = default)
+        {
+            if (ThrowOnNext) throw new InvalidOperationException("simulated Redis blip");
+            return _inner.GetValidationKeysAsync(ct);
+        }
+
+        public Task<JwtKeyEntry> RotateAsync(CancellationToken ct = default) =>
+            _inner.RotateAsync(ct);
+    }
+
+    private static void MarkCacheFieldStale(JwtTokenService sut, string fieldName)
+    {
+        // Replace _cachedActive / _cachedValidation with a copy whose CachedAt
+        // is 10 minutes ago (well past the 5-min ActiveKeyCacheTtl). This
+        // forces the refresh path on the next call without sleeping.
+        var field = typeof(JwtTokenService).GetField(fieldName,
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var current = field.GetValue(sut);
+        if (current is null) return; // nothing cached yet
+
+        var cachedAt = current.GetType().GetProperty("CachedAt")!;
+        var stale = (DateTimeOffset)cachedAt.GetValue(current)! - TimeSpan.FromMinutes(10);
+
+        // Records: use the compile-generated Clone via reflection (it's a
+        // protected member named "<Clone>$"). Falling back to a manual copy
+        // via the constructor.
+        var ctor = current.GetType().GetConstructors()[0];
+        var args = ctor.GetParameters().Select(p =>
+            p.Name == "CachedAt"
+                ? stale
+                : current.GetType().GetProperty(p.Name!)!.GetValue(current)).ToArray();
+        var newInstance = ctor.Invoke(args);
+        field.SetValue(sut, newInstance);
+    }
+
+    [Fact]
+    public async Task ValidateToken_ShouldReuseStaleCache_WhenGetValidationKeysAsyncThrows()
+    {
+        // Setup: build a real rotation service + wrap with toggleable.
+        using var realRotation = NewRotationService();
+        _ = await realRotation.RotateAsync();
+        var toggleable = new ToggleableRotationService(realRotation);
+
+        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+
+        // First call populates _cachedValidation via successful refresh.
+        var (token, _) = sut.GenerateAccessToken(MakeUser());
+        var firstPrincipal = await sut.ValidateTokenAsync(token, CancellationToken.None);
+        firstPrincipal.Should().NotBeNull(because: "the cache should be warm after first validation");
+
+        // Force the validation cache stale + arm the rotation service to throw.
+        MarkCacheFieldStale(sut, "_cachedValidation");
+        toggleable.ThrowOnNext = true;
+
+        // Second validation: refresh path will throw → catch path returns the
+        // stale-but-valid cached keys → token still validates successfully.
+        var secondPrincipal = await sut.ValidateTokenAsync(token, CancellationToken.None);
+        secondPrincipal.Should().NotBeNull(because: "stale-cache fallback should keep token validation working through transient Redis failures");
+    }
+
+    [Fact]
+    public async Task GenerateAccessToken_ShouldReuseStaleCachedCredentials_WhenGetActiveSigningKeyAsyncThrows()
+    {
+        using var realRotation = NewRotationService();
+        _ = await realRotation.RotateAsync();
+        var toggleable = new ToggleableRotationService(realRotation);
+
+        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+
+        // First token populates _cachedActive.
+        var (firstToken, _) = sut.GenerateAccessToken(MakeUser());
+        firstToken.Should().NotBeNullOrEmpty();
+
+        // Force the active cache stale + arm the rotation service to throw.
+        MarkCacheFieldStale(sut, "_cachedActive");
+        toggleable.ThrowOnNext = true;
+
+        // Second issuance: refresh would throw → catch path uses the stale
+        // credentials → token is still issued (and still validates because
+        // _cachedValidation already holds the same key).
+        var (secondToken, _) = sut.GenerateAccessToken(MakeUser());
+        secondToken.Should().NotBeNullOrEmpty(because: "stale-cache fallback should keep token issuance working through transient Redis failures");
+
+        // The two tokens use the same kid because we reused the cached active key.
+        var firstJwt = new JwtSecurityTokenHandler().ReadJwtToken(firstToken);
+        var secondJwt = new JwtSecurityTokenHandler().ReadJwtToken(secondToken);
+        secondJwt.Header.Kid.Should().Be(firstJwt.Header.Kid);
+    }
+
+    [Fact]
+    public void GenerateAccessToken_ShouldFailClosed_WhenRotationServiceAlwaysThrowsAndNoCacheYet()
+    {
+        // No prior successful call → _cachedActive is null. The catch-when
+        // clause requires `cached is not null` so the exception should
+        // propagate (fail-closed semantics: better 500 than issue a token
+        // with no signing key at all).
+        using var realRotation = NewRotationService();
+        var toggleable = new ToggleableRotationService(realRotation) { ThrowOnNext = true };
+
+        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+
+        Action act = () => sut.GenerateAccessToken(MakeUser());
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("simulated Redis blip",
+                because: "fail-closed when no stale cache to fall back to");
+    }
 }

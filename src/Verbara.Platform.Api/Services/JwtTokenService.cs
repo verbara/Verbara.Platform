@@ -52,7 +52,15 @@ internal sealed class JwtTokenService
 
     private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan ImpersonationTokenLifetime = TimeSpan.FromMinutes(30);
-    private static readonly TimeSpan ActiveKeyCacheTtl = TimeSpan.FromSeconds(60);
+
+    // 5 min — large enough to amortize Redis SCAN+N×GET cost across HPA scale
+    // events, small enough that a freshly-rotated key propagates within minutes.
+    // Bumped from 60s after R5.5 Phase C-LK observed HPA-induced cold-cache
+    // 401 cascades. The key-rotation cadence is 24h ActiveDuration + 24h
+    // GracePeriod (48h total validation window), so 5 min cache is still ~570×
+    // safer than the rotation cadence. See docs/research/2026-05-24-jti-
+    // investigation-presence-vu1500.md § "Recommended fix path Tier 1".
+    private static readonly TimeSpan ActiveKeyCacheTtl = TimeSpan.FromMinutes(5);
 
     private readonly IJtiRevocationCache _revocationCache;
 
@@ -262,13 +270,28 @@ internal sealed class JwtTokenService
             if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
                 return cached.Credentials;
 
-            var entry = _rotationService.GetActiveSigningKeyAsync().GetAwaiter().GetResult();
-            var credentials = BuildSigningCredentials(entry);
-            _cachedActive = new CachedActive(entry, credentials, DateTimeOffset.UtcNow);
-            // Validation keys must include this entry — invalidate cache so
-            // the next validation pull picks it up.
-            _cachedValidation = null;
-            return credentials;
+            try
+            {
+                var entry = _rotationService.GetActiveSigningKeyAsync().GetAwaiter().GetResult();
+                var credentials = BuildSigningCredentials(entry);
+                _cachedActive = new CachedActive(entry, credentials, DateTimeOffset.UtcNow);
+                // Validation keys must include this entry — invalidate cache so
+                // the next validation pull picks it up.
+                _cachedValidation = null;
+                return credentials;
+            }
+            catch when (cached is not null)
+            {
+                // Stale-cache fallback (R5.5 Phase C-LK Tier-1 hardening):
+                // a Redis blip or transient timeout in GetActiveSigningKeyAsync
+                // would otherwise 401 every in-flight token issuance request on
+                // this pod. Reuse the previously-cached active key (its
+                // validation entry is still within the 48h rotation window).
+                // Worst case: we sign with a key that has been demoted to the
+                // grace pool while we couldn't refresh — every validator still
+                // accepts it because validation pulls the full grace pool.
+                return cached.Credentials;
+            }
         }
     }
 
@@ -287,10 +310,26 @@ internal sealed class JwtTokenService
             if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
                 return cached.Keys;
 
-            var entries = _rotationService.GetValidationKeysAsync().GetAwaiter().GetResult();
-            var keys = entries.Select(e => BuildSigningCredentials(e).Key).ToArray();
-            _cachedValidation = new CachedValidationKeys(keys, DateTimeOffset.UtcNow);
-            return keys;
+            try
+            {
+                var entries = _rotationService.GetValidationKeysAsync().GetAwaiter().GetResult();
+                var keys = entries.Select(e => BuildSigningCredentials(e).Key).ToArray();
+                _cachedValidation = new CachedValidationKeys(keys, DateTimeOffset.UtcNow);
+                return keys;
+            }
+            catch when (cached is not null)
+            {
+                // Stale-cache fallback (R5.5 Phase C-LK Tier-1 hardening):
+                // a Redis blip in GetValidationKeysAsync would otherwise 401
+                // every JwtBearer-authenticated request on this pod. Reusing
+                // the previous validation-key set is safe because key
+                // rotation is 24h cadence with 24h grace — a momentary
+                // failure to refresh cannot expose a missing-key edge case
+                // within the 48h validation window. Without this fallback
+                // even a 1s Redis timeout cascades to per-pod cold-cache
+                // 401 storms during HPA scale-up bursts.
+                return cached.Keys;
+            }
         }
     }
 
