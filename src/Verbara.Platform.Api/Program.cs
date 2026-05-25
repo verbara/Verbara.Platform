@@ -582,7 +582,9 @@ if (useRotationPool)
 {
     builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
         sp.GetRequiredService<Verbara.Platform.Identity.Auth.Jwt.IJwtKeyRotationService>(),
-        sp.GetRequiredService<IJtiRevocationCache>()));
+        sp.GetRequiredService<IJtiRevocationCache>(),
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JwtTokenService>>(),
+        sp.GetService<System.Diagnostics.Metrics.IMeterFactory>()));
 
     // Idempotent legacy-file → rotation-pool migration. Runs once at startup
     // before the first request so already-issued (file-RSA-signed) tokens
@@ -599,7 +601,9 @@ else
     builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
         jwtKeyDirectory,
         sp.GetRequiredService<IDataProtectionProvider>(),
-        sp.GetRequiredService<IJtiRevocationCache>()));
+        sp.GetRequiredService<IJtiRevocationCache>(),
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JwtTokenService>>(),
+        sp.GetService<System.Diagnostics.Metrics.IMeterFactory>()));
 }
 
 // R5.4 S5.9 — JWT signing-key rotation pool. The store defaults to in-memory

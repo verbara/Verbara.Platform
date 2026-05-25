@@ -212,6 +212,16 @@ lock (_cacheLock)
 
 ## Validation experiment (before shipping any fix)
 
+> **Implementation status (2026-05-25):** instrumentation shipped alongside
+> Tier-1 hardening (same session as Tier-1 fix). New
+> `verbara.platform.jwt` meter with 3 counters:
+> `jwt.key.cache_misses`, `jwt.key.stale_cache_fallbacks`,
+> `jwt.key.fail_closed` (all tagged `path=signing|validation`). Plus 4
+> `[LoggerMessage]` events (EventId 6101-6104) covering cache miss
+> (Debug), stale-cache fallback (Warning), and fail-closed throw (Error).
+> Lab validation plan at
+> [`docs/plans/active/2026-05-25-jwt-tier1-lab-validation.md`](../plans/active/2026-05-25-jwt-tier1-lab-validation.md).
+
 To confirm the hypothesis is the actual cause (and not, e.g., some unrelated middleware issue), run the next B-LK measurement against v2.5.2 with these instrumentation additions:
 
 1. **Log on `GetCachedValidationKeys` cache miss** — `_logger.LogInformation("JWT validation key cache miss; refresh starting")`.
@@ -221,6 +231,22 @@ To confirm the hypothesis is the actual cause (and not, e.g., some unrelated mid
 If the hypothesis is correct, the next presence VU=1500 sweep should produce a cluster of 3-5 "cache miss" events correlated with a cluster of `OnAuthenticationFailed` logs carrying `SecurityTokenSignatureKeyNotFoundException` or `RedisTimeoutException` stack traces, and the count of failures should match the per-pod-event multiplier × number of events.
 
 If the hypothesis is wrong, the failure pattern from those logs will point at the actual cause.
+
+## Residual risk after Tier-1 — re-classification 2026-05-25
+
+R5.5 Phase C-LK.2b measured the failure mode on v2.5.2 (pre-Tier-1) at sustained NBomber `presence` VU=1500 / 300s: **1,980 Unauthorized (1.01% fail rate)**. The C-LK report ([`docs/operations/chaos-test-report-k8s-local.md`](../operations/chaos-test-report-k8s-local.md) § "v2.5.2 rerun" finding #3) attributed this to HPA scale-up 2→6 producing 4 new pods with cold per-pod validation-key caches.
+
+Tier-1 covers the **warm-pod + Redis blip** path (cached exists → fallback). It does **NOT** cover the **cold-pod + heavy Redis keyspace** path (cached is null → fail-closed → exception bubbles → 401). Expected post-Tier-1 residual: **500-1,500 Unauthorized** per HPA scale-up burst (4 cold-start pods × ~500 cold-window requests / pod, partially mitigated by 300s TTL meaning each pod refreshes once vs every 60s).
+
+Tier-2 (SCAN+N×GET → SMEMBERS+MGET) reduces the cold-window from 1-5s → 20-200ms = order-of-magnitude reduction in blast radius. See [`docs/specs/2026-05-25-jwt-tier-2-redis-set-index.md`](../specs/2026-05-25-jwt-tier-2-redis-set-index.md).
+
+**Updated priority classification:**
+
+| Tier | Original (2026-05-24) | Updated (2026-05-25 post C-LK) |
+|---|---|---|
+| Tier 1 (this doc) | "Ship in v2.5.2 or v2.5.3" | ✅ Shipped 2026-05-25 (commits `a6927f3a` + observability) |
+| Tier 2 (SCAN→MGET) | "Ship in v2.6.x or later" | **Active production concern — ship in v2.5.4 (within 2 weeks)** |
+| Tier 3 (async resolver + background refresh) | "Multi-week" | Unchanged — true defense-in-depth |
 
 ## Cross-references
 

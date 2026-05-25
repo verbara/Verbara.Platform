@@ -423,4 +423,77 @@ public sealed class JwtTokenServiceRotationTests
             .WithMessage("simulated Redis blip",
                 because: "fail-closed when no stale cache to fall back to");
     }
+
+    // ─── Observability counters (R5.5 Phase C-LK Tier-1 hardening) ─────────
+
+    private sealed class CollectingMeterListener : IDisposable
+    {
+        private readonly System.Diagnostics.Metrics.MeterListener _listener;
+        public Dictionary<string, long> Counters { get; } = new();
+
+        public CollectingMeterListener(string meterName)
+        {
+            _listener = new System.Diagnostics.Metrics.MeterListener
+            {
+                InstrumentPublished = (instrument, listener) =>
+                {
+                    if (instrument.Meter.Name == meterName) listener.EnableMeasurementEvents(instrument);
+                }
+            };
+            _listener.SetMeasurementEventCallback<long>((instrument, value, _, _) =>
+            {
+                lock (Counters)
+                    Counters[instrument.Name] = Counters.GetValueOrDefault(instrument.Name) + value;
+            });
+            _listener.Start();
+        }
+
+        public void Dispose() => _listener.Dispose();
+    }
+
+    [Fact]
+    public async Task ValidateToken_ShouldEmitStaleCacheFallbackCounter_WhenRefreshThrowsWithWarmCache()
+    {
+        using var listener = new CollectingMeterListener("verbara.platform.jwt");
+        using var realRotation = NewRotationService();
+        _ = await realRotation.RotateAsync();
+        var toggleable = new ToggleableRotationService(realRotation);
+
+        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+
+        // Warm the validation cache (1 cache-miss expected during this call).
+        var (token, _) = sut.GenerateAccessToken(MakeUser());
+        _ = await sut.ValidateTokenAsync(token, CancellationToken.None);
+
+        MarkCacheFieldStale(sut, "_cachedValidation");
+        toggleable.ThrowOnNext = true;
+
+        // Trigger refresh → throws → catch → stale fallback (1 cache-miss +
+        // 1 stale-cache-fallback expected).
+        _ = await sut.ValidateTokenAsync(token, CancellationToken.None);
+
+        // Allow the meter listener to flush its callback queue.
+        listener.Counters.Should().ContainKey("jwt.key.cache_misses");
+        listener.Counters["jwt.key.cache_misses"].Should().BeGreaterOrEqualTo(2);
+        listener.Counters.Should().ContainKey("jwt.key.stale_cache_fallbacks");
+        listener.Counters["jwt.key.stale_cache_fallbacks"].Should().Be(1);
+    }
+
+    [Fact]
+    public void GenerateAccessToken_ShouldEmitFailClosedCounter_WhenNoCacheAndRefreshThrows()
+    {
+        using var listener = new CollectingMeterListener("verbara.platform.jwt");
+        using var realRotation = NewRotationService();
+        var toggleable = new ToggleableRotationService(realRotation) { ThrowOnNext = true };
+
+        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+
+        Action act = () => sut.GenerateAccessToken(MakeUser());
+        act.Should().Throw<InvalidOperationException>();
+
+        listener.Counters.Should().ContainKey("jwt.key.fail_closed");
+        listener.Counters["jwt.key.fail_closed"].Should().Be(1);
+        // Stale-cache fallback MUST NOT fire on cold-start (path is fail-closed).
+        listener.Counters.GetValueOrDefault("jwt.key.stale_cache_fallbacks").Should().Be(0);
+    }
 }

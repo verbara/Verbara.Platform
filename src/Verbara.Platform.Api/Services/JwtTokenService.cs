@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -7,6 +8,8 @@ using Verbara.Platform.Identity;
 using Verbara.Platform.Identity.Auth;
 using Verbara.Platform.Identity.Auth.Jwt;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Verbara.Platform.Api.Services;
@@ -42,13 +45,20 @@ namespace Verbara.Platform.Api.Services;
 /// contract — so endpoints don't care which path is wired.
 /// </para>
 /// </remarks>
-internal sealed class JwtTokenService
+internal sealed partial class JwtTokenService
 {
     private const string Issuer = "verbara-platform";
     private const string Audience = "verbara-platform";
     private const string DataProtectorPurpose = "Verbara.Platform.Jwt.SigningKey";
     private const string LegacyKeyFileName = "jwt-signing-key.xml";
     private const string FileKeyIdPrefix = "platform-jwt-";
+
+    // Observability — R5.5 Phase C-LK Tier-1 hardening. See
+    // docs/research/2026-05-24-jti-investigation-presence-vu1500.md §
+    // "Validation experiment" for why these counters exist. Counter names
+    // follow the OpenTelemetry semantic-conventions style used elsewhere in
+    // Verbara.Platform.Api (AuthWriteQueue, ResilienceStateObserver).
+    private const string MeterName = "verbara.platform.jwt";
 
     private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan ImpersonationTokenLifetime = TimeSpan.FromMinutes(30);
@@ -76,9 +86,21 @@ internal sealed class JwtTokenService
     private CachedActive? _cachedActive;
     private CachedValidationKeys? _cachedValidation;
 
+    // ─── Observability (R5.5 Phase C-LK Tier-1 hardening) ──────────────────
+    private readonly ILogger<JwtTokenService> _logger;
+    private readonly Meter _meter;
+    private readonly Counter<long> _cacheMisses;
+    private readonly Counter<long> _staleCacheFallbacks;
+    private readonly Counter<long> _failClosedThrows;
+
     // ─── File-based constructor (existing) ──────────────────────────────────
 
-    public JwtTokenService(string dataDirectory, IDataProtectionProvider dataProtection, IJtiRevocationCache revocationCache)
+    public JwtTokenService(
+        string dataDirectory,
+        IDataProtectionProvider dataProtection,
+        IJtiRevocationCache revocationCache,
+        ILogger<JwtTokenService>? logger = null,
+        IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(dataDirectory);
         ArgumentNullException.ThrowIfNull(dataProtection);
@@ -86,6 +108,7 @@ internal sealed class JwtTokenService
 
         _revocationCache = revocationCache;
         _cacheLock = new Lock();
+        (_logger, _meter, _cacheMisses, _staleCacheFallbacks, _failClosedThrows) = InitObservability(logger, meterFactory);
 
         var rsa = LoadOrCreateFileBasedKey(dataDirectory, dataProtection);
         var kid = DeriveKeyIdFromRsa(rsa);
@@ -111,7 +134,9 @@ internal sealed class JwtTokenService
     /// </summary>
     public JwtTokenService(
         IJwtKeyRotationService rotationService,
-        IJtiRevocationCache revocationCache)
+        IJtiRevocationCache revocationCache,
+        ILogger<JwtTokenService>? logger = null,
+        IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(rotationService);
         ArgumentNullException.ThrowIfNull(revocationCache);
@@ -119,6 +144,7 @@ internal sealed class JwtTokenService
         _revocationCache = revocationCache;
         _rotationService = rotationService;
         _cacheLock = new Lock();
+        (_logger, _meter, _cacheMisses, _staleCacheFallbacks, _failClosedThrows) = InitObservability(logger, meterFactory);
 
         // Validation parameters use a delegate resolver so each call sees the
         // currently-cached set without re-creating the parameters object.
@@ -270,6 +296,8 @@ internal sealed class JwtTokenService
             if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
                 return cached.Credentials;
 
+            _cacheMisses.Add(1, new KeyValuePair<string, object?>("path", "signing"));
+            LogActiveKeyCacheMiss(_logger);
             try
             {
                 var entry = _rotationService.GetActiveSigningKeyAsync().GetAwaiter().GetResult();
@@ -280,7 +308,7 @@ internal sealed class JwtTokenService
                 _cachedValidation = null;
                 return credentials;
             }
-            catch when (cached is not null)
+            catch (Exception ex) when (cached is not null)
             {
                 // Stale-cache fallback (R5.5 Phase C-LK Tier-1 hardening):
                 // a Redis blip or transient timeout in GetActiveSigningKeyAsync
@@ -290,7 +318,15 @@ internal sealed class JwtTokenService
                 // Worst case: we sign with a key that has been demoted to the
                 // grace pool while we couldn't refresh — every validator still
                 // accepts it because validation pulls the full grace pool.
+                _staleCacheFallbacks.Add(1, new KeyValuePair<string, object?>("path", "signing"));
+                LogStaleCacheFallback(_logger, "signing", ex);
                 return cached.Credentials;
+            }
+            catch (Exception ex)
+            {
+                _failClosedThrows.Add(1, new KeyValuePair<string, object?>("path", "signing"));
+                LogFailClosedNoCacheYet(_logger, "signing", ex);
+                throw;
             }
         }
     }
@@ -310,6 +346,8 @@ internal sealed class JwtTokenService
             if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
                 return cached.Keys;
 
+            _cacheMisses.Add(1, new KeyValuePair<string, object?>("path", "validation"));
+            LogValidationKeyCacheMiss(_logger);
             try
             {
                 var entries = _rotationService.GetValidationKeysAsync().GetAwaiter().GetResult();
@@ -317,7 +355,7 @@ internal sealed class JwtTokenService
                 _cachedValidation = new CachedValidationKeys(keys, DateTimeOffset.UtcNow);
                 return keys;
             }
-            catch when (cached is not null)
+            catch (Exception ex) when (cached is not null)
             {
                 // Stale-cache fallback (R5.5 Phase C-LK Tier-1 hardening):
                 // a Redis blip in GetValidationKeysAsync would otherwise 401
@@ -328,10 +366,53 @@ internal sealed class JwtTokenService
                 // within the 48h validation window. Without this fallback
                 // even a 1s Redis timeout cascades to per-pod cold-cache
                 // 401 storms during HPA scale-up bursts.
+                _staleCacheFallbacks.Add(1, new KeyValuePair<string, object?>("path", "validation"));
+                LogStaleCacheFallback(_logger, "validation", ex);
                 return cached.Keys;
+            }
+            catch (Exception ex)
+            {
+                _failClosedThrows.Add(1, new KeyValuePair<string, object?>("path", "validation"));
+                LogFailClosedNoCacheYet(_logger, "validation", ex);
+                throw;
             }
         }
     }
+
+    // ─── Observability bootstrap ───────────────────────────────────────────
+
+    private static (ILogger<JwtTokenService> logger, Meter meter, Counter<long> cacheMisses, Counter<long> staleFallbacks, Counter<long> failClosed)
+        InitObservability(ILogger<JwtTokenService>? logger, IMeterFactory? meterFactory)
+    {
+        var resolvedLogger = logger ?? NullLogger<JwtTokenService>.Instance;
+        var meter = meterFactory is null ? new Meter(MeterName) : meterFactory.Create(MeterName);
+        var cacheMisses = meter.CreateCounter<long>(
+            "jwt.key.cache_misses",
+            description: "Count of JWT key cache misses triggering a Redis refresh (tagged by path=signing|validation).");
+        var staleFallbacks = meter.CreateCounter<long>(
+            "jwt.key.stale_cache_fallbacks",
+            description: "Count of stale-cache fallback events (Tier-1 hardening: refresh threw but a cached value existed → reused it).");
+        var failClosed = meter.CreateCounter<long>(
+            "jwt.key.fail_closed",
+            description: "Count of fail-closed throws (refresh threw and no cached value existed yet → exception rethrown).");
+        return (resolvedLogger, meter, cacheMisses, staleFallbacks, failClosed);
+    }
+
+    [LoggerMessage(EventId = 6101, Level = LogLevel.Debug,
+        Message = "JWT active-signing-key cache miss; refreshing from rotation service.")]
+    private static partial void LogActiveKeyCacheMiss(ILogger logger);
+
+    [LoggerMessage(EventId = 6102, Level = LogLevel.Debug,
+        Message = "JWT validation-keys cache miss; refreshing from rotation service.")]
+    private static partial void LogValidationKeyCacheMiss(ILogger logger);
+
+    [LoggerMessage(EventId = 6103, Level = LogLevel.Warning,
+        Message = "JWT key cache refresh failed on path={Path}; reusing previously-cached value (Tier-1 stale-cache fallback). Investigate rotation-service availability.")]
+    private static partial void LogStaleCacheFallback(ILogger logger, string path, Exception exception);
+
+    [LoggerMessage(EventId = 6104, Level = LogLevel.Error,
+        Message = "JWT key cache refresh failed on path={Path} with no prior cache to fall back to — rethrowing (fail-closed). New pod cold-start under Redis pressure or first-ever request.")]
+    private static partial void LogFailClosedNoCacheYet(ILogger logger, string path, Exception exception);
 
     // ─── Private — credential construction per algorithm ────────────────────
 
