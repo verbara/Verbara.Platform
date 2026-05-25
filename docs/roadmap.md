@@ -1,6 +1,20 @@
 # Roadmap — Verbara.Platform + Verbara.Platform.Web
 
-**Última actualización:** 2026-05-23 · **Baselines actuales:** Platform **`2.4.2`** (Pro v2.5.1-pro pin + Phase A.5 wiring scaffold in flight on local branch — `Verbara.Platform.Realtime` imports `Verbara.Sdk.Pro.Cluster.Leadership` in 3 files) · Platform.Web **`3.1.3-web`** (dependency-hygiene + v3.1.0-web HTTP 402 modal shipped 2026-05-18) · SDK pin **`2.2.1`** · Pro pin **`2.5.1-pro`** (ADR-0022 Phase A.5 per-resource leader election scaffold shipped 2026-05-23) · **🎉 visibility flip EXECUTED 2026-05-10 — all 7 ADR-0018 triggers GREEN; Platform + Web repos PUBLIC** · **✅ 2026-05-22 ADR-0022 Phase D CLOSED**: Dapper removed cross-repo, `Verbara.Platform.Api` ships Native AOT (Phase 5 cutover SDK 2.2.0 / Pro 2.5.0-pro / Platform v2.4.0→v2.4.1 + 4 cosign-signed images on ghcr.io per ADR-0023; Phase 6 24h soak PASS 803M req / 0 fail / p99 25 ms / 0 leak) · **✅ 2026-05-23 Pro v2.5.1-pro cross-repo validation DONE**: 0 build warnings · 1,728 tests passing · Native AOT publish clean (67MB ELF, 0 IL2*/IL3* warnings) — Pro v2.5.1-pro consumed end-to-end; no v2.5.2-pro patch needed; Platform Phase A.5 implementation now clean to advance · R5.5 K8s Phase B-LK (next) gated on Phase A.5 ship; R5.5 cloud (Phase 0C+) deferred indefinidamente.
+**Última actualización:** 2026-05-25 · **Baselines actuales:** Platform **`2.5.4`** (post-Phase A.5 + ADR-0025 K8s health contract fix + JWT Tier-1 hardening + observability) · Platform.Web **`3.1.3-web`** · SDK pin **`2.2.1`** · Pro pin **`2.5.1-pro`** · **🎉 visibility flip EXECUTED 2026-05-10 — Platform + Web repos PUBLIC** · **✅ 2026-05-22 ADR-0022 Phase D CLOSED** (Native AOT shipping) · **✅ 2026-05-24 Phase A.5 CLOSED** (Plan B Test 5 PARTIAL→PASS) · **✅ 2026-05-25 ADR-0025 K8s health contract + Phase B-LK + Phase C-LK closed on v2.5.2** · **✅ 2026-05-25 JWT Tier-1 hardening + lab causality on v2.5.4** (TTL bump = primary driver; stale-cache fallback = insurance, never fired in lab).
+
+> ### 🛑 STRATEGIC PIVOT 2026-05-25 — No cloud until real customers exist
+>
+> Maintainer directive: *"Todo el trabajo que tengamos que realizar en la nube queda pospuesto por presupuesto hasta que no existan clientes reales (...) lo primordial es ya tener un producto final probado y funcional el cual inicialmente estará enfocado en docker; k8s es para clientes mas grandes que sera captados a través de los resultados de los clientes pequeños."*
+>
+> **Effects:**
+> - **Phase 0C / 0CK / 0CR / R5.6 cloud-K8s sprint** → deferred indefinitely. R5.5 closes with docker + K8s-local datasets only (no cloud comparison dataset).
+> - **JWT Tier-2 (SCAN→MGET) + Tier-3 (`IssuerSigningKeyResolverAsync`)** → blocked, data-gated on production cloud telemetry that won't exist pre-revenue. Tier-2 spec stays as ready-to-execute reference (`docs/specs/2026-05-25-jwt-tier-2-redis-set-index.md`).
+> - **NetworkChaos #06+#07 + C-LK.3 etcd/apiserver chaos** → documented as known limit (Cilium eBPF + single-CP lab). Defer until customer footprint requires it.
+> - **Customer-acquisition flywheel:** SMB Docker reference deployment polish → first paying customers → demonstrated results → larger K8s/cloud customers. That's the order.
+>
+> **Primary track now:** SMB Docker product polish (Fase 1 SMB ya shipped 2026-05-17 — manuales 12 docs + `docker-compose.reference-smb.yml` + `quickstart-smb.sh` + 7 E2E tests). Re-audit + sync vs Platform v2.5.4 behavior. K8s local is secondary track.
+>
+> Re-evaluation trigger: first paying customer onboarded OR explicit maintainer override.
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 

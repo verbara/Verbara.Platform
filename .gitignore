@@ -25,6 +25,10 @@ tests/Verbara.Platform.LoadTests/load-test-reports/nbomber-log-*.txt
 # Stray NBomber output dumped at repo root (canonical artifacts live under
 # tests/Verbara.Platform.LoadTests/soak-reports/*/).
 /load-test-reports/
+# Sweep-preserve archive dirs from scripts/scenario-sweep.sh — NBomber 6.x wipes
+# load-test-reports/ at each run, so the harness copies per-step outputs here.
+# Canonical evidence packs live under docs/operations/r55-blk-evidence/*.
+tests/Verbara.Platform.LoadTests/load-test-reports-archive/
 # Raw timestamped chaos run dirs (canonical reports stay tracked under
 # docs/operations/chaos-test-report-*.md).
 chaos-reports/[0-9]*/
