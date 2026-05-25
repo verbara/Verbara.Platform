@@ -12,7 +12,7 @@ api:
     # the maintainer's k3s/Talos lab:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
-    tag: "v2.5.3"
+    tag: "v2.5.4"
     # Manifest-list digest of the `repository:tag` image, used for Layer-C
     # in-process image verification (ADR-0011, Pro v2.3.x). When set, the
     # Deployment template injects IMAGE_DIGEST env var that
@@ -21,12 +21,14 @@ api:
     # in verbara-website/data/authorized-digests.json. Leave empty to opt out
     # (Pro falls through to permissive path; matches dev-mode semantics).
     #
-    # v2.5.3 patch — JWT Tier-1 hardening (stale-cache fallback + TTL 60s→300s
-    # + observability counters) per docs/research/2026-05-24-jti-investigation-
-    # presence-vu1500.md § Tier 1. Paired with verbara-website PR #20 which
-    # adds this digest to authorized-digests.json `current[]`. release.yml
-    # run 26396711953, 4 cosign-signed images.
-    digest: "sha256:b7a75c8ce2e70021112492a886184d8a9fbe1a42d524109100668004e8297649"
+    # v2.5.4 patch — OpenTelemetry meter registration fix so
+    # verbara.platform.jwt counters become exposed via /metrics (single
+    # AddMeter call). Enables causality measurement for the v2.5.3 lab PASS
+    # result (1,980 → 0 Unauthorized). Paired with verbara-website PR #22.
+    # Use `crane digest <ref:tag>` to capture this (NOT
+    # `docker manifest inspect | jq .config.digest` which returns
+    # config-digest — that was the v2.5.3 mistake fixed in PR #22).
+    digest: "sha256:05ccb4fb00b50f71d302af4db26461e37ea8595dc54a6ab29e0690f07e5a0c48"
   replicas: 2
   port: 5000
   resources:
@@ -165,16 +167,16 @@ realtime:
     # registry when validating against the maintainer's k3s/Talos lab:
     #   --set realtime.image.repository=192.168.122.1:5050/verbara-platform/realtime
     repository: ghcr.io/verbara/platform/realtime
-    tag: "v2.5.3"
+    tag: "v2.5.4"
     # Image-digest binding (ADR-0011 Layer C) — Pro license verification
     # extends to the Realtime image via the AuthorizedImageDigests claim.
     # Leave empty for tag-only references (dev / local registry).
     #
-    # v2.5.3 patch — paired with the api digest above and verbara-website
-    # PR #20. Realtime has no semantic change in v2.5.3 (Tier-1 hardening
+    # v2.5.4 patch — paired with the api digest above and verbara-website
+    # PR #22. Realtime has no semantic change in v2.5.4 (OTel meter fix
     # only touched Platform.Api); rebuild captures the SDK/Pro restore +
     # 0-warning compile against current main.
-    digest: "sha256:6cfdfead2a117036d3e42120de81742e830060f83bd4f858a1b7459b4ee17cb5"
+    digest: "sha256:cf0605744e8dc34f70bc5d28ed1b5fc9365ef4207941620941e0e170e24e3c40"
   replicas: 1
   port: 5030
   resources:
