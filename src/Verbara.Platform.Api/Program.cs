@@ -338,6 +338,13 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     .AddMeter("Microsoft.AspNetCore.Server.Kestrel")
     .AddMeter("Microsoft.AspNetCore.Routing")
     .AddMeter("System.Net.Http")
+    // R5.5 Phase JWT Tier-1 hardening — expose verbara.platform.jwt meter
+    // (jwt.key.cache_misses / jwt.key.stale_cache_fallbacks /
+    // jwt.key.fail_closed) so we can prove the catch-when path is doing work
+    // in prod, not just succeeding silently. Added 2026-05-25 after the v2.5.3
+    // lab validation surfaced this gap: counters existed in JwtTokenService
+    // but were never exported.
+    .AddMeter("verbara.platform.jwt")
     .WithPrometheusExporter());
 
 // ─── Pro Hardening — Resilience + LicenseGuard + Retention ──────────────────
