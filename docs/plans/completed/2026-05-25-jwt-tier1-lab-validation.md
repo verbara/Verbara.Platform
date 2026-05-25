@@ -125,3 +125,53 @@ This plan is the empirical loop closing on the JWT Tier-1 work shipped 2026-05-2
 - ADR-0011 image-digest binding (governs Phase 1 ceremony)
 - ADR-0023 4-image release model (governs release.yml workflow)
 - ADR-0024 retroactive-tag guard (don't use; this is a forward release)
+
+---
+
+# EXECUTION OUTCOME — 2026-05-25 (PASS)
+
+**Executed:** 2026-05-25 same session that wrote this plan.
+
+## Result vs acceptance criteria
+
+| Metric | Target | Hard floor | **v2.5.3 actual** | Verdict |
+|---|---|---|---|---|
+| Fail count | <500 | <1,000 | **0** | ✅ PASS |
+| Fail rate | <0.3% | <0.5% | **0%** | ✅ PASS |
+| `jwt.key.cache_misses` counter | ≥5 events | ≥1 | (gap: meter not exported) | ⚠ deferred |
+| `jwt.key.stale_cache_fallbacks` counter | ≥0 | n/a | (gap: meter not exported) | ⚠ deferred |
+| `jwt.key.fail_closed` counter | roughly cold-pods × 1 | n/a | (gap: meter not exported) | ⚠ deferred |
+| HPA scale | 2→6 | unchanged | 2→6 | ✅ reproduces |
+| Pod restart delta | 0 | 0 | **0** | ✅ PASS |
+
+**Overall verdict: PASS** — primary acceptance gate met (0 Unauthorized vs 1,980 baseline). Observability secondary gates blocked by gap; fix shipped commit `5f34fb0e` for next rebuild.
+
+## Side benefits (not in original acceptance criteria)
+
+- Throughput +24% (193k → 240k OK at same VU/duration)
+- p99 latency -28% (8.77s → 6.29s)
+
+## Key commits
+
+- `8c83d463` chore(release): bump to v2.5.3
+- `aa8a3330` fix(helm): correct v2.5.3 image digests (was config-digest, must be manifest-list)
+- `5f34fb0e` fix(otel): register verbara.platform.jwt meter for Prom export
+
+## Cross-repo
+
+- verbara-website PR #20 — initial v2.5.3 digest authorization (with wrong digest)
+- verbara-website PR #21 — correction follow-up (manifest-list digest via `crane digest`)
+
+## Decision: Tier-2 priority
+
+Downgraded from "ship in v2.5.4 within 2 weeks" → **"v2.6.x or later"** per [`docs/research/2026-05-24-jti-investigation-presence-vu1500.md`](../../research/2026-05-24-jti-investigation-presence-vu1500.md) § "Updated priority classification". Re-evaluate after:
+1. Cloud Phase 0C validation (production-grade Redis contention)
+2. Observability rebuild + scrape (distinguish stale-cache-fallback firings from happy path)
+
+## Evidence
+
+- T0: `docs/operations/r55-blk-evidence/2026-05-25-jwt-tier1-validation/T0.txt`
+- T1: `docs/operations/r55-blk-evidence/2026-05-25-jwt-tier1-validation/T1.txt`
+- NBomber report: `nbomber_report_2026-05-25--11-33-02.md` (in archive)
+- Metrics timeline: `metrics/timeline.txt` (HTTP request counts; jwt_* empty due to observability gap)
+- Full analysis: `docs/operations/chaos-test-report-k8s-local.md` § "v2.5.3 JWT Tier-1 validation rerun — 2026-05-25 (PASS)"

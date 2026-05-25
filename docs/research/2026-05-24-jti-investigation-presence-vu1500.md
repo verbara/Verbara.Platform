@@ -242,11 +242,14 @@ Tier-2 (SCAN+N×GET → SMEMBERS+MGET) reduces the cold-window from 1-5s → 20-
 
 **Updated priority classification:**
 
-| Tier | Original (2026-05-24) | Updated (2026-05-25 post C-LK) |
-|---|---|---|
-| Tier 1 (this doc) | "Ship in v2.5.2 or v2.5.3" | ✅ Shipped 2026-05-25 (commits `a6927f3a` + observability) |
-| Tier 2 (SCAN→MGET) | "Ship in v2.6.x or later" | **Active production concern — ship in v2.5.4 (within 2 weeks)** |
-| Tier 3 (async resolver + background refresh) | "Multi-week" | Unchanged — true defense-in-depth |
+| Tier | Original (2026-05-24) | Updated 2026-05-25 mid-session | Updated 2026-05-25 post-lab-validation |
+|---|---|---|---|
+| Tier 1 (this doc) | "Ship in v2.5.2 or v2.5.3" | ✅ Shipped (`a6927f3a` + `d39d4dde`) | ✅ **Validated PASS** in v2.5.3 lab rerun (1,980 → 0 fails, 100% reduction) |
+| Tier 2 (SCAN→MGET) | "Ship in v2.6.x or later" | "Active production concern — ship in v2.5.4 within 2 weeks" | **Downgraded back to v2.6.x** — Tier-1 alone covered the lab cold-cache scenario. Re-evaluate after cloud Phase 0C validation + observability re-measurement. |
+| Tier 3 (async resolver + background refresh) | "Multi-week" | Unchanged | Unchanged — true defense-in-depth |
+| **NEW: Observability gap fix** | n/a | n/a | ✅ Shipped `5f34fb0e` (added `.AddMeter("verbara.platform.jwt")` to Program.cs). Next rebuild will expose the counters so we can distinguish "fallback fired" vs "happy path completed fast" in future measurements. |
+
+**Validation result:** lab-empirical PASS. See [`docs/operations/chaos-test-report-k8s-local.md`](../operations/chaos-test-report-k8s-local.md) § "v2.5.3 JWT Tier-1 validation rerun" for full numbers + caveats.
 
 ## Cross-references
 

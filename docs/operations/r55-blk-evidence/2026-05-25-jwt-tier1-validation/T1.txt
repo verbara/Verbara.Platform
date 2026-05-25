@@ -1,0 +1,29 @@
+T1=2026-05-25T11:35:49Z
+---pods---
+NAME                                 READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-7d9bd67c77-6zxdv        1/1     Running   0          6m50s   10.244.3.50    talos-w3   <none>           <none>
+platform-api-7d9bd67c77-cnvg9        1/1     Running   0          10m     10.244.0.58    talos-w1   <none>           <none>
+platform-api-7d9bd67c77-kgtjf        1/1     Running   0          4m20s   10.244.0.178   talos-w1   <none>           <none>
+platform-api-7d9bd67c77-n68l7        1/1     Running   0          5m50s   10.244.1.97    talos-w2   <none>           <none>
+platform-api-7d9bd67c77-x29hx        1/1     Running   0          6m50s   10.244.1.24    talos-w2   <none>           <none>
+platform-api-7d9bd67c77-zqsl4        1/1     Running   0          11m     10.244.3.44    talos-w3   <none>           <none>
+platform-realtime-848958cbfb-68lnb   1/1     Running   0          11m     10.244.1.126   talos-w2   <none>           <none>
+platform-realtime-848958cbfb-dw45t   1/1     Running   0          11m     10.244.3.178   talos-w3   <none>           <none>
+platform-realtime-848958cbfb-prcww   1/1     Running   0          11m     10.244.0.158   talos-w1   <none>           <none>
+web-6b9ccdb796-c77tj                 1/1     Running   0          15h     10.244.3.45    talos-w3   <none>           <none>
+---restart counts---
+platform-api-7d9bd67c77-6zxdv: restarts=0
+platform-api-7d9bd67c77-cnvg9: restarts=0
+platform-api-7d9bd67c77-kgtjf: restarts=0
+platform-api-7d9bd67c77-n68l7: restarts=0
+platform-api-7d9bd67c77-x29hx: restarts=0
+platform-api-7d9bd67c77-zqsl4: restarts=0
+platform-realtime-848958cbfb-68lnb: restarts=0
+platform-realtime-848958cbfb-dw45t: restarts=0
+platform-realtime-848958cbfb-prcww: restarts=0
+web-6b9ccdb796-c77tj: restarts=0
+---HPA final---
+NAME                REFERENCE                      TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
+platform-api        Deployment/platform-api        cpu: 1%/70%   2         8         6          20d
+platform-realtime   Deployment/platform-realtime   cpu: 1%/70%   1         4         3          27h
+---jwt_* metrics POST-LOAD---

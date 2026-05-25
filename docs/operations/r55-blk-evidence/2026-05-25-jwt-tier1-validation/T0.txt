@@ -1,0 +1,29 @@
+T0=2026-05-25T11:27:41Z
+---pods---
+NAME                                 READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-7d9bd67c77-cnvg9        1/1     Running   0          2m49s   10.244.0.58    talos-w1   <none>           <none>
+platform-api-7d9bd67c77-zqsl4        1/1     Running   0          3m30s   10.244.3.44    talos-w3   <none>           <none>
+platform-realtime-848958cbfb-68lnb   1/1     Running   0          3m23s   10.244.1.126   talos-w2   <none>           <none>
+platform-realtime-848958cbfb-82p7w   1/1     Running   0          3m30s   10.244.3.213   talos-w3   <none>           <none>
+platform-realtime-848958cbfb-dw45t   1/1     Running   0          3m5s    10.244.3.178   talos-w3   <none>           <none>
+platform-realtime-848958cbfb-prcww   1/1     Running   0          2m58s   10.244.0.158   talos-w1   <none>           <none>
+web-6b9ccdb796-c77tj                 1/1     Running   0          15h     10.244.3.45    talos-w3   <none>           <none>
+---restart counts---
+platform-api-7d9bd67c77-cnvg9: restarts=0
+platform-api-7d9bd67c77-zqsl4: restarts=0
+platform-realtime-848958cbfb-68lnb: restarts=0
+platform-realtime-848958cbfb-82p7w: restarts=0
+platform-realtime-848958cbfb-dw45t: restarts=0
+platform-realtime-848958cbfb-prcww: restarts=0
+web-6b9ccdb796-c77tj: restarts=0
+---HPA---
+NAME                REFERENCE                      TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
+platform-api        Deployment/platform-api        cpu: 1%/70%   2         8         2          20d
+platform-realtime   Deployment/platform-realtime   cpu: 2%/70%   1         4         4          27h
+---CNPG---
+NAME       AGE   INSTANCES   READY   STATUS                     PRIMARY
+postgres   21d   3           3       Cluster in healthy state   postgres-2
+---images---
+platform-api-7d9bd67c77-cnvg9: ghcr.io/verbara/platform/api@sha256:b7a75c8ce2e70021112492a886184d8a9fbe1a42d524109100668004e8297649
+platform-api-7d9bd67c77-zqsl4: ghcr.io/verbara/platform/api@sha256:b7a75c8ce2e70021112492a886184d8a9fbe1a42d524109100668004e8297649
+---jwt_* metrics baseline (pre-load)---

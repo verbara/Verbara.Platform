@@ -320,3 +320,67 @@ NOT one of the 10 chaos experiments — added because every Platform release doe
 - Loaded rollout restart timeline: `docs/operations/r55-blk-evidence/2026-05-25-c-lk-v252/loaded/rollout-restart-loaded.log`
 - ADR-0025 K8s liveness/readiness contract: `docs/decisions/0025-health-liveness-readiness-contract.md`
 - JTI investigation (latent path identification): `docs/research/2026-05-24-jti-investigation-presence-vu1500.md`
+
+---
+
+# v2.5.3 JWT Tier-1 validation rerun — 2026-05-25 (PASS)
+
+**Date:** 2026-05-25
+**Cluster:** Talos v1.13.0 + K8s 1.36.0 + Cilium 1.19.3 (same lab)
+**App version:** `ghcr.io/verbara/platform/api:v2.5.3` (`sha256:b7a75c8c…`)
+**Changes vs v2.5.2:** JWT Tier-1 hardening (`a6927f3a` stale-cache fallback + TTL 60s→300s; `d39d4dde` observability counters + `[LoggerMessage]`)
+**Scenario:** Same as C-LK.2b — NBomber `presence` VU=1500 sustained 300s against `http://api.r55.local`
+**Evidence dir:** `docs/operations/r55-blk-evidence/2026-05-25-jwt-tier1-validation/`
+
+## Headline result — Tier-1 fully eliminated the HPA cold-cache cascade
+
+| Metric | v2.5.2 (pre-Tier-1) | v2.5.3 (post-Tier-1) | Delta | Acceptance gate |
+|---|---|---|---|---|
+| OK count | 193,317 | **240,630** | +24% | n/a |
+| Fail count | **1,980 Unauthorized** | **0** | **100% reduction** | target <500 ✅ floor <1,000 ✅ |
+| Fail rate | 1.01% | **0%** | target <0.3% ✅ |
+| p99 latency (OK) | 8.77s | **6.29s** | -28% | n/a |
+| RPS sustained | 644.4 | **802.1** | +24% | n/a |
+| HPA scale | 2 → 6 replicas | 2 → 6 replicas | unchanged (HPA reproduces) | unchanged |
+| Pod restart count | 0 | **0** | unchanged | 0 (P0 if regressed) |
+
+**Verdict: PASS** — all acceptance gates met with margin. The HPA-induced JWT cold-cache cascade observed on v2.5.2 (1,980 Unauthorized at sustained VU=1500/300s) was fully eliminated by Tier-1 hardening on v2.5.3.
+
+## Caveat captured — observability gap
+
+The `verbara.platform.jwt` meter shipped in `d39d4dde` was created in `JwtTokenService` but the OpenTelemetry `MeterProvider` in `Program.cs` only `AddMeter()`-ed the framework meters (`Microsoft.AspNetCore.Hosting`, etc.). Result: `jwt.key.cache_misses`, `jwt.key.stale_cache_fallbacks`, `jwt.key.fail_closed` incremented in-process but were never exposed via the `/metrics` Prometheus endpoint.
+
+**Impact on this validation:** Cannot distinguish between two possible causes of the 0-fails result:
+1. **Stale-cache fallback fired** — Redis SCAN+N×GET timed out for some cold-start pod, the `catch when cached is not null` branch returned cached keys, no 401s emitted (Tier-1 catch path working as designed)
+2. **Cold-cache happy path completed fast enough** — Redis was responsive enough during this lab run that SCAN+N×GET succeeded within the 5s timeout, no exception thrown to catch (no Tier-1 fallback was needed)
+
+Tier-1 was the only material code change between v2.5.2 and v2.5.3, so the 100% reduction is attributable to Tier-1 — but the EXACT mechanism (which path triggered) is unmeasured.
+
+**Fix shipped same session:** commit `5f34fb0e` adds `.AddMeter("verbara.platform.jwt")` to the OpenTelemetry pipeline. Will be active in next rebuild (v2.5.4 or v2.5.3.1 patch). After redeploy + sweep rerun, the counters will distinguish #1 vs #2.
+
+**Production implication:** Tier-1 alone delivered 100% reduction under THIS lab load pattern. Production may have higher Redis contention (more keyspace noise from other caches, more concurrent multiplexer activity) where Tier-1 alone may not be 100% effective. Tier-2 (`docs/specs/2026-05-25-jwt-tier-2-redis-set-index.md`) remains queued to close the cold-start residual in adversarial conditions; the observability fix is the prerequisite for measuring whether Tier-2 is needed in any given customer environment.
+
+## Findings summary
+
+| # | Category | v2.5.3 observation | Follow-up |
+|---|---|---|---|
+| 1 | Tier-1 effectiveness | 100% reduction in lab cold-cache cascade (1,980 → 0 fails) | ✅ Ship-quality. Validate in cloud lab (Phase 0C) before claiming "always sufficient" |
+| 2 | Performance improvement | +24% throughput, -28% p99 latency under same load | Side benefit of 5min TTL (5× fewer Redis fetches under burst) |
+| 3 | Observability gap | `jwt.key.*` counters not exposed | ✅ Fix shipped `5f34fb0e`. Next rebuild + redeploy + scrape distinguishes fallback vs happy path |
+| 4 | Tier-2 priority | Was "active concern — ship in 2 weeks" | **Downgrade to "ship in v2.6.x"** — Tier-1 alone covered the lab scenario fully. Re-evaluate after cloud validation + observability re-measurement |
+| 5 | License authorization timing | First helm upgrade tried wrong digest (config-digest instead of manifest-list); fixed via `aa8a3330` + verbara-website PR #21 | Document the `crane digest <ref:tag>` pattern in release-runbook |
+
+## Process gotchas captured
+
+1. **`docker manifest inspect` returns config-digest, NOT manifest-list digest.** The correct command for image-binding (ADR-0011) is `crane digest <ref:tag>` (or `skopeo inspect ... | jq .Digest`). Used the wrong one initially; ImagePullBackOff with `unexpected media type application/octet-stream`.
+2. **`/metrics` is exposed publicly via Cilium Gateway** (`http://api.r55.local/metrics`). No ServiceMonitor for platform-api, so Prometheus doesn't auto-scrape. Use direct curl OR add a ServiceMonitor (filed as observability hardening).
+3. **Native AOT image has no `wget` / `curl`** — `kubectl exec ... wget` fails. Use port-forward + host curl, OR use Cilium Gateway external route.
+4. **Pro `license_image_unauthorized_total` counter showed 1** — the lab license hadn't been re-issued to include the v2.5.3 digest. Pro degraded Dialer feature but JWT path is NOT license-gated, so the validation proceeded successfully. License re-issue is normally automatic after `digest-reconciliation.yml` daily run; for forward-only validations like this we accept the lab license drift.
+
+## References
+
+- v2.5.3 commits: `a6927f3a` Tier-1 + `d39d4dde` observability + `8c83d463` version bump + `aa8a3330` helm digest fix + `5f34fb0e` OTel meter fix
+- release.yml run: 26396711953 (4 cosign-signed images)
+- verbara-website PR #20 (initial authorize) + #21 (digest correction)
+- NBomber report: `tests/Verbara.Platform.LoadTests/load-test-reports-archive/presence-LOADTEST_VU-1500-300s/nbomber_report_2026-05-25--11-33-02.md`
+- Helm release: `platform` rev 28 on v2.5.3 in `default` namespace

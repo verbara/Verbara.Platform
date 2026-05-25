@@ -1,0 +1,186 @@
+=== T=1 2026-05-25T11:27:58Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 14 1779708478910
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 25 1779708478910
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 2 1779708478910
+
+=== T=2 2026-05-25T11:28:13Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 19 1779708493954
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 20 1779708493954
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 1 1779708493954
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708493954
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 6668 1779708493954
+
+=== T=3 2026-05-25T11:28:28Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 21 1779708508994
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 21 1779708508994
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 2 1779708508994
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708508994
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 13549 1779708508994
+
+=== T=4 2026-05-25T11:28:44Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 22 1779708524036
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 23 1779708524036
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 3 1779708524036
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708524036
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 20262 1779708524036
+
+=== T=5 2026-05-25T11:28:59Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 23 1779708539073
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 24 1779708539073
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 4 1779708539073
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708539073
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 27085 1779708539073
+
+=== T=6 2026-05-25T11:29:14Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 1 1779708554112
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 1 1779708554112
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 760 1779708554112
+
+=== T=7 2026-05-25T11:29:29Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 25 1779708569147
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 27 1779708569147
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 5 1779708569147
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708569147
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 36919 1779708569147
+
+=== T=8 2026-05-25T11:29:44Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 23 1779708584191
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 38 1779708584191
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 3 1779708584191
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 39988 1779708584191
+
+=== T=9 2026-05-25T11:29:59Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 3 1779708599235
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 6 1779708599235
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 10751 1779708599235
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 1 1779708599235
+
+=== T=10 2026-05-25T11:30:14Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 4 1779708614273
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 8 1779708614273
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 13689 1779708614273
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 2 1779708614273
+
+=== T=11 2026-05-25T11:30:29Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 30 1779708631122
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 33 1779708631122
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 6 1779708631122
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708631122
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 48698 1779708631122
+
+=== T=12 2026-05-25T11:30:46Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 31 1779708646174
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 35 1779708646174
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 7 1779708646174
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708646174
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 50836 1779708646174
+
+=== T=13 2026-05-25T11:31:01Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 33 1779708661511
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 36 1779708661511
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 8 1779708661511
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708661511
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 53066 1779708661511
+
+=== T=14 2026-05-25T11:31:16Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 8 1779708676548
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 12 1779708676548
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 19674 1779708676548
+
+=== T=15 2026-05-25T11:31:31Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 35 1779708691798
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 39 1779708691798
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 9 1779708691798
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708691798
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 57720 1779708691798
+
+=== T=16 2026-05-25T11:31:46Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 31 1779708706843
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 51 1779708706843
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 4 1779708706843
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 59917 1779708706843
+
+=== T=17 2026-05-25T11:32:01Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 38 1779708722279
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 42 1779708722279
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 10 1779708722279
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708722279
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 61945 1779708722279
+
+=== T=18 2026-05-25T11:32:17Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 8 1779708737318
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 13 1779708737318
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 16910 1779708737318
+
+=== T=19 2026-05-25T11:32:32Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 3 1779708752354
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 6 1779708752354
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 5147 1779708752354
+
+=== T=20 2026-05-25T11:32:47Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 15 1779708767395
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 26 1779708767395
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 35737 1779708767395
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 3 1779708767395
+
+=== T=21 2026-05-25T11:33:02Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 6 1779708782434
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 9 1779708782434
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 8568 1779708782434
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 1 1779708782434
+
+=== T=22 2026-05-25T11:33:17Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 17 1779708797470
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 30 1779708797470
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 37264 1779708797470
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 4 1779708797470
+
+=== T=23 2026-05-25T11:33:32Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 13 1779708812504
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 21 1779708812504
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 22208 1779708812504
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 1 1779708812504
+
+=== T=24 2026-05-25T11:33:47Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 14 1779708827544
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 22 1779708827544
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 22208 1779708827544
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 2 1779708827544
+
+=== T=25 2026-05-25T11:34:02Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 46 1779708842580
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 56 1779708842580
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 11 1779708842580
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="POST",http_response_status_code="200",http_route="/api/v{version:apiVersion}/auth/login",network_protocol_version="1.1",url_scheme="http"} 1 1779708842580
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 69588 1779708842580
+
+=== T=26 2026-05-25T11:34:17Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 11 1779708857617
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 16 1779708857617
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 8568 1779708857617
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 2 1779708857617
+
+=== T=27 2026-05-25T11:34:32Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 23 1779708872654
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 31 1779708872654
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 33411 1779708872654
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 1 1779708872654
+
+=== T=28 2026-05-25T11:34:47Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 44 1779708887698
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 70 1779708887698
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 5 1779708887698
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 69591 1779708887698
+
+=== T=29 2026-05-25T11:35:02Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 25 1779708902733
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 42 1779708902733
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 37264 1779708902733
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 5 1779708902733
+
+=== T=30 2026-05-25T11:35:17Z ===
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health",network_protocol_version="1.1",url_scheme="http"} 20 1779708917767
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/health/ready",network_protocol_version="1.1",url_scheme="http"} 31 1779708917767
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/api/v{version:apiVersion}/admin/agents",network_protocol_version="1.1",url_scheme="http"} 22208 1779708917767
+http_server_request_duration_seconds_count{otel_scope_name="Microsoft.AspNetCore.Hosting",http_request_method="GET",http_response_status_code="200",http_route="/metrics",network_protocol_version="1.1",url_scheme="http"} 3 1779708917767
+
