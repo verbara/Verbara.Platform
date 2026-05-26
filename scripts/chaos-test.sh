@@ -86,7 +86,31 @@ if [ "${1:-}" = "--k8s" ]; then
             kubectl get pods -A -o wide 2>&1
         } >> "$LOG"
 
-        kubectl delete -f "$exp" --ignore-not-found >> "$LOG" 2>&1
+        # `kubectl delete` issues the deletion request; Chaos Mesh's controller
+        # owns the actual teardown via finalizers. On Cilium kube-proxy-
+        # replacement clusters, NetworkChaos teardown fails (the controller
+        # cannot reverse the iptables injection that was never applied), so
+        # the resource sits in `Terminating` forever with its finalizer intact.
+        # That blocks the next `kubectl apply -f` of the same name in the
+        # next sweep. Background-delete (--wait=false) then poll up to 10s
+        # for the resource to disappear; if it's still stuck, force-clear the
+        # finalizer so the next sweep starts clean. Recorded as C-LK v2.5.2
+        # finding #9 (docs/operations/chaos-test-report-k8s-local.md).
+        kubectl delete -f "$exp" --ignore-not-found --wait=false >> "$LOG" 2>&1
+        for _i in 1 2 3 4 5; do
+            if ! kubectl get -f "$exp" >/dev/null 2>&1; then
+                break
+            fi
+            sleep 2
+        done
+        if kubectl get -f "$exp" >/dev/null 2>&1; then
+            STUCK_KIND=$(kubectl get -f "$exp" -o jsonpath='{.kind}' 2>/dev/null || true)
+            STUCK_NAME=$(kubectl get -f "$exp" -o jsonpath='{.metadata.name}' 2>/dev/null || true)
+            STUCK_NS=$(kubectl get -f "$exp" -o jsonpath='{.metadata.namespace}' 2>/dev/null || true)
+            echo "[chaos-k8s] $NAME — finalizer stuck on ${STUCK_KIND}/${STUCK_NAME} (ns=${STUCK_NS:-default}); force-clearing"
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) finalizer-force-clear ${STUCK_KIND}/${STUCK_NAME}" >> "$LOG"
+            kubectl patch -f "$exp" --type=merge -p '{"metadata":{"finalizers":null}}' >> "$LOG" 2>&1 || true
+        fi
         echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) cleaned" >> "$LOG"
         echo "[chaos-k8s] $NAME — cleaned"
     done
