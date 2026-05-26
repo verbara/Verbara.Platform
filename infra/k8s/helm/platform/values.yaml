@@ -106,7 +106,11 @@ api:
       name: verbara-lab-license
       key: license.lic
   prometheus:
-    enabled: false
+    # Defaults to true: ships the platform-api ServiceMonitor so Prometheus
+    # Operator (kube-prometheus-stack) scrapes /metrics on every install.
+    # Set to false only on clusters where Prometheus Operator CRDs are absent
+    # (otherwise `helm install` fails with `no matches for kind ServiceMonitor`).
+    enabled: true
 
 web:
   image:

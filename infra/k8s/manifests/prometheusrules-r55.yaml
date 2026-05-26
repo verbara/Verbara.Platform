@@ -282,6 +282,75 @@ spec:
     #   - Loki count_over_time for log-derived signals (WorkerCrash, LicenseException,
     #     ProductionSafetyNet event-id 12002)
     # =================================================================
+
+    # =================================================================
+    # P1 K8s-state — alerts derived from kube-state-metrics + CNPG metrics.
+    # Added 2026-05-26 from C-LK v2.5.2 chaos findings #2 + #7
+    # (docs/operations/chaos-test-report-k8s-local.md). Requires
+    # kube-prometheus-stack (kube-state-metrics ServiceMonitor) and
+    # CloudNativePG operator metrics endpoint.
+    # =================================================================
+    - name: platform_k8s_state
+      interval: 30s
+      rules:
+
+        - alert: DeploymentReplicasUnavailable
+          expr: |
+            kube_deployment_status_replicas_unavailable{namespace="r55-platform"} > 0
+          for: 30s
+          labels:
+            severity: P1
+            service: kubernetes
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} has unavailable replicas (ns={{ $labels.namespace }})"
+            description: |
+              `kube_deployment_status_replicas_unavailable` > 0 for 30s on
+              {{ $labels.namespace }}/{{ $labels.deployment }}. Likely a probe
+              failure, image pull problem, or resource exhaustion. Cross-check
+              against `PodNotReadySustained` to see if the same pod is the
+              source. Under rolling restarts this fires for ~5s and self-resolves;
+              the 30s `for:` should suppress those.
+            runbook_url: "alerts-runbook.md#deploymentreplicasunavailable"
+
+        - alert: PodNotReadySustained
+          expr: |
+            sum by (namespace, pod) (kube_pod_status_ready{condition="false"}) > 0
+            unless on (namespace, pod) kube_pod_status_phase{phase=~"Succeeded|Pending"} > 0
+          for: 1m
+          labels:
+            severity: P1
+            service: kubernetes
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} NotReady for 1m"
+            description: |
+              Pod has been NotReady for 60s without being in Pending or Succeeded
+              phase — i.e. it's actively running but failing its readiness probe,
+              or its container is crash-looping. Tightens stock kube-prometheus
+              `KubePodNotReady` (default 15m) for fast detection of probe
+              regressions like the v2.5.1 cascade closed by PR #32 (ADR-0025).
+            runbook_url: "alerts-runbook.md#podnotreadysustained"
+
+        - alert: CnpgFailoverEvent
+          expr: |
+            increase(cnpg_failover_total[5m]) > 0
+            or
+            increase(cnpg_pg_replication_streaming_replicas{state!="streaming"}[5m]) > 0
+          labels:
+            severity: P1
+            service: postgres
+          annotations:
+            summary: "CloudNativePG failover detected on cluster {{ $labels.cluster }}"
+            description: |
+              CNPG reported a primary failover event (or streaming replica left
+              `streaming` state). Validated in C-LK v2.5.2 chaos suite as a
+              ~50s window where /health/ready degrades while platform-api stays
+              up via PR #32 contract fix. Investigate via
+              `kubectl -n r55-data describe cluster postgres` + CNPG operator
+              logs. Failovers under normal traffic are recoverable; under load
+              they cost ~50s of read/write availability during promotion.
+            runbook_url: "alerts-runbook.md#cnpgfailoverevent"
+
+    # =================================================================
     - name: platform_licensing
       interval: 30s
       rules:
