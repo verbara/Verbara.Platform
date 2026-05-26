@@ -1,0 +1,72 @@
+═══ D-LK 24h soak — post-execution summary ═══
+Soak PID:          697424
+Watch started:     —
+Watch ended:       2026-05-26T11:57:44-05:00
+Watch duration:    63604s
+Output dir:        /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260525-181547
+
+═══ Files captured ═══
+total 29044
+drwxrwxr-x 2 orion75 orion75     4096 May 26 11:57 .
+drwxrwxr-x 5 orion75 orion75     4096 May 25 18:15 ..
+-rw-rw-r-- 1 orion75 orion75     6426 May 26 11:57 describe-platform-api-7c64f8c5f9-768ws.txt
+-rw-rw-r-- 1 orion75 orion75     6955 May 26 11:57 describe-platform-api-7c64f8c5f9-bq4xz.txt
+-rw-rw-r-- 1 orion75 orion75     5875 May 26 11:53 dlk-soak-stdout.log
+-rw-rw-r-- 1 orion75 orion75        7 May 26 11:57 health-final.json
+-rw-rw-r-- 1 orion75 orion75      499 May 26 11:57 k8s-events.txt
+-rw-rw-r-- 1 orion75 orion75      629 May 26 11:57 k8s-pods.txt
+-rw-rw-r-- 1 orion75 orion75      330 May 26 11:57 k8s-top.txt
+-rw-rw-r-- 1 orion75 orion75    37260 May 26 11:57 logs-platform-api-7c64f8c5f9-768ws-current.txt
+-rw-rw-r-- 1 orion75 orion75    37117 May 26 11:57 logs-platform-api-7c64f8c5f9-768ws-previous.txt
+-rw-rw-r-- 1 orion75 orion75    37592 May 26 11:57 logs-platform-api-7c64f8c5f9-bq4xz-current.txt
+-rw-rw-r-- 1 orion75 orion75    38756 May 26 11:57 logs-platform-api-7c64f8c5f9-bq4xz-previous.txt
+-rw-rw-r-- 1 orion75 orion75     1056 May 26 11:57 nbomber-log-2026052518.txt
+-rw-rw-r-- 1 orion75 orion75      517 May 26 11:57 nbomber-log-2026052611.txt
+-rw-rw-r-- 1 orion75 orion75      742 May 26 11:57 nbomber_report_2026-05-26--16-53-04.csv
+-rw-rw-r-- 1 orion75 orion75 29499909 May 26 11:57 nbomber_report_2026-05-26--16-53-04.html
+-rw-rw-r-- 1 orion75 orion75     1276 May 26 11:57 nbomber_report_2026-05-26--16-53-04.md
+-rw-rw-r-- 1 orion75 orion75      354 May 26 11:57 SUMMARY.txt
+-rw-rw-r-- 1 orion75 orion75     1766 May 26 11:57 watcher.log
+
+═══ Last 30 lines of NBomber soak log ═══
+│ latency percentile (ms) │ p50 = 4, p75 = 4.65, p95 = 6.5, p99 = 10.1         │
+│      data transfer (KB) │ min = 4.996, mean = 4.996, max = 5, all = 9255.8   │
+│                         │ MB                                                 │
+└─────────────────────────┴────────────────────────────────────────────────────┘
+┌─────────────────────────┬────────────────────────────────────────────────────┐
+│                    step │ failures stats                                     │
+├─────────────────────────┼────────────────────────────────────────────────────┤
+│                    name │ global information                                 │
+│           request count │ all = 1902090, fail = 5014, RPS = 0.1              │
+│            latency (ms) │ min = 0.59, mean = 897.89, max = 24357.83, StdDev  │
+│                         │ = 3715.66                                          │
+│ latency percentile (ms) │ p50 = 1.05, p75 = 1.34, p95 = 7561.22, p99 =       │
+│                         │ 21233.66                                           │
+│      data transfer (KB) │ min = 0.724, mean = 0.726, max = 0.85, all = 3.6   │
+│                         │ MB                                                 │
+└─────────────────────────┴────────────────────────────────────────────────────┘
+
+status codes for scenario: queue_ingestion
+┌─────────────────────┬─────────┬─────────┐
+│         status code │  count  │ message │
+├─────────────────────┼─────────┼─────────┤
+│                  OK │ 1897076 │         │
+│ InternalServerError │    1    │         │
+│        Unauthorized │  5013   │         │
+└─────────────────────┴─────────┴─────────┘
+
+
+11:53:04 [INF] Reports saved in folder: "/media/Data/Source/Verbara/Verbara.Platform/load-test-reports"
+11:53:04 [WRN] THIS VERSION IS FREE ONLY FOR PERSONAL USE. You can't use it for an 
+organization.
+
+═══ Final pod state ═══
+NAME                                READY   STATUS    RESTARTS      AGE   IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-7c64f8c5f9-768ws       1/1     Running   1 (25h ago)   28h   10.244.0.126   talos-w1   <none>           <none>
+platform-api-7c64f8c5f9-bq4xz       1/1     Running   1 (25h ago)   28h   10.244.3.121   talos-w3   <none>           <none>
+platform-realtime-58db64c5c-5psrh   1/1     Running   1 (25h ago)   28h   10.244.3.18    talos-w3   <none>           <none>
+web-6b9ccdb796-c77tj                1/1     Running   2 (17h ago)   45h   10.244.3.169   talos-w3   <none>           <none>
+
+═══ Restart counters per replica ═══
+platform-api-7c64f8c5f9-768ws restarts=1
+platform-api-7c64f8c5f9-bq4xz restarts=1

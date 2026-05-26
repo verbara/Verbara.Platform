@@ -1,0 +1,5 @@
+NAME                                READY   STATUS    RESTARTS      AGE   IP             NODE       NOMINATED NODE   READINESS GATES
+platform-api-7c64f8c5f9-768ws       1/1     Running   1 (25h ago)   28h   10.244.0.126   talos-w1   <none>           <none>
+platform-api-7c64f8c5f9-bq4xz       1/1     Running   1 (25h ago)   28h   10.244.3.121   talos-w3   <none>           <none>
+platform-realtime-58db64c5c-5psrh   1/1     Running   1 (25h ago)   28h   10.244.3.18    talos-w3   <none>           <none>
+web-6b9ccdb796-c77tj                1/1     Running   2 (17h ago)   45h   10.244.3.169   talos-w3   <none>           <none>

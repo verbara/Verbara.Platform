@@ -29,6 +29,9 @@ tests/Verbara.Platform.LoadTests/load-test-reports/nbomber-log-*.txt
 # load-test-reports/ at each run, so the harness copies per-step outputs here.
 # Canonical evidence packs live under docs/operations/r55-blk-evidence/*.
 tests/Verbara.Platform.LoadTests/load-test-reports-archive/
+# K8s D-LK soak HTML reports (29 MB+ binaries); canonical summary stays in the
+# accompanying .md/.csv + closure README under docs/operations/r55-blk-evidence/.
+tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/**/*.html
 # Raw timestamped chaos run dirs (canonical reports stay tracked under
 # docs/operations/chaos-test-report-*.md).
 chaos-reports/[0-9]*/

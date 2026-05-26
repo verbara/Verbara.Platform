@@ -1,0 +1,139 @@
+Name:             platform-api-7c64f8c5f9-bq4xz
+Namespace:        r55-platform
+Priority:         0
+Service Account:  default
+Node:             talos-w3/192.168.122.13
+Start Time:       Mon, 25 May 2026 07:22:02 -0500
+Labels:           app.kubernetes.io/component=api
+                  app.kubernetes.io/instance=platform
+                  app.kubernetes.io/managed-by=Helm
+                  app.kubernetes.io/name=platform-api
+                  app.kubernetes.io/version=2.5.1
+                  pod-template-hash=7c64f8c5f9
+Annotations:      kubectl.kubernetes.io/restartedAt: 2026-05-25T04:34:06-05:00
+                  prometheus.io/path: /metrics
+                  prometheus.io/port: 5000
+                  prometheus.io/scrape: true
+Status:           Running
+IP:               10.244.3.121
+IPs:
+  IP:           10.244.3.121
+Controlled By:  ReplicaSet/platform-api-7c64f8c5f9
+Init Containers:
+  wait-for-postgres:
+    Container ID:    containerd://e8b50b1131b6f043680c247bea0337e7aae6ead505a8a3a2b816840c44790556
+    Image:           busybox:1.37
+    Image ID:        docker.io/library/busybox@sha256:1487d0af5f52b4ba31c7e465126ee2123fe3f2305d638e7827681e7cf6c83d5e
+    Port:            <none>
+    Host Port:       <none>
+    SeccompProfile:  RuntimeDefault
+    Command:
+      sh
+      -c
+      echo "Waiting for postgres-pooler.r55-data.svc.cluster.local..."
+      until nslookup postgres-pooler.r55-data.svc.cluster.local > /dev/null 2>&1; do
+        sleep 3
+      done
+      echo "Postgres pooler DNS resolved"
+      
+    State:          Terminated
+      Reason:       Completed
+      Exit Code:    0
+      Started:      Mon, 25 May 2026 18:10:24 -0500
+      Finished:     Mon, 25 May 2026 18:10:38 -0500
+    Last State:     Terminated
+      Reason:       Completed
+      Exit Code:    0
+      Started:      Mon, 25 May 2026 07:22:03 -0500
+      Finished:     Mon, 25 May 2026 07:22:03 -0500
+    Ready:          True
+    Restart Count:  1
+    Limits:
+      cpu:     50m
+      memory:  32Mi
+    Requests:
+      cpu:        10m
+      memory:     16Mi
+    Environment:  <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-m7j5j (ro)
+Containers:
+  api:
+    Container ID:    containerd://bfcc967cd2e97d4b55a64cb4a6ecc9307bbe0c0b1d78f9745be52c826b3043de
+    Image:           ghcr.io/verbara/platform/api@sha256:05ccb4fb00b50f71d302af4db26461e37ea8595dc54a6ab29e0690f07e5a0c48
+    Image ID:        ghcr.io/verbara/platform/api@sha256:05ccb4fb00b50f71d302af4db26461e37ea8595dc54a6ab29e0690f07e5a0c48
+    Port:            5000/TCP (http)
+    Host Port:       0/TCP (http)
+    SeccompProfile:  RuntimeDefault
+    State:           Running
+      Started:       Mon, 25 May 2026 18:10:38 -0500
+    Last State:      Terminated
+      Reason:        Error
+      Exit Code:     137
+      Started:       Mon, 25 May 2026 07:22:03 -0500
+      Finished:      Mon, 25 May 2026 10:13:13 -0500
+    Ready:           True
+    Restart Count:   1
+    Limits:
+      cpu:     2
+      memory:  2Gi
+    Requests:
+      cpu:      500m
+      memory:   512Mi
+    Liveness:   http-get http://:5000/health delay=30s timeout=3s period=15s #success=1 #failure=5
+    Readiness:  http-get http://:5000/health/ready delay=10s timeout=3s period=10s #success=1 #failure=5
+    Startup:    http-get http://:5000/health delay=5s timeout=3s period=5s #success=1 #failure=12
+    Environment:
+      ASPNETCORE_ENVIRONMENT:                       Production
+      IMAGE_DIGEST:                                 sha256:05ccb4fb00b50f71d302af4db26461e37ea8595dc54a6ab29e0690f07e5a0c48
+      ASPNETCORE_URLS:                              http://+:5000
+      PG_PASSWORD:                                  <set to the key 'password' in secret 'platform-pg-credentials'>  Optional: false
+      ConnectionStrings__Postgres:                  Host=postgres-pooler.r55-data.svc.cluster.local;Port=5432;Database=verbara;Username=platform;Password=$(PG_PASSWORD)
+      ConnectionStrings__Redis:                     redis-0.redis.r55-data.svc.cluster.local:6379
+      ConnectionStrings__IdentityRedis:             redis-0.redis.r55-data.svc.cluster.local:6379
+      Identity__JwtKeyRotation__UseRotationPool:    true
+      Identity__JwtKeyRotation__RequireRedisStore:  true
+      Identity__Jwt__Issuer:                        r55-staging
+      Identity__Jwt__Audience:                      r55-staging
+      JWT_SIGNING_KEY:                              <set to the key 'key' in secret 'jwt-signing-key'>  Optional: false
+      Services__ServiceKey:                         r55-staging-service-key-change-in-prod
+      CORS_ORIGINS:                                 http://r55.local,http://api.r55.local
+      Asterisk__Ami__Hostname:                      asterisk-sip.r55-asterisk.svc.cluster.local
+      Asterisk__Ami__Port:                          5038
+      Asterisk__Ami__Username:                      platform
+      Asterisk__Ami__Password:                      r55-staging-only-change-prod
+      Asterisk__Ari__BaseUrl:                       http://asterisk-ari.r55-asterisk.svc.cluster.local:8088
+      Asterisk__Ari__Username:                      verbara
+      Asterisk__Ari__Password:                      r55-staging-only-change-prod
+      Asterisk__Ari__Application:                   verbara
+      Licensing__FilePath:                          /etc/verbara/license.lic
+    Mounts:
+      /etc/verbara from license (ro)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-m7j5j (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+Volumes:
+  license:
+    Type:        Secret (a volume populated by a Secret)
+    SecretName:  verbara-lab-license
+    Optional:    false
+  kube-api-access-m7j5j:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason     Age                    From     Message
+  ----     ------     ----                   ----     -------
+  Warning  Unhealthy  8m54s (x3 over 9m14s)  kubelet  spec.containers{api}: Readiness probe failed: Get "http://10.244.3.121:5000/health/ready": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Warning  Unhealthy  8m54s (x2 over 9m9s)   kubelet  spec.containers{api}: Liveness probe failed: Get "http://10.244.3.121:5000/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)

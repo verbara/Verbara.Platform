@@ -1,0 +1,501 @@
+Defaulted container "api" out of: api, wait-for-postgres (init)
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.6994ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0017ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0035ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.2686ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.002ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0004ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.4115ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.9561ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0022ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.3494ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 2.4932ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0025ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.4727ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0015ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.001ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.5746ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 2.1448ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0014ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0031ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.5777ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - 200 - text/plain 1.7222ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.6437ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.002ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.2899ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0012ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0023ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.3791ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 2.3016ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0014ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0028ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.3275ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.9985ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0011ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0023ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.5958ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0023ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.2526ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.7856ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0011ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0022ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.3462ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - 200 - text/plain 1.9195ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.8246ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0007ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0025ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.4014ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0011ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0019ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.3425ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.5726ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0017ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.002ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.4699ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0026ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0018ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health/ready - 200 - application/json;+charset=utf-8 2.1610ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.9032ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0011ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0073ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 1.9027ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0008ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0032ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.5114ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.9262ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0009ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0024ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.5443ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - 200 - text/plain 1.9055ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.002ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0002ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health/ready - 200 - application/json;+charset=utf-8 2.3803ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 2.3142ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.002ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.2198ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0009ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.001ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.2699ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 2.1567ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0011ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0026ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.3844ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0049ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health/ready - 200 - application/json;+charset=utf-8 2.5335ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 3.0328ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0019ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0007ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.5974ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0021ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.2347ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health - 200 - text/plain 1.7948ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.0.126:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0017ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0027ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.0.126:5000/health/ready - 200 - application/json;+charset=utf-8 2.3537ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - 200 - text/plain 1.9233ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage

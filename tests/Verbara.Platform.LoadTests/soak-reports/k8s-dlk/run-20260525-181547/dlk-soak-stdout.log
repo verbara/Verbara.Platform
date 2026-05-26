@@ -1,0 +1,77 @@
+  _   _   ____                        _                        __               
+ | \ | | | __ )    ___    _ __ ___   | |__     ___   _ __     / /_              
+ |  \| | |  _ \   / _ \  | '_ ` _ \  | '_ \   / _ \ | '__|   | '_ \             
+ | |\  | | |_) | | (_) | | | | | | | | |_) | |  __/ | |      | (_) |            
+ |_| \_| |____/   \___/  |_| |_| |_| |_.__/   \___| |_|       \___/             
+                                                                                
+18:16:17 [INF] NBomber "6.1.0" started a new session: "2026-05-25_23.16.81_session_ea1432ff"
+18:16:17 [INF] NBomber started as single node
+18:16:17 [INF] License validation....
+18:16:17 [WRN] THIS VERSION IS FREE ONLY FOR PERSONAL USE. You can't use it for an 
+organization.
+18:16:17 [INF] Reports folder: "/media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/bi
+n/Release/net10.0/load-test-reports"
+18:16:17 [INF] Plugins: no plugins were loaded
+18:16:17 [INF] Reporting sinks: no reporting sinks were loaded
+18:16:17 [INF] Starting init...
+18:16:17 [INF] Target scenarios: "queue_ingestion"
+18:16:17 [INF] Init finished
+18:16:17 [INF] Starting bombing...
+11:53:00 [WRN] Stopping test early: "Stopping test because of too many fails. Scenario 'queue_ingestion' contains 
+'5014' fails."
+11:53:03 [INF] Calculating final statistics...
+
+────────────────────────────────── test info ───────────────────────────────────
+
+test suite: nbomber_default_test_suite_name
+test name: nbomber_default_test_name
+session id: 2026-05-25_23.16.81_session_ea1432ff
+
+──────────────────────────────── scenario stats ────────────────────────────────
+
+scenario: queue_ingestion
+  - ok count: 1897076
+  - fail count: 5014
+  - all data: 9259.4 MB
+  - duration: 17:36:43
+
+load simulations: 
+  - inject, rate: 30, interval: 00:00:01, during: 1.00:00:00
+
+┌─────────────────────────┬────────────────────────────────────────────────────┐
+│                    step │ ok stats                                           │
+├─────────────────────────┼────────────────────────────────────────────────────┤
+│                    name │ global information                                 │
+│           request count │ all = 1902090, ok = 1897076, RPS = 29.9            │
+│            latency (ms) │ min = 2.3, mean = 4.43, max = 24418.69, StdDev =   │
+│                         │ 30.76                                              │
+│ latency percentile (ms) │ p50 = 4, p75 = 4.65, p95 = 6.5, p99 = 10.1         │
+│      data transfer (KB) │ min = 4.996, mean = 4.996, max = 5, all = 9255.8   │
+│                         │ MB                                                 │
+└─────────────────────────┴────────────────────────────────────────────────────┘
+┌─────────────────────────┬────────────────────────────────────────────────────┐
+│                    step │ failures stats                                     │
+├─────────────────────────┼────────────────────────────────────────────────────┤
+│                    name │ global information                                 │
+│           request count │ all = 1902090, fail = 5014, RPS = 0.1              │
+│            latency (ms) │ min = 0.59, mean = 897.89, max = 24357.83, StdDev  │
+│                         │ = 3715.66                                          │
+│ latency percentile (ms) │ p50 = 1.05, p75 = 1.34, p95 = 7561.22, p99 =       │
+│                         │ 21233.66                                           │
+│      data transfer (KB) │ min = 0.724, mean = 0.726, max = 0.85, all = 3.6   │
+│                         │ MB                                                 │
+└─────────────────────────┴────────────────────────────────────────────────────┘
+
+status codes for scenario: queue_ingestion
+┌─────────────────────┬─────────┬─────────┐
+│         status code │  count  │ message │
+├─────────────────────┼─────────┼─────────┤
+│                  OK │ 1897076 │         │
+│ InternalServerError │    1    │         │
+│        Unauthorized │  5013   │         │
+└─────────────────────┴─────────┴─────────┘
+
+
+11:53:04 [INF] Reports saved in folder: "/media/Data/Source/Verbara/Verbara.Platform/load-test-reports"
+11:53:04 [WRN] THIS VERSION IS FREE ONLY FOR PERSONAL USE. You can't use it for an 
+organization.

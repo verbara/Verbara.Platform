@@ -1,0 +1,501 @@
+Defaulted container "api" out of: api, wait-for-postgres (init)
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health - 200 - text/plain 4.6748ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - 200 - text/plain 2.0376ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0028ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 200 - application/json;+charset=utf-8 2.5348ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health - 200 - text/plain 1.6281ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0013ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0014ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 200 - application/json;+charset=utf-8 3.4549ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0008ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0028ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 200 - application/json;+charset=utf-8 2.6228ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health - 200 - text/plain 1.4718ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://platform-api.r55-platform.svc:5000/health - 200 - text/plain 6.7268ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0022ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0008ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 200 - application/json;+charset=utf-8 2.2983ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health - 200 - text/plain 1.3693ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0021ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0007ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 200 - application/json;+charset=utf-8 2.0338ms
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0027ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0025ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 200 - application/json;+charset=utf-8 2.2844ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health - 200 - text/plain 1.7942ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Health checks'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check asterisk with status Degraded completed after 0.0022ms with message 'AMI configured at localhost:5038 — connectivity depends on SDK AmiClient'
+warn: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check dialer-engine with status Degraded completed after 0.0003ms with message 'DialerEngine has not completed its first reconciliation tick yet'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Health checks'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 200 - application/json;+charset=utf-8 2.1357ms
+warn: Verbara.Sdk.Pro.Push.Backplane.RedisEventRelay[1234555515]
+      Redis connection failed (Interactive/SocketClosed): SocketClosed (ReadEndOfStream, last-recv: 0) on redis-0.redis.r55-data.svc.cluster.local:6379/Interactive, Idle/MarkProcessed, last: INFO, origin: ReadFromPipe, outstanding: 0, last-read: 0s ago, last-write: 10s ago, keep-alive: 60s, state: ConnectedEstablished, mgr: 8 of 10 available, in: 0, in-pipe: 0, out-pipe: 0, last-heartbeat: 0s ago, last-mbeat: 0s ago, global: 0s ago, v: 2.12.14.58429
+warn: Verbara.Sdk.Pro.Push.Backplane.RedisEventRelay[1234555515]
+      Redis connection failed (Subscription/SocketClosed): SocketClosed (ReadEndOfStream, last-recv: 0) on redis-0.redis.r55-data.svc.cluster.local:6379/Subscription, Idle/MarkProcessed, last: PING, origin: ReadFromPipe, outstanding: 0, last-read: 0s ago, last-write: 9s ago, keep-alive: 60s, state: ConnectedEstablished, mgr: 8 of 10 available, in: 0, in-pipe: 0, out-pipe: 0, last-heartbeat: 0s ago, last-mbeat: 0s ago, global: 0s ago, v: 2.12.14.58429
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health - - -
+fail: Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware[233252029]
+      Unhandled exception
+      Npgsql.NpgsqlException (0x80004005): Exception while reading from stream
+       ---> System.IO.EndOfStreamException: Attempted to read past the end of the stream.
+         at Npgsql.Internal.NpgsqlReadBuffer.<<Ensure>g__EnsureLong|54_0>d.MoveNext() + 0x334
+         at Npgsql.Internal.NpgsqlReadBuffer.<<Ensure>g__EnsureLong|54_0>d.MoveNext() + 0x5fc
+      --- End of stack trace from previous location ---
+         at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16) + 0x1e
+         at Npgsql.Internal.NpgsqlConnector.<ReadMessageLong>d__234.MoveNext() + 0xa21
+      --- End of stack trace from previous location ---
+         at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource<TResult>.GetResult(Int16) + 0x2f
+         at Npgsql.Internal.NpgsqlConnector.<ReadMessageLong>d__234.MoveNext() + 0x92d
+      --- End of stack trace from previous location ---
+         at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource<TResult>.GetResult(Int16) + 0x2f
+         at Npgsql.NpgsqlDataReader.<NextResult>d__52.MoveNext() + 0xcf3
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlDataReader.<NextResult>d__52.MoveNext() + 0x23c7
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlCommand.<ExecuteReader>d__122.MoveNext() + 0x213
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlCommand.<ExecuteReader>d__122.MoveNext() + 0xffc
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlDataSourceCommand.<ExecuteReader>d__2.MoveNext() + 0x294
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlDataSourceCommand.<ExecuteReader>d__2.MoveNext() + 0x390
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x1ae
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x7ea
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Storage.Postgres.Stores.PostgresTenantBrandingStore.<GetBySubdomainAsync>d__4.MoveNext() + 0x55
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveFromSubdomainAsync>d__6.MoveNext() + 0x3c0
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveTenantIdAsync>d__5.MoveNext() + 0x26e
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<InvokeAsync>d__3.MoveNext() + 0x243
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.RateLimitHeadersMiddleware.<InvokeAsync>d__2.MoveNext() + 0x6d
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware.<InvokeAsync>d__3.MoveNext() + 0xa7
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health - 500 - application/problem+json 1.4366ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+warn: Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware[1435414672]
+      Request error: Client Closed Request
+      System.OperationCanceledException: The operation was canceled.
+         at System.Threading.CancellationToken.ThrowOperationCanceledException() + 0x30
+         at System.Threading.CancellationToken.ThrowIfCancellationRequested() + 0x19
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x878
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<RawOpen>d__214.MoveNext() + 0x48b
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<<Open>g__OpenCore|209_0>d.MoveNext() + 0x193
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<Open>d__209.MoveNext() + 0x8e8
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<OpenNewConnector>d__36.MoveNext() + 0x563
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<<Get>g__RentAsync|33_0>d.MoveNext() + 0x1d7
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlConnection.<<Open>g__OpenAsync|42_0>d.MoveNext() + 0x3d5
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlDataSourceCommand.<ExecuteReader>d__2.MoveNext() + 0xa4
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x1ae
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x7ea
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Storage.Postgres.Stores.PostgresTenantBrandingStore.<GetBySubdomainAsync>d__4.MoveNext() + 0x55
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveFromSubdomainAsync>d__6.MoveNext() + 0x3c0
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveTenantIdAsync>d__5.MoveNext() + 0x26e
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<InvokeAsync>d__3.MoveNext() + 0x243
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.RateLimitHeadersMiddleware.<InvokeAsync>d__2.MoveNext() + 0x6d
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware.<InvokeAsync>d__3.MoveNext() + 0xa7
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 499 - application/problem+json 3000.8255ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+warn: Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware[1435414672]
+      Request error: Client Closed Request
+      System.OperationCanceledException: The operation was canceled.
+         at System.Threading.CancellationToken.ThrowOperationCanceledException() + 0x30
+         at System.Threading.CancellationToken.ThrowIfCancellationRequested() + 0x19
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x878
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<RawOpen>d__214.MoveNext() + 0x48b
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<<Open>g__OpenCore|209_0>d.MoveNext() + 0x193
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<Open>d__209.MoveNext() + 0x8e8
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<OpenNewConnector>d__36.MoveNext() + 0x563
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<<Get>g__RentAsync|33_0>d.MoveNext() + 0x1d7
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlConnection.<<Open>g__OpenAsync|42_0>d.MoveNext() + 0x3d5
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlDataSourceCommand.<ExecuteReader>d__2.MoveNext() + 0xa4
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x1ae
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x7ea
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Storage.Postgres.Stores.PostgresTenantBrandingStore.<GetBySubdomainAsync>d__4.MoveNext() + 0x55
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveFromSubdomainAsync>d__6.MoveNext() + 0x3c0
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveTenantIdAsync>d__5.MoveNext() + 0x26e
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<InvokeAsync>d__3.MoveNext() + 0x243
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.RateLimitHeadersMiddleware.<InvokeAsync>d__2.MoveNext() + 0x6d
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware.<InvokeAsync>d__3.MoveNext() + 0xa7
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 499 - application/problem+json 3000.4533ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health - - -
+fail: Verbara.Platform.Api.Services.QueueDistributionWorker[1830145783]
+      Distribution cycle failed
+      System.TimeoutException: Action for key 'worker.queue-distribution' exceeded timeout of 00:00:10.
+         at Verbara.Sdk.Resilience.ResiliencePolicy.<ExecuteAsync>d__12`1.MoveNext() + 0x9aa
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Services.QueueDistributionWorker.<ExecuteAsync>d__12.MoveNext() + 0x348
+warn: Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware[1435414672]
+      Request error: Client Closed Request
+      System.OperationCanceledException: The operation was canceled.
+         at System.Threading.CancellationToken.ThrowOperationCanceledException() + 0x30
+         at System.Threading.CancellationToken.ThrowIfCancellationRequested() + 0x19
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x878
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<RawOpen>d__214.MoveNext() + 0x48b
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<<Open>g__OpenCore|209_0>d.MoveNext() + 0x193
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<Open>d__209.MoveNext() + 0x8e8
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<OpenNewConnector>d__36.MoveNext() + 0x563
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<<Get>g__RentAsync|33_0>d.MoveNext() + 0x1d7
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlConnection.<<Open>g__OpenAsync|42_0>d.MoveNext() + 0x3d5
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlDataSourceCommand.<ExecuteReader>d__2.MoveNext() + 0xa4
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x1ae
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x7ea
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Storage.Postgres.Stores.PostgresTenantBrandingStore.<GetBySubdomainAsync>d__4.MoveNext() + 0x55
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveFromSubdomainAsync>d__6.MoveNext() + 0x3c0
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveTenantIdAsync>d__5.MoveNext() + 0x26e
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<InvokeAsync>d__3.MoveNext() + 0x243
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.RateLimitHeadersMiddleware.<InvokeAsync>d__2.MoveNext() + 0x6d
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware.<InvokeAsync>d__3.MoveNext() + 0xa7
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health - 499 - application/problem+json 3001.1266ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://10.244.3.46:5000/health/ready - - -
+info: Microsoft.Hosting.Lifetime[0]
+      Application is shutting down...
+warn: Verbara.Sdk.Pro.Cluster.Transport.PostgresClusterTransport[364315089]
+      LISTEN loop error, reconnecting: Exception while reading from stream
+fail: Verbara.Platform.Api.Services.ConversationTimeoutWorker[2063999220]
+      Conversation timeout cycle failed
+      Npgsql.NpgsqlException (0x80004005): Resource temporarily unavailable
+       ---> System.Net.Sockets.SocketException (00000001, 11): Resource temporarily unavailable
+         at System.Net.Dns.GetHostEntryOrAddressesCore(String, Boolean, AddressFamily, Nullable`1) + 0x1a3
+         at System.Net.Dns.<>c.<GetHostEntryOrAddressesCoreAsync>b__34_0(Object, NameResolutionActivity) + 0x8d
+         at System.Net.Dns.<>c__DisplayClass40_0`1.<RunAsync>b__0(Task <p0>, Object <p1>) + 0x2c
+         at System.Threading.Tasks.ContinuationResultTaskFromTask`1.InnerInvoke() + 0x5f
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread, ExecutionContext, ContextCallback, Object) + 0x3d
+      --- End of stack trace from previous location ---
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread, ExecutionContext, ContextCallback, Object) + 0x71
+         at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task&, Thread) + 0x212
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x18e
+         at Verbara.Sdk.Resilience.ResiliencePolicy.<ExecuteAsync>d__12`1.MoveNext() + 0x9aa
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Services.ConversationTimeoutWorker.<ExecuteAsync>d__11.MoveNext() + 0x290
+fail: Verbara.Platform.Api.Services.Reports.ReportSchedulerService[1032801906]
+      Report scheduler tick failed
+      System.TimeoutException: Action for key 'worker.report-scheduler' exceeded timeout of 00:00:10.
+         at Verbara.Sdk.Resilience.ResiliencePolicy.<ExecuteAsync>d__12`1.MoveNext() + 0x9aa
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Services.Reports.ReportSchedulerService.<ExecuteAsync>d__17.MoveNext() + 0x1c3
+warn: Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware[1435414672]
+      Request error: Client Closed Request
+      System.OperationCanceledException: The operation was canceled.
+         at System.Threading.CancellationToken.ThrowOperationCanceledException() + 0x30
+         at System.Threading.CancellationToken.ThrowIfCancellationRequested() + 0x19
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x878
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<RawOpen>d__214.MoveNext() + 0x48b
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<<Open>g__OpenCore|209_0>d.MoveNext() + 0x193
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<Open>d__209.MoveNext() + 0x8e8
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<OpenNewConnector>d__36.MoveNext() + 0x563
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<<Get>g__RentAsync|33_0>d.MoveNext() + 0x1d7
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlConnection.<<Open>g__OpenAsync|42_0>d.MoveNext() + 0x3d5
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlDataSourceCommand.<ExecuteReader>d__2.MoveNext() + 0xa4
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x1ae
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QuerySingleOrDefaultAsync>d__2`1.MoveNext() + 0x7ea
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Storage.Postgres.Stores.PostgresTenantBrandingStore.<GetBySubdomainAsync>d__4.MoveNext() + 0x55
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveFromSubdomainAsync>d__6.MoveNext() + 0x3c0
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<ResolveTenantIdAsync>d__5.MoveNext() + 0x26e
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.TenantResolutionMiddleware.<InvokeAsync>d__3.MoveNext() + 0x243
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.RateLimitHeadersMiddleware.<InvokeAsync>d__2.MoveNext() + 0x6d
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Middleware.ErrorHandlingMiddleware.<InvokeAsync>d__3.MoveNext() + 0xa7
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://10.244.3.46:5000/health/ready - 499 - application/problem+json 3523.8461ms
+info: Verbara.Sdk.Pro.Analytics.Live.LiveQueueSnapshotWriter[112729106]
+      LiveQueueSnapshotWriter stopped
+info: Verbara.Sdk.VoiceAi.AudioSocket.AudioSocketServer[613139823]
+      [AudioSocket] Server stopped
+info: Verbara.Sdk.Pro.EventStore.EventStoreSubscriber[112729106]
+      EventStoreSubscriber stopped
+info: Verbara.Sdk.Pro.Cluster.ClusterManager[1694195323]
+      [CLUSTER] Instance platform-api-7c64f8c5f9-bq4xz stopping
+fail: Verbara.Sdk.Pro.Cluster.Health.NodeHealthMonitor[1547369331]
+      [HEALTH] Heartbeat loop error
+      Npgsql.NpgsqlException (0x80004005): Resource temporarily unavailable
+       ---> System.Net.Sockets.SocketException (00000001, 11): Resource temporarily unavailable
+         at System.Net.Dns.GetHostEntryOrAddressesCore(String, Boolean, AddressFamily, Nullable`1) + 0x1a3
+         at System.Net.Dns.<>c.<GetHostEntryOrAddressesCoreAsync>b__34_0(Object, NameResolutionActivity) + 0x8d
+         at System.Net.Dns.<>c__DisplayClass40_0`1.<RunAsync>b__0(Task <p0>, Object <p1>) + 0x2c
+         at System.Threading.Tasks.ContinuationResultTaskFromTask`1.InnerInvoke() + 0x5f
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread, ExecutionContext, ContextCallback, Object) + 0x3d
+      --- End of stack trace from previous location ---
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread, ExecutionContext, ContextCallback, Object) + 0x71
+         at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task&, Thread) + 0x212
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x18e
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x8c6
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<RawOpen>d__214.MoveNext() + 0x48b
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<<Open>g__OpenCore|209_0>d.MoveNext() + 0x193
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<Open>d__209.MoveNext() + 0x8e8
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<OpenNewConnector>d__36.MoveNext() + 0x563
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<<Get>g__RentAsync|33_0>d.MoveNext() + 0x1d7
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlConnection.<<Open>g__OpenAsync|42_0>d.MoveNext() + 0x3d5
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlDataSourceCommand.<ExecuteReader>d__2.MoveNext() + 0xa4
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlCommand.<ExecuteNonQuery>d__110.MoveNext() + 0x22f
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<ExecuteAsync>d__0.MoveNext() + 0x146
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<ExecuteAsync>d__0.MoveNext() + 0x346
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Pro.Cluster.Transport.PostgresClusterTransport.<HeartbeatAsync>d__19.MoveNext() + 0x62
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Pro.Cluster.Health.NodeHealthMonitor.<PublishHeartbeatAsync>d__29.MoveNext() + 0xaa
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Pro.Cluster.Health.NodeHealthMonitor.<RunHeartbeatLoopAsync>d__28.MoveNext() + 0x176
+info: Verbara.Sdk.Pro.Cluster.ClusterManager[112729106]
+      [CLUSTER] Instance platform-api-7c64f8c5f9-bq4xz stopped
+warn: Verbara.Sdk.Pro.Dialer.DialerEngine[335928832]
+      [DIALER] Reconciliation blocked by license guard: UnauthorizedImage
+fail: Verbara.Platform.Api.Services.WebhookDeliveryService[402714374]
+      Error polling pending webhook retries
+      Npgsql.NpgsqlException (0x80004005): Resource temporarily unavailable
+       ---> System.Net.Sockets.SocketException (00000001, 11): Resource temporarily unavailable
+         at System.Net.Dns.GetHostEntryOrAddressesCore(String, Boolean, AddressFamily, Nullable`1) + 0x1a3
+         at System.Net.Dns.<>c.<GetHostEntryOrAddressesCoreAsync>b__34_0(Object, NameResolutionActivity) + 0x8d
+         at System.Net.Dns.<>c__DisplayClass40_0`1.<RunAsync>b__0(Task <p0>, Object <p1>) + 0x2c
+         at System.Threading.Tasks.ContinuationResultTaskFromTask`1.InnerInvoke() + 0x5f
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread, ExecutionContext, ContextCallback, Object) + 0x3d
+      --- End of stack trace from previous location ---
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread, ExecutionContext, ContextCallback, Object) + 0x71
+         at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task&, Thread) + 0x212
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x18e
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x8c6
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<RawOpen>d__214.MoveNext() + 0x48b
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<<Open>g__OpenCore|209_0>d.MoveNext() + 0x193
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<Open>d__209.MoveNext() + 0x8e8
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<OpenNewConnector>d__36.MoveNext() + 0x563
+      --- End of stack trace from previous location ---
+         at Npgsql.PoolingDataSource.<<Get>g__RentAsync|33_0>d.MoveNext() + 0x1d7
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlConnection.<<Open>g__OpenAsync|42_0>d.MoveNext() + 0x3d5
+      --- End of stack trace from previous location ---
+         at Npgsql.NpgsqlDataSourceCommand.<ExecuteReader>d__2.MoveNext() + 0xa4
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QueryListAsync>d__3`1.MoveNext() + 0x1ae
+      --- End of stack trace from previous location ---
+         at Verbara.Sdk.Data.Npgsql.NpgsqlExecutor.<QueryListAsync>d__3`1.MoveNext() + 0x71e
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Storage.Postgres.Stores.PostgresWebhookDeliveryStore.<ListPendingRetriesAsync>d__4.MoveNext() + 0x58
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Services.WebhookDeliveryService.<PollPendingRetriesAsync>d__15.MoveNext() + 0x98
+fail: Verbara.Platform.Api.Services.CampaignMetricsPoller[402714374]
+      Error polling campaign metrics
+      Npgsql.NpgsqlException (0x80004005): Resource temporarily unavailable
+       ---> System.Net.Sockets.SocketException (00000001, 11): Resource temporarily unavailable
+         at System.Net.Dns.GetHostEntryOrAddressesCore(String, Boolean, AddressFamily, Nullable`1) + 0x1a3
+         at System.Net.Dns.<>c.<GetHostEntryOrAddressesCoreAsync>b__34_0(Object, NameResolutionActivity) + 0x8d
+         at System.Net.Dns.<>c__DisplayClass40_0`1.<RunAsync>b__0(Task <p0>, Object <p1>) + 0x2c
+         at System.Threading.Tasks.ContinuationResultTaskFromTask`1.InnerInvoke() + 0x5f
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread, ExecutionContext, ContextCallback, Object) + 0x3d
+      --- End of stack trace from previous location ---
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread, ExecutionContext, ContextCallback, Object) + 0x71
+         at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task&, Thread) + 0x212
+      --- End of stack trace from previous location ---
+         at Npgsql.Internal.NpgsqlConnector.<ConnectAsync>d__221.MoveNext() + 0x18e
+         at Verbara.Sdk.Resilience.ResiliencePolicy.<ExecuteAsync>d__12`1.MoveNext() + 0x9aa
+      --- End of stack trace from previous location ---
+         at Verbara.Platform.Api.Services.CampaignMetricsPoller.<ExecuteAsync>d__7.MoveNext() + 0x175
+info: Verbara.Sdk.Pro.Dialer.DialerEngine[1694195323]
+      [DIALER] Engine stopping, 0 campaigns to clean up
+info: Verbara.Sdk.Pro.Dialer.DialerEngine[112729106]
+      [DIALER] Engine stopped
+info: Verbara.Platform.Identity.Redis.RedisAuthCacheInvalidator[2]
+      RedisAuthCacheInvalidator stopped.
+warn: Verbara.Sdk.Pro.Cluster.Transport.PostgresClusterTransport[364315089]
+      LISTEN loop error, reconnecting: The operation has timed out

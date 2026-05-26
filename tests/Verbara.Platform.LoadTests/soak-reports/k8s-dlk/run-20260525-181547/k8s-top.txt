@@ -1,0 +1,5 @@
+NAME                                CPU(cores)   MEMORY(bytes)   
+platform-api-7c64f8c5f9-768ws       6m           184Mi           
+platform-api-7c64f8c5f9-bq4xz       5m           172Mi           
+platform-realtime-58db64c5c-5psrh   3m           210Mi           
+web-6b9ccdb796-c77tj                1m           4Mi             

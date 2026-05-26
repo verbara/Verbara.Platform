@@ -1,0 +1,11 @@
+[watcher] 2026-05-25T18:17:40-05:00 — armed for PID 697424. Output dir: /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260525-181547
+[watcher] 2026-05-26T11:57:44-05:00 — soak process ended after 63604s in watch.
+[watcher] 2026-05-26T11:57:44-05:00 — capturing NBomber reports + k8s state...
+'/media/Data/Source/Verbara/Verbara.Platform/load-test-reports/nbomber-log-2026052611.txt' -> '/media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260525-181547/nbomber-log-2026052611.txt'
+'/media/Data/Source/Verbara/Verbara.Platform/load-test-reports/nbomber-log-2026052518.txt' -> '/media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260525-181547/nbomber-log-2026052518.txt'
+'/media/Data/Source/Verbara/Verbara.Platform/load-test-reports/nbomber_report_2026-05-26--16-53-04.md' -> '/media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260525-181547/nbomber_report_2026-05-26--16-53-04.md'
+'/media/Data/Source/Verbara/Verbara.Platform/load-test-reports/nbomber_report_2026-05-26--16-53-04.html' -> '/media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260525-181547/nbomber_report_2026-05-26--16-53-04.html'
+'/media/Data/Source/Verbara/Verbara.Platform/load-test-reports/nbomber_report_2026-05-26--16-53-04.csv' -> '/media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260525-181547/nbomber_report_2026-05-26--16-53-04.csv'
+[watcher] 2026-05-26T11:57:44-05:00 — capturing K8s state...
+[watcher] 2026-05-26T11:57:44-05:00 — final health snapshot...
+[watcher] 2026-05-26T11:57:44-05:00 — DONE. Summary at: /media/Data/Source/Verbara/Verbara.Platform/tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260525-181547/SUMMARY.txt
