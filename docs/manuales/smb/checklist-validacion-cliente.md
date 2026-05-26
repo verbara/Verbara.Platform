@@ -70,12 +70,12 @@ Healthchecks:
 - ☐ `curl http://localhost/` → 200 OK
 - ☐ `docker exec verbara-asterisk asterisk -rx 'pjsip show transports'` → UDP+TCP+WS+WSS bound
 
-Verificación de firmas (ADR-0023, 5 imágenes signed):
-- ☐ `cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/api:v2.4.1` → OK
-- ☐ `cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/realtime:v2.4.1` → OK
-- ☐ `cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/renderer:v2.4.1` → OK
-- ☐ `cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/mail:v2.4.1` → OK
-- ☐ `cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/web:v3.0.3-web` → OK
+Verificación de firmas (ADR-0023, 5 imágenes signed — cosign v3+ con `--insecure-ignore-tlog`):
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/api:v2.5.4` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/realtime:v2.5.4` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/renderer:v2.5.4` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/mail:v2.5.4` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/web:v3.1.4-web` → OK
 
 ## 4. Setup inicial (Admin + Tenant + Agente + Queue)
 

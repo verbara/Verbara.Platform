@@ -41,7 +41,7 @@ $ dc logs --tail 50 platform-api
 | `Unable to bind to 'http://+:5000'` | Puerto 5000 ya ocupado en el host | `sudo ss -tlnp '( sport = :5000 )'` + matar el ofensor o cambiar `API_PORT` en `.env` |
 | `Could not parse JWT_SIGNING_KEY` | Valor del secret no tiene 32+ chars | Regenerar con `openssl rand -base64 64` |
 | `Failed to load license` | `LICENSE_PATH` apunta a un archivo inexistente o corrupto | Dejar `LICENSE_PATH=` vacío (modo OSS — Pro endpoints retornan HTTP 402 con upgrade URL); o adquirir Tier 0.5 gratis en https://verbara.io/developer-license y mountear el `.lic` |
-| `IMAGE_DIGEST mismatch` | Pro digest binding falla (ADR-0011) | `IMAGE_DIGEST` debe matchear `docker inspect ghcr.io/verbara/platform/api:v2.4.1` `RepoDigests` |
+| `IMAGE_DIGEST mismatch` | Pro digest binding falla (ADR-0011) | `IMAGE_DIGEST` debe matchear `docker inspect ghcr.io/verbara/platform/api:v2.5.4` `RepoDigests` |
 
 ### Reiniciar uno solo
 ```bash
@@ -391,23 +391,25 @@ $ cd /opt/verbara/platform
 # 1. Backup obligatorio antes
 $ docker exec verbara-postgres pg_dump -U platform -Fc verbara > backup-pre-upgrade.dump
 
-# 2. Leer release notes (ej. upgrade desde v2.4.1 hacia v2.5.0)
+# 2. Leer release notes (ej. upgrade desde v2.5.3 hacia v2.5.4)
 $ git fetch --tags
-$ git log v2.4.1..v2.5.0 --oneline -- docs/decisions/ docs/specs/ MIGRATIONS.md
+$ git log v2.5.3..v2.5.4 --oneline -- docs/decisions/ docs/specs/ MIGRATIONS.md
 
 # 3. Checkout
-$ git checkout v2.5.0
+$ git checkout v2.5.4
 
 # 4. Actualizar tag en .env
 $ ${EDITOR:-nano} docker/.env.reference-smb
-# PLATFORM_API_TAG=v2.5.0          (aplica a api+realtime+renderer+mail; comparten tag)
-# PLATFORM_WEB_TAG=v3.1.0-web      (web tiene su propio tren de release)
+# PLATFORM_API_TAG=v2.5.4          (aplica a api+realtime+renderer+mail; comparten tag)
+# PLATFORM_WEB_TAG=v3.1.4-web      (web tiene su propio tren de release)
 
-# 5. Verificar firmas (5 imágenes, ADR-0023)
+# 5. Verificar firmas (5 imágenes, ADR-0023) — cosign v3+ con --insecure-ignore-tlog
 $ for img in api realtime renderer mail; do
-    cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/$img:v2.5.0
+    cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
+        ghcr.io/verbara/platform/$img:v2.5.4
   done
-$ cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/web:v3.1.0-web
+$ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
+    ghcr.io/verbara/platform/web:v3.1.4-web
 
 # 6. Pull + up
 $ dc pull
@@ -419,7 +421,7 @@ $ curl http://localhost:5000/health/ready
 
 ### Rollback
 ```bash
-$ git checkout v2.4.1                              # tag previo a la upgrade
+$ git checkout v2.5.3                              # tag previo a la upgrade
 $ ${EDITOR:-nano} docker/.env.reference-smb        # revert tags
 $ dc pull && dc up -d --wait
 ```

@@ -126,23 +126,26 @@ Verbara SMB se distribuye en **3 tiers** que comparten el mismo binario. Pasás 
 ## Versionado y soporte
 
 Esta guía aplica a:
-- **Verbara.Platform.Api** `v2.4.1` (imagen `ghcr.io/verbara/platform/api:v2.4.1`, Native AOT)
-- **Verbara.Platform.Realtime** `v2.4.1` (imagen `ghcr.io/verbara/platform/realtime:v2.4.1`) — microservicio SignalR Hub (ADR-0022 Phase A)
-- **Verbara.Platform.Renderer** `v2.4.1` (imagen `ghcr.io/verbara/platform/renderer:v2.4.1`, Native AOT)
-- **Verbara.Platform.Mail** `v2.4.1` (imagen `ghcr.io/verbara/platform/mail:v2.4.1`, Native AOT)
-- **Verbara.Platform.Web** `v3.0.3-web` (imagen `ghcr.io/verbara/platform/web:v3.0.3-web`)
+- **Verbara.Platform.Api** `v2.5.4` (imagen `ghcr.io/verbara/platform/api:v2.5.4`, Native AOT)
+- **Verbara.Platform.Realtime** `v2.5.4` (imagen `ghcr.io/verbara/platform/realtime:v2.5.4`) — microservicio SignalR Hub (ADR-0022 Phase A)
+- **Verbara.Platform.Renderer** `v2.5.4` (imagen `ghcr.io/verbara/platform/renderer:v2.5.4`, Native AOT)
+- **Verbara.Platform.Mail** `v2.5.4` (imagen `ghcr.io/verbara/platform/mail:v2.5.4`, Native AOT)
+- **Verbara.Platform.Web** `v3.1.4-web` (imagen `ghcr.io/verbara/platform/web:v3.1.4-web`)
 - **nginx** `1.27-alpine` — actúa de gateway frente a Web + Api + Realtime, sirviendo el host port 80 (refleja la topología K8s Cilium HTTPRoute)
 - **Asterisk** 22 (build local desde `docker/Dockerfile.asterisk`)
 - **Postgres** 18-alpine
 - **Redis** 8-alpine (opt — solo necesario para multi-pod Realtime + JWT rotation pool)
 
-Las cinco imágenes Verbara están **firmadas con cosign** (ADR-0023) — antes del primer pull, validá con:
+Las cinco imágenes Verbara están **firmadas con cosign** (ADR-0023) — antes del primer pull, validá con cosign v3+:
 ```bash
 $ for img in api realtime renderer mail; do \
-    cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/$img:v2.4.1; \
+    cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
+        ghcr.io/verbara/platform/$img:v2.5.4; \
   done
-$ cosign verify --key docker/cosign.pub ghcr.io/verbara/platform/web:v3.0.3-web
+$ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
+    ghcr.io/verbara/platform/web:v3.1.4-web
 ```
+> `--insecure-ignore-tlog` es **obligatorio**: el workflow de release firma con `--signing-config` + `tlog-upload=false`, así que la firma es válida offline pero no está en la transparency log de Sigstore. La clave pública `docker/cosign.pub` sigue siendo el root of trust.
 
 ## Próximo paso
 
