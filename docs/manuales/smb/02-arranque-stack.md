@@ -14,7 +14,7 @@ $ sudo mkdir -p /opt/verbara && sudo chown $USER:$USER /opt/verbara
 $ cd /opt/verbara
 $ git clone https://github.com/verbara/platform.git
 $ cd platform
-$ git checkout v2.4.1      # el tag de la release a deployar
+$ git checkout v2.5.4      # el tag de la release a deployar
 ```
 
 > 💡 Si querés un workdir distinto (ej. `/srv/verbara` o `/home/operator/verbara`), reemplazá `/opt/verbara` por lo que prefieras — el manual asume `/opt/verbara/platform` de aquí en adelante.
@@ -28,7 +28,7 @@ docker/docker-compose.reference-smb.yml
 scripts/quickstart-smb.sh
 ```
 
-Si alguno no aparece, estás en un commit/tag viejo — re-checkout a `v2.4.1` o superior.
+Si alguno no aparece, estás en un commit/tag viejo — re-checkout a `v2.5.4` o superior.
 
 ## 2. Verificar firmas de las imágenes (opcional pero recomendado)
 
@@ -37,7 +37,7 @@ Las imágenes públicas `ghcr.io/verbara/platform/{api,realtime,renderer,mail,we
 Instalar cosign una sola vez:
 
 ```bash
-$ COSIGN_VER=v2.5.2
+$ COSIGN_VER=v3.0.6   # cosign v2.x ya no valida firmas del flujo actual
 $ curl -L "https://github.com/sigstore/cosign/releases/download/${COSIGN_VER}/cosign-linux-amd64" \
     -o /tmp/cosign && chmod +x /tmp/cosign && sudo mv /tmp/cosign /usr/local/bin/cosign
 $ cosign version
@@ -49,16 +49,16 @@ Verificar las cinco imágenes:
 $ cd /opt/verbara/platform
 $ for img in api realtime renderer mail; do
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.4.1
+        ghcr.io/verbara/platform/$img:v2.5.4
   done
 
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.0.3-web
+    ghcr.io/verbara/platform/web:v3.1.4-web
 ```
 
 Esperado en cada caso:
 ```
-Verification for ghcr.io/verbara/platform/api:v2.4.1 --
+Verification for ghcr.io/verbara/platform/api:v2.5.4 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key
@@ -300,8 +300,8 @@ $ dc down
 # Detener + borrar volúmenes (DATA LOSS — sólo para reset completo)
 $ dc down -v
 
-# Actualizar a una nueva release (ej. v2.5.0 cuando salga)
-$ git fetch --tags && git checkout v2.5.0
+# Actualizar a una nueva release (ej. v2.5.5 cuando salga)
+$ git fetch --tags && git checkout v2.5.5
 $ dc pull && dc up -d --wait
 
 # Backup de Postgres
