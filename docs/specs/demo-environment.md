@@ -1,11 +1,11 @@
 # Demo Environment — Verbara Platform
 
-> **Last updated:** 2026-03-31
+> **Last updated:** 2026-05-26
 > **IMPORTANT:** This document MUST be updated whenever any file under `docker/demo/` is modified.
 
 ## Overview
 
-Self-contained Docker environment (9 services) that demonstrates a fully operational omnichannel contact center with Asterisk 22, multi-tenancy, RBAC, IVR in Spanish, PSTN simulation, and real-time analytics. Zero external dependencies — everything runs locally with a single script.
+Self-contained Docker environment (10 services) that demonstrates a fully operational omnichannel contact center with Asterisk 22, multi-tenancy, RBAC, IVR in Spanish, PSTN simulation, and real-time analytics. Zero external dependencies — everything runs locally with a single script.
 
 ## Quick Start
 
@@ -17,59 +17,73 @@ chmod +x demo-reset.sh
 
 **URLs after startup:**
 
-| Service | URL |
-|---------|-----|
-| Platform Web | http://localhost |
-| Platform API | http://localhost:5000 |
-| Grafana | http://localhost:3000 |
-| Prometheus | http://localhost:9090 |
-| Asterisk AMI | localhost:5038 |
-| Asterisk ARI | http://localhost:8088 |
-| Asterisk SIP/WSS | localhost:5060/8089 |
+| Service | URL | Notes |
+|---------|-----|-------|
+| Platform Web | http://localhost | Served by nginx-gateway → web container |
+| Platform API | http://localhost:5000 | Direct (also proxied at `http://localhost/api/*`) |
+| Realtime Hub | http://localhost/hubs/* | Proxied by nginx-gateway (no direct host port) |
+| Grafana | http://localhost:3000 | |
+| Prometheus | http://localhost:9090 | |
+| Asterisk AMI | localhost:5038 | |
+| Asterisk ARI | http://localhost:8088 | |
+| Asterisk SIP/WSS | localhost:5060/8089 | UDP + TLS |
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│   web (:80)  │────>│ platform-api │────>│   postgres   │
-│  React/Vite  │     │  (:5000)     │────>│  :5432       │
-└──────────────┘     │  .NET 10 AOT │     └──────────────┘
-                     └──────┬───────┘            ^
-                            │ AMI/ARI            │ Realtime
-                     ┌──────▼───────┐            │
-                     │  asterisk    │────────────┘
-                     │  :5038/5060  │
-                     │  :8088/8089  │
-                     └──────┬───────┘
-                            │ SIP trunk
-                     ┌──────▼───────┐
-                     │pstn-emulator │
-                     │  Asterisk 22 │
-                     └──────────────┘
+                ┌───────────────────────────────────────────┐
+                │       nginx-gateway (:80)                 │
+                │   /        → web                          │
+                │   /api/*   → platform-api                 │
+                │   /hubs/*  → realtime  (SignalR / WS)     │
+                └────┬──────────────┬────────────┬──────────┘
+                     │              │            │
+              ┌──────▼───┐   ┌──────▼─────┐  ┌───▼─────────┐
+              │   web    │   │platform-api│  │  realtime   │
+              │ React 19 │   │  (:5000)   │  │  (:5030)    │
+              │  Vite    │   │ .NET 10 AOT│  │ SignalR Hub │
+              └──────────┘   └─────┬──────┘  └─────┬───────┘
+                                   │ AMI/ARI       │
+                                   │               │ backplane
+                            ┌──────▼──────┐  ┌─────▼──────┐
+                            │  asterisk   │  │   redis    │
+                            │ :5038/5060  │  │   :6379    │
+                            │ :8088/8089  │  └────────────┘
+                            └──────┬──────┘
+                                   │ Realtime tables
+                            ┌──────▼──────┐
+                            │  postgres   │  Platform + Pro + Realtime DB
+                            │   :5432     │
+                            └─────────────┘
+                                   ▲
+                                   │ SIP trunk
+                            ┌──────┴──────┐
+                            │pstn-emulator│
+                            │ Asterisk 22 │
+                            └─────────────┘
 
 ┌──────────────┐     ┌──────────────┐
 │  prometheus  │────>│   grafana    │
 │  (:9090)     │     │  (:3000)     │
 └──────────────┘     └──────────────┘
-
-┌──────────────┐
-│    redis     │  (session/cache store)
-│  :6379       │
-└──────────────┘
 ```
 
-## Services (9)
+> **ADR-0022 Phase A topology**: `nginx-gateway` is the single ingress (mirrors K8s Cilium HTTPRoute layout). `web`, `platform-api` and `realtime` are internal-only; the gateway routes `/`, `/api/*` and `/hubs/*` respectively. Multi-pod scale-out of `realtime` requires the Redis backplane (already wired here) + Pro.Cluster leader-election (Phase A.5, scaffolded in Pro v2.5.1-pro).
+
+## Services (10)
 
 | Service | Image | Ports | Purpose |
 |---------|-------|-------|---------|
 | **postgres** | postgres:18-alpine | 5432 (internal) | Single DB: Platform migrations + Realtime tables + Pro schemas + demo seed |
-| **redis** | redis:8-alpine | 6379 (internal) | Session store, cache |
+| **redis** | redis:8-alpine | 6379 (internal) | Session/cache store + SignalR backplane for realtime + IdentityRedis (JWT rotation, MFA throttle) |
 | **asterisk** | Custom (Dockerfile.asterisk) | 5038, 5060/udp, 8088, 8089, 8180, 20000-20050/udp | Main PBX — AMI, ARI, SIP, WSS, RTP |
 | **pstn-emulator** | Custom (Dockerfile.demo-pstn) | Internal only | Simulated PSTN gateway with 10 test scenarios |
-| **platform-api** | Custom (Dockerfile) | 5000 | .NET API — 27 packages + 16 Pro packages |
-| **web** | Custom (Platform.Web Dockerfile) | 80 | React 19 frontend, `VITE_DEFAULT_TENANT_ID=demo` |
+| **platform-api** | Custom (Dockerfile, Native AOT) | 5000 | .NET 10 API — 31 src packages + 16 Pro packages, 70 endpoint groups |
+| **realtime** | Custom (Dockerfile.realtime) | Internal only (5030) | SignalR Hub microservice (ADR-0022 Phase A); presence + Hub broadcast over Redis backplane |
+| **web** | Custom (Platform.Web Dockerfile) | Internal only (80) | React 19 frontend, `VITE_DEFAULT_TENANT_ID=demo` |
+| **nginx-gateway** | nginx:1.27-alpine | 80 | Single ingress fronting web + platform-api + realtime (mirrors K8s Cilium HTTPRoute) |
 | **prometheus** | prom/prometheus:latest | 9090 | Metrics scraping (API + self, every 15s) |
 | **grafana** | grafana/grafana:latest | 3000 | Dashboard "Contact Center" (8 panels, Spanish) |
 | (volume) | pgdata | - | Persistent PostgreSQL data |
@@ -91,7 +105,7 @@ chmod +x demo-reset.sh
 | Email | `platform@admin.local` |
 | Password | `PlatformAdmin2026!` |
 | Role | Platform Admin |
-| Scope | `/api/management/*`, `/api/setup` |
+| Scope | `/api/v1/management/*`, `/api/v1/setup` |
 | Management API Key | Generated at setup (printed in console) |
 
 ### Demo Tenant (customer, child of `platform`)
@@ -134,17 +148,20 @@ chmod +x demo-reset.sh
 
 | Step | Action | Details |
 |------|--------|---------|
-| 1/11 | Clean up | `docker compose down -v --remove-orphans` |
-| 2/11 | Copy NuGet feed | Pro packages from `/media/Data/Source/Verbara/local-nuget-feed/` |
-| 3/11 | Build images | `docker compose build --quiet` |
-| 4/11 | Start Postgres | Wait for `pg_isready` |
-| 5/11 | Start all services | `docker compose up -d` |
-| 6/11 | Wait for health | 120s timeout per service (asterisk, pstn-emulator, platform-api, web, grafana) |
-| 7/11 | Setup wizard | `POST /api/setup` — creates host tenant "platform", admin user, management API key |
-| 8/11 | Create demo tenant | `POST /api/management/tenants` — tenant "demo" (Customer, child of platform) |
-| 9/11 | Seed via API | 1 admin + 1 supervisor + 6 agents + 2 queues + WebChat channel activation |
-| 10/11 | SQL seed | Asterisk Realtime (6 endpoints, 8 queues, PSTN trunk) + 50 CDRs + 48 interval snapshots |
-| 11/11 | Verify | Login test as demo admin + API health check + print summary |
+| 1 | Clean up | `docker compose down -v --remove-orphans` |
+| 2 | Copy NuGet feed | Pro packages from `/media/Data/Source/Verbara/local-nuget-feed/` |
+| 3 | Build images | `docker compose build --quiet` |
+| 4 | Start Postgres | Wait for `pg_isready` |
+| 5 | Start all services | `docker compose up -d` (Pro tables created by `EnsureSchemaAsync` during API DI) |
+| 6 | Wait for health | 120s timeout per service (asterisk, pstn-emulator, platform-api, web, grafana) |
+| 7 | Setup wizard | `POST /api/v1/setup` — creates host tenant "platform", admin user, management API key |
+| 7.5 | Role assignment | Ensure platform admin user has the `platform_admin` role assigned |
+| 8 | Create demo tenant | `POST /api/v1/management/tenants` — tenant "demo" (Customer, child of platform) |
+| 8.5 | Set tenant plans | platform=Enterprise, demo=Pro (enables feature-gated endpoints) |
+| 9 | Seed via API | 1 admin + 1 supervisor + 6 agents + 2 queues + 2 bots + WebChat channel activation + team |
+| 9.5 | Seed billing | Billing data via Management API (requires mgmt key, not JWT) |
+| 10 | SQL seed | Asterisk Realtime (7 endpoints, 8 queues, PSTN trunk) + 50 CDRs + 48 interval snapshots |
+| 11 | Warmup + Summary | Login test as demo admin + API health check + print summary |
 
 ---
 
