@@ -19,6 +19,15 @@
 //   LOADTEST_VU            — overrides KeepConstant copies for VU-based scenarios
 //                            (presence)
 //   LOADTEST_DURATION_SEC  — overrides duration for any scenario
+//   LOADTEST_MAX_FAIL_COUNT — overrides NBomber's per-scenario fail-count guardrail.
+//                             Default 5000 (NBomber 6.x built-in) is appropriate for
+//                             short sweeps (<1h) but early-aborts long K8s soaks: at
+//                             30 RPS sustained, a 0.05 % steady drip of validation-key
+//                             cache-refresh failures crosses 5000 in ~14 h. R5.5
+//                             FIND-007 (D-LK 17h36m soak hit this on v2.5.4). Set to
+//                             a large value (e.g. 100_000 or int.MaxValue) for >12h
+//                             soaks; keep default for short sweeps so genuine app
+//                             regressions still abort fast.
 //
 // To run manually:
 //   PLATFORM_API_URL=http://localhost:8080 \
@@ -53,6 +62,11 @@ var scenarios = mode switch
         AgentAssistScenario.Build(baseUrl),
     },
 };
+
+if (int.TryParse(Environment.GetEnvironmentVariable("LOADTEST_MAX_FAIL_COUNT"), out var maxFailCount))
+{
+    scenarios = [.. scenarios.Select(s => s.WithMaxFailCount(maxFailCount))];
+}
 
 NBomberRunner
     .RegisterScenarios(scenarios)

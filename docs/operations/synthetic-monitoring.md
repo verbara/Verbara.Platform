@@ -1,6 +1,8 @@
 # Synthetic monitoring — R5.5 Phase E-LK
 
-**Status:** deployed + verified passively (induce-failure validation deferred until after D-LK 24h soak completes — scaling platform-api to 0 mid-soak would invalidate the soak run).
+**Status:** deployed + passively verified during D-LK 24h soak (2026-05-25 → 2026-05-26 on v2.5.4). The probe stack and alert rules stayed loaded for the entire substantive 17h36m run with no `BlackboxJourneyDown` fires (probe_success stayed 1 for all 5 targets — `platform-api` /health and /health/ready, asterisk AMI/ARI, postgres-pooler TCP). See [`r55-blk-evidence/2026-05-26-d-lk-soak-v254/`](r55-blk-evidence/2026-05-26-d-lk-soak-v254/README.md) and [Production Readiness Review](production-readiness-review.md) for the closure context.
+
+The **induce-failure validation** (E-LK Step 2 — scale platform-api to 0 and verify `BlackboxJourneyDown` fires within 5 min) was intentionally **not run** during the soak window (scaling to 0 would falsify the soak baseline). It is **unblocked** now that D-LK closed, and is scheduled as an **on-demand smoke** when the Talos lab is next brought up — the procedure is documented below. No production traffic depends on this validation; it confirms alert-rule reachability, not platform behavior. AlertManager delivery to a real receiver (slack/email/webhook) remains a Phase F follow-up that requires customer-side endpoint provisioning.
 
 ## What's running (K8s lab cluster)
 
@@ -60,32 +62,53 @@ sleep 3
 curl -sS http://localhost:9093/api/v2/alerts | jq
 ```
 
-## Induce-failure validation — DEFERRED
+## Induce-failure smoke (cold-clone procedure)
 
-The R5.5 plan's E-LK Step 2 calls for:
+Run when the Talos lab is up and no soak is in flight. Procedure:
 
 ```bash
+export KUBECONFIG=$HOME/.kube/config-talos
+
+# Pre-flight: confirm probe baseline
+PROM_POD=$(kubectl -n monitoring get pod prometheus-prometheus-prometheus-0 -o name)
+kubectl -n monitoring port-forward "$PROM_POD" 9090:9090 &
+PROM_PF_PID=$!
+sleep 3
+curl -sS 'http://localhost:9090/api/v1/query?query=probe_success' | jq '.data.result[] | {instance:.metric.instance, value:.value[1]}'
+# Expect: every probe `"1"`
+
+# Induce failure: scale platform-api to 0
 kubectl -n r55-platform scale deploy/platform-api --replicas=0
+SCALE_T0=$(date -u +%s)
+
+# Wait for alert to fire — `for: 5m` on BlackboxJourneyDown means ≥ 360 s
 sleep 360
-# Verify BlackboxJourneyDown alert fires in AlertManager
+kubectl -n monitoring port-forward svc/prometheus-alertmanager 9093:9093 &
+AM_PF_PID=$!
+sleep 3
+curl -sS http://localhost:9093/api/v2/alerts | jq '[.[] | select(.labels.alertname=="BlackboxJourneyDown" or .labels.alertname=="PlatformApiUnavailable") | {alertname:.labels.alertname, state:.status.state, startsAt:.startsAt}]'
+# Expect: at least one firing state with startsAt ≈ SCALE_T0 + 30s..60s
+
+# Restore
 kubectl -n r55-platform scale deploy/platform-api --replicas=2
+kill "$PROM_PF_PID" "$AM_PF_PID"
 ```
 
-This is **NOT executed during D-LK soak in flight**. Scaling platform-api to 0 mid-soak would falsify the soak data. Scheduled for **post-D-LK** (after T+24h on 2026-05-18 04:36 UTC) — see Phase F follow-up tracker.
+Pass criteria (cold-clone smoke):
+- `probe_success{instance=~".*platform-api.*"}` reports `0` within ~30 s of the scale-to-zero
+- `BlackboxJourneyDown` and/or `PlatformApiUnavailable` reach `firing` state within ~6 min (the 5 m `for:` window + scrape lag)
+- After restoring replicas, both alerts return to `inactive` within one full scrape cycle (~30 s)
 
-Expected behavior when the validation runs:
-- After ~30 s, `probe_success{instance=~".*platform-api.*"}` reports 0
-- After 5 minutes (default `for: 5m` on critical alerts), `BlackboxJourneyDown` + `PlatformApiUnavailable` transition to `firing` state in AlertManager
-- AlertManager routes (per `alertmanagerconfigs` CRD if any) deliver notifications
+This is a lab procedure only; it does not need to be repeated per release. Re-run when alert-rule expressions, scrape intervals, or the PrometheusRule chart change in a way that could break the firing path.
 
-## Passive verification done (E-LK PASS criteria for now)
+## Passive verification (D-LK 24h soak — 2026-05-25 → 2026-05-26 on v2.5.4)
 
-- ✅ All 5 ServiceMonitors `Available`
-- ✅ blackbox-exporter pod 1/1 Running
-- ✅ `BlackboxJourneyDown` alert rule loaded in PrometheusRule
-- ✅ Probe targets visible in Prometheus targets list (verified via Grafana → http://grafana.r55.local)
-- ⏳ Induce-failure validation: deferred to post-D-LK
-- ⏳ AlertManager delivery (slack/email/webhook): no receivers configured in this lab — Phase F follow-up
+- ✅ All 5 ServiceMonitors `Available` for the entire 17h36m substantive run
+- ✅ blackbox-exporter pod 1/1 Running, no restarts
+- ✅ `BlackboxJourneyDown` alert rule loaded in PrometheusRule, never fired
+- ✅ `probe_success == 1` continuously across all 5 targets (verified via Grafana → http://grafana.r55.local)
+- ⏳ Induce-failure smoke: procedure above, unblocked / unscheduled — see opening status block
+- ⏳ AlertManager delivery to a real receiver: no slack/email/webhook configured in the lab — Phase F follow-up (gated on customer-side endpoint provisioning)
 
 ## References
 

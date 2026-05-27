@@ -160,8 +160,8 @@ This PRR signs off the platform against the **as-validated** envelope and explic
 
 | ID | Surface | Disposition |
 |---|---|---|
-| **R5.5-FIND-007** | D-LK 17h36m: NBomber default `MaxFailCount=5000` inappropriate for >12h K8s soaks | Housekeeping: raise threshold or switch to `MaxFailRate` for next K8s soak. Not blocking ship. |
-| **R5.5-FIND-008** | Helm chart `app.kubernetes.io/version` label drift (`2.5.1` vs actual image v2.5.4) | Housekeeping: bump `appVersion` in `infra/k8s/helm/platform/Chart.yaml` next release. Not blocking ship. |
+| **R5.5-FIND-007** | D-LK 17h36m: NBomber default `MaxFailCount=5000` inappropriate for >12h K8s soaks | **Closed 2026-05-27 housekeeping** — `LOADTEST_MAX_FAIL_COUNT` env-var override added in [`tests/Verbara.Platform.LoadTests/Program.cs`](../../tests/Verbara.Platform.LoadTests/Program.cs); default preserved at 5000 (genuine regressions still abort short sweeps fast), large soaks set the override per run. |
+| **R5.5-FIND-008** | Helm chart `app.kubernetes.io/version` label drift (`2.5.1` vs actual image v2.5.4) | **Closed 2026-05-27 housekeeping** — bumped `appVersion` to `"2.5.4"` and chart `version` to `0.2.11` in [`infra/k8s/helm/platform/Chart.yaml`](../../infra/k8s/helm/platform/Chart.yaml). |
 | **R5.5-FIND-009** | Liveness probe occasionally times out on `Predicate=>false` no-op endpoint under load | Likely kubelet HTTP-client queue contention. Absorbed by `failureThreshold:5`. Investigate if it resurfaces at higher rates. |
 | **R5.5-FIND-010** | JWT Tier-2 sustained-load cache-refresh gap (5,013 drip Unauthorized over 17h36m on D-LK) | On-hold per causality finding. Trigger to ship Tier-2: production telemetry `jwt_key_stale_cache_fallbacks_total > 0 sustained`. |
 | **R5.5-FIND-011** | Latent sync-over-async path in `JwtTokenService.GetCachedValidationKeys` | Tier-1 hardening covers user-visible impact. Defense-in-depth refactor remains a candidate. |
@@ -189,8 +189,8 @@ Eight permanent architectural artifacts shipped during the R5.5 train (all in re
 
 1. **SMB Docker product polish track** (primary, 6 sub-tracks documented in [memory `project_roadmap`](../../../../.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/project_roadmap.md)) — manuales completion, onboarding feedback loop, first paying customer pursuit.
 2. **K8s local manuales (Phase 2)** — mirror the SMB manuales for K8s on-prem; gated on customer demand.
-3. **Phase E-LK doc** — K8s synthetic monitoring doc; data already on hand (blackbox-exporter on Talos lab), ~1h of redaction.
-4. **R5.5 findings remediation** — FIND-007/008/009 are housekeeping; FIND-010/011 are conditional defense-in-depth.
+3. ~~Phase E-LK doc~~ — **Closed 2026-05-27 housekeeping** — refreshed [`docs/operations/synthetic-monitoring.md`](synthetic-monitoring.md) with D-LK passive-verification PASS + cold-clone smoke procedure. Induce-failure smoke remains unscheduled (on-demand when lab is next up); AlertManager receiver wiring still gated on customer-side endpoint provisioning.
+4. **R5.5 findings remediation** — FIND-007/008 closed 2026-05-27 (see findings table); FIND-009 watch-only; FIND-010/011 are conditional defense-in-depth.
 5. **R6 brainstorm** — separate session: encryption-at-rest, HSM/KMS, SIEM streaming, multi-region staging, cloud K8s validation. Triggered by first paying customer or explicit override.
 
 ## References
