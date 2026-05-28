@@ -55,3 +55,10 @@ infra/k8s/talos/talosconfig
 # Plan 2026-05-27 dice "no commit hasta Fase 3 — antes solo local". El
 # pipeline regenera estos archivos en cada release.
 docs/manuales/auto/
+# Local-dev artifacts for SMB reference stack: .env.reference-smb contains
+# operator-chosen secrets (postgres password, JWT signing key, AMI/ARI
+# passwords); docker-compose.override.yml is a per-machine workaround
+# (e.g. postgres 18 PGDATA path, missing ConnectionStrings). Both are
+# per-developer and must NEVER be committed.
+docker/.env.reference-smb
+docker/docker-compose.override.yml
