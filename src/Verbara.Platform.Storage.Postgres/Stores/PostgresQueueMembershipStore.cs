@@ -11,11 +11,13 @@ internal sealed class PostgresQueueMembershipStore : IQueueMembershipStore
 
     public PostgresQueueMembershipStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
+    private const string SelectColumns =
+        "tenant_id, queue_id, agent_id, penalty, source, is_excluded, created_at, allowed_channels";
+
     public async Task<IReadOnlyList<QueueMembership>> ListByTenantAsync(TenantId tenantId, CancellationToken ct)
     {
         var rows = await _dataSource.QueryListAsync(
-            "SELECT tenant_id, queue_id, agent_id, penalty, source, is_excluded, created_at " +
-            "FROM queue_memberships WHERE tenant_id = @TenantId ORDER BY queue_id, agent_id",
+            $"SELECT {SelectColumns} FROM queue_memberships WHERE tenant_id = @TenantId ORDER BY queue_id, agent_id",
             p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
             MembershipRow.Map, ct);
         return rows.Select(r => r.ToModel()).ToList();
@@ -24,8 +26,7 @@ internal sealed class PostgresQueueMembershipStore : IQueueMembershipStore
     public async Task<IReadOnlyList<QueueMembership>> ListByQueueAsync(TenantId tenantId, EntityId queueId, CancellationToken ct)
     {
         var rows = await _dataSource.QueryListAsync(
-            "SELECT tenant_id, queue_id, agent_id, penalty, source, is_excluded, created_at " +
-            "FROM queue_memberships WHERE tenant_id = @TenantId AND queue_id = @QueueId ORDER BY penalty, agent_id",
+            $"SELECT {SelectColumns} FROM queue_memberships WHERE tenant_id = @TenantId AND queue_id = @QueueId ORDER BY penalty, agent_id",
             p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("QueueId", queueId.Value)); },
             MembershipRow.Map, ct);
         return rows.Select(r => r.ToModel()).ToList();
@@ -34,8 +35,7 @@ internal sealed class PostgresQueueMembershipStore : IQueueMembershipStore
     public async Task<QueueMembership?> GetAsync(TenantId tenantId, EntityId queueId, EntityId agentId, CancellationToken ct)
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
-            "SELECT tenant_id, queue_id, agent_id, penalty, source, is_excluded, created_at " +
-            "FROM queue_memberships WHERE tenant_id = @TenantId AND queue_id = @QueueId AND agent_id = @AgentId",
+            $"SELECT {SelectColumns} FROM queue_memberships WHERE tenant_id = @TenantId AND queue_id = @QueueId AND agent_id = @AgentId",
             p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("QueueId", queueId.Value)); p.Add(new NpgsqlParameter("AgentId", agentId.Value)); },
             MembershipRow.Map, ct);
         return row?.ToModel();
@@ -44,10 +44,11 @@ internal sealed class PostgresQueueMembershipStore : IQueueMembershipStore
     public async Task SaveAsync(QueueMembership membership, CancellationToken ct)
     {
         await _dataSource.ExecuteAsync(
-            "INSERT INTO queue_memberships (tenant_id, queue_id, agent_id, penalty, source, is_excluded, created_at) " +
-            "VALUES (@TenantId, @QueueId, @AgentId, @Penalty, @Source, @IsExcluded, @CreatedAt) " +
+            "INSERT INTO queue_memberships (tenant_id, queue_id, agent_id, penalty, source, is_excluded, created_at, allowed_channels) " +
+            "VALUES (@TenantId, @QueueId, @AgentId, @Penalty, @Source, @IsExcluded, @CreatedAt, @AllowedChannels) " +
             "ON CONFLICT (tenant_id, queue_id, agent_id) DO UPDATE SET " +
-            "  penalty = EXCLUDED.penalty, source = EXCLUDED.source, is_excluded = EXCLUDED.is_excluded",
+            "  penalty = EXCLUDED.penalty, source = EXCLUDED.source, is_excluded = EXCLUDED.is_excluded, " +
+            "  allowed_channels = EXCLUDED.allowed_channels",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", membership.TenantId.Value));
@@ -57,6 +58,10 @@ internal sealed class PostgresQueueMembershipStore : IQueueMembershipStore
                 p.Add(new NpgsqlParameter("Source", membership.Source.ToString().ToLowerInvariant()));
                 p.Add(new NpgsqlParameter("IsExcluded", membership.IsExcluded));
                 p.Add(new NpgsqlParameter("CreatedAt", membership.CreatedAt));
+                p.Add(new NpgsqlParameter("AllowedChannels", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text)
+                {
+                    Value = (object?)membership.AllowedChannels?.ToArray() ?? DBNull.Value,
+                });
             },
             ct);
     }
@@ -94,17 +99,23 @@ internal sealed class PostgresQueueMembershipStore : IQueueMembershipStore
         public string source { get; init; } = null!;
         public bool is_excluded { get; init; }
         public DateTime created_at { get; init; }
+        public string[]? allowed_channels { get; init; }
 
-        public static MembershipRow Map(NpgsqlDataReader r) => new()
+        public static MembershipRow Map(NpgsqlDataReader r)
         {
-            tenant_id = r.GetString("tenant_id"),
-            queue_id = r.GetString("queue_id"),
-            agent_id = r.GetString("agent_id"),
-            penalty = r.GetInt32("penalty"),
-            source = r.GetString("source"),
-            is_excluded = r.GetBoolean("is_excluded"),
-            created_at = r.GetDateTime("created_at"),
-        };
+            var allowedOrdinal = r.GetOrdinal("allowed_channels");
+            return new MembershipRow
+            {
+                tenant_id = r.GetString("tenant_id"),
+                queue_id = r.GetString("queue_id"),
+                agent_id = r.GetString("agent_id"),
+                penalty = r.GetInt32("penalty"),
+                source = r.GetString("source"),
+                is_excluded = r.GetBoolean("is_excluded"),
+                created_at = r.GetDateTime("created_at"),
+                allowed_channels = r.IsDBNull(allowedOrdinal) ? null : r.GetFieldValue<string[]>(allowedOrdinal),
+            };
+        }
 
         public QueueMembership ToModel() => new()
         {
@@ -115,6 +126,7 @@ internal sealed class PostgresQueueMembershipStore : IQueueMembershipStore
             Source = source == "manual" ? MembershipSource.Manual : MembershipSource.Skill,
             IsExcluded = is_excluded,
             CreatedAt = created_at,
+            AllowedChannels = allowed_channels,
         };
     }
 }

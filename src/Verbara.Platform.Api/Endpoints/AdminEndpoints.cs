@@ -415,10 +415,34 @@ internal static class AdminEndpoints
         HttpContext context,
         [FromBody] CreateAgentRequest body,
         [FromServices] IAgentStore store,
+        [FromServices] IQueueStore queueStore,
+        [FromServices] IQueueMembershipStore membershipStore,
         IClock clock,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+
+        // ADR-0026 Phase A.1 validation: normalize + verify allowed_channels.
+        // Per-membership: AllowedChannels=null means "all channels the queue accepts";
+        // an empty array is rejected — operator should use IsExcluded=true instead
+        // for audit clarity. Each non-null channel must match the ChannelType enum.
+        if (body.QueueMemberships is { Count: > 0 } pendingMemberships)
+        {
+            foreach (var m in pendingMemberships)
+            {
+                if (m.AllowedChannels is { Count: 0 })
+                    return Results.BadRequest($"AllowedChannels must be null (= all channels) or contain at least one channel. Empty arrays are not allowed; use IsExcluded=true for that semantic.");
+                if (m.AllowedChannels is { } channels)
+                {
+                    foreach (var ch in channels)
+                    {
+                        if (!Enum.TryParse<ChannelType>(ch, ignoreCase: true, out _))
+                            return Results.BadRequest($"Unknown channel: '{ch}'. Allowed values match ChannelType enum (Voice, WhatsApp, Sms, WebChat, Email, Messenger, Instagram, Telegram, Twitter, Video, Rcs).");
+                    }
+                }
+            }
+        }
+
         var agent = new Agent
         {
             AgentId = EntityId.New(),
@@ -432,13 +456,47 @@ internal static class AdminEndpoints
         if (body.SipPassword is not null) agent.SipPassword = body.SipPassword;
         await store.SaveAsync(agent, ct);
 
-        if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword))
+        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+        if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword) && syncService is not null)
         {
-            var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-            if (syncService is not null)
+            try { await syncService.SyncAgentAsync(tenantId, agent.AgentId.Value, agent.DisplayName, agent.Extension, agent.SipPassword, ct: ct); }
+            catch { }
+        }
+
+        // ADR-0026 Phase A.1 — associate agent to queues with channel-aware
+        // memberships. Sync to Asterisk queue_members is conditional: voice
+        // is included by default (AllowedChannels=null) or explicitly listed.
+        if (body.QueueMemberships is { Count: > 0 } memberships)
+        {
+            foreach (var m in memberships)
             {
-                try { await syncService.SyncAgentAsync(tenantId, agent.AgentId.Value, agent.DisplayName, agent.Extension, agent.SipPassword, ct: ct); }
-                catch { }
+                var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(m.QueueId), ct);
+                if (queue is null) continue;
+
+                var penalty = Math.Clamp(m.Penalty ?? 0, 0, 10);
+                await membershipStore.SaveAsync(new QueueMembership
+                {
+                    TenantId = tenantId,
+                    QueueId = queue.QueueId,
+                    AgentId = agent.AgentId,
+                    Penalty = penalty,
+                    Source = MembershipSource.Manual,
+                    IsExcluded = false,
+                    CreatedAt = clock.UtcNow,
+                    AllowedChannels = m.AllowedChannels,
+                }, ct);
+
+                // Asterisk sync gate: sync iff this membership covers voice
+                // (AllowedChannels null = all channels, or list contains "voice"
+                // case-insensitively). Phase B will move this into the SDK
+                // signature itself; in Phase A the gate lives at the caller.
+                var includesVoice = m.AllowedChannels is null
+                    || m.AllowedChannels.Any(c => c.Equals("voice", StringComparison.OrdinalIgnoreCase));
+                if (includesVoice && syncService is not null)
+                {
+                    try { await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name, agent.AgentId.Value, agent.DisplayName, penalty, ct); }
+                    catch { }
+                }
             }
         }
 
@@ -632,7 +690,25 @@ internal sealed record WrapUpConfigDto(
 
 internal sealed record AddQueueMemberRequest(string QueueId, string AgentId, int? Penalty = null);
 
-internal sealed record CreateAgentRequest(string UserId, string DisplayName, string? Extension = null, string? SipPassword = null);
+internal sealed record CreateAgentRequest(
+    string UserId,
+    string DisplayName,
+    string? Extension = null,
+    string? SipPassword = null,
+    IReadOnlyList<QueueMembershipRequest>? QueueMemberships = null);
+
+/// <summary>
+/// ADR-0026: channel-aware queue membership specification at agent creation.
+/// AllowedChannels=null means the agent is a member for all channels the
+/// queue accepts (preserves implicit pre-v2.6.0 behavior). A populated list
+/// restricts this membership to the listed channels only — both for routing
+/// eligibility (Phase B) and Asterisk queue_members sync (Phase A: skipped
+/// when voice not in AllowedChannels).
+/// </summary>
+internal sealed record QueueMembershipRequest(
+    string QueueId,
+    IReadOnlyList<string>? AllowedChannels = null,
+    int? Penalty = null);
 internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills, string? Extension = null, string? SipPassword = null);
 
 internal sealed record CreateTeamRequest(string Name);

@@ -79,7 +79,12 @@ internal static class ChannelConfigEndpoints
             tenantId, category: "config", action: "channel.configured", severity: "info",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
             targetId: channel, targetType: "channel",
-            changes: new AuditChanges(Before: before is null ? null : new { before.Channel, before.IsActive }, After: new { config.Channel, config.IsActive }),
+            // ADR-0026 Phase A.2 — anonymous types `new { ... }` cannot be
+            // serialized under AOT with reflection disabled. Use a typed DTO
+            // that's registered in ApiJsonContext.
+            changes: new AuditChanges(
+                Before: before is null ? null : new ChannelChangeAudit(before.Channel.ToString(), before.IsActive),
+                After: new ChannelChangeAudit(config.Channel.ToString(), config.IsActive)),
             metadata: new Dictionary<string, string>
             {
                 ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -112,3 +117,5 @@ internal sealed record UpdateChannelConfigRequest(bool IsActive, Dictionary<stri
 
 internal sealed record ChannelStatusDto(string Channel, bool IsActive);
 internal sealed record ChannelTestResponse(bool Success, string Message);
+// ADR-0026 Phase A.2 — typed replacement for anonymous-type AuditChanges payload.
+internal sealed record ChannelChangeAudit(string Channel, bool IsActive);

@@ -9,6 +9,7 @@ using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Billing;
+using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Email;
@@ -341,6 +342,8 @@ namespace Verbara.Platform.Api.Serialization;
 // Channel Config
 [JsonSerializable(typeof(ChannelStatusDto))]
 [JsonSerializable(typeof(ChannelTestResponse))]
+[JsonSerializable(typeof(TenantChannelConfig))]  // ADR-0026 Phase A.2 — fix AOT bug surfaced by living-docs (GET /admin/channels/{channel} returned 500 for enabled channels)
+[JsonSerializable(typeof(ChannelChangeAudit))]  // ADR-0026 Phase A.2 — typed audit DTO replacing anonymous types in UpdateChannelConfig
 [JsonSerializable(typeof(IReadOnlyDictionary<string, bool>))]
 // Management System
 [JsonSerializable(typeof(SystemInfoDto))]
@@ -476,6 +479,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(CreateQueueRequest))]
 [JsonSerializable(typeof(UpdateQueueRequest))]
 [JsonSerializable(typeof(CreateAgentRequest))]
+[JsonSerializable(typeof(QueueMembershipRequest))]  // ADR-0026 Phase A.1
 [JsonSerializable(typeof(UpdateAgentRequest))]
 [JsonSerializable(typeof(CreateTeamRequest))]
 [JsonSerializable(typeof(UpdateTeamRequest))]

@@ -314,6 +314,15 @@ internal sealed class PostgresAuditStore : IAuditStore
             // breadcrumb instead of silently dropping the change.
             return JsonSerializer.Serialize(value.ToString(), PostgresJson.Ctx.String);
         }
+        catch (InvalidOperationException)
+        {
+            // ADR-0026 Phase A.2 — under AOT with
+            // JsonSerializerIsReflectionEnabledByDefault=false, the runtime
+            // throws InvalidOperationException (not NotSupportedException)
+            // when a type isn't in any registered TypeInfoResolver. Fall
+            // back the same way so audit records survive missing source-gen.
+            return JsonSerializer.Serialize(value.ToString(), PostgresJson.Ctx.String);
+        }
     }
 
     private static readonly JsonSerializerOptions SerializeChangeOptions = new()
