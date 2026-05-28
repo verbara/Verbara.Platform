@@ -47,19 +47,40 @@ No hay clientes pagando todavía (pivot estratégico 2026-05-25 — ver [`sessio
 
 Concretamente, se adopta la combinación **B5 + B10 + B11** del análisis arquitectónico ampliado:
 
-### B5 — Modelo de datos y gate
+### B5 — Modelo de datos y gate (incluye channel-aware membership)
+
+Schema: `queue_memberships` agrega columna `allowed_channels TEXT[]` (nullable, default `NULL`):
+
+```sql
+ALTER TABLE queue_memberships
+  ADD COLUMN allowed_channels TEXT[];  -- NULL = todos los canales que la queue acepta
+```
+
+| `allowed_channels` valor | Semántica | Sync a Asterisk `queue_members` |
+|---|---|---|
+| `NULL` (default migración) | Member para TODOS los canales que la queue acepta (preserva semántica implícita pre-v2.6.0) | ✅ AddQueueMemberAsync |
+| `['voice']` | Solo voz para este agente en esta queue | ✅ AddQueueMemberAsync |
+| `['webchat', 'email']` | Solo digital, NO voz | ❌ RemoveQueueMemberAsync (Asterisk NO le timbra) |
+| `[]` (array vacío) | Equivalente a `IsExcluded=true` cross-channel | ❌ RemoveQueueMemberAsync |
 
 Cascada de filtros en eligibility (orden estricto, primer rechazo abandona):
 
 1. `IsMember(agentId, queueId) AND NOT IsExcluded` — gate primario
-2. `IsRoutable(agent.state)` — estado disponible
-3. `HasCapacity(agent, conversation.channel)` — capacidad por canal
-4. `queue.RequiredSkills.IsEmpty OR agent.Skills.Intersect(queue.RequiredSkills).Any()` — skill filter opcional
-5. **Sort ASC by `membership.penalty`** — alineado con Asterisk app_queue (0 = highest priority)
+2. `membership.AllowedChannels IS NULL OR conversation.Channel IN membership.AllowedChannels` — **channel-aware gate**
+3. `IsRoutable(agent.state)` — estado disponible
+4. `HasCapacity(agent, conversation.channel)` — capacidad numérica por canal (límite concurrentes)
+5. `queue.RequiredSkills.IsEmpty OR agent.Skills.Intersect(queue.RequiredSkills).Any()` — skill filter opcional
+6. **Sort ASC by `membership.penalty`** — alineado con Asterisk app_queue (0 = highest priority)
+
+**`Agent.ChannelCapacity` pierde rol de discriminación canal-sí/canal-no**: queda únicamente como límite numérico de concurrentes por canal (cuántas chats simultáneas un agente puede manejar). La decisión "este agente atiende voz en esta queue" la dice exclusivamente `QueueMembership.AllowedChannels`. Esto elimina el solape de dos modelos del status quo (problema reportado durante review pre-implementación 2026-05-28).
+
+**Granularidad per-queue-per-agent**: María puede ser `AllowedChannels=['webchat']` en queue Soporte y `AllowedChannels=['voice']` en queue VIP. Imposible expresar con `ChannelCapacity` global.
 
 ### B10 — Filosofía: Asterisk es la autoridad
 
-Para canal Voice, Verbara delega la decisión final a `app_queue` (que ya tiene `queue_members` sincronizado). Verbara solo se asegura que `queue_memberships` (Verbara) ↔ `queue_members` (Asterisk Realtime) estén consistentes. Para canales digitales, Verbara aplica el mismo modelo de elegibilidad localmente. **Una sola configuración del operador, comportamiento simétrico en todos los canales.**
+Para canal Voice, Verbara delega la decisión final a `app_queue` (que ya tiene `queue_members` sincronizado). Verbara solo se asegura que `queue_memberships` (Verbara) ↔ `queue_members` (Asterisk Realtime) estén consistentes — **condicionado al opt-in de voz en `allowed_channels`**. Para canales digitales, Verbara aplica el mismo modelo de elegibilidad localmente, filtrando por `allowed_channels` cuando el agente opted-out de un canal. **Una sola configuración del operador, comportamiento simétrico en todos los canales.**
+
+Implicación crítica para `IRealtimeSyncService`: el sync engine debe aceptar `allowedChannels` y solo invocar `AddQueueMemberAsync` cuando la membership permita voz (`AllowedChannels IS NULL OR 'voice' IN AllowedChannels`). En caso contrario, invoca `RemoveQueueMemberAsync` para asegurar que Asterisk NO tenga al agente en `queue_members` (lo que causaría que el PBX intentara timbrarlo). Cambio de signature en SDK Pro: `AddQueueMemberAsync(tenantId, queueName, agentId, displayName, penalty, allowedChannels, ct)`.
 
 ### B11 — Mecanismo: reconciliación + observabilidad
 
@@ -67,7 +88,9 @@ Para canal Voice, Verbara delega la decisión final a `app_queue` (que ya tiene 
 
 ### Wizard write-through
 
-El setup wizard (paso "Agente") y el endpoint `POST /api/v1/admin/agents` aceptan `queueIds[]` opcional. Si el operador crea un agente con skills coincidentes a una queue, el wizard materializa una `QueueMembership(Source=Skill, Penalty=0)` automáticamente. El campo `Source=Skill` (que ya existe en el modelo) gana semántica ejecutiva: distingue memberships derivadas de skill-match (gestionadas por sistema, auto-actualizan cuando skills cambian) de memberships `Source=Manual` (gestionadas explícitamente por admin).
+El setup wizard (paso "Agente") y el endpoint `POST /api/v1/admin/agents` aceptan `queueMemberships[]` opcional con `{ queueId, allowedChannels? }`. Si el operador crea un agente con skills coincidentes a una queue, el wizard materializa una `QueueMembership(Source=Skill, Penalty=0, AllowedChannels=NULL)` automáticamente (cualquier canal que la queue acepte). El campo `Source=Skill` (que ya existe en el modelo) gana semántica ejecutiva: distingue memberships derivadas de skill-match (gestionadas por sistema, auto-actualizan cuando skills cambian) de memberships `Source=Manual` (gestionadas explícitamente por admin).
+
+En el wizard Day 1, el operador no necesita decidir canales explícitamente — el default `AllowedChannels=NULL` significa "todos los canales de la queue", que es la expectativa pedagógica. El selector multi-canal aparece solo en `/admin/agents/{id}/queues` para operaciones avanzadas.
 
 ### Inserción arquitectónica limpia
 
@@ -113,15 +136,18 @@ Patrón soportado nativamente: agente miembro de **todas** las queues con `penal
 
 ## Migration strategy
 
-1. **Script `infer-memberships-from-skills.sh`** (idempotente): para cada `(agent, queue)` en el sistema donde `agent.Skills ∩ queue.RequiredSkills ≠ ∅` y no existe ya una membership, inserta `QueueMembership(Source=Skill, Penalty=0, IsExcluded=false)`. Luego dispara `RealtimeSyncEngine.SyncAgentBatchAsync` para propagar a Asterisk.
-2. **Ship behind feature flag** `RoutingFeatures.MembershipGate` (default OFF en v2.5.x patch release, ON en v2.6.0). Permite rollback emergente y testing A/B en lab.
-3. **Documentar comportamiento en manual SMB 03-setup-inicial.md y 04-canal-webchat.md** (escritos a mano) + regenerar manual living-docs 01-day1-setup-and-webchat para reflejar el wizard corregido.
+1. **Schema migration** (idempotente): `ALTER TABLE queue_memberships ADD COLUMN allowed_channels TEXT[];`. Default `NULL` preserva semántica implícita pre-v2.6.0 (member para todos los canales que la queue acepta).
+2. **Script `infer-memberships-from-skills.sh`** (idempotente): para cada `(agent, queue)` en el sistema donde `agent.Skills ∩ queue.RequiredSkills ≠ ∅` y no existe ya una membership, inserta `QueueMembership(Source=Skill, Penalty=0, IsExcluded=false, AllowedChannels=NULL)`. Luego dispara `RealtimeSyncEngine.SyncAgentBatchAsync` para propagar a Asterisk.
+3. **Ship behind feature flag** `RoutingFeatures.MembershipGate` (default OFF en v2.5.x patch release, ON en v2.6.0). Permite rollback emergente y testing A/B en lab.
+4. **Documentar comportamiento en manual SMB 03-setup-inicial.md y 04-canal-webchat.md** (escritos a mano) + regenerar manual living-docs 01-day1-setup-and-webchat para reflejar el wizard corregido + nuevo manual `agentes-y-queues.md` que explica el modelo channel-aware con ejemplos del agente WebChat-only.
 4. **Deprecar `Source=Manual` vs `Source=Skill` como distinción semántica** una vez estable; ambos son membership ejecutivos. La distinción se mantiene como audit metadata (quién creó la membership: operador vs sistema).
 
 ## Validation criteria
 
 - **Test Api.Tests**: `MembershipGateMiddleware_Should*ExcludeNonMember*` (suite completa para sticky, direct-to-agent, outbound, fallback).
-- **Integration test**: crear queue + agente sin membership → conversación entra → no se asigna; agregar membership → siguiente conversación se asigna.
+- **Test channel-aware**: `MembershipGate_Should*ExcludeAgent*WhenChannelNotInAllowedChannels` (WebChat-only agent no recibe voz aunque sea member; Voice-only agent no recibe chats).
+- **Integration test**: crear queue + agente sin membership → conversación entra → no se asigna; agregar membership con `AllowedChannels=['webchat']` → conversación de WebChat se asigna, conversación de Voz no se asigna a este agente.
+- **Asterisk sync test**: agente con membership `AllowedChannels=['webchat','email']` → `queue_members` Asterisk NO tiene al agente (verificar via AMI query). Cambiar a `AllowedChannels=NULL` → sync agrega al agente a `queue_members`.
 - **Living-docs Day 1 manual** auto-regenera mostrando wizard que crea queue + agente + membership en un solo flujo, sin necesidad de pasos extra del operador.
 - **Asterisk drift test**: `RealtimeVerifier` detecta inconsistencia introducida manualmente con `asterisk -rx "queue remove member ..."` y `RealtimeReconciler` la corrige.
 
