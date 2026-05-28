@@ -51,3 +51,7 @@ BenchmarkDotNet.Artifacts/
 infra/k8s/talos/controlplane.yaml
 infra/k8s/talos/worker.yaml
 infra/k8s/talos/talosconfig
+# Living-docs generated output (manuales auto-renderizados desde Playwright).
+# Plan 2026-05-27 dice "no commit hasta Fase 3 — antes solo local". El
+# pipeline regenera estos archivos en cada release.
+docs/manuales/auto/
