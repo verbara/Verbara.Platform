@@ -151,6 +151,34 @@ Patrón soportado nativamente: agente miembro de **todas** las queues con `penal
 - **Living-docs Day 1 manual** auto-regenera mostrando wizard que crea queue + agente + membership en un solo flujo, sin necesidad de pasos extra del operador.
 - **Asterisk drift test**: `RealtimeVerifier` detecta inconsistencia introducida manualmente con `asterisk -rx "queue remove member ..."` y `RealtimeReconciler` la corrige.
 
+## Implementation status (2026-05-28)
+
+**Phase A — SHIPPED ✅** (3 backend + 2 frontend commits + 1 test commit on `main`, no release tag yet — patches not customer-impacting because no paying customers exist).
+
+| Sub-phase | Status | Commit |
+|---|---|---|
+| A.1 — `CreateAgent` channel-aware + validation + voice-gate Asterisk sync | ✅ SHIPPED | Platform [`0ddb511d`](https://github.com/verbara/Verbara.Platform/commit/0ddb511d) |
+| A.2 — `[JsonSerializable(typeof(TenantChannelConfig))]` + `ChannelChangeAudit` + `QueueMembershipRequest` + AOT audit fallback (`InvalidOperationException` catch in `PostgresAuditStore.SerializeChange`) | ✅ SHIPPED | Platform [`0ddb511d`](https://github.com/verbara/Verbara.Platform/commit/0ddb511d) |
+| A.3 — Wizard guarda `createdQueueId` + materializa membership default-all | ✅ SHIPPED | Web [`a283666`](https://github.com/verbara/Verbara.Platform.Web/commit/a283666) |
+| A.4 — Wizard fuerza "crear nuevo usuario" en agent-step (admin no es agente) | ✅ SHIPPED | Web [`a283666`](https://github.com/verbara/Verbara.Platform.Web/commit/a283666) |
+| A.5 — Living-docs Day 1 spec end-to-end sin workaround + manual regenerado | ✅ SHIPPED | Web [`a283666`](https://github.com/verbara/Verbara.Platform.Web/commit/a283666) |
+| A.6 — `IQueueMembershipStore.ListByAgentAsync` + REST `AllowedChannels` flowthrough (POST + PATCH semantics + audit) + agent-centric `GET /admin/agents/{id}/queue-memberships` + Web editor `/admin/agents/{id}/queues` (channel chip multi-select + voice-sync badge + "All channels" toggle) | ✅ SHIPPED | Platform [`53c0ac61`](https://github.com/verbara/Verbara.Platform/commit/53c0ac61) + Web [`1d4dce2`](https://github.com/verbara/Verbara.Platform.Web/commit/1d4dce2) |
+| A.6.7 (extra, no estaba en el plan) — Day 2 living-docs journey "Restringir agente a WebChat" + scoped `membership-card-{queueId}` testid | ✅ SHIPPED | Web [`899594d`](https://github.com/verbara/Verbara.Platform.Web/commit/899594d) |
+| Phase A Api.Tests coverage (9 channel-aware POST/PATCH + 4 agent-membership listing = 13 new tests, total suite 961 / 961) | ✅ SHIPPED | Platform [`442e3ad9`](https://github.com/verbara/Verbara.Platform/commit/442e3ad9) |
+
+Permanent artifacts shipped:
+- DB column `queue_memberships.allowed_channels TEXT[]` (migration `025_QueueMembershipAllowedChannels.sql`, idempotent, default NULL).
+- `QueueMembership.AllowedChannels` model + InMemory + Postgres stores + helper `ListByAgentAsync`.
+- REST `QueueMembersEndpoints` + `AdminEndpoints` channel-aware contract locked by Api.Tests.
+- React `AgentQueuesPage` at `/admin/agents/{agentId}/queues` + hook `useAgentMemberships` + extended `use-queue-members` (`useUpdateQueueMember` with `clearAllowedChannels` PATCH semantics).
+- Living-docs journeys `01-day1-setup-and-webchat` (v2.5.4, refreshed) + `02-agent-channel-routing` (v2.5.5).
+
+**Phase B — QUEUED, calendar-gated.** Requires SDK Pro v2.6.0-pro (signature change `IRealtimeSyncService.AddQueueMemberAsync` to accept `allowedChannels` param + `MembershipGateMiddleware` in InboundRouter + `RoundRobinAgentSelector` penalty sort + `infer-memberships-from-skills.sh` migration). Pro v2.6.0-pro is gated by the v2.5.x freeze window (post-2026-06-28).
+
+**Phase C — Documentation.** Partially done via living-docs (journey 02 covers channel restriction). Hand-written SMB manuals 03/04 still pending refresh to mention channel-aware editor; defer to Phase B closure.
+
+**Phase A NOT released as a tagged image yet.** Local images `ghcr.io/verbara/platform/api:local-phase-a` + `ghcr.io/verbara/platform/web:local-phase-a` are running on the lab. Production-release packaging (release.yml run + cosign signing + verbara-website digest authorization) is deferred until the first paying customer triggers a release cadence per the 2026-05-25 pivot.
+
 ## References
 
 - Plan de implementación: [`docs/plans/active/2026-05-28-membership-executive-routing.md`](../plans/active/2026-05-28-membership-executive-routing.md)

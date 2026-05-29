@@ -5,6 +5,14 @@
 **Estimated effort:** Phase A ~3 días · Phase B ~6-8 días · Phase C ~3 días
 **Repos touched:** `Verbara.Platform` (mayoría), `Verbara.Platform.Web` (wizard + admin agentes), `Verbara.Sdk.Pro.Realtime` (signature change `AddQueueMemberAsync(..., allowedChannels)`)
 
+## Status (2026-05-28)
+
+| Phase | Status | Notes |
+|---|---|---|
+| **Phase A — Wizard fix + channel-aware REST + UI editor** | ✅ **SHIPPED** | A.1–A.6 + A.6.7 (extra) + Api.Tests coverage merged to `main` across 6 commits (3 Platform, 3 Web). No release tag yet — see ADR §Implementation status. |
+| **Phase B — Membership executive gate (digital routing parity)** | ⏸️ **QUEUED, calendar-gated** | Requires SDK Pro v2.6.0-pro (post-2026-06-28 freeze window). Scope unchanged from sections below. |
+| **Phase C — Documentation + manuales** | 🟡 **PARTIAL** | Living-docs journey 02 covers channel restriction. Hand-written SMB manuals 03/04 refresh deferred to Phase B closure. |
+
 ## Contexto
 
 Living-docs detectó dos bugs reales del wizard de setup en v2.5.4 durante la generación auto del manual SMB Día 1:
@@ -27,7 +35,9 @@ Adoptada **B5 + B10 + B11** según ADR-0026:
 
 ## Fases
 
-### Phase A — Wizard fix (2 días, frontend + endpoint extension)
+### Phase A — Wizard fix (2 días, frontend + endpoint extension) — ✅ SHIPPED 2026-05-28
+
+> Closure summary at the top of this file. Sub-section checklists below preserved for historical reference.
 
 **Objetivo:** el wizard del Día 1 deja agente correctamente asociado a la queue del paso anterior. Sin migración pendiente. Patch release tipo v2.5.5.
 
@@ -125,7 +135,7 @@ Living-docs detectó que `GET /api/v1/admin/channels/{channel}` retorna HTTP 500
 - ✅ Manual auto-generado tiene paridad pedagógica con [`docs/manuales/smb/03-setup-inicial.md`](../../manuales/smb/03-setup-inicial.md) (review humano).
 - ✅ Tagged v2.5.5 + cosign-signed images + verbara-website digest authorization.
 
-### Phase B — Membership executive gate (5-7 días, backend core)
+### Phase B — Membership executive gate (5-7 días, backend core) — ⏸️ QUEUED post-2026-06-28
 
 **Objetivo:** `queue_memberships` se vuelve ejecutivo para routing digital. Modelo simétrico Voice ↔ Digital. Ship en v2.6.0 (minor bump por cambio de semántica de routing).
 
@@ -199,7 +209,7 @@ Antes de tocar el routing, ship la migración del schema:
 - ✅ Living-docs Day 1 spec sigue verde post-cambio (rebreaker de regression).
 - ✅ Tagged v2.6.0.
 
-### Phase C — Documentation + manuales (3 días)
+### Phase C — Documentation + manuales (3 días) — 🟡 PARTIAL (Day 2 living-docs journey shipped 2026-05-28)
 
 **Objetivo:** operadores entienden el nuevo modelo. Manuales SMB y K8s reflejan membership ejecutivo.
 
