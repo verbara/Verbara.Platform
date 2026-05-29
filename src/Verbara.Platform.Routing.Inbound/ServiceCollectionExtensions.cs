@@ -1,4 +1,5 @@
 using Verbara.Platform.Routing.Inbound.Middlewares;
+using Verbara.Platform.Routing.Inbound.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Routing.Inbound;
@@ -34,6 +35,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<OverflowMiddleware>(),
             sp.GetRequiredService<BusinessHoursMiddleware>(),
         ]);
+
+        // ADR-0026 Phase B — membership-aware eligibility service replaces the
+        // direct IAgentPresenceService call inside the selector. The presence
+        // service stays registered for other consumers (supervisor UI, etc).
+        services.AddSingleton<IRoutingEligibilityService, MembershipAwareRoutingEligibilityService>();
 
         services.AddSingleton<RoundRobinAgentSelector>();
         services.AddSingleton<IAgentSelector>(sp => sp.GetRequiredService<RoundRobinAgentSelector>());

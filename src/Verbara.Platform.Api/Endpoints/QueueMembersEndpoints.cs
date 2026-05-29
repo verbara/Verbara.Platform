@@ -100,16 +100,19 @@ internal static partial class QueueMembersEndpoints
             AllowedChannels = body.AllowedChannels,
         }, ct);
 
-        // ADR-0026 Phase A.6 — Asterisk sync gate: only sync to queue_members
-        // if this membership covers voice (AllowedChannels null = all channels,
-        // or list contains "voice" case-insensitively).
-        var syncedToAsterisk = false;
+        // ADR-0026 Phase B (SDK Pro v2.6.0-pro) — voice-gate moved into
+        // IRealtimeSyncService.AddQueueMemberAsync. Pass AllowedChannels
+        // directly; the SDK upserts when null/voice-included, or short-
+        // circuits to RemoveQueueMember otherwise. The syncedToAsterisk
+        // flag retains audit semantics: true when voice was included
+        // (regardless of whether the row physically existed before).
+        var syncedToAsterisk = IncludesVoice(body.AllowedChannels);
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null && IncludesVoice(body.AllowedChannels))
+        if (syncService is not null)
         {
             await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name,
-                agent.AgentId.Value, agent.DisplayName, penalty, ct);
-            syncedToAsterisk = true;
+                agent.AgentId.Value, agent.DisplayName, penalty,
+                allowedChannels: body.AllowedChannels, ct);
         }
 
         await audit.RecordAsync(
@@ -239,28 +242,19 @@ internal static partial class QueueMembersEndpoints
         }, ct);
 
         // Asterisk sync diff: voice add/remove based on channel-include diff.
+        // ADR-0026 Phase B (SDK Pro v2.6.0-pro) — voice-gate moved into the
+        // SDK. AddQueueMemberAsync handles all 3 cases idempotently:
+        //   - null/voice + (new or penalty change) → upsert
+        //   - non-voice                            → short-circuit to Remove
+        // So a single call covers what was 3 branches in Phase A.
         var existingIncludesVoice = IncludesVoice(existing.AllowedChannels);
         var newIncludesVoice = IncludesVoice(newAllowedChannels);
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null)
+        if (syncService is not null && (existingIncludesVoice != newIncludesVoice || (newIncludesVoice && penaltyChanged)))
         {
-            if (!existingIncludesVoice && newIncludesVoice)
-            {
-                // Voice added → upsert in queue_members.
-                await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name,
-                    agent.AgentId.Value, agent.DisplayName, newPenalty, ct);
-            }
-            else if (existingIncludesVoice && !newIncludesVoice)
-            {
-                // Voice removed → delete row in queue_members.
-                await syncService.RemoveQueueMemberAsync(tenantId.Value, queue.Name, agent.AgentId.Value, ct);
-            }
-            else if (newIncludesVoice && penaltyChanged)
-            {
-                // Voice retained, penalty changed → upsert to update penalty.
-                await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name,
-                    agent.AgentId.Value, agent.DisplayName, newPenalty, ct);
-            }
+            await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name,
+                agent.AgentId.Value, agent.DisplayName, newPenalty,
+                allowedChannels: newAllowedChannels, ct);
         }
 
         if (penaltyChanged || channelsChanged || body.IsExcluded.HasValue)

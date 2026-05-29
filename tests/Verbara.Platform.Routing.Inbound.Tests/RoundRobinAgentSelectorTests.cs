@@ -2,9 +2,16 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Routing.Inbound;
+using Verbara.Platform.Routing.Inbound.Services;
 
 namespace Verbara.Platform.Routing.Inbound.Tests;
 
+// ADR-0026 Phase B — the selector now consumes IRoutingEligibilityService
+// (membership-aware) instead of IAgentPresenceService directly. These tests
+// retain their original intent (round-robin rotation, single-agent, null
+// when empty, preferred-agent honoring) but stub IRoutingEligibilityService
+// directly. Membership-gating semantics get dedicated coverage in
+// MembershipGateRoutingTests.
 public class RoundRobinAgentSelectorTests
 {
     private static readonly TenantId Tenant = new("t1");
@@ -21,14 +28,28 @@ public class RoundRobinAgentSelectorTests
         CreatedAt = DateTimeOffset.UtcNow,
     };
 
+    private static RoutableAgent[] AsPool(params Agent[] agents)
+        => agents.Select(a => new RoutableAgent(a, Penalty: 0)).ToArray();
+
+    private static RoundRobinAgentSelector Create(
+        IReadOnlyList<RoutableAgent> pool,
+        IAgentPresenceService? presence = null,
+        IQueueMembershipStore? membershipStore = null)
+    {
+        var eligibility = Substitute.For<IRoutingEligibilityService>();
+        eligibility.GetEligibleAgentsAsync(Tenant, QueueId, ChannelType.WebChat, Arg.Any<CancellationToken>())
+            .Returns(pool);
+        membershipStore ??= Substitute.For<IQueueMembershipStore>();
+        membershipStore.ListByAgentAsync(Tenant, Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<QueueMembership>());
+        presence ??= Substitute.For<IAgentPresenceService>();
+        return new RoundRobinAgentSelector(eligibility, membershipStore, presence);
+    }
+
     [Fact]
     public async Task SelectAgentAsync_ShouldReturnNull_WhenNoAgentsAvailable()
     {
-        var presence = Substitute.For<IAgentPresenceService>();
-        presence.GetAvailableAgentsAsync(Tenant, QueueId, ChannelType.WebChat, Arg.Any<CancellationToken>())
-            .Returns(Array.Empty<Agent>());
-
-        var selector = new RoundRobinAgentSelector(presence);
+        var selector = Create(pool: []);
 
         var result = await selector.SelectAgentAsync(Tenant, QueueId, ChannelType.WebChat, null, CancellationToken.None);
 
@@ -36,56 +57,40 @@ public class RoundRobinAgentSelectorTests
     }
 
     [Fact]
-    public async Task SelectAgentAsync_ShouldReturnPreferredAgent_WhenPreferredIsAvailable()
+    public async Task SelectAgentAsync_ShouldReturnPreferredAgent_WhenPreferredIsInEligiblePool()
     {
-        var presence = Substitute.For<IAgentPresenceService>();
         var agent1 = MakeAgent("agent-1");
         var agent2 = MakeAgent("agent-2");
-        var preferredId = agent2.AgentId;
+        var selector = Create(pool: AsPool(agent1, agent2));
 
-        presence.GetAvailableAgentsAsync(Tenant, QueueId, ChannelType.WebChat, Arg.Any<CancellationToken>())
-            .Returns(new[] { agent1, agent2 });
-
-        var selector = new RoundRobinAgentSelector(presence);
-
-        var result = await selector.SelectAgentAsync(Tenant, QueueId, ChannelType.WebChat, preferredId, CancellationToken.None);
+        var result = await selector.SelectAgentAsync(Tenant, QueueId, ChannelType.WebChat, agent2.AgentId, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Value.Value.Should().Be("agent-2");
     }
 
     [Fact]
-    public async Task SelectAgentAsync_ShouldFallBackToRoundRobin_WhenPreferredIsNotAvailable()
+    public async Task SelectAgentAsync_ShouldFallBackToRoundRobin_WhenPreferredIsNotEligibleAndHasNoMemberships()
     {
-        var presence = Substitute.For<IAgentPresenceService>();
         var agent1 = MakeAgent("agent-1");
         var agent2 = MakeAgent("agent-2");
-        var notAvailableId = EntityId.From("agent-999");
+        var notEligibleId = EntityId.From("agent-999");
+        // Default substitute returns empty memberships → no sticky bypass.
+        var selector = Create(pool: AsPool(agent1, agent2));
 
-        presence.GetAvailableAgentsAsync(Tenant, QueueId, ChannelType.WebChat, Arg.Any<CancellationToken>())
-            .Returns(new[] { agent1, agent2 });
-
-        var selector = new RoundRobinAgentSelector(presence);
-
-        var result = await selector.SelectAgentAsync(Tenant, QueueId, ChannelType.WebChat, notAvailableId, CancellationToken.None);
+        var result = await selector.SelectAgentAsync(Tenant, QueueId, ChannelType.WebChat, notEligibleId, CancellationToken.None);
 
         result.Should().NotBeNull();
-        // Should have selected one of the available agents via round-robin
         AgentIds12.Should().Contain(result!.Value.Value);
     }
 
     [Fact]
     public async Task SelectAgentAsync_ShouldRotateAgents_WhenCalledMultipleTimes()
     {
-        var presence = Substitute.For<IAgentPresenceService>();
         var agent1 = MakeAgent("agent-1");
         var agent2 = MakeAgent("agent-2");
         var agent3 = MakeAgent("agent-3");
-
-        presence.GetAvailableAgentsAsync(Tenant, QueueId, ChannelType.WebChat, Arg.Any<CancellationToken>())
-            .Returns(new[] { agent1, agent2, agent3 });
-
-        var selector = new RoundRobinAgentSelector(presence);
+        var selector = Create(pool: AsPool(agent1, agent2, agent3));
 
         var results = new HashSet<string>();
         for (var i = 0; i < 9; i++)
@@ -94,22 +99,16 @@ public class RoundRobinAgentSelectorTests
             results.Add(result!.Value.Value);
         }
 
-        // Over 9 calls with 3 agents, all agents should be selected at least once
         results.Should().Contain("agent-1");
         results.Should().Contain("agent-2");
         results.Should().Contain("agent-3");
     }
 
     [Fact]
-    public async Task SelectAgentAsync_ShouldReturnSingleAgent_WhenOnlyOneAvailable()
+    public async Task SelectAgentAsync_ShouldReturnSingleAgent_WhenOnlyOneEligible()
     {
-        var presence = Substitute.For<IAgentPresenceService>();
         var agent1 = MakeAgent("agent-solo");
-
-        presence.GetAvailableAgentsAsync(Tenant, QueueId, ChannelType.WebChat, Arg.Any<CancellationToken>())
-            .Returns(new[] { agent1 });
-
-        var selector = new RoundRobinAgentSelector(presence);
+        var selector = Create(pool: AsPool(agent1));
 
         var result = await selector.SelectAgentAsync(Tenant, QueueId, ChannelType.WebChat, null, CancellationToken.None);
 

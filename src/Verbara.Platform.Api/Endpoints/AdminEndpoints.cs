@@ -501,15 +501,19 @@ internal static class AdminEndpoints
                     AllowedChannels = m.AllowedChannels,
                 }, ct);
 
-                // Asterisk sync gate: sync iff this membership covers voice
-                // (AllowedChannels null = all channels, or list contains "voice"
-                // case-insensitively). Phase B will move this into the SDK
-                // signature itself; in Phase A the gate lives at the caller.
-                var includesVoice = m.AllowedChannels is null
-                    || m.AllowedChannels.Any(c => c.Equals("voice", StringComparison.OrdinalIgnoreCase));
-                if (includesVoice && syncService is not null)
+                // ADR-0026 Phase B (SDK Pro v2.6.0-pro) — voice-gate moved
+                // into IRealtimeSyncService.AddQueueMemberAsync. Just pass
+                // AllowedChannels through; the SDK upserts when null/voice
+                // included, or short-circuits to RemoveQueueMember otherwise.
+                if (syncService is not null)
                 {
-                    try { await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name, agent.AgentId.Value, agent.DisplayName, penalty, ct); }
+                    try
+                    {
+                        await syncService.AddQueueMemberAsync(
+                            tenantId.Value, queue.Name, agent.AgentId.Value,
+                            agent.DisplayName, penalty,
+                            allowedChannels: m.AllowedChannels, ct);
+                    }
                     catch { }
                 }
             }
