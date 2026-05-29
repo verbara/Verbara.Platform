@@ -166,6 +166,37 @@ This is what Management endpoints partially do today. Extending to a full system
 
 ---
 
+## Implementation status (2026-05-28)
+
+**SHIPPED ✅** (Phase A + Phase B + Phase C inventory script) in 3 commits on `main`. No release tag yet; deferred per the 2026-05-25 pivot (no paying customers).
+
+| Phase | Status | Commit |
+|---|---|---|
+| A.1 — `TenantTypeGateExtensions.RequireOperationalTenant` + `TenantTypeMismatchProblem` record | ✅ SHIPPED | Platform [`677d6f74`](https://github.com/verbara/Verbara.Platform/commit/677d6f74) |
+| A.2 — `[JsonSerializable(typeof(TenantTypeMismatchProblem))]` in `ApiJsonContext` | ✅ SHIPPED | Platform [`677d6f74`](https://github.com/verbara/Verbara.Platform/commit/677d6f74) |
+| A.3 — gate applied to **23 OPERATIONAL groups** (catalogued in §Decision) | ✅ SHIPPED | Platform [`677d6f74`](https://github.com/verbara/Verbara.Platform/commit/677d6f74) |
+| A.4 — **6 borderline** endpoints classified OPERATIONAL (Conversation, KnowledgeBase ×2 groups, WebhookSubscription, Case, Contact, Realtime); **4 left ungated** (WebChat public, Webhook receivers public, Onboarding NEUTRAL, WebhookEventTypes NEUTRAL catalog) | ✅ SHIPPED | Platform [`677d6f74`](https://github.com/verbara/Verbara.Platform/commit/677d6f74) |
+| A.5 — `AdminEndpoints.cs` split into NEUTRAL (`/admin/users`) + operationalGroup (`/admin/queues`, `/admin/agents`, `/admin/teams`, `/admin/queue-members` redirects) | ✅ SHIPPED | Platform [`677d6f74`](https://github.com/verbara/Verbara.Platform/commit/677d6f74) |
+| Test-factory updates (3 factories seed Customer-typed tenant so the existing 961 tests don't regress to 401) | ✅ SHIPPED | Platform [`677d6f74`](https://github.com/verbara/Verbara.Platform/commit/677d6f74) |
+| B.1 — `PlatformTenantAuthenticatedApiFactory` mirrors base but seeds `Type=Platform` | ✅ SHIPPED | Platform [`c2a96ef2`](https://github.com/verbara/Verbara.Platform/commit/c2a96ef2) |
+| B.2 + B.3 — 17 representative endpoints × 3 caller types = 51 parametrized tests (Platform→409, Partner→409, Customer passes) + 1 NEUTRAL fact = **52 new tests** | ✅ SHIPPED | Platform [`c2a96ef2`](https://github.com/verbara/Verbara.Platform/commit/c2a96ef2) |
+| B.4 — impersonation happy-path folded into Customer-passes-gate family (existing `ImpersonationPrivilegeEscalationTests` implicitly covers `Items["Tenant"]` swap) | ✅ FOLDED | — |
+| C.1 — `scripts/tenant-type-misplaced-data.sh` (idempotent read-only inventory of operational rows on non-Customer tenants) | ✅ SHIPPED | Platform [`PHASE_C_COMMIT`] |
+| C.2 — SMB hand-written manuals refresh to mention `/admin/*` operational not available from Platform tenant | 🟡 DEFERRED | Out of session scope; cheap follow-up |
+| C.3 — this Implementation-status section | ✅ SHIPPED | Platform [`PHASE_C_COMMIT`] |
+| C.4 — plan move `active/` → `completed/` | ✅ SHIPPED | Platform [`PHASE_C_COMMIT`] |
+
+**Permanent artifacts shipped:**
+
+- `src/Verbara.Platform.Api/Endpoints/TenantTypeGateExtensions.cs` — the filter + `TenantTypeMismatchProblem` DTO.
+- `src/Verbara.Platform.Api/Endpoints/AdminEndpoints.cs` — `/admin` parent group split into NEUTRAL + operational sub-groups.
+- 28 application sites with `.RequireOperationalTenant()` (across 23 files).
+- `tests/Verbara.Platform.Api.Tests/PlatformTenantAuthenticatedApiFactory.cs` — Platform-typed test factory.
+- `tests/Verbara.Platform.Api.Tests/TenantTypeGateTests.cs` — 52 new tests; suite total 961 → 1013, 0 regressions.
+- `scripts/tenant-type-misplaced-data.sh` — pre-flight inventory before promoting the gate in installs with pre-existing data.
+
+**Lab smoke** confirmed by the inventory script against my dev Talos/Docker lab: 2 misplaced rows in `agents` + `queue_memberships` on the `platform` tenant (Phase A test artifacts). Triage of those (DELETE) belongs to a separate cleanup commit on the local lab; production-bound installs should run the script BEFORE flipping the gate.
+
 ## References
 
 - Plan: [`docs/plans/active/2026-05-28-tenant-type-operational-gate.md`](../plans/active/2026-05-28-tenant-type-operational-gate.md)
