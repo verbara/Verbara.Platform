@@ -18,7 +18,8 @@ internal static partial class QueueMembersEndpoints
     public static void MapQueueMembersEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/queues/{queueId}/members")
-            .RequireAuthorization("AdminOnly");
+            .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant();
 
         group.MapGet("/", ListMembers);
         group.MapPost("/", AddMember);

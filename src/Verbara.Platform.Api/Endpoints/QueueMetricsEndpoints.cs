@@ -22,6 +22,7 @@ internal static class QueueMetricsEndpoints
     {
         var group = app.MapGroup("/operations")
             .RequireAuthorization("SupervisorPlus")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Analytics);
         group.MapGet("/queue-metrics", GetQueueMetrics);
     }

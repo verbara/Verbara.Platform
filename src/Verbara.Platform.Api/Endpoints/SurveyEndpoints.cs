@@ -9,7 +9,7 @@ internal static class SurveyEndpoints
 {
     public static void MapSurveyEndpoints(this IEndpointRouteBuilder app)
     {
-        var adminGroup = app.MapGroup("/admin/surveys").RequireAuthorization("AdminOnly");
+        var adminGroup = app.MapGroup("/admin/surveys").RequireAuthorization("AdminOnly").RequireOperationalTenant();
 
         adminGroup.MapGet("/", ListSurveys);
         adminGroup.MapPost("/", CreateSurvey);
@@ -18,7 +18,7 @@ internal static class SurveyEndpoints
         adminGroup.MapDelete("/{id}", DeleteSurvey);
         adminGroup.MapMethods("/{id}/activate", ["PATCH"], ActivateSurvey);
 
-        var analyticsGroup = app.MapGroup("/analytics/surveys").RequireAuthorization("SupervisorPlus");
+        var analyticsGroup = app.MapGroup("/analytics/surveys").RequireAuthorization("SupervisorPlus").RequireOperationalTenant();
 
         analyticsGroup.MapGet("/{id}/summary", GetSurveySummary);
         analyticsGroup.MapGet("/{id}/responses", GetSurveyResponses);

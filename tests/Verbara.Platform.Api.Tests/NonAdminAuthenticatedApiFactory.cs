@@ -42,6 +42,12 @@ public sealed class NonAdminAuthenticatedApiFactory : WebApplicationFactory<Prog
 
         var host = base.CreateHost(builder);
         AuthenticatedPlatformApiFactory.SeedEnterpriseFeatureGate(host.Services, TestTenantId);
+        // ADR-0027 — Customer-typed tenant so RequireOperationalTenant lets
+        // operational endpoints reach the AdminOnly authorization step (where
+        // they then return 403 because the test user is non-Admin). Without
+        // the seed, my filter would short-circuit at 401 (defense in depth)
+        // before the authorization layer evaluates the policy.
+        AuthenticatedPlatformApiFactory.SeedTestCustomerTenant(host.Services, TestTenantId);
         return host;
     }
 

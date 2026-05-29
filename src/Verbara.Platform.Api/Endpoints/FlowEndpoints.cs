@@ -11,6 +11,7 @@ internal static class FlowEndpoints
     {
         var group = app.MapGroup("/admin/flows")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequirePlanFeature(PlanFeature.Flows);
 
         group.MapGet("/", ListFlows);

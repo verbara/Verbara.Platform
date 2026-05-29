@@ -19,6 +19,7 @@ internal static class AnalyticsEndpoints
     {
         var analytics = app.MapGroup("/analytics")
             .RequireAuthorization("SupervisorPlus")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Analytics);
         analytics.MapGet("/dashboard", GetDashboard);
         analytics.MapGet("/cdr", ListCdr);

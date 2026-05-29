@@ -23,7 +23,8 @@ internal static class AgentAssistFeatureEndpoints
     public static void MapAgentAssistFeatureEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/admin/features/agent-assist")
-            .RequireAuthorization("features:agent-assist:manage");
+            .RequireAuthorization("features:agent-assist:manage")
+            .RequireOperationalTenant();
 
         group.MapGet("", GetFeature);
         group.MapPut("", UpdateFeature);

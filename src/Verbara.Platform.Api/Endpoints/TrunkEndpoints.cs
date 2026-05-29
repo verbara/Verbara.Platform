@@ -10,7 +10,7 @@ internal static class TrunkEndpoints
 {
     public static void MapTrunkEndpoints(this IEndpointRouteBuilder app)
     {
-        var trunks = app.MapGroup("/admin/trunks").RequireAuthorization("AdminOnly");
+        var trunks = app.MapGroup("/admin/trunks").RequireAuthorization("AdminOnly").RequireOperationalTenant();
 
         trunks.MapGet("/", ListTrunks);
         trunks.MapGet("/active", ListActiveTrunks);

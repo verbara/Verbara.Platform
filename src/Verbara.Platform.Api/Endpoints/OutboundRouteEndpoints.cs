@@ -10,7 +10,7 @@ internal static class OutboundRouteEndpoints
 {
     public static void MapOutboundRouteEndpoints(this IEndpointRouteBuilder app)
     {
-        var routes = app.MapGroup("/admin/routes").RequireAuthorization("AdminOnly");
+        var routes = app.MapGroup("/admin/routes").RequireAuthorization("AdminOnly").RequireOperationalTenant();
 
         routes.MapGet("/", ListRoutes);
         routes.MapGet("/{id:long}", GetRoute);

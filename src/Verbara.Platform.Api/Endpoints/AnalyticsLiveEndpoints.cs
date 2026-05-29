@@ -13,6 +13,7 @@ internal static class AnalyticsLiveEndpoints
     {
         var live = app.MapGroup("/analytics")
             .RequireAuthorization("SupervisorPlus")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Analytics);
         live.MapGet("/live", GetAllLiveStates);
         live.MapGet("/live/{queueName}", GetLiveState);

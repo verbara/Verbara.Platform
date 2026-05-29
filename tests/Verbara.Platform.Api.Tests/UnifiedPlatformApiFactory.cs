@@ -78,6 +78,11 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
         // so RequirePlanFeature endpoint filters pass (tests run with all features enabled).
         AuthenticatedPlatformApiFactory.SeedEnterpriseFeatureGate(host.Services, TestTenantId);
 
+        // ADR-0027 — same Customer-tenant seed as the base factory so the
+        // RequireOperationalTenant gate finds a Customer-typed tenant in the
+        // store and lets the Analytics/Realtime/Recording suites pass.
+        AuthenticatedPlatformApiFactory.SeedTestCustomerTenant(host.Services, TestTenantId);
+
         return host;
     }
 

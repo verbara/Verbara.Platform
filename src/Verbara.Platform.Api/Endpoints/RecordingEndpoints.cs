@@ -12,6 +12,7 @@ internal static class RecordingEndpoints
     {
         var recordings = app.MapGroup("/recordings")
             .RequireAuthorization("SupervisorPlus")
+            .RequireOperationalTenant()
             .RequirePlanFeature(PlanFeature.Recordings);
 
         recordings.MapGet("/{sessionId}", GetRecordingMetadata);

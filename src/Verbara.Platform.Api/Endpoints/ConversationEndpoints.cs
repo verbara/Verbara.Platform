@@ -14,7 +14,7 @@ internal static class ConversationEndpoints
 {
     public static void MapConversationEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/conversations").RequireAuthorization("Authenticated");
+        var group = app.MapGroup("/conversations").RequireAuthorization("Authenticated").RequireOperationalTenant();
 
         group.MapGet("/", ListConversations);
         group.MapGet("/{id}", GetConversation);

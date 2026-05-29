@@ -8,7 +8,7 @@ internal static class ContactEndpoints
 {
     public static void MapContactEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/contacts").RequireAuthorization("Authenticated");
+        var group = app.MapGroup("/contacts").RequireAuthorization("Authenticated").RequireOperationalTenant();
 
         group.MapGet("/{id}", GetContact);
         group.MapGet("/{id}/conversations", GetContactConversations);

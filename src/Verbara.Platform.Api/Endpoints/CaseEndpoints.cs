@@ -9,7 +9,7 @@ internal static class CaseEndpoints
 {
     public static void MapCaseEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/cases").RequireAuthorization("Authenticated");
+        var group = app.MapGroup("/cases").RequireAuthorization("Authenticated").RequireOperationalTenant();
 
         group.MapGet("/", ListCases);
         group.MapGet("/{id}", GetCase);

@@ -14,6 +14,7 @@ internal static class CallerIdPoolEndpoints
     {
         var group = app.MapGroup("/admin/caller-id-pools")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Dialer)
             .RequirePlanFeature(PlanFeature.Dialer);
 

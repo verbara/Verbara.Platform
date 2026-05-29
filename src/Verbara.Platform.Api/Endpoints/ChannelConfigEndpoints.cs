@@ -10,7 +10,7 @@ internal static class ChannelConfigEndpoints
 {
     public static void MapChannelConfigEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin/channels").RequireAuthorization("AdminOnly");
+        var group = app.MapGroup("/admin/channels").RequireAuthorization("AdminOnly").RequireOperationalTenant();
 
         group.MapGet("/", ListChannelConfigs);
         group.MapGet("/{channel}", GetChannelConfig);

@@ -22,7 +22,8 @@ internal static class CannedResponseEndpoints
         // Admin CRUD
         var admin = group.MapGroup("/admin/canned-responses")
             .WithTags("CannedResponses")
-            .RequireAuthorization("AdminOnly");
+            .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant();
 
         admin.MapGet("/", ListAll);
         admin.MapPost("/", Create);

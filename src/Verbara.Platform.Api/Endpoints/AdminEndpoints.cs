@@ -12,44 +12,56 @@ internal static class AdminEndpoints
 {
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin").RequireAuthorization("AdminOnly");
+        // ADR-0027 — the /admin/* surface is split in two sub-groups based on
+        // semantic tenancy: NEUTRAL routes (users, RBAC-adjacent) act on the
+        // caller's own tenant regardless of type and are valid on Platform,
+        // Partner, and Customer tenants. OPERATIONAL routes (queues, agents,
+        // teams, queue-members) act on tenant-internal data that only exists
+        // inside a Customer tenant; calling them from Platform or Partner is
+        // a semantic mistake that the gate converts to HTTP 409 with a
+        // remediation hint pointing to POST /management/impersonate.
+        var neutralGroup = app.MapGroup("/admin").RequireAuthorization("AdminOnly");
+        var operationalGroup = app.MapGroup("/admin")
+            .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant();
 
-        // Users
-        group.MapGet("/users", ListUsers);
-        group.MapGet("/users/{id}", GetUser);
-        group.MapPost("/users", CreateUser);
-        group.MapPut("/users/{id}", UpdateUser);
-        group.MapDelete("/users/{id}", DeleteUser);
+        // Users — NEUTRAL (every tenant manages its own user directory)
+        neutralGroup.MapGet("/users", ListUsers);
+        neutralGroup.MapGet("/users/{id}", GetUser);
+        neutralGroup.MapPost("/users", CreateUser);
+        neutralGroup.MapPut("/users/{id}", UpdateUser);
+        neutralGroup.MapDelete("/users/{id}", DeleteUser);
 
-        // Queues
-        group.MapGet("/queues", ListQueues);
-        group.MapGet("/queues/{id}", GetQueue);
-        group.MapPost("/queues", CreateQueue);
-        group.MapPut("/queues/{id}", UpdateQueue);
-        group.MapDelete("/queues/{id}", DeleteQueue);
+        // Queues — OPERATIONAL
+        operationalGroup.MapGet("/queues", ListQueues);
+        operationalGroup.MapGet("/queues/{id}", GetQueue);
+        operationalGroup.MapPost("/queues", CreateQueue);
+        operationalGroup.MapPut("/queues/{id}", UpdateQueue);
+        operationalGroup.MapDelete("/queues/{id}", DeleteQueue);
 
         // Queue Members — legacy endpoints kept as 308 Permanent Redirects
         // to the RESTful nested routes under /queues/{queueId}/members.
         // Preserves backward-compat for clients pinned to /admin/queue-members.
-        group.MapPost("/queue-members", RedirectAddQueueMember);
-        group.MapDelete("/queue-members/{queueId}/{agentId}", RedirectRemoveQueueMember);
+        // OPERATIONAL (the redirect target is operational).
+        operationalGroup.MapPost("/queue-members", RedirectAddQueueMember);
+        operationalGroup.MapDelete("/queue-members/{queueId}/{agentId}", RedirectRemoveQueueMember);
 
-        // Agents
-        group.MapGet("/agents", ListAgents);
-        group.MapGet("/agents/{id}", GetAgent);
-        group.MapPost("/agents", CreateAgent);
-        group.MapPut("/agents/{id}", UpdateAgent);
-        group.MapDelete("/agents/{id}", DeleteAgent);
+        // Agents — OPERATIONAL
+        operationalGroup.MapGet("/agents", ListAgents);
+        operationalGroup.MapGet("/agents/{id}", GetAgent);
+        operationalGroup.MapPost("/agents", CreateAgent);
+        operationalGroup.MapPut("/agents/{id}", UpdateAgent);
+        operationalGroup.MapDelete("/agents/{id}", DeleteAgent);
         // ADR-0026 Phase A.6 — agent-centric membership listing for the
         // /admin/agents/{agentId}/queues editor in the React admin UI.
-        group.MapGet("/agents/{id}/queue-memberships", ListAgentQueueMemberships);
+        operationalGroup.MapGet("/agents/{id}/queue-memberships", ListAgentQueueMemberships);
 
-        // Teams
-        group.MapGet("/teams", ListTeams);
-        group.MapGet("/teams/{id}", GetTeam);
-        group.MapPost("/teams", CreateTeam);
-        group.MapPut("/teams/{id}", UpdateTeam);
-        group.MapDelete("/teams/{id}", DeleteTeam);
+        // Teams — OPERATIONAL
+        operationalGroup.MapGet("/teams", ListTeams);
+        operationalGroup.MapGet("/teams/{id}", GetTeam);
+        operationalGroup.MapPost("/teams", CreateTeam);
+        operationalGroup.MapPut("/teams/{id}", UpdateTeam);
+        operationalGroup.MapDelete("/teams/{id}", DeleteTeam);
     }
 
     // ─── Users ────────────────────────────────────────────────────────────────

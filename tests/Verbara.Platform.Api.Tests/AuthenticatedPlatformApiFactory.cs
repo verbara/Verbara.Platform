@@ -67,7 +67,52 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
         // so RequirePlanFeature filters pass (tests run with all features enabled).
         SeedEnterpriseFeatureGate(host.Services, TestTenantId);
 
+        // ADR-0027 — seed the test tenant as Customer so RequireOperationalTenant
+        // (applied to /admin/*, /queues/{id}/members, /conversations, etc.)
+        // lets the existing Api.Tests suite pass through. Without this, the
+        // gate would reject every operational call with HTTP 409 because the
+        // TenantStatusMiddleware would return Items["Tenant"]=null when the
+        // tenant lookup misses.
+        SeedTestCustomerTenant(host.Services, TestTenantId);
+
         return host;
+    }
+
+    /// <summary>
+    /// Inserts a single <see cref="TenantType.Customer"/> tenant matching
+    /// <see cref="TestTenantId"/> into the wired in-memory <c>ITenantStore</c>
+    /// so the <c>TenantStatusMiddleware</c> populates <c>Items["Tenant"]</c>
+    /// for authenticated requests in tests.
+    /// </summary>
+    internal static void SeedTestCustomerTenant(IServiceProvider services, string tenantId)
+    {
+        using var scope = services.CreateScope();
+        var tenantStore = scope.ServiceProvider.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>();
+        var tenant = new Verbara.Sdk.Pro.MultiTenant.Tenant
+        {
+            TenantId = tenantId,
+            Name = "Test Customer",
+            Status = Verbara.Sdk.Pro.MultiTenant.TenantStatus.Active,
+            Type = Verbara.Sdk.Pro.MultiTenant.TenantType.Customer,
+            ParentTenantId = null,
+            Metadata = new Dictionary<string, string>
+            {
+                ["Plan"] = Verbara.Platform.Core.TenantPlan.Enterprise.ToString(),
+                ["RateLimitTier"] = "Enterprise",
+            },
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        AwaitTenantUpsert(tenantStore, tenant);
+    }
+
+    private static void AwaitTenantUpsert(Verbara.Sdk.Pro.MultiTenant.ITenantStore tenantStore, Verbara.Sdk.Pro.MultiTenant.Tenant tenant)
+    {
+        // The store API exposes either Task or ValueTask depending on the impl;
+        // hide the GetAwaiter().GetResult behind a tiny synchronous wrapper so
+        // the analyzer doesn't flag CA2012 on a ValueTask-returning UpsertAsync.
+        var task = tenantStore.UpsertAsync(tenant, CancellationToken.None);
+        task.AsTask().GetAwaiter().GetResult();
     }
 
     public HttpClient CreateAuthenticatedClient()

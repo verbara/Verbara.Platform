@@ -14,6 +14,7 @@ internal static class RealtimeEndpoints
     {
         var profiles = app.MapGroup("/admin/realtime/profiles")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Realtime);
 
         // Static routes BEFORE parameterised routes to avoid conflicts

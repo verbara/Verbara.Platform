@@ -15,6 +15,7 @@ internal static class HolidayCalendarEndpoints
     {
         var group = app.MapGroup("/admin/holiday-calendars")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Dialer)
             .RequirePlanFeature(PlanFeature.Dialer);
 

@@ -14,6 +14,7 @@ internal static class DispositionEndpoints
     {
         var group = app.MapGroup("/admin/dispositions")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Dialer);
 
         group.MapGet("/", ListDispositions);

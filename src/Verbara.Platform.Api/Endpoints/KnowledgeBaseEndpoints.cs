@@ -10,6 +10,7 @@ internal static class KnowledgeBaseEndpoints
     {
         var adminGroup = app.MapGroup("/admin/articles")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequirePlanFeature(PlanFeature.KnowledgeBase);
 
         adminGroup.MapGet("/", ListArticles);
@@ -19,6 +20,7 @@ internal static class KnowledgeBaseEndpoints
 
         var searchGroup = app.MapGroup("/knowledge")
             .RequireAuthorization()
+            .RequireOperationalTenant()
             .RequirePlanFeature(PlanFeature.KnowledgeBase);
 
         searchGroup.MapGet("/search", SearchArticles);

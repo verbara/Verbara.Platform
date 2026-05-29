@@ -14,6 +14,7 @@ internal static class SkillEndpoints
     {
         var skills = app.MapGroup("/admin/skills")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Routing);
 
         skills.MapGet("/", ListSkills);
@@ -24,6 +25,7 @@ internal static class SkillEndpoints
 
         var agentSkills = app.MapGroup("/admin/agents")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Routing);
 
         agentSkills.MapGet("/{agentId}/skills", GetAgentSkills);

@@ -11,6 +11,7 @@ internal static class BotEndpoints
     {
         var group = app.MapGroup("/admin/bots")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequirePlanFeature(PlanFeature.BotBasic);
 
         group.MapGet("/", ListBots);

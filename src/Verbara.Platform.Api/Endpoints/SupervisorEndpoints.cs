@@ -14,7 +14,7 @@ internal static class SupervisorEndpoints
 {
     public static void MapSupervisorEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/supervisor").RequireAuthorization("SupervisorPlus");
+        var group = app.MapGroup("/supervisor").RequireAuthorization("SupervisorPlus").RequireOperationalTenant();
 
         // Voice sessions
         group.MapGet("/sessions/active", GetActiveSessions);

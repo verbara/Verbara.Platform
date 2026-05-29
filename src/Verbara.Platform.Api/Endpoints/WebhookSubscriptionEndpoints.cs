@@ -14,6 +14,7 @@ internal static class WebhookSubscriptionEndpoints
     {
         var group = app.MapGroup("/webhooks/subscriptions")
             .RequireAuthorization("Authenticated")
+            .RequireOperationalTenant()
             .RequirePlanFeature(PlanFeature.Webhooks);
         group.MapGet("/", ListSubscriptions);
         group.MapPost("/", CreateSubscription);

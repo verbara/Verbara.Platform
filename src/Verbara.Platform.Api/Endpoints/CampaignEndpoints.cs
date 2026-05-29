@@ -17,6 +17,7 @@ internal static class CampaignEndpoints
     {
         var campaigns = app.MapGroup("/admin/campaigns")
             .RequireAuthorization("AdminOnly")
+            .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Dialer)
             .RequirePlanFeature(PlanFeature.Dialer);
 
@@ -54,7 +55,7 @@ internal static class CampaignEndpoints
         campaigns.MapGet("/{id:long}/metrics", GetCampaignMetrics);
 
         // Operations
-        var operations = app.MapGroup("/operations").RequireAuthorization("SupervisorPlus");
+        var operations = app.MapGroup("/operations").RequireAuthorization("SupervisorPlus").RequireOperationalTenant();
         operations.MapGet("/campaigns/metrics", ListActiveCampaignMetrics);
     }
 

@@ -290,6 +290,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ComplianceSummaryResponse))]
 // Shared response DTOs
 [JsonSerializable(typeof(ErrorResponse))]
+[JsonSerializable(typeof(TenantTypeMismatchProblem))]  // ADR-0027 — operational tenant-type gate response
 [JsonSerializable(typeof(ErrorDetailResponse))]
 [JsonSerializable(typeof(MessageResponse))]
 [JsonSerializable(typeof(StatusUpdateResponse))]
