@@ -209,6 +209,100 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    // ─── ADR-0026 Phase A.6 — agent-centric membership listing ────────────────
+
+    [Fact]
+    public async Task ListAgentQueueMemberships_ShouldReturn404_WhenAgentDoesNotExist()
+    {
+        var response = await _client.GetAsync(
+            "/api/admin/agents/no-such-agent/queue-memberships");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task ListAgentQueueMemberships_ShouldReturn200_WithEmptyList_WhenAgentHasNoMemberships()
+    {
+        var agentId = await CreateAgentAsync("Sin Memberships");
+
+        var response = await _client.GetAsync(
+            $"/api/admin/agents/{agentId}/queue-memberships");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var arr = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsArray();
+        arr.Count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ListAgentQueueMemberships_ShouldReturn200_WithJoinedQueueName_WhenMembershipExists()
+    {
+        var queueId = await CreateQueueAsync("Agent-Membership Queue");
+        var agentId = await CreateAgentAsync("Con Membership");
+        await AddMemberAsync(queueId, agentId);
+
+        var response = await _client.GetAsync(
+            $"/api/admin/agents/{agentId}/queue-memberships");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var arr = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsArray();
+        arr.Count.Should().Be(1);
+        var dto = arr[0]!;
+        dto["queueId"]!.GetValue<string>().Should().Be(queueId);
+        dto["queueName"]!.GetValue<string>().Should().Be("Agent-Membership Queue");
+        dto["source"]!.GetValue<string>().Should().Be("Manual");
+    }
+
+    [Fact]
+    public async Task ListAgentQueueMemberships_ShouldExposeAllowedChannels_WhenRestricted()
+    {
+        var queueId = await CreateQueueAsync("Restricted-Channels Queue");
+        var agentId = await CreateAgentAsync("Restricted Member");
+        // Restrict to WebChat-only at creation.
+        await _client.PostAsync(
+            $"/api/v1/queues/{queueId}/members",
+            JsonContent.Create(new { agentId, allowedChannels = ChannelTestData.WebChatOnly }));
+
+        var response = await _client.GetAsync(
+            $"/api/admin/agents/{agentId}/queue-memberships");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsArray()[0]!;
+        var channels = dto["allowedChannels"]!.AsArray()
+            .Select(n => n!.GetValue<string>()).ToList();
+        channels.Should().BeEquivalentTo(["WebChat"]);
+    }
+
+    // Local helpers — duplicate the small builders from QueueMembersEndpointsTests
+    // to keep AdminEndpointTests self-contained (no shared test fixture needed).
+    private async Task<string> CreateQueueAsync(string name)
+    {
+        var response = await _client.PostAsync(
+            "/api/v1/admin/queues",
+            JsonContent.Create(new { name }));
+        response.EnsureSuccessStatusCode();
+        var node = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        return node!["id"]!.GetValue<string>();
+    }
+
+    private async Task<string> CreateAgentAsync(string displayName)
+    {
+        var userId = $"user-{Guid.NewGuid():N}";
+        var response = await _client.PostAsync(
+            "/api/v1/admin/agents",
+            JsonContent.Create(new { userId, displayName }));
+        response.EnsureSuccessStatusCode();
+        var node = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        return node!["agentId"]!.GetValue<string>();
+    }
+
+    private async Task AddMemberAsync(string queueId, string agentId)
+    {
+        var response = await _client.PostAsync(
+            $"/api/v1/queues/{queueId}/members",
+            JsonContent.Create(new { agentId }));
+        response.EnsureSuccessStatusCode();
+    }
+
     // ─── Teams ────────────────────────────────────────────────────────────────
 
     [Fact]

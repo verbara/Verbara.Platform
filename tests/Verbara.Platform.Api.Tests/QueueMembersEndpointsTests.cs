@@ -1,8 +1,20 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Verbara.Platform.Api.Tests;
+
+internal static class ChannelTestData
+{
+    public static readonly string[] WebChatEmail = ["WebChat", "Email"];
+    public static readonly string[] Empty = [];
+    public static readonly string[] UnknownTelex = ["Telex"];
+    public static readonly string[] VoiceOnly = ["Voice"];
+    public static readonly string[] WebChatOnly = ["WebChat"];
+    public static readonly string[] EmailOnly = ["Email"];
+    public static readonly string[] UnknownFax = ["Fax"];
+}
 
 /// <summary>
 /// R5.1 Task I — coverage for the new RESTful queue-member endpoints.
@@ -421,6 +433,177 @@ public sealed class QueueMembersEndpointsTests :
         dto!["isPaused"]!.GetValue<bool>().Should().BeTrue();
         // realtimeSynced is exposed so clients can tell the AMI call did (or didn't) happen.
         dto!["realtimeSynced"].Should().NotBeNull();
+    }
+
+    // ─── ADR-0026 Phase A.6 — channel-aware AllowedChannels coverage ──────────
+
+    [Fact]
+    public async Task AddMember_ShouldPersistAllowedChannels_WhenSpecified()
+    {
+        var queueId = await CreateQueueAsync("Channel-Aware Add Queue");
+        var agentId = await CreateAgentAsync("Iris Channels");
+
+        var response = await _admin.PostAsync(
+            $"/api/v1/queues/{queueId}/members",
+            JsonContent.Create(new { agentId, allowedChannels = ChannelTestData.WebChatEmail }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var channels = dto!["allowedChannels"]!.AsArray()
+            .Select(n => n!.GetValue<string>()).ToList();
+        channels.Should().BeEquivalentTo(["WebChat", "Email"]);
+    }
+
+    [Fact]
+    public async Task AddMember_ShouldDefaultToAllChannels_WhenAllowedChannelsOmitted()
+    {
+        var queueId = await CreateQueueAsync("Default-All Queue");
+        var agentId = await CreateAgentAsync("Jorge Default");
+
+        var response = await _admin.PostAsync(
+            $"/api/v1/queues/{queueId}/members",
+            JsonContent.Create(new { agentId }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        // null in JSON = "all channels" semantically. When the serializer
+        // ignores null values, the property is absent — both shapes are
+        // equivalent to the channel-aware contract.
+        var hasExplicitNull = dto!["allowedChannels"] is null
+            || dto["allowedChannels"]!.GetValueKind() == JsonValueKind.Null;
+        hasExplicitNull.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AddMember_ShouldReturn400_WhenAllowedChannelsEmpty()
+    {
+        var queueId = await CreateQueueAsync("Empty-Channels Reject Queue");
+        var agentId = await CreateAgentAsync("Karla Empty");
+
+        var response = await _admin.PostAsync(
+            $"/api/v1/queues/{queueId}/members",
+            JsonContent.Create(new { agentId, allowedChannels = ChannelTestData.Empty }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("Empty arrays are not allowed");
+    }
+
+    [Fact]
+    public async Task AddMember_ShouldReturn400_WhenAllowedChannelsContainsUnknownChannel()
+    {
+        var queueId = await CreateQueueAsync("Unknown-Channel Reject Queue");
+        var agentId = await CreateAgentAsync("Luis Unknown");
+
+        var response = await _admin.PostAsync(
+            $"/api/v1/queues/{queueId}/members",
+            JsonContent.Create(new { agentId, allowedChannels = ChannelTestData.UnknownTelex }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("Unknown channel");
+        body.Should().Contain("Telex");
+    }
+
+    [Fact]
+    public async Task UpdateMember_ShouldReplaceAllowedChannels_WhenListProvided()
+    {
+        var queueId = await CreateQueueAsync("Replace-Channels Queue");
+        var agentId = await CreateAgentAsync("Mara Replace");
+        await AddMemberAsync(queueId, agentId);
+
+        var patch = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/queues/{queueId}/members/{agentId}")
+        {
+            Content = JsonContent.Create(new { allowedChannels = ChannelTestData.VoiceOnly }),
+        };
+        var response = await _admin.SendAsync(patch);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var channels = dto!["allowedChannels"]!.AsArray()
+            .Select(n => n!.GetValue<string>()).ToList();
+        channels.Should().BeEquivalentTo(["Voice"]);
+    }
+
+    [Fact]
+    public async Task UpdateMember_ShouldResetAllowedChannels_WhenClearAllowedChannelsTrue()
+    {
+        var queueId = await CreateQueueAsync("Clear-Channels Queue");
+        var agentId = await CreateAgentAsync("Nico Clear");
+        // Start with a restricted membership.
+        await _admin.PostAsync(
+            $"/api/v1/queues/{queueId}/members",
+            JsonContent.Create(new { agentId, allowedChannels = ChannelTestData.WebChatOnly }));
+
+        var patch = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/queues/{queueId}/members/{agentId}")
+        {
+            Content = JsonContent.Create(new { clearAllowedChannels = true }),
+        };
+        var response = await _admin.SendAsync(patch);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var resetToAll = dto!["allowedChannels"] is null
+            || dto["allowedChannels"]!.GetValueKind() == JsonValueKind.Null;
+        resetToAll.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateMember_ShouldPreserveAllowedChannels_WhenOmittedFromBody()
+    {
+        var queueId = await CreateQueueAsync("Preserve-Channels Queue");
+        var agentId = await CreateAgentAsync("Olga Preserve");
+        await _admin.PostAsync(
+            $"/api/v1/queues/{queueId}/members",
+            JsonContent.Create(new { agentId, allowedChannels = ChannelTestData.EmailOnly }));
+
+        // PATCH only the penalty — AllowedChannels must be left untouched.
+        var patch = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/queues/{queueId}/members/{agentId}")
+        {
+            Content = JsonContent.Create(new { penalty = 5 }),
+        };
+        var response = await _admin.SendAsync(patch);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var channels = dto!["allowedChannels"]!.AsArray()
+            .Select(n => n!.GetValue<string>()).ToList();
+        channels.Should().BeEquivalentTo(["Email"]);
+        dto["penalty"]!.GetValue<int>().Should().Be(5);
+    }
+
+    [Fact]
+    public async Task UpdateMember_ShouldReturn400_WhenAllowedChannelsEmpty()
+    {
+        var queueId = await CreateQueueAsync("Patch-Empty Reject Queue");
+        var agentId = await CreateAgentAsync("Pablo Empty");
+        await AddMemberAsync(queueId, agentId);
+
+        var patch = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/queues/{queueId}/members/{agentId}")
+        {
+            Content = JsonContent.Create(new { allowedChannels = ChannelTestData.Empty }),
+        };
+        var response = await _admin.SendAsync(patch);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task UpdateMember_ShouldReturn400_WhenAllowedChannelsContainsUnknownChannel()
+    {
+        var queueId = await CreateQueueAsync("Patch-Unknown Reject Queue");
+        var agentId = await CreateAgentAsync("Quim Unknown");
+        await AddMemberAsync(queueId, agentId);
+
+        var patch = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/queues/{queueId}/members/{agentId}")
+        {
+            Content = JsonContent.Create(new { allowedChannels = ChannelTestData.UnknownFax }),
+        };
+        var response = await _admin.SendAsync(patch);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("Fax");
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
