@@ -58,7 +58,8 @@ internal static partial class QueueMembersEndpoints
                 m.IsExcluded,
                 isPaused,
                 reason,
-                m.Source == MembershipSource.Manual ? "Manual" : "Skill"));
+                m.Source == MembershipSource.Manual ? "Manual" : "Skill",
+                m.AllowedChannels));
         }
         return Results.Ok(result);
     }
@@ -80,6 +81,11 @@ internal static partial class QueueMembersEndpoints
         var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(body.AgentId), ct);
         if (queue is null || agent is null) return Results.NotFound();
 
+        // ADR-0026 Phase A.6 — validate AllowedChannels (null = all channels,
+        // populated list restricts to listed channels, empty list = invalid).
+        if (ValidateChannels(body.AllowedChannels) is { ok: false, error: var addErr })
+            return Results.BadRequest(addErr);
+
         var penalty = Math.Clamp(body.Penalty ?? 0, 0, 10);
         await membershipStore.SaveAsync(new QueueMembership
         {
@@ -90,24 +96,35 @@ internal static partial class QueueMembersEndpoints
             Source = MembershipSource.Manual,
             IsExcluded = false,
             CreatedAt = DateTimeOffset.UtcNow,
+            AllowedChannels = body.AllowedChannels,
         }, ct);
 
+        // ADR-0026 Phase A.6 — Asterisk sync gate: only sync to queue_members
+        // if this membership covers voice (AllowedChannels null = all channels,
+        // or list contains "voice" case-insensitively).
+        var syncedToAsterisk = false;
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null)
+        if (syncService is not null && IncludesVoice(body.AllowedChannels))
         {
             await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name,
                 agent.AgentId.Value, agent.DisplayName, penalty, ct);
+            syncedToAsterisk = true;
         }
 
         await audit.RecordAsync(
             tenantId, category: "config", action: "queue.members.added", severity: "info",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
             targetId: $"{queueId}:{agent.AgentId.Value}", targetType: "queue_member",
-            metadata: BuildMetadata(context, ("queueId", queueId), ("agentId", agent.AgentId.Value), ("penalty", penalty.ToString(System.Globalization.CultureInfo.InvariantCulture))),
+            metadata: BuildMetadata(context,
+                ("queueId", queueId),
+                ("agentId", agent.AgentId.Value),
+                ("penalty", penalty.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                ("allowedChannels", body.AllowedChannels is null ? "all" : string.Join(",", body.AllowedChannels)),
+                ("asteriskSynced", syncedToAsterisk.ToString().ToLowerInvariant())),
             ct: ct);
 
         var dto = new QueueMemberDto(queueId, agent.AgentId.Value, agent.DisplayName,
-            penalty, false, false, null, "Manual");
+            penalty, false, false, null, "Manual", body.AllowedChannels);
         return Results.Created($"/api/v1/queues/{queueId}/members/{agent.AgentId.Value}", dto);
     }
 
@@ -129,20 +146,29 @@ internal static partial class QueueMembersEndpoints
         var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(agentId), ct);
         if (queue is null || agent is null) return Results.NotFound();
 
+        // ADR-0026 Phase A.6 — only call Asterisk RemoveQueueMember if this
+        // membership previously had voice (null=all OR explicit voice). For a
+        // digital-only membership the row never existed in queue_members.
+        var existing = await membershipStore.GetAsync(tenantId, queue.QueueId, agent.AgentId, ct);
         await membershipStore.DeleteAsync(tenantId, queue.QueueId, agent.AgentId, ct);
         pauseTracker.Clear(tenantId.Value, queueId, agentId);
 
+        var syncedToAsterisk = false;
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null)
+        if (syncService is not null && IncludesVoice(existing?.AllowedChannels))
         {
             await syncService.RemoveQueueMemberAsync(tenantId.Value, queue.Name, agent.AgentId.Value, ct);
+            syncedToAsterisk = true;
         }
 
         await audit.RecordAsync(
             tenantId, category: "config", action: "queue.members.removed", severity: "info",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
             targetId: $"{queueId}:{agentId}", targetType: "queue_member",
-            metadata: BuildMetadata(context, ("queueId", queueId), ("agentId", agentId)),
+            metadata: BuildMetadata(context,
+                ("queueId", queueId),
+                ("agentId", agentId),
+                ("asteriskSynced", syncedToAsterisk.ToString().ToLowerInvariant())),
             ct: ct);
         return Results.NoContent();
     }
@@ -175,6 +201,30 @@ internal static partial class QueueMembersEndpoints
         var newExcluded = body.IsExcluded ?? existing.IsExcluded;
         var penaltyChanged = body.Penalty.HasValue && newPenalty != existing.Penalty;
 
+        // ADR-0026 Phase A.6 — channel-aware PATCH semantics:
+        // - ClearAllowedChannels=true → reset to null (= all channels)
+        // - AllowedChannels populated → replace (validated)
+        // - both omitted → preserve existing
+        IReadOnlyList<string>? newAllowedChannels;
+        bool channelsChanged;
+        if (body.ClearAllowedChannels == true)
+        {
+            newAllowedChannels = null;
+            channelsChanged = existing.AllowedChannels is not null;
+        }
+        else if (body.AllowedChannels is not null)
+        {
+            if (ValidateChannels(body.AllowedChannels) is { ok: false, error: var chErr })
+                return Results.BadRequest(chErr);
+            newAllowedChannels = body.AllowedChannels;
+            channelsChanged = !ChannelListsEqual(existing.AllowedChannels, body.AllowedChannels);
+        }
+        else
+        {
+            newAllowedChannels = existing.AllowedChannels;
+            channelsChanged = false;
+        }
+
         await membershipStore.SaveAsync(new QueueMembership
         {
             TenantId = tenantId,
@@ -184,24 +234,45 @@ internal static partial class QueueMembersEndpoints
             Source = existing.Source,
             IsExcluded = newExcluded,
             CreatedAt = existing.CreatedAt,
+            AllowedChannels = newAllowedChannels,
         }, ct);
 
-        if (penaltyChanged)
+        // Asterisk sync diff: voice add/remove based on channel-include diff.
+        var existingIncludesVoice = IncludesVoice(existing.AllowedChannels);
+        var newIncludesVoice = IncludesVoice(newAllowedChannels);
+        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
+        if (syncService is not null)
         {
-            var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-            if (syncService is not null)
+            if (!existingIncludesVoice && newIncludesVoice)
             {
-                // AddQueueMemberAsync upserts — it updates the row in queue_members.
+                // Voice added → upsert in queue_members.
                 await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name,
                     agent.AgentId.Value, agent.DisplayName, newPenalty, ct);
             }
+            else if (existingIncludesVoice && !newIncludesVoice)
+            {
+                // Voice removed → delete row in queue_members.
+                await syncService.RemoveQueueMemberAsync(tenantId.Value, queue.Name, agent.AgentId.Value, ct);
+            }
+            else if (newIncludesVoice && penaltyChanged)
+            {
+                // Voice retained, penalty changed → upsert to update penalty.
+                await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name,
+                    agent.AgentId.Value, agent.DisplayName, newPenalty, ct);
+            }
+        }
+
+        if (penaltyChanged || channelsChanged || body.IsExcluded.HasValue)
+        {
             await audit.RecordAsync(
-                tenantId, category: "config", action: "queue.members.penalty_changed", severity: "info",
+                tenantId, category: "config", action: "queue.members.updated", severity: "info",
                 actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
                 targetId: $"{queueId}:{agentId}", targetType: "queue_member",
                 changes: new AuditChanges(
-                    Before: new { existing.Penalty },
-                    After: new { Penalty = newPenalty }),
+                    Before: new QueueMemberUpdateAudit(existing.Penalty, existing.IsExcluded,
+                        existing.AllowedChannels is null ? "all" : string.Join(",", existing.AllowedChannels)),
+                    After: new QueueMemberUpdateAudit(newPenalty, newExcluded,
+                        newAllowedChannels is null ? "all" : string.Join(",", newAllowedChannels))),
                 metadata: BuildMetadata(context, ("queueId", queueId), ("agentId", agentId)),
                 ct: ct);
         }
@@ -209,8 +280,38 @@ internal static partial class QueueMembersEndpoints
         var (isPaused, reason) = pauseTracker.Get(tenantId.Value, queueId, agentId);
         var dto = new QueueMemberDto(queueId, agent.AgentId.Value, agent.DisplayName,
             newPenalty, newExcluded, isPaused, reason,
-            existing.Source == MembershipSource.Manual ? "Manual" : "Skill");
+            existing.Source == MembershipSource.Manual ? "Manual" : "Skill",
+            newAllowedChannels);
         return Results.Ok(dto);
+    }
+
+    // ─── ADR-0026 Phase A.6 helpers ──────────────────────────────────────────
+
+    private static (bool ok, string? error) ValidateChannels(IReadOnlyList<string>? channels)
+    {
+        if (channels is null) return (true, null);
+        if (channels.Count == 0) return (false,
+            "AllowedChannels must be null (= all channels) or contain at least one channel. " +
+            "Empty arrays are not allowed; use IsExcluded=true for that semantic.");
+        foreach (var ch in channels)
+        {
+            if (!Enum.TryParse<ChannelType>(ch, ignoreCase: true, out _))
+                return (false, $"Unknown channel: '{ch}'. Allowed values match ChannelType enum " +
+                    "(Voice, WhatsApp, Sms, WebChat, Email, Messenger, Instagram, Telegram, Twitter, Video, Rcs).");
+        }
+        return (true, null);
+    }
+
+    private static bool IncludesVoice(IReadOnlyList<string>? channels)
+        => channels is null || channels.Any(c => c.Equals("voice", StringComparison.OrdinalIgnoreCase));
+
+    private static bool ChannelListsEqual(IReadOnlyList<string>? a, IReadOnlyList<string>? b)
+    {
+        if (a is null && b is null) return true;
+        if (a is null || b is null) return false;
+        if (a.Count != b.Count) return false;
+        var aSet = new HashSet<string>(a, StringComparer.OrdinalIgnoreCase);
+        return b.All(aSet.Contains);
     }
 
     // ─── POST /queues/{queueId}/members/{agentId}/pause ───────────────────────
@@ -360,6 +461,12 @@ internal static partial class QueueMembersEndpoints
 /// </param>
 /// <param name="PauseReason">Optional reason string associated with an active pause.</param>
 /// <param name="Source">Membership source — <c>Manual</c> or <c>Skill</c>.</param>
+/// <param name="AllowedChannels">
+/// ADR-0026 Phase A.6 channel-aware membership. <c>null</c> means the agent
+/// is a member for all channels the queue accepts (pre-v2.6.0 implicit
+/// behavior). A populated list restricts membership to the listed channels
+/// only and gates Asterisk sync (voice in list ⇒ sync; voice out ⇒ no sync).
+/// </param>
 public sealed record QueueMemberDto(
     string QueueId,
     string AgentId,
@@ -368,10 +475,28 @@ public sealed record QueueMemberDto(
     bool IsExcluded,
     bool IsPaused,
     string? PauseReason,
-    string Source);
+    string Source,
+    IReadOnlyList<string>? AllowedChannels = null);
 
-internal sealed record AddMemberBody(string AgentId, int? Penalty = null);
-internal sealed record UpdateMemberBody(int? Penalty, bool? IsExcluded);
+internal sealed record AddMemberBody(
+    string AgentId,
+    int? Penalty = null,
+    IReadOnlyList<string>? AllowedChannels = null);
+
+/// <summary>
+/// PATCH body for queue-member updates. PATCH semantics for AllowedChannels:
+/// <c>ClearAllowedChannels=true</c> resets to NULL (= all channels);
+/// <c>AllowedChannels</c> populated replaces existing list; both omitted
+/// preserves existing value.
+/// </summary>
+internal sealed record UpdateMemberBody(
+    int? Penalty,
+    bool? IsExcluded,
+    IReadOnlyList<string>? AllowedChannels = null,
+    bool? ClearAllowedChannels = null);
+
+internal sealed record QueueMemberUpdateAudit(int Penalty, bool IsExcluded, string AllowedChannels);
+
 internal sealed record PauseMemberBody(string? Reason);
 internal sealed record PauseResultDto(string QueueId, string AgentId, bool IsPaused, string? Reason, bool RealtimeSynced);
 

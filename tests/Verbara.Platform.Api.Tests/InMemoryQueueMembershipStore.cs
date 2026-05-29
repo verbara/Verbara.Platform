@@ -28,6 +28,15 @@ internal sealed class InMemoryQueueMembershipStore : IQueueMembershipStore
         return Task.FromResult(result);
     }
 
+    public Task<IReadOnlyList<QueueMembership>> ListByAgentAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        IReadOnlyList<QueueMembership> result = _store.Values
+            .Where(m => m.TenantId.Value == tenantId.Value && m.AgentId.Value == agentId.Value)
+            .OrderBy(m => m.QueueId.Value)
+            .ToList();
+        return Task.FromResult(result);
+    }
+
     public Task<QueueMembership?> GetAsync(TenantId tenantId, EntityId queueId, EntityId agentId, CancellationToken ct)
     {
         _store.TryGetValue((tenantId.Value, queueId.Value, agentId.Value), out var membership);

@@ -40,6 +40,9 @@ internal static class AdminEndpoints
         group.MapPost("/agents", CreateAgent);
         group.MapPut("/agents/{id}", UpdateAgent);
         group.MapDelete("/agents/{id}", DeleteAgent);
+        // ADR-0026 Phase A.6 — agent-centric membership listing for the
+        // /admin/agents/{agentId}/queues editor in the React admin UI.
+        group.MapGet("/agents/{id}/queue-memberships", ListAgentQueueMemberships);
 
         // Teams
         group.MapGet("/teams", ListTeams);
@@ -560,6 +563,39 @@ internal static class AdminEndpoints
         return Results.NoContent();
     }
 
+    // ADR-0026 Phase A.6 — agent-centric membership listing used by the
+    // /admin/agents/{agentId}/queues editor. Joins queue_memberships with
+    // queues to project queue names alongside membership details so the
+    // React UI can render channel multi-selects without an N+1 fetch.
+    private static async Task<IResult> ListAgentQueueMemberships(
+        string id,
+        HttpContext context,
+        [FromServices] IAgentStore agentStore,
+        [FromServices] IQueueStore queueStore,
+        [FromServices] IQueueMembershipStore membershipStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (agent is null) return Results.NotFound();
+
+        var memberships = await membershipStore.ListByAgentAsync(tenantId, agent.AgentId, ct);
+        var result = new List<AgentQueueMembershipDto>(memberships.Count);
+        foreach (var m in memberships)
+        {
+            var queue = await queueStore.GetByIdAsync(tenantId, m.QueueId, ct);
+            if (queue is null) continue;
+            result.Add(new AgentQueueMembershipDto(
+                m.QueueId.Value,
+                queue.Name,
+                m.Penalty,
+                m.IsExcluded,
+                m.AllowedChannels,
+                m.Source == MembershipSource.Manual ? "Manual" : "Skill"));
+        }
+        return Results.Ok(result);
+    }
+
     // ─── Teams ────────────────────────────────────────────────────────────────
 
     private static async Task<IResult> ListTeams(
@@ -709,6 +745,20 @@ internal sealed record QueueMembershipRequest(
     string QueueId,
     IReadOnlyList<string>? AllowedChannels = null,
     int? Penalty = null);
+
+/// <summary>
+/// ADR-0026 Phase A.6 — agent-centric membership projection used by the
+/// <c>/admin/agents/{agentId}/queues</c> editor. Joins queue_memberships
+/// with queues so the React UI renders queue names + channel multi-selects
+/// without an N+1 fetch loop.
+/// </summary>
+internal sealed record AgentQueueMembershipDto(
+    string QueueId,
+    string QueueName,
+    int Penalty,
+    bool IsExcluded,
+    IReadOnlyList<string>? AllowedChannels,
+    string Source);
 internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills, string? Extension = null, string? SipPassword = null);
 
 internal sealed record CreateTeamRequest(string Name);

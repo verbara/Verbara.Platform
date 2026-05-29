@@ -480,6 +480,8 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateQueueRequest))]
 [JsonSerializable(typeof(CreateAgentRequest))]
 [JsonSerializable(typeof(QueueMembershipRequest))]  // ADR-0026 Phase A.1
+[JsonSerializable(typeof(AgentQueueMembershipDto))]  // ADR-0026 Phase A.6
+[JsonSerializable(typeof(List<AgentQueueMembershipDto>))]  // ADR-0026 Phase A.6
 [JsonSerializable(typeof(UpdateAgentRequest))]
 [JsonSerializable(typeof(CreateTeamRequest))]
 [JsonSerializable(typeof(UpdateTeamRequest))]
@@ -491,6 +493,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(AddMemberBody))]
 [JsonSerializable(typeof(UpdateMemberBody))]
 [JsonSerializable(typeof(PauseMemberBody))]
+[JsonSerializable(typeof(QueueMemberUpdateAudit))]  // ADR-0026 Phase A.6 audit payload
 // Contacts
 [JsonSerializable(typeof(CreateContactRequest))]
 [JsonSerializable(typeof(UpdateContactRequest))]

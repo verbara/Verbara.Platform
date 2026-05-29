@@ -32,6 +32,15 @@ internal sealed class PostgresQueueMembershipStore : IQueueMembershipStore
         return rows.Select(r => r.ToModel()).ToList();
     }
 
+    public async Task<IReadOnlyList<QueueMembership>> ListByAgentAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        var rows = await _dataSource.QueryListAsync(
+            $"SELECT {SelectColumns} FROM queue_memberships WHERE tenant_id = @TenantId AND agent_id = @AgentId ORDER BY queue_id",
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("AgentId", agentId.Value)); },
+            MembershipRow.Map, ct);
+        return rows.Select(r => r.ToModel()).ToList();
+    }
+
     public async Task<QueueMembership?> GetAsync(TenantId tenantId, EntityId queueId, EntityId agentId, CancellationToken ct)
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
