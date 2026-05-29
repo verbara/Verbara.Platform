@@ -345,6 +345,9 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     // lab validation surfaced this gap: counters existed in JwtTokenService
     // but were never exported.
     .AddMeter("verbara.platform.jwt")
+    // ADR-0026 Phase B — realtime.reconciliation.{tenants,memberships,sync_failures}
+    // for Verbara queue_memberships → Asterisk Realtime drift observability.
+    .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)
     .WithPrometheusExporter());
 
 // ─── Pro Hardening — Resilience + LicenseGuard + Retention ──────────────────
@@ -783,6 +786,9 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
 builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
     Verbara.Platform.Automation.TimerPollingService.ResiliencePolicyKey,
     (_, _) => BuildDefaultWorkerPolicy());
+builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
+    Verbara.Platform.Api.Services.RealtimeReconciliationService.ResiliencePolicyKey,
+    (_, _) => BuildDefaultWorkerPolicy());
 
 // DB-heavy workers (long batch DELETEs / bulk inserts)
 builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
@@ -871,6 +877,12 @@ var realtimeConn = ConnectionStringDefaults.ApplyPoolDefaults(
 if (!string.IsNullOrEmpty(realtimeConn))
     builder.Services.UsePostgresRealtimeStorage(ResolveDataSource(realtimeConn)!);
 builder.Services.AddHostedService<RealtimeStateBridge>();
+
+// ADR-0026 Phase B — convergent reconciler for queue_memberships → Asterisk
+// Realtime store. Catches up any AddQueueMemberAsync calls swallowed by the
+// best-effort try/catch in QueueMembersEndpoints + AdminEndpoints. Uses
+// RealtimeOptions.ReconcilerIntervalSeconds (default 60s).
+builder.Services.AddHostedService<Verbara.Platform.Api.Services.RealtimeReconciliationService>();
 
 // Queue membership service + desired state provider for reconciler
 builder.Services.AddSingleton<QueueMembershipService>();

@@ -190,6 +190,31 @@ $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
 
 Todos los counts/IDs no-vacíos → setup OK.
 
+## 4b. Routing ejecutivo: membership = quién recibe conversaciones
+
+Desde la versión `2.6.0-pro` del SDK (Phase B de ADR-0026), la tabla `queue_memberships` es la **fuente de verdad ejecutiva** para el routing de TODOS los canales (digital + voz). Antes de Phase B era ejecutiva sólo para voz; ahora también lo es para digital.
+
+**Implicación práctica para el operador SMB:**
+
+- Un agente sin row en `queue_memberships` para una queue **NO recibe conversaciones de esa queue**, sin importar qué skills tenga su perfil.
+- Un agente con `AllowedChannels=['WebChat']` recibe sólo chats. Las llamadas no le timbran (Asterisk no lo sincroniza en `queue_members`) **y** los chats de otros canales (Email, WhatsApp) no le llegan (Verbara filtra el pool).
+- Un agente con `AllowedChannels=NULL` recibe todos los canales que la queue acepta — comportamiento "all-channels", equivalente a la membership implícita pre-Phase B.
+
+Donde se administra: `/admin/agents/{agentId}/queues` (editor visual con chips por canal + badge "Voice → Asterisk" / "Digital only"). El wizard del paso 3 ya creó la membership default-all-channels para `agente1` en `Atención General`, así que la verificación E2E del paso 5 funciona out-of-the-box.
+
+> 💡 Si estás trabajando como **Platform Admin** (el rol que creaste en el manual [02-arranque-stack.md](02-arranque-stack.md)) y querés validar el routing, tenés que **impersonar un Customer tenant** primero. El tenant `platform` no tiene queues ni agentes operacionales por diseño (ADR-0027 enforcer rechaza endpoints operacionales con HTTP 409 desde Platform / Partner tenants).
+
+### Backfill para upgrades de instalaciones legacy
+
+Si estás migrando desde una instalación **anterior a Phase A.6** (pre-2026-05-28) donde el routing digital se hacía implícitamente por skill-match sin requerir `queue_memberships`, ejecutá una sola vez:
+
+```bash
+$ bash scripts/infer-memberships-from-skills.sh --dry-run    # preview
+$ bash scripts/infer-memberships-from-skills.sh              # backfill
+```
+
+El script inserta `(tenant_id, queue_id, agent_id)` para cada par donde `agents.skills` interseca `queue_configs.required_skills` y todavía no hay row. Es **idempotente** — re-ejecutar no duplica filas (`ON CONFLICT DO NOTHING`). Para instalaciones nuevas hechas con el wizard del paso 3, el output esperado es `0 memberships inferred` porque el wizard ya creó la membership explícita.
+
 ## 5. (Opcional) Crear un segundo tenant
 
 Si vas a usar Verbara para **múltiples clientes** (modelo multi-tenant tipo agencia o reseller), creá un tenant por cliente. El tenant `platform` queda como administrativo.

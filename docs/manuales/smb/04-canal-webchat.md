@@ -112,6 +112,21 @@ $ curl -sS -X POST http://{server-ip}:5000/api/v1/admin/routing/inbound \
 
 El widget envía `page_path` automáticamente en la metadata de la primera mensaje de la sesión.
 
+### 3.1 Quién recibe los chats — membership ejecutivo
+
+Una vez que el conversation enrutado aterriza en una queue, Verbara selecciona el agente desde el **pool ejecutivo** de `queue_memberships`. Reglas:
+
+- El agente debe ser miembro de la queue (row presente en `queue_memberships`).
+- `IsExcluded` debe ser `false`.
+- `AllowedChannels` debe ser `NULL` (todos los canales) o contener `"WebChat"` (case-insensitive).
+- El agente debe estar disponible (presencia: `Available` + capacity disponible).
+
+Si querés que un agente reciba **sólo** WebChat (y nada de voz/email), editá su membership en `/admin/agents/{agentId}/queues` y dejá `Allowed channels = WebChat`. El badge "Digital only" confirma que ese agente no va a recibir llamadas (Asterisk no lo timbrará en `queue_members`).
+
+Si querés **reservar la queue** a un subset de agentes con un nivel de penalty, `queue_memberships.penalty` se respeta: `0` = highest priority, valores más altos se contactan sólo cuando los `0` están ocupados. Round-robin opera **dentro de cada banda de penalty**.
+
+> 💡 La regla del paso 3 (Inbound Routing por `page_path`) decide **a qué queue** va el chat. La membership decide **qué agente dentro de esa queue** lo atiende. Son dos capas independientes.
+
 ## 4. Probar el widget con la página de demo provista
 
 Verbara incluye una página de prueba en `/webchat/demo.html` que ya tiene el snippet embebido y funcional. Útil para validar antes de tocar el sitio del cliente.
