@@ -1,0 +1,19 @@
+# Keep the Docker build context lean. The AOT build does an explicit
+# `dotnet restore`/`publish`, so none of these are needed in-context — and
+# shipping them bloats the context + is a needless IP-leak surface on the
+# closed-Pro-IP image.
+.git
+.github
+**/bin
+**/obj
+tests
+docs
+local-nuget-feed
+*.log
+**/soak-reports
+**/*.user
+.vs
+.vscode
+.idea
+**/TestResults
+**/.DS_Store

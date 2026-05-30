@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Version>1.7.0</Version>
+    <!-- Assembly version flows from the central PackageVersion (Directory.Build.props)
+         so /management/system/info + OpenAPI report the real release version. Before
+         v2.6.0 this was hardcoded "1.7.0" and the API mis-reported its version for the
+         entire v2.x line. -->
+    <Version>$(PackageVersion)</Version>
     <Description>ASP.NET Core Minimal API layer for Verbara.Platform — webhook ingestion, agent desktop, admin CRUD, SSE events, SignalR PlatformHub</Description>
     <!-- ADR-0022 Phase D (2026-05-20): Dapper removed cross-repo (SDK + Pro + Platform);
          Platform.Api now publishes Native AOT with 0 IL2026/IL3050/IL207x diagnostics

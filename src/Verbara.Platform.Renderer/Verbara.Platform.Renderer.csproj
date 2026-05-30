@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Version>1.7.0</Version>
+    <Version>$(PackageVersion)</Version>
     <Description>Stateless PDF/CSV rendering microservice for Verbara.Platform</Description>
     <IsAotCompatible>false</IsAotCompatible>
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>

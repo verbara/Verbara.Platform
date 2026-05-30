@@ -21,7 +21,12 @@ public sealed class ManagementSystemEndpointTests : IClassFixture<PlatformAdminA
 
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("platform");
-        body.Should().Contain("1.7.0");
+        // Version flows from the central PackageVersion (Directory.Build.props) via
+        // <Version>$(PackageVersion)</Version> in the Api csproj — must be a real
+        // semver, never the old hardcoded "1.7.0" (the bug fixed pre-v2.6.0) nor the
+        // "0.0.0" MSBuild fallback.
+        body.Should().MatchRegex("\"version\":\"\\d+\\.\\d+\\.\\d+");
+        body.Should().NotContain("1.7.0");
     }
 
     [Fact]
