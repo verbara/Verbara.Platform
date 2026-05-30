@@ -50,8 +50,18 @@ internal static class SetupEndpoints
             return Results.BadRequest(new ErrorResponse(
                 "Customer tenant id must be a lowercase slug (letters, digits, hyphens) and cannot be 'platform'."));
 
+        // Normalize each email once and reuse the normalized value for BOTH the
+        // distinct-check below AND persistence (User.Email assignments). The email
+        // lookup (IUserStore.GetByEmailAsync) is case-insensitive — InMemory uses
+        // OrdinalIgnoreCase, Postgres uses `lower(email) = lower(@Email)` — so a
+        // trim + lowercase canonical form is safe: mixed-case login input still
+        // resolves, and we avoid persisting two whitespace/case variants that pass
+        // the distinct-check yet collide as the same login identity.
+        var platformAdminEmail = body.Email.Trim().ToLowerInvariant();
+        var customerAdminEmail = body.CustomerAdminEmail.Trim().ToLowerInvariant();
+
         // The two admins are distinct identities — different emails required
-        if (string.Equals(body.Email.Trim(), body.CustomerAdminEmail.Trim(), StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(platformAdminEmail, customerAdminEmail, StringComparison.OrdinalIgnoreCase))
             return Results.BadRequest(new ErrorResponse(
                 "Platform admin and customer admin must use different emails."));
 
@@ -65,6 +75,18 @@ internal static class SetupEndpoints
         if (!customerPwdCheck.IsValid)
             return Results.BadRequest(new ErrorDetailResponse(
                 "Customer admin password does not meet policy", customerPwdCheck.Errors));
+
+        // NON-ATOMIC FIRST-RUN WINDOW: the writes below (host tenant → orphan
+        // adoption → platform admin → mgmt key → customer tenant → customer admin)
+        // run as sequential awaited calls with NO surrounding transaction. A storage
+        // fault mid-sequence can leave a partially-initialized install (e.g. host
+        // tenant persisted but customer admin missing). Because the host tenant is
+        // the 409 sentinel checked at the top of this handler, a re-POST to /api/setup
+        // cannot repair such a partial state — it just returns "already initialized".
+        // This is an accepted trade-off per the spec
+        // (docs/specs/2026-05-30-setup-multitenant-platform-customer.md): a partial
+        // failure surfaces as a 500. A future follow-up may make first-run
+        // idempotent/transactional.
 
         // 1. Create host tenant
         var hostTenantId = "platform";
@@ -109,7 +131,7 @@ internal static class SetupEndpoints
         {
             UserId = userId,
             TenantId = tenantId,
-            Email = body.Email,
+            Email = platformAdminEmail,
             DisplayName = body.DisplayName ?? "Platform Admin",
             Role = UserRole.Admin,
             Status = UserStatus.Active,
@@ -189,7 +211,7 @@ internal static class SetupEndpoints
         {
             UserId = customerUserId,
             TenantId = customerTenantId,
-            Email = body.CustomerAdminEmail,
+            Email = customerAdminEmail,
             DisplayName = body.CustomerAdminDisplayName ?? "Administrator",
             Role = UserRole.Admin,
             Status = UserStatus.Active,
