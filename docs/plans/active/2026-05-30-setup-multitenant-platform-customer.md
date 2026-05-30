@@ -33,9 +33,9 @@
 ## Reference: existing facts (read before coding)
 
 - `SetupRequest` / `SetupResponse` records live at the bottom of `SetupEndpoints.cs` and are registered in `ApiJsonContext.cs:250-251`.
-- Error shapes (`src/Verbara.Platform.Api/Endpoints/Shared/ErrorResponses.cs`, both registered in `ApiJsonContext`):
+- Error shapes (`src/Verbara.Platform.Api/Endpoints/Shared/ErrorResponse.cs`, both registered in `ApiJsonContext`):
   - `internal sealed record ErrorResponse(string Error);`
-  - `internal sealed record ErrorDetailResponse(string Message, IReadOnlyList<string> Details);`
+  - `internal sealed record ErrorDetailResponse(string Error, IReadOnlyList<string> Details);` (first positional arg is the message; constructor calls in this plan pass it positionally)
 - Password validator (`src/Verbara.Platform.Api/Services/PasswordService.cs:148`):
   - `public static PasswordValidationResult ValidatePolicy(string password, TenantAuthConfig config)` → `PasswordValidationResult(bool IsValid, IReadOnlyList<string> Errors)`.
   - `TenantAuthConfig` defaults: `PasswordMinLength=12`, `PasswordRequireUppercase=true`, `PasswordRequireNumber=true`, `PasswordRequireSpecial=false`.
@@ -43,7 +43,7 @@
 - `User` (`src/Verbara.Platform.Identity/Identity/User.cs`): `{ UserId, TenantId, Email, DisplayName, Role, Status, PasswordHash, CreatedAt }`.
 - Helpers used by the existing handler: `EntityId.New()`, `new TenantId(string)`, `UserRole.Admin`, `UserStatus.Active`, `TenantStatus.Active`, `TenantType.{Platform,Customer}`, `PasswordService.HashPassword(string)`.
 - Role-clone helpers: `tenantRoleStore.CloneFromTemplateAsync(TenantId tenantId, string roleId, string templateId, string name, string? description, CancellationToken ct)` and `userRoleStore.AssignAsync(TenantId, EntityId userId, string roleId, string? assignedBy, CancellationToken ct)`. Valid template ids include `"admin"` ("Full administrative access except cluster and auth configuration").
-- Test factory: `PlatformApiFactory.GetService<T>()` resolves a service (e.g. `ITenantStore`, `IUserStore`) from the running host for assertions. `PlatformAdminApiFactory` already has a host tenant (used for the 409 test).
+- Test factory: `PlatformApiFactory` is a `WebApplicationFactory<Program>`. Resolve services for assertions via `factory.Services.GetRequiredService<T>()` (call `CreateClient()` first so the host is built). `PlatformAdminApiFactory` already has a host tenant (used for the 409 test).
 
 ---
 
@@ -154,7 +154,7 @@ public sealed class SetupEndpointTests : IClassFixture<PlatformApiFactory>
         body.AccessToken.Should().NotBeNullOrEmpty();
         body.ManagementApiKey.Should().StartWith("mgmt_");
 
-        var tenantStore = factory.GetService<ITenantStore>();
+        var tenantStore = factory.Services.GetRequiredService<ITenantStore>();
         var platform = await tenantStore.GetAsync("platform", default);
         platform.Should().NotBeNull();
         platform!.Type.Should().Be(TenantType.Platform);
@@ -164,7 +164,7 @@ public sealed class SetupEndpointTests : IClassFixture<PlatformApiFactory>
         customer!.Type.Should().Be(TenantType.Customer);
         customer.ParentTenantId.Should().Be("platform");
 
-        var userStore = factory.GetService<IUserStore>();
+        var userStore = factory.Services.GetRequiredService<IUserStore>();
         var platformAdmin = await userStore.GetByEmailAsync(new TenantId("platform"), "admin@setup-test.com", default);
         platformAdmin.Should().NotBeNull();
         var customerAdmin = await userStore.GetByEmailAsync(new TenantId("acme"), "ops@acme.com", default);
