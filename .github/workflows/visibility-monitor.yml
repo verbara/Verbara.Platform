@@ -66,8 +66,8 @@ jobs:
       # visibility-flip AND signature-drop regressions — GHCR's visibility
       # setting is per-package (not per-version), and cosign signatures are
       # attached per-digest so an unsigned push to a known tag is detectable.
-      PLATFORM_TAG: v2.5.2
-      WEB_TAG: v3.1.3-web
+      PLATFORM_TAG: v2.6.0
+      WEB_TAG: v3.1.4-web
     steps:
       - name: Checkout source (for .github/cosign.pub)
         uses: actions/checkout@v4

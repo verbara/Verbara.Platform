@@ -126,10 +126,10 @@ Verbara SMB se distribuye en **3 tiers** que comparten el mismo binario. Pasás 
 ## Versionado y soporte
 
 Esta guía aplica a:
-- **Verbara.Platform.Api** `v2.5.4` (imagen `ghcr.io/verbara/platform/api:v2.5.4`, Native AOT)
-- **Verbara.Platform.Realtime** `v2.5.4` (imagen `ghcr.io/verbara/platform/realtime:v2.5.4`) — microservicio SignalR Hub (ADR-0022 Phase A)
-- **Verbara.Platform.Renderer** `v2.5.4` (imagen `ghcr.io/verbara/platform/renderer:v2.5.4`, Native AOT)
-- **Verbara.Platform.Mail** `v2.5.4` (imagen `ghcr.io/verbara/platform/mail:v2.5.4`, Native AOT)
+- **Verbara.Platform.Api** `v2.6.0` (imagen `ghcr.io/verbara/platform/api:v2.6.0`, Native AOT)
+- **Verbara.Platform.Realtime** `v2.6.0` (imagen `ghcr.io/verbara/platform/realtime:v2.6.0`) — microservicio SignalR Hub (ADR-0022 Phase A)
+- **Verbara.Platform.Renderer** `v2.6.0` (imagen `ghcr.io/verbara/platform/renderer:v2.6.0`, Native AOT)
+- **Verbara.Platform.Mail** `v2.6.0` (imagen `ghcr.io/verbara/platform/mail:v2.6.0`, Native AOT)
 - **Verbara.Platform.Web** `v3.1.4-web` (imagen `ghcr.io/verbara/platform/web:v3.1.4-web`)
 - **nginx** `1.27-alpine` — actúa de gateway frente a Web + Api + Realtime, sirviendo el host port 80 (refleja la topología K8s Cilium HTTPRoute)
 - **Asterisk** 22 (build local desde `docker/Dockerfile.asterisk`)
@@ -140,7 +140,7 @@ Las cinco imágenes Verbara están **firmadas con cosign** (ADR-0023) — antes 
 ```bash
 $ for img in api realtime renderer mail; do \
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.5.4; \
+        ghcr.io/verbara/platform/$img:v2.6.0; \
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
     ghcr.io/verbara/platform/web:v3.1.4-web

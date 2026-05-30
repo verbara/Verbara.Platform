@@ -210,7 +210,7 @@ $ npx playwright test --grep @reference-deployment --reporter=html
 # Sign de las 5 imágenes (proof de imagen no-tampered, ADR-0023) — cosign v3+
 $ for img in api realtime renderer mail; do
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.5.4 > /tmp/sig-$img.txt 2>&1
+        ghcr.io/verbara/platform/$img:v2.6.0 > /tmp/sig-$img.txt 2>&1
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
     ghcr.io/verbara/platform/web:v3.1.4-web > /tmp/sig-web.txt 2>&1
