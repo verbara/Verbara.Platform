@@ -67,7 +67,7 @@ jobs:
       # setting is per-package (not per-version), and cosign signatures are
       # attached per-digest so an unsigned push to a known tag is detectable.
       PLATFORM_TAG: v2.6.0
-      WEB_TAG: v3.1.4-web
+      WEB_TAG: v3.2.0-web
     steps:
       - name: Checkout source (for .github/cosign.pub)
         uses: actions/checkout@v4

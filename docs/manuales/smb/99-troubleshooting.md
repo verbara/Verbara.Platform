@@ -401,7 +401,7 @@ $ git checkout v2.6.0
 # 4. Actualizar tag en .env
 $ ${EDITOR:-nano} docker/.env.reference-smb
 # PLATFORM_API_TAG=v2.6.0          (aplica a api+realtime+renderer+mail; comparten tag)
-# PLATFORM_WEB_TAG=v3.1.4-web      (web tiene su propio tren de release)
+# PLATFORM_WEB_TAG=v3.2.0-web      (web tiene su propio tren de release)
 
 # 5. Verificar firmas (5 imágenes, ADR-0023) — cosign v3+ con --insecure-ignore-tlog
 $ for img in api realtime renderer mail; do
@@ -409,7 +409,7 @@ $ for img in api realtime renderer mail; do
         ghcr.io/verbara/platform/$img:v2.6.0
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.1.4-web
+    ghcr.io/verbara/platform/web:v3.2.0-web
 
 # 6. Pull + up
 $ dc pull

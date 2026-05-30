@@ -130,7 +130,7 @@ Esta guía aplica a:
 - **Verbara.Platform.Realtime** `v2.6.0` (imagen `ghcr.io/verbara/platform/realtime:v2.6.0`) — microservicio SignalR Hub (ADR-0022 Phase A)
 - **Verbara.Platform.Renderer** `v2.6.0` (imagen `ghcr.io/verbara/platform/renderer:v2.6.0`, Native AOT)
 - **Verbara.Platform.Mail** `v2.6.0` (imagen `ghcr.io/verbara/platform/mail:v2.6.0`, Native AOT)
-- **Verbara.Platform.Web** `v3.1.4-web` (imagen `ghcr.io/verbara/platform/web:v3.1.4-web`)
+- **Verbara.Platform.Web** `v3.2.0-web` (imagen `ghcr.io/verbara/platform/web:v3.2.0-web`)
 - **nginx** `1.27-alpine` — actúa de gateway frente a Web + Api + Realtime, sirviendo el host port 80 (refleja la topología K8s Cilium HTTPRoute)
 - **Asterisk** 22 (build local desde `docker/Dockerfile.asterisk`)
 - **Postgres** 18-alpine
@@ -143,7 +143,7 @@ $ for img in api realtime renderer mail; do \
         ghcr.io/verbara/platform/$img:v2.6.0; \
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.1.4-web
+    ghcr.io/verbara/platform/web:v3.2.0-web
 ```
 > `--insecure-ignore-tlog` es **obligatorio**: el workflow de release firma con `--signing-config` + `tlog-upload=false`, así que la firma es válida offline pero no está en la transparency log de Sigstore. La clave pública `docker/cosign.pub` sigue siendo el root of trust.
 

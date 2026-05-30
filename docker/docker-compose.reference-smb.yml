@@ -263,7 +263,7 @@ services:
   # web + api + realtime under one hostname (ADR-0022 Phase A).
   # ──────────────────────────────────────────────────────────────────────
   web:
-    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.1.4-web}
+    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.2.0-web}
     container_name: verbara-web
     logging: *default-logging
     expose:

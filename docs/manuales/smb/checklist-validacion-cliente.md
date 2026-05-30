@@ -75,7 +75,7 @@ Verificación de firmas (ADR-0023, 5 imágenes signed — cosign v3+ con `--inse
 - ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/realtime:v2.6.0` → OK
 - ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/renderer:v2.6.0` → OK
 - ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/mail:v2.6.0` → OK
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/web:v3.1.4-web` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/web:v3.2.0-web` → OK
 
 ## 4. Setup inicial (Admin + Tenant + Agente + Queue)
 

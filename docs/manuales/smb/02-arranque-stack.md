@@ -53,7 +53,7 @@ $ for img in api realtime renderer mail; do
   done
 
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.1.4-web
+    ghcr.io/verbara/platform/web:v3.2.0-web
 ```
 
 Esperado en cada caso:
