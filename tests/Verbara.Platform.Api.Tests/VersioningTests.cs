@@ -28,6 +28,10 @@ public sealed class VersioningTests : IClassFixture<PlatformApiFactory>
             password = "VersionTest2026!",
             displayName = "Versioning Test Admin",
             platformName = "Versioning Test Platform",
+            customerTenantId = "versioning-co",
+            customerName = "Versioning Co",
+            customerAdminEmail = "ops@versioning.example.com",
+            customerAdminPassword = "VersionCustomer2026!",
         });
 
         // The middleware rewrites the path; the endpoint will respond 201 (first call) or 409 (tenant exists)
@@ -50,12 +54,20 @@ public sealed class VersioningTests : IClassFixture<PlatformApiFactory>
         {
             email = "rewrite-check@example.com",
             password = "RewriteCheck2026!",
+            customerTenantId = "rewrite-co",
+            customerName = "Rewrite Co",
+            customerAdminEmail = "ops@rewrite.example.com",
+            customerAdminPassword = "RewriteCustomer2026!",
         });
 
         var unversioned = await _client.PostAsJsonAsync("/api/setup", new
         {
             email = "rewrite-check@example.com",
             password = "RewriteCheck2026!",
+            customerTenantId = "rewrite-co",
+            customerName = "Rewrite Co",
+            customerAdminEmail = "ops@rewrite.example.com",
+            customerAdminPassword = "RewriteCustomer2026!",
         });
 
         // First call creates (201 or 409 if prior test ran); second must match or be 409.
@@ -71,6 +83,10 @@ public sealed class VersioningTests : IClassFixture<PlatformApiFactory>
         {
             email = "nowarning@example.com",
             password = "NoWarning2026!",
+            customerTenantId = "nowarning-co",
+            customerName = "NoWarning Co",
+            customerAdminEmail = "ops@nowarning.example.com",
+            customerAdminPassword = "NoWarningCustomer2026!",
         });
 
         ((int)response.StatusCode).Should().BeOneOf(201, 409);
@@ -86,6 +102,10 @@ public sealed class VersioningTests : IClassFixture<PlatformApiFactory>
         {
             email = "apiversions@example.com",
             password = "ApiVersions2026!",
+            customerTenantId = "apiversions-co",
+            customerName = "ApiVersions Co",
+            customerAdminEmail = "ops@apiversions.example.com",
+            customerAdminPassword = "ApiVersionsCustomer2026!",
         });
 
         ((int)response.StatusCode).Should().BeOneOf(201, 409);
