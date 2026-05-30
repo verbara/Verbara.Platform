@@ -88,7 +88,11 @@ SETUP=$(curl -sf -X POST http://localhost:5000/api/v1/setup \
         "email": "platform@admin.local",
         "password": "PlatformAdmin2026!",
         "displayName": "Platform Admin",
-        "platformName": "Verbara Platform"
+        "platformName": "Verbara Platform",
+        "customerTenantId": "my-company",
+        "customerName": "My Company",
+        "customerAdminEmail": "admin@my-company.local",
+        "customerAdminPassword": "CustomerAdmin2026!"
     }')
 
 echo "$SETUP" | python3 -m json.tool

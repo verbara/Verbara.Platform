@@ -63,9 +63,11 @@ fi
 
 if [ -z "$ADMIN_TOKEN" ]; then
     log "Attempting platform setup wizard..."
+    # Since v2.6.0 setup also requires a first Customer tenant + admin (Platform
+    # is admin-only per ADR-0027/0028). Create "staging" as that operational Customer.
     setup_resp=$(curl -s -w "\n%{http_code}" -X POST "$PLATFORM_API_URL/api/v1/setup" \
         -H "Content-Type: application/json" \
-        -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\",\"displayName\":\"R55 Platform Admin\",\"platformName\":\"R5.5 Staging\"}" || true)
+        -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\",\"displayName\":\"R55 Platform Admin\",\"platformName\":\"R5.5 Staging\",\"customerTenantId\":\"staging\",\"customerName\":\"R5.5 Staging Customer\",\"customerAdminEmail\":\"customer-$ADMIN_EMAIL\",\"customerAdminPassword\":\"$ADMIN_PASSWORD\"}" || true)
     setup_code=$(echo "$setup_resp" | tail -n1)
     setup_body=$(echo "$setup_resp" | head -n-1)
 
