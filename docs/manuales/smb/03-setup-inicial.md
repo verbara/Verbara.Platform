@@ -4,11 +4,17 @@
 > **Tiempo:** 15 minutos.
 > **Pre-requisitos:** [02-arranque-stack.md](02-arranque-stack.md) terminado, Web accesible en `http://{server-ip}/`.
 
-Verbara arranca **sin ningún usuario** — para evitar credenciales por defecto. El primer paso es crear el **platform admin** vía un endpoint público (`POST /api/v1/setup`) que sólo funciona cuando no existe ningún usuario. Después de eso el endpoint queda bloqueado hasta que el último admin se borre.
+Verbara arranca **sin ningún usuario** — para evitar credenciales por defecto. El primer paso es el **setup inicial** vía un endpoint público (`POST /api/v1/setup`) que sólo funciona cuando no existe ningún tenant host. Después de eso el endpoint queda bloqueado (HTTP 409).
 
-El resto de la configuración (tenant + agente + queue + canales) se hace desde la Web UI con el setup wizard.
+> **🏢 Por qué el setup crea DOS tenants.** Verbara distingue 3 tipos de tenant: `Platform` (host administrativo único de la instancia), `Partner` (reseller / white-label, opcional) y `Customer` (tenant **operativo** — es el único donde viven agentes, colas y conversaciones). El tenant `platform` es administrativo por diseño: **no puede manejar agentes ni colas** (ADR-0027 rechaza endpoints operacionales con HTTP 409 desde Platform/Partner). Por eso el setup crea **obligatoriamente** un primer `Customer` además del `platform`, con su propio administrador. Así, apenas termina el setup, ya tenés un tenant operativo listo para configurar colas/agentes/canales — sin pasos manuales extra.
 
-## 1. Crear el primer platform admin
+El setup crea entonces, en una sola operación:
+- el tenant **`platform`** + su **Platform Admin** (administra tenants, licensing, cluster);
+- el primer tenant **`Customer`** (tu empresa) + su **Customer Admin** (administra agentes, colas, conversaciones).
+
+El resto de la configuración (agente + queue + canales) se hace desde la Web UI con el setup wizard, **logueado como el Customer Admin** (o impersonando el Customer desde el Platform Admin).
+
+## 1. Setup inicial (Platform + Customer + 2 admins)
 
 ### Opción A — vía curl (más directo)
 
@@ -21,48 +27,86 @@ $ curl -sS -X POST http://{server-ip}:5000/api/v1/setup \
       "email": "admin@tu-empresa.com",
       "password": "TU-PASSWORD-FUERTE-12+CHARS",
       "displayName": "Admin Verbara",
-      "platformName": "Verbara - Tu Empresa"
+      "platformName": "Verbara - Tu Empresa",
+      "customerTenantId": "mi-empresa",
+      "customerName": "Mi Empresa",
+      "customerAdminEmail": "ops@mi-empresa.com",
+      "customerAdminPassword": "OTRA-PASSWORD-FUERTE-12+CHARS",
+      "customerAdminDisplayName": "Admin Operativo"
     }' | jq
 ```
 
-Respuesta esperada (HTTP 200):
+**Campos del Customer (todos obligatorios salvo el display name):**
+
+| Campo | Regla |
+|---|---|
+| `customerTenantId` | slug en minúsculas (letras, dígitos, guiones), **no puede ser `platform`** — ej. `mi-empresa`, `acme` |
+| `customerName` | nombre visible de tu empresa — ej. `Mi Empresa` |
+| `customerAdminEmail` | email del admin operativo — **debe ser distinto** del `email` del Platform Admin |
+| `customerAdminPassword` | mínimo 12 caracteres, con al menos una mayúscula y un número (misma política que el Platform Admin) |
+| `customerAdminDisplayName` | opcional |
+
+Respuesta esperada (HTTP 201):
 
 ```json
 {
   "tenantId": "platform",
   "userId": "user_01HX...",
   "accessToken": "eyJhbGciOiJIUzI1NiIs...",
-  "managementApiKey": "vrb_mgmt_KAaSjL..."
+  "managementApiKey": "vrb_mgmt_KAaSjL...",
+  "customerTenantId": "mi-empresa",
+  "customerUserId": "user_01HY..."
 }
 ```
 
 > 🔒 **Guardá el `managementApiKey` en tu gestor de contraseñas.** Te da acceso administrativo total al tenant `platform` vía el header `X-Api-Key` — útil para automatizaciones (scripts de provisioning, monitoring, etc.) sin tener que loguearte con email/password.
 
-Si el endpoint responde **HTTP 409 Conflict** con `"Setup already completed"`, significa que ya hay un admin creado y el endpoint quedó bloqueado. En ese caso saltá al paso 2 y logueate con el email/password ya existente.
+> ⚠️ **Para operar (crear colas/agentes/canales) usá el Customer Admin**, no el Platform Admin. El `accessToken` que devuelve el setup es del Platform Admin (administrativo). Logueate con `customerAdminEmail` / `customerAdminPassword` contra el tenant `mi-empresa` (paso 2), o impersoná el Customer desde el Platform Admin.
+
+Si el endpoint responde **HTTP 409 Conflict**, significa que el setup ya se completó y quedó bloqueado. En ese caso saltá al paso 2 y logueate con las credenciales ya existentes. Si responde **HTTP 400**, revisá que enviaste todos los campos del Customer y que las contraseñas cumplen la política (≥12, mayúscula, número) y los emails son distintos.
 
 ### Opción B — vía Web UI (browser)
 
-Abrí `http://{server-ip}/` en el browser. Verbara detecta que no hay usuarios y redirige automáticamente a `/setup`. Completá el formulario:
+Abrí `http://{server-ip}/` en el browser. Verbara detecta que no hay tenant host y redirige automáticamente a `/setup`. El formulario tiene tres secciones:
+
+**Cuenta de Administrador de Plataforma:**
 
 | Campo | Valor |
 |---|---|
 | **Email** | `admin@tu-empresa.com` |
-| **Password** | `TU-PASSWORD-FUERTE` (mínimo 12 caracteres) |
-| **Confirmar password** | igual |
+| **Password** | `TU-PASSWORD-FUERTE` (mínimo 12, con mayúscula y número) |
 | **Display name** | `Admin Verbara` |
+
+**Plataforma:**
+
+| Campo | Valor |
+|---|---|
 | **Platform name** | `Verbara - Tu Empresa` |
 
-Click **Crear platform admin** → vas a quedar logueado y aterrizado en `/admin` con el wizard del paso siguiente disponible.
-
-## 2. Login al Web UI (si veniste por Opción A)
-
-Abrí `http://{server-ip}/` en el browser → te lleva a `/login`:
+**Tu Empresa (Customer):**
 
 | Campo | Valor |
 |---|---|
-| **Email** | `admin@tu-empresa.com` |
-| **Password** | el que pusiste en el paso 1 |
-| **Tenant ID** | dejar por defecto (`platform`) o vacío |
+| **Company Name** | `Mi Empresa` |
+| **Tenant Id** | `mi-empresa` (minúsculas/dígitos/guiones, no `platform`) |
+| **Company Admin Email** | `ops@mi-empresa.com` (distinto al de plataforma) |
+| **Company Admin Password** | `OTRA-PASSWORD-FUERTE` (mínimo 12, con mayúscula y número) |
+
+Click **Initialize Platform** → se crean Platform + Customer + ambos admins y aterrizás logueado como Platform Admin. Para operar, logueate como el Customer Admin (paso 2).
+
+## 2. Login al Web UI
+
+Abrí `http://{server-ip}/` en el browser → te lleva a `/login`. Hay dos cuentas según lo que quieras hacer:
+
+**Para operar (colas, agentes, canales) — el caso normal en SMB:** logueate como el **Customer Admin**.
+
+| Campo | Valor |
+|---|---|
+| **Email** | `ops@mi-empresa.com` (el `customerAdminEmail` del paso 1) |
+| **Password** | el `customerAdminPassword` del paso 1 |
+| **Tenant ID** | `mi-empresa` (el `customerTenantId` del paso 1) |
+
+**Para tareas administrativas (gestionar tenants, licensing, cluster):** logueate como el **Platform Admin** (`admin@tu-empresa.com` / Tenant ID `platform`). Recordá que desde `platform` no podés crear colas/agentes — tenés que impersonar el Customer.
 
 Click **Iniciar sesión** → aterrizás en `/admin` (dashboard).
 
@@ -146,11 +190,11 @@ Si todos los ✓ pasan, click **Finalizar wizard** → quedás en `/admin`.
 
 ## 4. Verificación post-wizard
 
-Validar desde la API:
+Validar desde la API. **Importante:** las colas/agentes/canales viven en el **Customer**, no en `platform`. Usá el token del **Customer Admin** (login del paso 2) y `X-Tenant-Id: mi-empresa`. (Si usás el token del Platform Admin contra `X-Tenant-Id: platform`, recibís **HTTP 409** — el tenant `platform` no maneja recursos operacionales por diseño, ADR-0027.)
 
 ```bash
-$ TOKEN={el-accessToken-del-paso-1}
-$ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
+$ TOKEN={el-accessToken-del-Customer-Admin}     # del login del paso 2
+$ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
     http://{server-ip}:5000/api/v1/admin/queues | jq
 
 [
@@ -162,7 +206,7 @@ $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
   }
 ]
 
-$ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
+$ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
     http://{server-ip}:5000/api/v1/admin/agents | jq
 
 [
@@ -175,7 +219,7 @@ $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
   }
 ]
 
-$ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
+$ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
     http://{server-ip}:5000/api/v1/admin/channels | jq
 
 [
@@ -183,7 +227,7 @@ $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
     "id": "webchat",
     "displayName": "Chat del sitio web",
     "enabled": true,
-    "tenantId": "platform"
+    "tenantId": "mi-empresa"
   }
 ]
 ```
@@ -215,9 +259,9 @@ $ bash scripts/infer-memberships-from-skills.sh              # backfill
 
 El script inserta `(tenant_id, queue_id, agent_id)` para cada par donde `agents.skills` interseca `queue_configs.required_skills` y todavía no hay row. Es **idempotente** — re-ejecutar no duplica filas (`ON CONFLICT DO NOTHING`). Para instalaciones nuevas hechas con el wizard del paso 3, el output esperado es `0 memberships inferred` porque el wizard ya creó la membership explícita.
 
-## 5. (Opcional) Crear un segundo tenant
+## 5. (Opcional) Crear más tenants Customer
 
-Si vas a usar Verbara para **múltiples clientes** (modelo multi-tenant tipo agencia o reseller), creá un tenant por cliente. El tenant `platform` queda como administrativo.
+El setup del paso 1 ya creó tu primer Customer (`mi-empresa`). Si vas a usar Verbara para **múltiples clientes** (modelo multi-tenant tipo agencia o reseller), creá un tenant Customer adicional por cliente. El tenant `platform` queda como administrativo.
 
 ```bash
 $ curl -sS -X POST http://{server-ip}:5000/api/v1/management/tenants \
