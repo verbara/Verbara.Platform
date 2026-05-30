@@ -154,9 +154,9 @@ chmod +x demo-reset.sh
 | 4 | Start Postgres | Wait for `pg_isready` |
 | 5 | Start all services | `docker compose up -d` (Pro tables created by `EnsureSchemaAsync` during API DI) |
 | 6 | Wait for health | 120s timeout per service (asterisk, pstn-emulator, platform-api, web, grafana) |
-| 7 | Setup wizard | `POST /api/v1/setup` — creates host tenant "platform", admin user, management API key |
+| 7 | Setup wizard | `POST /api/v1/setup` — since v2.6.0 creates host tenant "platform" (admin + mgmt API key) **AND** the first Customer tenant "demo" (admin `admin@demo.local`) in one call (Platform is admin-only per ADR-0027, so a Customer is mandatory) |
 | 7.5 | Role assignment | Ensure platform admin user has the `platform_admin` role assigned |
-| 8 | Create demo tenant | `POST /api/v1/management/tenants` — tenant "demo" (Customer, child of platform) |
+| 8 | Ensure demo tenant | `POST /api/v1/management/tenants` — idempotent no-op safety net; "demo" already created in step 7 (409 swallowed on re-run) |
 | 8.5 | Set tenant plans | platform=Enterprise, demo=Pro (enables feature-gated endpoints) |
 | 9 | Seed via API | 1 admin + 1 supervisor + 6 agents + 2 queues + 2 bots + WebChat channel activation + team |
 | 9.5 | Seed billing | Billing data via Management API (requires mgmt key, not JWT) |

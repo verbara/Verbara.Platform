@@ -75,15 +75,25 @@ done
 
 API_BASE="http://localhost:5000"
 
-# 7. Initialize platform via setup wizard (creates host tenant + admin + mgmt key)
-echo "[7/11] Inicializando plataforma..."
+# 7. Initialize platform via setup wizard. Since v2.6.0 the setup endpoint
+# creates BOTH the host "platform" tenant (admin) AND a first operational
+# "Customer" tenant (admin) in one call — Platform is administrative-only and
+# cannot hold agents/queues (ADR-0027), so a Customer is mandatory. We make
+# that first Customer the "demo" tenant the rest of this script seeds into;
+# step 8 below then becomes an idempotent no-op (the tenant already exists).
+echo "[7/11] Inicializando plataforma (platform + customer 'demo')..."
 SETUP_RESPONSE=$(curl -sf -X POST "$API_BASE/api/v1/setup" \
     -H "Content-Type: application/json" \
     -d '{
         "email": "platform@admin.local",
         "password": "PlatformAdmin2026!",
         "displayName": "Platform Admin",
-        "platformName": "Verbara Platform"
+        "platformName": "Verbara Platform",
+        "customerTenantId": "demo",
+        "customerName": "Demo Contact Center",
+        "customerAdminEmail": "admin@demo.local",
+        "customerAdminPassword": "DemoAdmin2026!",
+        "customerAdminDisplayName": "Demo Admin"
     }' 2>/dev/null || echo '{"error":"setup failed or already initialized"}')
 MGMT_KEY=$(echo "$SETUP_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('managementApiKey',''))" 2>/dev/null || echo "")
 if [ -n "$MGMT_KEY" ]; then
@@ -132,14 +142,16 @@ docker exec -i demo-postgres-1 psql -U platform -d platform >/dev/null 2>&1 <<'S
 SQL
 echo "  OK"
 
-# 8. Create demo customer tenant via Management API
-echo "[8/11] Creando tenant demo..."
+# 8. Ensure demo customer tenant exists (idempotent). Since v2.6.0 step 7's
+# setup already creates "demo" as the first Customer; this POST is a no-op
+# safety net (409 swallowed by `|| true`) for re-runs where setup returned 409.
+echo "[8/11] Asegurando tenant demo (idempotente)..."
 if [ -n "$MGMT_KEY" ]; then
     curl -sf -X POST "$API_BASE/api/v1/management/tenants" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $MGMT_KEY" \
         -d '{"tenantId":"demo","name":"Demo Contact Center","type":2}' > /dev/null 2>&1 || true
-    echo "  OK (tenant 'demo' created as child of platform)"
+    echo "  OK (tenant 'demo' present as child of platform)"
 else
     echo "  SKIP (no management key)"
 fi

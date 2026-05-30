@@ -3,4 +3,4 @@ name: platform
 description: Verbara Platform.Api + Web for K8s
 type: application
 version: 0.2.11
-appVersion: "2.5.4"
+appVersion: "2.6.0"
