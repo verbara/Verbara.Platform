@@ -1,538 +1,341 @@
 # Manual SMB · 06 — Canal Voz/SIP
 
 > **Audiencia:** operador con stack arriba + setup inicial completo + firewall/NAT validado (manual [01](01-instalacion-docker.md) §3 OK).
-> **Tiempo:** 60-90 minutos (más si es la primera vez que el operador configura SIP).
+> **Tiempo:** 60–90 minutos (más si es la primera vez que configurás SIP).
 > **Pre-requisitos:**
-> - Trunk SIP provisionado con un carrier o Twilio Elastic SIP — necesitás credenciales + IP whitelist.
+> - Trunk SIP con un carrier o Twilio Elastic SIP — necesitás credenciales (usuario/password) **o** que el carrier permita autenticación por IP.
 > - DID (Direct Inward Dialing) — el número telefónico que va a aterrizar las llamadas en tu Verbara.
-> - Servidor con `EXTERNAL_IP` configurada correctamente (si estás detrás de NAT).
+> - Servidor con `EXTERNAL_IP` configurada (si estás detrás de NAT).
+> - Una **cola** ya creada (manual [03](03-setup-inicial.md) §4) y al menos un **agente** con su login.
 
-Este es **el manual más extenso y crítico** del kit SMB. Cubre el canal de voz end-to-end:
+> ⚠️ **ALCANCE — leé esto antes de empezar.** Hoy la **voz entrante llega hasta la cola**: la llamada del carrier se identifica como tu trunk, se resuelve el tenant, el DID se mapea a una cola y Asterisk la encola y hace ring al endpoint SIP del agente. Lo que **todavía NO está**: el **softphone en el browser** (responder la llamada y hablar desde la pestaña del agente), el **audio WebRTC bidireccional**, la **marcación saliente desde el browser** y el **TURN/Coturn**. Eso es la **Fase 3** del roadmap de voz. Mientras tanto, un agente recibe las llamadas encoladas registrando un **teléfono SIP externo** (teléfono de escritorio, Zoiper, Linphone) con su extensión — ver §6. Cada sección marca claramente qué está **✅ verificado**, qué es **🔜 Fase 3** y qué requiere **validación con tu carrier real**.
 
-1. Pre-requisitos de red (re-lectura compacta de los puertos + bandwidth).
-2. Capacidad por tier — cuántos agentes y llamadas concurrentes podés sostener.
-3. Configurar un trunk SIP (ejemplo paso a paso con Twilio Elastic + sección genérica).
-4. Configurar el dialplan inbound (DID → IVR → queue).
-5. Provisionar agentes WebRTC.
-6. Probar llamada entrante.
-7. Probar llamada saliente.
-8. Escalado a tier superior.
-9. WebRTC behind strict NAT (Coturn).
-10. Troubleshooting SIP (índice — el detalle está en [08-troubleshooting-sip.md](08-troubleshooting-sip.md)).
+Este manual cubre el canal de voz entrante end-to-end con los endpoints reales:
+
+1. Pre-requisitos de red (puertos + bandwidth).
+2. Capacidad por tier — agentes y llamadas concurrentes.
+3. Provisionar un trunk SIP (IP-ACL o registración) — **`POST /admin/trunks`**.
+4. Mapear el DID a una cola — **`POST /admin/did-routes`**.
+5. Cómo fluye una llamada entrante por dentro (trunk → Stasis → cola).
+6. Darle a un agente un endpoint SIP para recibir llamadas.
+7. Probar una llamada entrante.
+8. Troubleshooting (índice → [08](08-troubleshooting-sip.md)).
+9. Qué viene en Fase 3 (softphone browser, saliente, Coturn).
+
+---
+
+## 0. Verificar que el Realtime de Asterisk está conectado (CRÍTICO)
+
+Verbara escribe la config PJSIP (trunks, agentes, colas) en Postgres y Asterisk la lee por **Realtime** (`res_config_pgsql`). Si ese driver no está conectado, **nada de lo que sigue funciona** (Asterisk no ve el trunk ni la cola). Validalo primero:
+
+```bash
+$ docker exec verbara-asterisk asterisk -rx 'module show like res_config_pgsql'
+
+Module                         Description                              Use Count  Status
+res_config_pgsql.so            PostgreSQL RealTime Configuration Driver 1          Running
+```
+
+✓ **`Running`** = realtime conectado. Si dice **`Not Running`**, el archivo `res_pgsql.conf` no se generó o apunta a la DB equivocada:
+
+```bash
+# Ver la config efectiva dentro del contenedor
+$ docker exec verbara-asterisk cat /etc/asterisk/res_pgsql.conf
+[general]
+dbhost = 127.0.0.1        # host-network: loopback donde está publicada la DB
+dbport = 5432             # el puerto publicado de tu Postgres
+dbname = verbara
+dbuser = platform
+dbpass = ********
+```
+
+> 🛠️ El entrypoint del contenedor genera `res_pgsql.conf` desde las variables `PG_REALTIME_*` del `.env.reference-smb`. Si tu Postgres está publicado en un puerto distinto de `5432` (típico cuando el host ya tiene otro Postgres en 5432), seteá `PG_REALTIME_PORT` en el `.env` al puerto publicado. Tras cambiarlo: `dc restart asterisk`.
+
+Después de cualquier cambio en trunks/colas/agentes, Asterisk los toma on-demand desde Realtime, pero los **identifies por IP** (IP-ACL de trunks) se cargan a memoria — si agregaste un trunk IP-ACL y no aparece, recargá:
+
+```bash
+$ docker exec verbara-asterisk asterisk -rx 'module reload res_pjsip_endpoint_identifier_ip.so'
+```
 
 ## 1. Pre-requisitos de red — checklist final
 
-Si todo esto NO está verde, **detenete y revisá manual 01 §2 y §3** antes de continuar. Cada problema acá multiplica el tiempo de troubleshooting 10×.
+Si esto NO está verde, **revisá manual 01 §2 y §3** antes de seguir.
 
-| Puerto | Estado esperado | Comando de validación (desde otra máquina en internet) |
+| Puerto | Estado esperado | Validación (desde internet) |
 |---|---|---|
 | `5060/udp` SIP UDP | ABIERTO al `EXTERNAL_IP` | `nc -uvz {tu-IP-pública} 5060 < /dev/null` |
 | `5060/tcp` SIP TCP | ABIERTO | `nc -vz {tu-IP-pública} 5060` |
-| `8089/tcp` WSS WebRTC | ABIERTO | `curl -sIk https://{tu-IP-pública}:8089/asterisk/ws` → HTTP 426 |
-| `20000-20200/udp` RTP | ABIERTO al `EXTERNAL_IP` | Difícil de probar standalone — se valida con una llamada real |
-| `EXTERNAL_IP` en `.env` | matchea `curl https://api.ipify.org` desde el server | `grep EXTERNAL_IP docker/.env.reference-smb` |
-| Asterisk responde al ARI | OK | `curl -u verbara:$ARI_PASSWORD http://localhost:8088/ari/asterisk/info` |
+| `20000-20200/udp` RTP | ABIERTO al `EXTERNAL_IP` | se valida con una llamada real |
+| `EXTERNAL_IP` en `.env` | = `curl https://api.ipify.org` desde el server | `grep EXTERNAL_IP docker/.env.reference-smb` |
+| ARI responde | OK | `curl -u verbara:$ARI_PASSWORD http://localhost:8088/ari/asterisk/info` |
+
+> El puerto `8089/tcp` (WSS WebRTC) sólo hace falta para el **softphone del browser (Fase 3)**. Para voz entrante a cola + teléfonos SIP no es necesario.
 
 ```bash
 $ docker exec verbara-asterisk asterisk -rx 'pjsip show transports'
-
-  Transport:        <TransportId........>  <Type>  <cos>  <tos>     <BindAddress...>
-==========================================================================================
-  Transport:           transport-udp          udp      0      0           0.0.0.0:5060
-  Transport:           transport-tcp          tcp      0      0           0.0.0.0:5060
-  Transport:            transport-ws          ws       0      0           0.0.0.0:8180
-  Transport:           transport-wss          wss      0      0           0.0.0.0:8089
+  Transport:  transport-udp   udp   0   0   0.0.0.0:5060
+  Transport:  transport-tcp   tcp   0   0   0.0.0.0:5060
+  Transport:  transport-ws    ws    0   0   0.0.0.0:8180
+  Transport:  transport-wss   wss   0   0   0.0.0.0:8089
 ```
 
-✓ Los 4 transports `pjsip` bound a `0.0.0.0` — Asterisk está escuchando.
+## 2. Capacidad — llamadas + agentes por server
 
-## 2. Capacidad — cuántas llamadas + agentes soporta tu server
+| Tier | vCPU/RAM | Calls G.711 passthrough | Calls Opus↔G.711 transcoding | WAN simétrica recomendada |
+|---|---|---|---|---|
+| **SMB Lite** | 4 / 16 GB | **50** | 10 | 25 Mbps |
+| **SMB Standard** | 8 / 32 GB | **150** | 30 | 50 Mbps |
+| **SMB Plus** | 16 / 64 GB | **300** | 60 | 100 Mbps |
 
-Recapitulando el tier matrix de [00-vision-general.md](00-vision-general.md), con números afilados específicos para Voz:
+- **G.711 passthrough** (mayoría de trunks PSTN): ~2 % CPU/call; límite real = CPU + rango RTP.
+- **Opus↔G.711 transcoding**: ~5× más CPU/call. Si el trunk no acepta Opus, forzá G.711 en los codecs del trunk para evitarlo.
+- **WAN**: ~80 kbps/call simétrico para G.711. SMB Plus a 300 calls = ~48 Mbps sostenidos — la WAN del cliente DEBE ser simétrica.
 
-| Tier | vCPU/RAM | Calls G.711 passthrough | Calls Opus↔G.711 transcoding | Agentes WebRTC concurrent | WAN simétrica recomendada |
-|---|---|---|---|---|---|
-| **SMB Lite** | 4 / 16 GB | **50** | 10 | 50 | 25 Mbps |
-| **SMB Standard** | 8 / 32 GB | **150** | 30 | 150 | 50 Mbps |
-| **SMB Plus** | 16 / 64 GB | **300** | 60 | 300 | 100 Mbps |
+## 3. Provisionar un trunk SIP — `POST /admin/trunks`
 
-**Bottleneck dominante** según escenario:
+> **Tenant:** los endpoints de trunk son **operativos** → tenés que autenticarte como admin de tu tenant **Customer** (ej. `acme`), **no** como Platform admin. (Un trunk en el tenant `platform` se rechaza con HTTP 409.)
 
-- **G.711 passthrough** (mayoría de trunks PSTN): CPU Asterisk (~2 %/call). El límite real es CPU + RTP range.
-- **Opus↔G.711 transcoding**: 5× más CPU/call. Si tu trunk no acepta Opus pero los agentes son WebRTC (que negocia Opus por default), Asterisk transcodifica → capacidad cae 5×.
-- **WAN bandwidth**: 80 kbps/call simétrico para G.711. SMB Plus a 300 calls = 48 Mbps sostenidos — la WAN del cliente DEBE ser simétrica (no `100/20 Mbps`).
-
-> 💡 **Para evitar transcoding**: si tu trunk acepta Opus (ej. Twilio Elastic SIP con `Codecs: opus` configurado), forzá Opus end-to-end. Si NO, forzá G.711 también en el WebRTC offer (perdés wideband audio pero recuperás 5× capacity). Configuración en [§6 Provisionar agente WebRTC](#6-provisionar-primer-agente-webrtc).
-
-## 3. Configurar trunk SIP
-
-### 3.1 Ejemplo: Twilio Elastic SIP Trunking
-
-Twilio Elastic SIP es el caso más documentado por nosotros — funciona con IP authentication (sin password, mejor) y soporta Opus + G.711.
-
-**En la consola de Twilio:**
-
-1. **Elastic SIP Trunking → Trunks → Create new SIP Trunk**:
-   - Friendly name: `Verbara - {tu-empresa}`.
-2. **Termination URI**:
-   - Domain name: `verbara-{tu-empresa}.pstn.twilio.com` (te lo asigna Twilio).
-   - **Recording**: `Disabled` (Verbara graba localmente — evitar doble grabación).
-3. **Termination → Authentication → IP ACL**:
-   - Click **Add an IP Access Control List**.
-   - **Friendly name**: `Verbara server`.
-   - **CIDR network address**: `{tu-IP-pública}/32` (tu single public IP).
-   - Save.
-4. **Origination URIs** (Twilio → tu Asterisk):
-   - Add origination URI: `sip:{tu-IP-pública}:5060`.
-   - Priority: 10, Weight: 10.
-5. **Numbers**: comprá un número (Phone Numbers → Buy a Number). Una vez comprado, en sus settings:
-   - **Configure with**: `SIP Trunk`.
-   - **Trunk**: `Verbara - {tu-empresa}`.
-
-Tus credenciales finales:
-- **Trunk hostname**: `verbara-{tu-empresa}.pstn.twilio.com`
-- **Auth**: IP whitelist (no usuario/password).
-- **Tu DID**: `+15551234567` (el número que compraste).
-
-### 3.2 Provisionar el trunk en Verbara
-
-Vía API:
+Conseguí un token de tu admin Customer:
 
 ```bash
-$ curl -sS -X POST http://{server-ip}:5000/api/v1/dialer/trunks \
-    -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
-    -H "Content-Type: application/json" \
+$ TOKEN=$(curl -sS -X POST http://localhost:5000/api/v1/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"tenantId":"acme","email":"admin@acme.local","password":"TU-PASSWORD"}' \
+    | jq -r .accessToken)
+```
+
+El modelo de trunk real tiene estos campos (no hay `host`/`port`/`fromUser`/`authType` — eso era de un diseño viejo):
+
+| Campo | Tipo | Para qué |
+|---|---|---|
+| `name` | string (req) | id lógico del trunk |
+| `displayName` | string? | nombre visible |
+| `type` | `"pjsip"` \| `"sip"` \| `"iax2"` \| `"dahdi"` | tecnología (usá `pjsip`) |
+| `isActive` | bool | habilitado |
+| `maxChannels` | int | tope de canales simultáneos |
+| `transport` | string? | `transport-udp` (default) / `transport-tcp` / `transport-tls` |
+| `codecs` | string | CSV, ej. `"ulaw,alaw"` o `"opus,ulaw,alaw"` |
+| `authUsername` / `authPassword` | string? | **auth por digest** (registración) |
+| `registrationUri` / `clientUri` | string? | si el trunk **se registra** contra el carrier |
+| `context` | string? | contexto de dialplan entrante (default `from-trunk`) |
+| `matchHost` | string? | **IP-ACL**: IP/CIDR origen del carrier — identifica INVITEs entrantes sin digest |
+
+Hay **dos modos de identificación** del trunk entrante. Elegí según tu carrier:
+
+### 3.1 IP-ACL (recomendado — Twilio Elastic, Bandwidth, Skyetel) — ✅ verificado
+
+El carrier manda llamadas desde IPs fijas; Verbara identifica el INVITE por la IP origen, sin digest.
+
+```bash
+$ curl -sS -X POST http://localhost:5000/api/v1/admin/trunks \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -d '{
       "name": "twilio-elastic",
       "displayName": "Twilio Elastic SIP",
-      "host": "verbara-tu-empresa.pstn.twilio.com",
-      "port": 5060,
-      "transport": "udp",
-      "authType": "IpAuth",
-      "fromUser": "+15551234567",
-      "fromDomain": "verbara-tu-empresa.pstn.twilio.com",
-      "callerId": "+15551234567",
-      "codecs": ["g711_ulaw", "g711_alaw"],
-      "isActive": true
+      "type": "pjsip",
+      "isActive": true,
+      "maxChannels": 50,
+      "codecs": "ulaw,alaw",
+      "context": "from-trunk",
+      "matchHost": "54.172.60.0/30"
     }' | jq
 ```
 
-> Para trunks con auth user/password (no IP ACL):
-> ```json
-> "authType": "BasicAuth",
-> "authUser": "tu-usuario",
-> "authPassword": "tu-password"
-> ```
+> `matchHost` acepta IP (`203.0.113.10`) o CIDR (`203.0.113.0/24`). **Poné el rango de origination de tu carrier** (Twilio lo lista en *Elastic SIP Trunking → Origination*). Un valor mal formado se rechaza con HTTP 400; un rango demasiado amplio (`0.0.0.0/0`) dejaría que cualquiera entre como tu trunk — usá el rango exacto del carrier.
 
-### 3.3 Vía UI (alternativa)
+### 3.2 Registración / digest (VoIP.ms, Telnyx user/pass, carriers que piden registro)
 
-`/admin/trunks → Crear trunk`. Misma información que el JSON pero en form fields. Screenshots en el manual completo en `docs/manuales/smb/screenshots/` (anexo).
-
-### 3.4 Validar registro / conectividad del trunk
+El trunk se registra contra el carrier con usuario/password.
 
 ```bash
-$ docker exec verbara-asterisk asterisk -rx 'pjsip show endpoints' | head -10
-
-  Endpoint:              twilio-elastic                            Not in use    0 of inf
-        Aor:             twilio-elastic                                                  0
-        Identify:        twilio-elastic                            verbara-tu-empresa....
+$ curl -sS -X POST http://localhost:5000/api/v1/admin/trunks \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{
+      "name": "voipms",
+      "displayName": "VoIP.ms",
+      "type": "pjsip",
+      "isActive": true,
+      "maxChannels": 20,
+      "transport": "transport-udp",
+      "codecs": "ulaw",
+      "authUsername": "TU-USUARIO-SIP",
+      "authPassword": "TU-PASSWORD-SIP",
+      "registrationUri": "sip:chicago.voip.ms",
+      "clientUri": "sip:TU-USUARIO-SIP@chicago.voip.ms",
+      "context": "from-trunk"
+    }' | jq
 ```
 
-Si el trunk usa registration (no IP-auth):
+### 3.3 Verificar que Asterisk ve el trunk
+
+Cada trunk crea (vía Realtime) un endpoint `t-{id}` con tu tenant en `set_var=TENANT_ID={tenant}` (así la llamada entrante sabe a qué tenant pertenece — el nombre del canal del trunk **no** lleva el tenant). Si pusiste `matchHost`, además se crea un identify `ipauth-t-{id}`.
+
 ```bash
+# El endpoint del trunk (reemplazá 1 por el id que devolvió el POST)
+$ docker exec verbara-asterisk asterisk -rx 'pjsip show endpoint t-1' | grep -E 'Endpoint:|context'
+ Endpoint:  t-1   Unavailable   0 of inf
+ context : from-trunk
+
+# El identify IP-ACL (sólo si usaste matchHost)
+$ docker exec verbara-asterisk asterisk -rx 'pjsip show identifies'
+ Identify:  ipauth-t-1/t-1
+      Match: 54.172.60.0/30
+
+# El registro (sólo si usaste registración)
 $ docker exec verbara-asterisk asterisk -rx 'pjsip show registrations'
-
-  <Registration/ServerURI..............................>  <Auth..........>  <Status.......>
-==========================================================================================
-  twilio-elastic/sip:verbara-tu-empresa.pstn.twilio.com    twilio-creds      Registered
+ reg-t-2/sip:chicago.voip.ms   ...   Registered
 ```
 
-✓ `Registered` = trunk conectado a Twilio.
+> Si el identify no aparece, recargá: `asterisk -rx 'module reload res_pjsip_endpoint_identifier_ip.so'`.
 
-### 3.5 Trunks genéricos (otros carriers PSTN)
-
-Patrón común:
+### 3.4 Trunks por carrier (referencia)
 
 | Carrier | Host típico | Auth | Codecs |
 |---|---|---|---|
-| Twilio Elastic SIP | `*.pstn.twilio.com` | IP ACL | g711, opus |
-| Vonage Business / Nexmo | `sip.nexmo.com` | username + IP | g711 |
-| Bandwidth.com | `sip.bandwidth.com` | IP ACL | g711 |
-| VoIP.ms | `chicago.voip.ms` | username/password | g711, g729 |
-| Skyetel | `sip.skyetel.com` | IP ACL | g711, opus |
-| Telnyx | `sip.telnyx.com` | username/password OR IP ACL | g711, opus |
-| Carrier local (Movistar, Claro, Telmex, Vivo, Oi) | varía — pedir al carrier | varía | g711 |
+| Twilio Elastic SIP | `*.pstn.twilio.com` | IP-ACL (`matchHost`) | ulaw, opus |
+| Bandwidth.com | `sip.bandwidth.com` | IP-ACL | ulaw |
+| Skyetel | `sip.skyetel.com` | IP-ACL | ulaw, opus |
+| VoIP.ms | `*.voip.ms` | registración (user/pass) | ulaw, g729 |
+| Telnyx | `sip.telnyx.com` | registración **o** IP-ACL | ulaw, opus |
+| Carrier local (Movistar, Claro, Telmex, Vivo, Oi) | varía | varía | ulaw |
 
-Datos que pedirle SIEMPRE a tu carrier:
-1. **SIP hostname** del trunk (registration + termination).
-2. **Authentication mode**: usuario/password vs IP ACL.
-3. **Codecs soportados** (para alinear con `.codecs`).
-4. **DTMF mode** (RFC 2833 / INFO / inband) — RFC 2833 es lo más universal.
-5. **Caller ID format** que esperan (E.164 vs national).
+Pedile SIEMPRE a tu carrier: hostname, modo de auth (IP vs user/pass), **rango de IPs de origination** (para `matchHost`), codecs, DTMF mode (RFC 2833 es lo universal) y formato de Caller ID (E.164 vs nacional).
 
-## 4. Configurar dialplan inbound (DID → IVR → queue)
+## 4. Mapear el DID a una cola — `POST /admin/did-routes`
 
-Cuando una llamada entrante llega al trunk, Asterisk la enruta según el dialplan. Verbara ofrece 3 patrones built-in:
-
-### 4.1 Patrón A — DID directo a queue (más simple)
-
-Llamada al `+15551234567` → directa a queue `Atención General`.
+Cuando entra una llamada, el `StasisInboundConsumer` resuelve el **DID marcado → cola** usando la tabla `did_routes` de tu tenant. Es un mapeo directo número → cola (1 a 1).
 
 ```bash
-$ curl -sS -X POST http://{server-ip}:5000/api/v1/dialer/inbound-routes \
-    -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "name": "Main DID",
-      "trunkName": "twilio-elastic",
-      "didNumber": "+15551234567",
-      "destination": {
-        "type": "Queue",
-        "queueId": "queue_01HX..."
-      },
-      "isActive": true
-    }' | jq
+# El id de la cola lo sacás de GET /admin/queues
+$ QUEUE_ID=$(curl -sS http://localhost:5000/api/v1/admin/queues \
+    -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id')
+
+$ curl -sS -X POST http://localhost:5000/api/v1/admin/did-routes \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"did\":\"18005551234\",\"queueId\":\"$QUEUE_ID\",\"isActive\":true}" | jq
 ```
 
-### 4.2 Patrón B — IVR + opciones de menu
-
-Llamada al DID → mensaje grabado "Presione 1 para soporte, 2 para ventas" → routed a queue según selección.
-
-Crear un **Flow** (dialplan visual) en `/admin/flows → Crear → Voice IVR`:
-
-1. Drag node `PlayPrompt` → texto: `"Gracias por llamar. Presione 1 para soporte, 2 para ventas."`
-2. Drag node `GetDigit` → max digits 1, timeout 5s.
-3. Branch por digit:
-   - `1` → node `TransferToQueue` → `queue_soporte_id`
-   - `2` → node `TransferToQueue` → `queue_ventas_id`
-   - timeout → node `TransferToQueue` → `queue_atencion_general` (fallback)
-4. Save flow → copiar el `flowId`.
-
-Luego provisionar el DID apuntando al flow:
-
-```bash
-$ curl -sS -X POST .../api/v1/dialer/inbound-routes \
-    -d '{
-      "name": "Main DID with IVR",
-      "didNumber": "+15551234567",
-      "destination": {"type": "Flow", "flowId": "flow_01HX..."},
-      "isActive": true
-    }'
-```
-
-### 4.3 Patrón C — Business hours + after-hours
-
-Wrap del patrón A/B con horario de atención. Fuera de horario → voicemail o mensaje grabado.
-
-```bash
-$ curl -sS -X POST .../api/v1/dialer/business-hours \
-    -d '{
-      "name": "Horario soporte",
-      "timezone": "America/Bogota",
-      "schedule": [
-        { "day": "mon", "open": "08:00", "close": "18:00" },
-        { "day": "tue", "open": "08:00", "close": "18:00" },
-        { "day": "wed", "open": "08:00", "close": "18:00" },
-        { "day": "thu", "open": "08:00", "close": "18:00" },
-        { "day": "fri", "open": "08:00", "close": "18:00" }
-      ]
-    }'
-```
-
-Wrap el inbound route con la condición:
-```json
-{
-  "destination": {
-    "type": "BusinessHoursWrapper",
-    "businessHoursId": "bh_01HX...",
-    "onOpen": {"type": "Queue", "queueId": "queue_01HX..."},
-    "onClosed": {"type": "Voicemail", "mailbox": "soporte"}
-  }
-}
-```
-
-## 5. Estrategia de routing en la queue
-
-Editá la queue para definir cómo se asignan las llamadas a los agentes:
-
-```bash
-$ curl -sS -X PATCH http://{server-ip}:5000/api/v1/admin/queues/queue_01HX... \
-    -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "strategy": "LongestIdle",
-      "ringTimeoutSeconds": 30,
-      "wrapUpTimeSeconds": 15,
-      "maxQueueWaitSeconds": 300,
-      "overflowDestination": {"type": "Voicemail", "mailbox": "soporte"}
-    }'
-```
-
-| Estrategia | Cómo funciona | Cuándo usar |
-|---|---|---|
-| `LongestIdle` | Asigna al agente que más tiempo lleva sin llamada | **Default — recomendado** para fairness |
-| `RoundRobin` | Rota por la lista | Equipos pequeños homogéneos |
-| `LeastCalls` | Asigna al agente con menos llamadas atendidas el día | Equilibrar carga acumulada |
-| `SkillBased` | Match por skills del contacto vs skills del agente (Pro) | Equipos especializados (idioma/producto) |
-| `Random` | Aleatorio | Tests/development |
-
-## 6. Provisionar primer agente WebRTC
-
-El agente que creaste en el wizard ya existe como usuario. Falta darle un **PJSIP endpoint** (su softphone virtual en Asterisk) para que pueda recibir llamadas desde el browser.
-
-### 6.1 Auto-provisioning (el camino fácil)
-
-```bash
-$ curl -sS -X POST http://{server-ip}:5000/api/v1/admin/agents/agente1/provision-webrtc \
-    -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "extension": "1001",
-      "preferredCodecs": ["opus", "ulaw"]
-    }' | jq
-
-{
-  "extension": "1001",
-  "pjsipUsername": "agente1",
-  "pjsipPassword": "{generated-strong-password}",
-  "wssUri": "wss://verbara.tu-dominio.com:8089/asterisk/ws",
-  "iceServers": [
-    {"urls": "stun:stun.l.google.com:19302"}
-  ]
-}
-```
-
-Esto crea automáticamente:
-- `ps_endpoints` row con `endpoint=agente1`, transport WSS, codec orden Opus → ulaw.
-- `ps_auths` row con username `agente1`, password generado.
-- `ps_aors` row con max_contacts=1.
-
-> ⚠️ **Codec order matters**: si querés evitar transcoding cuando el trunk es G.711, ponelo PRIMERO: `"preferredCodecs": ["ulaw", "opus"]`. WebRTC negocia el primer codec común — el browser de tu agente aceptará ulaw también.
-
-### 6.2 Validar el endpoint
-
-```bash
-$ docker exec verbara-asterisk asterisk -rx 'pjsip show endpoint agente1'
-
-  Endpoint:           agente1                              Not in use      0 of 1
-       InAuth:        agente1                              agente1
-          Aor:        agente1                                                  1
-      Contact:        agente1/sip:....                     <no-status>      ...
-    Transport:        transport-wss                       wss
-   Identifier:        agente1                              ip
-```
-
-### 6.3 Login del agente en el Web UI
-
-El agente abre `https://verbara.tu-dominio.com/login`:
-
-| Campo | Valor |
+| Campo | Para qué |
 |---|---|
-| Email | `maria@tu-empresa.com` |
-| Password | la del wizard (la que anotaste en step 03) |
-| Tenant ID | `platform` |
+| `did` | el número marcado, **exactamente** como llega en el INVITE (típicamente E.164 sin `+`, ej. `18005551234`) |
+| `queueId` | id de la cola destino (`GET /admin/queues`) |
+| `isActive` | habilitado |
 
-Aterriza en `/agent`. Click **Conectar** (botón con icono de teléfono en la barra). El browser:
+> El DID es **único por tenant** (un segundo route con el mismo `did` devuelve HTTP 409). Para listar/editar: `GET /admin/did-routes`, `GET /admin/did-routes/by-did/{did}`, `PUT /admin/did-routes/{id}`, `DELETE /admin/did-routes/{id}`.
 
-1. Pide permiso del micrófono → **Permitir**.
-2. El widget WebRTC abre WSS contra `wss://verbara.tu-dominio.com:8089/asterisk/ws`.
-3. Indicador en el header cambia a verde: `Disponible`.
+> **¿IVR / horario de atención / overflow?** El `did_route` es DID→cola directo. Los menús IVR, business-hours y overflow se modelan con **Flows** (`/admin/flows`) y **Automation** — son canales/funciones aparte y **no** forman parte del contrato de `did_routes`. Para V1 de voz, DID→cola directo es el patrón soportado y verificado.
 
-> 🔒 **Browsers requieren HTTPS para acceder al micrófono** (excepto en `localhost`). Si tu Web UI no está bajo TLS, el agente NO podrá usar WebRTC en producción. Volver a manual [01](01-instalacion-docker.md) §5 para configurar Let's Encrypt.
+## 5. Cómo fluye una llamada entrante (qué pasa por dentro) — ✅ verificado
 
-## 7. Probar llamada entrante (golden path)
+```
+Carrier ──INVITE(DID)──▶ Asterisk
+   │  (identificado como trunk t-{id} por IP-ACL o registración)
+   │  el canal hereda set_var TENANT_ID={tenant}
+   ▼
+[from-trunk]  exten => _X.,1,Stasis(verbara,inbound,${EXTEN})
+   ▼
+StasisInboundConsumer (en Platform.Api, gated por leader-election)
+   1. lee TENANT_ID del canal               → tenant
+   2. busca did_routes(tenant, DID)          → queue_id
+   3. busca la cola                          → nombre realtime "{tenant}-{cola}"
+   4. AnswerAsync + set QUEUE_NAME + Continue(stasis-queue, s)
+   ▼
+[stasis-queue]  exten => s,1,Queue(${QUEUE_NAME})
+   ▼
+app_queue ── rinde a los miembros de la cola (endpoints SIP de los agentes)
+```
 
-1. **Estado inicial:**
-   - Trunk `twilio-elastic` registered + endpoint inbound configurado para DID `+15551234567`.
-   - Agente `agente1` logueado, en estado `Disponible`.
+Si **cualquier** paso no resuelve (sin TENANT_ID, DID sin route, cola inexistente), el consumer **cuelga** la llamada (fail-closed) en vez de dejarla colgada en Stasis. Todo queda logueado con prefijo `[STASIS]` en los logs de `platform-api`.
 
-2. **Llamar al DID** desde un teléfono móvil:
-   - Marcar `+15551234567`.
-3. **Verificar en el server:**
+> **Requisito de plataforma:** el consumer corre **sólo en el pod líder** (leader-election sobre `voice:stasis:inbound:leader`, respaldado por Postgres). En single-host SMB hay un solo pod → siempre es líder. En multi-pod, sólo uno abre el WebSocket ARI (Asterisk entrega una app Stasis a un único socket).
+
+## 6. Darle a un agente un endpoint SIP para recibir llamadas
+
+Para que la cola le haga **ring** a un agente, ese agente necesita un **endpoint PJSIP** registrado. Se lo das seteándole `extension` + `sipPassword`:
+
+```bash
+# AGENT_ID = GET /admin/agents → .[].id
+$ curl -sS -X PUT http://localhost:5000/api/v1/admin/agents/$AGENT_ID \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"extension":"1001","sipPassword":"UNA-PASSWORD-FUERTE"}' | jq
+```
+
+Esto sincroniza (vía Realtime) el endpoint del agente a `ps_endpoints` (`{tenant}-agent-{agentId}`, transport WSS) + su `ps_auths` (username `{tenant}-{extension}`). El agente ya es "marcable" desde la cola.
+
+```bash
+$ docker exec verbara-asterisk asterisk -rx 'pjsip show endpoint acme-agent-...' | grep -E 'Endpoint:|Aor:'
+```
+
+**Cómo responde el agente la llamada encolada — hoy vs Fase 3:**
+
+| Vía | Estado | Cómo |
+|---|---|---|
+| **Teléfono SIP externo** (escritorio, Zoiper, Linphone) | ✅ disponible hoy | El agente registra su softphone/teléfono con **usuario** `{tenant}-{extension}` (ej. `acme-1001`), **password** `sipPassword`, **dominio/proxy** = tu `EXTERNAL_IP`/dominio, transport UDP/TCP. Cuando entra una llamada a su cola, el teléfono suena. |
+| **Softphone en el browser** (responder desde la pestaña del agente) | 🔜 **Fase 3** | SIP.js + WebRTC dentro del Web UI — todavía no implementado. |
+
+> ⚠️ **Honestidad sobre el alcance verificado:** la cadena trunk → Stasis → cola está validada end-to-end con una llamada SIP real (la llamada **entra a la cola**). El tramo "el endpoint del agente registra + suena + audio bidireccional" depende de un cliente SIP registrado y de NAT/RTP correctos; validalo con tu primer teléfono real (§7). El softphone del browser + audio WebRTC es Fase 3.
+
+## 7. Probar una llamada entrante
+
+**Estado inicial:**
+- Realtime `Running` (§0). Trunk creado + visible en Asterisk (§3.3). `did_route` DID→cola creado (§4).
+- Un agente con `extension`+`sipPassword` (§6) y su teléfono SIP **registrado**:
+  ```bash
+  $ docker exec verbara-asterisk asterisk -rx 'pjsip show contacts' | grep agent
+  ```
+
+**Llamar al DID** desde un teléfono (o, para una prueba de humo sin carrier, con SIPp — ver [07-validacion-e2e.md](07-validacion-e2e.md)):
+
+1. Marcá tu DID (ej. `+1 800 555 1234`).
+2. En el server, mirá que la llamada entra y se encola:
    ```bash
-   $ docker exec verbara-asterisk asterisk -rx 'core show channels'
+   # El consumer loguea el ruteo:
+   $ docker logs verbara-platform-api --since 30s | grep STASIS
+   [STASIS] Channel 1780....0 (tenant acme, DID 18005551234) → queue 'acme-Cola Atención'.
 
-   Channel              Location             State   Application(Data)
-   PJSIP/twilio-...     default@verbara:1    Up      Dial(PJSIP/agente1,30)
-   PJSIP/agente1-...    queue@verbara:1      Ring    Dial(PJSIP/agente1,30)
+   # La cola la recibe:
+   $ docker exec verbara-asterisk asterisk -rx 'queue show'
+   acme-Cola Atención has 1 calls (max unlimited) ...
    ```
-4. **En el browser del agente:** suena ringtone + popup "Llamada entrante de +15554567890".
-5. Click **Aceptar** → audio bidireccional.
-6. **Validar audio:**
-   - Hablar desde el móvil → escuchar en headset del agente.
-   - Hablar desde el headset del agente → escuchar en móvil.
-7. Click **Colgar** → conversación queda en estado `Wrap-up` 15s para que el agente disponga.
+3. El teléfono SIP del agente suena → atiende → audio.
 
-### 7.1 ¿No hay audio en una dirección o en ambas?
+### 7.1 La llamada entra pero NO suena ningún agente
+- ¿La cola tiene miembros? El agente tiene que estar en la cola **y** `Disponible`, y su teléfono **registrado** (`pjsip show contacts`).
+- ¿`A:` (abandoned) sube pero `Completed` no? La llamada llegó a la cola pero ningún endpoint estaba reachable — revisá registración del teléfono del agente.
 
-→ Causa típica: NAT/EXTERNAL_IP mal o port-forwarding RTP roto.
+### 7.2 Suena pero NO hay audio (o en una sola dirección)
+- Causa típica: `EXTERNAL_IP` mal o RTP sin port-forwarding. En el `200 OK` del INVITE, el SDP debe anunciar tu **IP pública**, no la LAN:
+  ```bash
+  $ docker exec verbara-asterisk asterisk -rx 'pjsip set logger on'
+  # hacé una llamada y revisá el SDP:  c=IN IP4 {TU-IP-PÚBLICA}
+  ```
+- Detalle en [08-troubleshooting-sip.md](08-troubleshooting-sip.md) §"No audio".
 
-```bash
-# Validar que Asterisk anuncia tu EXTERNAL_IP en el SDP
-$ docker exec verbara-asterisk asterisk -rx 'pjsip set logger on'
-# Hacer una llamada → ver los logs
-$ docker logs verbara-asterisk | grep -i 'connection:' | head -5
-```
+### 7.3 La llamada se rechaza antes de entrar (`Couldn't find auth` / `No matching endpoint`)
+- `Couldn't find auth 'auth-t-{id}'`: trunk IP-ACL mal provisionado (versión vieja). Verificá que el trunk **no** referencia un auth inexistente: `pjsip show endpoint t-{id}` no debe listar `auth` si es IP-ACL.
+- `No matching endpoint`: la IP origen del carrier no matchea tu `matchHost`. Confirmá el rango real del carrier y recargá `res_pjsip_endpoint_identifier_ip.so`.
 
-En la respuesta `200 OK` del INVITE, el SDP debe tener:
-```
-c=IN IP4 200.118.42.61            ← tu EXTERNAL_IP
-m=audio 20034 RTP/AVP 0 8 ...     ← un puerto del rango RTP
-```
-
-Si dice `c=IN IP4 192.168.40.100` (LAN privada), el peer remoto manda RTP a la privada → audio se pierde. Setear/corregir `EXTERNAL_IP` en `.env`, `dc restart asterisk`.
-
-Detalles en [08-troubleshooting-sip.md](08-troubleshooting-sip.md) §"No audio".
-
-## 8. Probar llamada saliente
-
-1. En el Web del agente: click icono **Marcar** en la barra superior.
-2. Ingresar número destino en E.164: `+15555550199`.
-3. Click **Llamar**.
-4. El móvil destino ring → atender → conversación.
-5. Validar:
-   - El caller-id que ve el móvil destino = el DID configurado en el trunk (`+15551234567`).
-   - Audio bidireccional OK.
-   - Hangup limpio (Asterisk envía `BYE`, sale del CDR).
-
-> Si el caller-id que aparece es **"Anonymous"** o un número raro: el trunk no acepta el `From` que mandás — pedile al carrier qué From-header esperan. Algunos quieren E.164, otros nacional sin `+`, otros un username específico.
-
-## 9. Test de concurrencia mínima (5 llamadas)
-
-Antes de declarar el canal "productivo", validá que el server aguanta más de una llamada a la vez:
-
-1. Configurar 5 softphones de prueba (Linphone/Zoiper) en LAN — todos llamando al DID al mismo tiempo.
-2. Tener 5 agentes logueados (puede ser el mismo navegador en 5 modos incógnito distintos).
-3. Las 5 llamadas deben:
-   - Entrar simultáneamente al server.
-   - Conectarse a 5 agentes distintos (no a uno con cola de 4).
-   - Tener audio independiente (5 streams RTP en puertos distintos del rango).
-4. Validar:
-   ```bash
-   $ docker exec verbara-asterisk asterisk -rx 'core show channels' | grep PJSIP | wc -l
-   10            # ← 5 trunk channels + 5 agent channels
-   ```
-
-Si las 5 funcionan sin distorsión, ya validaste:
-- ✅ El RTP range tiene capacidad suficiente.
-- ✅ El dialplan + queue routing funcionan multi-call.
-- ✅ Asterisk no satura CPU a 5 calls.
-
-Para test de capacidad declarada del tier (50/150/300), corré SIPp — ver [07-validacion-e2e.md](07-validacion-e2e.md).
-
-## 10. Escalado entre tiers
-
-Para subir de SMB Lite (50) a Standard (150) sin reinstalar:
-
-```bash
-$ ${EDITOR:-nano} docker/.env.reference-smb
-```
-
-Cambiar:
-```diff
-- RTP_PORT_END=20200
-+ RTP_PORT_END=20400
-
-- ASTERISK_CPU_LIMIT=4.0
-+ ASTERISK_CPU_LIMIT=6.0
-
-- ASTERISK_MEM_LIMIT=4G
-+ ASTERISK_MEM_LIMIT=8G
-
-- PG_SHARED_BUFFERS=512MB
-+ PG_SHARED_BUFFERS=1GB
-```
-
-Asegurate de que el host físico tiene la RAM/CPU necesarios (si no, primero upgrade del host). También actualizá el firewall:
-
-```bash
-$ sudo ufw allow 20201:20400/udp comment 'Verbara RTP expansion'    # los nuevos
-```
-
-Y el port-forwarding del router (mismo rango ampliado).
-
-Reiniciar el stack:
-```bash
-$ dc up -d --wait
-```
-
-> Cambios de resource limits requieren `up -d` (no `restart`) para que se apliquen.
-
-## 11. WebRTC behind strict NAT — cuando necesitás Coturn
-
-Si tus agentes laburan **desde sus casas** y sus ISPs tienen **NAT simétrica** (común en Latam con CGNAT residencial — ej. Movistar fibra residencial), el WebRTC NO va a poder negociar candidatos directos. Síntoma: la llamada conecta (SIP signalling vía WSS OK) pero **audio en silencio**.
-
-Solución: levantar Coturn como TURN relay.
-
-### 11.1 Setup rápido
-
-```bash
-$ cd /opt/verbara/platform
-$ ${EDITOR:-nano} docker/.env.reference-smb
-```
-
-Descomentar y setear:
-```env
-COTURN_USER=verbara-turn
-COTURN_PASSWORD={32-char random — openssl rand -base64 32}
-```
-
-Abrir puertos en el firewall:
-```bash
-$ sudo ufw allow 3478/udp
-$ sudo ufw allow 3478/tcp
-$ sudo ufw allow 5349/tcp                  # TLS opt
-$ sudo ufw allow 49152:65535/udp           # relay range
-```
-
-> ⚠️ El relay range Coturn es **enorme** (49152-65535/udp = 16k puertos). Si no querés abrir tantos, podés reducirlo via `COTURN_RELAY_MIN=49152 COTURN_RELAY_MAX=50000` (1k puertos = 500 simultaneous relays).
-
-Levantar:
-```bash
-$ dc -f docker/docker-compose.reference-smb.yml \
-     -f docker/docker-compose.coturn.yml \
-     --profile coturn up -d --wait coturn
-```
-
-Configurar el agente WebRTC para usar el TURN:
-```bash
-$ curl -sS -X PATCH .../api/v1/admin/tenant-settings/webrtc \
-    -d '{
-      "iceServers": [
-        {"urls": "stun:stun.l.google.com:19302"},
-        {
-          "urls": "turn:verbara.tu-dominio.com:3478?transport=udp",
-          "username": "verbara-turn",
-          "credential": "{COTURN_PASSWORD}"
-        }
-      ]
-    }'
-```
-
-Los agentes deben **re-loguearse** para pickear la nueva config.
-
-### 11.2 Validar que el TURN funciona
-
-[Web del agente] → **Configuración → Diagnóstico WebRTC**:
-- ICE candidates gathered:
-  - `host` (LAN del agente)
-  - `srflx` (server-reflexive vía STUN)
-  - **`relay`** (servidor TURN) ← este es el que importa
-
-Si `relay` no aparece → el agente no puede llegar al Coturn. Validar firewall del router del agente.
-
-## 12. Troubleshooting — síntoma → solución (índice)
+## 8. Troubleshooting — síntoma → solución (índice)
 
 | Síntoma | Detalle en |
 |---|---|
-| "No hay audio" / "Audio sólo en una dirección" | [08-troubleshooting-sip.md](08-troubleshooting-sip.md) §"No audio" |
+| Realtime `Not Running` / Asterisk no ve trunk ni cola | §0 de este manual + [08](08-troubleshooting-sip.md) §"Realtime" |
+| "No hay audio" / "Audio en una sola dirección" | [08](08-troubleshooting-sip.md) §"No audio" |
 | "Llamada cae a los 30s" | [08](08-troubleshooting-sip.md) §"Stateful UDP timeout" |
-| "Agente no recibe ring" | [08](08-troubleshooting-sip.md) §"WSS handshake failures" |
 | "Trunk no se registra" | [08](08-troubleshooting-sip.md) §"Registration failures" |
 | "Caller-ID anonymous" | [08](08-troubleshooting-sip.md) §"From-header rejection" |
 | "Eco / distorsión" | [08](08-troubleshooting-sip.md) §"Codec mismatch + jitter" |
-| "Calidad pobre a 100+ calls" | [08](08-troubleshooting-sip.md) §"CPU + RTP starvation" |
+
+## 9. Qué viene en Fase 3 (roadmap de voz)
+
+Estas funciones **no están todavía** y por eso no las documentamos como operativas:
+
+- **Softphone en el browser** — responder/marcar llamadas desde la pestaña del agente (SIP.js + WebRTC contra `wss://…:8089/asterisk/ws`), con control de llamada (hold/transfer/mute), CLID y timer.
+- **Llamada saliente desde el browser**.
+- **WebRTC behind strict NAT (Coturn/TURN)** — relevante sólo cuando exista el softphone browser y los agentes trabajen desde casa con CGNAT.
+- **AMI bridge** que sincroniza el estado de la llamada SIP con la tarjeta de conversación del agente en el Web UI.
+
+Hasta entonces, el patrón soportado es: **voz entrante → cola → teléfono SIP del agente** (§6), con la cadena trunk → Stasis → cola validada end-to-end.
 
 ## Próximo paso
 
-→ [07-validacion-e2e.md](07-validacion-e2e.md) — checklist completo de validación + comando para correr la suite E2E automatizada.
+→ [07-validacion-e2e.md](07-validacion-e2e.md) — checklist de validación + cómo correr una llamada de prueba con SIPp sin depender del carrier.
