@@ -18,4 +18,18 @@ internal static class VoiceLeaderResources
     /// disconnected (stronger than the relay's per-event short-circuit).
     /// </summary>
     public const string Inbound = "voice:stasis:inbound:leader";
+
+    /// <summary>
+    /// Per-resource leader that designates the single pod allowed to EMIT AMI-driven
+    /// voice side-effects (creating the tracked voice <c>Conversation</c>, capacity
+    /// reserve/release, agent presence Busy/ACW transitions, and stamping the resolved
+    /// tenant onto the live <c>CallSession</c>). Every pod's <c>CallSessionManager</c>
+    /// observes the same broadcast AMI stream (warm standby), but only the leader acts —
+    /// so the side-effects happen exactly once cluster-wide without a cold-start gap on
+    /// failover (the warm-standby / leader-emit pattern). The per-call
+    /// <c>voice_linked_id</c> idempotency index (migration 027) is the failover safety net
+    /// behind this gate. Distinct from <see cref="Inbound"/> because AMI capability is not
+    /// the same as ARI capability — a pod may have one and not the other.
+    /// </summary>
+    public const string AmiOwner = "voice:ami:owner:leader";
 }

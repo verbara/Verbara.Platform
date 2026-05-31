@@ -17,7 +17,7 @@ internal sealed class PostgresConversationStore : IConversationStore
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id " +
             "FROM conversations WHERE tenant_id = @TenantId AND conversation_id = @ConversationId",
             p =>
             {
@@ -72,7 +72,7 @@ internal sealed class PostgresConversationStore : IConversationStore
 
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            $"metadata, created_at, closed_at, updated_at, created_by, updated_by " +
+            $"metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id " +
             $"FROM conversations WHERE {where} ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
             p =>
             {
@@ -92,33 +92,44 @@ internal sealed class PostgresConversationStore : IConversationStore
             (Dictionary<string, string>)conversation.Metadata,
             PostgresJson.Ctx.DictionaryStringString);
 
-        await _dataSource.ExecuteAsync(
-            "INSERT INTO conversations (conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by) " +
-            "VALUES (@ConversationId, @TenantId, @ContactId, @Channel, @State, @OwnerKind, @OwnerId, @CaseId, " +
-            "@Metadata::jsonb, @CreatedAt, @ClosedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
-            "ON CONFLICT (tenant_id, conversation_id) DO UPDATE SET " +
-            "  state = EXCLUDED.state, owner_kind = EXCLUDED.owner_kind, owner_id = EXCLUDED.owner_id, " +
-            "  case_id = EXCLUDED.case_id, metadata = EXCLUDED.metadata, closed_at = EXCLUDED.closed_at, " +
-            "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-            p =>
-            {
-                p.Add(new NpgsqlParameter("ConversationId", conversation.ConversationId.Value));
-                p.Add(new NpgsqlParameter("TenantId", conversation.TenantId.Value));
-                p.Add(new NpgsqlParameter("ContactId", conversation.ContactId.Value));
-                p.Add(new NpgsqlParameter("Channel", (int)conversation.Channel));
-                p.Add(new NpgsqlParameter("State", (int)conversation.State));
-                p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = (object?)(conversation.Owner != null ? (int?)conversation.Owner.Kind : null) ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("OwnerId", NpgsqlDbType.Text) { Value = (object?)conversation.Owner?.OwnerId?.Value ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("CaseId", NpgsqlDbType.Text) { Value = (object?)conversation.CaseId?.Value ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("Metadata", metadataJson));
-                p.Add(new NpgsqlParameter("CreatedAt", conversation.CreatedAt));
-                p.Add(new NpgsqlParameter("ClosedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.ClosedAt ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.UpdatedAt ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.CreatedBy ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.UpdatedBy ?? DBNull.Value });
-            },
-            ct);
+        try
+        {
+            await _dataSource.ExecuteAsync(
+                "INSERT INTO conversations (conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+                "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id) " +
+                "VALUES (@ConversationId, @TenantId, @ContactId, @Channel, @State, @OwnerKind, @OwnerId, @CaseId, " +
+                "@Metadata::jsonb, @CreatedAt, @ClosedAt, @UpdatedAt, @CreatedBy, @UpdatedBy, @VoiceLinkedId) " +
+                "ON CONFLICT (tenant_id, conversation_id) DO UPDATE SET " +
+                "  state = EXCLUDED.state, owner_kind = EXCLUDED.owner_kind, owner_id = EXCLUDED.owner_id, " +
+                "  case_id = EXCLUDED.case_id, metadata = EXCLUDED.metadata, closed_at = EXCLUDED.closed_at, " +
+                "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("ConversationId", conversation.ConversationId.Value));
+                    p.Add(new NpgsqlParameter("TenantId", conversation.TenantId.Value));
+                    p.Add(new NpgsqlParameter("ContactId", conversation.ContactId.Value));
+                    p.Add(new NpgsqlParameter("Channel", (int)conversation.Channel));
+                    p.Add(new NpgsqlParameter("State", (int)conversation.State));
+                    p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = (object?)(conversation.Owner != null ? (int?)conversation.Owner.Kind : null) ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("OwnerId", NpgsqlDbType.Text) { Value = (object?)conversation.Owner?.OwnerId?.Value ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("CaseId", NpgsqlDbType.Text) { Value = (object?)conversation.CaseId?.Value ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("Metadata", metadataJson));
+                    p.Add(new NpgsqlParameter("CreatedAt", conversation.CreatedAt));
+                    p.Add(new NpgsqlParameter("ClosedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.ClosedAt ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.UpdatedAt ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.CreatedBy ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.UpdatedBy ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("VoiceLinkedId", NpgsqlDbType.Text) { Value = (object?)conversation.VoiceLinkedId ?? DBNull.Value });
+                },
+                ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == "23505" && ex.ConstraintName == "uq_conversations_voice_linked_id")
+        {
+            // A concurrent / leadership-failover re-emission for the same physical call
+            // (same tenant + voice_linked_id) — the voice Conversation is already tracked.
+            // Idempotent no-op: this is the failover safety net behind the leader-emit gate
+            // (see migration 027). Mirrors the InMemoryConversationStore uniqueness guard.
+        }
     }
 
     public async Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
@@ -126,7 +137,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         // Terminal states: Closed = 3, Abandoned = 4 (check ConversationStateMachine)
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id " +
             "FROM conversations " +
             "WHERE tenant_id = @TenantId AND contact_id = @ContactId AND channel = @Channel " +
             "  AND state NOT IN (SELECT unnest(@TerminalStates)) " +
@@ -142,11 +153,40 @@ internal sealed class PostgresConversationStore : IConversationStore
         return row?.ToConversation();
     }
 
+    public async Task<Conversation?> FindByVoiceLinkedIdAsync(TenantId tenantId, string voiceLinkedId, CancellationToken ct)
+    {
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
+            "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id " +
+            "FROM conversations WHERE tenant_id = @TenantId AND voice_linked_id = @VoiceLinkedId",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("VoiceLinkedId", voiceLinkedId));
+            },
+            ConversationRow.Map, ct);
+        return row?.ToConversation();
+    }
+
+    public async Task<Conversation?> FindByVoiceLinkedIdAcrossTenantsAsync(string voiceLinkedId, CancellationToken ct)
+    {
+        // voice_linked_id is the Asterisk call-global LinkedId — unique per call on a given
+        // Asterisk — so QueryFirstOrDefault returns the one tracked conversation regardless of
+        // tenant. Used only for failover tenant recovery on hangup (see IConversationStore).
+        var row = await _dataSource.QueryFirstOrDefaultAsync(
+            "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id " +
+            "FROM conversations WHERE voice_linked_id = @VoiceLinkedId ORDER BY created_at DESC",
+            p => p.Add(new NpgsqlParameter("VoiceLinkedId", voiceLinkedId)),
+            ConversationRow.Map, ct);
+        return row?.ToConversation();
+    }
+
     public async Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id " +
             "FROM conversations WHERE tenant_id = @TenantId AND contact_id = @ContactId " +
             "ORDER BY created_at DESC",
             p =>
@@ -186,7 +226,7 @@ internal sealed class PostgresConversationStore : IConversationStore
     {
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id " +
             "FROM conversations WHERE tenant_id = @TenantId AND state = @State " +
             "ORDER BY created_at ASC LIMIT @Limit",
             p =>
@@ -203,7 +243,7 @@ internal sealed class PostgresConversationStore : IConversationStore
     {
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id " +
             "FROM conversations WHERE tenant_id = @TenantId AND state = @State " +
             "ORDER BY created_at ASC LIMIT @Limit",
             p =>
@@ -243,6 +283,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
+        public string? voice_linked_id { get; init; }
 
         public static ConversationRow Map(NpgsqlDataReader r) => new()
         {
@@ -260,6 +301,7 @@ internal sealed class PostgresConversationStore : IConversationStore
             updated_at = r.GetDateTimeOrNull("updated_at"),
             created_by = r.GetStringOrNull("created_by"),
             updated_by = r.GetStringOrNull("updated_by"),
+            voice_linked_id = r.GetStringOrNull("voice_linked_id"),
         };
 
         public Conversation ToConversation()
@@ -289,6 +331,7 @@ internal sealed class PostgresConversationStore : IConversationStore
                 UpdatedAt = updated_at,
                 CreatedBy = created_by,
                 UpdatedBy = updated_by,
+                VoiceLinkedId = voice_linked_id,
             };
 
             foreach (var kv in metaDict)

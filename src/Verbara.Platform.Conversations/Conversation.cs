@@ -17,6 +17,15 @@ public sealed class Conversation : ITenantScoped, IAuditable
     public string? CreatedBy { get; init; }
     public string? UpdatedBy { get; set; }
 
+    /// <summary>
+    /// For voice conversations: the Asterisk call-global <c>LinkedId</c> (shared by every
+    /// channel of one physical call). Acts as the per-call idempotency correlation key
+    /// (unique per tenant via a partial index, migration 027) so the leader-emit voice
+    /// bridge never creates a duplicate Conversation across a leadership failover.
+    /// <see langword="null"/> for every non-voice conversation.
+    /// </summary>
+    public string? VoiceLinkedId { get; init; }
+
     private readonly Dictionary<string, string> _metadata = new();
     public IReadOnlyDictionary<string, string> Metadata => _metadata;
 

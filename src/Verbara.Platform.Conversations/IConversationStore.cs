@@ -9,6 +9,23 @@ public interface IConversationStore
     Task SaveAsync(Conversation conversation, CancellationToken ct);
     Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct);
 
+    /// <summary>
+    /// Returns the voice conversation correlated to an Asterisk call <paramref name="voiceLinkedId"/>,
+    /// or <see langword="null"/> if none exists. The per-call idempotency lookup the voice bridge
+    /// uses to avoid creating a duplicate Conversation for the same physical call.
+    /// </summary>
+    Task<Conversation?> FindByVoiceLinkedIdAsync(TenantId tenantId, string voiceLinkedId, CancellationToken ct);
+
+    /// <summary>
+    /// Returns the voice conversation correlated to an Asterisk call <paramref name="voiceLinkedId"/>
+    /// WITHOUT a tenant scope, or <see langword="null"/> if none exists. An Asterisk <c>LinkedId</c>
+    /// is globally unique per call on a given Asterisk, so this resolves at most one row. Used ONLY
+    /// by the voice bridge's hangup handler to recover the tenant of a tracked call when a leadership
+    /// failover left this pod's in-memory <c>CallSession.TenantId</c> unstamped (and the trunk channel
+    /// is already gone, so AMI re-resolution is impossible) — the losslessness guarantee on failover.
+    /// </summary>
+    Task<Conversation?> FindByVoiceLinkedIdAcrossTenantsAsync(string voiceLinkedId, CancellationToken ct);
+
     /// <summary>Returns all conversations for a given contact (GDPR export).</summary>
     Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);
 

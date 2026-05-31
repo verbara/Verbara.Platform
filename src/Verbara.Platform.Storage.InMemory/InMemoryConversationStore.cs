@@ -34,6 +34,21 @@ internal sealed class InMemoryConversationStore : IConversationStore
 
     public Task SaveAsync(Conversation conversation, CancellationToken ct)
     {
+        // Mirror the Postgres partial-unique index uq_conversations_voice_linked_id:
+        // a second conversation with the same (tenant, voice_linked_id) but a DIFFERENT
+        // conversation_id is rejected as already-tracked (no-op), so InMemory and Postgres
+        // agree on per-call voice idempotency (Phase-2.1 parity lesson). A re-save of the
+        // SAME conversation_id is a normal upsert.
+        if (conversation.VoiceLinkedId is { } linkedId)
+        {
+            var existing = _items.Values.FirstOrDefault(c =>
+                c.TenantId == conversation.TenantId &&
+                c.VoiceLinkedId == linkedId &&
+                c.ConversationId != conversation.ConversationId);
+            if (existing is not null)
+                return Task.CompletedTask;
+        }
+
         _items[(conversation.TenantId, conversation.ConversationId)] = conversation;
         return Task.CompletedTask;
     }
@@ -46,6 +61,21 @@ internal sealed class InMemoryConversationStore : IConversationStore
             c.Channel == channel &&
             !ConversationStateMachine.IsTerminal(c.State));
 
+        return Task.FromResult(result);
+    }
+
+    public Task<Conversation?> FindByVoiceLinkedIdAsync(TenantId tenantId, string voiceLinkedId, CancellationToken ct)
+    {
+        var result = _items.Values.FirstOrDefault(c =>
+            c.TenantId == tenantId &&
+            c.VoiceLinkedId == voiceLinkedId);
+
+        return Task.FromResult(result);
+    }
+
+    public Task<Conversation?> FindByVoiceLinkedIdAcrossTenantsAsync(string voiceLinkedId, CancellationToken ct)
+    {
+        var result = _items.Values.FirstOrDefault(c => c.VoiceLinkedId == voiceLinkedId);
         return Task.FromResult(result);
     }
 

@@ -167,4 +167,111 @@ public sealed class InMemoryConversationStoreTests
         var result = await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None);
         result!.State.Should().Be(ConversationState.Active);
     }
+
+    private static Conversation MakeVoiceConversation(TenantId tenantId, string linkedId, ConversationState state = ConversationState.Queued) =>
+        new()
+        {
+            ConversationId = EntityId.New(),
+            TenantId = tenantId,
+            ContactId = EntityId.New(),
+            Channel = ChannelType.Voice,
+            State = state,
+            CreatedAt = DateTimeOffset.UtcNow,
+            VoiceLinkedId = linkedId,
+        };
+
+    [Fact]
+    public async Task FindByVoiceLinkedIdAsync_ShouldReturnConversation_WhenLinkedIdMatches()
+    {
+        var store = new InMemoryConversationStore();
+        var conv = MakeVoiceConversation(Tenant1, "linked-abc");
+        await store.SaveAsync(conv, CancellationToken.None);
+
+        var result = await store.FindByVoiceLinkedIdAsync(Tenant1, "linked-abc", CancellationToken.None);
+
+        result.Should().BeSameAs(conv);
+    }
+
+    [Fact]
+    public async Task FindByVoiceLinkedIdAsync_ShouldReturnNull_WhenNoMatch()
+    {
+        var store = new InMemoryConversationStore();
+        await store.SaveAsync(MakeVoiceConversation(Tenant1, "linked-abc"), CancellationToken.None);
+
+        var result = await store.FindByVoiceLinkedIdAsync(Tenant1, "linked-xyz", CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task FindByVoiceLinkedIdAsync_ShouldIsolateTenants()
+    {
+        var store = new InMemoryConversationStore();
+        await store.SaveAsync(MakeVoiceConversation(Tenant1, "linked-abc"), CancellationToken.None);
+
+        var result = await store.FindByVoiceLinkedIdAsync(Tenant2, "linked-abc", CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldNoOp_WhenDifferentConversationHasSameVoiceLinkedId()
+    {
+        // Mirrors the Postgres partial-unique index: one physical call ⇒ one Conversation.
+        var store = new InMemoryConversationStore();
+        var first = MakeVoiceConversation(Tenant1, "linked-dup");
+        var duplicate = MakeVoiceConversation(Tenant1, "linked-dup");
+
+        await store.SaveAsync(first, CancellationToken.None);
+        await store.SaveAsync(duplicate, CancellationToken.None);
+
+        var byFirstId = await store.GetByIdAsync(Tenant1, first.ConversationId, CancellationToken.None);
+        var byDuplicateId = await store.GetByIdAsync(Tenant1, duplicate.ConversationId, CancellationToken.None);
+        var byLinkedId = await store.FindByVoiceLinkedIdAsync(Tenant1, "linked-dup", CancellationToken.None);
+
+        byFirstId.Should().BeSameAs(first);
+        byDuplicateId.Should().BeNull("the second conversation with the same voice LinkedId is a no-op");
+        byLinkedId.Should().BeSameAs(first);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldUpsert_WhenSameVoiceConversationResaved()
+    {
+        var store = new InMemoryConversationStore();
+        var conv = MakeVoiceConversation(Tenant1, "linked-same", ConversationState.Queued);
+        await store.SaveAsync(conv, CancellationToken.None);
+
+        conv.State = ConversationState.Offered;
+        await store.SaveAsync(conv, CancellationToken.None);
+
+        var result = await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None);
+        result!.State.Should().Be(ConversationState.Offered);
+    }
+
+    [Fact]
+    public async Task FindByVoiceLinkedIdAcrossTenantsAsync_ShouldFindRegardlessOfTenant()
+    {
+        var store = new InMemoryConversationStore();
+        var conv = MakeVoiceConversation(Tenant2, "linked-xt");
+        await store.SaveAsync(conv, CancellationToken.None);
+
+        var result = await store.FindByVoiceLinkedIdAcrossTenantsAsync("linked-xt", CancellationToken.None);
+
+        result.Should().BeSameAs(conv);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldNotConstrainNullVoiceLinkedId()
+    {
+        // Non-voice conversations all have a null VoiceLinkedId and must not collide.
+        var store = new InMemoryConversationStore();
+        var a = MakeConversation(Tenant1);
+        var b = MakeConversation(Tenant1);
+
+        await store.SaveAsync(a, CancellationToken.None);
+        await store.SaveAsync(b, CancellationToken.None);
+
+        (await store.GetByIdAsync(Tenant1, a.ConversationId, CancellationToken.None)).Should().NotBeNull();
+        (await store.GetByIdAsync(Tenant1, b.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
 }
