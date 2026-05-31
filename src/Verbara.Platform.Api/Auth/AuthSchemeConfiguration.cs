@@ -139,7 +139,12 @@ internal static class AuthSchemeConfiguration
 
         var p = path.Value!;
         return p.StartsWith("/hubs/", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("/events/stream", StringComparison.OrdinalIgnoreCase)
+            // SSE is mounted under the versioned API group (v1.MapSseEndpoints →
+            // /api/v1/events/stream) and nginx forwards the prefix un-stripped, so
+            // a StartsWith("/events/stream") never matched the real browser path —
+            // EventSource (which can't set an Authorization header) got 401. Match
+            // the segment anywhere so root- and version-mounted paths both work.
+            || p.Contains("/events/stream", StringComparison.OrdinalIgnoreCase)
             || IsRecordingStreamPath(p);
     }
 

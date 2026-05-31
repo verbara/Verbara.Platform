@@ -25,6 +25,8 @@ public sealed class AuthSchemeConfigurationTests
     [InlineData("/events/stream")]
     [InlineData("/events/stream/something")]
     [InlineData("/Events/Stream")] // case-insensitive
+    [InlineData("/api/v1/events/stream")] // the ACTUAL deployed path (v1.MapSseEndpoints) — browser EventSource hits this
+    [InlineData("/api/v2/events/stream")] // future versioned path
     public void IsQueryTokenPathAllowed_ShouldReturnTrue_ForSseStreamPaths(string path)
     {
         AuthSchemeConfiguration.IsQueryTokenPathAllowed(new PathString(path)).Should().BeTrue();
