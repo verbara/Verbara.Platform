@@ -4,7 +4,10 @@ RTP_CONF="/etc/asterisk/rtp.conf"
 
 MANAGER_CONF="/etc/asterisk/manager.conf"
 ARI_CONF="/etc/asterisk/ari.conf"
-PGSQL_CONF="/etc/asterisk/res_config_pgsql.conf"
+# Asterisk's res_config_pgsql.so reads res_pgsql.conf (NOT res_config_pgsql.conf) —
+# using the wrong filename left realtime silently unconfigured, so Asterisk never
+# loaded ps_endpoints/ps_endpoint_id_ips/queues and inbound voice could not work.
+PGSQL_CONF="/etc/asterisk/res_pgsql.conf"
 
 # Inject AMI/ARI passwords from environment so .env secrets propagate into Asterisk
 if [ -n "$AMI_PASSWORD" ] && [ -f "$MANAGER_CONF" ]; then
