@@ -66,6 +66,14 @@ public sealed class WebChatSessionManager
         return Task.FromResult(session);
     }
 
+    /// <summary>
+    /// Atomically marks the session as routed-to-queue. Returns <c>true</c> exactly once (the
+    /// first inbound message of the session) and <c>false</c> afterwards or when the session is
+    /// unknown — so the first message triggers queue assignment and later messages are no-ops.
+    /// </summary>
+    public bool TryMarkRouted(string sessionId)
+        => _sessions.TryGetValue(sessionId, out var session) && session.TryMarkRouted();
+
     public Task<int> CleanupExpiredAsync(IClock clock)
     {
         var removed = 0;
