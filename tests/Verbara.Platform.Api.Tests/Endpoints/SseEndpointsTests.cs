@@ -63,7 +63,7 @@ public sealed class SseEndpointsTests
             new ConversationAssignedEvent("t", "c1", "a1", "Q", "whatsapp", "Alice"),
             new ConversationMessageEvent("t", "c1", "m1", "agent", "hello"),
             new ConversationStateChangedEvent("t", "c1", "Active", "Closed"),
-            new ConversationOfferedEvent("t", "c1", "a1", "q1"),
+            new ConversationOfferedEvent("t", "c1", "a1", "q1", "WebChat"),
             new ConversationOfferExpiredEvent("t", "c1", "a1"),
             new ConversationAbandonedEvent("t", "c1", "q1"),
             new AgentStateChangedEvent("t", "a1", "Agent 1", "Available", "Busy"),

@@ -70,7 +70,7 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
         _eventBus.Publish(new ConversationOfferedEvent(
             tenantId.Value, conversationId.Value, agentId.Value,
-            conversation.Owner?.OwnerId?.Value ?? ""));
+            conversation.Owner?.OwnerId?.Value ?? "", conversation.Channel.ToString()));
         _eventBus.Publish(new ConversationStateChangedEvent(
             tenantId.Value, conversationId.Value, "Queued", "Offered"));
         return new OwnershipResult(true, conversation.Owner, conversation.State, null);

@@ -122,9 +122,14 @@ public sealed record AgentStateChangedEvent(
     string NewState)
     : PlatformEvent(TenantId, "agent.state_changed", DateTimeOffset.UtcNow);
 
-/// <summary>Raised when a conversation is offered to an agent from a queue.</summary>
+/// <summary>
+/// Raised when a conversation is offered to an agent from a queue. Carries <see cref="Channel"/>
+/// because an Offered conversation keeps <c>Owner = Queue</c> (not the agent), so the agent UI
+/// cannot hydrate it from the agentId-filtered inbox query — it renders the offered card from
+/// this payload and reacts to it live (filtering by <see cref="AgentId"/>).
+/// </summary>
 public sealed record ConversationOfferedEvent(
-    string TenantId, string ConversationId, string AgentId, string QueueId)
+    string TenantId, string ConversationId, string AgentId, string QueueId, string Channel)
     : PlatformEvent(TenantId, "conversation.offered", DateTimeOffset.UtcNow);
 
 /// <summary>Raised when a conversation offer to an agent expires without acceptance.</summary>

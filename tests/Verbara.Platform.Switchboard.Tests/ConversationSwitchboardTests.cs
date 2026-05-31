@@ -521,6 +521,9 @@ public sealed class ConversationSwitchboardTests : IDisposable
         offeredEvent.TenantId.Should().Be(_tenantId.Value);
         offeredEvent.ConversationId.Should().Be(_conversationId.Value);
         offeredEvent.AgentId.Should().Be(_agentId.Value);
+        // The agent UI renders the offered card from this payload (an Offered conversation keeps
+        // Owner=Queue, so the agentId-filtered inbox query won't surface it) — carry the channel.
+        offeredEvent.Channel.Should().Be(conversation.Channel.ToString());
 
         var stateEvent = (ConversationStateChangedEvent)events.Single(e => e is ConversationStateChangedEvent);
         stateEvent.OldState.Should().Be("Queued");

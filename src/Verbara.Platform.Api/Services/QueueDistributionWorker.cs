@@ -134,7 +134,8 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
                         tenant.TenantId,
                         conversation.ConversationId.Value,
                         agentId.Value.Value,
-                        queueId.Value));
+                        queueId.Value,
+                        conversation.Channel.ToString()));
 
                     LogOfferSucceeded(conversation.ConversationId.Value, agentId.Value.Value);
                 }
