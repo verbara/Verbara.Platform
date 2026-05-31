@@ -17,6 +17,7 @@
     <ProjectReference Include="..\Verbara.Platform.Identity\Verbara.Platform.Identity.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Queues\Verbara.Platform.Queues.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Channels.Core\Verbara.Platform.Channels.Core.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Routing.Inbound\Verbara.Platform.Routing.Inbound.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Flows\Verbara.Platform.Flows.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Bot\Verbara.Platform.Bot.csproj" />
     <ProjectReference Include="..\Verbara.Platform.KnowledgeBase\Verbara.Platform.KnowledgeBase.csproj" />

@@ -18,6 +18,7 @@ using Verbara.Platform.Core.Reports;
 using Verbara.Platform.Media;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
+using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Storage.Postgres.Stores;
 using Verbara.Platform.Surveys;
 using Verbara.Platform.Core.Webhooks;
@@ -108,6 +109,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITeamStore, PostgresTeamStore>();
         services.AddSingleton<IQueueMembershipStore, PostgresQueueMembershipStore>();
         services.AddSingleton<IAgentCapacityStore, PostgresAgentCapacityStore>();
+
+        // Routing — inbound DID → queue routes (Phase 2 voice routing)
+        services.AddSingleton<IDidRouteStore, PostgresDidRouteStore>();
 
         // Channels
         services.AddSingleton<ITenantChannelConfigStore, PostgresTenantChannelConfigStore>();

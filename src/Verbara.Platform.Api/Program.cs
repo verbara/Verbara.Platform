@@ -1363,6 +1363,7 @@ v1.MapCallerIdPoolEndpoints();
 v1.MapHolidayCalendarEndpoints();
 v1.MapDialerSettingsEndpoints();
 v1.MapTrunkEndpoints();
+v1.MapDidRouteEndpoints();
 v1.MapOutboundRouteEndpoints();
 v1.MapRecordingEndpoints();
 v1.MapAnalyticsEndpoints();

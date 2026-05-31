@@ -13,6 +13,7 @@ using Verbara.Platform.KnowledgeBase;
 using Verbara.Platform.Media;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
+using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Surveys;
 using Verbara.Platform.Core.Branding;
 using Verbara.Platform.Core.Notifications;
@@ -72,6 +73,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITeamStore, InMemoryTeamStore>();
         services.AddSingleton<IQueueMembershipStore, InMemoryQueueMembershipStore>();
         services.AddSingleton<IAgentCapacityStore, InMemoryAgentCapacityStore>();
+
+        // Routing — inbound DID → queue routes (Phase 2 voice routing)
+        services.AddSingleton<IDidRouteStore, InMemoryDidRouteStore>();
 
         // Channels
         services.AddSingleton<ITenantChannelConfigStore, InMemoryTenantChannelConfigStore>();
