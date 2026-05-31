@@ -334,7 +334,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-platform}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - verbara_postgres_data:/var/lib/postgresql/data
+      # postgres:18+ stores data in a version-specific subdir and rejects a volume
+      # mounted directly at .../data (docker-library PR #1259) — mount the PARENT
+      # dir so the image manages the subdir itself. Matches the full/production/demo
+      # composes; a fresh `docker compose up` fails otherwise.
+      - verbara_postgres_data:/var/lib/postgresql
     ports:
       # Loopback-only binding — accessible to:
       #   • Asterisk on host network (via 127.0.0.1:5432)
