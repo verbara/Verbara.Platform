@@ -12,11 +12,6 @@ api:
     # the maintainer's k3s/Talos lab:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
-    # POST-PUBLISH: after the v2.6.0 release.yml run, set `digest` below to the
-    # new api manifest-list digest (capture via `crane digest ghcr.io/verbara/platform/api:v2.6.0`)
-    # AND add that digest to verbara-website/data/authorized-digests.json, or the
-    # lab's IMAGE_DIGEST injection trips Layer-C UnauthorizedImage. The digest
-    # still points at v2.5.4 until that step is done.
     tag: "v2.6.0"
     # Manifest-list digest of the `repository:tag` image, used for Layer-C
     # in-process image verification (ADR-0011, Pro v2.3.x). When set, the
@@ -26,14 +21,13 @@ api:
     # in verbara-website/data/authorized-digests.json. Leave empty to opt out
     # (Pro falls through to permissive path; matches dev-mode semantics).
     #
-    # v2.5.4 patch — OpenTelemetry meter registration fix so
-    # verbara.platform.jwt counters become exposed via /metrics (single
-    # AddMeter call). Enables causality measurement for the v2.5.3 lab PASS
-    # result (1,980 → 0 Unauthorized). Paired with verbara-website PR #22.
-    # Use `crane digest <ref:tag>` to capture this (NOT
-    # `docker manifest inspect | jq .config.digest` which returns
-    # config-digest — that was the v2.5.3 mistake fixed in PR #22).
-    digest: "sha256:05ccb4fb00b50f71d302af4db26461e37ea8595dc54a6ab29e0690f07e5a0c48"
+    # v2.6.0 — captured via `crane digest ghcr.io/verbara/platform/api:v2.6.0`
+    # after the v2.6.0 release.yml run (ADR-0026 Phase A+B membership executive
+    # routing + ADR-0028 mandatory-Customer setup). Authorized in verbara-website
+    # data/authorized-digests.json current[] (PR #23). Capture with
+    # `crane digest <ref:tag>` (NOT `docker manifest inspect | jq .config.digest`
+    # which returns the config-digest — the v2.5.3 mistake fixed in PR #22).
+    digest: "sha256:a627e0aab6b3f48acddf4978c842612ac5f31faa7d8d2bbd9971176ec37bd34a"
   replicas: 2
   port: 5000
   resources:
@@ -176,18 +170,17 @@ realtime:
     # registry when validating against the maintainer's k3s/Talos lab:
     #   --set realtime.image.repository=192.168.122.1:5050/verbara-platform/realtime
     repository: ghcr.io/verbara/platform/realtime
-    # POST-PUBLISH: update `digest` below to the v2.6.0 realtime manifest-list
-    # digest (`crane digest`) once the release.yml run completes.
     tag: "v2.6.0"
     # Image-digest binding (ADR-0011 Layer C) — Pro license verification
     # extends to the Realtime image via the AuthorizedImageDigests claim.
     # Leave empty for tag-only references (dev / local registry).
     #
-    # v2.5.4 patch — paired with the api digest above and verbara-website
-    # PR #22. Realtime has no semantic change in v2.5.4 (OTel meter fix
-    # only touched Platform.Api); rebuild captures the SDK/Pro restore +
-    # 0-warning compile against current main.
-    digest: "sha256:cf0605744e8dc34f70bc5d28ed1b5fc9365ef4207941620941e0e170e24e3c40"
+    # v2.6.0 — captured via `crane digest ghcr.io/verbara/platform/realtime:v2.6.0`
+    # after the v2.6.0 release.yml run, authorized in verbara-website current[]
+    # (PR #23). Realtime carries no semantic change in v2.6.0 (ADR-0026 Phase A+B
+    # touched Platform.Api + Pro only); the rebuild captures the SDK/Pro restore +
+    # 0-warning compile against main.
+    digest: "sha256:f9cd38911b2773a27f50ccb062dffb2c0845ea7ac17d4400f746c8c92dd009a2"
   replicas: 1
   port: 5030
   resources:
