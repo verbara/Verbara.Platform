@@ -50,7 +50,10 @@ public sealed class AdminEndpointRealtimeTests : IClassFixture<AuthenticatedPlat
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
         json!["extension"]!.GetValue<string>().Should().Be("3001");
-        json!["sipPassword"]!.GetValue<string>().Should().Be("pass456");
+        // Phase 3A·C — the admin response must NEVER echo the plaintext SIP
+        // secret (sipPassword is [JsonIgnore]d on the entity; write-only in).
+        // The only deliberate exposure is self-scoped GET /agents/me.
+        json!["sipPassword"].Should().BeNull();
     }
 
     [Fact]

@@ -34,7 +34,9 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
 {
     public const string TestApiKey = "test-api-key-12345";
     public const string TestTenantId = "tenant-test-001";
-    private const string TestUserId = "test-admin-user";
+    // Public so tests can seed entities (e.g. an Agent) owned by the
+    // authenticated caller — the test API key maps to this user id.
+    public const string TestUserId = "test-admin-user";
 
     private static readonly string s_hashedKey = HashKey(TestApiKey);
 

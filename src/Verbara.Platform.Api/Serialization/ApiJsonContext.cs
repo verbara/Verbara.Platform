@@ -46,6 +46,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(User))]
 [JsonSerializable(typeof(Queue))]
 [JsonSerializable(typeof(Agent))]
+[JsonSerializable(typeof(AgentMeResponseDto))]
 [JsonSerializable(typeof(Team))]
 [JsonSerializable(typeof(Conversation))]
 [JsonSerializable(typeof(Message))]

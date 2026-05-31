@@ -23,7 +23,9 @@ internal static class AgentEndpoints
         var userId = GetCurrentUserId(context);
 
         var agent = await agentStore.GetByUserIdAsync(tenantId, userId, ct);
-        return agent is null ? Results.NotFound() : Results.Ok(agent);
+        return agent is null
+            ? Results.NotFound()
+            : Results.Ok(AgentMeResponseDto.FromAgent(agent));
     }
 
     private static async Task<IResult> UpdateAgentState(
@@ -71,7 +73,14 @@ internal static class AgentEndpoints
         // PermissionAuthorizationHandler.cs + OidcEndpoints.cs and friends.
         // Without this, GetByUserIdAsync gets a fresh random EntityId and
         // returns null → every authenticated /agents/me* call returns 404.
+        //
+        // API-key auth sets NameIdentifier to the KEY id, and the linked USER
+        // id in the `user_id` claim (ApiKeyAuthenticationHandler) — same as
+        // UsersMeEndpoint. So prefer `sub` (JWT) then `user_id` (API-key linked
+        // user) and only fall back to NameIdentifier. Without `user_id`, an
+        // API key whose linked user owns an agent would wrongly 404.
         var nameId = context.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+            ?? context.User.FindFirst("user_id")?.Value
             ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         return nameId is not null ? EntityId.From(nameId) : EntityId.New();
     }
