@@ -52,6 +52,9 @@ internal static class TrunkEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        if (!string.IsNullOrEmpty(body.MatchHost) && !IsValidMatchHost(body.MatchHost))
+            return Results.BadRequest();
+
         var trunk = new Trunk
         {
             Name = body.Name,
@@ -66,6 +69,7 @@ internal static class TrunkEndpoints
             RegistrationUri = body.RegistrationUri,
             ClientUri = body.ClientUri,
             Context = body.Context,
+            MatchHost = body.MatchHost,
         };
         var id = await trunkStore.CreateAsync(trunk, tenantId, ct);
         trunk.Id = id;
@@ -110,6 +114,14 @@ internal static class TrunkEndpoints
         if (body.RegistrationUri is not null) trunk.RegistrationUri = body.RegistrationUri;
         if (body.ClientUri is not null) trunk.ClientUri = body.ClientUri;
         if (body.Context is not null) trunk.Context = body.Context;
+        if (body.MatchHost is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(body.MatchHost) && !IsValidMatchHost(body.MatchHost))
+                return Results.BadRequest();
+            // Empty/whitespace is the explicit clear sentinel — stored as null so the engine
+            // deletes the ps_endpoint_id_ips identify row (IP-ACL removal).
+            trunk.MatchHost = string.IsNullOrWhiteSpace(body.MatchHost) ? null : body.MatchHost;
+        }
 
         await trunkStore.UpdateAsync(trunk, tenantId, ct);
         await audit.RecordAsync(
@@ -175,7 +187,28 @@ internal static class TrunkEndpoints
 
     private static TrunkDto MapToDto(Trunk t) =>
         new(t.Id, t.Name, t.DisplayName, t.Type.ToString(), t.IsActive, t.MaxChannels,
-            t.Transport, t.Codecs, t.AuthUsername, t.RegistrationUri, t.ClientUri, t.Context);
+            t.Transport, t.Codecs, t.AuthUsername, t.RegistrationUri, t.ClientUri, t.Context, t.MatchHost);
+
+    /// <summary>
+    /// Validates a trunk <c>MatchHost</c> as a well-formed IP address or CIDR (host[/prefix]).
+    /// Rejects garbage/typos so a malformed value can't silently disable Asterisk IP
+    /// identification (Asterisk drops a malformed identify object at load with no operator signal).
+    /// </summary>
+    private static bool IsValidMatchHost(string value)
+    {
+        var slash = value.IndexOf('/', StringComparison.Ordinal);
+        if (slash < 0)
+            return System.Net.IPAddress.TryParse(value, out _);
+
+        var host = value[..slash];
+        if (!System.Net.IPAddress.TryParse(host, out var ip))
+            return false;
+        if (!int.TryParse(value[(slash + 1)..], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var prefix))
+            return false;
+        var max = ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? 128 : 32;
+        return prefix >= 0 && prefix <= max;
+    }
 
     private static TrunkType ParseTrunkType(string type) =>
         type.ToLowerInvariant() switch
@@ -203,14 +236,14 @@ internal static class TrunkEndpoints
 internal sealed record CreateTrunkRequest(
     string Name, string? DisplayName, string Type, bool IsActive, int MaxChannels,
     string? Transport, string? Codecs, string? AuthUsername, string? AuthPassword,
-    string? RegistrationUri, string? ClientUri, string? Context);
+    string? RegistrationUri, string? ClientUri, string? Context, string? MatchHost);
 
 internal sealed record UpdateTrunkRequest(
     string? Name, string? DisplayName, string? Type, bool? IsActive, int? MaxChannels,
     string? Transport, string? Codecs, string? AuthUsername, string? AuthPassword,
-    string? RegistrationUri, string? ClientUri, string? Context);
+    string? RegistrationUri, string? ClientUri, string? Context, string? MatchHost);
 
 internal sealed record TrunkDto(
     long Id, string Name, string? DisplayName, string Type, bool IsActive, int MaxChannels,
     string? Transport, string? Codecs, string? AuthUsername,
-    string? RegistrationUri, string? ClientUri, string? Context);
+    string? RegistrationUri, string? ClientUri, string? Context, string? MatchHost);
