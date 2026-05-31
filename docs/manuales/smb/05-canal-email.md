@@ -105,6 +105,19 @@ info: Verbara.Platform.Mail.ImapPoller[0]
    - **Threading mode:** `In-Reply-To` (default — recomendado)
 3. **Guardar**.
 
+### 2.4b Quién recibe los emails — membership ejecutivo
+
+Cuando un email entrante aterriza en una queue, Verbara selecciona el agente desde el **pool ejecutivo** de `queue_memberships`. Desde Phase B de ADR-0026, esta tabla es la fuente de verdad ejecutiva para TODOS los canales — voz **y** digital, incluido Email. Reglas:
+
+- El agente debe ser miembro de la queue (row presente en `queue_memberships`).
+- `IsExcluded` debe ser `false`.
+- `AllowedChannels` debe ser `NULL` (todos los canales) o contener `"Email"` (case-insensitive).
+- El agente debe estar disponible (presencia: `Available` + capacity disponible).
+
+Si querés que un agente reciba **sólo** Email (y nada de voz/chat), editá su membership en `/admin/agents/{agentId}/queues` y dejá `Allowed channels = Email`. El badge "Digital only" confirma que ese agente no va a recibir llamadas (Asterisk no lo timbrará en `queue_members`). Un agente con `AllowedChannels=NULL` recibe todos los canales que la queue acepta — comportamiento "all-channels".
+
+> 💡 La **Default queue** del paso 2.4 decide **a qué queue** entra el email. La membership decide **qué agente dentro de esa queue** lo atiende. Son dos capas independientes — si el email entra a la queue pero no se ofrece a ningún agente, revisá las memberships antes que el routing.
+
 ### 2.5 Probar round-trip
 
 **Enviar correo entrante** desde una cuenta personal:
@@ -118,8 +131,11 @@ Body:    Hola, esto es un mensaje de prueba para validar el canal.
 
 Esperar 60-120 segundos (poll interval). Validar:
 
+> **Importante (ADR-0027):** canales/colas/agentes/conversaciones viven en el **Customer**, no en `platform`. Usá el token del **Customer Admin** (login del paso 2 del setup inicial) y `X-Tenant-Id: mi-empresa`. Si pegás contra `X-Tenant-Id: platform`, recibís **HTTP 409** — el tenant `platform` es administrativo y no maneja recursos operacionales por diseño.
+
 ```bash
-$ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
+$ TOKEN={el-accessToken-del-Customer-Admin}     # del login del setup inicial
+$ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
     "http://{server-ip}:5000/api/v1/conversations?channelType=Email&limit=5" | jq '.[0]'
 
 {
@@ -210,10 +226,10 @@ Para el detalle paso a paso ver `docs/specs/email-oauth-google.md` (en este repo
 | `SubjectMatch` | Match por subject normalizado (sin `Re:`/`Fwd:`/etc.) | Cuando el cliente rompe headers (ej. clientes web viejos) |
 | `Per-Email` | Cada email entrante = nueva conversación (sin agrupar) | Casos donde cada email es un ticket nuevo |
 
-Cambiar:
+Cambiar (config de canal = recurso operacional → Customer tenant + Customer Admin token; usa **PUT**, no PATCH):
 ```bash
-$ curl -sS -X PATCH http://{server-ip}:5000/api/v1/admin/channels/email \
-    -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
+$ curl -sS -X PUT http://{server-ip}:5000/api/v1/admin/channels/email \
+    -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
     -H "Content-Type: application/json" \
     -d '{"threadingMode": "SubjectMatch"}'
 ```
@@ -221,8 +237,8 @@ $ curl -sS -X PATCH http://{server-ip}:5000/api/v1/admin/channels/email \
 ### 5.2 Auto-acknowledge (responder automático "recibimos tu mensaje")
 
 ```bash
-$ curl -sS -X PATCH http://{server-ip}:5000/api/v1/admin/channels/email \
-    -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
+$ curl -sS -X PUT http://{server-ip}:5000/api/v1/admin/channels/email \
+    -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
     -H "Content-Type: application/json" \
     -d '{
       "autoAck": true,
@@ -235,25 +251,15 @@ El placeholder `{conversationId}` se sustituye con el ID corto de la conversaci�
 
 ## 6. Catch-all y direcciones múltiples
 
-Si tu cliente usa varias direcciones (`soporte@`, `ventas@`, `cobros@` — todos al mismo buzón con regla MX catch-all), creá una **regla de Inbound Routing** por To-address:
+Si tu cliente usa varias direcciones (`soporte@`, `ventas@`, `cobros@` — todos al mismo buzón con regla MX catch-all), el routing por canal se resuelve vía configuración (`InboundRoutingOptions.ChannelQueueMapping`) o, para reglas más finas por To-address, vía un Flow de routing en `/admin/flows`.
 
-```bash
-$ curl -sS -X POST http://{server-ip}:5000/api/v1/admin/routing/inbound \
-    -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: platform" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "name": "Email ventas",
-      "channelType": "Email",
-      "predicate": {
-        "type": "ToMatch",
-        "value": "ventas@tu-empresa.com"
-      },
-      "queueId": "queue_ventas_01HX...",
-      "priority": 10
-    }'
-```
+<!-- TODO(NEEDS-VERIFICATION): no existe un endpoint REST `POST /api/v1/admin/routing/inbound`
+     ni `/dialer/inbound-routes`. El routing channel→queue es config-based
+     (InboundRoutingOptions.ChannelQueueMapping) o vía Flows (/admin/flows).
+     Documentar el flujo exacto de routing por To-address una vez confirmado el
+     mecanismo soportado (config en .env vs. nodo de Flow). NO inventar curl. -->
 
-Repetir por cada dirección que necesite routing distinto.
+Mientras tanto, la **Default queue** del canal (paso 2.4) recibe todos los emails entrantes. Si necesitás que `ventas@` y `cobros@` vayan a queues distintas, abrí un caso de configuración con el equipo de plataforma o usá un Flow en `/admin/flows`.
 
 ## 7. Troubleshooting
 
@@ -273,8 +279,13 @@ $ dc logs --tail 100 platform-api | grep -i email
 info: Verbara.Platform.Channels.Email[0]
       Created conversation conv_01HX... from email msg-id <abc@gmail.com>
 
-# 3. Si llegan al pipeline pero no a la queue → revisar routing rules
-$ curl ... /api/v1/admin/routing/inbound | jq
+# 3. Si llega a la queue pero NO se ofrece a ningún agente → revisar el membership-gate.
+#    Un agente recibe emails de esa queue SÓLO si tiene un row en queue_memberships
+#    (IsExcluded=false) con AllowedChannels = NULL o que contenga "Email".
+$ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
+    "http://{server-ip}:5000/api/v1/admin/agents/agente1/queue-memberships" | jq
+# Si AllowedChannels excluye "Email" (ej. ['WebChat']) → editá en
+# /admin/agents/{agentId}/queues y agregá el chip "Email" (o dejá NULL = all-channels).
 ```
 
 ### Síntoma: el mail de respuesta no sale

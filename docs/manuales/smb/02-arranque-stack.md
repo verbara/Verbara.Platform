@@ -300,8 +300,8 @@ $ dc down
 # Detener + borrar volúmenes (DATA LOSS — sólo para reset completo)
 $ dc down -v
 
-# Actualizar a una nueva release (ej. v2.5.5 cuando salga)
-$ git fetch --tags && git checkout v2.5.5
+# Actualizar a una nueva release
+$ git fetch --tags && git checkout vX.Y.Z   # la próxima release publicada
 $ dc pull && dc up -d --wait
 
 # Backup de Postgres
@@ -318,4 +318,4 @@ $ docker exec -it verbara-asterisk asterisk -rvvv
 
 El stack está vivo pero **vacío** — no hay admin user, ni tenant, ni agentes, ni canales configurados.
 
-→ [03-setup-inicial.md](03-setup-inicial.md) — completar el wizard `/setup` para crear el primer admin + tenant + agente + queue.
+→ [03-setup-inicial.md](03-setup-inicial.md) — completar el wizard `/setup`, que crea los tenants `platform` + tu primer `Customer` (con sus dos admins) + agente + queue.

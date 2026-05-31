@@ -79,14 +79,24 @@ Verificación de firmas (ADR-0023, 5 imágenes signed — cosign v3+ con `--inse
 
 ## 4. Setup inicial (Admin + Tenant + Agente + Queue)
 
-- ☐ Platform admin creado vía `POST /api/v1/setup` o wizard
-- ☐ Email: _______________________ Password guardada en password manager
+> **Nota:** `POST /api/v1/setup` crea en **una sola llamada** el tenant `platform` + Platform Admin **y** el primer tenant `Customer` (p. ej. `mi-empresa`) + Customer Admin (ADR-0028). Quedan **dos tenants y dos admins** desde el minuto cero. La config operacional (queues/agentes/canales) vive **dentro del Customer** — los endpoints operacionales contra `X-Tenant-Id: platform` devuelven **HTTP 409** por diseño (ADR-0027).
+
+- ☐ `POST /api/v1/setup` (o wizard) ejecutado: crea `platform` + primer `Customer` + ambos admins en una sola llamada
+- ☐ **Platform Admin** — Email: _______________________ Password guardada en password manager
+- ☐ **Customer Admin** — Email: _______________________ Password guardada en password manager
 - ☐ `managementApiKey` guardada en password manager
-- ☐ Login al Web UI exitoso, llega a `/admin`
-- ☐ Primer tenant creado: ID = _______________________
-- ☐ Primera queue creada: nombre = _______________________
-- ☐ Primer agente creado: userId = ____________ email = ____________
+- ☐ Login al Web UI exitoso (Customer Admin), llega a `/admin`
+- ☐ Primer Customer tenant (ya existe tras el setup): ID = _______________________
+- ☐ Primera queue creada (dentro del Customer): nombre = _______________________
+- ☐ Primer agente creado (dentro del Customer): userId = ____________ email = ____________
 - ☐ Agente puede loguearse en `/agent`
+
+### 4b. Membership ejecutiva (prerequisito de los round-trips de canal)
+
+> **Por qué:** `queue_memberships` es la fuente de verdad ejecutiva del routing para **todos** los canales (voz + digital, ADR-0026 A+B). Un agente recibe conversaciones de un canal **sólo si** tiene una membership no-excluida en la queue objetivo cuyo `AllowedChannels` sea **NULL** (= todos los canales) o **contenga** el canal bajo prueba. Strings canónicos en PascalCase: `Voice`, `WebChat`, `Email`, `WhatsApp`, `Sms`. El wizard ya crea la membership default-all-channels; verificá antes de cada round-trip.
+
+- ☐ Agente es miembro de la queue objetivo con el canal bajo prueba en `AllowedChannels` (o `NULL`)
+- ☐ Verificado vía editor `/admin/agents/{agentId}/queues` (chips por canal + badge "Voice → Asterisk" / "Digital only") o `GET /api/v1/admin/agents/{id}/queue-memberships`
 
 ## 5. Canal WebChat
 

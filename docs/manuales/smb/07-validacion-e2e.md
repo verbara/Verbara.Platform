@@ -20,10 +20,11 @@ Resumen — debés validar:
 - ☐ TLS certificado válido + cargado en Web nginx + Asterisk WSS.
 
 ### Setup inicial (manual 03)
-- ☐ Admin user creado, podés loguearte en `/admin`.
-- ☐ 1 tenant operativo (mínimo).
-- ☐ 1 queue creada.
-- ☐ 1 agente provisionado, podés loguearte como ese agente en `/agent`.
+- ☐ El setup creó **exactamente dos tenants**: el root `platform` (administrativo) + tu primer Customer (`mi-empresa`), y **dos admins** (Platform Admin + Customer Admin) — esto pasa siempre, en una sola llamada a `POST /api/v1/setup` (ADR-0028).
+- ☐ Podés loguearte como **Customer Admin** y entrar a `/admin`.
+- ☐ La config del día a día (colas/agentes/canales/trunks) vive en el tenant **Customer** (`mi-empresa`), **no** en `platform`. El root `platform` es sólo administrativo: un curl operacional contra `X-Tenant-Id: platform` devuelve **HTTP 409** por diseño (ADR-0027).
+- ☐ 1 queue creada (en el Customer).
+- ☐ 1 agente provisionado (en el Customer), podés loguearte como ese agente en `/agent`.
 
 ### Canal WebChat (manual 04)
 - ☐ Canal habilitado en `/admin/channels`.
@@ -46,6 +47,8 @@ Resumen — debés validar:
 - ☐ **Test outbound**: agente marca número externo → móvil ring → atiende → audio bidireccional → hangup limpio.
 - ☐ **Test concurrencia 5 calls**: 5 llamadas simultáneas, 5 agentes distintos, audio independiente sin distorsión.
 - ☐ CDR refleja todas las llamadas en `/admin/analytics/calls`.
+
+> **Por qué un round-trip puede fallar aunque el canal esté OK (ADR-0026):** bajo el routing ejecutivo, un agente sólo recibe conversaciones de un canal si tiene una row en `queue_memberships` cuyo `AllowedChannels` **permite ese canal** (lo contiene — `"Voice"`, `"WebChat"`, `"Email"`, `"WhatsApp"`, `"Sms"`, etc., en PascalCase, match case-insensitive) **o es `NULL`** (= todos los canales). Si un round-trip llega a la queue pero **no le timbra/aparece a ningún agente**, verificá la membership del agente en `/admin/agents/{agentId}/queues` (o `GET /api/v1/admin/agents/{id}/queue-memberships`) antes de sospechar del canal. El wizard del manual 03 ya creó la membership default-all-channels (`AllowedChannels=NULL`) para el agente de prueba, así que esta validación funciona out-of-the-box.
 
 ### Performance (al menos un test rápido)
 - ☐ `docker stats` no muestra ningún container > 80 % CPU sostenido.
@@ -78,14 +81,16 @@ $ ${EDITOR:-nano} tests/e2e/.env
 ```env
 VERBARA_API_BASE_URL=http://{server-ip}:5000
 VERBARA_WEB_BASE_URL=http://{server-ip}
-VERBARA_TENANT_ID=platform
-VERBARA_ADMIN_EMAIL=admin@tu-empresa.com
+VERBARA_TENANT_ID=mi-empresa                 # el Customer creado por el setup — NO 'platform' (operacional)
+VERBARA_ADMIN_EMAIL=admin@tu-empresa.com     # el Customer Admin (login del paso 2 del manual 03)
 VERBARA_ADMIN_PASSWORD=TU-PASSWORD-FUERTE
 VERBARA_TEST_AGENT_EMAIL=maria@tu-empresa.com
 VERBARA_TEST_AGENT_PASSWORD={password-temp-del-wizard}
 VERBARA_SIP_DID=+15551234567
 VERBARA_SIP_TEST_NUMBER=+15555550199        # un número de prueba para llamada outbound
 ```
+
+> **Tenant correcto:** los tests E2E ejercitan recursos **operacionales** (queues/agentes/canales), así que apuntan al tenant **Customer** (`mi-empresa`) con el token del **Customer Admin**. El root `platform` es administrativo y rechaza endpoints operacionales con HTTP 409 (ADR-0027). Usá `platform` sólo si vas a validar gestión de tenants / licensing / cluster.
 
 ### 2.3 Correr la suite
 
