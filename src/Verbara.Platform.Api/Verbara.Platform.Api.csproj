@@ -126,6 +126,12 @@
     <PackageReference Include="Verbara.Sdk.Pro.Realtime.Storage.Postgres" />
     <PackageReference Include="Verbara.Sdk.Pro.Cluster" />
     <PackageReference Include="Verbara.Sdk.Pro.Cluster.Storage.Postgres" />
+    <!-- Phase 2.2 voice inbound: leader-election for StasisInboundConsumer needs the
+         SDK distributed-lock primitive (IDistributedLock) + the Postgres lock backend
+         (AddPostgresDistributedLock + MigrationRunner.EnsureSchemaAsync). Realtime
+         already references these; the API host now does too for its own leader. -->
+    <PackageReference Include="Verbara.Sdk.Cluster.Primitives" />
+    <PackageReference Include="Verbara.Sdk.Cluster.Postgres" />
     <PackageReference Include="Verbara.Sdk.Pro.MultiTenant" />
     <PackageReference Include="Verbara.Sdk.Pro.Push" />
     <!-- Verbara.Sdk.Pro.Push.SignalR is kept for the T27 bridges + event types

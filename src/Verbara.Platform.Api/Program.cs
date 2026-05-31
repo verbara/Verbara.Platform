@@ -67,6 +67,7 @@ using Verbara.Sdk.Ami.Connection;
 using Verbara.Sdk.Pro.Cluster;
 using Verbara.Sdk.Pro.Cluster.DependencyInjection;
 using Verbara.Sdk.Pro.Cluster.Storage.Postgres.DependencyInjection;
+using Verbara.Sdk.Cluster.Postgres.DependencyInjection;
 using Verbara.Platform.Channels.WebChat;
 using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Pro.MultiTenant.DependencyInjection;
@@ -861,7 +862,34 @@ var clusterConn = ConnectionStringDefaults.ApplyPoolDefaults(
         ?? builder.Configuration.GetConnectionString("Postgres"));
 if (!string.IsNullOrEmpty(clusterConn))
 {
-    builder.Services.UsePostgresClusterTransport(ResolveDataSource(clusterConn)!);
+    var clusterDataSource = ResolveDataSource(clusterConn)!;
+    builder.Services.UsePostgresClusterTransport(clusterDataSource);
+
+    // ─── Phase 2.2 voice inbound — per-resource leader election ──────────────────
+    // StasisInboundConsumer opens an ARI WebSocket, and Asterisk delivers a Stasis
+    // app to exactly ONE socket — so only the elected leader pod connects + consumes
+    // (a physical call can't be re-emitted, so this gates the *connection*, stronger
+    // than the relay's per-event short-circuit). Mirrors the Realtime microservice
+    // wiring (ADR-0022 Phase A.5): a keyed "Cluster" NpgsqlDataSource (the SAME shared
+    // instance as the transport — no extra pool, ADR-0015) backs AddPostgresDistributedLock,
+    // and the builder AddVerbaraCluster overload registers the keyed IClusterLeader.
+    // This coexists with the ClusterOptions AddVerbaraCluster above (independent
+    // overloads). Gated additionally on Asterisk:Ari being configured so that ONLY an
+    // ARI-capable pod can ever win the voice-inbound lease — making "a pod that can't
+    // connect Asterisk never holds the lease while a capable pod stays follower" a
+    // structural invariant rather than relying on Helm env homogeneity.
+    var voiceInboundEnabled = !string.IsNullOrWhiteSpace(builder.Configuration["Asterisk:Ari:BaseUrl"]);
+    if (voiceInboundEnabled)
+    {
+        builder.Services.AddKeyedSingleton<NpgsqlDataSource>("Cluster", (_, _) => clusterDataSource);
+        builder.Services.AddPostgresDistributedLock(connectionStringName: "Cluster");
+        builder.Services.AddVerbaraCluster(opts =>
+        {
+            opts.UsePostgresLockBackend(connectionStringName: "Cluster");
+            opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.Inbound);
+        });
+        builder.Services.AddHostedService<Verbara.Platform.Api.Services.StasisInboundConsumer>();
+    }
 }
 
 // ─── Pro.MultiTenant ─────────────────────────────────────────────────────────
@@ -1189,6 +1217,27 @@ if (openApiEnabled)
 }
 
 var app = builder.Build();
+
+// ─── Phase 2.2 — ensure cluster_distributed_lock schema (leader election) ────
+// AddPostgresDistributedLock registers the lock primitive but does NOT create its
+// table; the SDK ships MigrationRunner.EnsureSchemaAsync as an explicit opt-in.
+// Without this the voice leader's TryAcquireAsync fails on first tick with
+// relation "cluster_distributed_lock" does not exist. Mirrors Realtime Program.cs.
+// Gated identically to the leader registration above (Postgres + Asterisk:Ari): the
+// keyed "Cluster" datasource only exists when voice inbound is enabled.
+if (!string.IsNullOrEmpty(clusterConn)
+    && !string.IsNullOrWhiteSpace(builder.Configuration["Asterisk:Ari:BaseUrl"]))
+{
+    using var clusterMigrationScope = app.Services.CreateScope();
+    var clusterLockDataSource = clusterMigrationScope.ServiceProvider
+        .GetRequiredKeyedService<NpgsqlDataSource>("Cluster");
+    var clusterMigrationLogger = clusterMigrationScope.ServiceProvider
+        .GetRequiredService<ILogger<Program>>();
+    await Verbara.Sdk.Cluster.Postgres.Migrations.MigrationRunner.EnsureSchemaAsync(
+        clusterLockDataSource,
+        clusterMigrationLogger,
+        app.Lifetime.ApplicationStopping);
+}
 
 // ─── Production Config Validation ────────────────────────────────────────────
 
