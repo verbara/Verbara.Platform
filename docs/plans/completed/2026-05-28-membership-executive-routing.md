@@ -5,13 +5,15 @@
 **Estimated effort:** Phase A ~3 días · Phase B ~6-8 días · Phase C ~3 días
 **Repos touched:** `Verbara.Platform` (mayoría), `Verbara.Platform.Web` (wizard + admin agentes), `Verbara.Sdk.Pro.Realtime` (signature change `AddQueueMemberAsync(..., allowedChannels)`)
 
-## Status (2026-05-28)
+## Status — ✅ CLOSED 2026-05-30 (shipped in Platform v2.6.0)
+
+> **Closure note (2026-05-30):** All three phases landed and shipped in Platform **v2.6.0** (tag `v2.6.0`, released via `release.yml`). This implementation plan is superseded by the executed Phase B gate plan ([`2026-05-29-membership-executive-gate.md`](2026-05-29-membership-executive-gate.md)) and the ADR closure ([`0026-queue-membership-executive-routing.md`](../../decisions/0026-queue-membership-executive-routing.md) §Implementation status). The original "post-2026-06-28 freeze" calendar gate on Phase B was retired by the 2026-05-25 pivot (no production to protect). Moved `active/` → `completed/`.
 
 | Phase | Status | Notes |
 |---|---|---|
-| **Phase A — Wizard fix + channel-aware REST + UI editor** | ✅ **SHIPPED** | A.1–A.6 + A.6.7 (extra) + Api.Tests coverage merged to `main` across 6 commits (3 Platform, 3 Web). No release tag yet — see ADR §Implementation status. |
-| **Phase B — Membership executive gate (digital routing parity)** | ⏸️ **QUEUED, calendar-gated** | Requires SDK Pro v2.6.0-pro (post-2026-06-28 freeze window). Scope unchanged from sections below. |
-| **Phase C — Documentation + manuales** | 🟡 **PARTIAL** | Living-docs journey 02 covers channel restriction. Hand-written SMB manuals 03/04 refresh deferred to Phase B closure. |
+| **Phase A — Wizard fix + channel-aware REST + UI editor** | ✅ **SHIPPED 2026-05-28** | A.1–A.6 + A.6.7 + 13 Api.Tests merged to `main` (6 commits; Platform `0ddb511d`/`53c0ac61`/`442e3ad9` + 3 Web). |
+| **Phase B — Membership executive gate (digital routing parity)** | ✅ **SHIPPED 2026-05-29** | SDK Pro v2.6.0-pro (`913ec98`, `AddQueueMemberAsync(allowedChannels)` voice-gate) + Platform `b731c1fc`+`a6220698` (`IRoutingEligibilityService`, `MembershipAwareRoutingEligibilityService`, penalty-grouped `RoundRobinAgentSelector`, `RealtimeReconciliationService`, `infer-memberships-from-skills.sh`) + 13 tests. Calendar gate derogated by 2026-05-25 pivot. |
+| **Phase C — Documentation + manuales** | 🟢 **DONE (SMB 03/04 refreshed)** | SMB manuals 03 §4b + 04 §3.1 refreshed with routing-ejecutivo semantics (closes ADR-0027 C.2). Broader manuales re-sync for v2.6.0 tracked separately under the post-release manuales audit / living-docs track. |
 
 ## Contexto
 
