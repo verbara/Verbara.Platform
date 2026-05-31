@@ -26,6 +26,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PriorityEscalationMiddleware>();
         services.AddSingleton<OverflowMiddleware>();
         services.AddSingleton<BusinessHoursMiddleware>();
+        services.AddSingleton<DefaultQueueFallbackMiddleware>();
 
         services.AddSingleton<IReadOnlyList<InboundRoutingMiddlewareBase>>(sp =>
         [
@@ -34,6 +35,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<PriorityEscalationMiddleware>(),
             sp.GetRequiredService<OverflowMiddleware>(),
             sp.GetRequiredService<BusinessHoursMiddleware>(),
+            // Innermost: guarantees a queue (channel default → first active) so channels with no
+            // explicit ChannelQueueMapping (e.g. WebChat) still route instead of throwing.
+            sp.GetRequiredService<DefaultQueueFallbackMiddleware>(),
         ]);
 
         // ADR-0026 Phase B — membership-aware eligibility service replaces the
