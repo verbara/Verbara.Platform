@@ -7,8 +7,10 @@ using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Storage.InMemory;
 using Verbara.Platform.Switchboard;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -61,7 +63,7 @@ public sealed class WebChatInboundRoutingTests
         var sessionId = sessionManager.ConnectAsync(
             Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-x"), clock).GetAwaiter().GetResult();
 
-        var sut = new WebChatInboundRouter(router, switchboard, store, contactStore, eventBus, sessionManager);
+        var sut = new WebChatInboundRouter(router, switchboard, store, contactStore, eventBus, sessionManager, NullLogger<WebChatInboundRouter>.Instance);
         return (sut, store, sessionId, switchboard, eventBus);
     }
 
@@ -113,11 +115,37 @@ public sealed class WebChatInboundRoutingTests
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
         var sessionId = await sessionManager.ConnectAsync(Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-y"), clock);
-        var sut = new WebChatInboundRouter(router, switchboard, convStore, contactStore, new PlatformEventBus(), sessionManager);
+        var sut = new WebChatInboundRouter(router, switchboard, convStore, contactStore, new PlatformEventBus(), sessionManager, NullLogger<WebChatInboundRouter>.Instance);
 
         await sut.RouteFirstInboundAsync(sessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
         await sut.RouteFirstInboundAsync(sessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
 
         await switchboard.Received(1).AssignToQueueAsync(ConvId, Tenant, QueueId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldNotThrowAndNotAssign_WhenRouterFindsNoQueue()
+    {
+        // InboundRouter throws InvalidOperationException when the tenant has no active queue.
+        // The visitor's WebSocket must survive: leave the conversation queued+unowned, do not crash.
+        var router = Substitute.For<IInboundRouter>();
+        router.RouteAsync(default!, default).ThrowsForAnyArgs(new InvalidOperationException("no queue"));
+        var switchboard = Substitute.For<IConversationSwitchboard>();
+        var convStore = Substitute.For<IConversationStore>();
+        convStore.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>())
+            .Returns(new Conversation { ConversationId = ConvId, TenantId = Tenant, ContactId = ContactId, Channel = ChannelType.WebChat, State = ConversationState.Queued, CreatedAt = DateTimeOffset.UtcNow });
+        var contactStore = Substitute.For<IContactStore>();
+        contactStore.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>())
+            .Returns(new Contact { ContactId = ContactId, TenantId = Tenant, CreatedAt = DateTimeOffset.UtcNow });
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
+        var sessionId = await sessionManager.ConnectAsync(Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-z"), clock);
+        var sut = new WebChatInboundRouter(router, switchboard, convStore, contactStore, new PlatformEventBus(), sessionManager, NullLogger<WebChatInboundRouter>.Instance);
+
+        var act = () => sut.RouteFirstInboundAsync(sessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        await switchboard.DidNotReceiveWithAnyArgs().AssignToQueueAsync(default, default, default, default);
     }
 }

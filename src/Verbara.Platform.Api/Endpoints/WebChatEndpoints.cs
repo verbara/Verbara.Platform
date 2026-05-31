@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Channels.Core.Pipeline;
 using Verbara.Platform.Channels.WebChat;
@@ -80,6 +81,7 @@ internal static partial class WebChatEndpoints
         [FromServices] WebSocketWebChatTransport transport,
         [FromServices] WebChatSessionManager sessionManager,
         [FromServices] IInboundMessagePipeline pipeline,
+        [FromServices] WebChatInboundRouter inboundRouter,
         [FromServices] IClock clock,
         [FromServices] PlatformEventBus eventBus)
     {
@@ -139,7 +141,9 @@ internal static partial class WebChatEndpoints
                             Guid.NewGuid().ToString("N"),
                             clock.UtcNow);
 
-                        await pipeline.ProcessAsync(inbound, session.TenantId, ChannelType.WebChat, ct);
+                        var pipelineResult = await pipeline.ProcessAsync(inbound, session.TenantId, ChannelType.WebChat, ct);
+                        await inboundRouter.RouteFirstInboundAsync(
+                            sessionId, session.TenantId, pipelineResult, inbound.Content, ct);
                     }
                     else if (clientMsg?.Type == "typing")
                     {
@@ -162,6 +166,7 @@ internal static partial class WebChatEndpoints
         WebChatMessageRequest request,
         [FromServices] WebChatSessionManager sessionManager,
         [FromServices] IInboundMessagePipeline pipeline,
+        [FromServices] WebChatInboundRouter inboundRouter,
         [FromServices] IClock clock,
         CancellationToken ct)
     {
@@ -180,7 +185,9 @@ internal static partial class WebChatEndpoints
             Guid.NewGuid().ToString("N"),
             clock.UtcNow);
 
-        await pipeline.ProcessAsync(inbound, session.TenantId, ChannelType.WebChat, ct);
+        var pipelineResult = await pipeline.ProcessAsync(inbound, session.TenantId, ChannelType.WebChat, ct);
+        await inboundRouter.RouteFirstInboundAsync(
+            sessionId, session.TenantId, pipelineResult, inbound.Content, ct);
 
         return Results.Ok(new MessageResponse("Message sent"));
     }

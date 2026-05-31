@@ -4,6 +4,7 @@ using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Switchboard;
+using Microsoft.Extensions.Logging;
 
 namespace Verbara.Platform.Api.Services;
 
@@ -16,7 +17,7 @@ namespace Verbara.Platform.Api.Services;
 /// to an agent. This bridge closes that gap. Idempotent per session: only the first inbound
 /// message routes; later messages are no-ops.
 /// </summary>
-internal sealed class WebChatInboundRouter
+internal sealed partial class WebChatInboundRouter
 {
     private readonly IInboundRouter _router;
     private readonly IConversationSwitchboard _switchboard;
@@ -24,6 +25,7 @@ internal sealed class WebChatInboundRouter
     private readonly IContactStore _contactStore;
     private readonly PlatformEventBus _eventBus;
     private readonly WebChatSessionManager _sessionManager;
+    private readonly ILogger<WebChatInboundRouter> _logger;
 
     public WebChatInboundRouter(
         IInboundRouter router,
@@ -31,7 +33,8 @@ internal sealed class WebChatInboundRouter
         IConversationStore conversationStore,
         IContactStore contactStore,
         PlatformEventBus eventBus,
-        WebChatSessionManager sessionManager)
+        WebChatSessionManager sessionManager,
+        ILogger<WebChatInboundRouter> logger)
     {
         _router = router;
         _switchboard = switchboard;
@@ -39,6 +42,7 @@ internal sealed class WebChatInboundRouter
         _contactStore = contactStore;
         _eventBus = eventBus;
         _sessionManager = sessionManager;
+        _logger = logger;
     }
 
     /// <summary>
@@ -73,7 +77,23 @@ internal sealed class WebChatInboundRouter
         }
 
         var routingCtx = new RoutingContext(conversation, contact, ChannelType.WebChat, content, tenantId);
-        var routeResult = await _router.RouteAsync(routingCtx, ct).ConfigureAwait(false);
-        await _switchboard.AssignToQueueAsync(conversation.ConversationId, tenantId, routeResult.QueueId, ct).ConfigureAwait(false);
+        try
+        {
+            var routeResult = await _router.RouteAsync(routingCtx, ct).ConfigureAwait(false);
+            await _switchboard.AssignToQueueAsync(conversation.ConversationId, tenantId, routeResult.QueueId, ct).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The routing pipeline resolved no queue (e.g. the tenant has no active queue). Keep the
+            // conversation Queued+unowned for manual supervisor pickup rather than killing the
+            // visitor's WebSocket session.
+            LogNoQueueResolved(ex, tenantId.Value, sessionId);
+        }
     }
+
+    [LoggerMessage(
+        EventId = 7401,
+        Level = LogLevel.Warning,
+        Message = "WebChat inbound routing resolved no queue for tenant {TenantId} session {SessionId}; conversation left unrouted for manual pickup.")]
+    private partial void LogNoQueueResolved(Exception ex, string tenantId, string sessionId);
 }

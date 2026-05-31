@@ -170,6 +170,9 @@ builder.Services.AddPlatformChannels();
 builder.Services.AddPlatformQueues();
 builder.Services.AddInboundRouting();
 builder.Services.AddSwitchboard();
+// Bridges WebChat inbound (which only persists messages) to the queue, mirroring the webhook
+// path, so a visitor's chat reaches an agent. See WebChatInboundRouter.
+builder.Services.AddSingleton<WebChatInboundRouter>();
 builder.Services.AddPlatformBot();
 builder.Services.AddHostedService<Verbara.Platform.Api.Services.BotAnalyticsPersistenceService>();
 builder.Services.AddPlatformAudit();
