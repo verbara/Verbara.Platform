@@ -117,43 +117,45 @@ Verificación de firmas (ADR-0023, 5 imágenes signed — cosign v3+ con `--inse
 
 ## 7. Canal Voz/SIP
 
-Trunk:
+> **Alcance V1 (ver manual [06](06-canal-voz-sip.md) §0):** la voz entrante llega **hasta la cola** y hace ring al endpoint SIP del agente (teléfono de escritorio / Zoiper / Linphone). El **softphone en el browser** (responder + audio + saliente desde la pestaña) es **Fase 3** — esos ítems están marcados 🔜 y no bloquean la firma de V1.
+
+Realtime (pre-requisito):
+- ☐ `module show like res_config_pgsql` → **`Running`** (sin esto Asterisk no ve trunks/colas)
+
+Trunk (`POST /api/v1/admin/trunks`, autenticado como admin del tenant **Customer**, no `platform`):
 - ☐ Proveedor: ☐ Twilio Elastic / ☐ ____________________
 - ☐ DID provisionado: _______________________
-- ☐ Modo auth: ☐ IP ACL / ☐ usuario+password
-- ☐ Trunk creado en `POST /api/v1/dialer/trunks`
-- ☐ Estado: `Registered` o `Reachable` (según mode)
-- ☐ `pjsip show endpoints | grep twilio` muestra el trunk como `Available`
+- ☐ Modo auth: ☐ IP-ACL (`matchHost` = rango del carrier) / ☐ registración (`registrationUri`+`authUsername`)
+- ☐ Trunk creado y visible: `pjsip show endpoint t-{id}` (context `from-trunk`)
+- ☐ Si IP-ACL: `pjsip show identifies` muestra `ipauth-t-{id}` con el Match correcto
+- ☐ Si registración: `pjsip show registrations` muestra `Registered`
+- ☐ `pjsip show transports` lista los transports (udp/tcp)
 
-Dialplan inbound:
-- ☐ DID enrutado a: ☐ queue directo / ☐ IVR / ☐ business-hours wrap
-- ☐ `pjsip show transports` lista 4 transports
+Ruteo DID → cola (`POST /api/v1/admin/did-routes`):
+- ☐ `did_route` creado: DID (como llega en el INVITE, ej. `18005551234`) → `queueId`
+- ☐ `GET /admin/did-routes/by-did/{did}` lo devuelve
 
-Agente WebRTC:
-- ☐ Endpoint provisionado: `POST /api/v1/admin/agents/{id}/provision-webrtc`
-- ☐ Codec order matches policy de transcoding: ____________________
-- ☐ Agente logueado en Web UI bajo HTTPS, indicador verde "Disponible"
-- ☐ Browser preguntó permiso de micrófono y operador permitió
+Endpoint SIP del agente (`PUT /api/v1/admin/agents/{id}` con `extension`+`sipPassword`):
+- ☐ Agente con `extension` + `sipPassword` seteados → `pjsip show endpoint {tenant}-agent-…`
+- ☐ Agente en la cola (membership con canal `Voice`) y en estado `Disponible`
+- ☐ Teléfono SIP del agente **registrado**: `pjsip show contacts | grep agent`
 
-Test inbound (golden path):
-- ☐ Móvil llama al DID → server recibe
-- ☐ `core show channels` muestra 2 channels (trunk + agent)
-- ☐ Browser del agente ringtone + popup
-- ☐ Agente acepta → audio bidireccional (validar voz hablada en ambas direcciones)
+Test inbound (golden path — ✅ V1):
+- ☐ Llamada al DID → `docker logs platform-api | grep STASIS` muestra `… (tenant …, DID …) → queue '…'`
+- ☐ `asterisk -rx 'queue show'` muestra la llamada en la cola
+- ☐ El teléfono SIP del agente suena → atiende → audio bidireccional (validar voz en ambas direcciones)
 - ☐ Hangup limpio
 - ☐ CDR aparece en `/admin/analytics/calls`
 
-Test outbound:
-- ☐ Agente marca número externo → móvil destino ring
-- ☐ Caller-ID en móvil destino = el DID configurado
-- ☐ Audio bidireccional
-- ☐ Hangup limpio
-
 Test concurrencia mínima (5 calls):
-- ☐ 5 softphones LAN llaman simultáneamente al DID
-- ☐ 5 agentes distintos atienden
+- ☐ 5 llamadas simultáneas al DID (SIPp o 5 teléfonos) → 5 entran a la cola
+- ☐ 5 agentes distintos atienden (5 teléfonos SIP registrados)
 - ☐ 5 audios independientes (sin solapamiento)
-- ☐ Todos los CDRs en `/admin/analytics/calls`
+
+🔜 **Fase 3 (no bloquea V1):**
+- ☐ Agente responde la llamada **desde el browser** (softphone WebRTC) con audio
+- ☐ Marcación **saliente** desde el browser → caller-ID = el DID configurado
+- ☐ WebRTC tras NAT estricto vía Coturn/TURN
 
 ## 8. Performance basal
 
