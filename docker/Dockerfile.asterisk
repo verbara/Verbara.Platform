@@ -5,7 +5,7 @@ USER root
 
 ARG ASTERISK_VERSION=22
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libopus0 \
+    && apt-get install -y --no-install-recommends ca-certificates libopus0 openssl \
     && rm -rf /var/lib/apt/lists/* \
     && cd /tmp \
     && curl -fsSL https://downloads.digium.com/pub/telephony/codec_opus/asterisk-${ASTERISK_VERSION}.0/x86-64/codec_opus-${ASTERISK_VERSION}.0_1.3.0-x86_64.tar.gz -o codec_opus.tar.gz \
@@ -26,10 +26,15 @@ RUN apt-get update \
     && curl -fsSL https://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-es-ulaw-current.tar.gz | tar xz \
     && curl -fsSL https://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-es-gsm-current.tar.gz | tar xz \
     && curl -fsSL https://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-es-sln16-current.tar.gz | tar xz \
-    && chown -R asterisk:asterisk /var/lib/asterisk/sounds
+    && chown -R asterisk:asterisk /var/lib/asterisk/sounds \
+    # Asterisk-writable runtime dir for an auto-generated WSS TLS cert (Phase 3A)
+    # — used as the fallback when /etc/asterisk/keys is a root-owned bind mount.
+    && mkdir -p /var/lib/asterisk/keys \
+    && chown asterisk:asterisk /var/lib/asterisk/keys
 
 COPY entrypoint-asterisk.sh /entrypoint-asterisk.sh
-RUN chmod +x /entrypoint-asterisk.sh
+COPY gen-asterisk-cert.sh /usr/local/bin/gen-asterisk-cert.sh
+RUN chmod +x /entrypoint-asterisk.sh /usr/local/bin/gen-asterisk-cert.sh
 ENTRYPOINT ["/entrypoint-asterisk.sh"]
 
 USER asterisk

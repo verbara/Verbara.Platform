@@ -4,6 +4,7 @@ RTP_CONF="/etc/asterisk/rtp.conf"
 
 MANAGER_CONF="/etc/asterisk/manager.conf"
 ARI_CONF="/etc/asterisk/ari.conf"
+HTTP_CONF="/etc/asterisk/http.conf"
 # Asterisk's res_config_pgsql.so reads res_pgsql.conf (NOT res_config_pgsql.conf) —
 # using the wrong filename left realtime silently unconfigured, so Asterisk never
 # loaded ps_endpoints/ps_endpoint_id_ips/queues and inbound voice could not work.
@@ -62,6 +63,30 @@ if [ -n "$EXTERNAL_IP" ] && [ -f "$RTP_CONF" ]; then
 ${CONTAINER_IP} => ${EXTERNAL_IP}
 EOF
     echo "[entrypoint] ice_host_candidates: ${CONTAINER_IP} => ${EXTERNAL_IP}"
+fi
+
+# ── TLS cert for WSS/HTTPS (port 8089) ───────────────────────────────────────
+# WebRTC softphones (Phase 3A) REGISTER over wss://host:8089 — Asterisk's HTTP
+# TLS listener (http.conf tlsbindaddr 0.0.0.0:8089) needs a usable cert. Prefer
+# the http.conf default dir (/etc/asterisk/keys); when that is a read-only /
+# root-owned bind mount (reference-smb mounts ./asterisk-config:/etc/asterisk,
+# whose keys/ subdir is root-owned), generating there fails — fall back to an
+# asterisk-writable runtime dir and repoint http.conf. A real mounted cert
+# (e.g. demo's :ro certs, or Let's Encrypt in production) is left untouched.
+DEFAULT_KEYS="/etc/asterisk/keys"
+RUNTIME_KEYS="/var/lib/asterisk/keys"
+CERT_CN="${EXTERNAL_IP:-$(hostname -i 2>/dev/null | awk '{print $1}')}"
+[ -z "$CERT_CN" ] && CERT_CN="localhost"
+
+if /usr/local/bin/gen-asterisk-cert.sh "$DEFAULT_KEYS" "$CERT_CN" 2>/dev/null; then
+    echo "[entrypoint] TLS cert ready at $DEFAULT_KEYS (CN=$CERT_CN)"
+else
+    /usr/local/bin/gen-asterisk-cert.sh "$RUNTIME_KEYS" "$CERT_CN"
+    if [ -f "$HTTP_CONF" ]; then
+        sed -i "s#^tlscertfile = .*#tlscertfile = $RUNTIME_KEYS/asterisk.pem#" "$HTTP_CONF"
+        sed -i "s#^tlsprivatekey = .*#tlsprivatekey = $RUNTIME_KEYS/asterisk.key#" "$HTTP_CONF"
+    fi
+    echo "[entrypoint] TLS cert ready at $RUNTIME_KEYS (CN=$CERT_CN), http.conf repointed"
 fi
 
 exec /usr/sbin/asterisk -f
