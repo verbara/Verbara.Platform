@@ -182,7 +182,9 @@ The investigation surfaced a **pre-existing latent defect**: the un-gated multi-
 
 ## 11. Implementation outcome (shipped 2026-05-31, local/unpushed)
 
-**Status: CODE COMPLETE + verified (unit + adversarial review + AOT). Lab E2E (§7) is the remaining empirical gate.**
+**Status: CODE COMPLETE + verified (unit + adversarial review + AOT) + lab E2E core PROVEN.**
+
+**Lab E2E (§7), 2026-05-31:** host-run 3B.0 Api against the dockerized reference-smb Asterisk (host-net) + verbara PG :5433. Migration 027 auto-applied; `[AMI] Connected …:5038 v22.9.0` (Q1 ✓); `voice:ami:owner` + `voice:stasis:inbound` leadership acquired; ARI Stasis app `verbara` consuming. A real SIPp INVITE (src 127.0.0.2, the trunk's identify match) → DID 18005551234 → `[STASIS] … (tenant acme, DID 18005551234) → queue` → **`[VOICE-CONV] Created voice Conversation … for tenant acme`**: DB row channel=Voice, **tenant=acme** (resolved via AMI GetVar TENANT_ID, NOT default-tenant), `voice_linked_id`=Asterisk LinkedId, contact resolved, state=Abandoned (Queued→Abandoned on hangup, no agent). **Deferred (not 3B.0 regressions):** Q5 CDR — `EventStoreSubscriber` is Pro + **license-gated** ("Revoked"; lab has no license); the answer-path (Connected→Active + capacity + Busy / Ended→WrapUp + Release + ACW + Q3 presence→pause) needs a registered+answering softphone (3A harness) — covered by the 17 unit tests + 5 GetVar-wire branch tests.
 
 Open items resolved (per approval): **O1** = `Queued` (verified: `CallQueuedEvent` carries `QueueName`+`Position`, and `CallerIdNum`/`LinkedId` are already populated by then); **O2** = bridge drives `IAgentCapacityService` directly with the platform agentId (the dormant `VerbaraCapacitySyncService` handlers are extension-keyed — wrong for session data — so they were left untouched, not contorted); **O3** = new `voice_linked_id TEXT` column + partial unique index (migration 027); **O4** = dedicated `voice:ami:owner:leader` lease gated on `Asterisk:Ami:Hostname`.
 
