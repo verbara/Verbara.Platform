@@ -51,6 +51,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     private readonly IContactIdentityResolver _contacts;
     private readonly IContactStore _contactStore;
     private readonly IAgentStore _agents;
+    private readonly IQueueStore _queues;
     private readonly IAgentCapacityService _capacity;
     private readonly PlatformEventBus _eventBus;
     private readonly IClusterLeader _leader;
@@ -78,6 +79,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         IContactIdentityResolver contacts,
         IContactStore contactStore,
         IAgentStore agents,
+        IQueueStore queues,
         IAgentCapacityService capacity,
         PlatformEventBus eventBus,
         [FromKeyedServices(VoiceLeaderResources.AmiOwner)] IClusterLeader leader,
@@ -90,6 +92,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         _contacts = contacts;
         _contactStore = contactStore;
         _agents = agents;
+        _queues = queues;
         _capacity = capacity;
         _eventBus = eventBus;
         _leader = leader;
@@ -251,6 +254,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             // (isForCurrentAgent). Carries the contact id for canonical contact/history hydration +
             // display hints for instant call-card rendering — the full conversation is hydrated by id.
             var contactName = await ResolveContactDisplayNameAsync(tenantId, conversation.ContactId, session).ConfigureAwait(false);
+            var (queueName, queueAutoAnswer) = await ResolveQueueAutoAnswerAsync(tenantId, tenant, session).ConfigureAwait(false);
             _eventBus.Publish(new VoiceScreenPopEvent(
                 tenant,
                 conversation.ConversationId.Value,
@@ -259,7 +263,9 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
                 conversation.ContactId.Value,
                 contactName,
                 session.CallerIdNum ?? "",
-                session.LinkedId));
+                session.LinkedId,
+                queueName,
+                queueAutoAnswer));
 
             await ReserveCapacityAsync(tenantId, activeAgent).ConfigureAwait(false);
             await TransitionAgentAsync(tenantId, activeAgent, AgentState.Busy).ConfigureAwait(false);
@@ -286,6 +292,35 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         }
 
         return session.CallerIdName ?? session.CallerIdNum ?? AnonymousCaller;
+    }
+
+    /// <summary>
+    /// Resolves the call's queue display name + its auto-answer default for the screen-pop (3B.2b).
+    /// <c>session.QueueName</c> is the Asterisk realtime name <c>{tenant}-{Queue.Name}</c>; the prefix
+    /// is stripped to the platform queue name. IQueueStore has no by-name lookup (queues per tenant
+    /// are few) so it lists + matches. Best-effort — a lookup failure or unknown queue falls open to
+    /// (name, false): the client then uses the per-agent flag alone.
+    /// </summary>
+    private async Task<(string QueueName, bool AutoAnswerDefault)> ResolveQueueAutoAnswerAsync(
+        TenantId tenantId, string tenant, CallSession session)
+    {
+        var raw = session.QueueName;
+        if (string.IsNullOrEmpty(raw))
+            return ("", false);
+
+        var prefix = tenant + "-";
+        var queueName = raw.StartsWith(prefix, StringComparison.Ordinal) ? raw[prefix.Length..] : raw;
+        try
+        {
+            var page = await _queues.ListAsync(tenantId, new PagedQuery(1, 500), CancellationToken.None).ConfigureAwait(false);
+            var queue = page.Items.FirstOrDefault(q => q.Name == queueName);
+            return (queueName, queue?.AutoAnswerDefault ?? false);
+        }
+        catch (Exception ex)
+        {
+            LogQueueResolveFailed(queueName, ex.Message);
+            return (queueName, false);
+        }
     }
 
     /// <summary>Call ended — wrap up / abandon the Conversation, release capacity, go ACW.</summary>
@@ -478,6 +513,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[VOICE-CONV] Contact {ContactId} lookup for screen-pop failed: {Reason}")]
     private partial void LogContactLookupFailed(string contactId, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[VOICE-CONV] Queue {QueueName} auto-answer resolve for screen-pop failed: {Reason}")]
+    private partial void LogQueueResolveFailed(string queueName, string reason);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[VOICE-CONV] Agent {AgentId} not found in tenant {TenantId} — skipping presence transition.")]

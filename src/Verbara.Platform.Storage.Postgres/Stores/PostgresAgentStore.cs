@@ -17,31 +17,36 @@ internal sealed class PostgresAgentStore : IAgentStore
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "extension, sip_password, created_at, updated_at, created_by, updated_by " +
+            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
             "FROM agents WHERE tenant_id = @TenantId AND agent_id = @AgentId",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("AgentId", agentId.Value));
             },
-            r => AgentRow.Map(r, includeSip: true), ct);
+            AgentRow.Map, ct);
         return row?.ToAgent();
     }
 
     public async Task<Agent?> GetByUserIdAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
     {
+        // The ONLY callers are the self-scoped GET/PUT /agents/me (the caller's own
+        // record), and GET /agents/me MUST surface extension + sip_password so the
+        // in-browser softphone can REGISTER (3A). This SELECT therefore INCLUDES
+        // them — omitting them (the pre-3A projection) left the Postgres softphone
+        // path returning a null sipPassword while the InMemory test path masked it
+        // (3B.2b fix). Agent.SipPassword stays [JsonIgnore], so a raw-entity return
+        // elsewhere still can't leak it.
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "created_at, updated_at, created_by, updated_by " +
+            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
             "FROM agents WHERE tenant_id = @TenantId AND user_id = @UserId LIMIT 1",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("UserId", userId.Value));
             },
-            // This SELECT deliberately omits the extension / sip_password columns
-            // (matching the original Dapper query); the row must not read them.
-            r => AgentRow.Map(r, includeSip: false), ct);
+            AgentRow.Map, ct);
         return row?.ToAgent();
     }
 
@@ -49,14 +54,14 @@ internal sealed class PostgresAgentStore : IAgentStore
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "extension, sip_password, created_at, updated_at, created_by, updated_by " +
+            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
             "FROM agents WHERE tenant_id = @TenantId AND extension = @Extension LIMIT 1",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("Extension", extension));
             },
-            r => AgentRow.Map(r, includeSip: true), ct);
+            AgentRow.Map, ct);
         return row?.ToAgent();
     }
 
@@ -89,7 +94,7 @@ internal sealed class PostgresAgentStore : IAgentStore
 
         var rows = await _dataSource.QueryListAsync(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            $"extension, sip_password, created_at, updated_at, created_by, updated_by " +
+            $"extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
             $"FROM agents WHERE {where} ORDER BY display_name LIMIT @Limit OFFSET @Offset",
             p =>
             {
@@ -97,7 +102,7 @@ internal sealed class PostgresAgentStore : IAgentStore
                 p.Add(new NpgsqlParameter("Limit", query.PageSize));
                 p.Add(new NpgsqlParameter("Offset", offset));
             },
-            r => AgentRow.Map(r, includeSip: true), ct);
+            AgentRow.Map, ct);
 
         var items = rows.Select(r => r.ToAgent()).ToList();
         return new PagedResult<Agent>(items, total, query.Page, query.PageSize);
@@ -110,13 +115,14 @@ internal sealed class PostgresAgentStore : IAgentStore
 
         await _dataSource.ExecuteAsync(
             "INSERT INTO agents (agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "extension, sip_password, created_at, updated_at, created_by, updated_by) " +
+            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by) " +
             "VALUES (@AgentId, @TenantId, @UserId, @DisplayName, @State, @Capacity::jsonb, @TeamId, @Skills::jsonb, " +
-            "@Extension, @SipPassword, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
+            "@Extension, @SipPassword, @AutoAnswer, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
             "ON CONFLICT (tenant_id, agent_id) DO UPDATE SET " +
             "  display_name = EXCLUDED.display_name, state = EXCLUDED.state, capacity = EXCLUDED.capacity, " +
             "  team_id = EXCLUDED.team_id, skills = EXCLUDED.skills, " +
             "  extension = EXCLUDED.extension, sip_password = EXCLUDED.sip_password, " +
+            "  auto_answer = EXCLUDED.auto_answer, " +
             "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
             p =>
             {
@@ -130,6 +136,7 @@ internal sealed class PostgresAgentStore : IAgentStore
                 p.Add(new NpgsqlParameter("Skills", skillsJson));
                 p.Add(new NpgsqlParameter("Extension", NpgsqlDbType.Varchar) { Value = (object?)agent.Extension ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("SipPassword", NpgsqlDbType.Varchar) { Value = (object?)agent.SipPassword ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("AutoAnswer", NpgsqlDbType.Boolean) { Value = (object?)agent.AutoAnswer ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedAt", agent.CreatedAt));
                 p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)agent.UpdatedAt ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)agent.CreatedBy ?? DBNull.Value });
@@ -162,16 +169,17 @@ internal sealed class PostgresAgentStore : IAgentStore
         public string skills { get; init; } = null!;
         public string? extension { get; init; }
         public string? sip_password { get; init; }
+        public bool? auto_answer { get; init; }
         public DateTime created_at { get; init; }
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
 
-        // GetByUserIdAsync's SELECT omits the extension / sip_password columns
-        // (preserved from the original Dapper query, where missing columns simply
-        // stayed null). includeSip gates those two reads so we don't call
-        // GetOrdinal on a column the reader doesn't expose.
-        public static AgentRow Map(NpgsqlDataReader r, bool includeSip) => new()
+        // Every SELECT in this store now projects extension / sip_password /
+        // auto_answer (the self-scoped /agents/me path needs the SIP secret; auto_answer
+        // is not a secret). Agent.SipPassword is [JsonIgnore] so a raw-entity return can
+        // never leak it — only the deliberate AgentMeResponseDto copies it.
+        public static AgentRow Map(NpgsqlDataReader r) => new()
         {
             agent_id = r.GetString("agent_id"),
             tenant_id = r.GetString("tenant_id"),
@@ -181,8 +189,9 @@ internal sealed class PostgresAgentStore : IAgentStore
             capacity = r.GetString("capacity"),
             team_id = r.GetStringOrNull("team_id"),
             skills = r.GetString("skills"),
-            extension = includeSip ? r.GetStringOrNull("extension") : null,
-            sip_password = includeSip ? r.GetStringOrNull("sip_password") : null,
+            extension = r.GetStringOrNull("extension"),
+            sip_password = r.GetStringOrNull("sip_password"),
+            auto_answer = r.IsDBNull(r.GetOrdinal("auto_answer")) ? null : r.GetBoolean("auto_answer"),
             created_at = r.GetDateTime("created_at"),
             updated_at = r.GetDateTimeOrNull("updated_at"),
             created_by = r.GetStringOrNull("created_by"),
@@ -201,6 +210,7 @@ internal sealed class PostgresAgentStore : IAgentStore
             Skills = JsonSerializer.Deserialize(skills, PostgresJson.Ctx.IReadOnlyListString) ?? (IReadOnlyList<string>)[],
             Extension = extension,
             SipPassword = sip_password,
+            AutoAnswer = auto_answer,
             CreatedAt = created_at,
             UpdatedAt = updated_at,
             CreatedBy = created_by,

@@ -75,7 +75,7 @@ public sealed class SseEndpointsTests
             new AgentAssistSentimentEvent("t", "s1", "a1", "c1", "customer", 0.8f, "Positive", ["great"]),
             new AgentAssistComplianceAlertEvent("t", "s1", "a1", "c1", "r1", "forbidden phrase", "Critical"),
             new AgentAssistTranscriptEvent("t", "s1", "a1", "c1", "agent", "Hello, how can I help?", true),
-            new VoiceScreenPopEvent("t", "conv1", "a1", "Voice", "contact1", "Ada Lovelace", "+15551234", "1780266205.0"),
+            new VoiceScreenPopEvent("t", "conv1", "a1", "Voice", "contact1", "Ada Lovelace", "+15551234", "1780266205.0", "Sales", true),
             new NotificationEvent("t", "system.generic", now, "n1", "u1",
                 NotificationCategory.System, NotificationSeverity.Info, "Title", "Body", null),
         ];
@@ -94,7 +94,7 @@ public sealed class SseEndpointsTests
         // reads camelCase data.agentId/conversationId/contactId — a PascalCase emit would silently
         // drop the screen-pop (the isForCurrentAgent filter would read undefined).
         var json = JsonSerializer.Serialize(
-            new VoiceScreenPopEvent("t", "conv1", "agent1", "Voice", "contact1", "Ada Lovelace", "+15551234", "1780266205.0"),
+            new VoiceScreenPopEvent("t", "conv1", "agent1", "Voice", "contact1", "Ada Lovelace", "+15551234", "1780266205.0", "Sales", true),
             typeof(VoiceScreenPopEvent), ApiJsonContext.Default);
 
         json.Should().Contain("\"agentId\":\"agent1\"");
@@ -102,5 +102,9 @@ public sealed class SseEndpointsTests
         json.Should().Contain("\"contactId\":\"contact1\"");
         json.Should().Contain("\"channel\":\"Voice\"");
         json.Should().Contain("\"voiceLinkedId\":\"1780266205.0\"");
+        // 3B.2b: the queue + its auto-answer default ride the screen-pop so the client computes
+        // the effective auto-answer (agent override ?? queue default) without a refetch.
+        json.Should().Contain("\"queueName\":\"Sales\"");
+        json.Should().Contain("\"queueAutoAnswerDefault\":true");
     }
 }

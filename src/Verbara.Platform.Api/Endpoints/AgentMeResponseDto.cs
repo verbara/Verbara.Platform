@@ -23,6 +23,7 @@ internal sealed record AgentMeResponseDto(
     IReadOnlyList<string> Skills,
     string? Extension,
     string? SipPassword,
+    bool? AutoAnswer,
     bool CanAcceptWork,
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt)
@@ -41,6 +42,7 @@ internal sealed record AgentMeResponseDto(
             Skills: agent.Skills,
             Extension: agent.Extension,
             SipPassword: agent.SipPassword,
+            AutoAnswer: agent.AutoAnswer,
             CanAcceptWork: agent.CanAcceptWork,
             CreatedAt: agent.CreatedAt,
             UpdatedAt: agent.UpdatedAt);

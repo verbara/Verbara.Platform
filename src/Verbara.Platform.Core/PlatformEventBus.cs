@@ -160,7 +160,11 @@ public sealed record VoiceScreenPopEvent(
     string ContactId,
     string ContactName,
     string CallerNumber,
-    string VoiceLinkedId)
+    string VoiceLinkedId,
+    // 3B.2b: the call's queue + its auto-answer default, so the client computes the
+    // effective auto-answer (agent override ?? queue default) without a refetch.
+    string QueueName,
+    bool QueueAutoAnswerDefault)
     : PlatformEvent(TenantId, "voice.screenpop", DateTimeOffset.UtcNow);
 
 /// <summary>Raised when an agent's channel capacity or load changes.</summary>

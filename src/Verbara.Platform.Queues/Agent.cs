@@ -23,6 +23,13 @@ public sealed class Agent : ITenantScoped, IAuditable
     // (or any future endpoint) can never leak it.
     [JsonIgnore]
     public string? SipPassword { get; set; }
+
+    // Auto-answer override for the in-browser softphone (3B.2b). Tri-state on
+    // purpose: null = "inherit the queue default" (the call's queue carries
+    // AutoAnswerDefault), true/false = an explicit per-agent override. The
+    // effective decision is computed client-side from this + the screen-pop's
+    // queue default. Not a secret — serializes normally.
+    public bool? AutoAnswer { get; set; }
     public required DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? UpdatedAt { get; set; }
     public string? CreatedBy { get; init; }

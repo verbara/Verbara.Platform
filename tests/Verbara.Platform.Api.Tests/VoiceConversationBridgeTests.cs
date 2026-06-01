@@ -44,6 +44,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
     private readonly IContactIdentityResolver _contacts = Substitute.For<IContactIdentityResolver>();
     private readonly IContactStore _contactStore = Substitute.For<IContactStore>();
     private readonly IAgentStore _agents = Substitute.For<IAgentStore>();
+    private readonly IQueueStore _queues = Substitute.For<IQueueStore>();
     private readonly IAgentCapacityService _capacity = Substitute.For<IAgentCapacityService>();
     private readonly PlatformEventBus _eventBus = new();
     private readonly IClock _clock = Substitute.For<IClock>();
@@ -53,10 +54,13 @@ public sealed class VoiceConversationBridgeTests : IDisposable
     {
         _sessions.Events.Returns(new Subject<SessionDomainEvent>());
         _clock.UtcNow.Returns(new DateTimeOffset(2026, 5, 31, 12, 0, 0, TimeSpan.Zero));
+        // Queue lookup for the screen-pop auto-answer default is best-effort; default to "no queues".
+        _queues.ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new PagedResult<Queue>([], 0, 1, 500));
     }
 
     private VoiceConversationBridge CreateBridge(bool isLeader = true) =>
-        new(_sessions, _serverPool, _conversations, _contacts, _contactStore, _agents, _capacity, _eventBus,
+        new(_sessions, _serverPool, _conversations, _contacts, _contactStore, _agents, _queues, _capacity, _eventBus,
             LeaderStub(isLeader), _clock, NullLogger<VoiceConversationBridge>.Instance);
 
     private static IClusterLeader LeaderStub(bool isLeader)

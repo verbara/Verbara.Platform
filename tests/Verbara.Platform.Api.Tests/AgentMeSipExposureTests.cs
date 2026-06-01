@@ -48,6 +48,19 @@ public sealed class AgentMeSipExposureTests : IClassFixture<AuthenticatedPlatfor
     }
 
     [Fact]
+    public async Task GetCurrentAgent_ShouldReturnAutoAnswer_WhenSet()
+    {
+        // 3B.2b: the softphone reads its own auto-answer override from /agents/me.
+        await SeedAgentForCallerAsync(extension: "1003", sipPassword: "p", autoAnswer: true);
+
+        var response = await _client.GetAsync("/api/v1/agents/me");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var dto = await response.Content.ReadFromJsonAsync<AgentMeDto>(s_json);
+        dto!.AutoAnswer.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task GetCurrentAgent_ShouldNeverReturnAnotherAgentsSecret_WhenResolvedFromJwtSub()
     {
         // Caller's own agent — its secret is allowed in the response.
@@ -107,7 +120,7 @@ public sealed class AgentMeSipExposureTests : IClassFixture<AuthenticatedPlatfor
     /// caller-owned agent first so <c>GetByUserIdAsync</c> stays deterministic
     /// across tests sharing the class fixture's in-memory store.
     /// </summary>
-    private async Task SeedAgentForCallerAsync(string extension, string sipPassword)
+    private async Task SeedAgentForCallerAsync(string extension, string sipPassword, bool? autoAnswer = null)
     {
         using var scope = _factory.Services.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IAgentStore>();
@@ -118,7 +131,7 @@ public sealed class AgentMeSipExposureTests : IClassFixture<AuthenticatedPlatfor
         if (existing is not null)
             await store.DeleteAsync(tenantId, existing.AgentId, CancellationToken.None);
 
-        await store.SaveAsync(NewAgent(tenantId, callerUserId, extension, sipPassword), CancellationToken.None);
+        await store.SaveAsync(NewAgent(tenantId, callerUserId, extension, sipPassword, autoAnswer), CancellationToken.None);
     }
 
     private async Task<EntityId> SeedAgentForUserAsync(EntityId userId, string extension, string sipPassword)
@@ -131,7 +144,7 @@ public sealed class AgentMeSipExposureTests : IClassFixture<AuthenticatedPlatfor
         return agent.AgentId;
     }
 
-    private static Agent NewAgent(TenantId tenantId, EntityId userId, string extension, string sipPassword) => new()
+    private static Agent NewAgent(TenantId tenantId, EntityId userId, string extension, string sipPassword, bool? autoAnswer = null) => new()
     {
         AgentId = EntityId.New(),
         TenantId = tenantId,
@@ -140,8 +153,9 @@ public sealed class AgentMeSipExposureTests : IClassFixture<AuthenticatedPlatfor
         State = AgentState.Offline,
         Extension = extension,
         SipPassword = sipPassword,
+        AutoAnswer = autoAnswer,
         CreatedAt = DateTimeOffset.UtcNow,
     };
 
-    private sealed record AgentMeDto(string? Extension, string? SipPassword);
+    private sealed record AgentMeDto(string? Extension, string? SipPassword, bool? AutoAnswer);
 }

@@ -220,6 +220,7 @@ internal static class AdminEndpoints
         q.OverflowRule,
         q.WrapUp,
         q.RequiredSkills?.ToList() ?? [],
+        q.AutoAnswerDefault,
         q.CreatedAt);
 
     private static async Task<IResult> CreateQueue(
@@ -254,6 +255,7 @@ internal static class AdminEndpoints
                 DefaultWrapUpSeconds = wu.DefaultWrapUpSeconds,
                 ForceWrapUp = wu.ForceWrapUp
             } : new WrapUpConfig(),
+            AutoAnswerDefault = body.AutoAnswerDefault ?? false,
             CreatedAt = clock.UtcNow,
         };
         try
@@ -331,6 +333,7 @@ internal static class AdminEndpoints
                 DefaultWrapUpSeconds = wu.DefaultWrapUpSeconds,
                 ForceWrapUp = wu.ForceWrapUp
             };
+        if (body.AutoAnswerDefault.HasValue) queue.AutoAnswerDefault = body.AutoAnswerDefault.Value;
         queue.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(queue, ct);
 
@@ -469,6 +472,7 @@ internal static class AdminEndpoints
         };
         if (body.Extension is not null) agent.Extension = body.Extension;
         if (body.SipPassword is not null) agent.SipPassword = body.SipPassword;
+        if (body.AutoAnswer is not null) agent.AutoAnswer = body.AutoAnswer;
         await store.SaveAsync(agent, ct);
 
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
@@ -540,6 +544,11 @@ internal static class AdminEndpoints
         if (body.Skills is not null) agent.Skills = body.Skills;
         if (body.Extension is not null) agent.Extension = body.Extension;
         if (body.SipPassword is not null) agent.SipPassword = body.SipPassword;
+        // Auto-answer is tri-state: null is a MEANINGFUL value (inherit the queue default), not
+        // "field absent". Set it unconditionally so the admin UI can reset On/Off back to Inherit —
+        // the only writer is the always-complete agent form, and inherit falls back to the queue
+        // default (false by default = manual), so an omitting caller's reset is benign.
+        agent.AutoAnswer = body.AutoAnswer;
         agent.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(agent, ct);
 
@@ -716,7 +725,8 @@ internal sealed record CreateQueueRequest(
     QueueOverflowRuleDto? OverflowRule = null,
     WrapUpConfigDto? WrapUp = null,
     int? MaxWaiting = null,
-    IReadOnlyList<string>? RequiredSkills = null);
+    IReadOnlyList<string>? RequiredSkills = null,
+    bool? AutoAnswerDefault = null);
 
 internal sealed record UpdateQueueRequest(
     string? Name = null,
@@ -725,7 +735,8 @@ internal sealed record UpdateQueueRequest(
     QueueOverflowRuleDto? OverflowRule = null,
     WrapUpConfigDto? WrapUp = null,
     int? MaxWaiting = null,
-    IReadOnlyList<string>? RequiredSkills = null);
+    IReadOnlyList<string>? RequiredSkills = null,
+    bool? AutoAnswerDefault = null);
 
 internal sealed record SlaPolicyTargetDto(
     int? AnswerWithinSeconds = null,
@@ -747,6 +758,7 @@ internal sealed record CreateAgentRequest(
     string DisplayName,
     string? Extension = null,
     string? SipPassword = null,
+    bool? AutoAnswer = null,
     IReadOnlyList<QueueMembershipRequest>? QueueMemberships = null);
 
 /// <summary>
@@ -775,7 +787,7 @@ internal sealed record AgentQueueMembershipDto(
     bool IsExcluded,
     IReadOnlyList<string>? AllowedChannels,
     string Source);
-internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills, string? Extension = null, string? SipPassword = null);
+internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills, string? Extension = null, string? SipPassword = null, bool? AutoAnswer = null);
 
 internal sealed record CreateTeamRequest(string Name);
 internal sealed record UpdateTeamRequest(string? Name);
@@ -799,4 +811,5 @@ internal sealed record QueueDto(
     QueueOverflowRule? OverflowRule,
     WrapUpConfig WrapUp,
     IReadOnlyList<string> RequiredSkills,
+    bool AutoAnswerDefault,
     DateTimeOffset CreatedAt);
