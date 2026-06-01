@@ -8,7 +8,7 @@
 > - Servidor con `EXTERNAL_IP` configurada (si estás detrás de NAT).
 > - Una **cola** ya creada (manual [03](03-setup-inicial.md) §4) y al menos un **agente** con su login.
 
-> ⚠️ **ALCANCE — leé esto antes de empezar.** Hoy la **voz entrante llega hasta la cola**: la llamada del carrier se identifica como tu trunk, se resuelve el tenant, el DID se mapea a una cola y Asterisk la encola y hace ring al endpoint SIP del agente. Lo que **todavía NO está**: el **softphone en el browser** (responder la llamada y hablar desde la pestaña del agente), el **audio WebRTC bidireccional**, la **marcación saliente desde el browser** y el **TURN/Coturn**. Eso es la **Fase 3** del roadmap de voz. Mientras tanto, un agente recibe las llamadas encoladas registrando un **teléfono SIP externo** (teléfono de escritorio, Zoiper, Linphone) con su extensión — ver §6. Cada sección marca claramente qué está **✅ verificado**, qué es **🔜 Fase 3** y qué requiere **validación con tu carrier real**.
+> ⚠️ **ALCANCE — leé esto antes de empezar.** La **voz entrante llega a la cola** (la llamada del carrier se identifica como tu trunk, se resuelve el tenant, el DID se mapea a una cola y Asterisk la encola) **y** el agente la atiende de dos formas: con un **teléfono SIP externo** (escritorio, Zoiper, Linphone — §6) **o** con el **softphone en el navegador** (responder + audio WebRTC bidireccional + control de llamada + saliente, ya implementado y validado en lab — §9). Lo que **todavía NO está** (roadmap §10): **transferencia atendida/consulta + conferencia**, **supervisor monitor/whisper/barge**, y **TURN/Coturn** (sólo para agentes tras NAT estricto). El softphone del navegador viene en el **build de Fase 3** — ver la nota de release en §9. Cada sección marca claramente qué está **✅ verificado**, qué es **🔜 roadmap** y qué requiere **validación con tu carrier real**.
 
 Este manual cubre el canal de voz entrante end-to-end con los endpoints reales:
 
@@ -20,7 +20,8 @@ Este manual cubre el canal de voz entrante end-to-end con los endpoints reales:
 6. Darle a un agente un endpoint SIP para recibir llamadas.
 7. Probar una llamada entrante.
 8. Troubleshooting (índice → [08](08-troubleshooting-sip.md)).
-9. Qué viene en Fase 3 (softphone browser, saliente, Coturn).
+9. Softphone en el navegador — atender + audio + control de llamada + saliente.
+10. Qué sigue (roadmap: transferencia atendida, supervisor, Coturn).
 
 ---
 
@@ -68,7 +69,7 @@ Si esto NO está verde, **revisá manual 01 §2 y §3** antes de seguir.
 | `EXTERNAL_IP` en `.env` | = `curl https://api.ipify.org` desde el server | `grep EXTERNAL_IP docker/.env.reference-smb` |
 | ARI responde | OK | `curl -u verbara:$ARI_PASSWORD http://localhost:8088/ari/asterisk/info` |
 
-> El puerto `8089/tcp` (WSS WebRTC) sólo hace falta para el **softphone del browser (Fase 3)**. Para voz entrante a cola + teléfonos SIP no es necesario.
+> El puerto `8089/tcp` (WSS WebRTC) hace falta para el **softphone del navegador** (§9) — abrilo si tus agentes van a atender desde la pestaña. Para voz entrante a cola + teléfonos SIP externos NO es necesario.
 
 ```bash
 $ docker exec verbara-asterisk asterisk -rx 'pjsip show transports'
@@ -265,14 +266,14 @@ Esto sincroniza (vía Realtime) el endpoint del agente a `ps_endpoints` (`{tenan
 $ docker exec verbara-asterisk asterisk -rx 'pjsip show endpoint acme-agent-...' | grep -E 'Endpoint:|Aor:'
 ```
 
-**Cómo responde el agente la llamada encolada — hoy vs Fase 3:**
+**Cómo responde el agente la llamada encolada — dos vías:**
 
 | Vía | Estado | Cómo |
 |---|---|---|
 | **Teléfono SIP externo** (escritorio, Zoiper, Linphone) | ✅ disponible hoy | El agente registra su softphone/teléfono con **usuario** `{tenant}-{extension}` (ej. `acme-1001`), **password** `sipPassword`, **dominio/proxy** = tu `EXTERNAL_IP`/dominio, transport UDP/TCP. Cuando entra una llamada a su cola, el teléfono suena. |
-| **Softphone en el browser** (responder desde la pestaña del agente) | 🔜 **Fase 3** | SIP.js + WebRTC dentro del Web UI — todavía no implementado. |
+| **Softphone en el navegador** (responder desde la pestaña del agente) | ✅ implementado, validado en lab | SIP.js + WebRTC dentro del Web UI: ring + atender + audio bidireccional + control de llamada + saliente, con la llamada rastreada como conversación. Viene en el **build de Fase 3** (ver nota de release en §9). Requiere puerto 8089 + cert WSS + contexto seguro para el mic — **todo el detalle en §9**. |
 
-> ⚠️ **Honestidad sobre el alcance verificado:** la cadena trunk → Stasis → cola está validada end-to-end con una llamada SIP real (la llamada **entra a la cola**). El tramo "el endpoint del agente registra + suena + audio bidireccional" depende de un cliente SIP registrado y de NAT/RTP correctos; validalo con tu primer teléfono real (§7). El softphone del browser + audio WebRTC es Fase 3.
+> ⚠️ **Honestidad sobre el alcance verificado:** la cadena trunk → Stasis → cola está validada end-to-end con una llamada SIP real (la llamada **entra a la cola**). El tramo "el endpoint del agente registra + suena + audio bidireccional" depende de un cliente SIP registrado y de NAT/RTP correctos; validalo con tu primer teléfono/navegador real (§7 / §9). El softphone del navegador está **implementado y validado en lab** (Fase 3) — leé su **nota de release y los pre-requisitos de contexto seguro en §9** antes de prometérselo a un cliente.
 
 ## 7. Probar una llamada entrante
 
@@ -325,16 +326,84 @@ $ docker exec verbara-asterisk asterisk -rx 'pjsip show endpoint acme-agent-...'
 | "Caller-ID anonymous" | [08](08-troubleshooting-sip.md) §"From-header rejection" |
 | "Eco / distorsión" | [08](08-troubleshooting-sip.md) §"Codec mismatch + jitter" |
 
-## 9. Qué viene en Fase 3 (roadmap de voz)
+## 9. Softphone en el navegador (Fase 3) — ✅ implementado, validado en lab
+
+El agente ya puede **atender y hacer llamadas desde la pestaña del navegador**, sin teléfono externo: un softphone SIP.js + WebRTC se registra contra Asterisk por WSS, la llamada encolada **suena en el navegador**, el agente atiende y hay **audio bidireccional**. La llamada se rastrea como una **conversación de voz** (screen-pop con quién llama + su historial, agent-assist en vivo, y wrap-up/disposición al colgar).
+
+> ⚠️ **Estado de release.** Esta funcionalidad es **código-completa y validada en lab** (Fase 3 del roadmap de voz, cerrada 2026-06-01), pero **todavía NO está publicada en un release ni en una imagen de ghcr.io** — vive en el árbol de fuentes (commits locales, sin pushear aún). El `docker-compose.reference-smb.yml` por defecto fija `PLATFORM_API_TAG=v2.6.0` y `PLATFORM_WEB_TAG=v3.2.0-web`, que son **previos a Fase 3**, así que con las imágenes por defecto **no la vas a ver**. Para usarla hoy: **construí las imágenes desde el árbol de fuentes actual** (que ya incluye Fase 3) y apuntá `PLATFORM_API_TAG`/`PLATFORM_WEB_TAG` a ese build; o esperá el primer release que la incluya (≥ `v2.7.0`). El patrón de **teléfono SIP externo** (§6) sigue válido como alternativa y no depende de esto.
+
+### 9.1 Pre-requisitos
+
+- **Puerto `8089/tcp` (WSS) abierto** al `EXTERNAL_IP` — es por donde el navegador hace REGISTER (a diferencia de la voz entrante a cola, que no lo necesita).
+- **Certificado TLS del WSS.** El entrypoint de Asterisk **auto-genera un cert self-signed** en el arranque si no hay uno montado (`docker/gen-asterisk-cert.sh` → `/var/lib/asterisk/keys/`). Para producción, montá un cert real (Let's Encrypt) en su lugar.
+- **Perfil WebRTC** como default del agente — los agentes nuevos se sincronizan con perfil WebRTC automáticamente. Si tu tenant fue creado antes de Fase 3, ejecutá una vez:
+  ```bash
+  $ curl -sS -X POST http://localhost:5000/api/v1/admin/realtime/profiles/seed-defaults \
+      -H "Authorization: Bearer $TOKEN"
+  # GET .../admin/realtime/profiles debe mostrar "WebRTC Agent" con isDefault:true
+  ```
+
+### 9.2 Configurar la URL WSS que usa el navegador
+
+El Web UI lee `asteriskWssUrl` de su `config.json` (servido al boot). Seteá la **ruta `/ws`** (es la default de `res_http_websocket` de Asterisk — **no** `/asterisk/ws`):
+
+```jsonc
+// config.json servido por el Web
+{ "asteriskWssUrl": "wss://TU-EXTERNAL_IP:8089/ws" }
+```
+
+Si queda vacío, el softphone no arranca (voz queda como canal de texto).
+
+### 9.3 Aceptar el certificado self-signed (una vez por navegador)
+
+Con cert self-signed, el navegador rechaza el WSS hasta que el operador/agente visita **`https://TU-EXTERNAL_IP:8089/`** una vez y acepta la advertencia. Sin esto, el REGISTER falla en silencio (SIP.js sólo reporta un error de transporte). Con un cert real (Let's Encrypt) este paso no hace falta.
+
+### 9.4 Contexto seguro para el micrófono (CRÍTICO)
+
+`getUserMedia` (el mic) **sólo funciona en un contexto seguro**: `https://…` **o** `http://localhost`. El reference-smb sirve el Web UI por **HTTP en el puerto `80`** → si el agente entra por `http://TU-IP-LAN`, el navegador **bloquea el micrófono** y no hay audio. Opciones:
+
+- **Agente en la misma máquina** → entrá por `http://localhost` (es contexto seguro).
+- **Agentes remotos** → **terminá TLS** para el origen del Web (poné un cert en el nginx-gateway / reverse-proxy y serví el Web por `https://`). Es el camino de producción.
+
+### 9.5 Provisionar el agente del navegador
+
+Igual que §6 — el agente necesita `extension` + `sipPassword`. Desde la UI de admin (**Agentes → editar → Extensión + Generar password**), o por API (§6). El secreto se expone **sólo al propio agente** vía `GET /agents/me` (nunca en los listados de admin).
+
+### 9.6 Qué puede hacer el agente desde el navegador — ✅ implementado
+
+| Capacidad | Estado | Nota |
+|---|---|---|
+| Registrar + recibir ring + **atender** + **colgar** | ✅ | la tarjeta de llamada suena en `/agent`; audio WebRTC bidireccional |
+| **Auto-answer** (opt-in) | ✅ | flag por-agente con cascada al default de la cola; zip-tone al auto-atender; gated en mic concedido |
+| **Hold / Mute / Teclado DTMF** | ✅ | control client-side (SimpleUser) |
+| **Transferencia ciega** a cola / a otro agente / a número externo | ✅ | server-side (AMI Redirect, leader-gated) |
+| **Llamada saliente** (click-to-dial) | ✅ | reusa el stack del Dialer Pro: DNC → ruta→trunk → caller-ID del tenant; rastreada como conversación saliente |
+| **Screen-pop + agent-assist + wrap-up** | ✅ | la llamada es una conversación de voz rastreada (contacto/historial, transcripción/sentimiento, disposición al colgar) |
+
+> El **caller-ID saliente** se setea por tenant (Configuración → caller-ID saliente). Sin él, se usa el default del trunk.
+
+### 9.7 Verificar el registro del navegador
+
+```bash
+# El contacto del agente debe aparecer sobre transport-wss
+$ docker exec verbara-asterisk asterisk -rx 'pjsip show contacts' | grep -i agent
+  Contact:  acme-agent-...   transport-wss   ...   Avail
+```
+
+Pasa = contacto `transport-wss` visible + la llamada encolada hace ring en `/agent` + atender da audio + colgar limpia el canal.
+
+> ⚠️ **Limitación de lab (no del producto):** en el lab el agente WebRTC habla **opus** y el generador de prueba (SIPp) habla **ulaw**; este Asterisk de lab no transcodifica opus↔ulaw para legs sintéticos, así que el audio de prueba se corta a los segundos. Con agentes WebRTC reales + carriers reales (que negocian un codec común) esto no aplica. La señalización, el ruteo, el bridging y el rastreo de conversación quedan validados igual.
+
+## 10. Qué sigue (roadmap de voz — todavía NO implementado)
 
 Estas funciones **no están todavía** y por eso no las documentamos como operativas:
 
-- **Softphone en el browser** — responder/marcar llamadas desde la pestaña del agente (SIP.js + WebRTC contra `wss://…:8089/asterisk/ws`), con control de llamada (hold/transfer/mute), CLID y timer.
-- **Llamada saliente desde el browser**.
-- **WebRTC behind strict NAT (Coturn/TURN)** — relevante sólo cuando exista el softphone browser y los agentes trabajen desde casa con CGNAT.
-- **AMI bridge** que sincroniza el estado de la llamada SIP con la tarjeta de conversación del agente en el Web UI.
+- **Transferencia atendida / consulta** y **conferencia** (3 o más participantes) — hoy la transferencia es **ciega** (§9.6). (Fase 3B.3.)
+- **Supervisor: monitor / whisper / barge** de **voz** (escuchar la llamada, susurrarle al agente, entrar a la llamada) — vía ARI Snoop, **no implementado**. (Fase 3B.3.) *(Ojo: el whisper/coaching que existe hoy es de texto sobre conversaciones digitales, no audio de voz.)*
+- **Transferir una llamada saliente que ya está activa** — la entrante y la saliente recién originada se transfieren bien; transferir una saliente en curso aún no está cableado.
+- **WebRTC tras NAT estricto (Coturn/TURN)** — necesario sólo cuando los agentes trabajan desde casa con CGNAT. Para LAN / mismo host alcanza con `EXTERNAL_IP` + candidatos host.
 
-Hasta entonces, el patrón soportado es: **voz entrante → cola → teléfono SIP del agente** (§6), con la cadena trunk → Stasis → cola validada end-to-end.
+El patrón base sigue intacto: **voz entrante → cola → (teléfono SIP externo §6 **o** softphone navegador §9)**, con la cadena trunk → Stasis → cola validada end-to-end.
 
 ## Próximo paso
 
