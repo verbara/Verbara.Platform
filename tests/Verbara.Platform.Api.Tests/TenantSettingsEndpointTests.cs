@@ -63,6 +63,21 @@ public sealed class TenantSettingsEndpointTests : IClassFixture<PlatformAdminApi
         });
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
+
+    [Fact]
+    public async Task UpdateSettings_ShouldRoundTripOutboundCallerId_WhenOperationalSet()
+    {
+        // 3B.2d — the tenant-level outbound caller ID drives agent click-to-dial + external transfer.
+        var response = await _client.PutAsJsonAsync("/api/v1/admin/tenant/settings", new
+        {
+            operational = new { outboundCallerId = "+15558675309" },
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var getResponse = await _client.GetAsync("/api/v1/admin/tenant/settings");
+        var body = await getResponse.Content.ReadAsStringAsync();
+        body.Should().Contain("\"outboundCallerId\":\"+15558675309\"");
+    }
 }
 
 public sealed class ManagementTenantSettingsEndpointTests : IClassFixture<PlatformAdminApiFactory>

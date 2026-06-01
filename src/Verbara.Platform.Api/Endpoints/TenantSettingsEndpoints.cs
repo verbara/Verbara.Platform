@@ -41,7 +41,9 @@ internal sealed record OperationalSettingsDto(
     int MaxActiveCampaigns,
     string? DialplanContextPrefix,
     List<string>? NodeAffinity,
-    List<int>? AllowedDialingModes);
+    List<int>? AllowedDialingModes,
+    // 3B.2d — tenant-level outbound caller ID for agent click-to-dial + external blind transfer.
+    string? OutboundCallerId);
 
 internal sealed record AuthSettingsDto(
     string MfaPolicy,
@@ -95,7 +97,8 @@ internal sealed record UpdateOperationalSettingsDto(
     int? MaxActiveCampaigns = null,
     string? DialplanContextPrefix = null,
     List<string>? NodeAffinity = null,
-    List<int>? AllowedDialingModes = null);
+    List<int>? AllowedDialingModes = null,
+    string? OutboundCallerId = null);
 
 internal sealed record UpdateAuthSettingsDto(
     string? MfaPolicy = null,
@@ -305,7 +308,8 @@ internal static class TenantSettingsEndpoints
                 MaxActiveCampaigns: tenant.Options.MaxActiveCampaigns,
                 DialplanContextPrefix: tenant.Options.DialplanContextPrefix,
                 NodeAffinity: tenant.Options.NodeAffinity,
-                AllowedDialingModes: tenant.Options.AllowedDialingModes),
+                AllowedDialingModes: tenant.Options.AllowedDialingModes,
+                OutboundCallerId: tenant.Options.OutboundCallerId),
             Auth: new AuthSettingsDto(
                 MfaPolicy: auth.MfaPolicy,
                 MfaRequiredRoles: auth.MfaRequiredRoles,
@@ -411,6 +415,7 @@ internal static class TenantSettingsEndpoints
                         DialplanContextPrefix = op?.DialplanContextPrefix ?? tenant.Options.DialplanContextPrefix,
                         NodeAffinity = op?.NodeAffinity ?? tenant.Options.NodeAffinity,
                         AllowedDialingModes = op?.AllowedDialingModes ?? tenant.Options.AllowedDialingModes,
+                        OutboundCallerId = op?.OutboundCallerId ?? tenant.Options.OutboundCallerId,
                     },
                     Metadata = newMetadata,
                     CreatedAt = tenant.CreatedAt,
