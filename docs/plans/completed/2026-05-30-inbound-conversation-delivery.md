@@ -1,5 +1,7 @@
 # Epic: Inbound Conversation Delivery — WebChat + Voice reach agents end-to-end
 
+> **Status: ✅ SHIPPED — moved to `completed/` 2026-06-01.** Released as **Platform `v2.7.0` + Web `v3.3.0-web` + Pro `2.7.3-pro`** (5 cosign-signed images on ghcr.io; verbara-website `authorized-digests.json` → v2.7.0 current). All phases done: **P1** WebChat inbound delivery · **P2** voice inbound→queue (Stasis consumer + did_routes + IP-ACL trunk) · **P3** in-browser SIP.js/WebRTC softphone (3A) + voice-as-tracked-Conversation + screen-pop + agent-assist (3B.0/3B.1) + in-call control / auto-answer / blind transfer / outbound click-to-dial (3B.2, its own completed plan). Manuales 04/06 reconstructed honest. **3B.3 (supervisor monitor/whisper/barge + attended transfer + conference) is a future plan, out of this epic's scope.** Sub-plans 3A/3B/3B.2 already in `completed/`.
+
 ## Context
 
 Reconstructing the SMB channel manuales (04-webchat, 06-voz-sip) after the v2.6.0 release exposed that **the two V1 inbound channels do not deliver inbound conversations to a browser-based agent out-of-the-box** — a blocker for the SMB-first "first paying customer" goal (a contact center must route inbound to agents). Three layers are missing, verified in code (see `docs/research/2026-05-30-channel-inbound-delivery-gaps.md`):
