@@ -236,6 +236,9 @@ services:
       Services__ServiceKey: ${SERVICE_KEY:?SERVICE_KEY required (32+ chars)}
       Services__PlatformApi__BaseUrl: http://platform-api:5000
       Asterisk__ClusterNodeId: ${REALTIME_CLUSTER_NODE_ID:-realtime-1}
+      # Postgres-backed leader election (REQUIRED since v2.8.0 — realtime hard-fails
+      # at startup without ConnectionStrings:Cluster or :Postgres). Single-host = sole leader.
+      ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform};Password=${POSTGRES_PASSWORD};Maximum Pool Size=5;Minimum Pool Size=1;Pooling=true"
       # Multi-pod backplane (opt-in). Uncomment when scaling out:
       # ConnectionStrings__Redis: redis:6379
       # ConnectionStrings__IdentityRedis: redis:6379
