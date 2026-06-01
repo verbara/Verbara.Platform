@@ -13,6 +13,22 @@ _No unreleased changes._
 
 ---
 
+## [2.8.0] — 2026-06-01 — Telephony admin: usable SIP trunk + DID configuration
+
+Closes the trunk/DID configuration gaps from the [trunk & DID audit](docs/research/2026-06-01-trunk-did-audit.md). Consumes **Pro 2.7.4-pro**. Ships with **Web v3.4.0-web** (the trunk form, DID module, wizard and connectivity-test UI). Native AOT preserved.
+
+### Fixed
+- **Trunk `match_host` (IP-ACL) now persists** (Pro 2.7.4-pro). It previously flowed only to Asterisk realtime, so `GET` returned null and an edit that omitted it silently dropped the inbound identify.
+
+### Added
+- **DID validation hardening** — `DidRouteEndpoints` rejects non-E.164 DIDs (`[GeneratedRegex]`) and non-existent target queues (`IQueueStore`) with typed 400s; no more silent DID-without-destination / orphan-queue routes.
+- **Trunk connectivity test** — leader-gated `POST /api/v1/admin/trunks/{id}/test-connectivity` runs AMI `pjsip show endpoint/registrations/identify` and returns a structured `TrunkConnectivityResult` (endpoint / registration / IP-ACL identify per auth mode). Gated on `voiceAmiEnabled`.
+
+### Changed
+- `Directory.Packages.props` Pro pins → **2.7.4-pro**. `docker-compose.reference-smb.yml` defaults → `PLATFORM_API_TAG=v2.8.0` + `PLATFORM_WEB_TAG=v3.4.0-web`.
+
+---
+
 ## [2.7.0] — 2026-06-01 — Inbound Conversation Delivery: voice reaches the agent in the browser
 
 Closes the *Inbound Conversation Delivery* epic — a visitor's chat **and** an inbound phone call now both reach an available agent who handles them entirely in the browser. Consumes **Pro 2.7.3-pro**. Native AOT preserved (0 IL2026/IL3050/IL207x). Ships with **Web v3.3.0-web** (the in-browser softphone UI).
