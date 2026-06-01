@@ -1,5 +1,7 @@
 # Plan: Phase 3B — Voice as a tracked Conversation + server-orchestrated call control
 
+> **Status: ✅ SHIPPED (detailed scope) — moved to `completed/` 2026-06-01.** 3B.0 (voice↔Conversation bridge) + 3B.1 (screen-pop + per-conversation agent-assist) code-complete + lab-verified. 3B.2 (in-call control) shipped under its own plan. **3B.3 (supervisor monitor/whisper/barge + attended/consult transfer + conference) remains a future plan at kickoff** — outlined here, not yet executed. Local/unpushed.
+
 > Mirror of the approved system-path plan (`~/.claude/plans/recursive-seeking-key.md`). This repo is authoritative. `git mv` to `completed/` on ship.
 
 ## Context

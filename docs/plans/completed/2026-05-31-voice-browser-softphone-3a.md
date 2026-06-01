@@ -1,5 +1,7 @@
 # Plan: Phase 3A — In-browser inbound voice (SIP.js/WebRTC softphone, audio MVP)
 
+> **Status: ✅ SHIPPED — moved to `completed/` 2026-06-01.** All workstreams (C/A/B/D/E/F/H) closed; lab-proven with real headless-browser two-way audio. Local/unpushed. Follow-on call-control/tracking lives in 3B / 3B.2.
+
 ## Context
 
 This is **Phase 3** of the *Inbound Conversation Delivery* epic (P1 WebChat ✅ shipped, P2 voice→queue ✅ shipped + proven with a real SIP call in the lab). P1/P2 made an inbound call **reach a queue and ring the agent's PJSIP endpoint** — but only on an **external SIP phone** (Zoiper/desk phone). The contact-center promise ("the agent answers in the browser with two-way audio") is still missing: the Web app has **zero** SIP/WebRTC code, voice is rendered as a text channel, and the agent's `sipPassword` is provisioned backend but the browser can't use it.

@@ -1,5 +1,7 @@
 # Plan 3B.2 — Voice call control + auto-answer + blind transfer + outbound click-to-dial
 
+> **Status: ✅ CODE-COMPLETE — moved to `completed/` 2026-06-01.** All 5 sub-phases shipped (3B.2a hold/mute/DTMF · 3B.2b auto-answer cascade · 3B.2c blind transfer queue/agent · 3B.2d outbound click-to-dial + external transfer, with 3B.2d.3 outbound-bridge-linking lab-validated live). Local/unpushed. **Remaining (non-blocking):** the optional confirmatory consolidated audio E2E (3B.2a+b+c+d together — riskiest piece d.3 already lab-validated), and the documented limitation that transfer-of-an-active-*outbound* call isn't wired (needs CoreShowChannels-by-LinkedId; future).
+
 ## Context
 
 Phase 3B.0 made an inbound voice call a tracked `Conversation` (AMI→bridge, leader-emit, idempotent by Asterisk `LinkedId`). Phase 3B.1 added screen-pop + per-conversation agent-assist. The agent can now **answer/reject/hangup** an inbound call in the browser softphone — but that's it. For a real omnichannel contact center the agent needs full **call control** on a live call (hold, mute, DTMF, transfer), an **auto-answer** option (industry-standard opt-in), and the ability to place **outbound** calls. 3B.2 closes that gap; attended/consult transfer, conference and supervisor monitor are deferred to 3B.3.
