@@ -460,5 +460,90 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         result.Should().BeNull();
     }
 
+    // ─── OnCallStarted outbound linkage (3B.2d.3 — lab-verified against the real SDK model) ───
+
+    private void StubGetVarFor(string variable, string? value)
+    {
+#pragma warning disable CA2012 // ValueTask in NSubstitute setup
+        _ami.SendActionAsync<GetVarResponse>(
+                Arg.Is<ManagerAction>(a => a is GetVarAction && ((GetVarAction)a).Variable == variable),
+                Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<GetVarResponse>(new GetVarResponse
+            {
+                Response = string.IsNullOrEmpty(value) ? "Error" : "Success",
+                Value = value,
+            }));
+#pragma warning restore CA2012
+    }
+
+    private Conversation OutboundConversation(EntityId agentId, string? voiceLinkedId = null) =>
+        new()
+        {
+            ConversationId = EntityId.New(),
+            TenantId = new TenantId(Tenant),
+            ContactId = EntityId.New(),
+            Channel = ChannelType.Voice,
+            State = ConversationState.Active,
+            Owner = new ConversationOwner(ConversationOwnerKind.Agent, agentId),
+            CreatedAt = _clock.UtcNow,
+            VoiceLinkedId = voiceLinkedId,
+        };
+
+    [Fact]
+    public async Task LinkOutboundCallAsync_ShouldStampLinkedIdAndScreenPop_WhenOutboundVarPresent()
+    {
+        AddPrimaryServer();
+        StubContact();
+        var events = CaptureEvents();
+        var agentId = EntityId.From(AgentGuid);
+        var conv = OutboundConversation(agentId);
+        _conversations.GetByIdAsync(new TenantId(Tenant), conv.ConversationId, Arg.Any<CancellationToken>()).Returns(conv);
+        StubGetVarFor("VERBARA_OUTBOUND_ID", conv.ConversationId.Value);
+        StubGetVarFor("TENANT_ID", Tenant);
+        var session = new CallSession("s-out-link", "link-out-1", "primary", CallDirection.Inbound);
+
+        var bridge = CreateBridge();
+        await bridge.LinkOutboundCallAsync(session, "PJSIP/acme-agent-x");
+
+        await _conversations.Received().SaveAsync(
+            Arg.Is<Conversation>(c => c.ConversationId == conv.ConversationId && c.VoiceLinkedId == "link-out-1"),
+            Arg.Any<CancellationToken>());
+        events.OfType<VoiceScreenPopEvent>().Should().ContainSingle(ev =>
+            ev.ConversationId == conv.ConversationId.Value
+            && ev.AgentId == AgentGuid
+            && ev.CorrelationId == conv.ConversationId.Value);
+    }
+
+    [Fact]
+    public async Task LinkOutboundCallAsync_ShouldNoOp_WhenOutboundVarAbsent()
+    {
+        AddPrimaryServer();
+        StubGetVarFor("VERBARA_OUTBOUND_ID", null); // not an outbound click-to-dial (e.g. inbound trunk leg)
+        var session = new CallSession("s-in", "link-in", "primary", CallDirection.Inbound);
+
+        var bridge = CreateBridge();
+        await bridge.LinkOutboundCallAsync(session, "PJSIP/t-2-abc");
+
+        await _conversations.DidNotReceive().GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>());
+        await _conversations.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task LinkOutboundCallAsync_ShouldBeIdempotent_WhenAlreadyLinked()
+    {
+        AddPrimaryServer();
+        var agentId = EntityId.From(AgentGuid);
+        var conv = OutboundConversation(agentId, voiceLinkedId: "already-linked");
+        _conversations.GetByIdAsync(new TenantId(Tenant), conv.ConversationId, Arg.Any<CancellationToken>()).Returns(conv);
+        StubGetVarFor("VERBARA_OUTBOUND_ID", conv.ConversationId.Value);
+        StubGetVarFor("TENANT_ID", Tenant);
+        var session = new CallSession("s-out-redup", "link-redup", "primary", CallDirection.Inbound);
+
+        var bridge = CreateBridge();
+        await bridge.LinkOutboundCallAsync(session, "PJSIP/acme-agent-x");
+
+        await _conversations.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
+    }
+
     public void Dispose() => _eventBus.Dispose();
 }

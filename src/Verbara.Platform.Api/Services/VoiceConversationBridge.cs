@@ -43,6 +43,8 @@ namespace Verbara.Platform.Api.Services;
 internal sealed partial class VoiceConversationBridge : IHostedService, IDisposable
 {
     private const string TenantVariable = "TENANT_ID";
+    /// <summary>Channel var the dial service stamps on an outbound Originate (= the tracked Conversation id).</summary>
+    private const string OutboundIdVariable = "VERBARA_OUTBOUND_ID";
     private const string AnonymousCaller = "anonymous";
 
     private readonly ICallSessionManager _sessions;
@@ -128,8 +130,11 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         if (!_leader.IsLeader)
             return;
 
-        // Only the three lifecycle events the voice projection follows.
-        var isLifecycle = evt is CallQueuedEvent or CallConnectedEvent or CallEndedEvent;
+        // Lifecycle events the voice projection follows. CallStarted is the OUTBOUND hook: an agent
+        // click-to-dial (3B.2d) is NOT a queue call, so it never raises CallConnected/CallQueued — but
+        // it does raise CallStarted on the originating (agent) channel, the one moment the leg is live
+        // and carries the VERBARA_OUTBOUND_ID correlation var.
+        var isLifecycle = evt is CallStartedEvent or CallQueuedEvent or CallConnectedEvent or CallEndedEvent;
         if (!isLifecycle)
             return;
 
@@ -141,6 +146,9 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             acquired = true;
             switch (evt)
             {
+                case CallStartedEvent started:
+                    await OnCallStartedAsync(started).ConfigureAwait(false);
+                    break;
                 case CallQueuedEvent queued:
                     await OnCallQueuedAsync(queued).ConfigureAwait(false);
                     break;
@@ -332,8 +340,12 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     private async Task OnCallEndedAsync(CallEndedEvent evt)
     {
         var session = _sessions.GetById(evt.SessionId);
-        if (session is null || session.Direction != CallDirection.Inbound)
+        if (session is null)
             return;
+        // Direction-agnostic: an outbound click-to-dial (3B.2d) is misclassified Inbound (its context
+        // isn't a configured outbound pattern), so we don't gate on Direction here — the
+        // find-by-LinkedId below is the real filter (untracked calls return null → no-op). This wraps
+        // up BOTH inbound queue calls and outbound calls once their Conversation exists.
 
         // Recover the tracked Conversation by the call-global LinkedId. On a leadership failover
         // mid-call this pod may never have stamped session.TenantId (it was a follower during
@@ -346,7 +358,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             return; // untracked call — nothing to wrap up
 
         var tenantId = conversation.TenantId;
-        var agentId = ExtractAgentId(tenantId.Value, session.AgentInterface);
+        // Inbound resolves the answering agent from the queue member interface; an outbound call has no
+        // AgentInterface, so fall back to the Conversation owner (the agent who placed the call).
+        var agentId = ExtractAgentId(tenantId.Value, session.AgentInterface)
+            ?? (conversation.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } owner } ? owner : null);
         var wasActive = conversation.State == ConversationState.Active;
 
         // Answered call → WrapUp (awaiting disposition, 3B.1); never-answered → Abandoned.
@@ -497,6 +512,109 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         }
     }
 
+    /// <summary>
+    /// Outbound click-to-dial linkage (3B.2d.3). An agent-initiated outbound call is NOT a queue call,
+    /// so the SDK raises no <c>CallConnectedEvent</c> for it — only this <c>CallStartedEvent</c> on the
+    /// originating (agent) leg, which is also the one moment that leg is live enough to read the
+    /// <c>VERBARA_OUTBOUND_ID</c> channel var (it returns <c>Error</c> by <c>CallEndedEvent</c>). The
+    /// dial service stamped that var = the pre-created Conversation id, so we link by id (the call's
+    /// direction is misclassified Inbound because <c>outbound-agent</c> isn't a configured outbound
+    /// context — we therefore key off the VAR, not the direction). Every inbound call also raises
+    /// CallStarted on its trunk leg; the var is absent there, so a single GetVar cleanly self-filters.
+    /// </summary>
+    private async Task OnCallStartedAsync(CallStartedEvent evt)
+    {
+        var session = _sessions.GetById(evt.SessionId);
+        // The outbound originate has exactly one participant at start: the agent (A) leg.
+        var channel = session?.Participants.Count > 0 ? session.Participants[0].Channel : null;
+        if (session is null || string.IsNullOrEmpty(channel))
+            return;
+        await LinkOutboundCallAsync(session, channel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The testable core of the outbound link (the channel is passed explicitly because
+    /// <c>CallSession.AddParticipant</c> is SDK-internal, so unit tests can't populate participants —
+    /// mirrors <see cref="ResolveTenantFromChannelAsync"/>).
+    /// </summary>
+    internal async Task LinkOutboundCallAsync(CallSession session, string channel)
+    {
+        var server = _serverPool.GetServer("primary");
+        if (server is null)
+            return;
+
+        var correlationId = await GetChannelVarAsync(server, channel, OutboundIdVariable).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(correlationId))
+            return; // not an outbound click-to-dial — the var is only set by the dial service
+
+        var tenant = await GetChannelVarAsync(server, channel, TenantVariable).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(tenant))
+            return;
+        var tenantId = new TenantId(tenant);
+        session.TenantId = tenant; // stamp so the End handler resolves the same tenant for wrap-up
+
+        var conversation = await _conversations.GetByIdAsync(tenantId, EntityId.From(correlationId), CancellationToken.None).ConfigureAwait(false);
+        if (conversation is null)
+        {
+            LogConversationMissing(session.SessionId, nameof(CallStartedEvent));
+            return;
+        }
+
+        // Idempotent: a re-emission once the LinkedId is stamped is a no-op.
+        if (!string.IsNullOrEmpty(conversation.VoiceLinkedId))
+            return;
+
+        conversation.VoiceLinkedId = session.LinkedId;
+        conversation.UpdatedAt = _clock.UtcNow;
+        await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
+        LogOutboundLinked(conversation.ConversationId.Value, tenant, session.LinkedId);
+
+        // The outbound Conversation is created Owner=agent by the dial service. The initiating client
+        // already correlated via the dial response; the screen-pop carries the correlationId for other
+        // consumers + consistency. session.Extension is the dialed number (Originate Exten).
+        if (conversation.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } owner })
+        {
+            var contactName = await ResolveContactDisplayNameAsync(tenantId, conversation.ContactId, session).ConfigureAwait(false);
+            _eventBus.Publish(new VoiceScreenPopEvent(
+                tenant,
+                conversation.ConversationId.Value,
+                owner.Value,
+                nameof(ChannelType.Voice),
+                conversation.ContactId.Value,
+                contactName,
+                session.Extension ?? "",
+                session.LinkedId,
+                "",
+                false,
+                correlationId));
+
+            await ReserveCapacityAsync(tenantId, owner).ConfigureAwait(false);
+            await TransitionAgentAsync(tenantId, owner, AgentState.Busy).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Reads <paramref name="variable"/> on <paramref name="channel"/> via an AMI GetVar. Returns the
+    /// value, or <see langword="null"/> when AMI fails / the variable is unset. (Distinct from
+    /// <see cref="ResolveTenantFromChannelAsync"/>, which also stamps the tenant hook.)
+    /// </summary>
+    private async Task<string?> GetChannelVarAsync(VerbaraServer server, string channel, string variable)
+    {
+        try
+        {
+            var response = await server.Connection.SendActionAsync<GetVarResponse>(
+                new GetVarAction { Channel = channel, Variable = variable },
+                CancellationToken.None).ConfigureAwait(false);
+            var ok = string.Equals(response.Response, "Success", StringComparison.OrdinalIgnoreCase);
+            return ok && !string.IsNullOrEmpty(response.Value) ? response.Value : null;
+        }
+        catch (Exception ex)
+        {
+            LogGetVarFailed(channel, ex.Message);
+            return null;
+        }
+    }
+
     // ─── Log messages ───────────────────────────────────────────────────────────
 
     [LoggerMessage(Level = LogLevel.Warning,
@@ -506,6 +624,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     [LoggerMessage(Level = LogLevel.Information,
         Message = "[VOICE-CONV] Created voice Conversation {ConversationId} for tenant {TenantId} (call {LinkedId}).")]
     private partial void LogConversationCreated(string conversationId, string tenantId, string linkedId);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "[VOICE-CONV] Linked OUTBOUND Conversation {ConversationId} for tenant {TenantId} to call {LinkedId}.")]
+    private partial void LogOutboundLinked(string conversationId, string tenantId, string linkedId);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[VOICE-CONV] Session {SessionId}: no tracked Conversation found on {Event} — skipping its update.")]
