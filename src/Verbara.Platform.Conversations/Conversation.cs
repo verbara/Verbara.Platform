@@ -22,9 +22,12 @@ public sealed class Conversation : ITenantScoped, IAuditable
     /// channel of one physical call). Acts as the per-call idempotency correlation key
     /// (unique per tenant via a partial index, migration 027) so the leader-emit voice
     /// bridge never creates a duplicate Conversation across a leadership failover.
-    /// <see langword="null"/> for every non-voice conversation.
+    /// <see langword="null"/> for every non-voice conversation. Settable (not init-only) because an
+    /// OUTBOUND voice Conversation (3B.2d) is pre-created by the dial service BEFORE the live call
+    /// exists, then the bridge stamps the real LinkedId on <c>CallConnected</c> (inbound sets it at
+    /// creation). The stores persist it on UPDATE, so a later stamp is durable.
     /// </summary>
-    public string? VoiceLinkedId { get; init; }
+    public string? VoiceLinkedId { get; set; }
 
     private readonly Dictionary<string, string> _metadata = new();
     public IReadOnlyDictionary<string, string> Metadata => _metadata;

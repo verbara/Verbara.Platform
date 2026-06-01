@@ -164,7 +164,10 @@ public sealed record VoiceScreenPopEvent(
     // 3B.2b: the call's queue + its auto-answer default, so the client computes the
     // effective auto-answer (agent override ?? queue default) without a refetch.
     string QueueName,
-    bool QueueAutoAnswerDefault)
+    bool QueueAutoAnswerDefault,
+    // 3B.2d: for an OUTBOUND screen-pop, the click-to-dial correlation id (= the outbound
+    // Conversation id the client set optimistically via startOutbound). Null for inbound.
+    string? CorrelationId = null)
     : PlatformEvent(TenantId, "voice.screenpop", DateTimeOffset.UtcNow);
 
 /// <summary>Raised when an agent's channel capacity or load changes.</summary>

@@ -123,6 +123,36 @@ public class PostgresConversationStoreVoiceLinkTests : IClassFixture<Conversatio
     }
 
     [Fact]
+    public async Task SaveAsync_ShouldPersistVoiceLinkedId_WhenStampedAfterCreation()
+    {
+        // 3B.2d outbound: the dial service pre-creates the Conversation with a NULL voice_linked_id
+        // (no live call yet); the bridge stamps the real LinkedId on CallConnected. The stamp lands
+        // via the upsert's UPDATE branch, so it must persist (the bug: voice_linked_id was missing
+        // from the DO UPDATE SET → the later stamp was silently dropped).
+        var conv = new Conversation
+        {
+            ConversationId = EntityId.New(),
+            TenantId = _tenant,
+            ContactId = EntityId.New(),
+            Channel = ChannelType.Voice,
+            State = ConversationState.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+            // VoiceLinkedId intentionally null at creation (outbound pre-create).
+        };
+        await _sut.SaveAsync(conv, CancellationToken.None);
+
+        conv.VoiceLinkedId = "linked-stamped-late";
+        await _sut.SaveAsync(conv, CancellationToken.None);
+
+        var byId = await _sut.GetByIdAsync(_tenant, conv.ConversationId, CancellationToken.None);
+        var byLinkedId = await _sut.FindByVoiceLinkedIdAsync(_tenant, "linked-stamped-late", CancellationToken.None);
+
+        byId!.VoiceLinkedId.Should().Be("linked-stamped-late");
+        byLinkedId.Should().NotBeNull("a LinkedId stamped after creation must be findable");
+        byLinkedId!.ConversationId.Should().Be(conv.ConversationId);
+    }
+
+    [Fact]
     public async Task SaveAsync_ShouldNotConstrainNullVoiceLinkedId()
     {
         var a = new Conversation

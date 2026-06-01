@@ -102,7 +102,10 @@ internal sealed class PostgresConversationStore : IConversationStore
                 "ON CONFLICT (tenant_id, conversation_id) DO UPDATE SET " +
                 "  state = EXCLUDED.state, owner_kind = EXCLUDED.owner_kind, owner_id = EXCLUDED.owner_id, " +
                 "  case_id = EXCLUDED.case_id, metadata = EXCLUDED.metadata, closed_at = EXCLUDED.closed_at, " +
-                "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
+                "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by, " +
+                // 3B.2d: an outbound voice Conversation is pre-created with a NULL voice_linked_id; the
+                // bridge stamps the real LinkedId later, so it must persist on UPDATE (not just INSERT).
+                "  voice_linked_id = EXCLUDED.voice_linked_id",
                 p =>
                 {
                     p.Add(new NpgsqlParameter("ConversationId", conversation.ConversationId.Value));
