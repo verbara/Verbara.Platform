@@ -4,18 +4,21 @@ using Verbara.Platform.Queues;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Live.Server;
 using Verbara.Sdk.Pro.Cluster.Leadership;
+using Verbara.Sdk.Pro.Dialer.Routing;
+using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Api.Services;
 
-/// <summary>Where a live voice call is being blind-transferred (3B.2c). External is added in 3B.2d.</summary>
+/// <summary>Where a live voice call is being blind-transferred (3B.2c queue/agent; 3B.2d external).</summary>
 internal enum VoiceTransferKind
 {
     Queue,
     Agent,
+    External,
 }
 
-/// <summary>A blind-transfer destination: <see cref="Value"/> is the queue id or agent id.</summary>
+/// <summary>A blind-transfer destination: <see cref="Value"/> is the queue id, agent id, or external number.</summary>
 internal sealed record VoiceTransferTarget(VoiceTransferKind Kind, string Value);
 
 /// <summary>Result of a transfer attempt — <see cref="Error"/> is a stable machine code on failure.</summary>
@@ -41,14 +44,21 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
     private const string TransferAgentContext = "transfer-agent";
     /// <summary>Channel variable the <c>[transfer-agent]</c> context dials.</summary>
     private const string TransferTargetVariable = "TRANSFER_TARGET";
-    /// <summary>Fixed extension in both <c>[stasis-queue]</c> and <c>[transfer-agent]</c>.</summary>
+    /// <summary>Shared outbound context (3B.2d) — dials <c>PJSIP/${TRUNK}/${EXTEN}</c> with <c>${OUTBOUND_CALLERID}</c>.</summary>
+    private const string OutboundAgentContext = "outbound-agent";
+    private const string TrunkVariable = "TRUNK";
+    private const string OutboundCallerIdVariable = "OUTBOUND_CALLERID";
+    /// <summary>Fixed extension in both <c>[stasis-queue]</c> and <c>[transfer-agent]</c> (external uses the number).</summary>
     private const string FixedExten = "s";
 
     private readonly IConversationStore _conversations;
     private readonly IQueueStore _queues;
     private readonly IAgentStore _agents;
     private readonly VerbaraServerPool _serverPool;
+    private readonly OutboundRouteResolverBase? _routes;
+    private readonly ITenantStore _tenants;
     private readonly IClusterLeader _leader;
+    private readonly string? _defaultTrunk;
     private readonly ILogger<VoiceCallControlService> _logger;
 
     public VoiceCallControlService(
@@ -56,14 +66,20 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
         IQueueStore queues,
         IAgentStore agents,
         VerbaraServerPool serverPool,
+        OutboundRouteResolverBase? routes,
+        ITenantStore tenants,
         [FromKeyedServices(VoiceLeaderResources.AmiOwner)] IClusterLeader leader,
+        string? defaultTrunk,
         ILogger<VoiceCallControlService> logger)
     {
         _conversations = conversations;
         _queues = queues;
         _agents = agents;
         _serverPool = serverPool;
+        _routes = routes;
+        _tenants = tenants;
         _leader = leader;
+        _defaultTrunk = defaultTrunk;
         _logger = logger;
     }
 
@@ -85,11 +101,13 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
         if (server is null)
             return new VoiceTransferOutcome(false, "ami-unavailable");
 
-        // Resolve the destination, set the variable the target context reads, then Redirect the
+        // Resolve the destination, set the variable(s) the target context reads, then Redirect the
         // customer leg. Queue → [stasis-queue] (the inbound contract: QUEUE_NAME + exten s);
-        // Agent → [transfer-agent] (dials TRANSFER_TARGET). AMI sends are best-effort (mirrors
-        // RealtimeStateBridge): a stale channel just leaves the call as-is.
+        // Agent → [transfer-agent] (dials TRANSFER_TARGET); External → [outbound-agent] (TRUNK +
+        // OUTBOUND_CALLERID, exten = the dialed number — shared with click-to-dial 3B.2d). AMI sends are
+        // best-effort (mirrors RealtimeStateBridge): a stale channel just leaves the call as-is.
         string context;
+        var exten = FixedExten;
         switch (target.Kind)
         {
             case VoiceTransferKind.Queue:
@@ -110,12 +128,45 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
                 context = TransferAgentContext;
                 break;
             }
+            case VoiceTransferKind.External:
+            {
+                var number = NormalizeNumber(target.Value);
+                if (string.IsNullOrEmpty(number))
+                    return new VoiceTransferOutcome(false, "invalid-number");
+
+                // Same route→trunk + tenant caller-ID resolution as click-to-dial (3B.2d.2): optional
+                // route resolver, falling back to the configured default trunk; caller ID from the tenant
+                // setting (empty → the dialplan clears CALLERID → the trunk default is presented).
+                string? trunk = null;
+                if (_routes is not null)
+                {
+                    try
+                    {
+                        trunk = (await _routes.ResolveAsync(tenantId.Value, number, campaignId: null, ct).ConfigureAwait(false))?.Name;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogRouteFailed(number, ex.Message);
+                    }
+                }
+                trunk ??= _defaultTrunk;
+                if (string.IsNullOrWhiteSpace(trunk))
+                    return new VoiceTransferOutcome(false, "no-trunk");
+
+                var tenant = await _tenants.GetAsync(tenantId.Value, ct).ConfigureAwait(false);
+                var callerId = tenant?.Options.OutboundCallerId ?? "";
+                await SendVarAsync(server, channel, TrunkVariable, trunk!, ct).ConfigureAwait(false);
+                await SendVarAsync(server, channel, OutboundCallerIdVariable, callerId, ct).ConfigureAwait(false);
+                context = OutboundAgentContext;
+                exten = number;
+                break;
+            }
             default:
                 return new VoiceTransferOutcome(false, "unsupported-target");
         }
 
         await server.Connection.SendActionAsync(
-            new RedirectAction { Channel = channel, Context = context, Exten = FixedExten, Priority = 1 },
+            new RedirectAction { Channel = channel, Context = context, Exten = exten, Priority = 1 },
             ct).ConfigureAwait(false);
 
         LogTransfer(conversationId.Value, target.Kind, target.Value);
@@ -126,7 +177,15 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
         await server.Connection.SendActionAsync(
             new SetVarAction { Channel = channel, Variable = variable, Value = value }, ct).ConfigureAwait(false);
 
+    /// <summary>Keeps digits and a leading <c>+</c> only — strips spaces, dashes, and parentheses.</summary>
+    private static string NormalizeNumber(string raw) =>
+        new([.. raw.Where(c => char.IsDigit(c) || c == '+')]);
+
     [LoggerMessage(Level = LogLevel.Information,
         Message = "[VOICE-XFER] Conversation {ConversationId} blind-transferred to {Kind} {Target}")]
     private partial void LogTransfer(string conversationId, VoiceTransferKind kind, string target);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[VOICE-XFER] Outbound route resolve for external {Number} failed (falling back to default trunk): {Reason}")]
+    private partial void LogRouteFailed(string number, string reason);
 }

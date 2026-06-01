@@ -906,9 +906,21 @@ if (!string.IsNullOrEmpty(clusterConn))
         if (voiceAmiEnabled)
         {
             builder.Services.AddHostedService<Verbara.Platform.Api.Services.VoiceConversationBridge>();
-            // Blind transfer (3B.2c) — leader-gated AMI Redirect; request-driven, not a HostedService.
-            builder.Services.AddSingleton<Verbara.Platform.Api.Services.IVoiceCallControlService,
-                Verbara.Platform.Api.Services.VoiceCallControlService>();
+            // Blind transfer (3B.2c queue/agent; 3B.2d external) — leader-gated AMI Redirect; request-driven.
+            // External transfer reuses the outbound route→trunk + tenant caller-ID resolution, so the route
+            // resolver is optional (GetService — only with the full dialer stack) + the default trunk config.
+            builder.Services.AddSingleton<Verbara.Platform.Api.Services.IVoiceCallControlService>(sp =>
+                new Verbara.Platform.Api.Services.VoiceCallControlService(
+                    sp.GetRequiredService<Verbara.Platform.Conversations.IConversationStore>(),
+                    sp.GetRequiredService<Verbara.Platform.Queues.IQueueStore>(),
+                    sp.GetRequiredService<Verbara.Platform.Queues.IAgentStore>(),
+                    sp.GetRequiredService<Verbara.Sdk.Live.Server.VerbaraServerPool>(),
+                    sp.GetService<Verbara.Sdk.Pro.Dialer.Routing.OutboundRouteResolverBase>(),
+                    sp.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
+                    sp.GetRequiredKeyedService<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
+                        Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner),
+                    builder.Configuration["Asterisk:Outbound:DefaultTrunk"],
+                    sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.VoiceCallControlService>>()));
             // Outbound click-to-dial (3B.2d): reuse the Pro Dialer originate executor (circuit-breaker +
             // trunk-health). It is NOT registered by AddProDialer (consumed via GetService there), and its
             // trunk-health / post-call / time-provider deps are optional, so register it via a factory that
