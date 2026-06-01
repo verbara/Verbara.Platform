@@ -904,7 +904,12 @@ if (!string.IsNullOrEmpty(clusterConn))
         if (voiceInboundEnabled)
             builder.Services.AddHostedService<Verbara.Platform.Api.Services.StasisInboundConsumer>();
         if (voiceAmiEnabled)
+        {
             builder.Services.AddHostedService<Verbara.Platform.Api.Services.VoiceConversationBridge>();
+            // Blind transfer (3B.2c) — leader-gated AMI Redirect; request-driven, not a HostedService.
+            builder.Services.AddSingleton<Verbara.Platform.Api.Services.IVoiceCallControlService,
+                Verbara.Platform.Api.Services.VoiceCallControlService>();
+        }
     }
 }
 
@@ -1401,6 +1406,10 @@ Verbara.Platform.Api.Endpoints.Profile.ProfileSessionsEndpoints.MapProfileSessio
 Verbara.Platform.Api.Endpoints.Profile.ProfileRecoveryCodesEndpoints.MapProfileRecoveryCodesEndpoints(v1);
 v1.MapWebhookEndpoints();
 v1.MapConversationEndpoints();
+// Voice call-control endpoints (3B.2c blind transfer) — only when AMI is configured, since the
+// leader-gated IVoiceCallControlService is registered under the same voice-AMI gate.
+if (!string.IsNullOrWhiteSpace(app.Configuration["Asterisk:Ami:Hostname"]))
+    v1.MapVoiceEndpoints();
 v1.MapAgentEndpoints();
 v1.MapAdminEndpoints();
 v1.MapQueueMembersEndpoints();

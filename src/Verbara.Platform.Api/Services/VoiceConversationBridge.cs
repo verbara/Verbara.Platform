@@ -244,6 +244,11 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
 
         if (agentId is { } owner)
             conversation.Owner = new ConversationOwner(ConversationOwnerKind.Agent, owner);
+        // Persist the customer (trunk) leg channel so a blind transfer (3B.2c) can Redirect the right
+        // leg later — survives a leadership failover because it lives on the Conversation, not the pod.
+        var callerChannel = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Caller)?.Channel;
+        if (!string.IsNullOrEmpty(callerChannel))
+            conversation.SetMetadata("customerChannel", callerChannel);
         conversation.UpdatedAt = _clock.UtcNow;
         await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
         _eventBus.Publish(new ConversationStateChangedEvent(tenant, conversation.ConversationId.Value, oldState.ToString(), conversation.State.ToString()));
