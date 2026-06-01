@@ -49,6 +49,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     private readonly VerbaraServerPool _serverPool;
     private readonly IConversationStore _conversations;
     private readonly IContactIdentityResolver _contacts;
+    private readonly IContactStore _contactStore;
     private readonly IAgentStore _agents;
     private readonly IAgentCapacityService _capacity;
     private readonly PlatformEventBus _eventBus;
@@ -75,6 +76,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         VerbaraServerPool serverPool,
         IConversationStore conversations,
         IContactIdentityResolver contacts,
+        IContactStore contactStore,
         IAgentStore agents,
         IAgentCapacityService capacity,
         PlatformEventBus eventBus,
@@ -86,6 +88,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         _serverPool = serverPool;
         _conversations = conversations;
         _contacts = contacts;
+        _contactStore = contactStore;
         _agents = agents;
         _capacity = capacity;
         _eventBus = eventBus;
@@ -242,11 +245,47 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
         _eventBus.Publish(new ConversationStateChangedEvent(tenant, conversation.ConversationId.Value, oldState.ToString(), conversation.State.ToString()));
 
-        if (agentId is { } reserved)
+        if (agentId is { } activeAgent)
         {
-            await ReserveCapacityAsync(tenantId, reserved).ConfigureAwait(false);
-            await TransitionAgentAsync(tenantId, reserved, AgentState.Busy).ConfigureAwait(false);
+            // Agent-targeted screen-pop (3B.1): tenant-broadcast, the client filters by AgentId
+            // (isForCurrentAgent). Carries the contact id for canonical contact/history hydration +
+            // display hints for instant call-card rendering — the full conversation is hydrated by id.
+            var contactName = await ResolveContactDisplayNameAsync(tenantId, conversation.ContactId, session).ConfigureAwait(false);
+            _eventBus.Publish(new VoiceScreenPopEvent(
+                tenant,
+                conversation.ConversationId.Value,
+                activeAgent.Value,
+                nameof(ChannelType.Voice),
+                conversation.ContactId.Value,
+                contactName,
+                session.CallerIdNum ?? "",
+                session.LinkedId));
+
+            await ReserveCapacityAsync(tenantId, activeAgent).ConfigureAwait(false);
+            await TransitionAgentAsync(tenantId, activeAgent, AgentState.Busy).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Resolves the caller's display name for the screen-pop: the contact's name if set, else the
+    /// SIP CallerIdName/Num, else "anonymous". Best-effort — a contact-store failure must never throw
+    /// out of the handler (StopHost), so it falls back to the caller number.
+    /// </summary>
+    private async Task<string> ResolveContactDisplayNameAsync(TenantId tenantId, EntityId contactId, CallSession session)
+    {
+        try
+        {
+            var contact = await _contactStore.GetByIdAsync(tenantId, contactId, CancellationToken.None).ConfigureAwait(false);
+            var name = $"{contact?.FirstName} {contact?.LastName}".Trim();
+            if (!string.IsNullOrWhiteSpace(name))
+                return name;
+        }
+        catch (Exception ex)
+        {
+            LogContactLookupFailed(contactId.Value, ex.Message);
+        }
+
+        return session.CallerIdName ?? session.CallerIdNum ?? AnonymousCaller;
     }
 
     /// <summary>Call ended — wrap up / abandon the Conversation, release capacity, go ACW.</summary>
@@ -356,21 +395,11 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     /// <c>PJSIP/{tenant}-agent-{agentId}</c>. The SDK's <c>CallSession.AgentId</c> is the raw AMI
     /// agent field (often empty for app_queue), so the interface is the reliable source.
     /// </summary>
-    private static EntityId? ExtractAgentId(string tenant, string? agentInterface)
-    {
-        if (string.IsNullOrEmpty(agentInterface))
-            return null;
-
-        var prefix = $"PJSIP/{tenant}-agent-";
-        if (!agentInterface.StartsWith(prefix, StringComparison.Ordinal))
-            return null;
-
-        var id = agentInterface[prefix.Length..];
-        // IsNullOrWhiteSpace (not IsNullOrEmpty): EntityId.From throws on a whitespace-only suffix,
-        // and a malformed agent interface must not abort the whole handler — return null so the
-        // conversation lifecycle still advances (per-step fault isolation).
-        return string.IsNullOrWhiteSpace(id) ? null : EntityId.From(id);
-    }
+    // Shared with AgentAssistBridge so the voice screen-pop and agent-assist events carry the SAME
+    // Agent.AgentId the client filters on. A whitespace-only suffix returns null (no throw), so a
+    // malformed interface never aborts the conversation lifecycle (per-step fault isolation).
+    private static EntityId? ExtractAgentId(string tenant, string? agentInterface) =>
+        AgentInterfaceParser.ExtractAgentId(tenant, agentInterface);
 
     private async Task TransitionAgentAsync(TenantId tenantId, EntityId agentId, AgentState target)
     {
@@ -445,6 +474,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[VOICE-CONV] AMI GetVar TENANT_ID failed on channel {Channel}: {Reason}")]
     private partial void LogGetVarFailed(string channel, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[VOICE-CONV] Contact {ContactId} lookup for screen-pop failed: {Reason}")]
+    private partial void LogContactLookupFailed(string contactId, string reason);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[VOICE-CONV] Agent {AgentId} not found in tenant {TenantId} — skipping presence transition.")]

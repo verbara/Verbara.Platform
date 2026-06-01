@@ -66,6 +66,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ConversationOfferExpiredEvent))]
 [JsonSerializable(typeof(ConversationAbandonedEvent))]
 [JsonSerializable(typeof(AgentCapacityChangedEvent))]
+[JsonSerializable(typeof(VoiceScreenPopEvent))]
 // SSE: Agent Assist events
 [JsonSerializable(typeof(AgentAssistSuggestionEvent))]
 [JsonSerializable(typeof(AgentAssistSentimentEvent))]

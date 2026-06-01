@@ -142,6 +142,27 @@ public sealed record ConversationAbandonedEvent(
     string TenantId, string ConversationId, string QueueId)
     : PlatformEvent(TenantId, "conversation.abandoned", DateTimeOffset.UtcNow);
 
+/// <summary>
+/// Raised when an inbound voice call is answered and its tracked voice <c>Conversation</c> should
+/// screen-pop in the answering agent's UI (Phase 3B.1). Like <see cref="ConversationOfferedEvent"/>
+/// it is tenant-broadcast (NO <c>Metadata.UserId</c> override) and carries <see cref="AgentId"/> so
+/// the client filters it via <c>isForCurrentAgent</c> against the <c>['agent-me']</c> cache. Carries
+/// correlation keys (<see cref="ConversationId"/>, <see cref="VoiceLinkedId"/>) + <see cref="ContactId"/>
+/// for canonical contact/history hydration + lightweight display hints (<see cref="ContactName"/>,
+/// <see cref="CallerNumber"/>) for instant call-card rendering — the full conversation is hydrated by id,
+/// not from this payload (no DTO drift).
+/// </summary>
+public sealed record VoiceScreenPopEvent(
+    string TenantId,
+    string ConversationId,
+    string AgentId,
+    string Channel,
+    string ContactId,
+    string ContactName,
+    string CallerNumber,
+    string VoiceLinkedId)
+    : PlatformEvent(TenantId, "voice.screenpop", DateTimeOffset.UtcNow);
+
 /// <summary>Raised when an agent's channel capacity or load changes.</summary>
 public sealed record AgentCapacityChangedEvent(
     string TenantId, string AgentId, string Channel,
@@ -174,6 +195,7 @@ public sealed record AgentAssistSuggestionEvent(
     string TenantId,
     string SessionId,
     string AgentId,
+    string ConversationId,
     string SuggestionId,
     string Text,
     string Priority,
@@ -186,6 +208,7 @@ public sealed record AgentAssistSentimentEvent(
     string TenantId,
     string SessionId,
     string AgentId,
+    string ConversationId,
     string Speaker,
     float Score,
     string Label,
@@ -197,6 +220,7 @@ public sealed record AgentAssistComplianceAlertEvent(
     string TenantId,
     string SessionId,
     string AgentId,
+    string ConversationId,
     string RuleId,
     string? Phrase,
     string Severity)
@@ -207,6 +231,7 @@ public sealed record AgentAssistTranscriptEvent(
     string TenantId,
     string SessionId,
     string AgentId,
+    string ConversationId,
     string Speaker,
     string Text,
     bool IsFinal)

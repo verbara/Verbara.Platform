@@ -42,6 +42,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         new(Substitute.For<IAmiConnectionFactory>(), NullLoggerFactory.Instance);
     private readonly IConversationStore _conversations = Substitute.For<IConversationStore>();
     private readonly IContactIdentityResolver _contacts = Substitute.For<IContactIdentityResolver>();
+    private readonly IContactStore _contactStore = Substitute.For<IContactStore>();
     private readonly IAgentStore _agents = Substitute.For<IAgentStore>();
     private readonly IAgentCapacityService _capacity = Substitute.For<IAgentCapacityService>();
     private readonly PlatformEventBus _eventBus = new();
@@ -55,7 +56,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
     }
 
     private VoiceConversationBridge CreateBridge(bool isLeader = true) =>
-        new(_sessions, _serverPool, _conversations, _contacts, _agents, _capacity, _eventBus,
+        new(_sessions, _serverPool, _conversations, _contacts, _contactStore, _agents, _capacity, _eventBus,
             LeaderStub(isLeader), _clock, NullLogger<VoiceConversationBridge>.Instance);
 
     private static IClusterLeader LeaderStub(bool isLeader)
@@ -207,6 +208,16 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         var agent = AgentInState(AgentState.Available);
         _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
             .Returns(agent);
+        var screenPopContact = new Contact
+        {
+            ContactId = conversation.ContactId,
+            TenantId = new TenantId(Tenant),
+            FirstName = "Ada",
+            LastName = "Lovelace",
+            CreatedAt = new DateTimeOffset(2026, 5, 31, 12, 0, 0, TimeSpan.Zero),
+        };
+        _contactStore.GetByIdAsync(Arg.Any<TenantId>(), conversation.ContactId, Arg.Any<CancellationToken>())
+            .Returns(screenPopContact);
         var events = CaptureEvents();
         var bridge = CreateBridge();
 
@@ -222,6 +233,14 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         events.OfType<AgentStateChangedEvent>().Should().Contain(ev => ev.NewState == nameof(AgentState.Busy));
         events.OfType<ConversationStateChangedEvent>()
             .Should().Contain(ev => ev.OldState == nameof(ConversationState.Queued) && ev.NewState == nameof(ConversationState.Active));
+        // 3B.1 screen-pop: agent-targeted event with the resolved contact + correlation keys.
+        events.OfType<VoiceScreenPopEvent>().Should().ContainSingle(ev =>
+            ev.AgentId == AgentGuid &&
+            ev.ConversationId == conversation.ConversationId.Value &&
+            ev.Channel == nameof(ChannelType.Voice) &&
+            ev.ContactId == conversation.ContactId.Value &&
+            ev.ContactName == "Ada Lovelace" &&
+            ev.VoiceLinkedId == "link-4");
     }
 
     // ─── Ended (hangup) ─────────────────────────────────────────────────────────
