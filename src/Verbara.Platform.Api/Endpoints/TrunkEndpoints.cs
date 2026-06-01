@@ -1,3 +1,4 @@
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Models;
@@ -19,6 +20,7 @@ internal static class TrunkEndpoints
         trunks.MapPost("/", CreateTrunk);
         trunks.MapPut("/{id:long}", UpdateTrunk);
         trunks.MapDelete("/{id:long}", DeleteTrunk);
+        trunks.MapPost("/{id:long}/test-connectivity", TestTrunkConnectivity);
     }
 
     // ─── Handlers ────────────────────────────────────────────────────────────
@@ -181,6 +183,41 @@ internal static class TrunkEndpoints
         var tenantId = GetTenantId(context);
         var trunk = await trunkStore.GetByNameAsync(name, tenantId, ct);
         return trunk is null ? Results.NotFound() : Results.Ok(MapToDto(trunk));
+    }
+
+    /// <summary>
+    /// Runs the <c>pjsip show ...</c> diagnostic queries server-side (over AMI) and returns a structured
+    /// report — so the operator no longer has to SSH and run them by hand (manual §3.3). Always 200 with
+    /// the diagnostic, even when <c>ok=false</c> (it is a report, not a command). 404 only when the trunk
+    /// does not exist for the caller tenant. When voice-AMI is disabled, <see cref="ITrunkConnectivityTester"/>
+    /// is not registered, so a clean "AMI no disponible" result is returned.
+    /// </summary>
+    private static async Task<IResult> TestTrunkConnectivity(
+        long id,
+        HttpContext context,
+        [FromServices] TrunkStoreBase trunkStore,
+        [FromServices] ITrunkConnectivityTester? tester,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+
+        if (tester is null)
+        {
+            // Voice-AMI not configured: the trunk must still exist for the tenant (so a bad id 404s),
+            // but there is no live AMI connection to query.
+            var trunk = await trunkStore.GetAsync(id, tenantId, ct);
+            if (trunk is null)
+                return Results.NotFound();
+            return Results.Ok(new TrunkConnectivityResult(
+                id, $"t-{id}", EndpointFound: false, AuthMode: "none",
+                Registered: null, IdentifyPresent: null, Reachable: null, Ok: false,
+                Messages: ["AMI no disponible — la verificación de voz no está configurada en este servidor"]));
+        }
+
+        var result = await tester.TestAsync(new TenantId(tenantId), id, ct);
+        if (!result.EndpointFound && result.Messages.Contains(ITrunkConnectivityTester.TrunkNotFoundMessage))
+            return Results.NotFound();
+        return Results.Ok(result);
     }
 
     // ─── Mapping Helpers ──────────────────────────────────────────────────────

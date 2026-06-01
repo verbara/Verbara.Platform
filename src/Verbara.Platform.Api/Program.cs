@@ -921,6 +921,16 @@ if (!string.IsNullOrEmpty(clusterConn))
                         Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner),
                     builder.Configuration["Asterisk:Outbound:DefaultTrunk"],
                     sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.VoiceCallControlService>>()));
+            // Trunk connectivity test (P2): leader-gated AMI `pjsip show ...` diagnostic run server-side
+            // (replaces the operator SSHing into Asterisk, manual §3.3). TrunkStoreBase resolves lazily —
+            // its registration is below, but this factory only touches it at first request.
+            builder.Services.AddSingleton<Verbara.Platform.Api.Services.ITrunkConnectivityTester>(sp =>
+                new Verbara.Platform.Api.Services.TrunkConnectivityTester(
+                    sp.GetRequiredService<TrunkStoreBase>(),
+                    sp.GetRequiredService<Verbara.Sdk.Live.Server.VerbaraServerPool>(),
+                    sp.GetRequiredKeyedService<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
+                        Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner),
+                    sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.TrunkConnectivityTester>>()));
             // Outbound click-to-dial (3B.2d): reuse the Pro Dialer originate executor (circuit-breaker +
             // trunk-health). It is NOT registered by AddProDialer (consumed via GetService there), and its
             // trunk-health / post-call / time-provider deps are optional, so register it via a factory that

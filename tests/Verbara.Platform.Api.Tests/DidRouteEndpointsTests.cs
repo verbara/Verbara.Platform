@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -29,6 +32,36 @@ public sealed class DidRouteEndpointsTests :
         _admin = adminFactory.CreateAuthenticatedClient();
         _unauth = unauthFactory.CreateClient();
         _nonAdmin = nonAdminFactory.CreateAuthenticatedClient();
+
+        // DID-route Create/Update now verify the target queue EXISTS in the
+        // tenant. Seed every queue id referenced by the contract tests into the
+        // singleton InMemory IQueueStore so the existing happy-path cases keep
+        // passing (idempotent: SaveAsync upserts).
+        SeedQueues(adminFactory.Services);
+    }
+
+    private static readonly string[] s_seededQueueIds =
+    [
+        "queue-support", "queue-1", "queue-2", "queue-get", "queue-bydid",
+        "queue-active", "queue-before", "queue-after", "queue-x", "queue-del",
+        "queue-exists",
+    ];
+
+    private static void SeedQueues(IServiceProvider services)
+    {
+        var queueStore = services.GetRequiredService<IQueueStore>();
+        var tenantId = new TenantId(AuthenticatedPlatformApiFactory.TestTenantId);
+        foreach (var queueId in s_seededQueueIds)
+        {
+            var queue = new Queue
+            {
+                QueueId = EntityId.From(queueId),
+                TenantId = tenantId,
+                Name = queueId,
+                CreatedAt = DateTimeOffset.UtcNow,
+            };
+            queueStore.SaveAsync(queue, CancellationToken.None).GetAwaiter().GetResult();
+        }
     }
 
     private static string UniqueDid() => "+1" + Random.Shared.NextInt64(1_000_000_000, 9_999_999_999).ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -197,6 +230,55 @@ public sealed class DidRouteEndpointsTests :
     {
         var response = await _admin.DeleteAsync("/api/v1/admin/did-routes/missing-id");
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // ─── Validation hardening (P1): E.164 + queue existence ───────────────────
+
+    [Theory]
+    [InlineData("not-a-number")]      // letters
+    [InlineData("12345")]             // too short (< 7 digits)
+    [InlineData("1234567890123456")]  // too long (> 15 digits)
+    [InlineData("0123456789")]        // leading zero
+    [InlineData("1800 555 1234")]     // embedded spaces
+    [InlineData("+")]                 // bare plus, no digits
+    public async Task CreateDidRoute_ShouldReturn400_WhenDidNotE164(string badDid)
+    {
+        var response = await _admin.PostAsJsonAsync(
+            "/api/v1/admin/did-routes",
+            new { did = badDid, queueId = "queue-exists", isActive = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        dto!["error"]!.GetValue<string>().Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task CreateDidRoute_ShouldReturn400_WhenQueueDoesNotExist()
+    {
+        var did = UniqueDid();
+
+        var response = await _admin.PostAsJsonAsync(
+            "/api/v1/admin/did-routes",
+            new { did, queueId = "queue-never-seeded", isActive = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        dto!["error"]!.GetValue<string>().Should().Contain("queue");
+    }
+
+    [Fact]
+    public async Task CreateDidRoute_ShouldSucceed_WhenE164AndQueueExists()
+    {
+        var did = UniqueDid();
+
+        var response = await _admin.PostAsJsonAsync(
+            "/api/v1/admin/did-routes",
+            new { did, queueId = "queue-exists", isActive = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        dto!["did"]!.GetValue<string>().Should().Be(did);
+        dto!["queueId"]!.GetValue<string>().Should().Be("queue-exists");
     }
 
     [Fact]

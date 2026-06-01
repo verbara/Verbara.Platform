@@ -1,5 +1,8 @@
+using System.Text.RegularExpressions;
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
 using Verbara.Platform.Routing.Inbound;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,8 +14,16 @@ namespace Verbara.Platform.Api.Endpoints;
 /// (like queues/agents) rather than bigint. The DID is unique per tenant; a
 /// duplicate create returns HTTP 409 Conflict.
 /// </summary>
-internal static class DidRouteEndpoints
+internal static partial class DidRouteEndpoints
 {
+    /// <summary>
+    /// E.164 validation for the dialed number as it arrives in the INVITE:
+    /// optional leading <c>+</c>, then a non-zero leading digit followed by
+    /// 6–14 more digits (7–15 total). Source-generated for AOT (no runtime
+    /// <c>new Regex(...)</c> reflection).
+    /// </summary>
+    [GeneratedRegex(@"^\+?[1-9]\d{6,14}$")]
+    private static partial Regex E164Regex();
     public static void MapDidRouteEndpoints(this IEndpointRouteBuilder app)
     {
         var dids = app.MapGroup("/admin/did-routes").RequireAuthorization("AdminOnly").RequireOperationalTenant();
@@ -77,12 +88,22 @@ internal static class DidRouteEndpoints
         HttpContext context,
         [FromBody] CreateDidRouteRequest body,
         [FromServices] IDidRouteStore store,
+        [FromServices] IQueueStore queueStore,
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        if (string.IsNullOrWhiteSpace(body.Did) || !EntityId.IsValid(body.QueueId))
-            return Results.BadRequest();
+
+        if (!EntityId.IsValid(body.QueueId))
+            return Results.BadRequest(new ErrorResponse("Invalid queue id."));
+
+        if (string.IsNullOrWhiteSpace(body.Did) || !E164Regex().IsMatch(body.Did))
+            return Results.BadRequest(new ErrorResponse(
+                "DID must be E.164: an optional leading '+' then 7–15 digits with a non-zero first digit."));
+
+        var queue = await queueStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(body.QueueId), ct);
+        if (queue is null)
+            return Results.BadRequest(new ErrorResponse("Target queue does not exist for this tenant."));
 
         var route = new DidRoute
         {
@@ -125,6 +146,7 @@ internal static class DidRouteEndpoints
         HttpContext context,
         [FromBody] UpdateDidRouteRequest body,
         [FromServices] IDidRouteStore store,
+        [FromServices] IQueueStore queueStore,
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
@@ -140,14 +162,18 @@ internal static class DidRouteEndpoints
 
         if (body.Did is not null)
         {
-            if (string.IsNullOrWhiteSpace(body.Did))
-                return Results.BadRequest();
+            if (string.IsNullOrWhiteSpace(body.Did) || !E164Regex().IsMatch(body.Did))
+                return Results.BadRequest(new ErrorResponse(
+                    "DID must be E.164: an optional leading '+' then 7–15 digits with a non-zero first digit."));
             route.Did = body.Did;
         }
         if (body.QueueId is not null)
         {
             if (!EntityId.IsValid(body.QueueId))
-                return Results.BadRequest();
+                return Results.BadRequest(new ErrorResponse("Invalid queue id."));
+            var queue = await queueStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(body.QueueId), ct);
+            if (queue is null)
+                return Results.BadRequest(new ErrorResponse("Target queue does not exist for this tenant."));
             route.QueueId = EntityId.From(body.QueueId);
         }
         if (body.IsActive.HasValue)

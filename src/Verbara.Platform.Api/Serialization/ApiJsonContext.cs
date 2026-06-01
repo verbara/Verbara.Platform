@@ -137,6 +137,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(AgentAssistCredentialsDto))]
 [JsonSerializable(typeof(TrunkDto))]
 [JsonSerializable(typeof(List<TrunkDto>))]
+[JsonSerializable(typeof(TrunkConnectivityResult))]
 [JsonSerializable(typeof(CreateTrunkRequest))]
 [JsonSerializable(typeof(UpdateTrunkRequest))]
 [JsonSerializable(typeof(DidRouteDto))]
