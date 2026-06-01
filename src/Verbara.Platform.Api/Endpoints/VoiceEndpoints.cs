@@ -19,6 +19,11 @@ internal static class VoiceEndpoints
     {
         var group = app.MapGroup("/conversations").RequireAuthorization("Authenticated").RequireOperationalTenant();
         group.MapPost("/{id}/voice-transfer", BlindTransfer);
+
+        // Outbound click-to-dial (3B.2d) — not conversation-scoped (the Conversation is created by the
+        // dial), so it lives under /voice rather than /conversations/{id}.
+        var voice = app.MapGroup("/voice").RequireAuthorization("Authenticated").RequireOperationalTenant();
+        voice.MapPost("/dial", Dial);
     }
 
     private static async Task<IResult> BlindTransfer(
@@ -63,6 +68,49 @@ internal static class VoiceEndpoints
             : Results.BadRequest(new VoiceTransferResponse(false, outcome.Error));
     }
 
+    private static async Task<IResult> Dial(
+        HttpContext context,
+        [FromBody] VoiceDialRequest body,
+        [FromServices] IAgentOutboundDialService dialService,
+        [FromServices] IAgentStore agents,
+        [FromServices] IContactStore contacts,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var userId = GetCurrentUserId(context);
+
+        // Only a provisioned agent may place an outbound call (the A-leg rings their own endpoint).
+        var agent = await agents.GetByUserIdAsync(tenantId, userId, ct);
+        if (agent is null)
+        {
+            return Results.Json(
+                new VoiceDialResponse(false, null, "not-an-agent"),
+                ApiJsonContext.Default.VoiceDialResponse,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        // Number from the request, or resolved from the contact's voice address when dialing a contact.
+        var number = body.ToNumber?.Trim();
+        EntityId? contactId = null;
+        if (!string.IsNullOrWhiteSpace(body.ContactId))
+        {
+            contactId = EntityId.From(body.ContactId);
+            if (string.IsNullOrWhiteSpace(number))
+            {
+                var contact = await contacts.GetByIdAsync(tenantId, contactId.Value, ct);
+                number = contact?.Addresses.FirstOrDefault(a => a.Channel == ChannelType.Voice)?.Address;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(number))
+            return Results.BadRequest(new VoiceDialResponse(false, null, "missing-number"));
+
+        var outcome = await dialService.DialAsync(tenantId, agent.AgentId, number, contactId, ct);
+        return outcome.Accepted
+            ? Results.Ok(new VoiceDialResponse(true, outcome.CorrelationId, null))
+            : Results.BadRequest(new VoiceDialResponse(false, null, outcome.Error));
+    }
+
     private static TenantId GetTenantId(HttpContext context)
     {
         if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
@@ -86,3 +134,9 @@ internal sealed record VoiceTransferRequest(string Kind, string Target);
 
 /// <summary><c>Error</c> is a stable machine code (e.g. "channel-unknown", "not-owner") on failure.</summary>
 internal sealed record VoiceTransferResponse(bool Accepted, string? Error);
+
+/// <summary>Click-to-dial request (3B.2d): dial <c>ToNumber</c>, or resolve the number from <c>ContactId</c>.</summary>
+internal sealed record VoiceDialRequest(string? ToNumber, string? ContactId);
+
+/// <summary><c>CorrelationId</c> is the tracked outbound Conversation id on success; <c>Error</c> a stable code otherwise.</summary>
+internal sealed record VoiceDialResponse(bool Accepted, string? CorrelationId, string? Error);

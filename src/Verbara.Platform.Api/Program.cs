@@ -909,6 +909,33 @@ if (!string.IsNullOrEmpty(clusterConn))
             // Blind transfer (3B.2c) — leader-gated AMI Redirect; request-driven, not a HostedService.
             builder.Services.AddSingleton<Verbara.Platform.Api.Services.IVoiceCallControlService,
                 Verbara.Platform.Api.Services.VoiceCallControlService>();
+            // Outbound click-to-dial (3B.2d): reuse the Pro Dialer originate executor (circuit-breaker +
+            // trunk-health). It is NOT registered by AddProDialer (consumed via GetService there), and its
+            // trunk-health / post-call / time-provider deps are optional, so register it via a factory that
+            // resolves those with GetService — works for voice-only tenants without the full dialer stack.
+            builder.Services.TryAddSingleton<Verbara.Sdk.Pro.Dialer.Execution.OriginateExecutorBase>(sp =>
+                new Verbara.Sdk.Pro.Dialer.Execution.DefaultOriginateExecutor(
+                    sp.GetRequiredService<Verbara.Sdk.Live.Server.VerbaraServerPool>(),
+                    sp.GetRequiredService<ILogger<Verbara.Sdk.Pro.Dialer.Execution.DefaultOriginateExecutor>>(),
+                    sp.GetService<Verbara.Sdk.Pro.Dialer.Health.ITrunkHealthProvider>(),
+                    sp.GetService<Verbara.Sdk.Pro.Dialer.PostCall.PostCallHandlerBase>(),
+                    sp.GetService<TimeProvider>()));
+            // The outbound route + DNC resolvers register only with the full dialer Postgres storage, so
+            // they are optional here (GetService): a voice-only tenant fails DNC open + uses the default trunk.
+            builder.Services.AddSingleton<Verbara.Platform.Api.Services.IAgentOutboundDialService>(sp =>
+                new Verbara.Platform.Api.Services.AgentOutboundDialService(
+                    sp.GetRequiredService<Verbara.Platform.Conversations.IConversationStore>(),
+                    sp.GetRequiredService<Verbara.Platform.Conversations.Services.IContactIdentityResolver>(),
+                    sp.GetRequiredService<Verbara.Platform.Queues.IAgentStore>(),
+                    sp.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
+                    sp.GetRequiredService<Verbara.Sdk.Pro.Dialer.Execution.OriginateExecutorBase>(),
+                    sp.GetService<Verbara.Sdk.Pro.Dialer.Routing.OutboundRouteResolverBase>(),
+                    sp.GetService<Verbara.Sdk.Pro.Dialer.Compliance.DncCheckerBase>(),
+                    sp.GetRequiredKeyedService<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
+                        Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner),
+                    sp.GetRequiredService<Verbara.Platform.Core.IClock>(),
+                    builder.Configuration["Asterisk:Outbound:DefaultTrunk"],
+                    sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.AgentOutboundDialService>>()));
         }
     }
 }
