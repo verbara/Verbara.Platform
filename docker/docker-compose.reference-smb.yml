@@ -141,7 +141,7 @@ services:
   # Platform.Api — composition root. Pinned to the latest signed release.
   # ──────────────────────────────────────────────────────────────────────
   platform-api:
-    image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.8.0}
+    image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.8.1}
     container_name: verbara-platform-api
     logging: *default-logging
     extra_hosts:
@@ -227,7 +227,7 @@ services:
   # `identity-redis` profile).
   # ──────────────────────────────────────────────────────────────────────
   realtime:
-    image: ghcr.io/verbara/platform/realtime:${PLATFORM_API_TAG:-v2.8.0}
+    image: ghcr.io/verbara/platform/realtime:${PLATFORM_API_TAG:-v2.8.1}
     container_name: verbara-realtime
     logging: *default-logging
     environment:
@@ -401,7 +401,7 @@ services:
   # Pinned to the latest signed release on ghcr.io (ADR-0023, Native AOT).
   # ──────────────────────────────────────────────────────────────────────
   renderer:
-    image: ghcr.io/verbara/platform/renderer:${PLATFORM_API_TAG:-v2.8.0}
+    image: ghcr.io/verbara/platform/renderer:${PLATFORM_API_TAG:-v2.8.1}
     container_name: verbara-renderer
     logging: *default-logging
     environment:
@@ -426,7 +426,7 @@ services:
   # Pinned to the latest signed release on ghcr.io (ADR-0023, Native AOT).
   # ──────────────────────────────────────────────────────────────────────
   mail:
-    image: ghcr.io/verbara/platform/mail:${PLATFORM_API_TAG:-v2.8.0}
+    image: ghcr.io/verbara/platform/mail:${PLATFORM_API_TAG:-v2.8.1}
     container_name: verbara-mail
     logging: *default-logging
     environment:

@@ -13,6 +13,18 @@ _No unreleased changes._
 
 ---
 
+## [2.8.1] — 2026-06-01 — Hotfix: reference-smb realtime leader-election connection
+
+Patch over v2.8.0. No code change to the API — same binaries.
+
+### Fixed
+- **`docker-compose.reference-smb.yml` realtime crash-loop.** Since v2.8.0, `Verbara.Platform.Realtime` hard-requires `ConnectionStrings:Cluster` (or `:Postgres` fallback) for leader election; the reference-smb compose provided neither, so the realtime container crash-looped on a fresh single-host v2.8.0 deploy. Added a Postgres-backed leader-election connection string to the realtime service.
+
+### Changed
+- `docker-compose.reference-smb.yml` default `PLATFORM_API_TAG` → **v2.8.1** (`PLATFORM_WEB_TAG` stays `v3.4.0-web` — Web unchanged).
+
+---
+
 ## [2.8.0] — 2026-06-01 — Telephony admin: usable SIP trunk + DID configuration
 
 Closes the trunk/DID configuration gaps from the [trunk & DID audit](docs/research/2026-06-01-trunk-did-audit.md). Consumes **Pro 2.7.4-pro**. Ships with **Web v3.4.0-web** (the trunk form, DID module, wizard and connectivity-test UI). Native AOT preserved.
