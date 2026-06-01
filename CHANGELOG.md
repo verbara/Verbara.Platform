@@ -13,6 +13,25 @@ _No unreleased changes._
 
 ---
 
+## [2.7.0] — 2026-06-01 — Inbound Conversation Delivery: voice reaches the agent in the browser
+
+Closes the *Inbound Conversation Delivery* epic — a visitor's chat **and** an inbound phone call now both reach an available agent who handles them entirely in the browser. Consumes **Pro 2.7.3-pro**. Native AOT preserved (0 IL2026/IL3050/IL207x). Ships with **Web v3.3.0-web** (the in-browser softphone UI).
+
+### Added
+- **Voice inbound → queue (P2).** `did_routes` table + `IDidRouteStore` + `DidRouteEndpoints` (`/admin/did-routes` CRUD, DID→queue 1:1, unique per tenant); leader-gated `StasisInboundConsumer` (consumes ARI app `verbara`, resolves tenant from the `TENANT_ID` channel var, maps DID→queue, `Answer`+`Continue([stasis-queue])`); `[stasis-queue]` dialplan. IP-ACL trunk identify (`Trunk.MatchHost` → `ps_endpoint_id_ips`) + `TENANT_ID` `set_var` on the trunk endpoint (cross-repo Pro 2.7.0-pro).
+- **In-browser voice softphone (3A).** Self-scoped `sipPassword` on `/agents/me` (`AgentMeResponseDto`; admin DTOs never echo the secret; `[JsonIgnore]` defense-in-depth); WebRTC the resolved default endpoint profile; Asterisk entrypoint auto-generates a self-signed WSS cert on boot.
+- **Voice as a tracked Conversation (3B.0/3B.1).** `VoiceConversationBridge` (leader-gated, idempotent by Asterisk `LinkedId`, lifecycle Queued→Offered→Active→WrapUp/Abandoned, `voice_linked_id` migration 027); `VoiceScreenPopEvent` screen-pop (caller + history) + per-conversation agent-assist (transcript/sentiment) + disposition/wrap-up + CDR.
+- **In-call control (3B.2).** Client hold/unhold/mute/DTMF (SimpleUser); per-agent + per-queue **auto-answer** cascade (migration 028); leader-gated **blind transfer** to queue/agent/external (`VoiceCallControlService` AMI `Redirect`, `POST /conversations/{id}/voice-transfer`); **outbound click-to-dial** (`AgentOutboundDialService` + `POST /voice/dial`) reusing the Pro Dialer stack (DNC + route→trunk + tenant outbound caller-ID), tracked as an outbound Conversation via `VERBARA_OUTBOUND_ID` correlation.
+
+### Fixed
+- `PostgresAgentStore.GetByUserIdAsync` omitted `extension`/`sip_password` from its SELECT → softphone got a null `sipPassword` on Postgres (InMemory masked it). All SELECTs now project them.
+- `PostgresConversationStore` upsert dropped `voice_linked_id` from the `DO UPDATE SET` clause → late LinkedId stamps (outbound) were lost.
+
+### Changed
+- `Directory.Packages.props` Pro pins → **2.7.3-pro**. `docker-compose.reference-smb.yml` defaults → `PLATFORM_API_TAG=v2.7.0` + `PLATFORM_WEB_TAG=v3.3.0-web`. Manual `06-canal-voz-sip.md` reconstructed with the in-browser softphone (§9) + honest roadmap (§10).
+
+---
+
 ## [2.4.0-rc] — 2026-05-18 — Pro v2.5.0-pro consumer migration (drops EnforcementMode); **NOT PUBLICLY SHIPPED** ([ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md))
 
 Internal RC tag for the Pro v2.5.0-pro consumer migration ([ADR-0012](../Verbara.Sdk.Pro/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md)). The `-rc` suffix signals that the code is correct + tests pass (958/958 Api.Tests green, 0 warnings, 0 errors) BUT the canonical `ghcr.io/verbara/platform/api:*` image cannot be published from this commit per [ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md) — the current Dockerfile produces a non-AOT image that ships 68 closed-source `Verbara.Sdk.Pro.*` DLLs as decompilable IL. Public image cutover blocked on ADR-0022 Phases A+B+C (SignalR Hub extraction + EF Core DataProtection migration + AOT publish), estimated 3–4 maintainer-days.
