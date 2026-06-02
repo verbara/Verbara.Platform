@@ -62,3 +62,11 @@ docs/manuales/auto/
 # per-developer and must NEVER be committed.
 docker/.env.reference-smb
 docker/docker-compose.override.yml
+
+# Asterisk runtime config — rendered from *.conf.template by entrypoint-asterisk.sh
+# at boot (secrets/IPs injected from env). The .template files are the versioned
+# source; these rendered files carry real values and must never be committed.
+docker/asterisk-config/ari.conf
+docker/asterisk-config/manager.conf
+docker/asterisk-config/res_pgsql.conf
+docker/asterisk-config/http.conf

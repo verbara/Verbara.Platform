@@ -10,6 +10,19 @@ HTTP_CONF="/etc/asterisk/http.conf"
 # loaded ps_endpoints/ps_endpoint_id_ips/queues and inbound voice could not work.
 PGSQL_CONF="/etc/asterisk/res_pgsql.conf"
 
+# ── Render runtime config from versioned templates ───────────────────────────
+# In bind-mounted (docker) deploys, each <conf>.template is the VERSIONED source
+# (placeholders only); the live <conf> is REGENERATED from it on every boot and is
+# gitignored, so the secrets/IPs the sed blocks below inject never pollute the
+# committed tree (and real secrets can never be committed by accident). Stacks that
+# supply the final <conf> directly (e.g. the k8s asterisk ConfigMap — no template
+# present) are left completely untouched: the loop is a no-op there.
+for _b in manager ari http res_pgsql; do
+    if [ -f "/etc/asterisk/${_b}.conf.template" ]; then
+        cp "/etc/asterisk/${_b}.conf.template" "/etc/asterisk/${_b}.conf"
+    fi
+done
+
 # Inject AMI/ARI passwords from environment so .env secrets propagate into Asterisk
 if [ -n "$AMI_PASSWORD" ] && [ -f "$MANAGER_CONF" ]; then
     sed -i "s/^secret = .*/secret = $AMI_PASSWORD/" "$MANAGER_CONF"
