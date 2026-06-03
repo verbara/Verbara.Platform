@@ -77,6 +77,10 @@ Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/
 
 > Las "En planificación" originales (1.9.x sub-releases + 2.0.0 arquitectónico + v2.1.0 image-binding + visibility flip) **YA SHIPPEARON** entre 2026-04-20 y 2026-05-10 — ver tabla "Shipped" arriba. Sección reescrita 2026-05-10 (post-flip) reflejando el estado real.
 
+### 🔧 On `main`, sin release — candidatos a v2.8.2 (2026-06-02)
+- **Asterisk config-rendering hardening** (`677e7ef3`): los 4 confs con secretos (`ari/manager/res_pgsql/http`) ahora renderizan desde `*.conf.template` (versionado, placeholders) a `*.conf` **gitignored** (el entrypoint los regenera + inyecta secretos del env en cada boot). Elimina el working-tree sucio perpetuo + el riesgo de commitear secretos vivos; alinea los confs con el patrón `.env`/`.example`. k8s intacto (guard-on-template). **Editar el `.template`, nunca el `.conf`.** **DECISIÓN ABIERTA:** soltar como **v2.8.2** (toca solo entrypoint del image asterisk + templates) o dejar en `main`.
+- **Backlog telefonía P3** (post-audit, no empezado): TLS/SRTP (`media_encryption` + `transport-tls`), resolver outbound Regex/DigitMask + `OverflowTrunkId` (hoy solo prefix), destinos DID más allá de cola (IVR/Flow/Agente). · **3B.3 voz:** supervisor monitor/whisper/barge + transfer atendida + conferencia.
+
 ### 🔥 Próximo ship: Platform v2.4.3 "Realtime startup migration hotfix" — Plan C activo, NO ejecutado (2026-05-23)
 
 **Status verificado 2026-05-23 contra working tree de Platform `main`:**
