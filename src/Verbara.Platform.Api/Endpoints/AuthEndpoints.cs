@@ -163,7 +163,7 @@ internal static class AuthEndpoints
         }
 
         // Issue tokens
-        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, ct);
+        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, ct);
     }
 
     // ─── MFA Verify ──────────────────────────────────────────────────────────────
@@ -177,6 +177,7 @@ internal static class AuthEndpoints
         AccountLockoutService lockoutService,
         AuthEventService authEvents,
         [FromServices] IMfaPendingCache mfaCache,
+        [FromServices] ITenantAuthConfigStore configStore,
         CancellationToken ct)
     {
         var pending = await mfaCache.TakeAsync(body.MfaToken, ct);
@@ -212,7 +213,7 @@ internal static class AuthEndpoints
         if (!verified)
             return Results.Unauthorized();
 
-        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, ct);
+        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, ct);
     }
 
     // ─── Refresh ────────────────────────────────────────────────────────────────
@@ -291,13 +292,16 @@ internal static class AuthEndpoints
         var featureRegistry = context.RequestServices.GetService<IFeatureRegistry>();
         var features = new Dictionary<string, bool>(featureRegistry?.GetFeatures() ?? new Dictionary<string, bool>());
 
+        var idleMinutes = (await configStore.GetAsync(user.TenantId.Value, ct))?.SessionIdleTimeoutMinutes ?? 30;
+
         return Results.Ok(new TokenResponse(
             accessToken,
             expiresAt,
             new TokenUserDto(user.UserId.Value, user.Email, user.DisplayName, user.Role.ToString().ToLowerInvariant()),
             user.TenantId.Value,
             permissions?.ToArray() ?? [],
-            features));
+            features,
+            idleMinutes));
     }
 
     // ─── Logout ─────────────────────────────────────────────────────────────────
@@ -902,6 +906,7 @@ internal static class AuthEndpoints
         RefreshTokenService refreshService,
         AccountLockoutService lockoutService,
         AuthEventService authEvents,
+        ITenantAuthConfigStore configStore,
         CancellationToken ct)
     {
         // AHH Phase 2 — these two writes used to be synchronous round-trips
@@ -953,13 +958,16 @@ internal static class AuthEndpoints
         var featureRegistry = context.RequestServices.GetService<IFeatureRegistry>();
         var features = new Dictionary<string, bool>(featureRegistry?.GetFeatures() ?? new Dictionary<string, bool>());
 
+        var idleMinutes = (await configStore.GetAsync(user.TenantId.Value, ct))?.SessionIdleTimeoutMinutes ?? 30;
+
         return Results.Ok(new TokenResponse(
             accessToken,
             expiresAt,
             new TokenUserDto(user.UserId.Value, user.Email, user.DisplayName, user.Role.ToString().ToLowerInvariant()),
             user.TenantId.Value,
             effectivePermissions,
-            features));
+            features,
+            idleMinutes));
     }
 
     private static void SetRefreshCookie(HttpContext context, string rawToken)
@@ -1060,7 +1068,8 @@ internal sealed record TokenResponse(
     TokenUserDto? User = null,
     string? TenantId = null,
     string[]? Permissions = null,
-    Dictionary<string, bool>? Features = null);
+    Dictionary<string, bool>? Features = null,
+    int? SessionIdleTimeoutMinutes = null);
 
 internal sealed record TokenUserDto(string Id, string Email, string DisplayName, string Role);
 

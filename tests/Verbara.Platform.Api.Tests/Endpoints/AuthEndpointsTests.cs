@@ -56,6 +56,25 @@ public sealed class AuthEndpointsTests
         setCookie.Should().NotContain("path=/api/auth;");
     }
 
+    // ─── A4: sessionIdleTimeoutMinutes on TokenResponse ─────────────────────
+
+    [Fact]
+    public void TokenResponse_ShouldSerializeSessionIdleTimeoutMinutes_WhenSet()
+    {
+        var resp = new TokenResponse(
+            "access-token",
+            DateTimeOffset.UtcNow,
+            null,
+            TestTenantId,
+            null,
+            null,
+            30);
+
+        var json = JsonSerializer.Serialize(resp, ApiJsonContext.Default.TokenResponse);
+
+        json.Should().Contain("\"sessionIdleTimeoutMinutes\":30");
+    }
+
     // ─── A2: refresh cookie delete path ─────────────────────────────────────
 
     [Fact]
