@@ -32,16 +32,16 @@ internal static partial class VoiceMetadataEndpoints
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
-        var logger = loggerFactory.CreateLogger("VoiceMetadataEndpoints");
+        var logger = loggerFactory.CreateLogger("Verbara.Platform.Api.Endpoints.VoiceMetadata");
 
-        // AMI services are only registered when Asterisk:Ami:Hostname is configured — resolve
-        // optionally so the endpoint works (returning fallback) in non-AMI environments.
+        // IClusterLeader is conditionally registered — resolve optionally.
         var leader = services.GetKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner);
         if (leader is null || !leader.IsLeader)
             return Results.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
 
-        var serverPool = services.GetService<VerbaraServerPool>();
-        var server = serverPool?.GetServer("primary");
+        // VerbaraServerPool is always registered (AddVerbaraMultiServer → TryAddSingleton).
+        var serverPool = services.GetRequiredService<VerbaraServerPool>();
+        var server = serverPool.GetServer("primary");
         if (server is null)
             return Results.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
 
@@ -57,7 +57,7 @@ internal static partial class VoiceMetadataEndpoints
                 : Results.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
         }
 #pragma warning disable CA1031 // Do not catch general exception types — intentional graceful degradation: any AMI failure returns fallback catalog instead of 5xx
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogCodecQueryFailed(logger, ex);
             return Results.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
@@ -65,7 +65,7 @@ internal static partial class VoiceMetadataEndpoints
 #pragma warning restore CA1031
     }
 
-    [LoggerMessage(Level = LogLevel.Warning,
+    [LoggerMessage(EventId = 7200, Level = LogLevel.Warning,
         Message = "Failed to query Asterisk codecs via AMI; returning fallback catalog.")]
     private static partial void LogCodecQueryFailed(ILogger logger, Exception ex);
 }
