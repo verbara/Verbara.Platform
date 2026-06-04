@@ -19,6 +19,12 @@ internal sealed class InMemoryRefreshTokenStore : IRefreshTokenStore
         return Task.FromResult(result);
     }
 
+    public Task<RefreshToken?> GetByTokenIdAsync(string tokenId, CancellationToken ct)
+    {
+        _items.TryGetValue(tokenId, out var token);
+        return Task.FromResult(token);
+    }
+
     public Task<IReadOnlyList<RefreshToken>> GetActiveByUserAsync(string tenantId, string userId, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
