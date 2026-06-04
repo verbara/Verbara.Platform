@@ -303,7 +303,7 @@ internal static class OidcEndpoints
             await authEvents.LogAsync(tenantId, userId, "oidc_logout", ip, ua, null, ct);
         }
 
-        context.Response.Cookies.Delete("refresh_token");
+        context.Response.Cookies.Delete("refresh_token", new CookieOptions { Path = "/api/v1/auth" });
         return Results.Ok(new MessageResponse("Logged out"));
     }
 }

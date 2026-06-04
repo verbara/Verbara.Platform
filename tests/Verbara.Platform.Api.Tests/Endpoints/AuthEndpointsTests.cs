@@ -56,6 +56,27 @@ public sealed class AuthEndpointsTests
         setCookie.Should().NotContain("path=/api/auth;");
     }
 
+    // ─── A2: refresh cookie delete path ─────────────────────────────────────
+
+    [Fact]
+    public async Task Logout_ShouldDeleteCookieOnVersionedAuthPath_WhenCalled()
+    {
+        var refreshTokenStore = Substitute.For<IRefreshTokenStore>();
+        var refreshService = new RefreshTokenService(refreshTokenStore);
+        var authEvents = new AuthEventService(Substitute.For<IAuthEventStore>());
+
+        var ctx = BuildHttpContext();
+        var result = await AuthEndpoints.Logout(
+            ctx, refreshService, authEvents, CancellationToken.None);
+
+        result.Should().BeOfType<Ok<MessageResponse>>();
+
+        var setCookie = ctx.Response.Headers.SetCookie.ToString().ToLowerInvariant();
+        setCookie.Should().Contain("refresh_token=");
+        setCookie.Should().Contain("path=/api/v1/auth");
+        setCookie.Should().Contain("expires=thu, 01 jan 1970");
+    }
+
     [Fact]
     public async Task MfaDisable_ShouldReturn403_WhenTenantPolicyRequiresMfaAll()
     {

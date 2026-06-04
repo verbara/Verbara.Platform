@@ -19,6 +19,7 @@ namespace Verbara.Platform.Api.Endpoints;
 internal static class AuthEndpoints
 {
     private const string RefreshCookieName = "refresh_token";
+    private const string RefreshCookiePath = "/api/v1/auth";
     private static readonly TimeSpan MfaPendingTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PasswordResetTtl = TimeSpan.FromHours(1);
 
@@ -263,7 +264,7 @@ internal static class AuthEndpoints
         {
             await refreshTokenStore.RevokeAllForUserAsync(
                 user.TenantId.Value, user.UserId.Value, DateTimeOffset.UtcNow, ct);
-            context.Response.Cookies.Delete(RefreshCookieName);
+            DeleteRefreshCookie(context);
             await authEvents.LogAsync(user.TenantId.Value, user.UserId.Value,
                 AuthEventTypes.SessionRevoked, ip, ua,
                 new Dictionary<string, string> { ["reason"] = "mfa_policy_updated" }, ct);
@@ -301,7 +302,10 @@ internal static class AuthEndpoints
 
     // ─── Logout ─────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> Logout(
+    // Visibility elevated from `private` to `internal` so the Api.Tests project
+    // (which has InternalsVisibleTo) can invoke this handler directly to assert
+    // the refresh cookie is deleted on the versioned auth path.
+    internal static async Task<IResult> Logout(
         HttpContext context,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
@@ -322,7 +326,7 @@ internal static class AuthEndpoints
                 GetIpAddress(context), GetUserAgent(context), null, ct);
         }
 
-        context.Response.Cookies.Delete(RefreshCookieName);
+        DeleteRefreshCookie(context);
         return Results.Ok(new MessageResponse("Logged out"));
     }
 
@@ -965,10 +969,17 @@ internal static class AuthEndpoints
             HttpOnly = true,
             Secure = true,
             SameSite = SameSiteMode.Strict,
-            Path = "/api/v1/auth",
+            Path = RefreshCookiePath,
             MaxAge = TimeSpan.FromHours(24),
         });
     }
+
+    // Deletes the refresh cookie with the SAME Path it was issued under. Without
+    // the matching Path, the browser keeps the /api/v1/auth-scoped cookie (the
+    // default-path delete only clears a "/"-scoped cookie), so logout would not
+    // actually revoke the client-side credential.
+    private static void DeleteRefreshCookie(HttpContext context) =>
+        context.Response.Cookies.Delete(RefreshCookieName, new CookieOptions { Path = RefreshCookiePath });
 
     // Test seam: exposes the private SetRefreshCookie to the Api.Tests project
     // (which has InternalsVisibleTo) so cookie scoping can be asserted in unit
