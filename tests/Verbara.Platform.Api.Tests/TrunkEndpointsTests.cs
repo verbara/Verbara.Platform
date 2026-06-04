@@ -141,4 +141,23 @@ public sealed class TrunkEndpointsTests : IClassFixture<AuthenticatedPlatformApi
             "/api/v1/admin/trunks", TrunkBody("carrier-goodcodec", null));
         create.StatusCode.Should().Be(HttpStatusCode.Created);
     }
+
+    [Fact]
+    public async Task UpdateTrunk_ShouldReturn400_WhenCodecTokenInvalid()
+    {
+        var create = await _admin.PostAsJsonAsync(
+            "/api/v1/admin/trunks", TrunkBody("carrier-update-badcodec", null));
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var id = JsonNode.Parse(await create.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
+
+        var response = await _admin.PutAsJsonAsync(
+            $"/api/v1/admin/trunks/{id}", new { codecs = "ulaw,ulwa" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        var invalidCodecs = json["invalidCodecs"]!.AsArray()
+            .Select(n => n!.GetValue<string>())
+            .ToArray();
+        invalidCodecs.Should().ContainSingle().Which.Should().Be("ulwa");
+    }
 }
