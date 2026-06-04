@@ -19,6 +19,7 @@ using Verbara.Platform.Flows;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Switchboard;
+using Verbara.Platform.Api.Voice;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Serialization;
@@ -135,6 +136,9 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(AgentAssistFeatureDto))]
 [JsonSerializable(typeof(AgentAssistFeatureUpdateRequest))]
 [JsonSerializable(typeof(AgentAssistCredentialsDto))]
+// Voice Codecs
+[JsonSerializable(typeof(VoiceCodecsResponse))]
+[JsonSerializable(typeof(CodecValidationError))]
 [JsonSerializable(typeof(TrunkDto))]
 [JsonSerializable(typeof(List<TrunkDto>))]
 [JsonSerializable(typeof(TrunkConnectivityResult))]
