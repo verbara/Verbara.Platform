@@ -3,7 +3,7 @@
 > **Tipo:** auditoría + diseño funcional (NO implementación). Evidencia real del repo (file:line). Lo marcado "no verificado" no pudo confirmarse en código.
 > **Fecha:** 2026-06-01.
 > **Repos auditados:** `Verbara.Platform` (Api + Storage), `Verbara.Platform.Web` (admin React), `Verbara.Sdk.Pro` (Dialer + Realtime — la telefonía vive acá), `Verbara.Sdk` (no aporta modelos de trunk/DID).
-> **Estado:** aprobado como diseño funcional. Backlog en §10; ninguna tarea ejecutada aún.
+> **Estado:** ✅ **P0/P1/P2 del backlog (§10) IMPLEMENTADOS + SHIPPED 2026-06-01** en Platform **v2.8.0** (+ hotfix **v2.8.1**) + Web **v3.4.0-web** + Pro **2.7.4-pro**. El wizard (§5/§11) se entregó con 6 pasos (el 7º "test de conectividad" como endpoint+acción aparte). **P3 diferido** (TLS/SRTP, resolver regex/digitmask + overflow trunk, destinos DID más allá de cola). Detalle del ship en la memoria `project_telephony_admin_v281`.
 
 ---
 

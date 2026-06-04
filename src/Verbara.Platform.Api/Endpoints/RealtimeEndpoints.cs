@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.Voice;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Licensing;
 using Verbara.Sdk.Pro.MultiTenant;
@@ -76,6 +77,10 @@ internal static class RealtimeEndpoints
         if (!valid)
             return Results.BadRequest(new { error });
 
+        var invalidCodecs = KnownCodecs.InvalidTokens(body.Codecs);
+        if (invalidCodecs.Count > 0)
+            return Results.BadRequest(new CodecValidationError([.. invalidCodecs]));
+
         var profile = new EndpointProfile
         {
             Name = body.Name,
@@ -108,7 +113,13 @@ internal static class RealtimeEndpoints
 
         if (body.Name is not null) profile.Name = body.Name;
         if (body.Transport is not null) profile.Transport = body.Transport;
-        if (body.Codecs is not null) profile.Codecs = body.Codecs;
+        if (body.Codecs is not null)
+        {
+            var invalidCodecs = KnownCodecs.InvalidTokens(body.Codecs);
+            if (invalidCodecs.Count > 0)
+                return Results.BadRequest(new CodecValidationError([.. invalidCodecs]));
+            profile.Codecs = body.Codecs;
+        }
         if (body.Webrtc.HasValue) profile.Webrtc = body.Webrtc.Value;
         if (body.MaxContacts.HasValue) profile.MaxContacts = body.MaxContacts.Value;
         if (body.IsDefault.HasValue) profile.IsDefault = body.IsDefault.Value;
