@@ -262,8 +262,8 @@ internal static class OidcEndpoints
             HttpOnly = true,
             Secure = true,
             SameSite = SameSiteMode.Strict,
-            Path = "/api/auth",
-            MaxAge = TimeSpan.FromDays(7),
+            Path = "/api/v1/auth",
+            MaxAge = TimeSpan.FromHours(24),
         });
 
         await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginSuccess, ip, ua, null, ct);

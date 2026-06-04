@@ -965,10 +965,16 @@ internal static class AuthEndpoints
             HttpOnly = true,
             Secure = true,
             SameSite = SameSiteMode.Strict,
-            Path = "/api/auth",
-            MaxAge = TimeSpan.FromDays(7),
+            Path = "/api/v1/auth",
+            MaxAge = TimeSpan.FromHours(24),
         });
     }
+
+    // Test seam: exposes the private SetRefreshCookie to the Api.Tests project
+    // (which has InternalsVisibleTo) so cookie scoping can be asserted in unit
+    // tests without standing up the full endpoint pipeline.
+    internal static void SetRefreshCookieForTest(HttpContext context, string rawToken) =>
+        SetRefreshCookie(context, rawToken);
 
     private static (string? TenantId, string? UserId) GetAuthClaims(HttpContext context)
     {

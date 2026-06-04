@@ -38,6 +38,24 @@ public sealed class AuthEndpointsTests
         json.Should().Contain("\"mfaToken\":\"abc123\"");
     }
 
+    // ─── A1: refresh cookie path + max-age ──────────────────────────────────
+
+    [Fact]
+    public void SetRefreshCookie_ShouldScopeCookieToVersionedAuthPath_WhenIssued()
+    {
+        var ctx = new DefaultHttpContext();
+
+        AuthEndpoints.SetRefreshCookieForTest(ctx, "raw-token-value");
+
+        var setCookie = ctx.Response.Headers.SetCookie.ToString().ToLowerInvariant();
+        setCookie.Should().Contain("refresh_token=");
+        setCookie.Should().Contain("path=/api/v1/auth");
+        setCookie.Should().Contain("max-age=86400");
+        setCookie.Should().Contain("httponly");
+        setCookie.Should().Contain("samesite=strict");
+        setCookie.Should().NotContain("path=/api/auth;");
+    }
+
     [Fact]
     public async Task MfaDisable_ShouldReturn403_WhenTenantPolicyRequiresMfaAll()
     {
