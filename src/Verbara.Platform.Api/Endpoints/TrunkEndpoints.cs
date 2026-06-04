@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Api.Voice;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Models;
@@ -57,6 +58,10 @@ internal static class TrunkEndpoints
         if (!string.IsNullOrEmpty(body.MatchHost) && !IsValidMatchHost(body.MatchHost))
             return Results.BadRequest();
 
+        var invalidCodecs = KnownCodecs.InvalidTokens(body.Codecs);
+        if (invalidCodecs.Count > 0)
+            return Results.BadRequest(new CodecValidationError([.. invalidCodecs]));
+
         var trunk = new Trunk
         {
             Name = body.Name,
@@ -110,7 +115,13 @@ internal static class TrunkEndpoints
         if (body.IsActive.HasValue) trunk.IsActive = body.IsActive.Value;
         if (body.MaxChannels.HasValue) trunk.MaxChannels = body.MaxChannels.Value;
         if (body.Transport is not null) trunk.Transport = body.Transport;
-        if (body.Codecs is not null) trunk.Codecs = body.Codecs;
+        if (body.Codecs is not null)
+        {
+            var invalidCodecs = KnownCodecs.InvalidTokens(body.Codecs);
+            if (invalidCodecs.Count > 0)
+                return Results.BadRequest(new CodecValidationError([.. invalidCodecs]));
+            trunk.Codecs = body.Codecs;
+        }
         if (body.AuthUsername is not null) trunk.AuthUsername = body.AuthUsername;
         if (body.AuthPassword is not null) trunk.AuthPassword = body.AuthPassword;
         if (body.RegistrationUri is not null) trunk.RegistrationUri = body.RegistrationUri;

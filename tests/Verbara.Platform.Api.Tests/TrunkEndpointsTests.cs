@@ -103,4 +103,42 @@ public sealed class TrunkEndpointsTests : IClassFixture<AuthenticatedPlatformApi
             "/api/v1/admin/trunks", TrunkBody("carrier-badcidr", badMatchHost));
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
+
+    [Fact]
+    public async Task CreateTrunk_ShouldReturn400_WhenCodecTokenInvalid()
+    {
+        var body = new
+        {
+            name = "carrier-badcodec",
+            displayName = (string?)null,
+            type = "pjsip",
+            isActive = true,
+            maxChannels = 10,
+            transport = "transport-udp",
+            codecs = "ulaw,ulwa",
+            authUsername = (string?)null,
+            authPassword = (string?)null,
+            registrationUri = (string?)null,
+            clientUri = (string?)null,
+            context = "from-trunk",
+            matchHost = (string?)null,
+        };
+
+        var response = await _admin.PostAsJsonAsync("/api/v1/admin/trunks", body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        var invalidCodecs = json["invalidCodecs"]!.AsArray()
+            .Select(n => n!.GetValue<string>())
+            .ToArray();
+        invalidCodecs.Should().ContainSingle().Which.Should().Be("ulwa");
+    }
+
+    [Fact]
+    public async Task CreateTrunk_ShouldSucceed_WhenCodecsValid()
+    {
+        var create = await _admin.PostAsJsonAsync(
+            "/api/v1/admin/trunks", TrunkBody("carrier-goodcodec", null));
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
 }
