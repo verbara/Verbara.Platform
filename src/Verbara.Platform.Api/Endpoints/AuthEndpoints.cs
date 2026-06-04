@@ -18,8 +18,6 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class AuthEndpoints
 {
-    private const string RefreshCookieName = "refresh_token";
-    private const string RefreshCookiePath = "/api/v1/auth";
     private static readonly TimeSpan MfaPendingTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PasswordResetTtl = TimeSpan.FromHours(1);
 
@@ -232,7 +230,7 @@ internal static class AuthEndpoints
         AuthEventService authEvents,
         CancellationToken ct)
     {
-        var rawToken = context.Request.Cookies[RefreshCookieName];
+        var rawToken = context.Request.Cookies[RefreshTokenCookie.Name];
         if (string.IsNullOrEmpty(rawToken))
             return Results.Unauthorized();
 
@@ -315,7 +313,7 @@ internal static class AuthEndpoints
         AuthEventService authEvents,
         CancellationToken ct)
     {
-        var rawToken = context.Request.Cookies[RefreshCookieName];
+        var rawToken = context.Request.Cookies[RefreshTokenCookie.Name];
         if (!string.IsNullOrEmpty(rawToken))
             await refreshService.RevokeAsync(rawToken, ct);
 
@@ -888,7 +886,7 @@ internal static class AuthEndpoints
         IRefreshTokenStore refreshTokenStore,
         CancellationToken ct)
     {
-        if (!context.Request.Cookies.TryGetValue(RefreshCookieName, out var refreshToken) ||
+        if (!context.Request.Cookies.TryGetValue(RefreshTokenCookie.Name, out var refreshToken) ||
             string.IsNullOrEmpty(refreshToken))
             return null;
 
@@ -970,24 +968,17 @@ internal static class AuthEndpoints
             idleMinutes));
     }
 
-    private static void SetRefreshCookie(HttpContext context, string rawToken)
-    {
-        context.Response.Cookies.Append(RefreshCookieName, rawToken, new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.Strict,
-            Path = RefreshCookiePath,
-            MaxAge = TimeSpan.FromHours(24),
-        });
-    }
+    // Thin wrappers over the shared RefreshTokenCookie source of truth so call
+    // sites read naturally; the cookie name/path/max-age live in exactly one place.
+    private static void SetRefreshCookie(HttpContext context, string rawToken) =>
+        RefreshTokenCookie.Append(context, rawToken);
 
     // Deletes the refresh cookie with the SAME Path it was issued under. Without
     // the matching Path, the browser keeps the /api/v1/auth-scoped cookie (the
     // default-path delete only clears a "/"-scoped cookie), so logout would not
     // actually revoke the client-side credential.
     private static void DeleteRefreshCookie(HttpContext context) =>
-        context.Response.Cookies.Delete(RefreshCookieName, new CookieOptions { Path = RefreshCookiePath });
+        RefreshTokenCookie.Delete(context);
 
     // Test seam: exposes the private SetRefreshCookie to the Api.Tests project
     // (which has InternalsVisibleTo) so cookie scoping can be asserted in unit
