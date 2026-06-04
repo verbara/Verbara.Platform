@@ -6,7 +6,7 @@ namespace Verbara.Platform.Api.Services;
 
 internal sealed class RefreshTokenService
 {
-    private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(7);
+    private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromHours(24);
     private readonly IRefreshTokenStore _store;
 
     public RefreshTokenService(IRefreshTokenStore store) => _store = store;

@@ -33,6 +33,16 @@ public sealed class RefreshTokenServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_ShouldSetExpiryToAbsolute24Hours_WhenCalled()
+    {
+        var before = DateTimeOffset.UtcNow;
+
+        var (_, token) = await _sut.GenerateAsync("user1", "t1", null, null, CancellationToken.None);
+
+        token.ExpiresAt.Should().BeCloseTo(before.AddHours(24), TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
     public async Task RotateAsync_ShouldReturnNewToken_WhenTokenIsValid()
     {
         var (rawToken, original) = await _sut.GenerateAsync("user1", "t1", "127.0.0.1", "Agent", CancellationToken.None);
