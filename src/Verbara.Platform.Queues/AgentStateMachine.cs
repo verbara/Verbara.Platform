@@ -15,9 +15,13 @@ public static class AgentStateMachine
         (AgentState.Available, AgentState.DND),
         (AgentState.Available, AgentState.Offline),
 
-        // Busy -> Available, ACW
+        // Busy -> Available, ACW, Offline
+        // Busy -> Offline is a legitimate sign-off: a routable busy agent may
+        // sign out directly (e.g. idle-logout teardown) without first going
+        // back to Available, preventing a routing zombie.
         (AgentState.Busy, AgentState.Available),
         (AgentState.Busy, AgentState.ACW),
+        (AgentState.Busy, AgentState.Offline),
 
         // ACW -> Available, Break, Offline
         (AgentState.ACW, AgentState.Available),

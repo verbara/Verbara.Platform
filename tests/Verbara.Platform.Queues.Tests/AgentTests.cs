@@ -71,4 +71,29 @@ public class AgentTests
 
         agent.CanAcceptWork.Should().BeTrue();
     }
+
+    [Theory]
+    [InlineData(AgentState.Busy)]
+    [InlineData(AgentState.DND)]
+    [InlineData(AgentState.ACW)]
+    [InlineData(AgentState.Break)]
+    public void ForceOffline_ShouldSetOfflineFromAnyState_WhenInvoked(
+        AgentState initial)
+    {
+        var agent = NewAgent(initial);
+
+        agent.ForceOffline();
+
+        agent.State.Should().Be(AgentState.Offline);
+    }
+
+    private static Agent NewAgent(AgentState state) => new()
+    {
+        AgentId = EntityId.From("a-001"),
+        TenantId = new TenantId("t1"),
+        UserId = EntityId.From("u-001"),
+        DisplayName = "Agent",
+        State = state,
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
 }
