@@ -7,6 +7,7 @@ using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Notifications;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Identity.Mfa;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -89,6 +90,62 @@ public sealed class AuthEndpointsTests
             ctx, refreshService, authEvents, CancellationToken.None);
 
         result.Should().BeOfType<Ok<MessageResponse>>();
+
+        var setCookie = ctx.Response.Headers.SetCookie.ToString().ToLowerInvariant();
+        setCookie.Should().Contain("refresh_token=");
+        setCookie.Should().Contain("path=/api/v1/auth");
+        setCookie.Should().Contain("expires=thu, 01 jan 1970");
+    }
+
+    [Fact]
+    public async Task Refresh_ShouldDeleteCookieOnVersionedAuthPath_WhenMfaPolicyRevokesSession()
+    {
+        // Drive the MFA-policy-revoke branch end-to-end: a valid refresh cookie
+        // rotates successfully, the user is resolved, but the tenant policy now
+        // requires MFA while the user is not enrolled → the whole lineage is
+        // revoked and the refresh cookie MUST be deleted on the issuing Path so
+        // the browser actually clears it.
+        var refreshTokenStore = Substitute.For<IRefreshTokenStore>();
+        var refreshService = new RefreshTokenService(refreshTokenStore);
+        var userStore = Substitute.For<IUserStore>();
+        var configStore = Substitute.For<ITenantAuthConfigStore>();
+        var mfaPolicyEvaluator = Substitute.For<IMfaPolicyEvaluator>();
+        var authEvents = new AuthEventService(Substitute.For<IAuthEventStore>());
+
+        const string rawCookieToken = "incoming-refresh-token";
+        var storedToken = new RefreshToken
+        {
+            TokenId = "rotated-from",
+            UserId = TestUserId,
+            TenantId = TestTenantId,
+            TokenHash = RefreshTokenService.HashToken(rawCookieToken),
+            CreatedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+        };
+        // RotateAsync resolves the incoming token by hash → a valid, non-revoked token.
+        refreshTokenStore.GetByHashAsync(storedToken.TokenHash, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<RefreshToken?>(storedToken));
+
+        var user = BuildUser(mfaEnabled: false, role: UserRole.Admin);
+        userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<User?>(user));
+
+        // Policy now requires MFA for this role; user is not enrolled → revoke branch.
+        mfaPolicyEvaluator.RequiresMfaAsync(TestTenantId, Arg.Any<UserRole>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(true));
+
+        var ctx = BuildHttpContext();
+        ctx.Request.Headers.Cookie = $"refresh_token={rawCookieToken}";
+
+        var result = await AuthEndpoints.Refresh(
+            ctx, userStore, jwtService: null!, refreshService, refreshTokenStore,
+            configStore, mfaPolicyEvaluator, authEvents, CancellationToken.None);
+
+        var statusResult = result.Should().BeOfType<JsonHttpResult<MfaEnrollmentRequiredResponse>>().Subject;
+        statusResult.StatusCode.Should().Be(401);
+
+        await refreshTokenStore.Received(1).RevokeAllForUserAsync(
+            TestTenantId, TestUserId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
 
         var setCookie = ctx.Response.Headers.SetCookie.ToString().ToLowerInvariant();
         setCookie.Should().Contain("refresh_token=");
