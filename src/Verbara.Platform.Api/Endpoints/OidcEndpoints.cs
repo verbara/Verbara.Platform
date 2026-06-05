@@ -257,14 +257,7 @@ internal static class OidcEndpoints
         var (rawRefreshToken, _) = await refreshService.GenerateAsync(
             user.UserId.Value, user.TenantId.Value, ip, ua, ct);
 
-        context.Response.Cookies.Append("refresh_token", rawRefreshToken, new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.Strict,
-            Path = "/api/auth",
-            MaxAge = TimeSpan.FromDays(7),
-        });
+        RefreshTokenCookie.Append(context, rawRefreshToken);
 
         await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginSuccess, ip, ua, null, ct);
 
@@ -281,7 +274,10 @@ internal static class OidcEndpoints
         return Results.Redirect(callbackUrl);
     }
 
-    private static async Task<IResult> OidcLogout(
+    // Visibility elevated to internal so Verbara.Platform.Api.Tests (InternalsVisibleTo)
+    // can directly assert the refresh cookie is deleted on the versioned auth path,
+    // consistent with the sibling CompleteOidcLoginAsync / AuthEndpoints.Logout seams.
+    internal static async Task<IResult> OidcLogout(
         HttpContext context,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
@@ -292,7 +288,7 @@ internal static class OidcEndpoints
         var userId = context.User.FindFirst("user_id")?.Value
             ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-        var rawToken = context.Request.Cookies["refresh_token"];
+        var rawToken = context.Request.Cookies[RefreshTokenCookie.Name];
         if (!string.IsNullOrEmpty(rawToken))
             await refreshService.RevokeAsync(rawToken, ct);
 
@@ -303,7 +299,7 @@ internal static class OidcEndpoints
             await authEvents.LogAsync(tenantId, userId, "oidc_logout", ip, ua, null, ct);
         }
 
-        context.Response.Cookies.Delete("refresh_token");
+        RefreshTokenCookie.Delete(context);
         return Results.Ok(new MessageResponse("Logged out"));
     }
 }

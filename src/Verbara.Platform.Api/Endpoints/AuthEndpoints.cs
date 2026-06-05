@@ -18,7 +18,6 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class AuthEndpoints
 {
-    private const string RefreshCookieName = "refresh_token";
     private static readonly TimeSpan MfaPendingTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PasswordResetTtl = TimeSpan.FromHours(1);
 
@@ -162,7 +161,7 @@ internal static class AuthEndpoints
         }
 
         // Issue tokens
-        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, ct);
+        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, ct);
     }
 
     // ─── MFA Verify ──────────────────────────────────────────────────────────────
@@ -176,6 +175,7 @@ internal static class AuthEndpoints
         AccountLockoutService lockoutService,
         AuthEventService authEvents,
         [FromServices] IMfaPendingCache mfaCache,
+        [FromServices] ITenantAuthConfigStore configStore,
         CancellationToken ct)
     {
         var pending = await mfaCache.TakeAsync(body.MfaToken, ct);
@@ -211,7 +211,7 @@ internal static class AuthEndpoints
         if (!verified)
             return Results.Unauthorized();
 
-        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, ct);
+        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, ct);
     }
 
     // ─── Refresh ────────────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ internal static class AuthEndpoints
         AuthEventService authEvents,
         CancellationToken ct)
     {
-        var rawToken = context.Request.Cookies[RefreshCookieName];
+        var rawToken = context.Request.Cookies[RefreshTokenCookie.Name];
         if (string.IsNullOrEmpty(rawToken))
             return Results.Unauthorized();
 
@@ -263,7 +263,7 @@ internal static class AuthEndpoints
         {
             await refreshTokenStore.RevokeAllForUserAsync(
                 user.TenantId.Value, user.UserId.Value, DateTimeOffset.UtcNow, ct);
-            context.Response.Cookies.Delete(RefreshCookieName);
+            DeleteRefreshCookie(context);
             await authEvents.LogAsync(user.TenantId.Value, user.UserId.Value,
                 AuthEventTypes.SessionRevoked, ip, ua,
                 new Dictionary<string, string> { ["reason"] = "mfa_policy_updated" }, ct);
@@ -290,24 +290,30 @@ internal static class AuthEndpoints
         var featureRegistry = context.RequestServices.GetService<IFeatureRegistry>();
         var features = new Dictionary<string, bool>(featureRegistry?.GetFeatures() ?? new Dictionary<string, bool>());
 
+        var idleMinutes = (await configStore.GetAsync(user.TenantId.Value, ct))?.SessionIdleTimeoutMinutes ?? 30;
+
         return Results.Ok(new TokenResponse(
             accessToken,
             expiresAt,
             new TokenUserDto(user.UserId.Value, user.Email, user.DisplayName, user.Role.ToString().ToLowerInvariant()),
             user.TenantId.Value,
             permissions?.ToArray() ?? [],
-            features));
+            features,
+            idleMinutes));
     }
 
     // ─── Logout ─────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> Logout(
+    // Visibility elevated from `private` to `internal` so the Api.Tests project
+    // (which has InternalsVisibleTo) can invoke this handler directly to assert
+    // the refresh cookie is deleted on the versioned auth path.
+    internal static async Task<IResult> Logout(
         HttpContext context,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
         CancellationToken ct)
     {
-        var rawToken = context.Request.Cookies[RefreshCookieName];
+        var rawToken = context.Request.Cookies[RefreshTokenCookie.Name];
         if (!string.IsNullOrEmpty(rawToken))
             await refreshService.RevokeAsync(rawToken, ct);
 
@@ -322,7 +328,7 @@ internal static class AuthEndpoints
                 GetIpAddress(context), GetUserAgent(context), null, ct);
         }
 
-        context.Response.Cookies.Delete(RefreshCookieName);
+        DeleteRefreshCookie(context);
         return Results.Ok(new MessageResponse("Logged out"));
     }
 
@@ -880,7 +886,7 @@ internal static class AuthEndpoints
         IRefreshTokenStore refreshTokenStore,
         CancellationToken ct)
     {
-        if (!context.Request.Cookies.TryGetValue(RefreshCookieName, out var refreshToken) ||
+        if (!context.Request.Cookies.TryGetValue(RefreshTokenCookie.Name, out var refreshToken) ||
             string.IsNullOrEmpty(refreshToken))
             return null;
 
@@ -898,6 +904,7 @@ internal static class AuthEndpoints
         RefreshTokenService refreshService,
         AccountLockoutService lockoutService,
         AuthEventService authEvents,
+        ITenantAuthConfigStore configStore,
         CancellationToken ct)
     {
         // AHH Phase 2 — these two writes used to be synchronous round-trips
@@ -949,26 +956,35 @@ internal static class AuthEndpoints
         var featureRegistry = context.RequestServices.GetService<IFeatureRegistry>();
         var features = new Dictionary<string, bool>(featureRegistry?.GetFeatures() ?? new Dictionary<string, bool>());
 
+        var idleMinutes = (await configStore.GetAsync(user.TenantId.Value, ct))?.SessionIdleTimeoutMinutes ?? 30;
+
         return Results.Ok(new TokenResponse(
             accessToken,
             expiresAt,
             new TokenUserDto(user.UserId.Value, user.Email, user.DisplayName, user.Role.ToString().ToLowerInvariant()),
             user.TenantId.Value,
             effectivePermissions,
-            features));
+            features,
+            idleMinutes));
     }
 
-    private static void SetRefreshCookie(HttpContext context, string rawToken)
-    {
-        context.Response.Cookies.Append(RefreshCookieName, rawToken, new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.Strict,
-            Path = "/api/auth",
-            MaxAge = TimeSpan.FromDays(7),
-        });
-    }
+    // Thin wrappers over the shared RefreshTokenCookie source of truth so call
+    // sites read naturally; the cookie name/path/max-age live in exactly one place.
+    private static void SetRefreshCookie(HttpContext context, string rawToken) =>
+        RefreshTokenCookie.Append(context, rawToken);
+
+    // Deletes the refresh cookie with the SAME Path it was issued under. Without
+    // the matching Path, the browser keeps the /api/v1/auth-scoped cookie (the
+    // default-path delete only clears a "/"-scoped cookie), so logout would not
+    // actually revoke the client-side credential.
+    private static void DeleteRefreshCookie(HttpContext context) =>
+        RefreshTokenCookie.Delete(context);
+
+    // Test seam: exposes the private SetRefreshCookie to the Api.Tests project
+    // (which has InternalsVisibleTo) so cookie scoping can be asserted in unit
+    // tests without standing up the full endpoint pipeline.
+    internal static void SetRefreshCookieForTest(HttpContext context, string rawToken) =>
+        SetRefreshCookie(context, rawToken);
 
     private static (string? TenantId, string? UserId) GetAuthClaims(HttpContext context)
     {
@@ -1043,7 +1059,8 @@ internal sealed record TokenResponse(
     TokenUserDto? User = null,
     string? TenantId = null,
     string[]? Permissions = null,
-    Dictionary<string, bool>? Features = null);
+    Dictionary<string, bool>? Features = null,
+    int? SessionIdleTimeoutMinutes = null);
 
 internal sealed record TokenUserDto(string Id, string Email, string DisplayName, string Role);
 

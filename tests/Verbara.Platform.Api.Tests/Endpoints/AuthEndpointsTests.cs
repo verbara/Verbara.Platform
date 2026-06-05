@@ -7,6 +7,7 @@ using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Notifications;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Identity.Mfa;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -36,6 +37,120 @@ public sealed class AuthEndpointsTests
 
         json.Should().Contain("\"requiresMfa\":true");
         json.Should().Contain("\"mfaToken\":\"abc123\"");
+    }
+
+    // ─── A1: refresh cookie path + max-age ──────────────────────────────────
+
+    [Fact]
+    public void SetRefreshCookie_ShouldScopeCookieToVersionedAuthPath_WhenIssued()
+    {
+        var ctx = new DefaultHttpContext();
+
+        AuthEndpoints.SetRefreshCookieForTest(ctx, "raw-token-value");
+
+        var setCookie = ctx.Response.Headers.SetCookie.ToString().ToLowerInvariant();
+        setCookie.Should().Contain("refresh_token=");
+        setCookie.Should().Contain("path=/api/v1/auth");
+        setCookie.Should().Contain("max-age=86400");
+        setCookie.Should().Contain("httponly");
+        setCookie.Should().Contain("samesite=strict");
+        setCookie.Should().NotContain("path=/api/auth;");
+    }
+
+    // ─── A4: sessionIdleTimeoutMinutes on TokenResponse ─────────────────────
+
+    [Fact]
+    public void TokenResponse_ShouldSerializeSessionIdleTimeoutMinutes_WhenSet()
+    {
+        var resp = new TokenResponse(
+            "access-token",
+            DateTimeOffset.UtcNow,
+            null,
+            TestTenantId,
+            null,
+            null,
+            30);
+
+        var json = JsonSerializer.Serialize(resp, ApiJsonContext.Default.TokenResponse);
+
+        json.Should().Contain("\"sessionIdleTimeoutMinutes\":30");
+    }
+
+    // ─── A2: refresh cookie delete path ─────────────────────────────────────
+
+    [Fact]
+    public async Task Logout_ShouldDeleteCookieOnVersionedAuthPath_WhenCalled()
+    {
+        var refreshTokenStore = Substitute.For<IRefreshTokenStore>();
+        var refreshService = new RefreshTokenService(refreshTokenStore);
+        var authEvents = new AuthEventService(Substitute.For<IAuthEventStore>());
+
+        var ctx = BuildHttpContext();
+        var result = await AuthEndpoints.Logout(
+            ctx, refreshService, authEvents, CancellationToken.None);
+
+        result.Should().BeOfType<Ok<MessageResponse>>();
+
+        var setCookie = ctx.Response.Headers.SetCookie.ToString().ToLowerInvariant();
+        setCookie.Should().Contain("refresh_token=");
+        setCookie.Should().Contain("path=/api/v1/auth");
+        setCookie.Should().Contain("expires=thu, 01 jan 1970");
+    }
+
+    [Fact]
+    public async Task Refresh_ShouldDeleteCookieOnVersionedAuthPath_WhenMfaPolicyRevokesSession()
+    {
+        // Drive the MFA-policy-revoke branch end-to-end: a valid refresh cookie
+        // rotates successfully, the user is resolved, but the tenant policy now
+        // requires MFA while the user is not enrolled → the whole lineage is
+        // revoked and the refresh cookie MUST be deleted on the issuing Path so
+        // the browser actually clears it.
+        var refreshTokenStore = Substitute.For<IRefreshTokenStore>();
+        var refreshService = new RefreshTokenService(refreshTokenStore);
+        var userStore = Substitute.For<IUserStore>();
+        var configStore = Substitute.For<ITenantAuthConfigStore>();
+        var mfaPolicyEvaluator = Substitute.For<IMfaPolicyEvaluator>();
+        var authEvents = new AuthEventService(Substitute.For<IAuthEventStore>());
+
+        const string rawCookieToken = "incoming-refresh-token";
+        var storedToken = new RefreshToken
+        {
+            TokenId = "rotated-from",
+            UserId = TestUserId,
+            TenantId = TestTenantId,
+            TokenHash = RefreshTokenService.HashToken(rawCookieToken),
+            CreatedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+        };
+        // RotateAsync resolves the incoming token by hash → a valid, non-revoked token.
+        refreshTokenStore.GetByHashAsync(storedToken.TokenHash, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<RefreshToken?>(storedToken));
+
+        var user = BuildUser(mfaEnabled: false, role: UserRole.Admin);
+        userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<User?>(user));
+
+        // Policy now requires MFA for this role; user is not enrolled → revoke branch.
+        mfaPolicyEvaluator.RequiresMfaAsync(TestTenantId, Arg.Any<UserRole>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(true));
+
+        var ctx = BuildHttpContext();
+        ctx.Request.Headers.Cookie = $"refresh_token={rawCookieToken}";
+
+        var result = await AuthEndpoints.Refresh(
+            ctx, userStore, jwtService: null!, refreshService, refreshTokenStore,
+            configStore, mfaPolicyEvaluator, authEvents, CancellationToken.None);
+
+        var statusResult = result.Should().BeOfType<JsonHttpResult<MfaEnrollmentRequiredResponse>>().Subject;
+        statusResult.StatusCode.Should().Be(401);
+
+        await refreshTokenStore.Received(1).RevokeAllForUserAsync(
+            TestTenantId, TestUserId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+
+        var setCookie = ctx.Response.Headers.SetCookie.ToString().ToLowerInvariant();
+        setCookie.Should().Contain("refresh_token=");
+        setCookie.Should().Contain("path=/api/v1/auth");
+        setCookie.Should().Contain("expires=thu, 01 jan 1970");
     }
 
     [Fact]

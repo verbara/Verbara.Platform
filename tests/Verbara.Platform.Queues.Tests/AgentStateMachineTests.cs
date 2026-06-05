@@ -36,6 +36,13 @@ public class AgentStateMachineTests
     }
 
     [Fact]
+    public void CanTransition_ShouldReturnTrue_WhenBusyToOffline()
+    {
+        AgentStateMachine.CanTransition(AgentState.Busy, AgentState.Offline)
+            .Should().BeTrue();
+    }
+
+    [Fact]
     public void IsRoutable_ShouldReturnTrue_WhenAvailableOrBusy()
     {
         AgentStateMachine.IsRoutable(AgentState.Available).Should().BeTrue();

@@ -6,10 +6,15 @@ namespace Verbara.Platform.Api.Services;
 
 internal sealed class RefreshTokenService
 {
-    private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(7);
+    private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromHours(24);
     private readonly IRefreshTokenStore _store;
+    private readonly TimeSpan _graceWindow;
 
-    public RefreshTokenService(IRefreshTokenStore store) => _store = store;
+    public RefreshTokenService(IRefreshTokenStore store, TimeSpan? rotationGraceWindow = null)
+    {
+        _store = store;
+        _graceWindow = rotationGraceWindow ?? TimeSpan.FromSeconds(15);
+    }
 
     public async Task<(string RawToken, RefreshToken StoredToken)> GenerateAsync(
         string userId, string tenantId, string? ipAddress, string? userAgent, CancellationToken ct)
@@ -43,17 +48,47 @@ internal sealed class RefreshTokenService
 
         if (existing is null) return null;
 
-        // Reuse detection: revoked token replayed → revoke ALL for user
+        var now = DateTimeOffset.UtcNow;
+
+        // Cross-tab refresh race: a token that was just rotated (revoked + ReplacedBy set)
+        // and replayed within the grace window is treated as a benign race rather than
+        // genuine reuse. This happens when two browser tabs present the same current
+        // refresh token within milliseconds — tab 1 rotates it, tab 2 then sees the
+        // now-revoked token. Without a grace window this would family-revoke and log out
+        // both tabs. Genuine reuse (hard-revoked with no ReplacedBy, or replayed after the
+        // grace) still falls through to the family-revoke path below.
         if (existing.IsRevoked)
         {
-            await _store.RevokeAllForUserAsync(existing.TenantId, existing.UserId, DateTimeOffset.UtcNow, ct);
+            if (existing.ReplacedBy is { } replacedById &&
+                existing.RevokedAt is { } revokedAt &&
+                (now - revokedAt) <= _graceWindow)
+            {
+                var replacement = await _store.GetByTokenIdAsync(replacedById, ct);
+                if (replacement is not null &&
+                    !replacement.IsRevoked &&
+                    replacement.ExpiresAt > now &&
+                    replacement.UserId == existing.UserId &&
+                    replacement.TenantId == existing.TenantId)
+                {
+                    // The replacement token's RAW value is unrecoverable (only its hash is
+                    // stored), so we cannot hand back the replacement itself. Instead we mint
+                    // a fresh token and chain the replacement to it (replacement → new), so the
+                    // racing tab gets a usable token and the family stays linked.
+                    var (newRaw, newTok) = await GenerateAsync(existing.UserId, existing.TenantId, ipAddress, userAgent, ct);
+                    await _store.RevokeAsync(replacement.TokenId, now, replacedBy: newTok.TokenId, ct);
+                    return (newRaw, newTok);
+                }
+            }
+
+            // Reuse detection: revoked token replayed → revoke ALL for user
+            await _store.RevokeAllForUserAsync(existing.TenantId, existing.UserId, now, ct);
             return null;
         }
 
-        if (existing.IsExpired(DateTimeOffset.UtcNow)) return null;
+        if (existing.IsExpired(now)) return null;
 
         var (newRawToken, newToken) = await GenerateAsync(existing.UserId, existing.TenantId, ipAddress, userAgent, ct);
-        await _store.RevokeAsync(existing.TokenId, DateTimeOffset.UtcNow, newToken.TokenId, ct);
+        await _store.RevokeAsync(existing.TokenId, now, newToken.TokenId, ct);
         return (newRawToken, newToken);
     }
 

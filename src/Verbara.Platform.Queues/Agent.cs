@@ -52,4 +52,13 @@ public sealed class Agent : ITenantScoped, IAuditable
         AgentStateMachine.EnsureTransition(State, newState);
         State = newState;
     }
+
+    // Bounded teardown helper: forces Offline from ANY state, bypassing
+    // EnsureTransition ON PURPOSE. Reserved for sign-off / disconnect teardown
+    // (e.g. idle-logout, dropped connections) where leaving an agent in a
+    // routable state would create a routing zombie. NOT for user-driven
+    // UpdateAgentState — that must keep going through TransitionTo so normal
+    // transition validation still applies. The single Offline target is the
+    // only transition this loosens.
+    public void ForceOffline() => State = AgentState.Offline;
 }

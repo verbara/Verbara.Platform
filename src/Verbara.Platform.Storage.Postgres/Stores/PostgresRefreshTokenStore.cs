@@ -46,6 +46,15 @@ internal sealed class PostgresRefreshTokenStore : IRefreshTokenStore
         return row?.ToRefreshToken();
     }
 
+    public async Task<RefreshToken?> GetByTokenIdAsync(string tokenId, CancellationToken ct)
+    {
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
+            $"SELECT {SelectColumns} FROM refresh_tokens WHERE token_id = @TokenId",
+            p => p.Add(new NpgsqlParameter("TokenId", tokenId)),
+            RefreshTokenRow.Map, ct);
+        return row?.ToRefreshToken();
+    }
+
     public async Task<IReadOnlyList<RefreshToken>> GetActiveByUserAsync(string tenantId, string userId, CancellationToken ct)
     {
         var rows = await _dataSource.QueryListAsync(
