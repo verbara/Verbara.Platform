@@ -36,6 +36,14 @@ public sealed class TenantAuthConfig
     public int ImpersonationAutoTimeoutMinutes { get; set; } = 240;
 
     /// <summary>
+    /// W3 — Redis presence-key TTL (seconds) for server-side agent liveness.
+    /// The liveness reaper forces a routable agent Offline when its presence
+    /// key is missing. The client heartbeats well within this window
+    /// (~20 s &lt;&lt; 60 s). <c>&lt;= 0</c> disables liveness reaping for the tenant.
+    /// </summary>
+    public int AgentLivenessTimeoutSeconds { get; set; } = 60;
+
+    /// <summary>
     /// v1.3.0 IP Allowlist — when true, requests from IPs not matching any
     /// row in tenant_ip_allowlist are rejected with 403. When false, the
     /// allowlist is dormant regardless of the entries that may exist.

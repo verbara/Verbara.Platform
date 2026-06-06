@@ -686,6 +686,13 @@ builder.Services.AddSingleton<Verbara.Platform.Identity.Mfa.IMfaPendingCache,
 builder.Services.AddSingleton<Verbara.Platform.Identity.Mfa.IPasswordResetCache,
     Verbara.Platform.Identity.Mfa.InMemoryPasswordResetCache>();
 
+// W3 server-side agent liveness — default to the in-memory presence store
+// (single-instance safe). When ConnectionStrings:IdentityRedis is set, the
+// registration below is swapped to RedisAgentLivenessStore so presence keys
+// are shared across API instances.
+builder.Services.AddSingleton<Verbara.Platform.Queues.Services.IAgentLivenessStore,
+    Verbara.Platform.Storage.InMemory.InMemoryAgentLivenessStore>();
+
 var identityRedisConn = builder.Configuration.GetConnectionString("IdentityRedis");
 
 // v1.14.4 (MFA-007 fix) — multi-replica deployments MUST set both
@@ -727,6 +734,15 @@ if (!string.IsNullOrWhiteSpace(identityRedisConn))
     // Engages only when Redis is configured; in single-instance deploys the
     // cache decorators rely on local TTL only (60 s default).
     builder.Services.AddAuthHotpathRedisInvalidation();
+
+    // W3 — swap the in-memory agent-liveness store for the Redis-backed one so
+    // presence keys (and the liveness reaper's view) are shared across replicas.
+    // The shared IConnectionMultiplexer is registered (TryAddSingleton) by
+    // AddVerbaraPlatformIdentityRedis above.
+    var presencePrefix = builder.Configuration["Identity:Redis:KeyPrefix"] ?? "asterisk:identity:";
+    builder.Services.RemoveAll<Verbara.Platform.Queues.Services.IAgentLivenessStore>();
+    builder.Services.AddSingleton<Verbara.Platform.Queues.Services.IAgentLivenessStore>(sp =>
+        new RedisAgentLivenessStore(sp.GetRequiredService<StackExchange.Redis.IConnectionMultiplexer>(), presencePrefix));
 }
 
 // ─── OIDC SSO Services ──────────────────────────────────────────────────────

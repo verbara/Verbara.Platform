@@ -58,4 +58,16 @@ internal sealed class InMemoryAgentStore : IAgentStore
         _items.TryRemove((tenantId, agentId), out _);
         return Task.CompletedTask;
     }
+
+    public async IAsyncEnumerable<Agent> StreamRoutableAgentsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var agent in _items.Values)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (AgentStateMachine.IsRoutable(agent.State))
+                yield return agent;
+        }
+        await Task.CompletedTask;
+    }
 }
