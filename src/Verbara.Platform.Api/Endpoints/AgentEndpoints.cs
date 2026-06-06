@@ -120,14 +120,19 @@ internal static class AgentEndpoints
             agent.TransitionTo(target);
             await agentStore.SaveAsync(agent, ct);
 
-            // Unpause first (pending cleared) then publish the real state change.
-            // For a routable target both decisions say "unpause", so the order is
-            // consistent regardless; for completeness the final state-change wins.
-            eventBus.Publish(new AgentPendingStateChangedEvent(
-                tenantId.ToString(),
-                agent.AgentId.Value,
-                agent.DisplayName,
-                null));
+            // Emit the unpause (pending-cleared) event ONLY when the new target is
+            // ROUTABLE. For a non-routable target (ACW/Offline) the AgentStateChangedEvent
+            // below already keeps the agent paused, and emitting pending(null) first
+            // would cause an unpause→re-pause flicker + a redundant AMI QueuePause —
+            // the same contract the force path upholds.
+            if (AgentStateMachine.IsRoutable(target))
+            {
+                eventBus.Publish(new AgentPendingStateChangedEvent(
+                    tenantId.ToString(),
+                    agent.AgentId.Value,
+                    agent.DisplayName,
+                    null));
+            }
             eventBus.Publish(new AgentStateChangedEvent(
                 tenantId.ToString(),
                 agent.AgentId.Value,

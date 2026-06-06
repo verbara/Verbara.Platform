@@ -180,6 +180,39 @@ public sealed class DeferredPauseEndpointsTests : IClassFixture<AuthenticatedPla
             .Should().ContainSingle(e => e.AgentId == agentId.Value && e.NewState == "Available");
     }
 
+    [Fact]
+    public async Task UpdateAgentState_ShouldNotEmitPendingNull_WhenNonRoutableTargetRequestedWhilePending()
+    {
+        // Busy + active work → pending Break; then request a NON-routable target
+        // (Offline; Busy→Offline is a valid transition). Cancel-and-apply must NOT
+        // emit AgentPendingStateChangedEvent(null) — that would unpause→re-pause
+        // (flicker). Only the AgentStateChangedEvent(non-routable) is published,
+        // which keeps the agent paused.
+        var agentId = await SeedAgentForCallerAsync(AgentState.Busy);
+        await SeedActiveWorkAsync(agentId);
+        await _client.PutAsync(
+            "/api/v1/agents/me/state", JsonContent.Create(new { state = "Break" }));
+        (await GetAgentAsync(agentId)).HasPendingPause.Should().BeTrue();
+
+        var (captured, sub) = SubscribeEvents();
+        using var _ = sub;
+
+        var response = await _client.PutAsync(
+            "/api/v1/agents/me/state", JsonContent.Create(new { state = "Offline" }));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var agent = await GetAgentAsync(agentId);
+        agent.State.Should().Be(AgentState.Offline);
+        agent.HasPendingPause.Should().BeFalse();
+
+        // No unpause event for a non-routable target (no flicker).
+        captured.OfType<AgentPendingStateChangedEvent>()
+            .Where(e => e.AgentId == agentId.Value)
+            .Should().BeEmpty();
+        captured.OfType<AgentStateChangedEvent>()
+            .Should().ContainSingle(e => e.AgentId == agentId.Value && e.NewState == "Offline");
+    }
+
     // ── POST /me/pause/cancel ─────────────────────────────────────────────────
 
     [Fact]
