@@ -15,6 +15,10 @@ public interface IAgentStore
     // ALL tenants, unpaged/streamed. Used by the liveness reaper to reconcile
     // "Postgres says routable" against "Redis says alive".
     IAsyncEnumerable<Agent> StreamRoutableAgentsAsync(CancellationToken ct);
+
+    // W4 — drain-sweep enumeration of every agent with a pending pause, across ALL
+    // tenants, unpaged/streamed. Mirrors StreamRoutableAgentsAsync.
+    IAsyncEnumerable<Agent> StreamPendingPauseAgentsAsync(CancellationToken ct);
 }
 
 public sealed record AgentQuery

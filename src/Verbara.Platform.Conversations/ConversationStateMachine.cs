@@ -57,6 +57,13 @@ public static class ConversationStateMachine
         ConversationState.Spam,
     ];
 
+    /// <summary>W4 — conversation states that count as the agent actively working an item
+    /// (block a deferred pause from applying). Excludes parked + pre-accept + terminal.</summary>
+    public static readonly IReadOnlyList<ConversationState> ActiveWorkStates =
+        [ConversationState.Active, ConversationState.OnHold, ConversationState.Consulting, ConversationState.WrapUp];
+
+    public static bool IsActiveWork(ConversationState state) => ActiveWorkStates.Contains(state);
+
     public static bool CanTransition(ConversationState from, ConversationState to) =>
         s_validTransitions.Contains((from, to));
 

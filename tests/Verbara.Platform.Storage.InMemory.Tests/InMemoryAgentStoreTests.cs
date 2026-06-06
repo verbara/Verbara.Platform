@@ -70,4 +70,57 @@ public sealed class InMemoryAgentStoreTests
 
         routable.Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task StreamPendingPauseAgentsAsync_ShouldYieldOnlyAgentsWithPending_WhenMixedStates()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        var pendingA = MakeAgent(tenant, AgentState.Busy);
+        pendingA.PendingState = AgentState.Break;
+        var pendingB = MakeAgent(tenant, AgentState.ACW);
+        pendingB.PendingState = AgentState.Lunch;
+        var noPending = MakeAgent(tenant, AgentState.Available);
+        await store.SaveAsync(pendingA, CancellationToken.None);
+        await store.SaveAsync(pendingB, CancellationToken.None);
+        await store.SaveAsync(noPending, CancellationToken.None);
+
+        var pending = await CollectAsync(store.StreamPendingPauseAgentsAsync(CancellationToken.None));
+
+        pending.Select(a => a.AgentId).Should().BeEquivalentTo(new[] { pendingA.AgentId, pendingB.AgentId });
+    }
+
+    [Fact]
+    public async Task StreamPendingPauseAgentsAsync_ShouldYieldNothing_WhenNoPending()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        await store.SaveAsync(MakeAgent(tenant, AgentState.Available), CancellationToken.None);
+        await store.SaveAsync(MakeAgent(tenant, AgentState.Busy), CancellationToken.None);
+
+        var pending = await CollectAsync(store.StreamPendingPauseAgentsAsync(CancellationToken.None));
+
+        pending.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldRoundTripPendingFields_WhenPendingSet()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        var since = DateTimeOffset.UtcNow;
+        var agent = MakeAgent(tenant, AgentState.Busy);
+        agent.PendingState = AgentState.Lunch;
+        agent.PendingReason = "lunch";
+        agent.PendingSince = since;
+        await store.SaveAsync(agent, CancellationToken.None);
+
+        var loaded = await store.GetByIdAsync(tenant, agent.AgentId, CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.PendingState.Should().Be(AgentState.Lunch);
+        loaded.PendingReason.Should().Be("lunch");
+        loaded.PendingSince.Should().Be(since);
+        loaded.HasPendingPause.Should().BeTrue();
+    }
 }

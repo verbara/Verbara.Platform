@@ -62,6 +62,10 @@ public sealed class InMemoryAgentPresenceService : IAgentPresenceService
             if (queue?.RequiredSkills.Count > 0 && !queue.RequiredSkills.Any(s => agent.Skills.Contains(s)))
                 continue;
 
+            // W4 — a pending pause blocks NEW routing instantly, before State flips.
+            if (agent.HasPendingPause)
+                continue;
+
             // Filter: routable state
             var currentState = _states.GetValueOrDefault((tenantId, agent.AgentId), agent.State);
             if (!AgentStateMachine.IsRoutable(currentState))

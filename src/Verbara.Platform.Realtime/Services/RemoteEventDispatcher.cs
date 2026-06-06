@@ -116,6 +116,9 @@ internal sealed class RemoteEventDispatcher : IHostedService
             case "agent.state_changed":
                 DecodeAndPublish(envelope, PlatformPushJsonContext.Default.AgentStateChangedEvent);
                 break;
+            case "agent.pending_state_changed":
+                DecodeAndPublish(envelope, PlatformPushJsonContext.Default.AgentPendingStateChangedEvent);
+                break;
             case "conversation.state_changed":
                 DecodeAndPublish(envelope, PlatformPushJsonContext.Default.ConversationStateChangedEvent);
                 break;

@@ -1,3 +1,4 @@
+using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
@@ -8,12 +9,22 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class AgentEndpoints
 {
+    // W4 — aux states the agent may DEFER ("pause when free"): if the agent still
+    // has active work, requesting one of these records a PendingState instead of
+    // flipping State immediately, so the live call/chat keeps routing-blocked but
+    // is not cut off. Routable + teardown targets (Available/Busy/Offline/ACW) are
+    // NOT deferrable — they apply at once.
+    private static readonly HashSet<AgentState> DeferrableStates =
+        [AgentState.Break, AgentState.Lunch, AgentState.Training, AgentState.DND];
+
     public static void MapAgentEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/agents").RequireAuthorization("Authenticated").RequireOperationalTenant();
 
         group.MapGet("/me", GetCurrentAgent);
         group.MapPut("/me/state", UpdateAgentState);
+        group.MapPost("/me/pause/cancel", CancelPendingPause);
+        group.MapPost("/me/pause/force", ForcePendingPause);
         group.MapPost("/me/heartbeat", Heartbeat);
         group.MapPost("/me/offline", GoOffline);
     }
@@ -21,20 +32,33 @@ internal static class AgentEndpoints
     private static async Task<IResult> GetCurrentAgent(
         HttpContext context,
         [FromServices] IAgentStore agentStore,
+        [FromServices] IConversationStore conversationStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = GetCurrentUserId(context);
 
         var agent = await agentStore.GetByUserIdAsync(tenantId, userId, ct);
-        return agent is null
-            ? Results.NotFound()
-            : Results.Ok(AgentMeResponseDto.FromAgent(agent));
+        if (agent is null)
+            return Results.NotFound();
+
+        var activeWork = await conversationStore.CountActiveWorkAsync(tenantId, agent.AgentId, ct);
+        return Results.Ok(AgentMeResponseDto.FromAgent(agent, activeWork));
     }
 
+    // W4 (A5) — pending-aware state change. A deferrable aux state requested while
+    // the agent is still working is RECORDED as a PendingState (the live item keeps
+    // going, new work is blocked) rather than applied. A routable/teardown target,
+    // or any target with no active work, applies immediately via TransitionTo.
+    // CRITICAL ORDERING (A4 review): when setting/clearing a pending pause we
+    // ALWAYS SaveAsync (so HasPendingPause is durable for GetAvailableAgentsAsync)
+    // BEFORE publishing the event — otherwise the event-driven QueuePause could
+    // fire while routing still sees the agent as eligible.
     private static async Task<IResult> UpdateAgentState(
         HttpContext context,
         [FromServices] IAgentStore agentStore,
+        [FromServices] IConversationStore conversationStore,
+        [FromServices] TimeProvider clock,
         PlatformEventBus eventBus,
         [FromBody] UpdateAgentStateRequest body,
         CancellationToken ct)
@@ -46,8 +70,81 @@ internal static class AgentEndpoints
         if (agent is null)
             return Results.NotFound();
 
+        var target = body.State;
         var oldState = agent.State;
-        agent.TransitionTo(body.State);
+
+        if (DeferrableStates.Contains(target))
+        {
+            var activeWork = await conversationStore.CountActiveWorkAsync(tenantId, agent.AgentId, ct);
+
+            if (agent.HasPendingPause || activeWork > 0)
+            {
+                // Set OR re-request (possibly a different deferrable target): record
+                // the pending target + refresh PendingSince. State is UNCHANGED — the
+                // agent keeps working the live item. Idempotent on the same target.
+                agent.PendingState = target;
+                agent.PendingReason = body.Reason;
+                agent.PendingSince = clock.GetUtcNow();
+                await agentStore.SaveAsync(agent, ct);
+
+                eventBus.Publish(new AgentPendingStateChangedEvent(
+                    tenantId.ToString(),
+                    agent.AgentId.Value,
+                    agent.DisplayName,
+                    target.ToString()));
+
+                return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+            }
+
+            // Deferrable but no active work and not already pending → apply now.
+            agent.TransitionTo(target);
+            await agentStore.SaveAsync(agent, ct);
+
+            eventBus.Publish(new AgentStateChangedEvent(
+                tenantId.ToString(),
+                agent.AgentId.Value,
+                agent.DisplayName,
+                oldState.ToString(),
+                target.ToString()));
+
+            return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+        }
+
+        // Non-deferrable target (Available/Busy/Offline/ACW/…).
+        if (agent.HasPendingPause)
+        {
+            // Cancel the pending pause AND apply the requested target in one save.
+            agent.PendingState = null;
+            agent.PendingReason = null;
+            agent.PendingSince = null;
+            agent.TransitionTo(target);
+            await agentStore.SaveAsync(agent, ct);
+
+            // Emit the unpause (pending-cleared) event ONLY when the new target is
+            // ROUTABLE. For a non-routable target (ACW/Offline) the AgentStateChangedEvent
+            // below already keeps the agent paused, and emitting pending(null) first
+            // would cause an unpause→re-pause flicker + a redundant AMI QueuePause —
+            // the same contract the force path upholds.
+            if (AgentStateMachine.IsRoutable(target))
+            {
+                eventBus.Publish(new AgentPendingStateChangedEvent(
+                    tenantId.ToString(),
+                    agent.AgentId.Value,
+                    agent.DisplayName,
+                    null));
+            }
+            eventBus.Publish(new AgentStateChangedEvent(
+                tenantId.ToString(),
+                agent.AgentId.Value,
+                agent.DisplayName,
+                oldState.ToString(),
+                target.ToString()));
+
+            return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+        }
+
+        // Not pending, any target — existing immediate path.
+        agent.TransitionTo(target);
         await agentStore.SaveAsync(agent, ct);
 
         eventBus.Publish(new AgentStateChangedEvent(
@@ -55,9 +152,87 @@ internal static class AgentEndpoints
             agent.AgentId.Value,
             agent.DisplayName,
             oldState.ToString(),
-            body.State.ToString()));
+            target.ToString()));
 
-        return Results.Ok(agent);
+        return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+    }
+
+    // W4 (A5) — cancel a pending pause WITHOUT applying it. The agent stays in its
+    // current (routable) state and resumes accepting new work. Publishes the unpause
+    // (AgentPendingStateChangedEvent null). Idempotent: a no-op 200 when not pending.
+    private static async Task<IResult> CancelPendingPause(
+        HttpContext context,
+        [FromServices] IAgentStore agentStore,
+        [FromServices] IConversationStore conversationStore,
+        PlatformEventBus eventBus,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var userId = GetCurrentUserId(context);
+
+        var agent = await agentStore.GetByUserIdAsync(tenantId, userId, ct);
+        if (agent is null)
+            return Results.NotFound();
+
+        if (agent.HasPendingPause)
+        {
+            agent.PendingState = null;
+            agent.PendingReason = null;
+            agent.PendingSince = null;
+            await agentStore.SaveAsync(agent, ct);
+
+            eventBus.Publish(new AgentPendingStateChangedEvent(
+                tenantId.ToString(),
+                agent.AgentId.Value,
+                agent.DisplayName,
+                null));
+        }
+
+        return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+    }
+
+    // W4 (A5) — apply a pending pause NOW (skip the drain wait). Flips State to the
+    // pending target via ApplyPendingState() and publishes ONLY AgentStateChangedEvent.
+    // Deliberately does NOT publish AgentPendingStateChangedEvent(null): doing so would
+    // unpause then immediately re-pause for the now-non-routable state (the A4 flicker
+    // contract). Idempotent: a no-op 200 when not pending.
+    private static async Task<IResult> ForcePendingPause(
+        HttpContext context,
+        [FromServices] IAgentStore agentStore,
+        [FromServices] IConversationStore conversationStore,
+        PlatformEventBus eventBus,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var userId = GetCurrentUserId(context);
+
+        var agent = await agentStore.GetByUserIdAsync(tenantId, userId, ct);
+        if (agent is null)
+            return Results.NotFound();
+
+        if (agent.HasPendingPause)
+        {
+            var oldState = agent.State;
+            var target = agent.PendingState!.Value;
+            agent.ApplyPendingState();
+            await agentStore.SaveAsync(agent, ct);
+
+            eventBus.Publish(new AgentStateChangedEvent(
+                tenantId.ToString(),
+                agent.AgentId.Value,
+                agent.DisplayName,
+                oldState.ToString(),
+                target.ToString()));
+        }
+
+        return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+    }
+
+    private static async Task<IResult> OkDtoAsync(
+        IConversationStore conversationStore, TenantId tenantId, Agent agent, CancellationToken ct)
+    {
+        var activeWork = await conversationStore.CountActiveWorkAsync(tenantId, agent.AgentId, ct);
+        return Results.Ok(AgentMeResponseDto.FromAgent(agent, activeWork));
     }
 
     // W3 (A3) — heartbeat / proof-of-life. The browser refreshes the agent's
@@ -160,4 +335,7 @@ internal static class AgentEndpoints
     }
 }
 
-internal sealed record UpdateAgentStateRequest(AgentState State);
+// W4 (A5) — Reason is OPTIONAL and back-compat: the existing client posts only
+// { state }. When a deferrable target is recorded as a PendingState, Reason (if
+// present) is stored alongside it for the agent/supervisor UI.
+internal sealed record UpdateAgentStateRequest(AgentState State, string? Reason = null);

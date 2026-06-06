@@ -160,6 +160,28 @@ public class AgentPresenceServiceTests
     }
 
     [Fact]
+    public async Task GetAvailableAgentsAsync_ShouldExcludeAgent_WhenPendingStateSet()
+    {
+        var agentWithPending = MakeAgent(AgentState.Available);
+        agentWithPending.PendingState = AgentState.Break;
+        var (sut, _, _, _) = CreateSut(agentWithPending);
+
+        var result = await sut.GetAvailableAgentsAsync(Tenant, QueueId, ChannelType.Voice, CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetAvailableAgentsAsync_ShouldIncludeAgent_WhenNoPending()
+    {
+        var (sut, _, _, _) = CreateSut(MakeAgent(AgentState.Available));
+
+        var result = await sut.GetAvailableAgentsAsync(Tenant, QueueId, ChannelType.Voice, CancellationToken.None);
+
+        result.Should().ContainSingle(a => a.AgentId == AgentId);
+    }
+
+    [Fact]
     public async Task GetAvailableAgents_ShouldReturnEmpty_WhenNoMatch()
     {
         var agentStore = Substitute.For<IAgentStore>();

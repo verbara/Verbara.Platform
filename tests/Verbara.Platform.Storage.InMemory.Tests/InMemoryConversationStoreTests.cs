@@ -274,4 +274,86 @@ public sealed class InMemoryConversationStoreTests
         (await store.GetByIdAsync(Tenant1, a.ConversationId, CancellationToken.None)).Should().NotBeNull();
         (await store.GetByIdAsync(Tenant1, b.ConversationId, CancellationToken.None)).Should().NotBeNull();
     }
+
+    private static Conversation MakeAgentOwned(TenantId tenantId, EntityId agentId, ConversationState state) =>
+        new()
+        {
+            ConversationId = EntityId.New(),
+            TenantId = tenantId,
+            ContactId = EntityId.New(),
+            Channel = ChannelType.WebChat,
+            State = state,
+            Owner = ConversationOwner.ForAgent(agentId),
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+    [Fact]
+    public async Task CountActiveWorkAsync_ShouldCountEngagedStates_WhenAgentOwnsActiveAndOnHold()
+    {
+        var store = new InMemoryConversationStore();
+        var agentId = EntityId.New();
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Active), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.OnHold), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Consulting), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.WrapUp), CancellationToken.None);
+
+        var count = await store.CountActiveWorkAsync(Tenant1, agentId, CancellationToken.None);
+
+        count.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task CountActiveWorkAsync_ShouldExcludeParked_WhenAgentOwnsWaitingForCustomerAndSnoozed()
+    {
+        var store = new InMemoryConversationStore();
+        var agentId = EntityId.New();
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.WaitingForCustomer), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Snoozed), CancellationToken.None);
+
+        var count = await store.CountActiveWorkAsync(Tenant1, agentId, CancellationToken.None);
+
+        count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CountActiveWorkAsync_ShouldExcludePreAccept_WhenAgentOwnsQueuedAndOffered()
+    {
+        var store = new InMemoryConversationStore();
+        var agentId = EntityId.New();
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Queued), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Offered), CancellationToken.None);
+
+        var count = await store.CountActiveWorkAsync(Tenant1, agentId, CancellationToken.None);
+
+        count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CountActiveWorkAsync_ShouldReturnZero_WhenAgentOwnsOnlyTerminal()
+    {
+        var store = new InMemoryConversationStore();
+        var agentId = EntityId.New();
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Closed), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Abandoned), CancellationToken.None);
+
+        var count = await store.CountActiveWorkAsync(Tenant1, agentId, CancellationToken.None);
+
+        count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CountActiveWorkAsync_ShouldNotCountOtherAgentsWork_WhenDifferentOwner()
+    {
+        var store = new InMemoryConversationStore();
+        var agentId = EntityId.New();
+        var otherAgentId = EntityId.New();
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Active), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, otherAgentId, ConversationState.Active), CancellationToken.None);
+        // Same agent id but a different tenant must also be excluded.
+        await store.SaveAsync(MakeAgentOwned(Tenant2, agentId, ConversationState.Active), CancellationToken.None);
+
+        var count = await store.CountActiveWorkAsync(Tenant1, agentId, CancellationToken.None);
+
+        count.Should().Be(1);
+    }
 }

@@ -30,4 +30,30 @@ public sealed class InMemoryTenantAuthConfigStoreTests
         config.Should().NotBeNull();
         config!.AgentLivenessTimeoutSeconds.Should().Be(90);
     }
+
+    [Fact]
+    public async Task GetAsync_ShouldReturnDefault30_WhenPendingPauseTimeoutNotSet()
+    {
+        var store = new InMemoryTenantAuthConfigStore();
+        await store.SaveAsync(new TenantAuthConfig { TenantId = "tenant-1" }, CancellationToken.None);
+
+        var config = await store.GetAsync("tenant-1", CancellationToken.None);
+
+        config.Should().NotBeNull();
+        config!.PendingPauseTimeoutMinutes.Should().Be(30);
+    }
+
+    [Fact]
+    public async Task SaveThenGet_ShouldRoundTripPendingPauseTimeoutMinutes_WhenCustomValue()
+    {
+        var store = new InMemoryTenantAuthConfigStore();
+        await store.SaveAsync(
+            new TenantAuthConfig { TenantId = "tenant-1", PendingPauseTimeoutMinutes = 45 },
+            CancellationToken.None);
+
+        var config = await store.GetAsync("tenant-1", CancellationToken.None);
+
+        config.Should().NotBeNull();
+        config!.PendingPauseTimeoutMinutes.Should().Be(45);
+    }
 }
