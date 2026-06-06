@@ -10,6 +10,11 @@ public interface IAgentStore
     Task<PagedResult<Agent>> ListAsync(TenantId tenantId, AgentQuery query, CancellationToken ct);
     Task SaveAsync(Agent agent, CancellationToken ct);
     Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
+
+    // W3 — reaper enumeration of every routable agent ({Available, Busy}) across
+    // ALL tenants, unpaged/streamed. Used by the liveness reaper to reconcile
+    // "Postgres says routable" against "Redis says alive".
+    IAsyncEnumerable<Agent> StreamRoutableAgentsAsync(CancellationToken ct);
 }
 
 public sealed record AgentQuery

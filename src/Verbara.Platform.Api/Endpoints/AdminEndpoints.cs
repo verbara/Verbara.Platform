@@ -1,6 +1,8 @@
+using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Pro.Realtime;
 using Verbara.Sdk.Pro.Realtime.Models;
 using Verbara.Platform.Api.Services;
@@ -55,6 +57,11 @@ internal static class AdminEndpoints
         // ADR-0026 Phase A.6 — agent-centric membership listing for the
         // /admin/agents/{agentId}/queues editor in the React admin UI.
         operationalGroup.MapGet("/agents/{id}/queue-memberships", ListAgentQueueMemberships);
+        // W3 (A6) — manual supervisor lever to force a routing zombie / stuck
+        // agent Offline (heartbeat/reaper detection is automatic; this is the
+        // human escape hatch). Optionally revokes the agent's refresh-token
+        // sessions so a wedged client cannot silently come back.
+        operationalGroup.MapPost("/agents/{id}/force-offline", ForceAgentOffline);
 
         // Teams — OPERATIONAL
         operationalGroup.MapGet("/teams", ListTeams);
@@ -621,6 +628,83 @@ internal static class AdminEndpoints
         return Results.Ok(result);
     }
 
+    // W3 (A6) — admin force-offline. The MANUAL counterpart to the automatic
+    // heartbeat/reaper liveness flow: a supervisor kicks a routing zombie /
+    // wedged agent Offline from the UI. Mirrors AgentEndpoints.GoOffline
+    // (ForceOffline + RemoveAsync + conditional-publish) plus an optional
+    // refresh-token session revoke so a stuck client cannot silently re-appear.
+    // Idempotent: an already-Offline agent still 204s, still removes the
+    // presence key, still revokes sessions when asked — it just publishes no
+    // duplicate AgentStateChangedEvent.
+    private static async Task<IResult> ForceAgentOffline(
+        string id,
+        [FromBody] ForceAgentOfflineRequest body,
+        HttpContext context,
+        [FromServices] IAgentStore agentStore,
+        [FromServices] IAgentLivenessStore livenessStore,
+        [FromServices] IRefreshTokenStore refreshTokenStore,
+        PlatformEventBus eventBus,
+        [FromServices] IAuditService audit,
+        [FromServices] TimeProvider clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var callerUserId = GetCurrentUserId(context);
+
+        var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (agent is null)
+            return Results.NotFound();
+
+        var oldState = agent.State;
+        agent.ForceOffline();
+        await agentStore.SaveAsync(agent, ct);
+        await livenessStore.RemoveAsync(tenantId, agent.AgentId, ct);
+
+        // Publish ONLY on a real transition so a force-offline against an
+        // already-Offline agent doesn't spam RealtimeStateBridge → AMI QueuePause.
+        if (oldState != AgentState.Offline)
+            eventBus.Publish(new AgentStateChangedEvent(
+                tenantId.ToString(),
+                agent.AgentId.Value,
+                agent.DisplayName,
+                oldState.ToString(),
+                AgentState.Offline.ToString()));
+
+        // Optional hard session revoke. RevokeAllForUserAsync expects the USER
+        // id (not the agent id) — agent.UserId is the owning user.
+        if (body.RevokeSessions)
+            await refreshTokenStore.RevokeAllForUserAsync(
+                tenantId.ToString(), agent.UserId.Value, clock.GetUtcNow(), ct);
+
+        // Best-effort audit (mirrors the reaper: a failed audit write must not
+        // fail the operator's force-offline). Same category ("queues") as the
+        // automatic liveness path so both surface together in the audit log.
+        try
+        {
+            await audit.RecordAsync(
+                tenantId,
+                category: "queues",
+                action: "agent.force_offline",
+                severity: "warning",
+                actorId: callerUserId.Value,
+                actorType: "user",
+                targetId: agent.AgentId.Value,
+                targetType: "Agent",
+                metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["old_state"] = oldState.ToString(),
+                    ["revoked_sessions"] = body.RevokeSessions ? "true" : "false",
+                },
+                ct: ct);
+        }
+        catch
+        {
+            // Swallow — the force-offline already succeeded; audit is advisory.
+        }
+
+        return Results.NoContent();
+    }
+
     // ─── Teams ────────────────────────────────────────────────────────────────
 
     private static async Task<IResult> ListTeams(
@@ -712,6 +796,19 @@ internal static class AdminEndpoints
 
         throw new InvalidOperationException("Tenant ID not resolved");
     }
+
+    // Resolves the CALLER's user id from claims. Mirrors AgentEndpoints +
+    // PermissionAuthorizationHandler: with MapInboundClaims=false the JWT `sub`
+    // is the primary source; API-key auth links the user via the `user_id`
+    // claim; NameIdentifier is the last-resort fallback (and is the KEY id for
+    // API-key callers, hence checked last). Used as the audit actor id.
+    private static EntityId GetCurrentUserId(HttpContext context)
+    {
+        var nameId = context.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+            ?? context.User.FindFirst("user_id")?.Value
+            ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        return nameId is not null ? EntityId.From(nameId) : EntityId.New();
+    }
 }
 
 // ─── Request DTOs ─────────────────────────────────────────────────────────────
@@ -788,6 +885,14 @@ internal sealed record AgentQueueMembershipDto(
     IReadOnlyList<string>? AllowedChannels,
     string Source);
 internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills, string? Extension = null, string? SipPassword = null, bool? AutoAnswer = null);
+
+/// <summary>
+/// W3 (A6) — request body for the admin force-offline lever. When
+/// <paramref name="RevokeSessions"/> is true, the target agent's refresh-token
+/// sessions are revoked (RevokeAllForUserAsync) so a wedged client cannot
+/// silently re-establish a session after the supervisor kicks it Offline.
+/// </summary>
+internal sealed record ForceAgentOfflineRequest(bool RevokeSessions);
 
 internal sealed record CreateTeamRequest(string Name);
 internal sealed record UpdateTeamRequest(string? Name);

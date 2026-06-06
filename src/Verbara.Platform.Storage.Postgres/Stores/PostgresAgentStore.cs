@@ -157,6 +157,22 @@ internal sealed class PostgresAgentStore : IAgentStore
             ct);
     }
 
+    public async IAsyncEnumerable<Agent> StreamRoutableAgentsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        // The NpgsqlExecutor facade has no streaming primitive, so hand-roll a
+        // reader loop and yield row-by-row — the reaper must never buffer every
+        // routable agent across every tenant into memory.
+        // state IN (1, 2) == { Available, Busy } == AgentStateMachine.IsRoutable.
+        await using var cmd = _dataSource.CreateCommand(
+            "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
+            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
+            "FROM agents WHERE state IN (1, 2)");
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            yield return AgentRow.Map(reader).ToAgent();
+    }
+
     private sealed class AgentRow
     {
         public string agent_id { get; init; } = null!;
