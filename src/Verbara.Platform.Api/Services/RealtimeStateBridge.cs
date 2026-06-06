@@ -57,38 +57,64 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
 
     private async void OnEvent(PlatformEvent evt)
     {
-        if (evt is not AgentStateChangedEvent e) return;
+        switch (evt)
+        {
+            case AgentStateChangedEvent e:
+                await ApplyPauseAsync(
+                    e.TenantId,
+                    e.AgentId,
+                    !AgentStateMachine.IsRoutable(Enum.Parse<AgentState>(e.NewState)),
+                    e.NewState,
+                    CancellationToken.None);
+                break;
+            case AgentPendingStateChangedEvent p:
+                // SET (pending != null) => pause now (block new; active call/chat continues).
+                // CANCEL (pending == null) => unpause (State is routable on cancel).
+                await ApplyPauseAsync(
+                    p.TenantId,
+                    p.AgentId,
+                    shouldPause: p.PendingState is not null,
+                    reason: p.PendingState ?? "pause_cancelled",
+                    CancellationToken.None);
+                break;
+        }
+    }
 
-        var semaphore = _agentLocks.GetOrAdd(e.AgentId, _ => new SemaphoreSlim(1, 1));
-        await semaphore.WaitAsync();
+    /// <summary>
+    /// Propagates a paused/unpaused decision to the Asterisk Realtime DB and AMI
+    /// under a per-agent semaphore. Both side-effects are independent and best-effort:
+    /// a DB failure does NOT prevent the AMI QueuePause from being attempted (and vice
+    /// versa). Both share the resilience policy key so circuit state is aggregated at
+    /// the bridge level. Shared by <see cref="AgentStateChangedEvent"/> (drain/normal
+    /// state flips) and <see cref="AgentPendingStateChangedEvent"/> (W4 deferred-pause
+    /// set/cancel, where State stays routable).
+    /// </summary>
+    private async Task ApplyPauseAsync(string tenantId, string agentId, bool shouldPause, string reason, CancellationToken ct)
+    {
+        var semaphore = _agentLocks.GetOrAdd(agentId, _ => new SemaphoreSlim(1, 1));
+        await semaphore.WaitAsync(ct);
         try
         {
-            var shouldPause = !AgentStateMachine.IsRoutable(
-                Enum.Parse<AgentState>(e.NewState));
-            var iface = $"PJSIP/{e.TenantId}-agent-{e.AgentId}";
+            var iface = $"PJSIP/{tenantId}-agent-{agentId}";
 
-            // DB and AMI are independent side-effects — wrap each separately
-            // so a DB failure does NOT prevent the AMI QueuePause from being
-            // attempted (and vice versa). Both share the policy key so circuit
-            // state is aggregated at the bridge level.
             try
             {
                 await _policy.ExecuteAsync(
                     ResiliencePolicyKey,
                     async innerCt =>
                     {
-                        await _syncService.SyncAgentPausedAsync(e.TenantId, e.AgentId, shouldPause, innerCt);
+                        await _syncService.SyncAgentPausedAsync(tenantId, agentId, shouldPause, innerCt);
                         return 0;
                     },
                     CancellationToken.None);
             }
             catch (CircuitBreakerOpenException)
             {
-                Log.CircuitOpen(_logger, e.AgentId);
+                Log.CircuitOpen(_logger, agentId);
             }
             catch (Exception ex)
             {
-                Log.SyncPausedDbFailed(_logger, e.AgentId, ex);
+                Log.SyncPausedDbFailed(_logger, agentId, ex);
             }
 
             var server = _serverPool.GetServer("primary");
@@ -105,7 +131,7 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
                                 {
                                     Interface = iface,
                                     Paused = shouldPause,
-                                    Reason = e.NewState,
+                                    Reason = reason,
                                 },
                                 innerCt);
                             return 0;
@@ -114,11 +140,11 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
                 }
                 catch (CircuitBreakerOpenException)
                 {
-                    Log.CircuitOpen(_logger, e.AgentId);
+                    Log.CircuitOpen(_logger, agentId);
                 }
                 catch (Exception ex)
                 {
-                    Log.QueuePauseFailed(_logger, e.AgentId, ex);
+                    Log.QueuePauseFailed(_logger, agentId, ex);
                 }
             }
         }

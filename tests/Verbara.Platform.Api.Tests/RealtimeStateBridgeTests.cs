@@ -194,6 +194,64 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         await _ami.DidNotReceive().SendActionAsync(Arg.Any<QueuePauseAction>());
     }
 
+    // ─── W4: deferred-pause pending event ─────────────────────────────────────
+
+    [Fact]
+    public async Task OnEvent_ShouldQueuePauseTrue_WhenPendingStateSet()
+    {
+        AddPrimaryServer();
+        var bridge = CreateBridge();
+        await bridge.StartAsync(CancellationToken.None);
+
+        await PublishAndWaitAsync(new AgentPendingStateChangedEvent("t1", "a1", "Agent One", "Break"));
+
+        await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
+        await _ami.Received(1).SendActionAsync(
+            Arg.Is<QueuePauseAction>(a => a.Paused == true && a.Interface == "PJSIP/t1-agent-a1" && a.Reason == "Break"));
+    }
+
+    [Fact]
+    public async Task OnEvent_ShouldQueuePauseFalse_WhenPendingStateCleared()
+    {
+        AddPrimaryServer();
+        var bridge = CreateBridge();
+        await bridge.StartAsync(CancellationToken.None);
+
+        await PublishAndWaitAsync(new AgentPendingStateChangedEvent("t1", "a1", "Agent One", PendingState: null));
+
+        await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", false);
+        await _ami.Received(1).SendActionAsync(
+            Arg.Is<QueuePauseAction>(a => a.Paused == false && a.Interface == "PJSIP/t1-agent-a1" && a.Reason == "pause_cancelled"));
+    }
+
+    [Fact]
+    public async Task OnEvent_ShouldStillPause_WhenAgentStateChangedToNonRoutable()
+    {
+        AddPrimaryServer();
+        var bridge = CreateBridge();
+        await bridge.StartAsync(CancellationToken.None);
+
+        await PublishAndWaitAsync(MakeEvent("Break"));
+
+        await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
+        await _ami.Received(1).SendActionAsync(
+            Arg.Is<QueuePauseAction>(a => a.Paused == true && a.Reason == "Break"));
+    }
+
+    [Fact]
+    public async Task OnEvent_ShouldStillUnpause_WhenAgentStateChangedToRoutable()
+    {
+        AddPrimaryServer();
+        var bridge = CreateBridge();
+        await bridge.StartAsync(CancellationToken.None);
+
+        await PublishAndWaitAsync(MakeEvent("Available"));
+
+        await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", false);
+        await _ami.Received(1).SendActionAsync(
+            Arg.Is<QueuePauseAction>(a => a.Paused == false && a.Reason == "Available"));
+    }
+
     public void Dispose()
     {
         _subject.Dispose();

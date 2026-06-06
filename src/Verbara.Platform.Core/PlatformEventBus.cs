@@ -123,6 +123,20 @@ public sealed record AgentStateChangedEvent(
     : PlatformEvent(TenantId, "agent.state_changed", DateTimeOffset.UtcNow);
 
 /// <summary>
+/// W4 — raised when an agent's deferred-pause target is SET (PendingState non-null,
+/// blocking new work while the active call/chat continues) or CANCELLED (null).
+/// Drives RealtimeStateBridge: QueuePause(true) on set, unpause on cancel (the agent's
+/// State is still routable on both). APPLY (drain) does NOT emit this — it emits
+/// AgentStateChangedEvent(non-routable) instead, which keeps the pause.
+/// </summary>
+public sealed record AgentPendingStateChangedEvent(
+    string TenantId,
+    string AgentId,
+    string AgentName,
+    string? PendingState)
+    : PlatformEvent(TenantId, "agent.pending_state_changed", DateTimeOffset.UtcNow);
+
+/// <summary>
 /// Raised when a conversation is offered to an agent from a queue. Carries <see cref="Channel"/>
 /// because an Offered conversation keeps <c>Owner = Queue</c> (not the agent), so the agent UI
 /// cannot hydrate it from the agentId-filtered inbox query — it renders the offered card from

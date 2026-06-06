@@ -45,5 +45,6 @@ namespace Verbara.Platform.Core.Push;
 [JsonSourceGenerationOptions(
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(AgentStateChangedEvent))]
+[JsonSerializable(typeof(AgentPendingStateChangedEvent))]
 [JsonSerializable(typeof(ConversationStateChangedEvent))]
 public partial class PlatformPushJsonContext : JsonSerializerContext;
