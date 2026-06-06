@@ -905,18 +905,25 @@ if (!string.IsNullOrEmpty(clusterConn))
     // RegisterLeader calls (the Pro builder materializes each lease independently).
     var voiceInboundEnabled = !string.IsNullOrWhiteSpace(builder.Configuration["Asterisk:Ari:BaseUrl"]);
     var voiceAmiEnabled = !string.IsNullOrWhiteSpace(builder.Configuration["Asterisk:Ami:Hostname"]);
+
+    // W3 — the cluster/lock/leader registration is lifted to the clusterConn level (out of the
+    // voice-only sub-block below) because the agent-liveness lease must run on EVERY clustered
+    // deployment, not just voice-capable ones. The one shared lock backend + keyed "Cluster"
+    // datasource (one pool, ADR-0015) materializes each lease independently: the liveness lease
+    // ALWAYS, the two voice leases only when their respective Asterisk capability is configured.
+    builder.Services.AddKeyedSingleton<NpgsqlDataSource>("Cluster", (_, _) => clusterDataSource);
+    builder.Services.AddPostgresDistributedLock(connectionStringName: "Cluster");
+    builder.Services.AddVerbaraCluster(opts =>
+    {
+        opts.UsePostgresLockBackend(connectionStringName: "Cluster");
+        opts.RegisterLeader(Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep);   // W3 — always
+        if (voiceInboundEnabled)
+            opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.Inbound);
+        if (voiceAmiEnabled)
+            opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner);
+    });
     if (voiceInboundEnabled || voiceAmiEnabled)
     {
-        builder.Services.AddKeyedSingleton<NpgsqlDataSource>("Cluster", (_, _) => clusterDataSource);
-        builder.Services.AddPostgresDistributedLock(connectionStringName: "Cluster");
-        builder.Services.AddVerbaraCluster(opts =>
-        {
-            opts.UsePostgresLockBackend(connectionStringName: "Cluster");
-            if (voiceInboundEnabled)
-                opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.Inbound);
-            if (voiceAmiEnabled)
-                opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner);
-        });
         if (voiceInboundEnabled)
             builder.Services.AddHostedService<Verbara.Platform.Api.Services.StasisInboundConsumer>();
         if (voiceAmiEnabled)
@@ -977,6 +984,23 @@ if (!string.IsNullOrEmpty(clusterConn))
         }
     }
 }
+else
+{
+    // W3 — single-node (no cluster conn): always-leader stub for the agent-liveness
+    // sweep resource so the reaper still runs on a single replica. Clustered
+    // deployments take the Postgres-lease-backed leader registered above instead.
+    builder.Services.AddKeyedSingleton<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
+        Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep,
+        (_, _) => new Verbara.Platform.Api.Services.AlwaysLeader(
+            Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep));
+}
+
+// W3 — leader-gated agent-liveness reaper. Runs on every pod (both cluster + single-node
+// branches register the keyed IClusterLeader for AgentLivenessLeaderResources.Sweep); the
+// leader gate inside SweepOnceAsync ensures exactly one pod reconciles cluster-wide. The
+// keyed leader is resolved lazily at host start, so registering here (regardless of branch)
+// is safe.
+builder.Services.AddHostedService<Verbara.Platform.Api.Services.AgentLivenessReaper>();
 
 // ─── Pro.MultiTenant ─────────────────────────────────────────────────────────
 builder.Services.AddVerbaraMultiTenant();
@@ -1307,12 +1331,12 @@ var app = builder.Build();
 // ─── Phase 2.2 — ensure cluster_distributed_lock schema (leader election) ────
 // AddPostgresDistributedLock registers the lock primitive but does NOT create its
 // table; the SDK ships MigrationRunner.EnsureSchemaAsync as an explicit opt-in.
-// Without this the voice leader's TryAcquireAsync fails on first tick with
+// Without this a leader's TryAcquireAsync fails on first tick with
 // relation "cluster_distributed_lock" does not exist. Mirrors Realtime Program.cs.
-// Gated identically to the leader registration above (Postgres + Asterisk:Ari): the
-// keyed "Cluster" datasource only exists when voice inbound is enabled.
-if (!string.IsNullOrEmpty(clusterConn)
-    && !string.IsNullOrWhiteSpace(builder.Configuration["Asterisk:Ari:BaseUrl"]))
+// W3 — gated on clusterConn ALONE (no longer Asterisk:Ari): the keyed "Cluster"
+// datasource + at least one lease (the always-on agent-liveness sweep) now exist for
+// EVERY clustered deployment, voice or not, so the lock table must always be ensured.
+if (!string.IsNullOrEmpty(clusterConn))
 {
     using var clusterMigrationScope = app.Services.CreateScope();
     var clusterLockDataSource = clusterMigrationScope.ServiceProvider
