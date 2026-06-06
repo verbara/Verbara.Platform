@@ -499,6 +499,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(AgentQueueMembershipDto))]  // ADR-0026 Phase A.6
 [JsonSerializable(typeof(List<AgentQueueMembershipDto>))]  // ADR-0026 Phase A.6
 [JsonSerializable(typeof(UpdateAgentRequest))]
+[JsonSerializable(typeof(ForceAgentOfflineRequest))]  // W3 (A6) — admin force-offline lever
 [JsonSerializable(typeof(CreateTeamRequest))]
 [JsonSerializable(typeof(UpdateTeamRequest))]
 // Agent / Supervisor
