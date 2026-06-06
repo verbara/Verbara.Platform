@@ -10,6 +10,17 @@ public sealed class Agent : ITenantScoped, IAuditable
     public required EntityId UserId { get; init; }
     public required string DisplayName { get; set; }
     public required AgentState State { get; set; }
+
+    /// <summary>W4 — deferred ("pause-when-free") target. When set, the agent has
+    /// requested this aux state; it is applied only once active work drains (or the
+    /// per-tenant timeout forces it). Requesting a pause does NOT change State — it
+    /// records the target here so State keeps reflecting the real (still-working) state.</summary>
+    public AgentState? PendingState { get; set; }
+    public string? PendingReason { get; set; }
+    public DateTimeOffset? PendingSince { get; set; }
+
+    public bool HasPendingPause => PendingState is not null;
+
     public ChannelCapacity Capacity { get; set; } = new();
     public EntityId? TeamId { get; set; }
     public IReadOnlyList<string> Skills { get; set; } = [];
@@ -61,4 +72,20 @@ public sealed class Agent : ITenantScoped, IAuditable
     // transition validation still applies. The single Offline target is the
     // only transition this loosens.
     public void ForceOffline() => State = AgentState.Offline;
+
+    /// <summary>
+    /// Applies the deferred PendingState as the new State, bypassing EnsureTransition
+    /// ON PURPOSE (e.g. ACW->Lunch is invalid in the table, but the target was
+    /// validated as a legitimate aux state at request time). Mirrors the bounded
+    /// ForceOffline() bypass. Idempotent no-op when no pending. Does NOT widen the
+    /// public transition table — user-driven UpdateAgentState still uses TransitionTo.
+    /// </summary>
+    public void ApplyPendingState()
+    {
+        if (PendingState is null) return;
+        State = PendingState.Value;
+        PendingState = null;
+        PendingReason = null;
+        PendingSince = null;
+    }
 }

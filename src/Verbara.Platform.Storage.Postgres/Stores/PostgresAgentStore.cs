@@ -17,7 +17,8 @@ internal sealed class PostgresAgentStore : IAgentStore
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "created_at, updated_at, created_by, updated_by " +
             "FROM agents WHERE tenant_id = @TenantId AND agent_id = @AgentId",
             p =>
             {
@@ -39,7 +40,8 @@ internal sealed class PostgresAgentStore : IAgentStore
         // elsewhere still can't leak it.
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "created_at, updated_at, created_by, updated_by " +
             "FROM agents WHERE tenant_id = @TenantId AND user_id = @UserId LIMIT 1",
             p =>
             {
@@ -54,7 +56,8 @@ internal sealed class PostgresAgentStore : IAgentStore
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "created_at, updated_at, created_by, updated_by " +
             "FROM agents WHERE tenant_id = @TenantId AND extension = @Extension LIMIT 1",
             p =>
             {
@@ -94,7 +97,8 @@ internal sealed class PostgresAgentStore : IAgentStore
 
         var rows = await _dataSource.QueryListAsync(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            $"extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "created_at, updated_at, created_by, updated_by " +
             $"FROM agents WHERE {where} ORDER BY display_name LIMIT @Limit OFFSET @Offset",
             p =>
             {
@@ -115,14 +119,18 @@ internal sealed class PostgresAgentStore : IAgentStore
 
         await _dataSource.ExecuteAsync(
             "INSERT INTO agents (agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by) " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "created_at, updated_at, created_by, updated_by) " +
             "VALUES (@AgentId, @TenantId, @UserId, @DisplayName, @State, @Capacity::jsonb, @TeamId, @Skills::jsonb, " +
-            "@Extension, @SipPassword, @AutoAnswer, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
+            "@Extension, @SipPassword, @AutoAnswer, @PendingState, @PendingReason, @PendingSince, " +
+            "@CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
             "ON CONFLICT (tenant_id, agent_id) DO UPDATE SET " +
             "  display_name = EXCLUDED.display_name, state = EXCLUDED.state, capacity = EXCLUDED.capacity, " +
             "  team_id = EXCLUDED.team_id, skills = EXCLUDED.skills, " +
             "  extension = EXCLUDED.extension, sip_password = EXCLUDED.sip_password, " +
             "  auto_answer = EXCLUDED.auto_answer, " +
+            "  pending_state = EXCLUDED.pending_state, pending_reason = EXCLUDED.pending_reason, " +
+            "  pending_since = EXCLUDED.pending_since, " +
             "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
             p =>
             {
@@ -137,6 +145,9 @@ internal sealed class PostgresAgentStore : IAgentStore
                 p.Add(new NpgsqlParameter("Extension", NpgsqlDbType.Varchar) { Value = (object?)agent.Extension ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("SipPassword", NpgsqlDbType.Varchar) { Value = (object?)agent.SipPassword ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("AutoAnswer", NpgsqlDbType.Boolean) { Value = (object?)agent.AutoAnswer ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("PendingState", NpgsqlDbType.Integer) { Value = (object?)(int?)agent.PendingState ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("PendingReason", NpgsqlDbType.Text) { Value = (object?)agent.PendingReason ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("PendingSince", NpgsqlDbType.TimestampTz) { Value = (object?)agent.PendingSince ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedAt", agent.CreatedAt));
                 p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)agent.UpdatedAt ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)agent.CreatedBy ?? DBNull.Value });
@@ -166,8 +177,25 @@ internal sealed class PostgresAgentStore : IAgentStore
         // state IN (1, 2) == { Available, Busy } == AgentStateMachine.IsRoutable.
         await using var cmd = _dataSource.CreateCommand(
             "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-            "extension, sip_password, auto_answer, created_at, updated_at, created_by, updated_by " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "created_at, updated_at, created_by, updated_by " +
             "FROM agents WHERE state IN (1, 2)");
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            yield return AgentRow.Map(reader).ToAgent();
+    }
+
+    public async IAsyncEnumerable<Agent> StreamPendingPauseAgentsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        // W4 — same hand-rolled streaming reader as StreamRoutableAgentsAsync; the
+        // drain sweep must never buffer every pending-pause agent across every tenant
+        // into memory. pending_state IS NOT NULL == HasPendingPause.
+        await using var cmd = _dataSource.CreateCommand(
+            "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "created_at, updated_at, created_by, updated_by " +
+            "FROM agents WHERE pending_state IS NOT NULL");
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
             yield return AgentRow.Map(reader).ToAgent();
@@ -186,6 +214,9 @@ internal sealed class PostgresAgentStore : IAgentStore
         public string? extension { get; init; }
         public string? sip_password { get; init; }
         public bool? auto_answer { get; init; }
+        public int? pending_state { get; init; }
+        public string? pending_reason { get; init; }
+        public DateTime? pending_since { get; init; }
         public DateTime created_at { get; init; }
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
@@ -208,6 +239,9 @@ internal sealed class PostgresAgentStore : IAgentStore
             extension = r.GetStringOrNull("extension"),
             sip_password = r.GetStringOrNull("sip_password"),
             auto_answer = r.IsDBNull(r.GetOrdinal("auto_answer")) ? null : r.GetBoolean("auto_answer"),
+            pending_state = r.IsDBNull(r.GetOrdinal("pending_state")) ? (int?)null : r.GetInt32("pending_state"),
+            pending_reason = r.GetStringOrNull("pending_reason"),
+            pending_since = r.GetDateTimeOrNull("pending_since"),
             created_at = r.GetDateTime("created_at"),
             updated_at = r.GetDateTimeOrNull("updated_at"),
             created_by = r.GetStringOrNull("created_by"),
@@ -227,6 +261,9 @@ internal sealed class PostgresAgentStore : IAgentStore
             Extension = extension,
             SipPassword = sip_password,
             AutoAnswer = auto_answer,
+            PendingState = pending_state is { } ps ? (AgentState)ps : null,
+            PendingReason = pending_reason,
+            PendingSince = pending_since,
             CreatedAt = created_at,
             UpdatedAt = updated_at,
             CreatedBy = created_by,
