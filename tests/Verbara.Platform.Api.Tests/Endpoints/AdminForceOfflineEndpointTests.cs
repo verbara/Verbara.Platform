@@ -144,6 +144,61 @@ public sealed class AdminForceOfflineEndpointTests : IClassFixture<Authenticated
     }
 
     [Fact]
+    public async Task ForceAgentOffline_ShouldStillRevokeSessions_WhenAlreadyOfflineAndRevokeTrue()
+    {
+        // The session revoke is gated only on revokeSessions, NOT on the state
+        // transition — an admin must be able to kill the sessions of an agent
+        // that is already Offline (e.g. a stuck/compromised account).
+        var (agentId, ownerUserId) = await SeedAgentAsync(AgentState.Offline);
+        var tokenId = await SeedRefreshTokenAsync(ownerUserId);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/v1/admin/agents/{agentId.Value}/force-offline",
+            new { revokeSessions = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        (await GetRefreshTokenAsync(tokenId))!.IsRevoked.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ForceAgentOffline_ShouldReturnNotFoundAndNotMutate_WhenAgentInDifferentTenant()
+    {
+        // KEY SECURITY PROPERTY: an admin of tenant A must NOT be able to
+        // force-offline (or revoke the sessions of) an agent in tenant B. The
+        // operational tenant is resolved from the request context (s_tenantId),
+        // and GetByIdAsync is tenant-scoped, so a foreign agent id resolves to
+        // null → 404 with zero mutation.
+        var otherTenant = new TenantId("tenant-other-w3");
+        var otherAgentId = EntityId.New();
+        using (var seedScope = _factory.Services.CreateScope())
+        {
+            var store = seedScope.ServiceProvider.GetRequiredService<IAgentStore>();
+            await store.SaveAsync(
+                new Agent
+                {
+                    AgentId = otherAgentId,
+                    TenantId = otherTenant,
+                    UserId = EntityId.New(),
+                    DisplayName = "Other-Tenant Agent",
+                    State = AgentState.Available,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                },
+                CancellationToken.None);
+        }
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/v1/admin/agents/{otherAgentId.Value}/force-offline",
+            new { revokeSessions = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var verifyStore = verifyScope.ServiceProvider.GetRequiredService<IAgentStore>();
+        var untouched = await verifyStore.GetByIdAsync(otherTenant, otherAgentId, CancellationToken.None);
+        untouched!.State.Should().Be(AgentState.Available); // never forced Offline across the tenant boundary
+    }
+
+    [Fact]
     public async Task ForceAgentOffline_ShouldEmitAuditEvent_WhenCalled()
     {
         var (agentId, _) = await SeedAgentAsync(AgentState.Busy);
@@ -173,9 +228,8 @@ public sealed class AdminForceOfflineEndpointTests : IClassFixture<Authenticated
     [Fact]
     public async Task ForceAgentOffline_ShouldReturnForbidden_WhenCallerNotAdmin()
     {
-        // Seed the target agent in the admin tenant first (so the call would
-        // succeed for an admin), then attempt it from a non-admin caller in a
-        // DIFFERENT tenant — the AdminOnly policy must reject before any work.
+        // The AdminOnly policy is ROLE-driven: an Agent-role caller is rejected
+        // by the auth pipeline (403) before the handler runs, regardless of tenant.
         await using var nonAdmin = new NonAdminAuthenticatedApiFactory();
         using var nonAdminClient = nonAdmin.CreateAuthenticatedClient();
 
