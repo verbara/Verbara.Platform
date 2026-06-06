@@ -25,10 +25,19 @@ internal sealed record AgentMeResponseDto(
     string? SipPassword,
     bool? AutoAnswer,
     bool CanAcceptWork,
+    // W4 — deferred ("pause-when-free") target. Non-null when the agent requested
+    // an aux state that is held until active work drains. State stays the real
+    // (still-working) state; these fields tell the client a pause is pending.
+    AgentState? PendingState,
+    string? PendingReason,
+    DateTimeOffset? PendingSince,
+    // W4 — count of conversations the agent actively owns (engaged states). The
+    // client uses it to show "N items must finish before your pause applies".
+    int ActiveWorkCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt)
 {
-    public static AgentMeResponseDto FromAgent(Agent agent)
+    public static AgentMeResponseDto FromAgent(Agent agent, int activeWorkCount)
     {
         ArgumentNullException.ThrowIfNull(agent);
         return new AgentMeResponseDto(
@@ -44,6 +53,10 @@ internal sealed record AgentMeResponseDto(
             SipPassword: agent.SipPassword,
             AutoAnswer: agent.AutoAnswer,
             CanAcceptWork: agent.CanAcceptWork,
+            PendingState: agent.PendingState,
+            PendingReason: agent.PendingReason,
+            PendingSince: agent.PendingSince,
+            ActiveWorkCount: activeWorkCount,
             CreatedAt: agent.CreatedAt,
             UpdatedAt: agent.UpdatedAt);
     }
