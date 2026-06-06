@@ -917,6 +917,7 @@ if (!string.IsNullOrEmpty(clusterConn))
     {
         opts.UsePostgresLockBackend(connectionStringName: "Cluster");
         opts.RegisterLeader(Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep);   // W3 — always
+        opts.RegisterLeader(Verbara.Platform.Api.Services.PendingPauseLeaderResources.Sweep);    // W4 — always
         if (voiceInboundEnabled)
             opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.Inbound);
         if (voiceAmiEnabled)
@@ -993,6 +994,12 @@ else
         Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep,
         (_, _) => new Verbara.Platform.Api.Services.AlwaysLeader(
             Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep));
+    // W4 — single-node always-leader stub for the deferred-pause drain sweep resource
+    // so the drain worker still runs on a single replica (same rationale as W3 above).
+    builder.Services.AddKeyedSingleton<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
+        Verbara.Platform.Api.Services.PendingPauseLeaderResources.Sweep,
+        (_, _) => new Verbara.Platform.Api.Services.AlwaysLeader(
+            Verbara.Platform.Api.Services.PendingPauseLeaderResources.Sweep));
 }
 
 // W3 — leader-gated agent-liveness reaper. Runs on every pod (both cluster + single-node
@@ -1001,6 +1008,12 @@ else
 // keyed leader is resolved lazily at host start, so registering here (regardless of branch)
 // is safe.
 builder.Services.AddHostedService<Verbara.Platform.Api.Services.AgentLivenessReaper>();
+
+// W4 — leader-gated deferred-pause drain worker. Runs on every pod (both cluster +
+// single-node branches register the keyed IClusterLeader for
+// PendingPauseLeaderResources.Sweep); the leader gate inside SweepOnceAsync ensures
+// exactly one pod applies pending pauses cluster-wide. Mirrors the W3 reaper wiring above.
+builder.Services.AddHostedService<Verbara.Platform.Api.Services.PendingPauseDrainWorker>();
 
 // ─── Pro.MultiTenant ─────────────────────────────────────────────────────────
 builder.Services.AddVerbaraMultiTenant();
