@@ -67,6 +67,7 @@ public sealed class SseEndpointsTests
             new ConversationOfferExpiredEvent("t", "c1", "a1"),
             new ConversationAbandonedEvent("t", "c1", "q1"),
             new AgentStateChangedEvent("t", "a1", "Agent 1", "Available", "Busy"),
+            new AgentPendingStateChangedEvent("t", "a1", "Agent 1", "Break"),
             new AgentCapacityChangedEvent("t", "a1", "voice", 1, 3, true),
             new CampaignStatusChangedEvent("t", 1, "Camp1", "Paused", "Running"),
             new CampaignMetricsUpdatedEvent("t", 1, 100, 50, 0.45, 0.02, 5),
