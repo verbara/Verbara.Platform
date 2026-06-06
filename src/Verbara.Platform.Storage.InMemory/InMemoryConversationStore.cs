@@ -133,4 +133,14 @@ internal sealed class InMemoryConversationStore : IConversationStore
             .ToList();
         return Task.FromResult(result);
     }
+
+    public Task<int> CountActiveWorkAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        var count = _items.Values.Count(c =>
+            c.TenantId == tenantId &&
+            c.Owner is { Kind: ConversationOwnerKind.Agent } owner &&
+            owner.OwnerId == agentId &&
+            ConversationStateMachine.IsActiveWork(c.State));
+        return Task.FromResult(count);
+    }
 }

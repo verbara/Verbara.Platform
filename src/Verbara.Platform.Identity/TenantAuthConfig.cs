@@ -44,6 +44,13 @@ public sealed class TenantAuthConfig
     public int AgentLivenessTimeoutSeconds { get; set; } = 60;
 
     /// <summary>
+    /// W4 — max minutes a deferred ("pause-when-free") request may stay pending before
+    /// the drain sweep force-applies it + raises a supervisor alert. Default 30.
+    /// <c>&lt;= 0</c> disables the timeout (the pending waits indefinitely for active work to drain).
+    /// </summary>
+    public int PendingPauseTimeoutMinutes { get; set; } = 30;
+
+    /// <summary>
     /// v1.3.0 IP Allowlist — when true, requests from IPs not matching any
     /// row in tenant_ip_allowlist are rejected with 403. When false, the
     /// allowlist is dormant regardless of the entries that may exist.

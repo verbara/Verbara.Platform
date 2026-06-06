@@ -259,6 +259,27 @@ internal sealed class PostgresConversationStore : IConversationStore
         return rows.Select(r => r.ToConversation()).ToList();
     }
 
+    public async Task<int> CountActiveWorkAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        // W4 — owner-scoped + tenant-scoped count of engaged conversations
+        // (ConversationStateMachine.ActiveWorkStates). Covers voice + digital; the
+        // voice bridge models a live call as a Conversation owned by the agent.
+        var activeWorkStates = ConversationStateMachine.ActiveWorkStates.Select(s => (int)s).ToArray();
+        var count = await _dataSource.ExecuteScalarAsync<long?>(
+            "SELECT COUNT(*) FROM conversations " +
+            "WHERE tenant_id = @TenantId AND owner_kind = @OwnerKind AND owner_id = @AgentId " +
+            "  AND state = ANY(@States)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("OwnerKind", (int)ConversationOwnerKind.Agent));
+                p.Add(new NpgsqlParameter("AgentId", agentId.Value));
+                p.Add(new NpgsqlParameter("States", activeWorkStates));
+            },
+            ct);
+        return (int)(count ?? 0L);
+    }
+
     private static int[] GetTerminalStateInts()
     {
         var terminalStates = new List<int>();

@@ -40,4 +40,12 @@ public interface IConversationStore
 
     /// <summary>Returns conversations in a specific state ordered by CreatedAt ASC.</summary>
     Task<IReadOnlyList<Conversation>> ListByStateAsync(TenantId tenantId, ConversationState state, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// W4 — count of conversations the agent actively OWNS in engaged states
+    /// (ConversationStateMachine.ActiveWorkStates). Excludes parked/pre-accept/terminal.
+    /// Covers voice + digital. Used by the deferred-pause drain to decide when a
+    /// pending pause may apply.
+    /// </summary>
+    Task<int> CountActiveWorkAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
 }
