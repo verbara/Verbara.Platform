@@ -82,4 +82,30 @@ public sealed class InMemoryTenantAuthConfigStoreTests
         config.Should().NotBeNull();
         config!.WorkFailoverGraceSeconds.Should().Be(90);
     }
+
+    [Fact]
+    public async Task GetAsync_ShouldReturnDefault25_WhenVoiceCallbackGraceNotSet()
+    {
+        var store = new InMemoryTenantAuthConfigStore();
+        await store.SaveAsync(new TenantAuthConfig { TenantId = "tenant-1" }, CancellationToken.None);
+
+        var config = await store.GetAsync("tenant-1", CancellationToken.None);
+
+        config.Should().NotBeNull();
+        config!.VoiceCallbackGraceSeconds.Should().Be(25);
+    }
+
+    [Fact]
+    public async Task SaveThenGet_ShouldRoundTripVoiceCallbackGraceSeconds_WhenCustomValue()
+    {
+        var store = new InMemoryTenantAuthConfigStore();
+        await store.SaveAsync(
+            new TenantAuthConfig { TenantId = "tenant-1", VoiceCallbackGraceSeconds = 40 },
+            CancellationToken.None);
+
+        var config = await store.GetAsync("tenant-1", CancellationToken.None);
+
+        config.Should().NotBeNull();
+        config!.VoiceCallbackGraceSeconds.Should().Be(40);
+    }
 }

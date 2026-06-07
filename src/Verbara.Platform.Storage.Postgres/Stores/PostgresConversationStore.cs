@@ -307,6 +307,25 @@ internal sealed class PostgresConversationStore : IConversationStore
         return rows.Select(r => r.ToConversation()).ToList();
     }
 
+    public async Task<IReadOnlyList<Conversation>> ListPendingCallbackEvalAsync(CancellationToken ct)
+    {
+        // W5b — cross-tenant list of answered voice conversations parked in WrapUp whose metadata
+        // carries the pendingCallbackEval marker (jsonb ->> accessor). The leader-gated
+        // CallbackRescueWorker iterates these and groups by tenant; it clears the marker when it
+        // enqueues a callback or escalates, so the set self-bounds.
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "FROM conversations " +
+            "WHERE state = @State AND metadata->>'pendingCallbackEval' = 'true'",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("State", (int)ConversationState.WrapUp));
+            },
+            ConversationRow.Map, ct);
+        return rows.Select(r => r.ToConversation()).ToList();
+    }
+
     private static int[] GetTerminalStateInts()
     {
         var terminalStates = new List<int>();

@@ -471,4 +471,61 @@ public sealed class InMemoryConversationStoreTests
 
         result.Select(c => c.ConversationId).Should().BeEquivalentTo(new[] { own.ConversationId });
     }
+
+    private static Conversation MakeMarked(TenantId tenantId, ConversationState state, string? marker = "true")
+    {
+        var conv = MakeConversation(tenantId, state);
+        if (marker is not null)
+            conv.SetMetadata("pendingCallbackEval", marker);
+        return conv;
+    }
+
+    [Fact]
+    public async Task ListPendingCallbackEvalAsync_ShouldReturnConversation_WhenWrapUpAndMarkerTrue()
+    {
+        var store = new InMemoryConversationStore();
+        var marked = MakeMarked(Tenant1, ConversationState.WrapUp);
+        await store.SaveAsync(marked, CancellationToken.None);
+
+        var result = await store.ListPendingCallbackEvalAsync(CancellationToken.None);
+
+        result.Select(c => c.ConversationId).Should().BeEquivalentTo(new[] { marked.ConversationId });
+    }
+
+    [Fact]
+    public async Task ListPendingCallbackEvalAsync_ShouldExclude_WhenWrapUpButNoMarker()
+    {
+        var store = new InMemoryConversationStore();
+        await store.SaveAsync(MakeMarked(Tenant1, ConversationState.WrapUp, marker: null), CancellationToken.None);
+
+        var result = await store.ListPendingCallbackEvalAsync(CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListPendingCallbackEvalAsync_ShouldExclude_WhenMarkerTrueButNotWrapUp()
+    {
+        var store = new InMemoryConversationStore();
+        await store.SaveAsync(MakeMarked(Tenant1, ConversationState.Active), CancellationToken.None);
+
+        var result = await store.ListPendingCallbackEvalAsync(CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListPendingCallbackEvalAsync_ShouldReturnAcrossTenants()
+    {
+        var store = new InMemoryConversationStore();
+        var t1 = MakeMarked(Tenant1, ConversationState.WrapUp);
+        var t2 = MakeMarked(Tenant2, ConversationState.WrapUp);
+        await store.SaveAsync(t1, CancellationToken.None);
+        await store.SaveAsync(t2, CancellationToken.None);
+
+        var result = await store.ListPendingCallbackEvalAsync(CancellationToken.None);
+
+        result.Select(c => c.ConversationId).Should().BeEquivalentTo(
+            new[] { t1.ConversationId, t2.ConversationId });
+    }
 }

@@ -157,4 +157,14 @@ internal sealed class InMemoryConversationStore : IConversationStore
             .ToList();
         return Task.FromResult(result);
     }
+
+    public Task<IReadOnlyList<Conversation>> ListPendingCallbackEvalAsync(CancellationToken ct)
+    {
+        IReadOnlyList<Conversation> result = _items.Values
+            .Where(c =>
+                c.State == ConversationState.WrapUp &&
+                c.Metadata.TryGetValue("pendingCallbackEval", out var v) && v == "true")
+            .ToList();
+        return Task.FromResult(result);
+    }
 }
