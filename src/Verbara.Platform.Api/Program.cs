@@ -983,6 +983,21 @@ if (!string.IsNullOrEmpty(clusterConn))
                     sp.GetRequiredService<Verbara.Platform.Core.IClock>(),
                     builder.Configuration["Asterisk:Outbound:DefaultTrunk"],
                     sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.AgentOutboundDialService>>()));
+            // W5b voice caller-rescue: originates a callback to a dropped customer into their origin queue
+            // at the front (QUEUE_PRIO). Reuses the same originate executor + optional route resolver +
+            // default trunk as click-to-dial. NOT leader-gated here — the leader-gated CallbackRescueWorker
+            // (task A6) holds the AMI-owner lease and invokes it.
+            builder.Services.AddSingleton<Verbara.Platform.Api.Services.ICallbackOriginator>(sp =>
+                new Verbara.Platform.Api.Services.CallbackOriginator(
+                    sp.GetRequiredService<Verbara.Platform.Conversations.IConversationStore>(),
+                    sp.GetRequiredService<Verbara.Platform.Queues.IQueueStore>(),
+                    sp.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
+                    sp.GetRequiredService<Verbara.Platform.Conversations.Services.IContactIdentityResolver>(),
+                    sp.GetRequiredService<Verbara.Sdk.Pro.Dialer.Execution.OriginateExecutorBase>(),
+                    sp.GetService<Verbara.Sdk.Pro.Dialer.Routing.OutboundRouteResolverBase>(),
+                    sp.GetRequiredService<Verbara.Platform.Core.IClock>(),
+                    builder.Configuration["Asterisk:Outbound:DefaultTrunk"],
+                    sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.CallbackOriginator>>()));
         }
     }
 }
