@@ -40,7 +40,7 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
         await using var conn = new NpgsqlConnection(ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = SchemaSql + MigrationV021Sql;
+        cmd.CommandText = SchemaSql + MigrationV021Sql + MigrationV034Sql;
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -136,6 +136,19 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
         CREATE INDEX IF NOT EXISTS idx_audit_category
             ON audit_entries (tenant_id, category, occurred_at DESC);
         COMMIT;
+        """;
+
+    // Mirrors 034_AuditCategoryVocabulary.sql — widens audit_entries_category_check
+    // to the union of categories the application code actually emits.
+    private const string MigrationV034Sql = """
+
+        ALTER TABLE audit_entries DROP CONSTRAINT IF EXISTS audit_entries_category_check;
+        ALTER TABLE audit_entries
+            ADD CONSTRAINT audit_entries_category_check
+            CHECK (category IN ('auth', 'billing', 'config', 'tenant', 'security',
+                                'impersonation', 'retention', 'data', 'rbac',
+                                'data_access', 'admin', 'conversations', 'queues',
+                                'reports', 'operational', 'license'));
         """;
 }
 
