@@ -922,7 +922,10 @@ if (!string.IsNullOrEmpty(clusterConn))
         if (voiceInboundEnabled)
             opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.Inbound);
         if (voiceAmiEnabled)
+        {
             opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner);
+            opts.RegisterLeader(Verbara.Platform.Api.Services.CallbackRescueLeaderResources.Sweep);    // W5b — voice-AMI only
+        }
     });
     if (voiceInboundEnabled || voiceAmiEnabled)
     {
@@ -998,6 +1001,11 @@ if (!string.IsNullOrEmpty(clusterConn))
                     sp.GetRequiredService<Verbara.Platform.Core.IClock>(),
                     builder.Configuration["Asterisk:Outbound:DefaultTrunk"],
                     sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.CallbackOriginator>>()));
+            // W5b — leader-gated voice callback-rescue worker. Registered ONLY on a voice-AMI pod
+            // (its ICallbackOriginator dependency exists only here, and voice itself requires the
+            // cluster connection): the leader gate inside SweepOnceAsync ensures exactly one pod
+            // originates rescue callbacks cluster-wide. Mirrors the W5 worker, but voice-gated.
+            builder.Services.AddHostedService<Verbara.Platform.Api.Services.CallbackRescueWorker>();
         }
     }
 }
@@ -1042,6 +1050,12 @@ builder.Services.AddHostedService<Verbara.Platform.Api.Services.PendingPauseDrai
 // leader gate inside SweepOnceAsync ensures exactly one pod re-queues orphaned
 // conversations cluster-wide. Mirrors the W3/W4 worker wiring above.
 builder.Services.AddHostedService<Verbara.Platform.Api.Services.WorkFailoverWorker>();
+
+// W5b — the voice callback-rescue worker is NOT registered here (unlike W3/W4/W5). It depends
+// on ICallbackOriginator, which exists only on a voice-AMI pod, so it is registered inside the
+// voiceAmiEnabled block of the cluster branch above (next to ICallbackOriginator + the
+// CallbackRescueLeaderResources.Sweep lease). Voice requires the cluster connection, so there is
+// no single-node path for it.
 
 // ─── Pro.MultiTenant ─────────────────────────────────────────────────────────
 builder.Services.AddVerbaraMultiTenant();
