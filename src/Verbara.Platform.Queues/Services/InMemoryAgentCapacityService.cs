@@ -5,15 +5,12 @@ namespace Verbara.Platform.Queues.Services;
 
 public sealed class InMemoryAgentCapacityService : IAgentCapacityService
 {
-    private readonly IAgentStore _agentStore;
     private readonly IAgentCapacityResolver _resolver;
     private readonly ConcurrentDictionary<(TenantId, EntityId, ChannelType), int> _load = new();
 
-    public InMemoryAgentCapacityService(IAgentStore agentStore, IAgentCapacityResolver resolver)
+    public InMemoryAgentCapacityService(IAgentCapacityResolver resolver)
     {
-        ArgumentNullException.ThrowIfNull(agentStore);
         ArgumentNullException.ThrowIfNull(resolver);
-        _agentStore = agentStore;
         _resolver = resolver;
     }
 
@@ -56,16 +53,12 @@ public sealed class InMemoryAgentCapacityService : IAgentCapacityService
     {
         var bucket = NormalizeToCapacityBucket(channel);
 
-        // W6-A4 — keep a cheap existence guard so work is never routed to a deleted/phantom
-        // agent. The resolver returns the bare tenant defaults for a missing agent, so without
-        // this guard HasCapacity would read load(0) < default(>0) == true for an agent that no
-        // longer exists. The read goes through the same Singleton IAgentStore the resolver uses
-        // (auth hot-path cached in the Api host), so it is not an extra round-trip in practice.
-        var agent = await _agentStore.GetByIdAsync(tenantId, agentId, ct).ConfigureAwait(false);
-        if (agent is null)
-            return false;
-
+        // W6 — a SINGLE agent read, owned by the resolver: it returns the EFFECTIVE capacity for
+        // a present agent or null for a deleted/phantom one. Failing closed on null keeps work
+        // from ever routing to an agent that no longer exists, with no second store round-trip.
         var effective = await _resolver.ResolveAsync(tenantId, agentId, ct).ConfigureAwait(false);
+        if (effective is null)
+            return false;
 
         if (bucket == ChannelType.Voice)
         {

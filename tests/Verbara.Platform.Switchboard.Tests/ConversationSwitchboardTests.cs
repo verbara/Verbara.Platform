@@ -175,20 +175,10 @@ public sealed class ConversationSwitchboardTests : IDisposable
         // not a stubbed bool. An agent already handling 3 chats + 1 email is at MaxTotal=4 even
         // though Email's PER-CHANNEL limit (5) is unfilled; accepting one more async conversation
         // (Email) must be rejected by the combined-async cap, NOT the per-channel cap.
-        var agentStore = Substitute.For<IAgentStore>();
         var resolver = Substitute.For<IAgentCapacityResolver>();
-        var capacity = new InMemoryAgentCapacityService(agentStore, resolver);
+        var capacity = new InMemoryAgentCapacityService(resolver);
 
-        agentStore.GetByIdAsync(_tenantId, _agentId, Arg.Any<CancellationToken>())
-                  .Returns(new Agent
-                  {
-                      AgentId = _agentId,
-                      TenantId = _tenantId,
-                      UserId = EntityId.From("user-001"),
-                      DisplayName = "Agent One",
-                      State = AgentState.Available,
-                      CreatedAt = _now,
-                  });
+        // W6 — the resolver owns the single agent read; a non-null return == present agent.
         resolver.ResolveAsync(_tenantId, _agentId, Arg.Any<CancellationToken>())
                 .Returns(new ChannelCapacity { MaxChat = 3, MaxEmail = 5, MaxSms = 3, MaxTotal = 4 });
 

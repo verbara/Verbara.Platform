@@ -8,5 +8,9 @@ namespace Verbara.Platform.Queues.Services;
 /// </summary>
 public interface IAgentCapacityResolver
 {
-    Task<ChannelCapacity> ResolveAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
+    /// <summary>
+    /// Returns the agent's EFFECTIVE capacity, or <c>null</c> when the agent does not exist
+    /// (the resolver owns the single agent read AND doubles as the existence signal).
+    /// </summary>
+    Task<ChannelCapacity?> ResolveAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
 }

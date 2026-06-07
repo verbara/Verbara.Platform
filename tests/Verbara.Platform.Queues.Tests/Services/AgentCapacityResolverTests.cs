@@ -48,7 +48,8 @@ public class AgentCapacityResolverTests
 
         var effective = await sut.ResolveAsync(Tenant, AgentId, CancellationToken.None);
 
-        effective.MaxVoice.Should().Be(1);
+        effective.Should().NotBeNull();
+        effective!.MaxVoice.Should().Be(1);
         effective.MaxChat.Should().Be(4);
         effective.MaxEmail.Should().Be(6);
         effective.MaxSms.Should().Be(2);
@@ -64,7 +65,8 @@ public class AgentCapacityResolverTests
 
         var effective = await sut.ResolveAsync(Tenant, AgentId, CancellationToken.None);
 
-        effective.MaxChat.Should().Be(5);
+        effective.Should().NotBeNull();
+        effective!.MaxChat.Should().Be(5);
         effective.MaxEmail.Should().Be(5);
         effective.MaxSms.Should().Be(3);
         effective.MaxTotal.Should().Be(5);
@@ -80,22 +82,20 @@ public class AgentCapacityResolverTests
 
         var effective = await sut.ResolveAsync(Tenant, AgentId, CancellationToken.None);
 
-        effective.MaxVoice.Should().Be(1);
+        effective.Should().NotBeNull();
+        effective!.MaxVoice.Should().Be(1);
     }
 
     [Fact]
-    public async Task ResolveAsync_ShouldReturnDefaults_WhenAgentNotFound()
+    public async Task ResolveAsync_ShouldReturnNull_WhenAgentNotFound()
     {
         var defaults = new ChannelCapacity { MaxVoice = 9, MaxChat = 4, MaxEmail = 6, MaxSms = 2, MaxTotal = 7 };
         var (sut, _, _) = CreateSut(agent: null, defaults);
 
         var effective = await sut.ResolveAsync(Tenant, AgentId, CancellationToken.None);
 
-        // All non-voice channels come straight from the tenant defaults; voice is pinned to 1.
-        effective.MaxChat.Should().Be(4);
-        effective.MaxEmail.Should().Be(6);
-        effective.MaxSms.Should().Be(2);
-        effective.MaxTotal.Should().Be(7);
-        effective.MaxVoice.Should().Be(1);
+        // A missing agent resolves to null (the resolver doubles as the existence signal) — it
+        // does NOT merge defaults for a phantom agent.
+        effective.Should().BeNull();
     }
 }

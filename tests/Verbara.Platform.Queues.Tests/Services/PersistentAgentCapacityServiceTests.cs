@@ -15,26 +15,10 @@ public class PersistentAgentCapacityServiceTests
     private static readonly TenantId Tenant = new("t1");
     private static readonly EntityId AgentId = EntityId.From("a-001");
 
-    private static Agent MakeAgent() => new()
-    {
-        AgentId = AgentId,
-        TenantId = Tenant,
-        UserId = EntityId.From("u-001"),
-        DisplayName = "Agent",
-        State = AgentState.Available,
-        CapacityOverride = new ChannelCapacityOverride(),
-        CreatedAt = DateTimeOffset.UtcNow,
-    };
-
-    private static (PersistentAgentCapacityService Sut, IAgentCapacityStore Store, IConversationStore ConvStore, IAgentStore AgentStore) CreateSut(
+    private static (PersistentAgentCapacityService Sut, IAgentCapacityStore Store, IConversationStore ConvStore, IAgentCapacityResolver Resolver) CreateSut(
         ChannelCapacity? effective = null,
-        Agent? agent = null,
         IReadOnlyList<Conversation>? activeConversations = null)
     {
-        var agentStore = Substitute.For<IAgentStore>();
-        agentStore.GetByIdAsync(Tenant, AgentId, Arg.Any<CancellationToken>())
-            .Returns(agent ?? MakeAgent());
-
         var resolver = Substitute.For<IAgentCapacityResolver>();
         resolver.ResolveAsync(Tenant, Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(effective ?? new ChannelCapacity());
@@ -47,8 +31,8 @@ public class PersistentAgentCapacityServiceTests
         conversationStore.ListByStateAsync(Tenant, ConversationState.Active, Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Conversation>>(activeConversations ?? []));
 
-        var sut = new PersistentAgentCapacityService(agentStore, resolver, capacityStore, conversationStore);
-        return (sut, capacityStore, conversationStore, agentStore);
+        var sut = new PersistentAgentCapacityService(resolver, capacityStore, conversationStore);
+        return (sut, capacityStore, conversationStore, resolver);
     }
 
     private static Conversation MakeActiveConversation(ChannelType channel, string suffix) => new()

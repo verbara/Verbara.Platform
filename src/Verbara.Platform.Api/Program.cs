@@ -247,7 +247,6 @@ if (!string.IsNullOrEmpty(coreConnectionString))
     // Override in-memory capacity with persistent version for restart recovery
     builder.Services.AddSingleton<IAgentCapacityService>(sp =>
         new PersistentAgentCapacityService(
-            sp.GetRequiredService<IAgentStore>(),
             sp.GetRequiredService<IAgentCapacityResolver>(),
             sp.GetRequiredService<IAgentCapacityStore>(),
             sp.GetRequiredService<IConversationStore>()));
@@ -284,9 +283,10 @@ builder.Services.AddAuthHotpathCaching();
 
 // ─── W6 capacity defaults provider ─────────────────────────────────────────────
 // Supplies Queues' IAgentCapacityResolver with the per-tenant Max*Default columns,
-// read through the (now cached) ITenantAuthConfigStore registered just above — so
-// the resolver inherits the auth hot-path cache for free. Singleton to match the
-// cached store + IAgentStore lifetimes the resolver depends on.
+// read through the (now cached) ITenantAuthConfigStore registered just above — so the
+// DEFAULTS leg of the resolve inherits the auth hot-path cache for free. The AGENT leg
+// (IAgentStore) is NOT auth-hot-path cached and issues a real SQL SELECT per resolve; W6
+// collapses the capacity check to that single agent read (resolver-owned). Singleton.
 builder.Services.AddSingleton<ICapacityDefaultsProvider, TenantAuthConfigCapacityDefaultsProvider>();
 
 // ─── IP Allowlist caching ─────────────────────────────────────────────────────

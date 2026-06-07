@@ -17,15 +17,14 @@ public sealed class PersistentAgentCapacityService : IAgentCapacityService
     private int _reconciled;
 
     public PersistentAgentCapacityService(
-        IAgentStore agentStore,
         IAgentCapacityResolver resolver,
         IAgentCapacityStore store,
         IConversationStore conversationStore)
     {
-        // W6 — the inner now resolves EFFECTIVE capacity via the resolver (tenant default +
-        // per-agent override) and pools the chat family; it still takes IAgentStore for the
-        // cheap phantom-agent existence guard.
-        _inner = new InMemoryAgentCapacityService(agentStore, resolver);
+        // W6 — the inner resolves EFFECTIVE capacity via the resolver (tenant default +
+        // per-agent override), pools the chat family, and relies on the resolver's null return
+        // as the single phantom-agent existence signal (one agent read, no double-fetch).
+        _inner = new InMemoryAgentCapacityService(resolver);
         _store = store;
         _conversationStore = conversationStore;
     }

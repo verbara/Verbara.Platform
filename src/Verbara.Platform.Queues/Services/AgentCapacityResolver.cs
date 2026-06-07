@@ -20,15 +20,17 @@ public sealed class AgentCapacityResolver : IAgentCapacityResolver
         _defaults = defaults;
     }
 
-    public async Task<ChannelCapacity> ResolveAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    public async Task<ChannelCapacity?> ResolveAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
     {
-        var defaults = await _defaults.GetDefaultsAsync(tenantId, ct).ConfigureAwait(false);
+        // The resolver owns the SINGLE agent read for the capacity path AND doubles as the
+        // existence signal: a missing agent returns null so callers never route work to a
+        // deleted/phantom agent (do NOT merge defaults for an agent that does not exist).
         var agent = await _agents.GetByIdAsync(tenantId, agentId, ct).ConfigureAwait(false);
+        if (agent is null)
+            return null;
 
-        // A missing agent resolves to the bare tenant defaults (an all-null override is the
-        // "inherit everything" identity merge), so the per-channel maxima are still well-defined.
-        var over = agent?.CapacityOverride ?? new ChannelCapacityOverride();
-        var effective = over.ToEffective(defaults);
+        var defaults = await _defaults.GetDefaultsAsync(tenantId, ct).ConfigureAwait(false);
+        var effective = agent.CapacityOverride.ToEffective(defaults);
 
         // W6 invariant — voice is a single-call exclusive lane regardless of any tenant default or
         // per-agent override. An agent on a voice call cannot concurrently bridge a second call until
