@@ -13,6 +13,18 @@ _No unreleased changes._
 
 ---
 
+## [2.9.1] — 2026-06-07 — Audit category vocabulary fix
+
+Patch over v2.9.0. Migration **034**. No API behaviour change beyond audit persistence.
+
+### Fixed
+- **`audit_entries` category CHECK constraint widened to the full emitted vocabulary** (`Migrations/034_AuditCategoryVocabulary.sql` + `AuditEntry.cs`). Some categories the app emits — including the W6 capacity-audit entries (`queues` for `agent.capacity_override`, `operational` for `tenant.capacity_default_changed`) — were not in the DB CHECK list, so the audit insert could be rejected. The constraint now matches what the code emits.
+
+### Changed
+- **Synced the hand-rolled Postgres test fixtures with migrations 029–033** (`AuditEntriesNormalizationFixture` et al.) — closes the stale-fixture drift that surfaced as `pending_state` / `queue_priority` "column does not exist" failures in `Storage.Postgres.Tests` during the W6 gate.
+
+---
+
 ## [2.9.0] — 2026-06-07 — Session/Auth overhaul: agent presence, liveness & work continuity (ADR-0009 W1–W6)
 
 The complete [ADR-0009](docs/decisions/0009-agent-presence-session-work-continuity.md) north-star, shipped as six sequenced tracks (W1–W6, 2026-06-05→06-07) over PRs #41–#46. Native AOT preserved; no new cross-pod event escaped its `[JsonSerializable]` context. Migrations **029–033**. Ships with **Web v3.5.0-web**.
