@@ -190,6 +190,11 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         var tenantId = new TenantId(tenant);
 
         // Idempotent per call (LinkedId): a re-emission for the same physical call is a no-op.
+        // This early-return is ALSO what prevents a duplicate Conversation for a W5b callback-rescue
+        // call: CallbackOriginator pre-created the tracked Conversation, and the preceding CallStarted →
+        // LinkOutboundCallAsync already stamped its VoiceLinkedId by then (CallStarted precedes
+        // CallQueued, and the per-session stripe lock preserves that order), so FindByVoiceLinkedIdAsync
+        // finds it here and we skip the create — the rescue Conversation flows through the queue unchanged.
         var existing = await _conversations.FindByVoiceLinkedIdAsync(tenantId, session.LinkedId, CancellationToken.None).ConfigureAwait(false);
         if (existing is not null)
             return;
@@ -683,6 +688,14 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         // The outbound Conversation is created Owner=agent by the dial service. The initiating client
         // already correlated via the dial response; the screen-pop carries the correlationId for other
         // consumers + consistency. session.Extension is the dialed number (Originate Exten).
+        //
+        // This method ALSO links W5b voice caller-rescue Conversations: CallbackOriginator pre-creates
+        // them with Owner=null (no agent placed the call — it's a system callback to the dropped customer)
+        // and the same VERBARA_OUTBOUND_ID correlation var, so the link/stamp above runs for them too. For
+        // those the Owner=null screen-pop / capacity-reserve / Busy block below is intentionally SKIPPED:
+        // a rescue call has no owning agent yet — it enters the [stasis-queue] like any inbound queue call
+        // and is activated normally (owner assigned, screen-pop, capacity, Busy) by OnCallConnectedAsync
+        // once an agent answers. The rescuedFrom / callbackAttempts / direction metadata is untouched here.
         if (conversation.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } owner })
         {
             var contactName = await ResolveContactDisplayNameAsync(tenantId, conversation.ContactId, session).ConfigureAwait(false);

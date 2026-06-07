@@ -547,6 +547,127 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         await _conversations.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
     }
 
+    // ─── W5b callback-rescue conversation lifecycle through the bridge (A5) ───────
+    //
+    // CallbackOriginator (A4) pre-creates a tracked rescue Conversation (Voice, Queued, Owner=null,
+    // metadata direction="callback-rescue" + rescuedFrom + callbackAttempts) and AMI-Originates the
+    // dropped customer into [stasis-queue] with VERBARA_OUTBOUND_ID = that Conversation id. The SDK
+    // classifies the callback as Inbound (stasis-queue is not an outbound pattern), so the existing
+    // Inbound-gated handlers process it. These tests LOCK IN that the unchanged bridge:
+    //   1. links the Owner=null rescue conv via LinkOutboundCallAsync WITHOUT a screen-pop/capacity
+    //      reserve (no owning agent yet) and preserves its rescue metadata;
+    //   2. does NOT create a duplicate on the following CallQueued (already linked);
+    //   3. activates it normally on answer (Active + owner + screen-pop + capacity + Busy) while the
+    //      rescuedFrom / callbackAttempts metadata SURVIVES — so a re-dropped callback chains correctly.
+
+    private Conversation RescueConversation(string rescuedFrom, string callbackAttempts, string? voiceLinkedId = null)
+    {
+        var conv = new Conversation
+        {
+            ConversationId = EntityId.New(),
+            TenantId = new TenantId(Tenant),
+            ContactId = EntityId.New(),
+            Channel = ChannelType.Voice,
+            State = ConversationState.Queued,
+            Owner = null,
+            QueuePriority = -1,
+            CreatedAt = _clock.UtcNow,
+            VoiceLinkedId = voiceLinkedId,
+        };
+        conv.SetMetadata("direction", "callback-rescue");
+        conv.SetMetadata("rescuedFrom", rescuedFrom);
+        conv.SetMetadata("callbackAttempts", callbackAttempts);
+        return conv;
+    }
+
+    [Fact]
+    public async Task LinkOutboundCallAsync_ShouldLinkRescueConversationWithoutScreenPop_WhenOwnerNull()
+    {
+        AddPrimaryServer();
+        var events = CaptureEvents();
+        var rescuedFrom = EntityId.New().Value;
+        var conv = RescueConversation(rescuedFrom, callbackAttempts: "1");
+        _conversations.GetByIdAsync(new TenantId(Tenant), conv.ConversationId, Arg.Any<CancellationToken>()).Returns(conv);
+        StubGetVarFor("VERBARA_OUTBOUND_ID", conv.ConversationId.Value);
+        StubGetVarFor("TENANT_ID", Tenant);
+        var session = new CallSession("s-rescue-link", "link-rescue-1", "primary", CallDirection.Inbound);
+
+        var bridge = CreateBridge();
+        await bridge.LinkOutboundCallAsync(session, "PJSIP/acme-trunk/+15551230000");
+
+        // Linked + saved with the call's LinkedId.
+        await _conversations.Received().SaveAsync(
+            Arg.Is<Conversation>(c => c.ConversationId == conv.ConversationId && c.VoiceLinkedId == "link-rescue-1"),
+            Arg.Any<CancellationToken>());
+        // Owner=null ⇒ the agent screen-pop / capacity-reserve block is intentionally skipped.
+        events.OfType<VoiceScreenPopEvent>().Should().BeEmpty();
+        await _capacity.DidNotReceive().ReserveAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
+        // Rescue metadata survives the link untouched.
+        conv.Metadata.Should().ContainKey("rescuedFrom").WhoseValue.Should().Be(rescuedFrom);
+        conv.Metadata.Should().ContainKey("direction").WhoseValue.Should().Be("callback-rescue");
+    }
+
+    [Fact]
+    public async Task OnCallQueued_ShouldNotCreateDuplicate_WhenRescueConversationAlreadyLinked()
+    {
+        // The preceding CallStarted/LinkOutboundCallAsync already stamped VoiceLinkedId on the rescue
+        // conv, so the by-LinkedId lookup finds it here and the create is skipped (no duplicate).
+        var session = MakeSession("link-rescue-q", Tenant);
+        _sessions.GetById("s-link-rescue-q").Returns(session);
+        // Build the rescue conv BEFORE the Returns() call: it reads _clock.UtcNow (a substitute), which
+        // NSubstitute would otherwise treat as configuring a call inside the Returns() argument.
+        var existing = RescueConversation(EntityId.New().Value, "1", voiceLinkedId: "link-rescue-q");
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-rescue-q", Arg.Any<CancellationToken>())
+            .Returns(existing);
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallQueuedEvent("s-link-rescue-q", "primary", _clock.UtcNow, "acme-Support", 10));
+
+        await _conversations.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
+        await _contacts.DidNotReceive().ResolveAsync(Arg.Any<TenantId>(), Arg.Any<ChannelAddress>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OnCallConnected_ShouldActivateRescueConversationPreservingMetadata_WhenAnswered()
+    {
+        var session = MakeSession("link-rescue-conn", Tenant, AgentInterface);
+        _sessions.GetById("s-link-rescue-conn").Returns(session);
+        var rescuedFrom = EntityId.New().Value;
+        var conversation = RescueConversation(rescuedFrom, callbackAttempts: "1", voiceLinkedId: "link-rescue-conn");
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-rescue-conn", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        var agent = AgentInState(AgentState.Available);
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(agent);
+        var screenPopContact = new Contact
+        {
+            ContactId = conversation.ContactId,
+            TenantId = new TenantId(Tenant),
+            FirstName = "Ada",
+            LastName = "Lovelace",
+            CreatedAt = _clock.UtcNow,
+        };
+        _contactStore.GetByIdAsync(Arg.Any<TenantId>(), conversation.ContactId, Arg.Any<CancellationToken>())
+            .Returns(screenPopContact);
+        var events = CaptureEvents();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallConnectedEvent("s-link-rescue-conn", "primary", _clock.UtcNow, null, "acme-Support", TimeSpan.FromSeconds(3)));
+
+        // Activated + owner assigned exactly like a normal inbound queue call.
+        conversation.State.Should().Be(ConversationState.Active);
+        conversation.Owner.Should().NotBeNull();
+        conversation.Owner!.Kind.Should().Be(ConversationOwnerKind.Agent);
+        conversation.Owner!.OwnerId!.Value.Value.Should().Be(AgentGuid);
+        await _capacity.Received(1).ReserveAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), ChannelType.Voice, Arg.Any<CancellationToken>());
+        agent.State.Should().Be(AgentState.Busy);
+        events.OfType<VoiceScreenPopEvent>().Should().ContainSingle(ev =>
+            ev.AgentId == AgentGuid && ev.ConversationId == conversation.ConversationId.Value);
+        // The anti-loop counter + provenance SURVIVE activation so a re-dropped callback chains correctly.
+        conversation.Metadata.Should().ContainKey("rescuedFrom").WhoseValue.Should().Be(rescuedFrom);
+        conversation.Metadata.Should().ContainKey("callbackAttempts").WhoseValue.Should().Be("1");
+    }
+
     // ─── IsAbnormalAgentHangup (W5b A1 — the pure callback-eval classifier) ───────
 
     [Fact]
