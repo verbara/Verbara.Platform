@@ -176,6 +176,37 @@ public sealed class TenantSettingsEndpointTests : IClassFixture<PlatformAdminApi
             && e.Metadata != null
             && e.Metadata["new_max_chat_default"] == "9");
     }
+
+    [Fact]
+    public async Task UpdateSettings_ShouldPersistBothAuthAndCapacityDefaults_WhenUpdatedTogether()
+    {
+        // W6-M3 — a SINGLE request mutating BOTH the Auth section AND the capacity defaults must
+        // persist both. A7 deliberately orders the capacity-defaults block AFTER the Auth block and
+        // RE-READS the cache-evicted auth config (capacity lives on TenantAuthConfig too), so the
+        // capacity write does not clobber the just-saved Auth change. Lock that interleaving here.
+        var response = await _client.PutAsJsonAsync("/api/v1/admin/tenant/settings", new
+        {
+            auth = new { passwordMinLength = 18 },
+            operational = new
+            {
+                maxVoiceDefault = 1,
+                maxChatDefault = 7,
+                maxTotalDefault = 11,
+            },
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var getResponse = await _client.GetAsync("/api/v1/admin/tenant/settings");
+        var dto = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync())!;
+
+        // Auth change survived the subsequent capacity write.
+        dto["auth"]!["passwordMinLength"]!.GetValue<int>().Should().Be(18);
+
+        // Capacity defaults survived alongside the Auth change.
+        var op = dto["operational"]!;
+        op["maxChatDefault"]!.GetValue<int>().Should().Be(7);
+        op["maxTotalDefault"]!.GetValue<int>().Should().Be(11);
+    }
 }
 
 public sealed class ManagementTenantSettingsEndpointTests : IClassFixture<PlatformAdminApiFactory>

@@ -504,10 +504,13 @@ internal static class AdminEndpoints
         if (body.Capacity is { } capOverride) agent.CapacityOverride = ToOverride(capOverride);
         await store.SaveAsync(agent, ct);
 
-        // W6-A6 — best-effort audit when an override was supplied at creation (no old value).
-        if (body.Capacity is not null)
+        // W6-A6/M1 — best-effort audit when an override was supplied at creation (no old value).
+        // Skip when the supplied override is itself all-null (== empty): that sets no real override,
+        // so recording an old==new entry would be noise (consistent with the update-path check).
+        var emptyOverride = new ChannelCapacityOverride();
+        if (body.Capacity is not null && CapacityOverrideChanged(emptyOverride, agent.CapacityOverride))
             await RecordCapacityAuditAsync(audit, tenantId, GetCurrentUserId(context), agent.AgentId,
-                oldOverride: new ChannelCapacityOverride(), newOverride: agent.CapacityOverride, ct);
+                oldOverride: emptyOverride, newOverride: agent.CapacityOverride, ct);
 
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
         if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword) && syncService is not null)
@@ -603,7 +606,9 @@ internal static class AdminEndpoints
         agent.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(agent, ct);
 
-        if (capacityChanged)
+        // W6-M1 — only audit when an override was supplied AND it actually differs from the old
+        // value (no-op overrides — e.g. re-submitting the same form — must not record old==new).
+        if (capacityChanged && CapacityOverrideChanged(oldOverride, agent.CapacityOverride))
             await RecordCapacityAuditAsync(audit, tenantId, GetCurrentUserId(context), agent.AgentId,
                 oldOverride, agent.CapacityOverride, ct);
 
@@ -876,6 +881,16 @@ internal static class AdminEndpoints
         MaxTotal = cap.MaxTotal,
     };
 
+    // W6-M1 — value-equality for the capacity override so the audit only fires on a REAL change
+    // (mirrors A7's tenant-default "changed" check). ChannelCapacityOverride is a class, NOT a
+    // record, so the default `==` is reference equality — compare the 5 nullable ints field-by-field.
+    private static bool CapacityOverrideChanged(ChannelCapacityOverride old, ChannelCapacityOverride @new) =>
+        old.MaxVoice != @new.MaxVoice
+        || old.MaxChat != @new.MaxChat
+        || old.MaxEmail != @new.MaxEmail
+        || old.MaxSms != @new.MaxSms
+        || old.MaxTotal != @new.MaxTotal;
+
     // W6-A6 — best-effort capacity audit (mirrors ForceAgentOffline: a failed audit write must
     // NEVER fail the operator's request). Same category ("queues") as the other agent-lifecycle
     // audit entries so capacity changes surface alongside force-offline + state transitions.
@@ -1018,6 +1033,8 @@ internal sealed record ChannelCapacityOverrideDto(
 /// resolved <see cref="EffectiveCapacity"/> (tenant default merged with the override,
 /// MaxVoice pinned). The plaintext SIP password is deliberately NOT carried (admin
 /// surfaces must never echo the secret — see AgentMeSipExposureTests).
+/// The <see cref="Agent"/> entity's OfflineSince, CreatedBy, and UpdatedBy are intentionally
+/// NOT projected (no admin-UI consumer today — add them here if a future supervisor surface needs them).
 /// </summary>
 internal sealed record AdminAgentResponseDto(
     string AgentId,
