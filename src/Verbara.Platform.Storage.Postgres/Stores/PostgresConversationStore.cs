@@ -280,6 +280,30 @@ internal sealed class PostgresConversationStore : IConversationStore
         return (int)(count ?? 0L);
     }
 
+    public async Task<IReadOnlyList<Conversation>> ListFailoverWorkByOwnerAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        // W5 — owner-scoped + tenant-scoped list of conversations with a LIVE customer
+        // (ConversationStateMachine.FailoverWorkStates {Active,OnHold,Consulting}; excludes
+        // WrapUp/parked/pre-accept). Returns full Conversation entities so the failover
+        // sweep can re-queue each. int[] = ANY(@States) mirrors CountActiveWorkAsync.
+        var failoverWorkStates = ConversationStateMachine.FailoverWorkStates.Select(s => (int)s).ToArray();
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id " +
+            "FROM conversations " +
+            "WHERE tenant_id = @TenantId AND owner_kind = @OwnerKind AND owner_id = @AgentId " +
+            "  AND state = ANY(@States)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("OwnerKind", (int)ConversationOwnerKind.Agent));
+                p.Add(new NpgsqlParameter("AgentId", agentId.Value));
+                p.Add(new NpgsqlParameter("States", failoverWorkStates));
+            },
+            ConversationRow.Map, ct);
+        return rows.Select(r => r.ToConversation()).ToList();
+    }
+
     private static int[] GetTerminalStateInts()
     {
         var terminalStates = new List<int>();

@@ -143,4 +143,16 @@ internal sealed class InMemoryConversationStore : IConversationStore
             ConversationStateMachine.IsActiveWork(c.State));
         return Task.FromResult(count);
     }
+
+    public Task<IReadOnlyList<Conversation>> ListFailoverWorkByOwnerAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        IReadOnlyList<Conversation> result = _items.Values
+            .Where(c =>
+                c.TenantId == tenantId &&
+                c.Owner is { Kind: ConversationOwnerKind.Agent } owner &&
+                owner.OwnerId == agentId &&
+                ConversationStateMachine.IsFailoverWork(c.State))
+            .ToList();
+        return Task.FromResult(result);
+    }
 }

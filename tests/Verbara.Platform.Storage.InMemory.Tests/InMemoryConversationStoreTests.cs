@@ -356,4 +356,70 @@ public sealed class InMemoryConversationStoreTests
 
         count.Should().Be(1);
     }
+
+    [Fact]
+    public async Task ListFailoverWorkByOwnerAsync_ShouldReturnActiveOnHoldConsulting_WhenOwned()
+    {
+        var store = new InMemoryConversationStore();
+        var agentId = EntityId.New();
+        var active = MakeAgentOwned(Tenant1, agentId, ConversationState.Active);
+        var onHold = MakeAgentOwned(Tenant1, agentId, ConversationState.OnHold);
+        var consulting = MakeAgentOwned(Tenant1, agentId, ConversationState.Consulting);
+        await store.SaveAsync(active, CancellationToken.None);
+        await store.SaveAsync(onHold, CancellationToken.None);
+        await store.SaveAsync(consulting, CancellationToken.None);
+
+        var result = await store.ListFailoverWorkByOwnerAsync(Tenant1, agentId, CancellationToken.None);
+
+        result.Select(c => c.ConversationId).Should().BeEquivalentTo(
+            new[] { active.ConversationId, onHold.ConversationId, consulting.ConversationId });
+    }
+
+    [Fact]
+    public async Task ListFailoverWorkByOwnerAsync_ShouldExcludeWrapUp_WhenOwned()
+    {
+        var store = new InMemoryConversationStore();
+        var agentId = EntityId.New();
+        var active = MakeAgentOwned(Tenant1, agentId, ConversationState.Active);
+        var wrapUp = MakeAgentOwned(Tenant1, agentId, ConversationState.WrapUp);
+        await store.SaveAsync(active, CancellationToken.None);
+        await store.SaveAsync(wrapUp, CancellationToken.None);
+
+        var result = await store.ListFailoverWorkByOwnerAsync(Tenant1, agentId, CancellationToken.None);
+
+        result.Select(c => c.ConversationId).Should().BeEquivalentTo(new[] { active.ConversationId });
+    }
+
+    [Fact]
+    public async Task ListFailoverWorkByOwnerAsync_ShouldExcludeParkedAndPreAccept()
+    {
+        var store = new InMemoryConversationStore();
+        var agentId = EntityId.New();
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Queued), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Offered), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.WaitingForCustomer), CancellationToken.None);
+        await store.SaveAsync(MakeAgentOwned(Tenant1, agentId, ConversationState.Snoozed), CancellationToken.None);
+
+        var result = await store.ListFailoverWorkByOwnerAsync(Tenant1, agentId, CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListFailoverWorkByOwnerAsync_ShouldOnlyReturnOwnAgentAndTenant()
+    {
+        var store = new InMemoryConversationStore();
+        var agentId = EntityId.New();
+        var otherAgentId = EntityId.New();
+        var own = MakeAgentOwned(Tenant1, agentId, ConversationState.Active);
+        await store.SaveAsync(own, CancellationToken.None);
+        // Different agent, same tenant — excluded.
+        await store.SaveAsync(MakeAgentOwned(Tenant1, otherAgentId, ConversationState.Active), CancellationToken.None);
+        // Same agent id, different tenant — excluded.
+        await store.SaveAsync(MakeAgentOwned(Tenant2, agentId, ConversationState.Active), CancellationToken.None);
+
+        var result = await store.ListFailoverWorkByOwnerAsync(Tenant1, agentId, CancellationToken.None);
+
+        result.Select(c => c.ConversationId).Should().BeEquivalentTo(new[] { own.ConversationId });
+    }
 }

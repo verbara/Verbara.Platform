@@ -48,4 +48,11 @@ public interface IConversationStore
     /// pending pause may apply.
     /// </summary>
     Task<int> CountActiveWorkAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
+
+    /// <summary>
+    /// W5 — conversations the agent OWNS in FailoverWorkStates {Active,OnHold,Consulting}
+    /// (excludes WrapUp/parked/pre-accept). Returns the full Conversation entities so the
+    /// failover sweep can re-queue them. Used when the owner has gone Offline past the grace.
+    /// </summary>
+    Task<IReadOnlyList<Conversation>> ListFailoverWorkByOwnerAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
 }

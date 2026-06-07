@@ -19,6 +19,11 @@ public interface IAgentStore
     // W4 — drain-sweep enumeration of every agent with a pending pause, across ALL
     // tenants, unpaged/streamed. Mirrors StreamRoutableAgentsAsync.
     IAsyncEnumerable<Agent> StreamPendingPauseAgentsAsync(CancellationToken ct);
+
+    // W5 — drain-sweep enumeration of every Offline agent across ALL tenants,
+    // unpaged/streamed. Mirrors StreamRoutableAgentsAsync. The failover sweep starts
+    // here (offline owners are the orphan candidates) then lists their active work.
+    IAsyncEnumerable<Agent> StreamOfflineAgentsAsync(CancellationToken ct);
 }
 
 public sealed record AgentQuery

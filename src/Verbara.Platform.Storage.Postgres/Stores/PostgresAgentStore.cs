@@ -202,6 +202,23 @@ internal sealed class PostgresAgentStore : IAgentStore
             yield return AgentRow.Map(reader).ToAgent();
     }
 
+    public async IAsyncEnumerable<Agent> StreamOfflineAgentsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        // W5 — same hand-rolled streaming reader as StreamRoutableAgentsAsync; the
+        // failover sweep starts from the (few) Offline owners and must never buffer
+        // every offline agent across every tenant into memory.
+        // state = 0 == AgentState.Offline.
+        await using var cmd = _dataSource.CreateCommand(
+            "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "offline_since, created_at, updated_at, created_by, updated_by " +
+            "FROM agents WHERE state = 0");
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            yield return AgentRow.Map(reader).ToAgent();
+    }
+
     private sealed class AgentRow
     {
         public string agent_id { get; init; } = null!;
