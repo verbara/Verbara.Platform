@@ -41,8 +41,10 @@ namespace Verbara.Platform.Api.Services;
 ///
 /// <para><b>Leader-gated (ADR-0022 Phase A.5 pattern):</b> the sweep runs on every voice-capable pod
 /// but only the elected leader for <see cref="CallbackRescueLeaderResources.Sweep"/> acts — a single
-/// pod originates cluster-wide, honouring the AMI single-writer contract. On single-node deployments
-/// an <see cref="AlwaysLeader"/> stub is registered so the worker still runs.</para>
+/// pod originates cluster-wide, honouring the AMI single-writer contract. Unlike the W3/W4/W5 digital
+/// sweeps, voice is cluster-only (the whole voice/AMI stack registers solely inside the
+/// cluster-connection branch), so this worker + its lease only exist on a clustered voice-AMI pod and
+/// are always Postgres-lease-gated — there is no single-node path and no <c>AlwaysLeader</c> stub.</para>
 ///
 /// <para><b>Idempotent + restart-tolerant:</b> each candidate is re-loaded and re-checked (still in
 /// WrapUp, still pending, not already stuck) before acting, so a raced state change or another pod is
@@ -188,7 +190,12 @@ internal sealed partial class CallbackRescueWorker : BackgroundService
         // Grace window (also gives cancel-on-return / transient-blip time).
         if (!conv.Metadata.TryGetValue("callbackEvalSince", out var sinceRaw)
             || !DateTimeOffset.TryParse(sinceRaw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var evalSince))
-            return;                                   // malformed: skip (cleaned later)
+        {
+            // Missing/corrupt timestamp (the bridge always writes "O") — we can't bound the grace, so
+            // clear the marker to self-bound the pending set rather than re-listing it every sweep.
+            await ClearPendingAsync(conv, ct).ConfigureAwait(false);
+            return;
+        }
         if (now - evalSince < TimeSpan.FromSeconds(grace))
             return;                                   // not ready yet
 

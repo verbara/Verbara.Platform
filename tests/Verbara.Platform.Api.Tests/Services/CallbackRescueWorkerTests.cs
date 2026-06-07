@@ -45,11 +45,14 @@ public sealed class CallbackRescueWorkerTests
     public async Task SweepOnceAsync_ShouldNotCallback_WhenWithinGrace()
     {
         var ctx = new TestContext();   // grace = 25
-        ctx.SeedPending(agentLegAbnormal: true, evalSince: ctx.Now - TimeSpan.FromSeconds(10));
+        var conv = ctx.SeedPending(agentLegAbnormal: true, evalSince: ctx.Now - TimeSpan.FromSeconds(10));
 
         await ctx.Worker.SweepOnceAsync(CancellationToken.None);
 
         ctx.Originator.Calls.Should().BeEmpty();
+        // Within grace must NOT clear the marker — a later sweep re-evaluates (losing it = a dropped rescue).
+        conv.Metadata.ContainsKey("pendingCallbackEval").Should().BeTrue();
+        conv.Metadata.ContainsKey("callbackStuck").Should().BeFalse();
     }
 
     [Fact]
@@ -152,6 +155,21 @@ public sealed class CallbackRescueWorkerTests
     }
 
     [Fact]
+    public async Task SweepOnceAsync_ShouldClearPending_WhenEvalSinceMalformed()
+    {
+        var ctx = new TestContext();
+        var conv = ctx.SeedPending(agentLegAbnormal: true, evalSince: ctx.Now - TimeSpan.FromSeconds(60));
+        conv.SetMetadata("callbackEvalSince", "not-a-timestamp");   // corrupt — grace can't be bounded
+
+        await ctx.Worker.SweepOnceAsync(CancellationToken.None);
+
+        ctx.Originator.Calls.Should().BeEmpty();
+        // Self-bound the pending set instead of re-listing the corrupt row every sweep.
+        conv.Metadata.ContainsKey("pendingCallbackEval").Should().BeFalse();
+        conv.Metadata.ContainsKey("callbackStuck").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task SweepOnceAsync_ShouldIncrementAttemptsBeforeOriginate_AndLeavePendingOnFailure()
     {
         var ctx = new TestContext();
@@ -161,6 +179,8 @@ public sealed class CallbackRescueWorkerTests
         await ctx.Worker.SweepOnceAsync(CancellationToken.None);
 
         conv.Metadata["callbackAttempts"].Should().Be("1");                   // counter persisted BEFORE originate
+        ctx.Originator.Calls.Should().ContainSingle()
+            .Which.CallbackAttempts.Should().Be(1);                           // originator observed the persisted value
         conv.Metadata.ContainsKey("pendingCallbackEval").Should().BeTrue();   // left for retry (attempts < max)
         conv.Metadata.ContainsKey("callbackStuck").Should().BeFalse();
         await ctx.AssertFailedAsync(conv, attempt: 1);
