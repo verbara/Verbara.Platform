@@ -23,6 +23,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAgentCapacityService, InMemoryAgentCapacityService>();
         services.AddSingleton<IAgentPresenceService, InMemoryAgentPresenceService>();
 
+        // W6 — effective-capacity resolver (tenant default + sparse per-agent override, merged at
+        // read time). Stateless over Singleton stores; ICapacityDefaultsProvider is supplied by the
+        // Api layer so Queues stays free of an Identity dependency.
+        services.AddSingleton<IAgentCapacityResolver, AgentCapacityResolver>();
+
         return services;
     }
 }

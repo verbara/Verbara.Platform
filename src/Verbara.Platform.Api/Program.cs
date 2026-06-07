@@ -281,6 +281,13 @@ NpgsqlDataSource? ResolveDataSource(string? candidateConnectionString)
 // See docs/plans/active/2026-04-27-auth-hotpath-hardening.md Phase 1 + ADR-0010.
 builder.Services.AddAuthHotpathCaching();
 
+// ─── W6 capacity defaults provider ─────────────────────────────────────────────
+// Supplies Queues' IAgentCapacityResolver with the per-tenant Max*Default columns,
+// read through the (now cached) ITenantAuthConfigStore registered just above — so
+// the resolver inherits the auth hot-path cache for free. Singleton to match the
+// cached store + IAgentStore lifetimes the resolver depends on.
+builder.Services.AddSingleton<ICapacityDefaultsProvider, TenantAuthConfigCapacityDefaultsProvider>();
+
 // ─── IP Allowlist caching ─────────────────────────────────────────────────────
 // IMemoryCache decorator over ITenantIpAllowlistStore. Mirrors the AHH pattern;
 // cross-replica invalidation is not wired because allowlist mutations are
