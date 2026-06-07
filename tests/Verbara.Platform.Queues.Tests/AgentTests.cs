@@ -88,6 +88,56 @@ public class AgentTests
     }
 
     [Fact]
+    public void ForceOffline_ShouldSetOfflineSince_WhenEnteringOffline()
+    {
+        var now = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var agent = NewAgent(AgentState.Busy);
+
+        agent.ForceOffline(now);
+
+        agent.State.Should().Be(AgentState.Offline);
+        agent.OfflineSince.Should().Be(now);
+    }
+
+    [Fact]
+    public void ForceOffline_ShouldNotResetOfflineSince_WhenCalledAgain()
+    {
+        var t1 = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var t2 = new DateTimeOffset(2026, 6, 6, 10, 5, 0, TimeSpan.Zero);
+        var agent = NewAgent(AgentState.Busy);
+
+        agent.ForceOffline(t1);
+        agent.ForceOffline(t2);
+
+        agent.OfflineSince.Should().Be(t1);
+    }
+
+    [Fact]
+    public void TransitionTo_ShouldSetOfflineSince_WhenTargetOffline()
+    {
+        var now = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var agent = NewAgent(AgentState.Available);
+
+        agent.TransitionTo(AgentState.Offline, now);
+
+        agent.State.Should().Be(AgentState.Offline);
+        agent.OfflineSince.Should().Be(now);
+    }
+
+    [Fact]
+    public void TransitionTo_ShouldClearOfflineSince_WhenLeavingOffline()
+    {
+        var now = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var agent = NewAgent(AgentState.Offline);
+        agent.OfflineSince = now;
+
+        agent.TransitionTo(AgentState.Available);
+
+        agent.State.Should().Be(AgentState.Available);
+        agent.OfflineSince.Should().BeNull();
+    }
+
+    [Fact]
     public void ApplyPendingState_ShouldSetStateAndClearPending_WhenPendingSet()
     {
         var agent = NewAgent(AgentState.Available);

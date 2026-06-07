@@ -123,4 +123,20 @@ public sealed class InMemoryAgentStoreTests
         loaded.PendingSince.Should().Be(since);
         loaded.HasPendingPause.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task SaveAsync_ShouldRoundTripOfflineSince_WhenSet()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        var offlineSince = DateTimeOffset.UtcNow;
+        var agent = MakeAgent(tenant, AgentState.Offline);
+        agent.OfflineSince = offlineSince;
+        await store.SaveAsync(agent, CancellationToken.None);
+
+        var loaded = await store.GetByIdAsync(tenant, agent.AgentId, CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.OfflineSince.Should().Be(offlineSince);
+    }
 }
