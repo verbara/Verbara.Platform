@@ -58,6 +58,13 @@ public sealed class TenantAuthConfig
     public int WorkFailoverGraceSeconds { get; set; } = 30;
 
     /// <summary>
+    /// Per-tenant grace (seconds) a dropped voice caller waits before a rescue callback is
+    /// originated, measured from the call's WrapUp. Default 25. 0 (or less) disables voice
+    /// callback-rescue for the tenant. (W5b)
+    /// </summary>
+    public int VoiceCallbackGraceSeconds { get; set; } = 25;
+
+    /// <summary>
     /// v1.3.0 IP Allowlist — when true, requests from IPs not matching any
     /// row in tenant_ip_allowlist are rejected with 403. When false, the
     /// allowlist is dormant regardless of the entries that may exist.

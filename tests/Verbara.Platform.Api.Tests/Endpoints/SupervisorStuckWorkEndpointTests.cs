@@ -102,6 +102,130 @@ public sealed class SupervisorStuckWorkEndpointTests : IClassFixture<Authenticat
         stuck.Should().NotContain(c => c.OwnerAgentId == availableAgent.AgentId.Value);
     }
 
+    [Fact]
+    public async Task GetStuckConversations_ShouldIncludeVoiceCallbackStuck_WhenPresent()
+    {
+        var owner = await SeedAgentAsync(AgentState.Offline, "Voice Owner");
+        var conv = await SeedVoiceConversationAsync(
+            owner.AgentId,
+            ConversationState.WrapUp,
+            metadata: new Dictionary<string, string>
+            {
+                ["callbackStuck"] = "true",
+                ["callbackAttempts"] = "3",
+            });
+
+        var stuck = await GetStuckAsync();
+
+        var dto = stuck.Single(c => c.ConversationId == conv.ConversationId.Value);
+        dto.Channel.Should().Be("Voice");
+        dto.State.Should().Be("WrapUp");
+        dto.Escalated.Should().BeTrue();
+        dto.FailoverAttempts.Should().Be(3);
+        dto.OwnerAgentId.Should().Be(owner.AgentId.Value);
+        dto.OwnerAgentName.Should().Be("Voice Owner");
+    }
+
+    [Fact]
+    public async Task GetStuckConversations_ShouldIncludeBothDigitalAndVoice_WhenMixed()
+    {
+        var digitalOwner = await SeedAgentAsync(AgentState.Offline, "Digital Owner");
+        var digitalConv = await SeedConversationAsync(
+            digitalOwner.AgentId,
+            ConversationState.Active,
+            metadata: new Dictionary<string, string> { ["failoverStuck"] = "true" });
+
+        var voiceOwner = await SeedAgentAsync(AgentState.Offline, "Voice Owner Mixed");
+        var voiceConv = await SeedVoiceConversationAsync(
+            voiceOwner.AgentId,
+            ConversationState.WrapUp,
+            metadata: new Dictionary<string, string>
+            {
+                ["callbackStuck"] = "true",
+                ["callbackAttempts"] = "3",
+            });
+
+        var stuck = await GetStuckAsync();
+
+        var digital = stuck.Single(c => c.ConversationId == digitalConv.ConversationId.Value);
+        digital.Channel.Should().Be("WebChat");
+        digital.Escalated.Should().BeTrue();
+
+        var voice = stuck.Single(c => c.ConversationId == voiceConv.ConversationId.Value);
+        voice.Channel.Should().Be("Voice");
+        voice.State.Should().Be("WrapUp");
+        voice.Escalated.Should().BeTrue();
+    }
+
+    // ── POST /supervisor/conversations/{id}/retry-callback ─────────────────────
+
+    [Fact]
+    public async Task RetryCallback_ShouldReArmRescue_WhenVoiceCallbackStuck()
+    {
+        var owner = await SeedAgentAsync(AgentState.Offline, "Retry Owner");
+        var conv = await SeedVoiceConversationAsync(
+            owner.AgentId,
+            ConversationState.WrapUp,
+            metadata: new Dictionary<string, string>
+            {
+                ["callbackStuck"] = "true",
+                ["callbackAttempts"] = "3",
+            });
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/v1/supervisor/conversations/{conv.ConversationId.Value}/retry-callback",
+            new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var updated = await GetConversationAsync(conv.ConversationId);
+        updated.Metadata.ContainsKey("callbackStuck").Should().BeFalse();
+        updated.Metadata["pendingCallbackEval"].Should().Be("true");
+        updated.Metadata["callbackAttempts"].Should().Be("0");
+        updated.Metadata.ContainsKey("callbackEvalSince").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RetryCallback_ShouldReturnBadRequest_WhenNotVoiceStuck()
+    {
+        // A digital conversation (even if failover-stuck) is not a voice rescue.
+        var owner = await SeedAgentAsync(AgentState.Offline, "NotVoice Owner");
+        var conv = await SeedConversationAsync(
+            owner.AgentId,
+            ConversationState.Active,
+            metadata: new Dictionary<string, string> { ["failoverStuck"] = "true" });
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/v1/supervisor/conversations/{conv.ConversationId.Value}/retry-callback",
+            new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task RetryCallback_ShouldReturnBadRequest_WhenVoiceWithoutCallbackStuck()
+    {
+        // A voice conversation in WrapUp but without the callbackStuck marker is not stuck.
+        var owner = await SeedAgentAsync(AgentState.Offline, "PlainVoice Owner");
+        var conv = await SeedVoiceConversationAsync(owner.AgentId, ConversationState.WrapUp);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/v1/supervisor/conversations/{conv.ConversationId.Value}/retry-callback",
+            new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task RetryCallback_ShouldReturnNotFound_WhenConversationMissing()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/v1/supervisor/conversations/no-such-conversation/retry-callback",
+            new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
     // ── POST /supervisor/conversations/{id}/reassign ──────────────────────────
 
     [Fact]
@@ -289,6 +413,30 @@ public sealed class SupervisorStuckWorkEndpointTests : IClassFixture<Authenticat
             TenantId = s_tenantId,
             ContactId = EntityId.New(),
             Channel = ChannelType.WebChat,
+            State = state,
+            Owner = ConversationOwner.ForAgent(ownerAgentId),
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        if (metadata is not null)
+            foreach (var (k, v) in metadata)
+                conv.SetMetadata(k, v);
+        await store.SaveAsync(conv, CancellationToken.None);
+        return conv;
+    }
+
+    private async Task<Conversation> SeedVoiceConversationAsync(
+        EntityId ownerAgentId,
+        ConversationState state,
+        IReadOnlyDictionary<string, string>? metadata = null)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IConversationStore>();
+        var conv = new Conversation
+        {
+            ConversationId = EntityId.New(),
+            TenantId = s_tenantId,
+            ContactId = EntityId.New(),
+            Channel = ChannelType.Voice,
             State = state,
             Owner = ConversationOwner.ForAgent(ownerAgentId),
             CreatedAt = DateTimeOffset.UtcNow,

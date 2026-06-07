@@ -34,6 +34,11 @@ internal static class SupervisorEndpoints
         // W5 (A7) — stuck-work visibility + manual reassign
         group.MapGet("/conversations/stuck", GetStuckConversations);
         group.MapPost("/conversations/{id}/reassign", ReassignConversation);
+
+        // W5b — voice-appropriate counterpart to reassign: re-arm the rescue of a
+        // callback-stuck WrapUp voice conversation (the live call is gone, so it can't
+        // be transferred to a queue).
+        group.MapPost("/conversations/{id}/retry-callback", RetryCallback);
     }
 
     // ─── Handlers ─────────────────────────────────────────────────────────────
@@ -265,6 +270,43 @@ internal static class SupervisorEndpoints
             }
         }
 
+        // W5b — also surface voice conversations whose rescue callbacks exhausted the
+        // retry cap. These live in WrapUp (NOT a failover-work state) so the loop above
+        // never returns them: the two sets are DISJOINT (FailoverWorkStates vs WrapUp),
+        // no dedup needed. The conv's Owner is the (now-dead) agent; resolve it best-
+        // effort (the agent may have reconnected — OwnerOfflineSince stays nullable).
+        foreach (var conv in await conversationStore.ListCallbackStuckAsync(tenantId, ct))
+        {
+            var attempts = conv.Metadata.TryGetValue("callbackAttempts", out var a)
+                && int.TryParse(a, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+                ? n
+                : 0;
+
+            string ownerAgentId = string.Empty;
+            string ownerAgentName = string.Empty;
+            DateTimeOffset? ownerOfflineSince = null;
+            if (conv.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerId })
+            {
+                ownerAgentId = ownerId.Value;
+                var owner = await agentStore.GetByIdAsync(tenantId, ownerId, ct);
+                if (owner is not null)
+                {
+                    ownerAgentName = owner.DisplayName;
+                    ownerOfflineSince = owner.OfflineSince;
+                }
+            }
+
+            stuck.Add(new StuckConversationDto(
+                ConversationId: conv.ConversationId.Value,
+                Channel: conv.Channel.ToString(),
+                State: conv.State.ToString(),
+                OwnerAgentId: ownerAgentId,
+                OwnerAgentName: ownerAgentName,
+                OwnerOfflineSince: ownerOfflineSince,
+                FailoverAttempts: attempts,
+                Escalated: true));
+        }
+
         IReadOnlyList<StuckConversationDto> result = stuck;
         return Results.Ok(result);
     }
@@ -340,6 +382,74 @@ internal static class SupervisorEndpoints
             // Swallow — the reassign already succeeded; audit is advisory.
         }
 
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// W5b — voice-appropriate counterpart to <see cref="ReassignConversation"/>. A WrapUp voice
+    /// conversation whose rescue callbacks exhausted the retry cap (marked <c>callbackStuck</c>)
+    /// can't be transferred to a queue — the live call is already gone — so the supervisor re-arms
+    /// the AUTOMATIC rescue instead: clear <c>callbackStuck</c>, reset <c>callbackAttempts</c> to a
+    /// fresh cap, and re-stamp <c>pendingCallbackEval</c>/<c>callbackEvalSince</c> so the
+    /// CallbackRescueWorker re-evaluates after the grace and originates a fresh callback.
+    /// </summary>
+    private static async Task<IResult> RetryCallback(
+        string id,
+        HttpContext context,
+        [FromServices] IConversationStore conversationStore,
+        [FromServices] IAuditService audit,
+        [FromServices] IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var supervisorId = GetCurrentUserId(context);
+
+        var convId = EntityId.From(id);
+        var conv = await conversationStore.GetByIdAsync(tenantId, convId, ct);
+        if (conv is null)
+            return Results.NotFound();
+
+        if (conv.Channel != ChannelType.Voice
+            || conv.State != ConversationState.WrapUp
+            || !conv.Metadata.ContainsKey("callbackStuck"))
+        {
+            return Results.BadRequest(new ErrorResponse("Conversation is not a stuck voice rescue."));
+        }
+
+        // Re-arm the automatic rescue: drop the stuck marker, reset the cap, and re-stamp the
+        // pending-eval markers so the CallbackRescueWorker picks it up after the grace.
+        conv.RemoveMetadata("callbackStuck");
+        conv.SetMetadata("callbackAttempts", "0");
+        conv.SetMetadata("pendingCallbackEval", "true");
+        conv.SetMetadata("callbackEvalSince", clock.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        await conversationStore.SaveAsync(conv, ct);
+
+        // Best-effort audit (mirrors ReassignConversation's shape; a failed audit write must not
+        // fail the supervisor's re-arm).
+        try
+        {
+            await audit.RecordAsync(
+                tenantId,
+                category: "conversations",
+                action: "conversation.callback.retry_requested",
+                severity: "info",
+                actorId: supervisorId.Value,
+                actorType: "user",
+                targetId: id,
+                targetType: "Conversation",
+                metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["by_supervisor"] = supervisorId.Value,
+                },
+                ct: ct);
+        }
+        catch
+        {
+            // Swallow — the re-arm already succeeded; audit is advisory.
+        }
+
+        // 204 (not Ok()) so the empty body doesn't trip customFetch's response.json() — matches
+        // the proven-safe ReassignConversation sibling the Web client already consumes.
         return Results.NoContent();
     }
 

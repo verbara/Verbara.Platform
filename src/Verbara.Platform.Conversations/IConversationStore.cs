@@ -55,4 +55,20 @@ public interface IConversationStore
     /// failover sweep can re-queue them. Used when the owner has gone Offline past the grace.
     /// </summary>
     Task<IReadOnlyList<Conversation>> ListFailoverWorkByOwnerAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
+
+    /// <summary>
+    /// W5b — cross-tenant list of answered voice conversations parked in WrapUp awaiting a
+    /// callback-rescue decision (metadata <c>pendingCallbackEval == "true"</c>, stamped by the
+    /// voice bridge on an answered-call hangup). The leader-gated CallbackRescueWorker drains
+    /// this set after the per-tenant grace. Self-bounds: the worker clears the marker once it
+    /// enqueues a callback or escalates.
+    /// </summary>
+    Task<IReadOnlyList<Conversation>> ListPendingCallbackEvalAsync(CancellationToken ct);
+
+    /// <summary>
+    /// W5b — tenant-scoped list of voice conversations whose rescue callbacks exhausted the
+    /// retry cap (in WrapUp, metadata <c>callbackStuck == "true"</c>). Surfaced in the supervisor
+    /// stuck-work view so a human can re-arm the rescue or close the call.
+    /// </summary>
+    Task<IReadOnlyList<Conversation>> ListCallbackStuckAsync(TenantId tenantId, CancellationToken ct);
 }
