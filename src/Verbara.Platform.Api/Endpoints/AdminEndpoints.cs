@@ -656,7 +656,7 @@ internal static class AdminEndpoints
             return Results.NotFound();
 
         var oldState = agent.State;
-        agent.ForceOffline();
+        agent.ForceOffline(clock.GetUtcNow());   // W5 — deterministic grace stamp
         await agentStore.SaveAsync(agent, ct);
         await livenessStore.RemoveAsync(tenantId, agent.AgentId, ct);
 

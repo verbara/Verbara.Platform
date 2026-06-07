@@ -30,6 +30,12 @@ public sealed class InMemoryAgentPresenceService : IAgentPresenceService
 
         _states[(tenantId, agentId)] = newState;
         agent.State = newState;
+        // W5 — this write path bypasses the Agent.TransitionTo/ForceOffline helpers, so
+        // maintain the OfflineSince grace clock here too (set-on-enter without resetting a
+        // prior episode, clear-on-leave) — otherwise the work-failover sweep's grace breaks.
+        agent.OfflineSince = newState == AgentState.Offline
+            ? (agent.OfflineSince ?? DateTimeOffset.UtcNow)
+            : null;
         await _agentStore.SaveAsync(agent, ct).ConfigureAwait(false);
     }
 

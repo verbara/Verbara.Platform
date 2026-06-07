@@ -433,6 +433,10 @@ namespace Verbara.Platform.Api.Serialization;
 // Supervisor Digital
 [JsonSerializable(typeof(SupervisorCloseRequest))]
 [JsonSerializable(typeof(CoachingNoteRequest))]
+// Supervisor stuck-work + manual reassign (W5 A7)
+[JsonSerializable(typeof(StuckConversationDto))]
+[JsonSerializable(typeof(IReadOnlyList<StuckConversationDto>))]
+[JsonSerializable(typeof(ReassignConversationRequest))]
 // Canned Responses
 [JsonSerializable(typeof(CannedResponseEndpoints.CreateCannedResponseRequest))]
 [JsonSerializable(typeof(CannedResponseEndpoints.UpdateCannedResponseRequest))]

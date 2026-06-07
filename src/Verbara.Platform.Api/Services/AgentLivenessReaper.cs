@@ -149,7 +149,7 @@ public sealed partial class AgentLivenessReaper : BackgroundService
                 continue;
 
             var oldState = fresh.State.ToString();
-            fresh.ForceOffline();
+            fresh.ForceOffline(_clock.GetUtcNow());   // W5 — deterministic grace stamp
             await _agentStore.SaveAsync(fresh, ct).ConfigureAwait(false);
 
             _eventBus.Publish(new AgentStateChangedEvent(

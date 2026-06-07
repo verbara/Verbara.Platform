@@ -233,6 +233,89 @@ public sealed class ConversationSwitchboardTests : IDisposable
         result.NewState.Should().Be(ConversationState.Queued);
     }
 
+    [Fact]
+    public async Task TransferToQueueAsync_ShouldSetQueuePriorityZero_WhenNormalTransfer()
+    {
+        // Regression: a normal transfer is FIFO (back of the queue) and resets/keeps priority 0,
+        // so a previously-failovered conversation transferred normally returns to FIFO.
+        var conversation = BuildConversation(ConversationState.Active, ConversationOwner.ForAgent(_agentId));
+        conversation.QueuePriority = -1; // pretend it was previously failovered to the front
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var targetQueue = EntityId.From("queue-002");
+        var sut = CreateSut();
+        var result = await sut.TransferToQueueAsync(_conversationId, _tenantId, targetQueue, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        conversation.QueuePriority.Should().Be(0);
+    }
+
+    // ─── RequeueToFront (W5 work failover) ─────────────────────────────────────
+
+    [Fact]
+    public async Task RequeueToFrontAsync_ShouldSetQueuePriorityMinusOne_AndQueueAndReleaseCapacity()
+    {
+        var agentOwner = ConversationOwner.ForAgent(_agentId);
+        var conversation = BuildConversation(ConversationState.Active, agentOwner);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var targetQueue = EntityId.From("queue-002");
+        var sut = CreateSut();
+        var result = await sut.RequeueToFrontAsync(_conversationId, _tenantId, targetQueue, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.NewState.Should().Be(ConversationState.Queued);
+        result.NewOwner!.Kind.Should().Be(ConversationOwnerKind.Queue);
+        result.NewOwner.OwnerId.Should().Be(targetQueue);
+        conversation.QueuePriority.Should().Be(-1);
+        await _capacity.Received(1).ReleaseAsync(_tenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RequeueToFrontAsync_ShouldTakeActiveToQueued_ViaEscalated()
+    {
+        var conversation = BuildConversation(ConversationState.Active, ConversationOwner.ForAgent(_agentId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var targetQueue = EntityId.From("queue-002");
+        var sut = CreateSut();
+        var result = await sut.RequeueToFrontAsync(_conversationId, _tenantId, targetQueue, CancellationToken.None);
+
+        // Active → Escalated → Queued (the state machine forbids Active → Queued directly);
+        // a successful Queued result confirms the path was traversed without throwing.
+        result.Success.Should().BeTrue();
+        result.NewState.Should().Be(ConversationState.Queued);
+        conversation.State.Should().Be(ConversationState.Queued);
+    }
+
+    [Theory]
+    [InlineData(ConversationState.OnHold)]
+    [InlineData(ConversationState.Consulting)]
+    public async Task RequeueToFrontAsync_ShouldReachQueued_WhenSourceIsOnHoldOrConsulting(
+        ConversationState initial)
+    {
+        // FailoverWorkStates includes OnHold/Consulting, which have no DIRECT →Queued edge.
+        // The core must bridge them via Active → Escalated → Queued so on-hold/consulting
+        // orphans of an offline agent are actually re-queued (+ capacity released), not
+        // silently failed (which would strand the customer and leak the agent's slot).
+        var conversation = BuildConversation(initial, ConversationOwner.ForAgent(_agentId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var targetQueue = EntityId.From("queue-002");
+        var sut = CreateSut();
+        var result = await sut.RequeueToFrontAsync(_conversationId, _tenantId, targetQueue, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.NewState.Should().Be(ConversationState.Queued);
+        conversation.State.Should().Be(ConversationState.Queued);
+        conversation.QueuePriority.Should().Be(-1);
+        await _capacity.Received(1).ReleaseAsync(_tenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>());
+    }
+
     // ─── TransferToAgent ──────────────────────────────────────────────────────
 
     [Fact]

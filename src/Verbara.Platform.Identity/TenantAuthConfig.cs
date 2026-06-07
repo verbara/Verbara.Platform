@@ -51,6 +51,13 @@ public sealed class TenantAuthConfig
     public int PendingPauseTimeoutMinutes { get; set; } = 30;
 
     /// <summary>
+    /// W5 — seconds the owner agent must remain Offline before the work-failover sweep
+    /// re-queues their orphaned digital conversations. Default 30. <c>&lt;= 0</c> disables
+    /// failover re-queueing for the tenant.
+    /// </summary>
+    public int WorkFailoverGraceSeconds { get; set; } = 30;
+
+    /// <summary>
     /// v1.3.0 IP Allowlist — when true, requests from IPs not matching any
     /// row in tenant_ip_allowlist are rejected with 403. When false, the
     /// allowlist is dormant regardless of the entries that may exist.

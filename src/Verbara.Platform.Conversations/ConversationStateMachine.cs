@@ -64,6 +64,14 @@ public static class ConversationStateMachine
 
     public static bool IsActiveWork(ConversationState state) => ActiveWorkStates.Contains(state);
 
+    /// <summary>W5 — conversation states a work-failover re-queue applies to: a LIVE
+    /// customer is engaged/waiting. Excludes WrapUp (no live customer; closed by the
+    /// wrap-up timeout) and parked/pre-accept. Narrower than ActiveWorkStates.</summary>
+    public static readonly IReadOnlyList<ConversationState> FailoverWorkStates =
+        [ConversationState.Active, ConversationState.OnHold, ConversationState.Consulting];
+
+    public static bool IsFailoverWork(ConversationState state) => FailoverWorkStates.Contains(state);
+
     public static bool CanTransition(ConversationState from, ConversationState to) =>
         s_validTransitions.Contains((from, to));
 

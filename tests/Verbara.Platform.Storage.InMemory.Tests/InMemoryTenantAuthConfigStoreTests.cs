@@ -56,4 +56,30 @@ public sealed class InMemoryTenantAuthConfigStoreTests
         config.Should().NotBeNull();
         config!.PendingPauseTimeoutMinutes.Should().Be(45);
     }
+
+    [Fact]
+    public async Task GetAsync_ShouldReturnDefault30_WhenWorkFailoverGraceNotSet()
+    {
+        var store = new InMemoryTenantAuthConfigStore();
+        await store.SaveAsync(new TenantAuthConfig { TenantId = "tenant-1" }, CancellationToken.None);
+
+        var config = await store.GetAsync("tenant-1", CancellationToken.None);
+
+        config.Should().NotBeNull();
+        config!.WorkFailoverGraceSeconds.Should().Be(30);
+    }
+
+    [Fact]
+    public async Task SaveThenGet_ShouldRoundTripWorkFailoverGraceSeconds_WhenCustomValue()
+    {
+        var store = new InMemoryTenantAuthConfigStore();
+        await store.SaveAsync(
+            new TenantAuthConfig { TenantId = "tenant-1", WorkFailoverGraceSeconds = 90 },
+            CancellationToken.None);
+
+        var config = await store.GetAsync("tenant-1", CancellationToken.None);
+
+        config.Should().NotBeNull();
+        config!.WorkFailoverGraceSeconds.Should().Be(90);
+    }
 }

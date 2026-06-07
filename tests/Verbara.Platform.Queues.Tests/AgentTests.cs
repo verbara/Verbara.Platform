@@ -88,6 +88,76 @@ public class AgentTests
     }
 
     [Fact]
+    public void ForceOffline_ShouldSetOfflineSince_WhenEnteringOffline()
+    {
+        var now = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var agent = NewAgent(AgentState.Busy);
+
+        agent.ForceOffline(now);
+
+        agent.State.Should().Be(AgentState.Offline);
+        agent.OfflineSince.Should().Be(now);
+    }
+
+    [Fact]
+    public void ForceOffline_ShouldNotResetOfflineSince_WhenCalledAgain()
+    {
+        var t1 = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var t2 = new DateTimeOffset(2026, 6, 6, 10, 5, 0, TimeSpan.Zero);
+        var agent = NewAgent(AgentState.Busy);
+
+        agent.ForceOffline(t1);
+        agent.ForceOffline(t2);
+
+        agent.OfflineSince.Should().Be(t1);
+    }
+
+    [Fact]
+    public void TransitionTo_ShouldSetOfflineSince_WhenTargetOffline()
+    {
+        var now = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var agent = NewAgent(AgentState.Available);
+
+        agent.TransitionTo(AgentState.Offline, now);
+
+        agent.State.Should().Be(AgentState.Offline);
+        agent.OfflineSince.Should().Be(now);
+    }
+
+    [Fact]
+    public void TransitionTo_ShouldClearOfflineSince_WhenLeavingOffline()
+    {
+        var now = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var agent = NewAgent(AgentState.Offline);
+        agent.OfflineSince = now;
+
+        agent.TransitionTo(AgentState.Available);
+
+        agent.State.Should().Be(AgentState.Available);
+        agent.OfflineSince.Should().BeNull();
+    }
+
+    [Fact]
+    public void OfflineSince_ShouldStartFresh_WhenSecondOfflineEpisodeAfterReturn()
+    {
+        // The exact stale-stamp scenario: Offline(t1) → Available (cleared) → Offline(t2)
+        // must yield OfflineSince == t2, not a stale t1 (which would make the grace appear
+        // already elapsed and re-queue the second episode's work immediately).
+        var t1 = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var t2 = t1.AddMinutes(5);
+        var agent = NewAgent(AgentState.Available);
+
+        agent.ForceOffline(t1);
+        agent.OfflineSince.Should().Be(t1);
+
+        agent.TransitionTo(AgentState.Available);
+        agent.OfflineSince.Should().BeNull();
+
+        agent.ForceOffline(t2);
+        agent.OfflineSince.Should().Be(t2);
+    }
+
+    [Fact]
     public void ApplyPendingState_ShouldSetStateAndClearPending_WhenPendingSet()
     {
         var agent = NewAgent(AgentState.Available);

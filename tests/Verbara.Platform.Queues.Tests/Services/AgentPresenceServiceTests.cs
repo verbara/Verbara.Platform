@@ -90,6 +90,33 @@ public class AgentPresenceServiceTests
     }
 
     [Fact]
+    public async Task UpdateState_ShouldStampOfflineSince_WhenTransitioningToOffline()
+    {
+        // W5 — this write path bypasses Agent.TransitionTo, so it must maintain the
+        // OfflineSince grace clock itself; otherwise the work-failover sweep never reaps.
+        var agent = MakeAgent(AgentState.Available);
+        var (sut, _, _, _) = CreateSut(agent);
+
+        await sut.UpdateStateAsync(Tenant, AgentId, AgentState.Offline, CancellationToken.None);
+
+        agent.State.Should().Be(AgentState.Offline);
+        agent.OfflineSince.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task UpdateState_ShouldClearOfflineSince_WhenLeavingOffline()
+    {
+        var agent = MakeAgent(AgentState.Offline);
+        agent.OfflineSince = new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero);
+        var (sut, _, _, _) = CreateSut(agent);
+
+        await sut.UpdateStateAsync(Tenant, AgentId, AgentState.Available, CancellationToken.None);
+
+        agent.State.Should().Be(AgentState.Available);
+        agent.OfflineSince.Should().BeNull();
+    }
+
+    [Fact]
     public async Task GetState_ShouldReturnCurrentState()
     {
         var (sut, _, _, _) = CreateSut(MakeAgent(AgentState.Break));

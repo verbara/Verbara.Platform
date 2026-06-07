@@ -19,6 +19,14 @@ public sealed class Agent : ITenantScoped, IAuditable
     public string? PendingReason { get; set; }
     public DateTimeOffset? PendingSince { get; set; }
 
+    /// <summary>
+    /// W5 — when the agent ENTERED the Offline state (UTC), or null when not Offline.
+    /// The work-failover sweep uses (now - OfflineSince) to measure the grace before
+    /// re-queueing the agent's orphaned conversations. Set on entering Offline (and
+    /// NOT reset by repeated offline writes, e.g. idle beacons), cleared on leaving.
+    /// </summary>
+    public DateTimeOffset? OfflineSince { get; set; }
+
     public bool HasPendingPause => PendingState is not null;
 
     public ChannelCapacity Capacity { get; set; } = new();
@@ -58,10 +66,16 @@ public sealed class Agent : ITenantScoped, IAuditable
         return Capacity.GetMax(channel) > 0;
     }
 
-    public void TransitionTo(AgentState newState)
+    public void TransitionTo(AgentState newState, DateTimeOffset? now = null)
     {
         AgentStateMachine.EnsureTransition(State, newState);
         State = newState;
+        // W5 — entering Offline stamps the grace clock (preserving an existing
+        // stamp so repeated offline writes don't reset it); any non-Offline
+        // target clears it.
+        OfflineSince = newState == AgentState.Offline
+            ? (OfflineSince ?? now ?? DateTimeOffset.UtcNow)
+            : null;
     }
 
     // Bounded teardown helper: forces Offline from ANY state, bypassing
@@ -71,7 +85,13 @@ public sealed class Agent : ITenantScoped, IAuditable
     // UpdateAgentState — that must keep going through TransitionTo so normal
     // transition validation still applies. The single Offline target is the
     // only transition this loosens.
-    public void ForceOffline() => State = AgentState.Offline;
+    public void ForceOffline(DateTimeOffset? now = null)
+    {
+        State = AgentState.Offline;
+        // W5 — stamp the grace clock once; the ??= means a repeated ForceOffline
+        // (e.g. an idle beacon followed by the liveness reaper) does NOT reset it.
+        OfflineSince ??= now ?? DateTimeOffset.UtcNow;
+    }
 
     /// <summary>
     /// Applies the deferred PendingState as the new State, bypassing EnsureTransition
@@ -83,6 +103,9 @@ public sealed class Agent : ITenantScoped, IAuditable
     public void ApplyPendingState()
     {
         if (PendingState is null) return;
+        // W5 — OfflineSince is irrelevant here: a pending pause only ever targets
+        // an aux state (never Offline) from a working state, so the grace clock
+        // stays null throughout and needs no touch.
         State = PendingState.Value;
         PendingState = null;
         PendingReason = null;

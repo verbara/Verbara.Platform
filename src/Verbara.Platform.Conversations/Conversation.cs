@@ -29,6 +29,12 @@ public sealed class Conversation : ITenantScoped, IAuditable
     /// </summary>
     public string? VoiceLinkedId { get; set; }
 
+    /// <summary>
+    /// W5 — queue ordering priority; lower sorts earlier. 0 = normal FIFO (by CreatedAt);
+    /// failover re-queue sets -1 to jump to the front.
+    /// </summary>
+    public int QueuePriority { get; set; }
+
     private readonly Dictionary<string, string> _metadata = new();
     public IReadOnlyDictionary<string, string> Metadata => _metadata;
 
@@ -49,4 +55,7 @@ public sealed class Conversation : ITenantScoped, IAuditable
 
     public void SetMetadata(string key, string value) =>
         _metadata[key] = value;
+
+    /// <summary>Removes a metadata key if present. Used to clear W5 failover markers on reassign.</summary>
+    public void RemoveMetadata(string key) => _metadata.Remove(key);
 }

@@ -76,7 +76,8 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             "session_idle_timeout_minutes, session_absolute_timeout_hours, oidc_enabled, oidc_authority, " +
             "oidc_client_id, oidc_client_secret, oidc_auto_create_users, oidc_default_role, " +
             "impersonation_max_concurrent_sessions, impersonation_auto_timeout_minutes, " +
-            "agent_liveness_timeout_seconds, pending_pause_timeout_minutes, ip_allowlist_enabled, updated_at " +
+            "agent_liveness_timeout_seconds, pending_pause_timeout_minutes, work_failover_grace_seconds, " +
+            "ip_allowlist_enabled, updated_at " +
             "FROM tenant_auth_config WHERE tenant_id = @TenantId",
             p => p.Add(new NpgsqlParameter("TenantId", tenantId)),
             TenantAuthConfigRow.Map, ct);
@@ -91,13 +92,15 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             "lockout_duration_minutes, session_idle_timeout_minutes, session_absolute_timeout_hours, oidc_enabled, " +
             "oidc_authority, oidc_client_id, oidc_client_secret, oidc_auto_create_users, oidc_default_role, " +
             "impersonation_max_concurrent_sessions, impersonation_auto_timeout_minutes, " +
-            "agent_liveness_timeout_seconds, pending_pause_timeout_minutes, ip_allowlist_enabled, updated_at) " +
+            "agent_liveness_timeout_seconds, pending_pause_timeout_minutes, work_failover_grace_seconds, " +
+            "ip_allowlist_enabled, updated_at) " +
             "VALUES (@TenantId, @MfaPolicy, @MfaRequiredRoles, @PasswordMinLength, @PasswordRequireUppercase, " +
             "@PasswordRequireNumber, @PasswordRequireSpecial, @LockoutThreshold, @LockoutDurationMinutes, " +
             "@SessionIdleTimeoutMinutes, @SessionAbsoluteTimeoutHours, @OidcEnabled, @OidcAuthority, " +
             "@OidcClientId, @OidcClientSecret, @OidcAutoCreateUsers, @OidcDefaultRole, " +
             "@ImpersonationMaxConcurrentSessions, @ImpersonationAutoTimeoutMinutes, " +
-            "@AgentLivenessTimeoutSeconds, @PendingPauseTimeoutMinutes, @IpAllowlistEnabled, @UpdatedAt) " +
+            "@AgentLivenessTimeoutSeconds, @PendingPauseTimeoutMinutes, @WorkFailoverGraceSeconds, " +
+            "@IpAllowlistEnabled, @UpdatedAt) " +
             "ON CONFLICT (tenant_id) DO UPDATE SET " +
             "  mfa_policy = EXCLUDED.mfa_policy, mfa_required_roles = EXCLUDED.mfa_required_roles, " +
             "  password_min_length = EXCLUDED.password_min_length, password_require_uppercase = EXCLUDED.password_require_uppercase, " +
@@ -111,6 +114,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             "  impersonation_auto_timeout_minutes = EXCLUDED.impersonation_auto_timeout_minutes, " +
             "  agent_liveness_timeout_seconds = EXCLUDED.agent_liveness_timeout_seconds, " +
             "  pending_pause_timeout_minutes = EXCLUDED.pending_pause_timeout_minutes, " +
+            "  work_failover_grace_seconds = EXCLUDED.work_failover_grace_seconds, " +
             "  ip_allowlist_enabled = EXCLUDED.ip_allowlist_enabled, " +
             "  updated_at = EXCLUDED.updated_at",
             p =>
@@ -137,6 +141,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
                 p.Add(new NpgsqlParameter("ImpersonationAutoTimeoutMinutes", config.ImpersonationAutoTimeoutMinutes));
                 p.Add(new NpgsqlParameter("AgentLivenessTimeoutSeconds", config.AgentLivenessTimeoutSeconds));
                 p.Add(new NpgsqlParameter("PendingPauseTimeoutMinutes", config.PendingPauseTimeoutMinutes));
+                p.Add(new NpgsqlParameter("WorkFailoverGraceSeconds", config.WorkFailoverGraceSeconds));
                 p.Add(new NpgsqlParameter("IpAllowlistEnabled", config.IpAllowlistEnabled));
                 p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)config.UpdatedAt ?? DBNull.Value });
             },
@@ -166,6 +171,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
         public int impersonation_auto_timeout_minutes { get; init; } = 240;
         public int agent_liveness_timeout_seconds { get; init; } = 60;
         public int pending_pause_timeout_minutes { get; init; } = 30;
+        public int work_failover_grace_seconds { get; init; } = 30;
         public bool ip_allowlist_enabled { get; init; }
         public DateTime? updated_at { get; init; }
 
@@ -197,6 +203,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
                 impersonation_auto_timeout_minutes = r.GetInt32("impersonation_auto_timeout_minutes"),
                 agent_liveness_timeout_seconds = r.GetInt32("agent_liveness_timeout_seconds"),
                 pending_pause_timeout_minutes = r.GetInt32("pending_pause_timeout_minutes"),
+                work_failover_grace_seconds = r.GetInt32("work_failover_grace_seconds"),
                 ip_allowlist_enabled = r.GetBoolean("ip_allowlist_enabled"),
                 updated_at = r.GetDateTimeOrNull("updated_at"),
             };
@@ -229,6 +236,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             ImpersonationAutoTimeoutMinutes = impersonation_auto_timeout_minutes,
             AgentLivenessTimeoutSeconds = agent_liveness_timeout_seconds,
             PendingPauseTimeoutMinutes = pending_pause_timeout_minutes,
+            WorkFailoverGraceSeconds = work_failover_grace_seconds,
             IpAllowlistEnabled = ip_allowlist_enabled,
             UpdatedAt = updated_at,
         };

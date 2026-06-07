@@ -133,6 +133,10 @@ public sealed class QueueDistributionWorkerTests : IDisposable
             .Returns(new[] { MakeActiveTenant(TestTenantId) });
         _conversationStore.ListQueuedAsync(Arg.Any<TenantId>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new[] { conversation });
+        // The worker re-loads the freshly-offered conversation before stamping metadata
+        // (so it stamps the Offered instance, not the stale Queued snapshot — see W5/O1).
+        _conversationStore.GetByIdAsync(Arg.Any<TenantId>(), conversation.ConversationId, Arg.Any<CancellationToken>())
+            .Returns(conversation);
         _agentSelector.SelectAgentAsync(
                 Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(),
                 Arg.Any<EntityId?>(), Arg.Any<CancellationToken>())
@@ -147,6 +151,9 @@ public sealed class QueueDistributionWorkerTests : IDisposable
             .WhoseValue.Should().Be(now.ToString("O"));
         conversation.Metadata.Should().ContainKey("_offeredTo")
             .WhoseValue.Should().Be("a1");
+        // W5 — the originating queue is stamped so work-failover can re-queue back to it.
+        conversation.Metadata.Should().ContainKey("originQueueId")
+            .WhoseValue.Should().Be("q1");
 
         await _conversationStore.Received(1).SaveAsync(conversation, Arg.Any<CancellationToken>());
     }

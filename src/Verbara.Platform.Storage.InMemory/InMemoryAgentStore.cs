@@ -82,4 +82,16 @@ internal sealed class InMemoryAgentStore : IAgentStore
         }
         await Task.CompletedTask;
     }
+
+    public async IAsyncEnumerable<Agent> StreamOfflineAgentsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var agent in _items.Values)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (agent.State == AgentState.Offline)
+                yield return agent;
+        }
+        await Task.CompletedTask;
+    }
 }

@@ -126,9 +126,21 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
 
                 if (result.Success)
                 {
-                    conversation.SetMetadata("_offeredAt", _clock.UtcNow.ToString("O"));
-                    conversation.SetMetadata("_offeredTo", agentId.Value.Value);
-                    await _conversationStore.SaveAsync(conversation, ct);
+                    // Re-load the freshly-OFFERED conversation and stamp metadata on THAT instance.
+                    // OfferToAgentAsync did its own GetById→Offered→Save; saving our stale Queued
+                    // snapshot here would revert the offer in stores that return distinct instances
+                    // (e.g. Postgres). W5's originQueueId must persist on the real row.
+                    var offered = await _conversationStore.GetByIdAsync(tid, conversation.ConversationId, ct);
+                    if (offered is not null)
+                    {
+                        offered.SetMetadata("_offeredAt", _clock.UtcNow.ToString("O"));
+                        offered.SetMetadata("_offeredTo", agentId.Value.Value);
+                        // Remember the originating queue so work-failover (W5) can re-queue an orphaned
+                        // conversation back to it. The owner is still the Queue at offer time.
+                        if (offered.Owner is { Kind: ConversationOwnerKind.Queue, OwnerId: { } qid })
+                            offered.SetMetadata("originQueueId", qid.Value);
+                        await _conversationStore.SaveAsync(offered, ct);
+                    }
 
                     _eventBus.Publish(new ConversationOfferedEvent(
                         tenant.TenantId,

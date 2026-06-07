@@ -118,7 +118,8 @@ internal sealed class InMemoryConversationStore : IConversationStore
     {
         IReadOnlyList<Conversation> result = _items.Values
             .Where(c => c.TenantId == tenantId && c.State == ConversationState.Queued)
-            .OrderBy(c => c.CreatedAt)
+            .OrderBy(c => c.QueuePriority)
+            .ThenBy(c => c.CreatedAt)
             .Take(limit)
             .ToList();
         return Task.FromResult(result);
@@ -128,7 +129,8 @@ internal sealed class InMemoryConversationStore : IConversationStore
     {
         IReadOnlyList<Conversation> result = _items.Values
             .Where(c => c.TenantId == tenantId && c.State == state)
-            .OrderBy(c => c.CreatedAt)
+            .OrderBy(c => c.QueuePriority)
+            .ThenBy(c => c.CreatedAt)
             .Take(limit)
             .ToList();
         return Task.FromResult(result);
@@ -142,5 +144,17 @@ internal sealed class InMemoryConversationStore : IConversationStore
             owner.OwnerId == agentId &&
             ConversationStateMachine.IsActiveWork(c.State));
         return Task.FromResult(count);
+    }
+
+    public Task<IReadOnlyList<Conversation>> ListFailoverWorkByOwnerAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        IReadOnlyList<Conversation> result = _items.Values
+            .Where(c =>
+                c.TenantId == tenantId &&
+                c.Owner is { Kind: ConversationOwnerKind.Agent } owner &&
+                owner.OwnerId == agentId &&
+                ConversationStateMachine.IsFailoverWork(c.State))
+            .ToList();
+        return Task.FromResult(result);
     }
 }

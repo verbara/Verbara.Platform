@@ -104,6 +104,54 @@ public sealed class InMemoryAgentStoreTests
     }
 
     [Fact]
+    public async Task StreamOfflineAgentsAsync_ShouldYieldOnlyOffline_WhenMixedStates()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        var offlineA = MakeAgent(tenant, AgentState.Offline);
+        var offlineB = MakeAgent(tenant, AgentState.Offline);
+        var available = MakeAgent(tenant, AgentState.Available);
+        var busy = MakeAgent(tenant, AgentState.Busy);
+        var onBreak = MakeAgent(tenant, AgentState.Break);
+        await store.SaveAsync(offlineA, CancellationToken.None);
+        await store.SaveAsync(offlineB, CancellationToken.None);
+        await store.SaveAsync(available, CancellationToken.None);
+        await store.SaveAsync(busy, CancellationToken.None);
+        await store.SaveAsync(onBreak, CancellationToken.None);
+
+        var offline = await CollectAsync(store.StreamOfflineAgentsAsync(CancellationToken.None));
+
+        offline.Select(a => a.AgentId).Should().BeEquivalentTo(new[] { offlineA.AgentId, offlineB.AgentId });
+    }
+
+    [Fact]
+    public async Task StreamOfflineAgentsAsync_ShouldYieldAcrossTenants_WhenMultipleTenants()
+    {
+        var store = new InMemoryAgentStore();
+        var agentA = MakeAgent(new TenantId("tenant-a"), AgentState.Offline);
+        var agentB = MakeAgent(new TenantId("tenant-b"), AgentState.Offline);
+        await store.SaveAsync(agentA, CancellationToken.None);
+        await store.SaveAsync(agentB, CancellationToken.None);
+
+        var offline = await CollectAsync(store.StreamOfflineAgentsAsync(CancellationToken.None));
+
+        offline.Select(a => a.AgentId).Should().BeEquivalentTo(new[] { agentA.AgentId, agentB.AgentId });
+    }
+
+    [Fact]
+    public async Task StreamOfflineAgentsAsync_ShouldYieldNothing_WhenNoneOffline()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        await store.SaveAsync(MakeAgent(tenant, AgentState.Available), CancellationToken.None);
+        await store.SaveAsync(MakeAgent(tenant, AgentState.Busy), CancellationToken.None);
+
+        var offline = await CollectAsync(store.StreamOfflineAgentsAsync(CancellationToken.None));
+
+        offline.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SaveAsync_ShouldRoundTripPendingFields_WhenPendingSet()
     {
         var store = new InMemoryAgentStore();
@@ -122,5 +170,21 @@ public sealed class InMemoryAgentStoreTests
         loaded.PendingReason.Should().Be("lunch");
         loaded.PendingSince.Should().Be(since);
         loaded.HasPendingPause.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldRoundTripOfflineSince_WhenSet()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        var offlineSince = DateTimeOffset.UtcNow;
+        var agent = MakeAgent(tenant, AgentState.Offline);
+        agent.OfflineSince = offlineSince;
+        await store.SaveAsync(agent, CancellationToken.None);
+
+        var loaded = await store.GetByIdAsync(tenant, agent.AgentId, CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.OfflineSince.Should().Be(offlineSince);
     }
 }
