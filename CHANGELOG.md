@@ -13,6 +13,27 @@ _No unreleased changes._
 
 ---
 
+## [2.9.0] — 2026-06-07 — Session/Auth overhaul: agent presence, liveness & work continuity (ADR-0009 W1–W6)
+
+The complete [ADR-0009](docs/decisions/0009-agent-presence-session-work-continuity.md) north-star, shipped as six sequenced tracks (W1–W6, 2026-06-05→06-07) over PRs #41–#46. Native AOT preserved; no new cross-pod event escaped its `[JsonSerializable]` context. Migrations **029–033**. Ships with **Web v3.5.0-web**.
+
+### Added
+- **W3 — server-side agent liveness / anti-zombie.** Web heartbeat `POST /agents/me/heartbeat` (~20s) → Redis `presence:agent:{tenant}:{agent}` with per-tenant TTL `AgentLivenessTimeoutSeconds`; leader-gated `AgentLivenessReaper` reconciles "Postgres-routable AND Redis-dead → ForceOffline → AMI QueuePause". `pagehide` departure beacon `POST /agents/me/offline`; admin `POST /admin/agents/{id}/force-offline`. Migration 029.
+- **W4 — deferred pause ("pause-when-free").** `Agent.PendingState` blocks new work instantly but the visible state flips only when active work drains (leader-gated `PendingPauseDrainWorker` + per-tenant `PendingPauseTimeoutMinutes` force + audit). Migration 030.
+- **W5 — digital work failover.** Leader-gated `WorkFailoverWorker` re-queues orphaned digital conversations to the FRONT of the origin queue when the owner goes Offline past grace (`Agent.OfflineSince` + cancel-on-return + 3-attempt anti-loop). Supervisor stuck-work view + reassign.
+- **W5b — voice caller-rescue.** Abnormal agent-leg-hangup detection (per-leg `HangupCause` on the existing `CallSession` + W3 liveness in a grace window) → leader-gated `CallbackRescueWorker` priority-callbacks the dropped customer into the front of the origin queue (`CallbackOriginator`, anti-loop, `retry-callback`). Per-tenant `VoiceCallbackGraceSeconds`. Migration 032.
+- **W6 — agent channel-capacity configurability.** Per-tenant DEFAULT capacity + sparse per-agent OVERRIDE (`ChannelCapacityOverride`, per-field nullable, resolved at read via `IAgentCapacityResolver`/`ICapacityDefaultsProvider` reusing the auth hot-path cache). `MaxTotal` now ENFORCED over the async aggregate (chat-pool + email + sms), voice an exclusive lane (`MaxVoice` pinned 1). Capacity override on agent create/update + tenant defaults in operational settings; capacity-change audit. Migration 033 (tenant-default columns + legacy `agents.capacity` normalization).
+
+### Changed
+- **W1 — refresh-token / session hardening.** Refresh cookie re-scoped `/api/v1/auth` (centralized `RefreshTokenCookie`) — fixes the forced-logout-at-15-min root cause; refresh lifetime 24h absolute; per-tenant `TokenResponse.sessionIdleTimeoutMinutes`; rotation grace window (fail-closed); `Busy→Offline` + `Agent.ForceOffline()`.
+- **W6 — chat-family capacity pooling.** `ChannelCapacity.GetMax` + the in-memory load ledger now pool the whole chat family (WebChat/WhatsApp/Messenger/Instagram/Telegram/Twitter/Video/Rcs) into one `MaxChat` bucket across live/persist/reconcile.
+
+### Fixed
+- **W6 — chat-pool counter bug.** Previously each chat sub-channel counted separately against `MaxChat`, so an agent could hold ~24 chats while "respecting" MaxChat=3. Now correctly pooled.
+- **W6 — `MaxTotal` was a dead field.** Defined but never enforced (0 usages); now gates the async aggregate.
+
+---
+
 ## [2.8.1] — 2026-06-01 — Hotfix: reference-smb realtime leader-election connection
 
 Patch over v2.8.0. No code change to the API — same binaries.
