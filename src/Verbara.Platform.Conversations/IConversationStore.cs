@@ -64,4 +64,11 @@ public interface IConversationStore
     /// enqueues a callback or escalates.
     /// </summary>
     Task<IReadOnlyList<Conversation>> ListPendingCallbackEvalAsync(CancellationToken ct);
+
+    /// <summary>
+    /// W5b — tenant-scoped list of voice conversations whose rescue callbacks exhausted the
+    /// retry cap (in WrapUp, metadata <c>callbackStuck == "true"</c>). Surfaced in the supervisor
+    /// stuck-work view so a human can re-arm the rescue or close the call.
+    /// </summary>
+    Task<IReadOnlyList<Conversation>> ListCallbackStuckAsync(TenantId tenantId, CancellationToken ct);
 }

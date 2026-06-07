@@ -528,4 +528,68 @@ public sealed class InMemoryConversationStoreTests
         result.Select(c => c.ConversationId).Should().BeEquivalentTo(
             new[] { t1.ConversationId, t2.ConversationId });
     }
+
+    [Fact]
+    public async Task ListCallbackStuckAsync_ShouldReturnConversation_WhenWrapUpAndMarkerTrue()
+    {
+        var store = new InMemoryConversationStore();
+        var stuck = MakeCallbackStuck(Tenant1, ConversationState.WrapUp);
+        await store.SaveAsync(stuck, CancellationToken.None);
+
+        var result = await store.ListCallbackStuckAsync(Tenant1, CancellationToken.None);
+
+        result.Select(c => c.ConversationId).Should().BeEquivalentTo(new[] { stuck.ConversationId });
+    }
+
+    [Fact]
+    public async Task ListCallbackStuckAsync_ShouldExclude_WhenWrapUpButNoMarker()
+    {
+        var store = new InMemoryConversationStore();
+        await store.SaveAsync(MakeCallbackStuck(Tenant1, ConversationState.WrapUp, marker: null), CancellationToken.None);
+
+        var result = await store.ListCallbackStuckAsync(Tenant1, CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListCallbackStuckAsync_ShouldExclude_WhenMarkerTrueButNotWrapUp()
+    {
+        var store = new InMemoryConversationStore();
+        await store.SaveAsync(MakeCallbackStuck(Tenant1, ConversationState.Active), CancellationToken.None);
+
+        var result = await store.ListCallbackStuckAsync(Tenant1, CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListCallbackStuckAsync_ShouldOnlyReturnOwnTenant()
+    {
+        var store = new InMemoryConversationStore();
+        var own = MakeCallbackStuck(Tenant1, ConversationState.WrapUp);
+        await store.SaveAsync(own, CancellationToken.None);
+        // Same marker + state, different tenant — excluded (this query IS tenant-scoped).
+        await store.SaveAsync(MakeCallbackStuck(Tenant2, ConversationState.WrapUp), CancellationToken.None);
+
+        var result = await store.ListCallbackStuckAsync(Tenant1, CancellationToken.None);
+
+        result.Select(c => c.ConversationId).Should().BeEquivalentTo(new[] { own.ConversationId });
+    }
+
+    private static Conversation MakeCallbackStuck(TenantId tenantId, ConversationState state, string? marker = "true")
+    {
+        var conv = new Conversation
+        {
+            ConversationId = EntityId.New(),
+            TenantId = tenantId,
+            ContactId = EntityId.New(),
+            Channel = ChannelType.Voice,
+            State = state,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        if (marker is not null)
+            conv.SetMetadata("callbackStuck", marker);
+        return conv;
+    }
 }
