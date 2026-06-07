@@ -118,7 +118,8 @@ internal sealed class InMemoryConversationStore : IConversationStore
     {
         IReadOnlyList<Conversation> result = _items.Values
             .Where(c => c.TenantId == tenantId && c.State == ConversationState.Queued)
-            .OrderBy(c => c.CreatedAt)
+            .OrderBy(c => c.QueuePriority)
+            .ThenBy(c => c.CreatedAt)
             .Take(limit)
             .ToList();
         return Task.FromResult(result);
@@ -128,7 +129,8 @@ internal sealed class InMemoryConversationStore : IConversationStore
     {
         IReadOnlyList<Conversation> result = _items.Values
             .Where(c => c.TenantId == tenantId && c.State == state)
-            .OrderBy(c => c.CreatedAt)
+            .OrderBy(c => c.QueuePriority)
+            .ThenBy(c => c.CreatedAt)
             .Take(limit)
             .ToList();
         return Task.FromResult(result);

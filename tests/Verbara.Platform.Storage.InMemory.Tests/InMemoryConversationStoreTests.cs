@@ -406,6 +406,55 @@ public sealed class InMemoryConversationStoreTests
     }
 
     [Fact]
+    public async Task ListQueuedAsync_ShouldOrderByQueuePriorityThenCreatedAt_WhenMixed()
+    {
+        // A failover re-queue (priority -1) created LATER must still sort ahead of a normal
+        // (priority 0) conversation created earlier — the customer was already engaged.
+        var store = new InMemoryConversationStore();
+        var earlierNormal = new Conversation
+        {
+            ConversationId = EntityId.New(),
+            TenantId = Tenant1,
+            ContactId = EntityId.New(),
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Queued,
+            CreatedAt = new DateTimeOffset(2026, 6, 1, 10, 0, 0, TimeSpan.Zero),
+            QueuePriority = 0,
+        };
+        var laterFront = new Conversation
+        {
+            ConversationId = EntityId.New(),
+            TenantId = Tenant1,
+            ContactId = EntityId.New(),
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Queued,
+            CreatedAt = new DateTimeOffset(2026, 6, 1, 11, 0, 0, TimeSpan.Zero),
+            QueuePriority = -1,
+        };
+
+        await store.SaveAsync(earlierNormal, CancellationToken.None);
+        await store.SaveAsync(laterFront, CancellationToken.None);
+
+        var result = await store.ListQueuedAsync(Tenant1, 10, CancellationToken.None);
+
+        result.Select(c => c.ConversationId).Should().ContainInOrder(
+            laterFront.ConversationId, earlierNormal.ConversationId);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldRoundTripQueuePriority()
+    {
+        var store = new InMemoryConversationStore();
+        var conv = MakeConversation(Tenant1, ConversationState.Queued);
+        conv.QueuePriority = -1;
+
+        await store.SaveAsync(conv, CancellationToken.None);
+
+        var retrieved = await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None);
+        retrieved!.QueuePriority.Should().Be(-1);
+    }
+
+    [Fact]
     public async Task ListFailoverWorkByOwnerAsync_ShouldOnlyReturnOwnAgentAndTenant()
     {
         var store = new InMemoryConversationStore();
