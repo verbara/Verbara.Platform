@@ -448,7 +448,9 @@ internal static class SupervisorEndpoints
             // Swallow — the re-arm already succeeded; audit is advisory.
         }
 
-        return Results.Ok();
+        // 204 (not Ok()) so the empty body doesn't trip customFetch's response.json() — matches
+        // the proven-safe ReassignConversation sibling the Web client already consumes.
+        return Results.NoContent();
     }
 
     private static TenantId GetTenantId(HttpContext context)

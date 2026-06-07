@@ -176,7 +176,7 @@ public sealed class SupervisorStuckWorkEndpointTests : IClassFixture<Authenticat
             $"/api/v1/supervisor/conversations/{conv.ConversationId.Value}/retry-callback",
             new { });
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         var updated = await GetConversationAsync(conv.ConversationId);
         updated.Metadata.ContainsKey("callbackStuck").Should().BeFalse();
