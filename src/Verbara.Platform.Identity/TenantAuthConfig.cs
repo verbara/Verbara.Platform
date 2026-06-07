@@ -65,6 +65,24 @@ public sealed class TenantAuthConfig
     public int VoiceCallbackGraceSeconds { get; set; } = 25;
 
     /// <summary>
+    /// W6 per-tenant default channel capacity; agents inherit unless overridden
+    /// (sparse per-agent <c>ChannelCapacityOverride</c> wins field-by-field at read time).
+    /// </summary>
+    public int MaxVoiceDefault { get; set; } = 1;
+
+    /// <inheritdoc cref="MaxVoiceDefault"/>
+    public int MaxChatDefault { get; set; } = 3;
+
+    /// <inheritdoc cref="MaxVoiceDefault"/>
+    public int MaxEmailDefault { get; set; } = 5;
+
+    /// <inheritdoc cref="MaxVoiceDefault"/>
+    public int MaxSmsDefault { get; set; } = 3;
+
+    /// <inheritdoc cref="MaxVoiceDefault"/>
+    public int MaxTotalDefault { get; set; } = 5;
+
+    /// <summary>
     /// v1.3.0 IP Allowlist — when true, requests from IPs not matching any
     /// row in tenant_ip_allowlist are rejected with 403. When false, the
     /// allowlist is dormant regardless of the entries that may exist.

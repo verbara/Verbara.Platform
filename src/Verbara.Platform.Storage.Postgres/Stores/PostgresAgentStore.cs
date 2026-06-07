@@ -275,9 +275,9 @@ internal sealed class PostgresAgentStore : IAgentStore
             UserId = EntityId.From(user_id),
             DisplayName = display_name,
             State = (AgentState)state,
-            // W6 — legacy rows store '{}' (or a full ChannelCapacity shape); either
-            // deserializes into ChannelCapacityOverride with the missing fields left
-            // null = "inherit the tenant default".
+            // W6 — migration 033 normalized every legacy row to '{}', which deserializes
+            // to an all-null ChannelCapacityOverride = "inherit the tenant default" on every
+            // field. New rows persist only the fields an admin actually overrides.
             CapacityOverride = JsonSerializer.Deserialize(capacity, PostgresJson.Ctx.ChannelCapacityOverride) ?? new ChannelCapacityOverride(),
             TeamId = team_id != null ? EntityId.From(team_id) : null,
             Skills = JsonSerializer.Deserialize(skills, PostgresJson.Ctx.IReadOnlyListString) ?? (IReadOnlyList<string>)[],
