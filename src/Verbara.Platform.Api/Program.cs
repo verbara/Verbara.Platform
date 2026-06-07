@@ -918,6 +918,7 @@ if (!string.IsNullOrEmpty(clusterConn))
         opts.UsePostgresLockBackend(connectionStringName: "Cluster");
         opts.RegisterLeader(Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep);   // W3 — always
         opts.RegisterLeader(Verbara.Platform.Api.Services.PendingPauseLeaderResources.Sweep);    // W4 — always
+        opts.RegisterLeader(Verbara.Platform.Api.Services.WorkFailoverLeaderResources.Sweep);    // W5 — always
         if (voiceInboundEnabled)
             opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.Inbound);
         if (voiceAmiEnabled)
@@ -1000,6 +1001,12 @@ else
         Verbara.Platform.Api.Services.PendingPauseLeaderResources.Sweep,
         (_, _) => new Verbara.Platform.Api.Services.AlwaysLeader(
             Verbara.Platform.Api.Services.PendingPauseLeaderResources.Sweep));
+    // W5 — single-node always-leader stub for the work-failover sweep resource so the
+    // failover worker still runs on a single replica (same rationale as W3/W4 above).
+    builder.Services.AddKeyedSingleton<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
+        Verbara.Platform.Api.Services.WorkFailoverLeaderResources.Sweep,
+        (_, _) => new Verbara.Platform.Api.Services.AlwaysLeader(
+            Verbara.Platform.Api.Services.WorkFailoverLeaderResources.Sweep));
 }
 
 // W3 — leader-gated agent-liveness reaper. Runs on every pod (both cluster + single-node
@@ -1014,6 +1021,12 @@ builder.Services.AddHostedService<Verbara.Platform.Api.Services.AgentLivenessRea
 // PendingPauseLeaderResources.Sweep); the leader gate inside SweepOnceAsync ensures
 // exactly one pod applies pending pauses cluster-wide. Mirrors the W3 reaper wiring above.
 builder.Services.AddHostedService<Verbara.Platform.Api.Services.PendingPauseDrainWorker>();
+
+// W5 — leader-gated work-failover worker. Runs on every pod (both cluster + single-node
+// branches register the keyed IClusterLeader for WorkFailoverLeaderResources.Sweep); the
+// leader gate inside SweepOnceAsync ensures exactly one pod re-queues orphaned
+// conversations cluster-wide. Mirrors the W3/W4 worker wiring above.
+builder.Services.AddHostedService<Verbara.Platform.Api.Services.WorkFailoverWorker>();
 
 // ─── Pro.MultiTenant ─────────────────────────────────────────────────────────
 builder.Services.AddVerbaraMultiTenant();

@@ -128,6 +128,10 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
                 {
                     conversation.SetMetadata("_offeredAt", _clock.UtcNow.ToString("O"));
                     conversation.SetMetadata("_offeredTo", agentId.Value.Value);
+                    // W5 — remember the originating queue so work-failover can re-queue an orphaned
+                    // conversation back to it. The owner is still the Queue at offer time.
+                    if (conversation.Owner is { Kind: ConversationOwnerKind.Queue, OwnerId: { } qid })
+                        conversation.SetMetadata("originQueueId", qid.Value);
                     await _conversationStore.SaveAsync(conversation, ct);
 
                     _eventBus.Publish(new ConversationOfferedEvent(
