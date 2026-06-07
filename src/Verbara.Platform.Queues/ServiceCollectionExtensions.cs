@@ -20,8 +20,17 @@ public static class ServiceCollectionExtensions
         else
             services.AddOptions<QueueOptions>();
 
+        // W6 — InMemoryAgentCapacityService(IAgentCapacityResolver): the resolver supplies
+        // EFFECTIVE per-channel + MaxTotal capacity AND owns the single agent read (null ==
+        // phantom agent → fail closed). Resolved by constructor injection. (The Api host
+        // overrides this with PersistentAgentCapacityService when a Postgres connection exists.)
         services.AddSingleton<IAgentCapacityService, InMemoryAgentCapacityService>();
         services.AddSingleton<IAgentPresenceService, InMemoryAgentPresenceService>();
+
+        // W6 — effective-capacity resolver (tenant default + sparse per-agent override, merged at
+        // read time). Stateless over Singleton stores; ICapacityDefaultsProvider is supplied by the
+        // Api layer so Queues stays free of an Identity dependency.
+        services.AddSingleton<IAgentCapacityResolver, AgentCapacityResolver>();
 
         return services;
     }

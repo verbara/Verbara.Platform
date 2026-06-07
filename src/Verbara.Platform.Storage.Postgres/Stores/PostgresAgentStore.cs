@@ -114,7 +114,7 @@ internal sealed class PostgresAgentStore : IAgentStore
 
     public async Task SaveAsync(Agent agent, CancellationToken ct)
     {
-        var capacityJson = JsonSerializer.Serialize(agent.Capacity, PostgresJson.Ctx.ChannelCapacity);
+        var capacityJson = JsonSerializer.Serialize(agent.CapacityOverride, PostgresJson.Ctx.ChannelCapacityOverride);
         var skillsJson = JsonSerializer.Serialize(agent.Skills, PostgresJson.Ctx.IReadOnlyListString);
 
         await _dataSource.ExecuteAsync(
@@ -275,7 +275,10 @@ internal sealed class PostgresAgentStore : IAgentStore
             UserId = EntityId.From(user_id),
             DisplayName = display_name,
             State = (AgentState)state,
-            Capacity = JsonSerializer.Deserialize(capacity, PostgresJson.Ctx.ChannelCapacity) ?? new ChannelCapacity(),
+            // W6 — migration 033 normalized every legacy row to '{}', which deserializes
+            // to an all-null ChannelCapacityOverride = "inherit the tenant default" on every
+            // field. New rows persist only the fields an admin actually overrides.
+            CapacityOverride = JsonSerializer.Deserialize(capacity, PostgresJson.Ctx.ChannelCapacityOverride) ?? new ChannelCapacityOverride(),
             TeamId = team_id != null ? EntityId.From(team_id) : null,
             Skills = JsonSerializer.Deserialize(skills, PostgresJson.Ctx.IReadOnlyListString) ?? (IReadOnlyList<string>)[],
             Extension = extension,

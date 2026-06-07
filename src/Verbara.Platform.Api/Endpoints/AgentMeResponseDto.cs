@@ -37,16 +37,19 @@ internal sealed record AgentMeResponseDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt)
 {
-    public static AgentMeResponseDto FromAgent(Agent agent, int activeWorkCount)
+    public static AgentMeResponseDto FromAgent(Agent agent, int activeWorkCount, ChannelCapacity effectiveCapacity)
     {
         ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(effectiveCapacity);
         return new AgentMeResponseDto(
             AgentId: agent.AgentId.Value,
             TenantId: agent.TenantId.Value,
             UserId: agent.UserId.Value,
             DisplayName: agent.DisplayName,
             State: agent.State,
-            Capacity: agent.Capacity,
+            // W6-A6 — resolver-computed effective capacity (tenant default merged with the
+            // per-agent override, MaxVoice pinned to 1); supplied by the /agents/me handler.
+            Capacity: effectiveCapacity,
             TeamId: agent.TeamId?.Value,
             Skills: agent.Skills,
             Extension: agent.Extension,

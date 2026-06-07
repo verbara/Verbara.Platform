@@ -82,6 +82,26 @@ public sealed class AgentMeSipExposureTests : IClassFixture<AuthenticatedPlatfor
     }
 
     [Fact]
+    public async Task AgentMe_ShouldReturnEffectiveCapacity_WhenOverrideAndDefault()
+    {
+        // W6-A6 — /agents/me must surface the RESOLVER-computed effective capacity
+        // (tenant default merged with the per-agent override, MaxVoice pinned to 1),
+        // NOT the A1 temp bridge over the hard ChannelCapacity() defaults.
+        await SeedAgentForCallerWithCapacityAsync(maxChat: 8);
+
+        var response = await _client.GetAsync("/api/v1/agents/me");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var dto = await response.Content.ReadFromJsonAsync<AgentMeCapacityDto>(s_json);
+        dto.Should().NotBeNull();
+        // Chat overridden to 8 wins over the tenant default; voice stays pinned to 1.
+        dto!.Capacity!.MaxChat.Should().Be(8);
+        dto.Capacity.MaxVoice.Should().Be(1);
+        // Non-overridden channels fall back to the tenant default (3/5/3/5 for the test tenant).
+        dto.Capacity.MaxEmail.Should().Be(5);
+    }
+
+    [Fact]
     public async Task ListAgents_ShouldNotIncludeSipPassword_InResponseJson()
     {
         await SeedAgentForUserAsync(
@@ -134,6 +154,26 @@ public sealed class AgentMeSipExposureTests : IClassFixture<AuthenticatedPlatfor
         await store.SaveAsync(NewAgent(tenantId, callerUserId, extension, sipPassword, autoAnswer), CancellationToken.None);
     }
 
+    /// <summary>
+    /// Seeds a caller-owned agent carrying a per-agent capacity override (W6-A6).
+    /// Replaces any prior caller-owned agent so GetByUserIdAsync stays deterministic.
+    /// </summary>
+    private async Task SeedAgentForCallerWithCapacityAsync(int maxChat)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAgentStore>();
+        var tenantId = new TenantId(AuthenticatedPlatformApiFactory.TestTenantId);
+        var callerUserId = EntityId.From(AuthenticatedPlatformApiFactory.TestUserId);
+
+        var existing = await store.GetByUserIdAsync(tenantId, callerUserId, CancellationToken.None);
+        if (existing is not null)
+            await store.DeleteAsync(tenantId, existing.AgentId, CancellationToken.None);
+
+        var agent = NewAgent(tenantId, callerUserId, "1500", "p");
+        agent.CapacityOverride = new ChannelCapacityOverride { MaxChat = maxChat };
+        await store.SaveAsync(agent, CancellationToken.None);
+    }
+
     private async Task<EntityId> SeedAgentForUserAsync(EntityId userId, string extension, string sipPassword)
     {
         using var scope = _factory.Services.CreateScope();
@@ -158,4 +198,8 @@ public sealed class AgentMeSipExposureTests : IClassFixture<AuthenticatedPlatfor
     };
 
     private sealed record AgentMeDto(string? Extension, string? SipPassword, bool? AutoAnswer);
+
+    private sealed record AgentMeCapacityDto(CapacityShape? Capacity);
+
+    private sealed record CapacityShape(int MaxVoice, int MaxChat, int MaxEmail, int MaxSms, int MaxTotal);
 }

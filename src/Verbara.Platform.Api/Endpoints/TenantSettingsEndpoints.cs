@@ -43,7 +43,13 @@ internal sealed record OperationalSettingsDto(
     List<string>? NodeAffinity,
     List<int>? AllowedDialingModes,
     // 3B.2d — tenant-level outbound caller ID for agent click-to-dial + external blind transfer.
-    string? OutboundCallerId);
+    string? OutboundCallerId,
+    // W6-A7 — per-tenant default channel capacity; agents inherit these unless overridden.
+    int MaxVoiceDefault,
+    int MaxChatDefault,
+    int MaxEmailDefault,
+    int MaxSmsDefault,
+    int MaxTotalDefault);
 
 internal sealed record AuthSettingsDto(
     string MfaPolicy,
@@ -98,7 +104,13 @@ internal sealed record UpdateOperationalSettingsDto(
     string? DialplanContextPrefix = null,
     List<string>? NodeAffinity = null,
     List<int>? AllowedDialingModes = null,
-    string? OutboundCallerId = null);
+    string? OutboundCallerId = null,
+    // W6-A7 — per-tenant default channel capacity (null = leave unchanged).
+    int? MaxVoiceDefault = null,
+    int? MaxChatDefault = null,
+    int? MaxEmailDefault = null,
+    int? MaxSmsDefault = null,
+    int? MaxTotalDefault = null);
 
 internal sealed record UpdateAuthSettingsDto(
     string? MfaPolicy = null,
@@ -309,7 +321,13 @@ internal static class TenantSettingsEndpoints
                 DialplanContextPrefix: tenant.Options.DialplanContextPrefix,
                 NodeAffinity: tenant.Options.NodeAffinity,
                 AllowedDialingModes: tenant.Options.AllowedDialingModes,
-                OutboundCallerId: tenant.Options.OutboundCallerId),
+                OutboundCallerId: tenant.Options.OutboundCallerId,
+                // W6-A7 — per-tenant default channel capacity lives on the auth config.
+                MaxVoiceDefault: auth.MaxVoiceDefault,
+                MaxChatDefault: auth.MaxChatDefault,
+                MaxEmailDefault: auth.MaxEmailDefault,
+                MaxSmsDefault: auth.MaxSmsDefault,
+                MaxTotalDefault: auth.MaxTotalDefault),
             Auth: new AuthSettingsDto(
                 MfaPolicy: auth.MfaPolicy,
                 MfaRequiredRoles: auth.MfaRequiredRoles,
@@ -492,6 +510,98 @@ internal static class TenantSettingsEndpoints
             await authConfigStore.SaveAsync(auth, ct);
         }
 
+        // W6-A7 — per-tenant default channel capacity. Carried in the Operational
+        // DTO (UI surface) but persisted on the auth config (the resolver's
+        // tenant-defaults source of truth). Saving via authConfigStore.SaveAsync
+        // goes through CachedTenantAuthConfigStore, which evicts the hot-path cache
+        // so the capacity resolver/provider observes the new defaults on next read.
+        var capOp = body.Operational;
+        if (capOp is not null && (capOp.MaxVoiceDefault is not null
+            || capOp.MaxChatDefault is not null || capOp.MaxEmailDefault is not null
+            || capOp.MaxSmsDefault is not null || capOp.MaxTotalDefault is not null))
+        {
+            // Validate BEFORE persisting (mirror A6 style: 400 + plain string).
+            // MaxVoice is pinned to 1 until the W5b ARI mixing-bridge lands.
+            if (capOp.MaxVoiceDefault is { } voiceDefault && voiceDefault != 1)
+                return Results.BadRequest(
+                    "MaxVoiceDefault must equal 1. Concurrent voice is a single exclusive lane until the ARI mixing-bridge lands.");
+
+            if (CapacityRangeError(capOp.MaxChatDefault, nameof(capOp.MaxChatDefault)) is { } chatErr)
+                return Results.BadRequest(chatErr);
+            if (CapacityRangeError(capOp.MaxEmailDefault, nameof(capOp.MaxEmailDefault)) is { } emailErr)
+                return Results.BadRequest(emailErr);
+            if (CapacityRangeError(capOp.MaxSmsDefault, nameof(capOp.MaxSmsDefault)) is { } smsErr)
+                return Results.BadRequest(smsErr);
+            if (CapacityRangeError(capOp.MaxTotalDefault, nameof(capOp.MaxTotalDefault)) is { } totalErr)
+                return Results.BadRequest(totalErr);
+
+            var cap = await authConfigStore.GetAsync(tenantId, ct)
+                   ?? new TenantAuthConfig { TenantId = tenantId };
+
+            var oldVoice = cap.MaxVoiceDefault;
+            var oldChat = cap.MaxChatDefault;
+            var oldEmail = cap.MaxEmailDefault;
+            var oldSms = cap.MaxSmsDefault;
+            var oldTotal = cap.MaxTotalDefault;
+
+            if (capOp.MaxVoiceDefault is { } nv) cap.MaxVoiceDefault = nv;
+            if (capOp.MaxChatDefault is { } nc) cap.MaxChatDefault = nc;
+            if (capOp.MaxEmailDefault is { } ne) cap.MaxEmailDefault = ne;
+            if (capOp.MaxSmsDefault is { } ns) cap.MaxSmsDefault = ns;
+            if (capOp.MaxTotalDefault is { } nt) cap.MaxTotalDefault = nt;
+
+            var changed = cap.MaxVoiceDefault != oldVoice
+                || cap.MaxChatDefault != oldChat
+                || cap.MaxEmailDefault != oldEmail
+                || cap.MaxSmsDefault != oldSms
+                || cap.MaxTotalDefault != oldTotal;
+
+            if (changed)
+            {
+                cap.UpdatedAt = DateTimeOffset.UtcNow;
+                await authConfigStore.SaveAsync(cap, ct);
+
+                // Best-effort audit (mirror A6/ForceAgentOffline: a failed audit
+                // write must NEVER fail the operator's settings update).
+                var audit = sp?.GetService(typeof(IAuditService)) as IAuditService;
+                if (audit is not null)
+                {
+                    try
+                    {
+                        await audit.RecordAsync(
+                            tenantId: new TenantId(tenantId),
+                            category: "operational",
+                            action: "tenant.capacity_default_changed",
+                            severity: "info",
+                            actorId: actorName,
+                            actorType: "user",
+                            targetId: tenantId,
+                            targetType: "Tenant",
+                            metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["actor"] = actorName,
+                                ["tenant_id"] = tenantId,
+                                ["old_max_voice_default"] = oldVoice.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["old_max_chat_default"] = oldChat.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["old_max_email_default"] = oldEmail.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["old_max_sms_default"] = oldSms.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["old_max_total_default"] = oldTotal.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["new_max_voice_default"] = cap.MaxVoiceDefault.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["new_max_chat_default"] = cap.MaxChatDefault.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["new_max_email_default"] = cap.MaxEmailDefault.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["new_max_sms_default"] = cap.MaxSmsDefault.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["new_max_total_default"] = cap.MaxTotalDefault.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            },
+                            ct: ct);
+                    }
+                    catch
+                    {
+                        // Swallow — the capacity-default write already succeeded; audit is advisory.
+                    }
+                }
+            }
+        }
+
         if (body.Quotas is not null)
         {
             var quota = await quotaStore.GetAsync(new TenantId(tenantId), ct)
@@ -574,6 +684,15 @@ internal static class TenantSettingsEndpoints
 
         return null;
     }
+
+    // W6-A7 — per-channel default capacity range (mirrors AdminEndpoints' agent-override bound):
+    // null (leave unchanged) or [0, MaxCapacityDefaultValue].
+    private const int MaxCapacityDefaultValue = 50;
+
+    private static string? CapacityRangeError(int? value, string field) =>
+        value is { } x && (x < 0 || x > MaxCapacityDefaultValue)
+            ? $"{field} must be between 0 and {MaxCapacityDefaultValue}."
+            : null;
 
     /// <summary>
     /// Applies management branding updates including Subdomain (PlatformAdminOnly).

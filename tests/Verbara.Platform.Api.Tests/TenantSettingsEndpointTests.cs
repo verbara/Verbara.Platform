@@ -1,16 +1,22 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json.Nodes;
 using FluentAssertions;
+using Verbara.Platform.Audit;
+using Verbara.Platform.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Verbara.Platform.Api.Tests;
 
 public sealed class TenantSettingsEndpointTests : IClassFixture<PlatformAdminApiFactory>
 {
+    private readonly PlatformAdminApiFactory _factory;
     private readonly HttpClient _client;
 
     public TenantSettingsEndpointTests(PlatformAdminApiFactory factory)
     {
+        _factory = factory;
         _client = factory.CreatePlatformAdminClient();
         _client.DefaultRequestHeaders.Add("X-Tenant-Id", PlatformAdminApiFactory.HostTenantId);
     }
@@ -77,6 +83,129 @@ public sealed class TenantSettingsEndpointTests : IClassFixture<PlatformAdminApi
         var getResponse = await _client.GetAsync("/api/v1/admin/tenant/settings");
         var body = await getResponse.Content.ReadAsStringAsync();
         body.Should().Contain("\"outboundCallerId\":\"+15558675309\"");
+    }
+
+    // ─── W6-A7 per-tenant default channel capacity ─────────────────────────────
+
+    [Fact]
+    public async Task GetSettings_ShouldReturnCapacityDefaults_WhenRead()
+    {
+        var response = await _client.GetAsync("/api/v1/admin/tenant/settings");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        var op = dto["operational"]!;
+        // Fresh-tenant defaults from TenantAuthConfig: 1/3/5/3/5.
+        op["maxVoiceDefault"]!.GetValue<int>().Should().Be(1);
+        op["maxChatDefault"]!.GetValue<int>().Should().Be(3);
+        op["maxEmailDefault"]!.GetValue<int>().Should().Be(5);
+        op["maxSmsDefault"]!.GetValue<int>().Should().Be(3);
+        op["maxTotalDefault"]!.GetValue<int>().Should().Be(5);
+    }
+
+    [Fact]
+    public async Task UpdateSettings_ShouldPersistCapacityDefaults_WhenOperationalSet()
+    {
+        var response = await _client.PutAsJsonAsync("/api/v1/admin/tenant/settings", new
+        {
+            operational = new
+            {
+                maxVoiceDefault = 1,
+                maxChatDefault = 8,
+                maxEmailDefault = 10,
+                maxSmsDefault = 6,
+                maxTotalDefault = 12,
+            },
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var getResponse = await _client.GetAsync("/api/v1/admin/tenant/settings");
+        var dto = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync())!;
+        var op = dto["operational"]!;
+        op["maxChatDefault"]!.GetValue<int>().Should().Be(8);
+        op["maxEmailDefault"]!.GetValue<int>().Should().Be(10);
+        op["maxSmsDefault"]!.GetValue<int>().Should().Be(6);
+        op["maxTotalDefault"]!.GetValue<int>().Should().Be(12);
+    }
+
+    [Fact]
+    public async Task UpdateSettings_ShouldRejectMaxVoiceDefaultAboveOne_WhenSet()
+    {
+        var response = await _client.PutAsJsonAsync("/api/v1/admin/tenant/settings", new
+        {
+            operational = new { maxVoiceDefault = 2 },
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task UpdateSettings_ShouldRejectCapacityDefaultOutOfBounds_WhenSet()
+    {
+        var negative = await _client.PutAsJsonAsync("/api/v1/admin/tenant/settings", new
+        {
+            operational = new { maxChatDefault = -1 },
+        });
+        negative.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var tooLarge = await _client.PutAsJsonAsync("/api/v1/admin/tenant/settings", new
+        {
+            operational = new { maxTotalDefault = 51 },
+        });
+        tooLarge.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task UpdateSettings_ShouldEmitCapacityDefaultAudit_WhenChanged()
+    {
+        var response = await _client.PutAsJsonAsync("/api/v1/admin/tenant/settings", new
+        {
+            operational = new { maxChatDefault = 9 },
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var scope = _factory.Services.CreateScope();
+        var auditStore = scope.ServiceProvider.GetRequiredService<IAuditStore>();
+        var hits = await auditStore.SearchAsync(
+            new TenantId(PlatformAdminApiFactory.HostTenantId),
+            new AuditQuery(Action: "tenant.capacity_default_changed", Page: 1, PageSize: 100),
+            CancellationToken.None);
+
+        hits.Items.Should().Contain(e =>
+            e.Category == "operational"
+            && e.ActorType == "user"
+            && e.Metadata != null
+            && e.Metadata["new_max_chat_default"] == "9");
+    }
+
+    [Fact]
+    public async Task UpdateSettings_ShouldPersistBothAuthAndCapacityDefaults_WhenUpdatedTogether()
+    {
+        // W6-M3 — a SINGLE request mutating BOTH the Auth section AND the capacity defaults must
+        // persist both. A7 deliberately orders the capacity-defaults block AFTER the Auth block and
+        // RE-READS the cache-evicted auth config (capacity lives on TenantAuthConfig too), so the
+        // capacity write does not clobber the just-saved Auth change. Lock that interleaving here.
+        var response = await _client.PutAsJsonAsync("/api/v1/admin/tenant/settings", new
+        {
+            auth = new { passwordMinLength = 18 },
+            operational = new
+            {
+                maxVoiceDefault = 1,
+                maxChatDefault = 7,
+                maxTotalDefault = 11,
+            },
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var getResponse = await _client.GetAsync("/api/v1/admin/tenant/settings");
+        var dto = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync())!;
+
+        // Auth change survived the subsequent capacity write.
+        dto["auth"]!["passwordMinLength"]!.GetValue<int>().Should().Be(18);
+
+        // Capacity defaults survived alongside the Auth change.
+        var op = dto["operational"]!;
+        op["maxChatDefault"]!.GetValue<int>().Should().Be(7);
+        op["maxTotalDefault"]!.GetValue<int>().Should().Be(11);
     }
 }
 

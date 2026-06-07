@@ -1,5 +1,6 @@
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Switchboard;
 
@@ -164,6 +165,49 @@ public sealed class ConversationSwitchboardTests : IDisposable
 
         result.Success.Should().BeFalse();
         result.FailureReason.Should().Be("Agent has no capacity.");
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ShouldReject_WhenAsyncTotalAtMaxTotal()
+    {
+        // W6-A5 integration regression: prove the MaxTotal gate (internal to HasCapacityAsync,
+        // W6-A4) actually flows through AcceptAsync end-to-end with the REAL capacity service —
+        // not a stubbed bool. An agent already handling 3 chats + 1 email is at MaxTotal=4 even
+        // though Email's PER-CHANNEL limit (5) is unfilled; accepting one more async conversation
+        // (Email) must be rejected by the combined-async cap, NOT the per-channel cap.
+        var resolver = Substitute.For<IAgentCapacityResolver>();
+        var capacity = new InMemoryAgentCapacityService(resolver);
+
+        // W6 — the resolver owns the single agent read; a non-null return == present agent.
+        resolver.ResolveAsync(_tenantId, _agentId, Arg.Any<CancellationToken>())
+                .Returns(new ChannelCapacity { MaxChat = 3, MaxEmail = 5, MaxSms = 3, MaxTotal = 4 });
+
+        // Drive the agent to the at-MaxTotal state: 3 chats + 1 email = 4 async = MaxTotal.
+        await capacity.ReserveAsync(_tenantId, _agentId, ChannelType.WebChat, CancellationToken.None);
+        await capacity.ReserveAsync(_tenantId, _agentId, ChannelType.WebChat, CancellationToken.None);
+        await capacity.ReserveAsync(_tenantId, _agentId, ChannelType.WebChat, CancellationToken.None);
+        await capacity.ReserveAsync(_tenantId, _agentId, ChannelType.Email, CancellationToken.None);
+
+        var conversation = new Conversation
+        {
+            ConversationId = _conversationId,
+            TenantId = _tenantId,
+            ContactId = EntityId.From("contact-001"),
+            Channel = ChannelType.Email,
+            State = ConversationState.Offered,
+            Owner = ConversationOwner.ForQueue(_queueId),
+            CreatedAt = _now,
+        };
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = new ConversationSwitchboard(_store, capacity, _clock, _eventBus);
+        var result = await sut.AcceptAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.FailureReason.Should().Be("Agent has no capacity.");
+        conversation.State.Should().Be(ConversationState.Offered); // no ownership/state change
+        await _store.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
     }
 
     // ─── RejectAsync ──────────────────────────────────────────────────────────

@@ -158,6 +158,15 @@ public sealed class TenantAuthConfigEncryptionFixture : IAsyncLifetime
             oidc_default_role TEXT NOT NULL DEFAULT 'Agent',
             impersonation_max_concurrent_sessions INT NOT NULL DEFAULT 3,
             impersonation_auto_timeout_minutes INT NOT NULL DEFAULT 240,
+            agent_liveness_timeout_seconds INT NOT NULL DEFAULT 60,
+            pending_pause_timeout_minutes INT NOT NULL DEFAULT 30,
+            work_failover_grace_seconds INT NOT NULL DEFAULT 30,
+            voice_callback_grace_seconds INT NOT NULL DEFAULT 25,
+            max_voice_default INT NOT NULL DEFAULT 1,
+            max_chat_default INT NOT NULL DEFAULT 3,
+            max_email_default INT NOT NULL DEFAULT 5,
+            max_sms_default INT NOT NULL DEFAULT 3,
+            max_total_default INT NOT NULL DEFAULT 5,
             ip_allowlist_enabled BOOLEAN NOT NULL DEFAULT false,
             updated_at TIMESTAMPTZ
         );

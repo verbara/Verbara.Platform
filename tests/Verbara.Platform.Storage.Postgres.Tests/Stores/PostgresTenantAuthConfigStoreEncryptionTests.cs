@@ -113,6 +113,51 @@ public sealed class PostgresTenantAuthConfigStoreEncryptionTests
     }
 
     [Fact]
+    public async Task GetAsync_ShouldReturnSeededDefaults_WhenRowHasNoCapacityColumns()
+    {
+        // A row written without touching capacity must report the column-default capacity
+        // (1/3/5/3/5) — the W6 tenant defaults agents inherit when they carry no override.
+        await _sut.SaveAsync(new TenantAuthConfig
+        {
+            TenantId = _tenantId,
+            OidcEnabled = false,
+        }, default);
+
+        var loaded = await _sut.GetAsync(_tenantId, default);
+
+        loaded.Should().NotBeNull();
+        loaded!.MaxVoiceDefault.Should().Be(1);
+        loaded.MaxChatDefault.Should().Be(3);
+        loaded.MaxEmailDefault.Should().Be(5);
+        loaded.MaxSmsDefault.Should().Be(3);
+        loaded.MaxTotalDefault.Should().Be(5);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldPersistCapacityDefaults_WhenSet()
+    {
+        await _sut.SaveAsync(new TenantAuthConfig
+        {
+            TenantId = _tenantId,
+            OidcEnabled = false,
+            MaxVoiceDefault = 2,
+            MaxChatDefault = 6,
+            MaxEmailDefault = 10,
+            MaxSmsDefault = 4,
+            MaxTotalDefault = 12,
+        }, default);
+
+        var loaded = await _sut.GetAsync(_tenantId, default);
+
+        loaded.Should().NotBeNull();
+        loaded!.MaxVoiceDefault.Should().Be(2);
+        loaded.MaxChatDefault.Should().Be(6);
+        loaded.MaxEmailDefault.Should().Be(10);
+        loaded.MaxSmsDefault.Should().Be(4);
+        loaded.MaxTotalDefault.Should().Be(12);
+    }
+
+    [Fact]
     public async Task Save_ShouldPersistNull_WhenOidcClientSecretIsNullOrEmpty()
     {
         await _sut.SaveAsync(new TenantAuthConfig

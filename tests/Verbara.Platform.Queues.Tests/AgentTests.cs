@@ -20,13 +20,19 @@ public class AgentTests
         };
 
         agent.State.Should().Be(AgentState.Offline);
-        agent.Capacity.MaxVoice.Should().Be(1);
-        agent.Capacity.MaxChat.Should().Be(3);
+        // W6 — a freshly constructed agent carries an all-null override
+        // ("inherit every tenant default"); the effective per-channel maxima are
+        // resolved later from the tenant default + this override.
+        agent.CapacityOverride.MaxVoice.Should().BeNull();
+        agent.CapacityOverride.MaxChat.Should().BeNull();
     }
 
     [Fact]
-    public void HasCapacity_ShouldReturnTrue_WhenBelowLimit()
+    public void HasCapacity_ShouldReturnTrue_WhenRoutable()
     {
+        // W6 — HasCapacity is now a pure routability check (the per-channel /
+        // MaxTotal gate moved to IAgentCapacityService + the resolver). A routable
+        // state must answer true regardless of the channel argument.
         var agent = new Agent
         {
             AgentId = EntityId.From("a-001"),
@@ -41,8 +47,9 @@ public class AgentTests
     }
 
     [Fact]
-    public void HasCapacity_ShouldReturnFalse_WhenNotAvailable()
+    public void HasCapacity_ShouldReturnFalse_WhenNotRoutable()
     {
+        // W6 — a non-routable state (Break) is never eligible for new work.
         var agent = new Agent
         {
             AgentId = EntityId.From("a-001"),
