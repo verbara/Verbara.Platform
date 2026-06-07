@@ -55,4 +55,7 @@ public sealed class Conversation : ITenantScoped, IAuditable
 
     public void SetMetadata(string key, string value) =>
         _metadata[key] = value;
+
+    /// <summary>Removes a metadata key if present. Used to clear W5 failover markers on reassign.</summary>
+    public void RemoveMetadata(string key) => _metadata.Remove(key);
 }

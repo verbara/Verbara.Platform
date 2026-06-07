@@ -1,9 +1,12 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
 using Verbara.Platform.Switchboard;
 using Verbara.Sdk.Pro.AgentAssist.Engine;
 using Microsoft.AspNetCore.Mvc;
@@ -27,6 +30,10 @@ internal static class SupervisorEndpoints
         group.MapPost("/conversations/{id}/takeover", TakeoverConversation);
         group.MapPost("/conversations/{id}/close", ForceCloseConversation);
         group.MapPost("/conversations/{id}/note", SendCoachingNote);
+
+        // W5 (A7) — stuck-work visibility + manual reassign
+        group.MapGet("/conversations/stuck", GetStuckConversations);
+        group.MapPost("/conversations/{id}/reassign", ReassignConversation);
     }
 
     // ─── Handlers ─────────────────────────────────────────────────────────────
@@ -211,11 +218,149 @@ internal static class SupervisorEndpoints
         return Results.Ok(new MessageResponse("Coaching note sent"));
     }
 
+    // ─── W5 (A7) Stuck Work + Manual Reassign ────────────────────────────────────
+
+    /// <summary>
+    /// W5 (A7) — "stuck work" = conversations actively OWNED by an Offline agent in a
+    /// failover-work state ({Active, OnHold, Consulting}). This includes the
+    /// failover-escalated ones (still owned by the offline agent, marked
+    /// <c>failoverStuck</c>) the automatic sweep could not re-queue. Reuses the existing
+    /// offline-agent + failover-work-by-owner queries (N+1 over a tenant's offline agents
+    /// is fine for a supervisor-initiated query).
+    /// </summary>
+    private static async Task<IResult> GetStuckConversations(
+        HttpContext context,
+        [FromServices] IAgentStore agentStore,
+        [FromServices] IConversationStore conversationStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+
+        // Page through ALL offline agents (large page so a single call covers them).
+        var offline = await agentStore.ListAsync(
+            tenantId,
+            new AgentQuery { State = AgentState.Offline, Page = 1, PageSize = 10_000 },
+            ct);
+
+        var stuck = new List<StuckConversationDto>();
+        foreach (var agent in offline.Items)
+        {
+            var work = await conversationStore.ListFailoverWorkByOwnerAsync(tenantId, agent.AgentId, ct);
+            foreach (var conv in work)
+            {
+                var attempts = conv.Metadata.TryGetValue("failoverAttempts", out var a)
+                    && int.TryParse(a, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+                    ? n
+                    : 0;
+
+                stuck.Add(new StuckConversationDto(
+                    ConversationId: conv.ConversationId.Value,
+                    Channel: conv.Channel.ToString(),
+                    State: conv.State.ToString(),
+                    OwnerAgentId: agent.AgentId.Value,
+                    OwnerAgentName: agent.DisplayName,
+                    OwnerOfflineSince: agent.OfflineSince,
+                    FailoverAttempts: attempts,
+                    Escalated: conv.Metadata.ContainsKey("failoverStuck")));
+            }
+        }
+
+        IReadOnlyList<StuckConversationDto> result = stuck;
+        return Results.Ok(result);
+    }
+
+    /// <summary>
+    /// W5 (A7) — manual reassign of a stuck conversation to a queue OR an agent. Clears the
+    /// W5 failover markers (<c>failoverAttempts</c>, <c>failoverStuck</c>) BEFORE the transfer
+    /// so the transfer's own re-load+save carries the cleared state and a reassigned-then-
+    /// re-orphaned conversation gets fresh failover treatment (the worker skips when
+    /// <c>failoverStuck</c> is present, so it must be GONE, not "false").
+    /// </summary>
+    private static async Task<IResult> ReassignConversation(
+        string id,
+        [FromBody] ReassignConversationRequest body,
+        HttpContext context,
+        [FromServices] IConversationStore conversationStore,
+        [FromServices] IConversationSwitchboard switchboard,
+        [FromServices] IAuditService audit,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var supervisorId = GetCurrentUserId(context);
+
+        var hasQueue = !string.IsNullOrWhiteSpace(body.TargetQueueId);
+        var hasAgent = !string.IsNullOrWhiteSpace(body.TargetAgentId);
+        if (hasQueue == hasAgent)   // both or neither
+            return Results.BadRequest(new ErrorResponse(
+                "Exactly one of targetQueueId or targetAgentId must be provided."));
+
+        var convId = EntityId.From(id);
+        var conv = await conversationStore.GetByIdAsync(tenantId, convId, ct);
+        if (conv is null)
+            return Results.NotFound();
+
+        // Clear failover markers BEFORE the transfer so the transfer's re-load+save carries
+        // the cleared state (setting them "false" is not enough — ContainsKey must go false).
+        conv.RemoveMetadata("failoverAttempts");
+        conv.RemoveMetadata("failoverStuck");
+        await conversationStore.SaveAsync(conv, ct);
+
+        OwnershipResult result;
+        if (hasQueue)
+            result = await switchboard.TransferToQueueAsync(convId, tenantId, EntityId.From(body.TargetQueueId!), ct);
+        else
+            result = await switchboard.TransferToAgentAsync(convId, tenantId, EntityId.From(body.TargetAgentId!), ct);
+
+        if (!result.Success)
+            return Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Reassign failed"));
+
+        // Best-effort audit (mirrors the automatic failover sweep's audit shape; a failed
+        // audit write must not fail the supervisor's reassign).
+        try
+        {
+            await audit.RecordAsync(
+                tenantId,
+                category: "conversations",
+                action: "conversation.reassigned",
+                severity: "info",
+                actorId: supervisorId.Value,
+                actorType: "user",
+                targetId: convId.Value,
+                targetType: "Conversation",
+                metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [hasQueue ? "target_queue" : "target_agent"] =
+                        (hasQueue ? body.TargetQueueId : body.TargetAgentId)!,
+                    ["by_supervisor"] = supervisorId.Value,
+                },
+                ct: ct);
+        }
+        catch
+        {
+            // Swallow — the reassign already succeeded; audit is advisory.
+        }
+
+        return Results.NoContent();
+    }
+
     private static TenantId GetTenantId(HttpContext context)
     {
         if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
             return tid;
         throw new InvalidOperationException("Tenant ID not resolved");
+    }
+
+    /// <summary>
+    /// Resolves the calling user's id. Mirrors AdminEndpoints.GetCurrentUserId: prefer the
+    /// JWT <c>sub</c>, then the <c>user_id</c> claim (set by ApiKeyAuthenticationHandler when
+    /// the key has a linked user), then NameIdentifier.
+    /// </summary>
+    private static EntityId GetCurrentUserId(HttpContext context)
+    {
+        var nameId = context.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+            ?? context.User.FindFirst("user_id")?.Value
+            ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        return nameId is not null ? EntityId.From(nameId) : EntityId.New();
     }
 }
 
@@ -247,3 +392,17 @@ internal sealed record ListenEntry(
 internal sealed record SupervisorCloseRequest(string? Reason);
 
 internal sealed record CoachingNoteRequest(string Text);
+
+// W5 (A7) — stuck-work list item: a conversation actively owned by an offline agent.
+internal sealed record StuckConversationDto(
+    string ConversationId,
+    string Channel,
+    string State,
+    string OwnerAgentId,
+    string OwnerAgentName,
+    DateTimeOffset? OwnerOfflineSince,
+    int FailoverAttempts,
+    bool Escalated);
+
+// W5 (A7) — manual reassign body: EXACTLY ONE of the two targets must be set.
+internal sealed record ReassignConversationRequest(string? TargetQueueId, string? TargetAgentId);
