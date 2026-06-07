@@ -33,6 +33,7 @@ internal static class AgentEndpoints
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
+        [FromServices] IAgentCapacityResolver capacityResolver,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -42,8 +43,7 @@ internal static class AgentEndpoints
         if (agent is null)
             return Results.NotFound();
 
-        var activeWork = await conversationStore.CountActiveWorkAsync(tenantId, agent.AgentId, ct);
-        return Results.Ok(AgentMeResponseDto.FromAgent(agent, activeWork));
+        return await OkDtoAsync(conversationStore, capacityResolver, tenantId, agent, ct);
     }
 
     // W4 (A5) — pending-aware state change. A deferrable aux state requested while
@@ -58,6 +58,7 @@ internal static class AgentEndpoints
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
+        [FromServices] IAgentCapacityResolver capacityResolver,
         [FromServices] TimeProvider clock,
         PlatformEventBus eventBus,
         [FromBody] UpdateAgentStateRequest body,
@@ -93,7 +94,7 @@ internal static class AgentEndpoints
                     agent.DisplayName,
                     target.ToString()));
 
-                return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+                return await OkDtoAsync(conversationStore, capacityResolver, tenantId, agent, ct);
             }
 
             // Deferrable but no active work and not already pending → apply now.
@@ -107,7 +108,7 @@ internal static class AgentEndpoints
                 oldState.ToString(),
                 target.ToString()));
 
-            return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+            return await OkDtoAsync(conversationStore, capacityResolver, tenantId, agent, ct);
         }
 
         // Non-deferrable target (Available/Busy/Offline/ACW/…).
@@ -140,7 +141,7 @@ internal static class AgentEndpoints
                 oldState.ToString(),
                 target.ToString()));
 
-            return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+            return await OkDtoAsync(conversationStore, capacityResolver, tenantId, agent, ct);
         }
 
         // Not pending, any target — existing immediate path.
@@ -154,7 +155,7 @@ internal static class AgentEndpoints
             oldState.ToString(),
             target.ToString()));
 
-        return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+        return await OkDtoAsync(conversationStore, capacityResolver, tenantId, agent, ct);
     }
 
     // W4 (A5) — cancel a pending pause WITHOUT applying it. The agent stays in its
@@ -164,6 +165,7 @@ internal static class AgentEndpoints
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
+        [FromServices] IAgentCapacityResolver capacityResolver,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
@@ -188,7 +190,7 @@ internal static class AgentEndpoints
                 null));
         }
 
-        return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+        return await OkDtoAsync(conversationStore, capacityResolver, tenantId, agent, ct);
     }
 
     // W4 (A5) — apply a pending pause NOW (skip the drain wait). Flips State to the
@@ -200,6 +202,7 @@ internal static class AgentEndpoints
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
+        [FromServices] IAgentCapacityResolver capacityResolver,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
@@ -225,14 +228,23 @@ internal static class AgentEndpoints
                 target.ToString()));
         }
 
-        return await OkDtoAsync(conversationStore, tenantId, agent, ct);
+        return await OkDtoAsync(conversationStore, capacityResolver, tenantId, agent, ct);
     }
 
     private static async Task<IResult> OkDtoAsync(
-        IConversationStore conversationStore, TenantId tenantId, Agent agent, CancellationToken ct)
+        IConversationStore conversationStore,
+        IAgentCapacityResolver capacityResolver,
+        TenantId tenantId,
+        Agent agent,
+        CancellationToken ct)
     {
         var activeWork = await conversationStore.CountActiveWorkAsync(tenantId, agent.AgentId, ct);
-        return Results.Ok(AgentMeResponseDto.FromAgent(agent, activeWork));
+        // W6-A6 — resolve the agent's EFFECTIVE capacity (tenant default merged with the per-agent
+        // override, MaxVoice pinned). The `??` is a defensive fallback for the impossible-null case
+        // (the agent was just loaded so it exists); merge over the hard defaults if it ever fires.
+        var effective = await capacityResolver.ResolveAsync(tenantId, agent.AgentId, ct)
+            ?? AgentCapacityResolver.ResolveEffective(agent.CapacityOverride, new ChannelCapacity());
+        return Results.Ok(AgentMeResponseDto.FromAgent(agent, activeWork, effective));
     }
 
     // W3 (A3) — heartbeat / proof-of-life. The browser refreshes the agent's

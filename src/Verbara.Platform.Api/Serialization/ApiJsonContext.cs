@@ -504,6 +504,11 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(AgentQueueMembershipDto))]  // ADR-0026 Phase A.6
 [JsonSerializable(typeof(List<AgentQueueMembershipDto>))]  // ADR-0026 Phase A.6
 [JsonSerializable(typeof(UpdateAgentRequest))]
+// W6-A6 — agent capacity override on the admin agent representation + create/update bodies.
+[JsonSerializable(typeof(ChannelCapacity))]
+[JsonSerializable(typeof(ChannelCapacityOverrideDto))]
+[JsonSerializable(typeof(AdminAgentResponseDto))]
+[JsonSerializable(typeof(PagedResult<AdminAgentResponseDto>))]
 [JsonSerializable(typeof(ForceAgentOfflineRequest))]  // W3 (A6) — admin force-offline lever
 [JsonSerializable(typeof(CreateTeamRequest))]
 [JsonSerializable(typeof(UpdateTeamRequest))]

@@ -30,7 +30,19 @@ public sealed class AgentCapacityResolver : IAgentCapacityResolver
             return null;
 
         var defaults = await _defaults.GetDefaultsAsync(tenantId, ct).ConfigureAwait(false);
-        var effective = agent.CapacityOverride.ToEffective(defaults);
+        return ResolveEffective(agent.CapacityOverride, defaults);
+    }
+
+    /// <summary>
+    /// Merges a per-agent <paramref name="over"/> over <paramref name="defaults"/> (override wins
+    /// field-by-field) and applies the W6 voice pin. SINGLE source of truth for the pin so callers
+    /// that already hold the agent + defaults (e.g. admin list/detail endpoints) compute the exact
+    /// same effective capacity as <see cref="ResolveAsync"/> WITHOUT re-reading the agent (N+1).
+    /// </summary>
+    public static ChannelCapacity ResolveEffective(ChannelCapacityOverride over, ChannelCapacity defaults)
+    {
+        ArgumentNullException.ThrowIfNull(over);
+        var effective = over.ToEffective(defaults);
 
         // W6 invariant — voice is a single-call exclusive lane regardless of any tenant default or
         // per-agent override. An agent on a voice call cannot concurrently bridge a second call until

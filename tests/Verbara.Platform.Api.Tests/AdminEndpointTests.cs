@@ -2,15 +2,20 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Verbara.Platform.Audit;
+using Verbara.Platform.Core;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Api.Tests;
 
 public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiFactory>
 {
+    private readonly AuthenticatedPlatformApiFactory _factory;
     private readonly HttpClient _client;
 
     public AdminEndpointTests(AuthenticatedPlatformApiFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateAuthenticatedClient();
     }
 
@@ -207,6 +212,144 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
         var response = await _client.GetAsync("/api/admin/agents/no-such-agent");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // ─── W6-A6 — per-agent capacity override on create/update + effective in responses ──
+
+    [Fact]
+    public async Task UpdateAgent_ShouldRejectMaxVoiceAboveOne_WhenOverrideSet()
+    {
+        var agentId = await CreateAgentAsync("Voice Over Cap");
+
+        var response = await _client.PutAsync(
+            $"/api/v1/admin/agents/{agentId}",
+            JsonContent.Create(new { capacity = new { maxVoice = 2 } }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task UpdateAgent_ShouldRejectNegativeCapacity_WhenOverrideSet()
+    {
+        var agentId = await CreateAgentAsync("Negative Cap");
+
+        var response = await _client.PutAsync(
+            $"/api/v1/admin/agents/{agentId}",
+            JsonContent.Create(new { capacity = new { maxChat = -1 } }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task UpdateAgent_ShouldRejectCapacityAboveMax_WhenOverrideSet()
+    {
+        var agentId = await CreateAgentAsync("Absurd Cap");
+
+        var response = await _client.PutAsync(
+            $"/api/v1/admin/agents/{agentId}",
+            JsonContent.Create(new { capacity = new { maxEmail = 9999 } }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task UpdateAgent_ShouldPersistCapacityOverride_WhenValid()
+    {
+        var agentId = await CreateAgentAsync("Persist Cap");
+
+        var response = await _client.PutAsync(
+            $"/api/v1/admin/agents/{agentId}",
+            JsonContent.Create(new { capacity = new { maxChat = 7, maxTotal = 9 } }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        dto["capacityOverride"]!["maxChat"]!.GetValue<int>().Should().Be(7);
+        dto["capacityOverride"]!["maxTotal"]!.GetValue<int>().Should().Be(9);
+        // Effective merges over the tenant default (chat overridden to 7) and pins voice.
+        dto["effectiveCapacity"]!["maxChat"]!.GetValue<int>().Should().Be(7);
+        dto["effectiveCapacity"]!["maxVoice"]!.GetValue<int>().Should().Be(1);
+
+        // Re-fetch confirms durability.
+        var get = await _client.GetAsync($"/api/v1/admin/agents/{agentId}");
+        var getDto = JsonNode.Parse(await get.Content.ReadAsStringAsync())!;
+        getDto["capacityOverride"]!["maxChat"]!.GetValue<int>().Should().Be(7);
+    }
+
+    [Fact]
+    public async Task UpdateAgent_ShouldEmitCapacityAudit_WhenOverrideChanged()
+    {
+        var agentId = await CreateAgentAsync("Audited Cap");
+
+        var response = await _client.PutAsync(
+            $"/api/v1/admin/agents/{agentId}",
+            JsonContent.Create(new { capacity = new { maxChat = 4 } }));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var scope = _factory.Services.CreateScope();
+        var auditStore = scope.ServiceProvider.GetRequiredService<IAuditStore>();
+        var hits = await auditStore.SearchAsync(
+            new TenantId(AuthenticatedPlatformApiFactory.TestTenantId),
+            new AuditQuery(Action: "agent.capacity_override", Page: 1, PageSize: 100),
+            CancellationToken.None);
+
+        hits.Items.Should().ContainSingle(e =>
+            e.TargetId == agentId
+            && e.Category == "queues"
+            && e.ActorType == "user"
+            && e.Metadata != null
+            && e.Metadata["new_max_chat"] == "4"
+            && e.Metadata["old_max_chat"] == "inherit");
+    }
+
+    [Fact]
+    public async Task GetAgent_ShouldReturnEffectiveAndNullOverride_WhenInheriting()
+    {
+        var agentId = await CreateAgentAsync("Inheriting Cap");
+
+        var response = await _client.GetAsync($"/api/v1/admin/agents/{agentId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        // Fully inherited → no raw override emitted (UI renders "inherited").
+        dto["capacityOverride"].Should().BeNull();
+        // Effective reflects the tenant defaults (1/3/5/3/5 for an unconfigured test tenant).
+        dto["effectiveCapacity"]!["maxVoice"]!.GetValue<int>().Should().Be(1);
+        dto["effectiveCapacity"]!["maxChat"]!.GetValue<int>().Should().Be(3);
+        dto["effectiveCapacity"]!["maxEmail"]!.GetValue<int>().Should().Be(5);
+    }
+
+    [Fact]
+    public async Task GetAgent_ShouldReturnOverride_WhenSet()
+    {
+        var agentId = await CreateAgentAsync("With Override");
+        await _client.PutAsync(
+            $"/api/v1/admin/agents/{agentId}",
+            JsonContent.Create(new { capacity = new { maxSms = 2 } }));
+
+        var response = await _client.GetAsync($"/api/v1/admin/agents/{agentId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        dto["capacityOverride"].Should().NotBeNull();
+        dto["capacityOverride"]!["maxSms"]!.GetValue<int>().Should().Be(2);
+        // The non-overridden fields stay null in the raw override DTO.
+        dto["capacityOverride"]!["maxChat"].Should().BeNull();
+        dto["effectiveCapacity"]!["maxSms"]!.GetValue<int>().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task CreateAgent_ShouldPersistCapacityOverride_WhenSupplied()
+    {
+        var userId = $"user-{Guid.NewGuid():N}";
+        var response = await _client.PostAsync(
+            "/api/v1/admin/agents",
+            JsonContent.Create(new { userId, displayName = "Created With Cap", capacity = new { maxChat = 6 } }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        dto["capacityOverride"]!["maxChat"]!.GetValue<int>().Should().Be(6);
+        dto["effectiveCapacity"]!["maxChat"]!.GetValue<int>().Should().Be(6);
     }
 
     // ─── ADR-0026 Phase A.6 — agent-centric membership listing ────────────────

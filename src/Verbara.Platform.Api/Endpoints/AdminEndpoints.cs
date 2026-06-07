@@ -416,24 +416,39 @@ internal static class AdminEndpoints
     private static async Task<IResult> ListAgents(
         HttpContext context,
         [FromServices] IAgentStore store,
+        [FromServices] ICapacityDefaultsProvider defaultsProvider,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
     {
         var tenantId = GetTenantId(context);
         var result = await store.ListAsync(tenantId, new AgentQuery { Page = page, PageSize = pageSize }, ct);
-        return Results.Ok(result);
+
+        // W6-A6 — fetch the tenant defaults ONCE, then resolve each already-loaded agent's
+        // effective capacity in-memory (AgentCapacityResolver.ResolveEffective) instead of calling
+        // the resolver per agent, which would re-read each agent from the store (N+1).
+        var defaults = await defaultsProvider.GetDefaultsAsync(tenantId, ct);
+        var items = result.Items
+            .Select(a => AdminAgentResponseDto.FromAgent(a, AgentCapacityResolver.ResolveEffective(a.CapacityOverride, defaults)))
+            .ToList();
+        var dtos = new PagedResult<AdminAgentResponseDto>(items, result.TotalCount, result.Page, result.PageSize);
+        return Results.Ok(dtos);
     }
 
     private static async Task<IResult> GetAgent(
         string id,
         HttpContext context,
         [FromServices] IAgentStore store,
+        [FromServices] ICapacityDefaultsProvider defaultsProvider,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var agent = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return agent is null ? Results.NotFound() : Results.Ok(agent);
+        if (agent is null) return Results.NotFound();
+
+        var defaults = await defaultsProvider.GetDefaultsAsync(tenantId, ct);
+        var effective = AgentCapacityResolver.ResolveEffective(agent.CapacityOverride, defaults);
+        return Results.Ok(AdminAgentResponseDto.FromAgent(agent, effective));
     }
 
     private static async Task<IResult> CreateAgent(
@@ -442,10 +457,16 @@ internal static class AdminEndpoints
         [FromServices] IAgentStore store,
         [FromServices] IQueueStore queueStore,
         [FromServices] IQueueMembershipStore membershipStore,
+        [FromServices] ICapacityDefaultsProvider defaultsProvider,
+        [FromServices] IAuditService audit,
         IClock clock,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+
+        // W6-A6 — validate the optional capacity override before any write.
+        if (body.Capacity is { } cap && ValidateCapacity(cap) is { } capError)
+            return Results.BadRequest(capError);
 
         // ADR-0026 Phase A.1 validation: normalize + verify allowed_channels.
         // Per-membership: AllowedChannels=null means "all channels the queue accepts";
@@ -480,7 +501,13 @@ internal static class AdminEndpoints
         if (body.Extension is not null) agent.Extension = body.Extension;
         if (body.SipPassword is not null) agent.SipPassword = body.SipPassword;
         if (body.AutoAnswer is not null) agent.AutoAnswer = body.AutoAnswer;
+        if (body.Capacity is { } capOverride) agent.CapacityOverride = ToOverride(capOverride);
         await store.SaveAsync(agent, ct);
+
+        // W6-A6 — best-effort audit when an override was supplied at creation (no old value).
+        if (body.Capacity is not null)
+            await RecordCapacityAuditAsync(audit, tenantId, GetCurrentUserId(context), agent.AgentId,
+                oldOverride: new ChannelCapacityOverride(), newOverride: agent.CapacityOverride, ct);
 
         var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
         if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword) && syncService is not null)
@@ -530,7 +557,9 @@ internal static class AdminEndpoints
             }
         }
 
-        return Results.Created($"/admin/agents/{agent.AgentId}", agent);
+        var defaults = await defaultsProvider.GetDefaultsAsync(tenantId, ct);
+        var effective = AgentCapacityResolver.ResolveEffective(agent.CapacityOverride, defaults);
+        return Results.Created($"/admin/agents/{agent.AgentId}", AdminAgentResponseDto.FromAgent(agent, effective));
     }
 
     private static async Task<IResult> UpdateAgent(
@@ -538,10 +567,17 @@ internal static class AdminEndpoints
         HttpContext context,
         [FromBody] UpdateAgentRequest body,
         [FromServices] IAgentStore store,
+        [FromServices] ICapacityDefaultsProvider defaultsProvider,
+        [FromServices] IAuditService audit,
         IClock clock,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+
+        // W6-A6 — validate the optional capacity override before loading/mutating the agent.
+        if (body.Capacity is { } cap && ValidateCapacity(cap) is { } capError)
+            return Results.BadRequest(capError);
+
         var agent = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (agent is null)
             return Results.NotFound();
@@ -556,8 +592,20 @@ internal static class AdminEndpoints
         // the only writer is the always-complete agent form, and inherit falls back to the queue
         // default (false by default = manual), so an omitting caller's reset is benign.
         agent.AutoAnswer = body.AutoAnswer;
+
+        // W6-A6 — capacity override: null leaves the existing override untouched (like other
+        // optional fields); a populated DTO replaces it wholesale. Snapshot the old value first
+        // so the audit records the before/after.
+        var oldOverride = agent.CapacityOverride;
+        var capacityChanged = body.Capacity is not null;
+        if (body.Capacity is { } newCap) agent.CapacityOverride = ToOverride(newCap);
+
         agent.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(agent, ct);
+
+        if (capacityChanged)
+            await RecordCapacityAuditAsync(audit, tenantId, GetCurrentUserId(context), agent.AgentId,
+                oldOverride, agent.CapacityOverride, ct);
 
         if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword))
         {
@@ -569,7 +617,9 @@ internal static class AdminEndpoints
             }
         }
 
-        return Results.Ok(agent);
+        var defaults = await defaultsProvider.GetDefaultsAsync(tenantId, ct);
+        var effective = AgentCapacityResolver.ResolveEffective(agent.CapacityOverride, defaults);
+        return Results.Ok(AdminAgentResponseDto.FromAgent(agent, effective));
     }
 
     private static async Task<IResult> DeleteAgent(
@@ -787,6 +837,92 @@ internal static class AdminEndpoints
         return Results.NoContent();
     }
 
+    // ─── W6-A6 capacity helpers ─────────────────────────────────────────────────
+
+    // The async-channel caps (chat/email/sms/total) accept 0..50: 0 disables the
+    // channel for the agent, 50 is an absurd-but-safe upper bound that rejects typos
+    // and negatives. Voice is pinned to a single exclusive lane (W5b ARI mixing-bridge
+    // deferred), so MaxVoice may only be null (inherit) or exactly 1.
+    private const int MaxCapacityValue = 50;
+
+    /// <summary>
+    /// W6-A6 — validates a per-agent capacity override. Returns a human-readable error string for
+    /// HTTP 400 (Results.BadRequest, matching the sibling agent-create channel validation), or null
+    /// when valid. MaxVoice must be null or 1; each other field, when non-null, must be in [0, 50].
+    /// </summary>
+    private static string? ValidateCapacity(ChannelCapacityOverrideDto cap)
+    {
+        if (cap.MaxVoice is { } v && v != 1)
+            return "MaxVoice must be null (inherit) or 1. Concurrent voice is a single exclusive lane until the ARI mixing-bridge lands.";
+
+        if (RangeError(cap.MaxChat, nameof(cap.MaxChat)) is { } chatErr) return chatErr;
+        if (RangeError(cap.MaxEmail, nameof(cap.MaxEmail)) is { } emailErr) return emailErr;
+        if (RangeError(cap.MaxSms, nameof(cap.MaxSms)) is { } smsErr) return smsErr;
+        if (RangeError(cap.MaxTotal, nameof(cap.MaxTotal)) is { } totalErr) return totalErr;
+        return null;
+
+        static string? RangeError(int? value, string field) =>
+            value is { } x && (x < 0 || x > MaxCapacityValue)
+                ? $"{field} must be null (inherit) or between 0 and {MaxCapacityValue}."
+                : null;
+    }
+
+    private static ChannelCapacityOverride ToOverride(ChannelCapacityOverrideDto cap) => new()
+    {
+        MaxVoice = cap.MaxVoice,
+        MaxChat = cap.MaxChat,
+        MaxEmail = cap.MaxEmail,
+        MaxSms = cap.MaxSms,
+        MaxTotal = cap.MaxTotal,
+    };
+
+    // W6-A6 — best-effort capacity audit (mirrors ForceAgentOffline: a failed audit write must
+    // NEVER fail the operator's request). Same category ("queues") as the other agent-lifecycle
+    // audit entries so capacity changes surface alongside force-offline + state transitions.
+    private static async Task RecordCapacityAuditAsync(
+        IAuditService audit,
+        TenantId tenantId,
+        EntityId actorId,
+        EntityId agentId,
+        ChannelCapacityOverride oldOverride,
+        ChannelCapacityOverride newOverride,
+        CancellationToken ct)
+    {
+        try
+        {
+            await audit.RecordAsync(
+                tenantId,
+                category: "queues",
+                action: "agent.capacity_override",
+                severity: "info",
+                actorId: actorId.Value,
+                actorType: "user",
+                targetId: agentId.Value,
+                targetType: "Agent",
+                metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["old_max_voice"] = FormatNullable(oldOverride.MaxVoice),
+                    ["old_max_chat"] = FormatNullable(oldOverride.MaxChat),
+                    ["old_max_email"] = FormatNullable(oldOverride.MaxEmail),
+                    ["old_max_sms"] = FormatNullable(oldOverride.MaxSms),
+                    ["old_max_total"] = FormatNullable(oldOverride.MaxTotal),
+                    ["new_max_voice"] = FormatNullable(newOverride.MaxVoice),
+                    ["new_max_chat"] = FormatNullable(newOverride.MaxChat),
+                    ["new_max_email"] = FormatNullable(newOverride.MaxEmail),
+                    ["new_max_sms"] = FormatNullable(newOverride.MaxSms),
+                    ["new_max_total"] = FormatNullable(newOverride.MaxTotal),
+                },
+                ct: ct);
+        }
+        catch
+        {
+            // Swallow — the capacity write already succeeded; audit is advisory.
+        }
+
+        static string FormatNullable(int? value) =>
+            value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "inherit";
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private static TenantId GetTenantId(HttpContext context)
@@ -856,7 +992,87 @@ internal sealed record CreateAgentRequest(
     string? Extension = null,
     string? SipPassword = null,
     bool? AutoAnswer = null,
+    // W6-A6 — optional per-agent capacity override. null = inherit the tenant default
+    // for every channel; a populated DTO sets only its non-null fields.
+    ChannelCapacityOverrideDto? Capacity = null,
     IReadOnlyList<QueueMembershipRequest>? QueueMemberships = null);
+
+/// <summary>
+/// W6-A6 — wire shape for the per-agent <see cref="ChannelCapacityOverride"/>. Each null field
+/// means "inherit the tenant default" for that channel; a non-null value overrides it. Returned
+/// on the admin agent representation as <c>capacityOverride</c> (null when fully inherited) and
+/// accepted on create/update as <c>capacity</c>.
+/// </summary>
+internal sealed record ChannelCapacityOverrideDto(
+    int? MaxVoice,
+    int? MaxChat,
+    int? MaxEmail,
+    int? MaxSms,
+    int? MaxTotal);
+
+/// <summary>
+/// W6-A6 — the admin agent representation returned by GET /admin/agents/{id} and
+/// /admin/agents (paged). Mirrors the fields the React admin UI consumed from the raw
+/// <see cref="Agent"/> entity, ADDING the raw per-agent <see cref="CapacityOverride"/>
+/// (null when fully inherited, so the UI can render "inherited" vs "overridden") plus the
+/// resolved <see cref="EffectiveCapacity"/> (tenant default merged with the override,
+/// MaxVoice pinned). The plaintext SIP password is deliberately NOT carried (admin
+/// surfaces must never echo the secret — see AgentMeSipExposureTests).
+/// </summary>
+internal sealed record AdminAgentResponseDto(
+    string AgentId,
+    string TenantId,
+    string UserId,
+    string DisplayName,
+    AgentState State,
+    AgentState? PendingState,
+    string? PendingReason,
+    DateTimeOffset? PendingSince,
+    bool HasPendingPause,
+    string? TeamId,
+    IReadOnlyList<string> Skills,
+    string? Extension,
+    bool? AutoAnswer,
+    bool CanAcceptWork,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? UpdatedAt,
+    ChannelCapacityOverrideDto? CapacityOverride,
+    ChannelCapacity EffectiveCapacity)
+{
+    public static AdminAgentResponseDto FromAgent(Agent agent, ChannelCapacity effective)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(effective);
+
+        var o = agent.CapacityOverride;
+        // Emit null when ALL five fields are null (fully inherited) so the UI can
+        // distinguish "inherited" from "overridden"; otherwise project the sparse override.
+        var overrideDto = (o.MaxVoice is null && o.MaxChat is null && o.MaxEmail is null
+                && o.MaxSms is null && o.MaxTotal is null)
+            ? null
+            : new ChannelCapacityOverrideDto(o.MaxVoice, o.MaxChat, o.MaxEmail, o.MaxSms, o.MaxTotal);
+
+        return new AdminAgentResponseDto(
+            AgentId: agent.AgentId.Value,
+            TenantId: agent.TenantId.Value,
+            UserId: agent.UserId.Value,
+            DisplayName: agent.DisplayName,
+            State: agent.State,
+            PendingState: agent.PendingState,
+            PendingReason: agent.PendingReason,
+            PendingSince: agent.PendingSince,
+            HasPendingPause: agent.HasPendingPause,
+            TeamId: agent.TeamId?.Value,
+            Skills: agent.Skills,
+            Extension: agent.Extension,
+            AutoAnswer: agent.AutoAnswer,
+            CanAcceptWork: agent.CanAcceptWork,
+            CreatedAt: agent.CreatedAt,
+            UpdatedAt: agent.UpdatedAt,
+            CapacityOverride: overrideDto,
+            EffectiveCapacity: effective);
+    }
+}
 
 /// <summary>
 /// ADR-0026: channel-aware queue membership specification at agent creation.
@@ -884,7 +1100,16 @@ internal sealed record AgentQueueMembershipDto(
     bool IsExcluded,
     IReadOnlyList<string>? AllowedChannels,
     string Source);
-internal sealed record UpdateAgentRequest(string? DisplayName, string? TeamId, IReadOnlyList<string>? Skills, string? Extension = null, string? SipPassword = null, bool? AutoAnswer = null);
+internal sealed record UpdateAgentRequest(
+    string? DisplayName,
+    string? TeamId,
+    IReadOnlyList<string>? Skills,
+    string? Extension = null,
+    string? SipPassword = null,
+    bool? AutoAnswer = null,
+    // W6-A6 — optional per-agent capacity override. null = leave the existing override
+    // untouched (consistent with the other optional fields); a populated DTO replaces it.
+    ChannelCapacityOverrideDto? Capacity = null);
 
 /// <summary>
 /// W3 (A6) — request body for the admin force-offline lever. When
