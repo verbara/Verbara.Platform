@@ -20,6 +20,10 @@ public static class ServiceCollectionExtensions
         else
             services.AddOptions<QueueOptions>();
 
+        // W6 — InMemoryAgentCapacityService(IAgentStore, IAgentCapacityResolver): the resolver
+        // supplies EFFECTIVE per-channel + MaxTotal capacity; IAgentStore backs the phantom-agent
+        // existence guard. Both are Singletons resolved by constructor injection. (The Api host
+        // overrides this with PersistentAgentCapacityService when a Postgres connection exists.)
         services.AddSingleton<IAgentCapacityService, InMemoryAgentCapacityService>();
         services.AddSingleton<IAgentPresenceService, InMemoryAgentPresenceService>();
 

@@ -13,17 +13,19 @@ public sealed class PersistentAgentCapacityService : IAgentCapacityService
     private readonly InMemoryAgentCapacityService _inner;
     private readonly IAgentCapacityStore _store;
     private readonly IConversationStore _conversationStore;
-    private readonly IAgentStore _agentStore;
 
     private int _reconciled;
 
     public PersistentAgentCapacityService(
         IAgentStore agentStore,
+        IAgentCapacityResolver resolver,
         IAgentCapacityStore store,
         IConversationStore conversationStore)
     {
-        _agentStore = agentStore;
-        _inner = new InMemoryAgentCapacityService(agentStore);
+        // W6 — the inner now resolves EFFECTIVE capacity via the resolver (tenant default +
+        // per-agent override) and pools the chat family; it still takes IAgentStore for the
+        // cheap phantom-agent existence guard.
+        _inner = new InMemoryAgentCapacityService(agentStore, resolver);
         _store = store;
         _conversationStore = conversationStore;
     }
@@ -80,7 +82,9 @@ public sealed class PersistentAgentCapacityService : IAgentCapacityService
             loads[key] = loads.GetValueOrDefault(key) + 1;
         }
 
-        // Set in-memory capacity to match actual ownership
+        // Set in-memory capacity to match actual ownership. W6 — the inner ReserveAsync
+        // normalizes each raw chat-family channel onto the canonical WebChat bucket, so
+        // these per-raw-channel reserves funnel into the same pooled slot the live gate reads.
         foreach (var ((agentIdStr, channel), count) in loads)
         {
             var agentId = EntityId.From(agentIdStr);
@@ -138,6 +142,8 @@ public sealed class PersistentAgentCapacityService : IAgentCapacityService
     private async Task PersistCurrentLoadsAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
     {
         var voice = await _inner.GetCurrentLoadAsync(tenantId, agentId, ChannelType.Voice, ct).ConfigureAwait(false);
+        // W6 — WebChat is the canonical chat bucket; the inner pools every chat-family channel
+        // here, so this single read returns the POOLED chat total (not just WebChat-typed work).
         var chat = await _inner.GetCurrentLoadAsync(tenantId, agentId, ChannelType.WebChat, ct).ConfigureAwait(false);
         var email = await _inner.GetCurrentLoadAsync(tenantId, agentId, ChannelType.Email, ct).ConfigureAwait(false);
         var sms = await _inner.GetCurrentLoadAsync(tenantId, agentId, ChannelType.Sms, ct).ConfigureAwait(false);

@@ -248,6 +248,7 @@ if (!string.IsNullOrEmpty(coreConnectionString))
     builder.Services.AddSingleton<IAgentCapacityService>(sp =>
         new PersistentAgentCapacityService(
             sp.GetRequiredService<IAgentStore>(),
+            sp.GetRequiredService<IAgentCapacityResolver>(),
             sp.GetRequiredService<IAgentCapacityStore>(),
             sp.GetRequiredService<IConversationStore>()));
 }

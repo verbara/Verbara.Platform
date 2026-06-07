@@ -20,8 +20,17 @@ public sealed class ChannelCapacity
     public int GetMax(ChannelType channel) => channel switch
     {
         ChannelType.Voice => MaxVoice,
+        // W6 — the whole chat family shares ONE pooled bucket vs MaxChat. Mapping every
+        // chat sub-channel here keeps GetMax consistent with the capacity service's pooling
+        // (which normalizes all of these to the WebChat bucket before calling GetMax).
         ChannelType.WhatsApp => MaxChat,
         ChannelType.WebChat => MaxChat,
+        ChannelType.Messenger => MaxChat,
+        ChannelType.Instagram => MaxChat,
+        ChannelType.Telegram => MaxChat,
+        ChannelType.Twitter => MaxChat,
+        ChannelType.Video => MaxChat,
+        ChannelType.Rcs => MaxChat,
         ChannelType.Sms => MaxSms,
         ChannelType.Email => MaxEmail,
         _ => 0,
