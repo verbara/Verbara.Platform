@@ -97,7 +97,7 @@ internal static class AgentEndpoints
             }
 
             // Deferrable but no active work and not already pending → apply now.
-            agent.TransitionTo(target);
+            agent.TransitionTo(target, clock.GetUtcNow());
             await agentStore.SaveAsync(agent, ct);
 
             eventBus.Publish(new AgentStateChangedEvent(
@@ -117,7 +117,7 @@ internal static class AgentEndpoints
             agent.PendingState = null;
             agent.PendingReason = null;
             agent.PendingSince = null;
-            agent.TransitionTo(target);
+            agent.TransitionTo(target, clock.GetUtcNow());
             await agentStore.SaveAsync(agent, ct);
 
             // Emit the unpause (pending-cleared) event ONLY when the new target is
@@ -144,7 +144,7 @@ internal static class AgentEndpoints
         }
 
         // Not pending, any target — existing immediate path.
-        agent.TransitionTo(target);
+        agent.TransitionTo(target, clock.GetUtcNow());
         await agentStore.SaveAsync(agent, ct);
 
         eventBus.Publish(new AgentStateChangedEvent(
