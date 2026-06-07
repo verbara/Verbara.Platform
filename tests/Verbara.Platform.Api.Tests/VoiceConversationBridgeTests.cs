@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reactive.Subjects;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Conversations;
@@ -7,6 +8,7 @@ using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
 using Verbara.Sdk;
 using Verbara.Sdk.Ami.Actions;
+using Verbara.Sdk.Enums;
 using Verbara.Sdk.Ami.Connection;
 using Verbara.Sdk.Ami.Responses;
 using Verbara.Sdk.Live.Server;
@@ -543,6 +545,162 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         await bridge.LinkOutboundCallAsync(session, "PJSIP/acme-agent-x");
 
         await _conversations.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
+    }
+
+    // ─── IsAbnormalAgentHangup (W5b A1 — the pure callback-eval classifier) ───────
+
+    [Fact]
+    public void IsAbnormalAgentHangup_ShouldReturnTrue_WhenNonNormalCauseAndAgentLeftFirst()
+    {
+        var agentLeft = new DateTimeOffset(2026, 5, 31, 12, 0, 0, TimeSpan.Zero);
+        var callerLeft = agentLeft.AddSeconds(2);
+
+        VoiceConversationBridge.IsAbnormalAgentHangup(HangupCause.NormalTemporaryFailure, agentLeft, callerLeft)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsAbnormalAgentHangup_ShouldReturnTrue_WhenAgentLeftAndCallerStillPresent()
+    {
+        var agentLeft = new DateTimeOffset(2026, 5, 31, 12, 0, 0, TimeSpan.Zero);
+
+        VoiceConversationBridge.IsAbnormalAgentHangup(HangupCause.NetworkOutOfOrder, agentLeft, callerLeftAt: null)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsAbnormalAgentHangup_ShouldReturnFalse_WhenNormalClearing()
+    {
+        var agentLeft = new DateTimeOffset(2026, 5, 31, 12, 0, 0, TimeSpan.Zero);
+
+        VoiceConversationBridge.IsAbnormalAgentHangup(HangupCause.NormalClearing, agentLeft, callerLeftAt: null)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsAbnormalAgentHangup_ShouldReturnFalse_WhenCauseNull()
+    {
+        var agentLeft = new DateTimeOffset(2026, 5, 31, 12, 0, 0, TimeSpan.Zero);
+
+        VoiceConversationBridge.IsAbnormalAgentHangup(agentCause: null, agentLeft, callerLeftAt: null)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsAbnormalAgentHangup_ShouldReturnFalse_WhenCallerHungUpFirst()
+    {
+        var callerLeft = new DateTimeOffset(2026, 5, 31, 12, 0, 0, TimeSpan.Zero);
+        var agentLeft = callerLeft.AddSeconds(2);
+
+        VoiceConversationBridge.IsAbnormalAgentHangup(HangupCause.NormalTemporaryFailure, agentLeft, callerLeft)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsAbnormalAgentHangup_ShouldReturnFalse_WhenAgentLeftAtNull()
+    {
+        var callerLeft = new DateTimeOffset(2026, 5, 31, 12, 0, 0, TimeSpan.Zero);
+
+        VoiceConversationBridge.IsAbnormalAgentHangup(HangupCause.NormalTemporaryFailure, agentLeftAt: null, callerLeft)
+            .Should().BeFalse();
+    }
+
+    // ─── OnCallEnded callback-eval fact stamping (W5b A1) ─────────────────────────
+
+    private Queue StubQueue(string name)
+    {
+        var queue = new Queue
+        {
+            QueueId = EntityId.New(),
+            TenantId = new TenantId(Tenant),
+            Name = name,
+            CreatedAt = _clock.UtcNow,
+        };
+        _queues.ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new PagedResult<Queue>([queue], 1, 1, 500));
+        return queue;
+    }
+
+    private Contact StubContactWithVoiceAddress(EntityId contactId, string voiceAddress)
+    {
+        var contact = new Contact
+        {
+            ContactId = contactId,
+            TenantId = new TenantId(Tenant),
+            CreatedAt = _clock.UtcNow,
+        };
+        contact.AddAddress(new ChannelAddress(ChannelType.Voice, voiceAddress));
+        _contactStore.GetByIdAsync(Arg.Any<TenantId>(), contactId, Arg.Any<CancellationToken>())
+            .Returns(contact);
+        return contact;
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampCallbackEvalFacts_WhenEndedAfterAnswer()
+    {
+        var session = MakeSession("link-cb1", Tenant, AgentInterface);
+        session.QueueName = "acme-Support";
+        _sessions.GetById("s-link-cb1").Returns(session);
+        var conversation = VoiceConversation("link-cb1", ConversationState.Active);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-cb1", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        var queue = StubQueue("Support");
+        StubContactWithVoiceAddress(conversation.ContactId, "+15551230000");
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Busy));
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-cb1", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(39)));
+
+        conversation.Metadata.Should().ContainKey("pendingCallbackEval").WhoseValue.Should().Be("true");
+        conversation.Metadata.Should().ContainKey("callbackEvalSince")
+            .WhoseValue.Should().Be(_clock.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        // No participants on the test session ⇒ null CallerIdNum ⇒ resolved from the contact's Voice address.
+        conversation.Metadata.Should().ContainKey("callbackNumber").WhoseValue.Should().Be("+15551230000");
+        conversation.Metadata.Should().ContainKey("originQueueId").WhoseValue.Should().Be(queue.QueueId.Value);
+        // No participants ⇒ conservative default: agent leg NOT flagged abnormal.
+        conversation.Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("false");
+        // Existing behavior preserved: answered call → WrapUp + capacity released + ACW.
+        conversation.State.Should().Be(ConversationState.WrapUp);
+        await _capacity.Received(1).ReleaseAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), ChannelType.Voice, Arg.Any<CancellationToken>());
+        await _agents.Received(1).SaveAsync(Arg.Is<Agent>(a => a.State == AgentState.ACW), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldNotStampCallbackEval_WhenEndedWhileQueued()
+    {
+        var session = MakeSession("link-cb2", Tenant);
+        session.QueueName = "acme-Support";
+        _sessions.GetById("s-link-cb2").Returns(session);
+        var conversation = VoiceConversation("link-cb2", ConversationState.Queued);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-cb2", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-cb2", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(8), null));
+
+        conversation.State.Should().Be(ConversationState.Abandoned);
+        conversation.Metadata.Should().NotContainKey("pendingCallbackEval");
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldNotStampCallbackNumber_WhenCallerAnonymous()
+    {
+        var session = MakeSession("link-cb3", Tenant, AgentInterface);
+        session.QueueName = "acme-Support";
+        _sessions.GetById("s-link-cb3").Returns(session);
+        var conversation = VoiceConversation("link-cb3", ConversationState.Active);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-cb3", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        StubContactWithVoiceAddress(conversation.ContactId, "anonymous");
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Busy));
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-cb3", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(39)));
+
+        conversation.Metadata.Should().ContainKey("pendingCallbackEval").WhoseValue.Should().Be("true");
+        conversation.Metadata.Should().NotContainKey("callbackNumber");
     }
 
     public void Dispose() => _eventBus.Dispose();

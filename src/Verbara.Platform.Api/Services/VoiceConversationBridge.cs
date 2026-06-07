@@ -1,3 +1,4 @@
+using System.Globalization;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
@@ -5,6 +6,7 @@ using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Ami.Responses;
+using Verbara.Sdk.Enums;
 using Verbara.Sdk.Live.Server;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Sessions;
@@ -376,6 +378,14 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             var oldState = conversation.State;
             conversation.TransitionTo(next, _clock.UtcNow);
             conversation.UpdatedAt = _clock.UtcNow;
+
+            // W5b voice caller-rescue (A1): for an ANSWERED call only, stamp the facts the later
+            // leader-gated callback worker (A6) reads to decide whether the dropped caller deserves
+            // a priority callback. We persist them in the SAME SaveAsync as the WrapUp transition so
+            // the eval markers and the state advance commit atomically (no half-stamped row on crash).
+            if (wasActive)
+                await StampCallbackEvalFactsAsync(tenantId, session, conversation).ConfigureAwait(false);
+
             await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
             _eventBus.Publish(new ConversationStateChangedEvent(tenantId.Value, conversation.ConversationId.Value, oldState.ToString(), conversation.State.ToString()));
         }
@@ -387,6 +397,107 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         {
             await ReleaseCapacityAsync(tenantId, released).ConfigureAwait(false);
             await TransitionAgentAsync(tenantId, released, AgentState.ACW).ConfigureAwait(false);
+        }
+    }
+
+    // ─── W5b voice caller-rescue: callback-eval detection + fact stamping (A1) ───
+
+    /// <summary>
+    /// Classifies whether the agent's SIP leg died ABNORMALLY (vs a deliberate hangup) on an answered
+    /// call — the trigger for a possible priority callback to the dropped customer (W5b). Pure +
+    /// primitive-typed (not a <see cref="CallSession"/>) because <c>CallSession.AddParticipant</c> is
+    /// SDK-internal, so this stays directly unit-testable. Deliberately CONSERVATIVE (favors false
+    /// negatives): a wrong "abnormal=true" would call a customer the agent intentionally hung up on,
+    /// which is worse than a missed callback. Ambiguous cases the A6 worker still covers via its agent
+    /// liveness backstop, so under-flagging here is safe.
+    /// </summary>
+    /// <param name="agentCause">The agent leg's hangup cause; <see langword="null"/> = no evidence.</param>
+    /// <param name="agentLeftAt">When the agent leg left the bridge; <see langword="null"/> = unknown.</param>
+    /// <param name="callerLeftAt">When the caller leg left the bridge; <see langword="null"/> = still present at end.</param>
+    internal static bool IsAbnormalAgentHangup(HangupCause? agentCause, DateTimeOffset? agentLeftAt, DateTimeOffset? callerLeftAt)
+    {
+        if (agentCause is null)
+            return false; // no evidence the agent leg ended at all → can't claim abnormal
+        if (agentCause == HangupCause.NormalClearing)
+            return false; // deliberate clean hangup (Q.931 cause 16) → not a leg death
+        if (agentLeftAt is null)
+            return false; // can't establish ordering vs the caller → stay conservative
+        if (callerLeftAt is { } caller && caller < agentLeftAt)
+            return false; // caller hung up first → customer-initiated end, not agent death
+        return true;       // non-normal cause AND agent left first/together (or caller still present) → abnormal
+    }
+
+    /// <summary>
+    /// Stamps the callback-eval contract metadata the A6 leader-gated worker reads. The KEY STRINGS are
+    /// a hard cross-component contract — A6 looks them up verbatim. Best-effort lookups (queue, contact)
+    /// fall back to "absent": A6 escalates a callback with no number / no origin queue rather than fail.
+    /// </summary>
+    private async Task StampCallbackEvalFactsAsync(TenantId tenantId, CallSession session, Conversation conversation)
+    {
+        var agent = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Agent);
+        var caller = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Caller);
+        var abnormal = IsAbnormalAgentHangup(agent?.HangupCause, agent?.LeftAt, caller?.LeftAt);
+
+        conversation.SetMetadata("pendingCallbackEval", "true");
+        conversation.SetMetadata("agentLegAbnormal", abnormal ? "true" : "false");
+        conversation.SetMetadata("callbackEvalSince", _clock.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+
+        var number = await ResolveCallbackNumberAsync(tenantId, session, conversation.ContactId).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(number) && !string.Equals(number, AnonymousCaller, StringComparison.OrdinalIgnoreCase))
+            conversation.SetMetadata("callbackNumber", number);
+        // else: leave callbackNumber absent — A6 escalates a callback it can't place a number for.
+
+        var originQueueId = await ResolveOriginQueueIdAsync(tenantId, tenantId.Value, session.QueueName).ConfigureAwait(false);
+        if (originQueueId is { } queueId)
+            conversation.SetMetadata("originQueueId", queueId.Value);
+        // else: leave originQueueId absent — A6 escalates "no origin queue".
+    }
+
+    /// <summary>
+    /// Resolves the customer's callable number for a callback: the live SIP <see cref="CallSession.CallerIdNum"/>
+    /// when it's a real number, else the contact's stored Voice <see cref="ChannelAddress"/>. Best-effort —
+    /// a contact-store fault must never throw out of the handler (StopHost), so it logs + returns null.
+    /// </summary>
+    private async Task<string?> ResolveCallbackNumberAsync(TenantId tenantId, CallSession session, EntityId contactId)
+    {
+        if (!string.IsNullOrWhiteSpace(session.CallerIdNum))
+            return session.CallerIdNum;
+
+        try
+        {
+            var contact = await _contactStore.GetByIdAsync(tenantId, contactId, CancellationToken.None).ConfigureAwait(false);
+            return contact?.Addresses.FirstOrDefault(a => a.Channel == ChannelType.Voice)?.Address;
+        }
+        catch (Exception ex)
+        {
+            LogContactLookupFailed(contactId.Value, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the platform queue id the call came in on, from the Asterisk realtime
+    /// <c>{tenant}-{Queue.Name}</c> in <see cref="CallSession.QueueName"/> — mirrors
+    /// <see cref="ResolveQueueAutoAnswerAsync"/> (strip prefix, list + match by name). Best-effort:
+    /// blank name, no match, or a lookup fault returns null and the fact is left unstamped.
+    /// </summary>
+    private async Task<EntityId?> ResolveOriginQueueIdAsync(TenantId tenantId, string tenant, string? rawQueueName)
+    {
+        if (string.IsNullOrWhiteSpace(rawQueueName))
+            return null;
+
+        var prefix = tenant + "-";
+        var queueName = rawQueueName.StartsWith(prefix, StringComparison.Ordinal) ? rawQueueName[prefix.Length..] : rawQueueName;
+        try
+        {
+            var page = await _queues.ListAsync(tenantId, new PagedQuery(1, 500), CancellationToken.None).ConfigureAwait(false);
+            var queue = page.Items.FirstOrDefault(q => q.Name == queueName);
+            return queue?.QueueId;
+        }
+        catch (Exception ex)
+        {
+            LogQueueResolveFailed(queueName, ex.Message);
+            return null;
         }
     }
 
