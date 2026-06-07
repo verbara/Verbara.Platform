@@ -21,7 +21,9 @@ public class PersistentAgentCapacityServiceTests
         UserId = EntityId.From("u-001"),
         DisplayName = "Agent",
         State = AgentState.Available,
-        Capacity = new ChannelCapacity { MaxVoice = maxVoice, MaxChat = maxChat, MaxEmail = maxEmail },
+        // W6 — set the per-agent override so the effective per-channel maxima are the
+        // test's chosen values (the service merges this over the class defaults via ToEffective).
+        CapacityOverride = new ChannelCapacityOverride { MaxVoice = maxVoice, MaxChat = maxChat, MaxEmail = maxEmail },
         CreatedAt = DateTimeOffset.UtcNow,
     };
 

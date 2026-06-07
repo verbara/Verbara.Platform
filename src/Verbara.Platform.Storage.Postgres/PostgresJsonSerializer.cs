@@ -36,6 +36,7 @@ namespace Verbara.Platform.Storage.Postgres;
 [JsonSerializable(typeof(HoursOfOperation))]
 [JsonSerializable(typeof(WrapUpConfig))]
 [JsonSerializable(typeof(ChannelCapacity))]
+[JsonSerializable(typeof(ChannelCapacityOverride))]
 [JsonSerializable(typeof(List<int>))]
 [JsonSerializable(typeof(IReadOnlyList<int>))]
 [JsonSerializable(typeof(List<SurveyQuestion>))]

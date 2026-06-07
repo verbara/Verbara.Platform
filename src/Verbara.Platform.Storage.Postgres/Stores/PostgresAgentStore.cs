@@ -114,7 +114,7 @@ internal sealed class PostgresAgentStore : IAgentStore
 
     public async Task SaveAsync(Agent agent, CancellationToken ct)
     {
-        var capacityJson = JsonSerializer.Serialize(agent.Capacity, PostgresJson.Ctx.ChannelCapacity);
+        var capacityJson = JsonSerializer.Serialize(agent.CapacityOverride, PostgresJson.Ctx.ChannelCapacityOverride);
         var skillsJson = JsonSerializer.Serialize(agent.Skills, PostgresJson.Ctx.IReadOnlyListString);
 
         await _dataSource.ExecuteAsync(
@@ -275,7 +275,10 @@ internal sealed class PostgresAgentStore : IAgentStore
             UserId = EntityId.From(user_id),
             DisplayName = display_name,
             State = (AgentState)state,
-            Capacity = JsonSerializer.Deserialize(capacity, PostgresJson.Ctx.ChannelCapacity) ?? new ChannelCapacity(),
+            // W6 — legacy rows store '{}' (or a full ChannelCapacity shape); either
+            // deserializes into ChannelCapacityOverride with the missing fields left
+            // null = "inherit the tenant default".
+            CapacityOverride = JsonSerializer.Deserialize(capacity, PostgresJson.Ctx.ChannelCapacityOverride) ?? new ChannelCapacityOverride(),
             TeamId = team_id != null ? EntityId.From(team_id) : null,
             Skills = JsonSerializer.Deserialize(skills, PostgresJson.Ctx.IReadOnlyListString) ?? (IReadOnlyList<string>)[],
             Extension = extension,

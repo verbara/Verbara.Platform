@@ -19,7 +19,8 @@ public sealed class InMemoryAgentCapacityService : IAgentCapacityService
         if (agent is null)
             return false;
 
-        var max = agent.Capacity.GetMax(channel);
+        // W6-A4 will resolve via IAgentCapacityResolver (tenant default) + add chat-pool + MaxTotal
+        var max = agent.CapacityOverride.ToEffective(new ChannelCapacity()).GetMax(channel);
         if (max <= 0)
             return false;
 

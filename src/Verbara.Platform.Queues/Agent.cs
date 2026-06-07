@@ -29,7 +29,14 @@ public sealed class Agent : ITenantScoped, IAuditable
 
     public bool HasPendingPause => PendingState is not null;
 
-    public ChannelCapacity Capacity { get; set; } = new();
+    /// <summary>
+    /// W6 — sparse per-agent capacity override. Each null field inherits the
+    /// per-tenant default; the effective <see cref="ChannelCapacity"/> is resolved
+    /// at read time by IAgentCapacityResolver (tenant default + this override).
+    /// Persisted as the <c>agents.capacity</c> jsonb column (legacy <c>'{}'</c>
+    /// rows deserialize to an all-null override = "inherit everything").
+    /// </summary>
+    public ChannelCapacityOverride CapacityOverride { get; set; } = new();
     public EntityId? TeamId { get; set; }
     public IReadOnlyList<string> Skills { get; set; } = [];
     public string? Extension { get; set; }
@@ -56,14 +63,19 @@ public sealed class Agent : ITenantScoped, IAuditable
 
     public bool CanAcceptWork => AgentStateMachine.IsRoutable(State);
 
+    /// <summary>
+    /// W6 — a pure routability check. The per-channel / MaxTotal capacity gate now
+    /// requires the resolved effective <see cref="ChannelCapacity"/> (tenant default
+    /// merged with <see cref="CapacityOverride"/>), which is not available on the
+    /// agent entity alone — that gate lives in IAgentCapacityService + the resolver
+    /// (W6-A3/A4). This helper only answers "is the agent in a routable state?".
+    /// The <paramref name="channel"/> arg is retained for source-compatibility and
+    /// future per-channel routability rules.
+    /// </summary>
     public bool HasCapacity(ChannelType channel)
     {
-        if (!CanAcceptWork)
-        {
-            return false;
-        }
-
-        return Capacity.GetMax(channel) > 0;
+        _ = channel;
+        return CanAcceptWork;
     }
 
     public void TransitionTo(AgentState newState, DateTimeOffset? now = null)

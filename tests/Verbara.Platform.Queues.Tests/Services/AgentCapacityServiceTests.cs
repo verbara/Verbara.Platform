@@ -21,7 +21,9 @@ public class AgentCapacityServiceTests
         UserId = EntityId.From("u-001"),
         DisplayName = "Agent",
         State = AgentState.Available,
-        Capacity = new ChannelCapacity { MaxVoice = maxVoice },
+        // W6 — set the per-agent override so the effective MaxVoice is the test's
+        // chosen value (the service merges this over the class defaults via ToEffective).
+        CapacityOverride = new ChannelCapacityOverride { MaxVoice = maxVoice },
         CreatedAt = DateTimeOffset.UtcNow,
     };
 

@@ -46,7 +46,8 @@ internal sealed record AgentMeResponseDto(
             UserId: agent.UserId.Value,
             DisplayName: agent.DisplayName,
             State: agent.State,
-            Capacity: agent.Capacity,
+            // W6-A6 will resolve via IAgentCapacityResolver (tenant default)
+            Capacity: agent.CapacityOverride.ToEffective(new ChannelCapacity()),
             TeamId: agent.TeamId?.Value,
             Skills: agent.Skills,
             Extension: agent.Extension,
