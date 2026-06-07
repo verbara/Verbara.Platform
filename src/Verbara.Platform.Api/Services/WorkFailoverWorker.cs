@@ -294,7 +294,7 @@ public sealed partial class WorkFailoverWorker : BackgroundService
         Message = "Conversation {ConversationId} (tenant {TenantId}) ESCALATED (not re-queued) by work-failover sweep after {Attempts} attempts.")]
     partial void LogFailoverEscalated(string conversationId, string tenantId, int attempts);
 
-    [LoggerMessage(Level = LogLevel.Critical,
+    [LoggerMessage(EventId = 9134, Level = LogLevel.Critical,
         Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]
     partial void LogWorkerCrash(string workerName, string reason, Exception ex);
 }
