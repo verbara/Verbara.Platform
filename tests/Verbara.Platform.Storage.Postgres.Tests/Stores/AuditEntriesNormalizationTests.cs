@@ -210,6 +210,41 @@ public sealed class AuditEntriesNormalizationTests
             .Where(ex => ex.SqlState == "23514"); // check_violation
     }
 
+    [Theory]
+    // The full vocabulary the application code actually emits via IAuditService.RecordAsync.
+    // 'conversations', 'queues', 'reports', 'operational', 'license' were missing from the
+    // migration 021 CHECK and so failed with 23514 against Postgres (the W3-W6 liveness /
+    // deferred-pause / work-failover / callback-rescue workers emit 'queues'/'conversations').
+    // Migration 034 widens the constraint to the real union — this test locks it.
+    [InlineData("auth")]
+    [InlineData("billing")]
+    [InlineData("config")]
+    [InlineData("tenant")]
+    [InlineData("security")]
+    [InlineData("impersonation")]
+    [InlineData("retention")]
+    [InlineData("data")]
+    [InlineData("rbac")]
+    [InlineData("data_access")]
+    [InlineData("admin")]
+    [InlineData("conversations")]
+    [InlineData("queues")]
+    [InlineData("reports")]
+    [InlineData("operational")]
+    [InlineData("license")]
+    public async Task CheckConstraint_ShouldAcceptDomainCategory_WhenWritten(string category)
+    {
+        await _fixture.ResetAsync();
+
+        var act = async () => await _fixture.ExecAsync(
+            "INSERT INTO audit_entries (entry_id, tenant_id, action, entity_type, entity_id, " +
+            "occurred_at, category, severity, actor_type) " +
+            $"VALUES ('e1', 't1', 'a', 'e', '1', NOW(), '{category}', 'info', 'system')");
+
+        await act.Should().NotThrowAsync(
+            because: $"'{category}' is a category emitted by application code and must satisfy audit_entries_category_check");
+    }
+
     [Fact]
     public async Task Reader_ShouldHydrateChanges_FromBeforeAfterColumns()
     {
