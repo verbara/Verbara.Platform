@@ -161,7 +161,15 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         if (conversation.Owner?.Kind == ConversationOwnerKind.Agent && conversation.Owner.OwnerId.HasValue)
             await _capacity.ReleaseAsync(tenantId, conversation.Owner.OwnerId.Value, conversation.Channel, ct).ConfigureAwait(false);
 
-        // Active → Queued requires going through Escalated per the state machine
+        var oldState = conversation.State;
+
+        // Re-queue path. OnHold/Consulting have no direct →Queued edge in the state machine,
+        // but they ARE valid re-queue sources (W5 FailoverWorkStates), so first bring them back
+        // to Active; then Active→Escalated→Queued. Active goes straight through; other transferable
+        // states (e.g. Snoozed) use their direct →Queued edge.
+        if (conversation.State is ConversationState.OnHold or ConversationState.Consulting)
+            conversation.TransitionTo(ConversationState.Active, _clock.UtcNow);
+
         if (conversation.State == ConversationState.Active)
         {
             conversation.TransitionTo(ConversationState.Escalated, _clock.UtcNow);
@@ -183,7 +191,7 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
         _eventBus.Publish(new ConversationStateChangedEvent(
-            tenantId.Value, conversationId.Value, "Active", conversation.State.ToString()));
+            tenantId.Value, conversationId.Value, oldState.ToString(), conversation.State.ToString()));
         return new OwnershipResult(true, owner, conversation.State, null);
     }
 

@@ -291,6 +291,31 @@ public sealed class ConversationSwitchboardTests : IDisposable
         conversation.State.Should().Be(ConversationState.Queued);
     }
 
+    [Theory]
+    [InlineData(ConversationState.OnHold)]
+    [InlineData(ConversationState.Consulting)]
+    public async Task RequeueToFrontAsync_ShouldReachQueued_WhenSourceIsOnHoldOrConsulting(
+        ConversationState initial)
+    {
+        // FailoverWorkStates includes OnHold/Consulting, which have no DIRECT →Queued edge.
+        // The core must bridge them via Active → Escalated → Queued so on-hold/consulting
+        // orphans of an offline agent are actually re-queued (+ capacity released), not
+        // silently failed (which would strand the customer and leak the agent's slot).
+        var conversation = BuildConversation(initial, ConversationOwner.ForAgent(_agentId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var targetQueue = EntityId.From("queue-002");
+        var sut = CreateSut();
+        var result = await sut.RequeueToFrontAsync(_conversationId, _tenantId, targetQueue, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.NewState.Should().Be(ConversationState.Queued);
+        conversation.State.Should().Be(ConversationState.Queued);
+        conversation.QueuePriority.Should().Be(-1);
+        await _capacity.Received(1).ReleaseAsync(_tenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>());
+    }
+
     // ─── TransferToAgent ──────────────────────────────────────────────────────
 
     [Fact]
