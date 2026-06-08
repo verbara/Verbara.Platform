@@ -58,6 +58,7 @@
     <Project Path="tests/Verbara.Platform.Flows.Tests/Verbara.Platform.Flows.Tests.csproj" />
     <Project Path="tests/Verbara.Platform.Bot.Tests/Verbara.Platform.Bot.Tests.csproj" />
     <Project Path="tests/Verbara.Platform.Surveys.Tests/Verbara.Platform.Surveys.Tests.csproj" />
+    <Project Path="tests/Verbara.Platform.Typification.Tests/Verbara.Platform.Typification.Tests.csproj" />
     <Project Path="tests/Verbara.Platform.Automation.Tests/Verbara.Platform.Automation.Tests.csproj" />
     <Project Path="tests/Verbara.Platform.Audit.Tests/Verbara.Platform.Audit.Tests.csproj" />
     <Project Path="tests/Verbara.Platform.Billing.Tests/Verbara.Platform.Billing.Tests.csproj" />
