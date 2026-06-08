@@ -277,6 +277,69 @@ public sealed class FlowExecutionEngineTests
         found!.ExecutionId.Should().Be(execution.ExecutionId);
     }
 
+    // ── FlowMetadata ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ProcessMessageAsync_ShouldExposeNonPrivateVariablesAsFlowMetadata_WhenExecutionHasUserVariables()
+    {
+        var flowStore = new InMemoryFlowStore();
+        var execStore = new InMemoryFlowExecutionStore();
+        var engine = BuildEngine(flowStore, execStore);
+
+        var setId = EntityId.New();
+        var endId = EntityId.New();
+        var flow = FlowTestHelpers.MakeFlow(setId, published: true,
+            FlowTestHelpers.MakeNode(setId, "set_variable",
+                new Dictionary<string, string> { ["variable"] = "reason", ["value"] = "billing" },
+                new FlowEdge("default", endId)),
+            FlowTestHelpers.MakeNode(endId, "end"));
+        flowStore.Add(flow);
+
+        var execution = FlowTestHelpers.MakeRunningExecution(flow.FlowId, EntityId.New(), setId);
+        await execStore.SaveAsync(execution, CancellationToken.None);
+
+        var result = await engine.ProcessMessageAsync(
+            execution.ExecutionId, FlowTestHelpers.TextMessage("go"), CancellationToken.None);
+
+        result.Status.Should().Be(FlowExecutionStatus.Completed);
+        result.FlowMetadata.Should().NotBeNull();
+        var metadata = result.FlowMetadata!;
+        metadata.Should().ContainKey("reason");
+        metadata["reason"].Should().Be("billing");
+    }
+
+    [Fact]
+    public async Task ProcessMessageAsync_ShouldExcludeDoubleUnderscoreKeys_WhenBuildingFlowMetadata()
+    {
+        var flowStore = new InMemoryFlowStore();
+        var execStore = new InMemoryFlowExecutionStore();
+        var engine = BuildEngine(flowStore, execStore);
+
+        var setId = EntityId.New();
+        var enqueueId = EntityId.New();
+        var flow = FlowTestHelpers.MakeFlow(setId, published: true,
+            FlowTestHelpers.MakeNode(setId, "set_variable",
+                new Dictionary<string, string> { ["variable"] = "topic", ["value"] = "refund" },
+                new FlowEdge("default", enqueueId)),
+            FlowTestHelpers.MakeNode(enqueueId, "enqueue",
+                new Dictionary<string, string> { ["queue_id"] = "support-q", ["priority"] = "High" }));
+        flowStore.Add(flow);
+
+        var execution = FlowTestHelpers.MakeRunningExecution(flow.FlowId, EntityId.New(), setId);
+        await execStore.SaveAsync(execution, CancellationToken.None);
+
+        var result = await engine.ProcessMessageAsync(
+            execution.ExecutionId, FlowTestHelpers.TextMessage("help"), CancellationToken.None);
+
+        result.Status.Should().Be(FlowExecutionStatus.HandedOff);
+        result.FlowMetadata.Should().NotBeNull();
+        var metadata = result.FlowMetadata!;
+        metadata.Should().ContainKey("topic");
+        metadata.Keys.Should().NotContain(k => k.StartsWith("__", StringComparison.Ordinal));
+        metadata.Should().NotContainKey("__enqueue_queue_id");
+        metadata.Should().NotContainKey("__enqueue_priority");
+    }
+
     [Fact]
     public async Task ProcessMessageAsync_ShouldReturnExistingStatus_WhenExecutionAlreadyCompleted()
     {
