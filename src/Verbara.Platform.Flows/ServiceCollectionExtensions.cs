@@ -25,6 +25,7 @@ public static class ServiceCollectionExtensions
         // Built-in node handlers.
         services.AddSingleton<IFlowNodeHandler, SendMessageNodeHandler>();
         services.AddSingleton<IFlowNodeHandler, CollectInputNodeHandler>();
+        services.AddSingleton<IFlowNodeHandler, CollectReasonNodeHandler>();
         services.AddSingleton<IFlowNodeHandler, ConditionNodeHandler>();
         services.AddSingleton<IFlowNodeHandler, SetVariableNodeHandler>();
         services.AddSingleton<IFlowNodeHandler, AiClassifyNodeHandler>();
