@@ -114,9 +114,20 @@ P0 ships the headline capability; its model is designed from day one to host P1�
 - Server-side validation authoritative for required/visibility/typed fields; the Web renderer mirrors it for UX only.
 - Reporting indexes on `typification_submissions(tenant_id, leaf_node_id, completed_at DESC)` and on the selected-path for roll-ups.
 
+## Addendum — P1 design refinement (2026-06-08, append-only)
+
+P1 planning (deep analysis grounded in code) **refined** D2's one-line framing without changing the decision. Recorded here; full design in [`docs/specs/2026-06-08-typification-p1-shared-capture.md`](../specs/2026-06-08-typification-p1-shared-capture.md).
+
+- **D2 reframed as an attribute-bag contract.** "Shared taxonomy threaded end-to-end" is realized as a single string→string contract on `Conversation.Metadata` (the market-proven *contact attributes* / *participant data* model). Well-known key `reasonPath` = JSON array of node **`Code`s** (stable across republish; the consumer maps Codes→NodeId against the resolved schema, longest-valid-prefix tolerant), plus arbitrary prefill keys consumed by `TypificationField.PrefillSource{Kind:Metadata}`. One consumer (`ITypificationPrefillResolver`) reads it at `GET /typification-form`. Precedence is by execution order: implicit (routing) stamps first, explicit (bot/flow) overwrites.
+- **Capture is broader than `collect_input`.** Four writers: (B1) generic flow-vars→metadata propagation at bot handoff (was discarded — `BotResponse`/`FlowStepResult` gain `FlowMetadata`); (B2) a **new dedicated `collect_reason` flow node** (not `collect_input`) that walks the cascade and writes `reasonPath` by Code; (B3) **implicit digital** via the previously-unused `RouteResult.Metadata` + a new `ReasonHint` rule; (B4) **implicit voice** via a `VERBARA_REASON` channel var set in `StasisInboundConsumer` and read in `VoiceConversationBridge`. Deep analysis found implicit capture (zero customer effort, all channels) is highest-ROI and mostly reuses existing infra.
+- **`ReasonHint` (new, in `Verbara.Platform.Typification`)** keyed by `Scope ∈ {Did, Channel, Queue}` → `ReasonPath` (Codes), resolved most-specific-wins (Did→Queue→Channel). Kept separate from `DidRoute` (routing) for SoC. Admin CRUD `/admin/reason-hints` gated `AdvancedTypification`.
+- **No Pro/Sdk change in P1** (`AdvancedTypification` already exists). **No new cross-pod SSE event.** Prefill provenance deferred to P4.
+- **Latent fix folded in:** the flow designer persisted `node.type` PascalCase while the engine matches snake_case (no publish-time type validation) → designer-built flows would throw at runtime; resolved by a pure bidirectional mapping in the Web `flow-utils.ts` (wire/engine vocabulary = snake_case; PascalCase is a React-Flow render detail).
+
 ## References
 
 - Spec: [`docs/specs/2026-06-07-typification-cascading-conditional-ai.md`](../specs/2026-06-07-typification-cascading-conditional-ai.md)
+- P1 spec: [`docs/specs/2026-06-08-typification-p1-shared-capture.md`](../specs/2026-06-08-typification-p1-shared-capture.md)
 - Current domain being superseded: [`src/Verbara.Platform.Conversations/Disposition.cs`](../../src/Verbara.Platform.Conversations/Disposition.cs), [`WrapUpRecord.cs`](../../src/Verbara.Platform.Conversations/WrapUpRecord.cs), [`DispositionEndpoints.cs`](../../src/Verbara.Platform.Api/Endpoints/DispositionEndpoints.cs)
 - Reused engine: [`src/Verbara.Platform.Flows/Nodes/HttpRequestNodeHandler.cs`](../../src/Verbara.Platform.Flows/Nodes/HttpRequestNodeHandler.cs)
 - Reused AI stack (Pro): `Verbara.Sdk.Pro.CallAnalytics/Engine/CallAnalyticsEngine.cs`, `Verbara.Sdk.Pro.CallAnalytics/Domain/CallSummary.cs` (`DispositionCode`), `Verbara.Sdk.Pro.AgentAssist/Engine/AgentAssistSession.cs`
