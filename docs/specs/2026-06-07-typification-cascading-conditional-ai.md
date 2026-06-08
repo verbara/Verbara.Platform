@@ -3,7 +3,7 @@
 - **Date:** 2026-06-07
 - **Author:** Verbara maintainer (Harol A. Reina H.)
 - **ADR:** [`0029-typification-cascading-conditional-ai-module`](../decisions/0029-typification-cascading-conditional-ai-module.md)
-- **Status:** Draft (input to implementation planning)
+- **Status:** **P0 SHIPPED 2026-06-07** (Pro #2 / Platform #48 / Web #82 merged; Pro v2.7.5-pro). P1–P4 pending.
 - **Repos:** `Verbara.Platform` (domain/API) + `Verbara.Platform.Web` (designer + renderer) + `Verbara.Sdk.Pro` (AI wiring, P2 only)
 
 ## 1. Problem
@@ -232,7 +232,7 @@ No new reflection; Pro engines already exist — P2 is wiring + the suggester + 
 
 ## 11. Phasing
 
-P0 (core, manual) → P1 (shared capture) → P2 (AI) → P3 (data-dips) → P4 (analytics + builder polish). See ADR-0029 §Phasing. **P0 is specced for implementation first**; this document is the umbrella spec, with per-phase plans authored via the writing-plans skill.
+P0 (core, manual) → P1 (shared capture) → P2 (AI) → P3 (data-dips) → P4 (analytics + builder polish). See ADR-0029 §Phasing. **P0 ✅ SHIPPED 2026-06-07** (Pro #2 / Platform #48 / Web #82). P1–P4 pending; this document is the umbrella spec, with per-phase plans authored via the writing-plans skill.
 
 ## 12. Open scope (lock in P0 plan)
 
