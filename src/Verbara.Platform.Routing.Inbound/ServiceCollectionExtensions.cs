@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
         else
             services.AddOptions<InboundRoutingOptions>();
 
+        services.AddSingleton<ReasonHintMiddleware>();
         services.AddSingleton<ChannelQueueMappingMiddleware>();
         services.AddSingleton<LastAgentMiddleware>();
         services.AddSingleton<PriorityEscalationMiddleware>();
@@ -30,6 +31,10 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IReadOnlyList<InboundRoutingMiddlewareBase>>(sp =>
         [
+            // Outermost: continuation-first post-processor. Lets the queue-resolving
+            // chain below run first, then stamps the captured reason taxonomy
+            // (reasonPath) into the resolved route's metadata using the final QueueId.
+            sp.GetRequiredService<ReasonHintMiddleware>(),
             sp.GetRequiredService<ChannelQueueMappingMiddleware>(),
             sp.GetRequiredService<LastAgentMiddleware>(),
             sp.GetRequiredService<PriorityEscalationMiddleware>(),
