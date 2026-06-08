@@ -9,8 +9,8 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 /// <see cref="PostgresTenantIpAllowlistStoreTests"/>. Spins up
 /// <c>postgres:16-alpine</c> and creates a minimal schema:
 /// <c>tenants(tenant_id TEXT PK)</c> + the full <c>tenant_ip_allowlist</c>
-/// table from migration 023. Avoids dragging in the 20+ migration
-/// platform schema.
+/// table from the consolidated 001_Baseline.sql. Avoids dragging in the
+/// full platform schema.
 /// </summary>
 public sealed class IpAllowlistFixture : IAsyncLifetime
 {

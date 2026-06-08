@@ -7,14 +7,17 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 /// <summary>
 /// Testcontainers-backed Postgres fixture for
 /// <see cref="AuditEntriesNormalizationTests"/>. Spins up
-/// <c>postgres:16-alpine</c> and applies the audit_entries shape from
-/// migration 001 plus the normalization columns + check constraints + filter
-/// indexes from migration 021 (R5.3 Phase A Task A.1, ADR-0006).
+/// <c>postgres:16-alpine</c> and builds the final folded audit_entries shape
+/// from the consolidated 001_Baseline.sql: the base table, the normalization
+/// columns + check constraints + filter indexes (ADR-0006), and the widened
+/// category vocabulary. The build is staged here to also exercise the
+/// constraint-evolution path the application historically applied.
 /// </summary>
 /// <remarks>
-/// SQL is inlined rather than running the full 21-migration pipeline so the
+/// SQL is inlined rather than running the full migration pipeline so the
 /// fixture exercises only the surface this test suite cares about (audit
-/// store round-trip + index plan check + CHECK constraint enforcement).
+/// store round-trip + index plan check + CHECK constraint enforcement). The
+/// staged result is byte-identical to the audit_entries shape in 001_Baseline.sql.
 /// </remarks>
 public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
 {
@@ -70,8 +73,9 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // Subset of 001_InitialSchema.sql — audit_entries table + impersonator_id
-    // column from 011. Migration 021 shape is applied separately below.
+    // Base audit_entries table (incl. impersonator_id) from 001_Baseline.sql.
+    // The normalization columns + constraints are layered on separately below
+    // to also cover the constraint-evolution path.
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS audit_entries (
             entry_id TEXT NOT NULL PRIMARY KEY,
@@ -88,7 +92,8 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
         CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_entries (tenant_id, occurred_at DESC);
         """;
 
-    // Mirrors 021_AuditEntriesNormalize.sql exactly. Kept inline so the
+    // The audit-normalization columns + constraints + filter indexes, as folded
+    // into 001_Baseline.sql (formerly migration 021, ADR-0006). Kept inline so the
     // fixture can apply it even when the embedded resource isn't loaded
     // through the production SchemaMigrator path.
     private const string MigrationV021Sql = """
@@ -138,8 +143,8 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
         COMMIT;
         """;
 
-    // Mirrors 034_AuditCategoryVocabulary.sql — widens audit_entries_category_check
-    // to the union of categories the application code actually emits.
+    // The widened audit_entries_category_check (union of categories the application
+    // code actually emits), as folded into 001_Baseline.sql (formerly migration 034).
     private const string MigrationV034Sql = """
 
         ALTER TABLE audit_entries DROP CONSTRAINT IF EXISTS audit_entries_category_check;

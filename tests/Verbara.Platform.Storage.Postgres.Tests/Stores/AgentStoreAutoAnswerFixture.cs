@@ -6,9 +6,9 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 
 /// <summary>
 /// Testcontainers-backed Postgres fixture for <see cref="PostgresAgentStoreAutoAnswerTests"/>.
-/// Spins up postgres with the <c>agents</c> table from migration 001 plus the <c>auto_answer</c>
-/// column from migration 028 and the deferred-pause / work-failover columns from migrations 030-031
-/// (<c>pending_state</c>, <c>pending_reason</c>, <c>pending_since</c>, <c>offline_since</c>), so the
+/// Spins up postgres with the final folded <c>agents</c> table from the consolidated
+/// 001_Baseline.sql (incl. <c>auto_answer</c> and the deferred-pause / work-failover columns
+/// <c>pending_state</c>, <c>pending_reason</c>, <c>pending_since</c>, <c>offline_since</c>), so the
 /// column-projection of GetByUserIdAsync (the 3B.2b sip+auto_answer
 /// fix that the InMemory store cannot catch) can be exercised against a real DB.
 /// </summary>
@@ -55,8 +55,8 @@ public sealed class AgentStoreAutoAnswerFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // agents DDL from 001_InitialSchema.sql + the 028_VoiceAutoAnswer delta (auto_answer boolean NULL)
-    // + the 030_DeferredPause (pending_*) and 031_WorkFailover (offline_since) deltas.
+    // agents DDL — subset of the consolidated 001_Baseline.sql (final folded shape:
+    // auto_answer boolean NULL, pending_* and offline_since columns included).
     private const string SchemaSql = """
         CREATE TABLE agents (
             agent_id TEXT NOT NULL,

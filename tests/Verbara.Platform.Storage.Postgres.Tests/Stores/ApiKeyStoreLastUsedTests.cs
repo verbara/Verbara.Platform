@@ -9,7 +9,7 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 /// Integration coverage for the Postgres-backed
 /// <see cref="IApiKeyStore.UpdateLastUsedAsync"/> implementation that backs
 /// R5.2 PC.5 / B.12. Validates round-trip persistence + read-back of the
-/// new <c>last_used_at</c> column added by migration 020.
+/// <c>last_used_at</c> column (folded into the consolidated 001_Baseline.sql).
 /// </summary>
 [Collection("ApiKeyStoreLastUsed")]
 public sealed class ApiKeyStoreLastUsedTests

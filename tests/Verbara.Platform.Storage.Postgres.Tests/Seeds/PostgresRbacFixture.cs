@@ -10,7 +10,7 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Seeds;
 /// and creates the minimal subset of tables touched by
 /// <c>RoleTemplateSeeder.ReseedExistingTenantsAsync</c>: <c>permissions</c>,
 /// <c>role_templates</c>, <c>role_template_permissions</c>, <c>tenant_roles</c>,
-/// <c>tenant_role_permissions</c>. Avoids dragging in the entire 19-migration
+/// <c>tenant_role_permissions</c>. Avoids dragging in the entire
 /// platform schema.
 /// </summary>
 public sealed class PostgresRbacFixture : IAsyncLifetime
@@ -59,9 +59,9 @@ public sealed class PostgresRbacFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // Subset of 001_InitialSchema.sql limited to the RBAC tables exercised by
+    // Subset of the consolidated 001_Baseline.sql limited to the RBAC tables exercised by
     // ReseedExistingTenantsAsync. Keeping it inline avoids coupling the test
-    // to the full 19-migration pipeline + the ProMultiTenant deps.
+    // to the full migration pipeline + the ProMultiTenant deps.
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS permissions (
             permission_id TEXT PRIMARY KEY,

@@ -8,8 +8,8 @@ using Verbara.Sdk.Data.Npgsql;
 namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 
 /// <summary>
-/// Integration coverage for the audit_entries schema normalization shipped in
-/// migration 021 (R5.3 Phase A Task A.1, ADR-0006). Validates that:
+/// Integration coverage for the audit_entries schema normalization (ADR-0006),
+/// now folded into the consolidated 001_Baseline.sql. Validates that:
 ///
 ///   1. The writer persists Category / Severity / ActorType / Changes
 ///      (Before+After) / IntegrityHash to typed columns instead of silently

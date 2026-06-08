@@ -271,7 +271,7 @@ static List<(string Name, string Sql)> GetEmbeddedMigrations()
     var migrations = new List<(string, string)>();
     foreach (var resourceName in names)
     {
-        // Resources are embedded as "Migrations\001_InitialSchema.sql" (backslash on Windows) or forward slash
+        // Resources are embedded as "Migrations\001_Baseline.sql" (backslash on Windows) or forward slash
         if (!resourceName.Contains("Migrations") || !resourceName.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
             continue;
 
