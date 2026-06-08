@@ -76,14 +76,15 @@ public sealed class TypificationEndpointTests : IClassFixture<AuthenticatedPlatf
     }
 
     [Fact]
-    public async Task PublishSchema_ShouldReturn400WithErrors_WhenDepthExceedsMax()
+    public async Task PublishSchema_ShouldReturnOkFalseWithErrors_WhenDepthExceedsMax()
     {
         // maxDepth=1 but the tree has a root→leaf chain of depth 2 → ValidateForPublish fails.
+        // Validation failures return 200 with { ok: false, errors } so the Web onSuccess fires.
         var id = await CreateSchemaAsync(_client, ValidSchemaBody("Depth Violation", maxDepth: 1));
 
         var response = await _client.PostAsync($"/api/admin/typification/schemas/{id}/publish", content: null);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync());
         body!["ok"]!.GetValue<bool>().Should().BeFalse();
         body["errors"]!.AsArray().Count.Should().BeGreaterThan(0);

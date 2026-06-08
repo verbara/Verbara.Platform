@@ -173,6 +173,37 @@ public sealed class TypifyEndpointTests : IClassFixture<AuthenticatedPlatformApi
     }
 
     [Fact]
+    public async Task Typify_ShouldNotTransitionToWrapUp_WhenValidationFails()
+    {
+        await SeedPublishedTenantSchemaAsync("Typify No Mutation On Invalid");
+        var conv = await SeedConversationAsync(ConversationState.Active);
+
+        // Required field omitted → server validation fails BEFORE any state mutation.
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string>(),
+            notes = "should not mutate",
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        using var scope = _factory.Services.CreateScope();
+
+        // Conversation must STILL be Active (NOT transitioned to WrapUp).
+        var conversationStore = scope.ServiceProvider.GetRequiredService<IConversationStore>();
+        var unchanged = await conversationStore.GetByIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        unchanged!.State.Should().Be(ConversationState.Active);
+
+        // No TypificationSubmission was persisted.
+        var submissionStore = scope.ServiceProvider
+            .GetRequiredService<Verbara.Platform.Typification.Stores.ITypificationSubmissionStore>();
+        var saved = await submissionStore.GetByConversationIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        saved.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Typify_ShouldPersistSubmission_WhenValidManual()
     {
         await SeedPublishedTenantSchemaAsync("Typify Persist");

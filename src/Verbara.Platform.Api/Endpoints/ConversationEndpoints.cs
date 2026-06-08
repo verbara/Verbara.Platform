@@ -218,10 +218,20 @@ internal static class ConversationEndpoints
 
         var schema = resolved.Schema;
 
-        // 2. Map the selected node-path strings → EntityId list, then move to WrapUp
-        //    (same state-machine guard the old /wrapup handler used).
+        // 2. Map the selected node-path strings → EntityId list.
         var path = body.SelectedNodePath.Select(EntityId.From).ToList();
 
+        // 3. Server-authoritative validation of the submission FIRST — a validation
+        //    failure must NOT mutate or persist any conversation state.
+        var validation = validator.ValidateSubmission(schema, path, body.FieldValues);
+        if (!validation.IsValid)
+        {
+            return Results.BadRequest(new TypifyErrorResponse(
+                validation.Errors.Select(e => new TypifyFieldError(e.Field, e.Message)).ToArray()));
+        }
+
+        // 4. Move to WrapUp (same state-machine guard the old /wrapup handler used)
+        //    only after validation succeeds, then persist.
         try
         {
             conversation.TransitionTo(ConversationState.WrapUp);
@@ -232,14 +242,6 @@ internal static class ConversationEndpoints
         }
 
         await conversationStore.SaveAsync(conversation, ct);
-
-        // 3. Server-authoritative validation of the submission.
-        var validation = validator.ValidateSubmission(schema, path, body.FieldValues);
-        if (!validation.IsValid)
-        {
-            return Results.BadRequest(new TypifyErrorResponse(
-                validation.Errors.Select(e => new TypifyFieldError(e.Field, e.Message)).ToArray()));
-        }
 
         var leafNodeId = path[^1];
 
@@ -290,7 +292,11 @@ internal static class ConversationEndpoints
                 // Schedule a callback when the leaf requests one and a valid date was captured.
                 if (leaf.TriggerCallback &&
                     body.FieldValues.TryGetValue(TypificationFieldKeys.CallbackDate, out var cbDate) &&
-                    DateTimeOffset.TryParse(cbDate, out var scheduledAt) &&
+                    DateTimeOffset.TryParse(
+                        cbDate,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.RoundtripKind,
+                        out var scheduledAt) &&
                     meta.TryGetValue("contactId", out var contactIdStr) &&
                     long.TryParse(contactIdStr, out var contactId))
                 {

@@ -187,7 +187,7 @@ internal static class TypificationEndpoints
         var validation = validator.ValidateForPublish(latest);
         if (!validation.IsValid)
         {
-            return Results.BadRequest(new PublishResultDto(
+            return Results.Ok(new PublishResultDto(
                 Ok: false,
                 Errors: validation.Errors.Select(e => new PublishErrorDto(e.Field, e.Message)).ToArray()));
         }
