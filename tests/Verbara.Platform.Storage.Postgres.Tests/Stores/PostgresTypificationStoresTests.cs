@@ -16,6 +16,7 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
     private readonly PostgresTypificationSchemaStore _schemas;
     private readonly PostgresSchemaBindingStore _bindings;
     private readonly PostgresTypificationSubmissionStore _submissions;
+    private readonly PostgresReasonHintStore _reasonHints;
     private static readonly TenantId Tenant = new("acme");
 
     public PostgresTypificationStoresTests(TypificationStoreFixture fixture)
@@ -24,6 +25,7 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         _schemas = new PostgresTypificationSchemaStore(_fixture.DataSource);
         _bindings = new PostgresSchemaBindingStore(_fixture.DataSource);
         _submissions = new PostgresTypificationSubmissionStore(_fixture.DataSource);
+        _reasonHints = new PostgresReasonHintStore(_fixture.DataSource);
     }
 
     public Task InitializeAsync() => _fixture.ResetAsync();
@@ -269,6 +271,80 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         loaded.AiAccepted.Should().BeTrue();
         loaded.Source.Should().Be(SubmissionSource.AutoAi);
         loaded.Duration.Should().Be(TimeSpan.FromSeconds(42));
+    }
+
+    private static ReasonHint NewHint(ReasonHintScope scope, string scopeRef, string reasonPath, int priority = 0, bool isActive = true) => new()
+    {
+        HintId = EntityId.New(),
+        TenantId = Tenant,
+        Scope = scope,
+        ScopeRef = scopeRef,
+        ReasonPath = reasonPath,
+        Priority = priority,
+        IsActive = isActive,
+    };
+
+    [Fact]
+    public async Task SaveAsync_ShouldRoundTrip_WhenReasonHintPersisted()
+    {
+        var hint = NewHint(ReasonHintScope.Did, "+15551234567", "[\"CITAS\",\"REPROG\",\"GINE\"]", priority: 5, isActive: false);
+
+        await _reasonHints.SaveAsync(hint, CancellationToken.None);
+        var loaded = await _reasonHints.GetByIdAsync(Tenant, hint.HintId, CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.HintId.Should().Be(hint.HintId);
+        loaded.TenantId.Should().Be(Tenant);
+        loaded.Scope.Should().Be(ReasonHintScope.Did);
+        loaded.ScopeRef.Should().Be("+15551234567");
+        loaded.ReasonPath.Should().Be("[\"CITAS\",\"REPROG\",\"GINE\"]");
+        loaded.Priority.Should().Be(5);
+        loaded.IsActive.Should().BeFalse();
+
+        // Upsert on the same key updates in place (no duplicate row).
+        await _reasonHints.SaveAsync(hint with { Priority = 9, IsActive = true }, CancellationToken.None);
+        var all = await _reasonHints.ListAsync(Tenant, CancellationToken.None);
+        all.Should().ContainSingle();
+        all[0].Priority.Should().Be(9);
+        all[0].IsActive.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ListByScopeAsync_ShouldReturnMatches_WhenScopeAndRefGiven()
+    {
+        var queueA = NewHint(ReasonHintScope.Queue, "queue-1", "[\"REPROG\"]");
+        var queueAlt = NewHint(ReasonHintScope.Queue, "queue-1", "[\"CONFIRM\"]", priority: 2);
+        var queueB = NewHint(ReasonHintScope.Queue, "queue-2", "[\"GINE\"]");
+        var didMatchingRef = NewHint(ReasonHintScope.Did, "queue-1", "[\"OTHER\"]");
+
+        await _reasonHints.SaveAsync(queueA, CancellationToken.None);
+        await _reasonHints.SaveAsync(queueAlt, CancellationToken.None);
+        await _reasonHints.SaveAsync(queueB, CancellationToken.None);
+        await _reasonHints.SaveAsync(didMatchingRef, CancellationToken.None);
+
+        var queue1 = await _reasonHints.ListByScopeAsync(Tenant, ReasonHintScope.Queue, "queue-1", CancellationToken.None);
+        queue1.Should().HaveCount(2);
+        queue1.Select(h => h.HintId).Should().BeEquivalentTo(new[] { queueA.HintId, queueAlt.HintId });
+
+        // Same ref but a different scope must NOT match.
+        var asDid = await _reasonHints.ListByScopeAsync(Tenant, ReasonHintScope.Did, "queue-1", CancellationToken.None);
+        asDid.Should().ContainSingle().Which.HintId.Should().Be(didMatchingRef.HintId);
+
+        // Non-existent ref returns empty.
+        var missing = await _reasonHints.ListByScopeAsync(Tenant, ReasonHintScope.Queue, "queue-9", CancellationToken.None);
+        missing.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ShouldRemove_WhenHintExists()
+    {
+        var hint = NewHint(ReasonHintScope.Channel, "WebChat", "[\"SUPPORT\"]");
+        await _reasonHints.SaveAsync(hint, CancellationToken.None);
+
+        await _reasonHints.DeleteAsync(Tenant, hint.HintId, CancellationToken.None);
+
+        (await _reasonHints.GetByIdAsync(Tenant, hint.HintId, CancellationToken.None)).Should().BeNull();
+        (await _reasonHints.ListAsync(Tenant, CancellationToken.None)).Should().BeEmpty();
     }
 
     [Fact]

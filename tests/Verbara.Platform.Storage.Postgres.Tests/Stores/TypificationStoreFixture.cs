@@ -55,7 +55,7 @@ public sealed class TypificationStoreFixture : IAsyncLifetime
         await using var conn = await DataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "TRUNCATE typification_schemas, typification_bindings, typification_submissions RESTART IDENTITY CASCADE";
+            "TRUNCATE typification_schemas, typification_bindings, typification_submissions, reason_hints RESTART IDENTITY CASCADE";
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -92,5 +92,17 @@ public sealed class TypificationStoreFixture : IAsyncLifetime
         );
         CREATE INDEX idx_typification_submissions_leaf ON typification_submissions (tenant_id, leaf_node_id, completed_at DESC);
         CREATE INDEX idx_typification_submissions_completed ON typification_submissions (tenant_id, completed_at DESC);
+
+        CREATE TABLE reason_hints (
+            tenant_id   TEXT    NOT NULL,
+            hint_id     TEXT    NOT NULL,
+            scope       TEXT    NOT NULL,
+            scope_ref   TEXT    NOT NULL,
+            reason_path TEXT    NOT NULL,
+            priority    INT     NOT NULL DEFAULT 0,
+            is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+            PRIMARY KEY (tenant_id, hint_id)
+        );
+        CREATE INDEX idx_reason_hints_scope ON reason_hints (tenant_id, scope, scope_ref);
         """;
 }
