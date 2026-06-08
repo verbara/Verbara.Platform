@@ -13,6 +13,21 @@ _No unreleased changes._
 
 ---
 
+## [2.11.0] — 2026-06-08 — Typification shared taxonomy capture — P1
+
+Phase **P1** of the Typification module (ADR-0029 D2): what the IVR/bot/routing captures about the customer now travels with the conversation and **pre-selects the wrap-up cascade + pre-fills fields** (the agent confirms instead of re-classifying). Platform + Web only — no `Verbara.Sdk.Pro` change (`AdvancedTypification` already shipped in P0). PR #50 / verbara/Verbara.Platform.Web#92.
+
+### Added
+- **Attribute-bag contract** on `Conversation.Metadata`: well-known key `reasonPath` (JSON array of node `Code`s) plus arbitrary prefill keys; one consumer reads it at wrap-up. Four capture writers: flow-variable propagation at bot handoff (`BotResponse`/`FlowStepResult.FlowMetadata`); a new **`collect_reason`** flow node (cascade menu → reasonPath); implicit-digital via `ReasonHintMiddleware` → the previously-unused `RouteResult.Metadata`; implicit-voice via a `VERBARA_REASON` Asterisk channel variable read in `VoiceConversationBridge`.
+- **`ReasonHint`** domain (scope Did/Channel/Queue → reasonPath) + most-specific-wins resolver + InMemory/Postgres stores + migration `002_reason_hints.sql`; `/admin/reason-hints` CRUD gated `AdvancedTypification`.
+- **`ITypificationPrefillResolver`** (Code→NodeId, longest-valid-prefix, subtree-aware, never throws) + metadata field prefill; `GET /conversations/{id}/typification-form` now returns `PrefilledNodePath` + `PrefilledFieldValues`. Field `PrefillSource` exposed in the schema admin DTOs.
+
+### Fixed
+- The bot **flow engine was never registered** (`AddPlatformFlows` uncalled; `ILlmProvider` had no implementation) — bot/webhook requests failed DI activation. Wired with a disabled-by-default `ILlmProvider` (AI nodes fail clearly only if executed; AI auto-disposition is P2); added a DI composition smoke test.
+- Best-effort reason capture in the voice (`StasisInboundConsumer`) and routing (`ReasonHintMiddleware`) critical paths is now guarded so a transient store failure can't drop a live call or fail a route.
+
+---
+
 ## [2.10.0] — 2026-06-07 — Typification (cascading + conditional disposition forms) — P0
 
 New first-class **Typification** module (ADR-0029) replacing the flat single-select disposition model with cascading, conditional, schema-driven disposition forms. Consumes `Verbara.Sdk.Pro` **v2.7.5-pro** (new `AdvancedTypification` license feature). PRs #48 (Platform) / #2 (Pro) / verbara/Verbara.Platform.Web#82.
