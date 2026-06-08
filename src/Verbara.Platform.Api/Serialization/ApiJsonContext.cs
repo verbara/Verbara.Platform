@@ -48,6 +48,11 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(PublishResultDto))]
 // Typification — runtime typify (replaces flat /wrapup)
 [JsonSerializable(typeof(TypificationFormResponse))]
+// C9 — TypificationFormResponse PREFILL member types (preselected reason node-id
+// path + prefilled field values). Source-gen resolves the DECLARED member types, so
+// both interface shapes must have a JsonTypeInfo under the no-reflection AOT contract.
+[JsonSerializable(typeof(IReadOnlyList<string>))]
+[JsonSerializable(typeof(IReadOnlyDictionary<string, string>))]
 [JsonSerializable(typeof(TypifyErrorResponse))]
 [JsonSerializable(typeof(Verbara.Platform.Typification.TypificationSubmission))]
 [JsonSerializable(typeof(PagedResult<Conversation>))]

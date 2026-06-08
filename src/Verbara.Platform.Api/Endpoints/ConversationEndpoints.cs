@@ -173,6 +173,7 @@ internal static class ConversationEndpoints
         HttpContext context,
         [FromServices] IConversationStore conversationStore,
         [FromServices] ITypificationResolver resolver,
+        [FromServices] ITypificationPrefillResolver prefillResolver,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -184,9 +185,20 @@ internal static class ConversationEndpoints
         if (resolved is null)
             return Results.NotFound();
 
+        // C9 — resolve the wrap-up prefill (preselected reason path + prefilled field
+        // values) from the conversation's captured context. Pure + never throws; empty
+        // collections map to null so the client distinguishes "no prefill" cleanly.
+        var prefill = prefillResolver.ResolvePrefill(resolved.Schema, resolved.SubtreeRoot, conversation);
+
         return Results.Ok(new TypificationFormResponse(
             Schema: TypificationEndpoints.ToSchemaDto(resolved.Schema),
-            SubtreeRootNodeId: resolved.SubtreeRoot?.Value));
+            SubtreeRootNodeId: resolved.SubtreeRoot?.Value,
+            PrefilledNodePath: prefill.PrefilledNodePath.Count > 0
+                ? prefill.PrefilledNodePath.Select(n => n.Value).ToArray()
+                : null,
+            PrefilledFieldValues: prefill.PrefilledFieldValues.Count > 0
+                ? prefill.PrefilledFieldValues
+                : null));
     }
 
     private static async Task<IResult> TypifyConversation(
@@ -421,10 +433,19 @@ internal sealed record TypifyRequest(
     string? Notes = null,
     bool? AiAccepted = null);
 
-/// <summary>The resolved typification form for a conversation (cascading schema + optional sub-tree root).</summary>
+/// <summary>
+/// The resolved typification form for a conversation: the cascading schema, the
+/// optional sub-tree root, and the wrap-up PREFILL (C9) — a preselected reason node
+/// path (root→leaf node-id strings) and prefilled field values (keyed by field Key)
+/// derived from the conversation's captured context so the agent confirms instead of
+/// re-classifying. Both prefill members are <see langword="null"/> (not empty) when
+/// nothing is preselectable, so the client cleanly distinguishes "no prefill".
+/// </summary>
 internal sealed record TypificationFormResponse(
     TypificationSchemaDto Schema,
-    string? SubtreeRootNodeId);
+    string? SubtreeRootNodeId,
+    IReadOnlyList<string>? PrefilledNodePath = null,
+    IReadOnlyDictionary<string, string>? PrefilledFieldValues = null);
 
 /// <summary>400 payload when a runtime typify submission fails server validation.</summary>
 internal sealed record TypifyErrorResponse(IReadOnlyList<TypifyFieldError> Errors);
