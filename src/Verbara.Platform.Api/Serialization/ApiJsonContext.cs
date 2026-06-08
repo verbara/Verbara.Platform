@@ -43,6 +43,9 @@ namespace Verbara.Platform.Api.Serialization;
 // Typification — response DTOs
 [JsonSerializable(typeof(TypificationSchemaDto[]))]
 [JsonSerializable(typeof(TypificationSchemaDto))]
+// C9b — field PrefillSource sub-DTO (nested on TypificationFieldDto; the parent is
+// resolved transitively, but the new nested type is registered explicitly).
+[JsonSerializable(typeof(PrefillSourceDto))]
 [JsonSerializable(typeof(SchemaBindingDto[]))]
 [JsonSerializable(typeof(SchemaBindingDto))]
 [JsonSerializable(typeof(PublishResultDto))]

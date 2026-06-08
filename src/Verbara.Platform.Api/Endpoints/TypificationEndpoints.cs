@@ -374,6 +374,9 @@ internal static class TypificationEndpoints
             VisibleWhen: f.VisibleWhen is null
                 ? null
                 : new ConditionExprDto(f.VisibleWhen.RefType.ToString(), f.VisibleWhen.Ref, f.VisibleWhen.Op.ToString(), f.VisibleWhen.Value),
+            PrefillSource: f.PrefillSource is { } pr
+                ? new PrefillSourceDto(pr.Kind.ToString(), pr.Ref)
+                : null,
             SortOrder: f.SortOrder);
 
     private static SchemaBindingDto ToBindingDto(SchemaBinding b) =>
@@ -441,8 +444,22 @@ internal static class TypificationEndpoints
                     Op = Enum.Parse<ConditionOp>(f.VisibleWhen.Op, ignoreCase: true),
                     Value = f.VisibleWhen.Value,
                 },
+            PrefillSource = MapPrefillSource(f.PrefillSource),
             SortOrder = f.SortOrder,
         }).ToList();
+
+    // PrefillSource is tolerant on input (unlike the throwing VisibleWhen enum maps):
+    // an unknown Kind or an empty Ref maps to null rather than failing the request,
+    // since prefill is an optional P2/P3 capability layered onto the schema.
+    private static PrefillRef? MapPrefillSource(PrefillSourceDto? dto)
+    {
+        if (dto is not { } ps || string.IsNullOrWhiteSpace(ps.Ref))
+            return null;
+
+        return Enum.TryParse<PrefillSourceKind>(ps.Kind, ignoreCase: true, out var kind)
+            ? new PrefillRef { Kind = kind, Ref = ps.Ref }
+            : null;
+    }
 
     private static TypificationAiConfig EmptyAiConfig() =>
         new()
@@ -527,6 +544,7 @@ internal sealed record TypificationFieldDto(
     FieldValidationDto? Validation,
     string? AttachToNodeId,
     ConditionExprDto? VisibleWhen,
+    PrefillSourceDto? PrefillSource,
     int SortOrder);
 
 internal sealed record FieldOptionDto(string Value, string Label);
@@ -542,6 +560,8 @@ internal sealed record ConditionExprDto(
     string Ref,
     string Op,
     string? Value);
+
+internal sealed record PrefillSourceDto(string Kind, string Ref);
 
 internal sealed record SchemaBindingDto(
     string BindingId,
