@@ -1,6 +1,6 @@
 # ADR-0029: Typification — cascading, conditional, AI-assisted disposition module (clean-break rename)
 
-- **Status:** Accepted
+- **Status:** Accepted — **P0 SHIPPED 2026-06-07** (Pro #2 → `Verbara.Sdk.Pro` v2.7.5-pro · Platform #48 · Web #82; all merged to `main`). P1–P4 pending.
 - **Date:** 2026-06-07
 - **Deciders:** Verbara maintainer (Harol A. Reina H.)
 - **Related:**
