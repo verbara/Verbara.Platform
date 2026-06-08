@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Reactive.Subjects;
+using System.Reflection;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
@@ -82,6 +83,23 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         if (tenant is not null) session.TenantId = tenant;
         if (agentInterface is not null) session.AgentInterface = agentInterface;
         return session;
+    }
+
+    // CallSession.AddParticipant is SDK-internal (and this assembly is not in its InternalsVisibleTo
+    // list), so a caller leg can only be attached via reflection. This is the one path the bridge uses
+    // to find the trunk channel it reads VERBARA_REASON off, so the OnCallQueued capture tests need it.
+    private static void AddCaller(CallSession session, string channel)
+    {
+        var participant = new SessionParticipant
+        {
+            UniqueId = channel,
+            Channel = channel,
+            Technology = "PJSIP",
+            Role = ParticipantRole.Caller,
+        };
+        var add = typeof(CallSession).GetMethod("AddParticipant", BindingFlags.Instance | BindingFlags.NonPublic)
+                  ?? throw new InvalidOperationException("CallSession.AddParticipant not found.");
+        add.Invoke(session, [participant]);
     }
 
     private Contact StubContact()
@@ -460,6 +478,79 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         var result = await bridge.ResolveTenantFromChannelAsync(session, "PJSIP/t-2-abc");
 
         result.Should().BeNull();
+    }
+
+    // ─── ResolveReasonFromChannelAsync (Typification P1 implicit voice capture — VERBARA_REASON) ───
+
+    [Fact]
+    public async Task ResolveReasonFromChannelAsync_ShouldReturnValue_WhenAmiGetVarSucceeds()
+    {
+        AddPrimaryServer();
+        const string ReasonPath = "[\"CITAS\",\"REPROG\"]";
+        StubGetVarFor("VERBARA_REASON", ReasonPath);
+        var bridge = CreateBridge();
+
+        var result = await bridge.ResolveReasonFromChannelAsync("PJSIP/t-2-abc", CancellationToken.None);
+
+        result.Should().Be(ReasonPath);
+    }
+
+    [Fact]
+    public async Task ResolveReasonFromChannelAsync_ShouldReturnNull_WhenAmiUnavailable()
+    {
+        // Empty server pool — AMI not connected/configured ⇒ no reason to capture.
+        var bridge = CreateBridge();
+
+        var result = await bridge.ResolveReasonFromChannelAsync("PJSIP/t-2-abc", CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task OnCallQueued_ShouldStampReasonPathMetadata_WhenChannelVarPresent()
+    {
+        AddPrimaryServer();
+        const string ReasonPath = "[\"CITAS\",\"REPROG\"]";
+        StubGetVarFor("VERBARA_REASON", ReasonPath);
+        StubContact();
+        // A caller leg is required so the bridge can read VERBARA_REASON off the trunk channel.
+        var session = MakeSession("link-reason", Tenant);
+        AddCaller(session, "PJSIP/acme-trunk/+15551230000");
+        _sessions.GetById("s-link-reason").Returns(session);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-reason", Arg.Any<CancellationToken>())
+            .Returns((Conversation?)null);
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallQueuedEvent("s-link-reason", "primary", _clock.UtcNow, "acme-Support", 1));
+
+        // The reason taxonomy path is stamped onto the freshly-created Conversation, in the SAME save.
+        await _conversations.Received(1).SaveAsync(
+            Arg.Is<Conversation>(c =>
+                c.VoiceLinkedId == "link-reason" &&
+                c.Metadata.ContainsKey("reasonPath") &&
+                c.Metadata["reasonPath"] == ReasonPath),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OnCallQueued_ShouldNotStampReasonPath_WhenChannelVarEmpty()
+    {
+        AddPrimaryServer();
+        StubGetVarFor("VERBARA_REASON", null); // var unset ⇒ GetVar "Error" ⇒ no reason captured
+        StubContact();
+        var session = MakeSession("link-noreason", Tenant);
+        AddCaller(session, "PJSIP/acme-trunk/+15551230000");
+        _sessions.GetById("s-link-noreason").Returns(session);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-noreason", Arg.Any<CancellationToken>())
+            .Returns((Conversation?)null);
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallQueuedEvent("s-link-noreason", "primary", _clock.UtcNow, "acme-Support", 1));
+
+        // Conversation still created (voice tracking never depends on a reason), but no reasonPath stamped.
+        await _conversations.Received(1).SaveAsync(
+            Arg.Is<Conversation>(c => c.VoiceLinkedId == "link-noreason" && !c.Metadata.ContainsKey("reasonPath")),
+            Arg.Any<CancellationToken>());
     }
 
     // ─── OnCallStarted outbound linkage (3B.2d.3 — lab-verified against the real SDK model) ───

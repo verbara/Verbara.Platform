@@ -4,6 +4,7 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
+using Verbara.Platform.Typification;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Ami.Responses;
 using Verbara.Sdk.Enums;
@@ -47,6 +48,12 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     private const string TenantVariable = "TENANT_ID";
     /// <summary>Channel var the dial service stamps on an outbound Originate (= the tracked Conversation id).</summary>
     private const string OutboundIdVariable = "VERBARA_OUTBOUND_ID";
+    /// <summary>
+    /// Channel var the Stasis consumer stamps with the inbound DID/queue reason taxonomy path
+    /// (JSON array of node Codes) for Typification P1 implicit voice capture. Read here via AMI
+    /// <c>GetVar</c> when the Conversation is created and persisted as <c>Metadata["reasonPath"]</c>.
+    /// </summary>
+    private const string ReasonVariable = "VERBARA_REASON";
     private const string AnonymousCaller = "anonymous";
 
     private readonly ICallSessionManager _sessions;
@@ -217,6 +224,21 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             CreatedAt = _clock.UtcNow,
             VoiceLinkedId = session.LinkedId,
         };
+
+        // Typification P1 implicit voice capture: read the reason taxonomy path the Stasis consumer
+        // pushed onto the caller leg's VERBARA_REASON channel var and stamp it onto the fresh
+        // Conversation. Best-effort — a missing var / AMI failure simply leaves reasonPath unstamped
+        // (the disposition form falls back to a manual reason). Folded into the create's SaveAsync so
+        // the metadata and the row commit atomically. The caller leg is the same channel the tenant
+        // resolution read TENANT_ID from (the inbound trunk leg), so the reason var rides alongside it.
+        var callerChannel = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Caller)?.Channel;
+        if (!string.IsNullOrEmpty(callerChannel))
+        {
+            var reasonPath = await ResolveReasonFromChannelAsync(callerChannel, CancellationToken.None).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(reasonPath))
+                conversation.SetMetadata(TypificationMetadataKeys.ReasonPath, reasonPath);
+        }
+
         await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
 
         _eventBus.Publish(new ConversationStateChangedEvent(tenant, conversation.ConversationId.Value, "", nameof(ConversationState.Queued)));
@@ -553,6 +575,39 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             // their fail-closed paths keep side-effects single cluster-wide.
             session.TenantId = response.Value;
             return response.Value;
+        }
+        catch (Exception ex)
+        {
+            LogGetVarFailed(channel, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads the <c>VERBARA_REASON</c> channel variable on <paramref name="channel"/> (the caller /
+    /// inbound trunk leg) via an AMI GetVar — the Typification P1 implicit voice-capture contract:
+    /// the Stasis consumer stamped it with the DID/queue reason taxonomy path. Returns the JSON Codes
+    /// string, or <see langword="null"/> when AMI is unavailable, the variable is unset, or the action
+    /// fails (defensive try/catch like <see cref="ResolveTenantFromChannelAsync"/> — a missing reason
+    /// must never throw out of the handler or block the call). Internal so the wire is unit-testable
+    /// without a live SDK-internal participant. Unlike the tenant resolver this does NOT stamp the
+    /// session — the reason is a per-Conversation fact, not a call-global hook — so it takes only the
+    /// channel, not the <see cref="CallSession"/>.
+    /// </summary>
+    internal async Task<string?> ResolveReasonFromChannelAsync(string channel, CancellationToken ct)
+    {
+        var server = _serverPool.GetServer("primary");
+        if (server is null)
+            return null; // AMI not connected / unconfigured — no reason to capture
+
+        try
+        {
+            var response = await server.Connection.SendActionAsync<GetVarResponse>(
+                new GetVarAction { Channel = channel, Variable = ReasonVariable },
+                ct).ConfigureAwait(false);
+
+            var ok = string.Equals(response.Response, "Success", StringComparison.OrdinalIgnoreCase);
+            return ok && !string.IsNullOrEmpty(response.Value) ? response.Value : null;
         }
         catch (Exception ex)
         {

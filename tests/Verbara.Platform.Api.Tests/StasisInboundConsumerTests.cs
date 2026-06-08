@@ -6,6 +6,8 @@ using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Routing.Inbound;
+using Verbara.Platform.Typification;
+using Verbara.Platform.Typification.Resolution;
 using Verbara.Sdk;
 using Verbara.Sdk.Ari.Client;
 using Verbara.Sdk.Ari.Events;
@@ -63,15 +65,35 @@ public sealed class StasisInboundConsumerTests
         IDidRouteStore didRoutes,
         IQueueStore queues,
         IAriClientFactory? factory = null,
+        IReasonHintResolver? reasonHints = null,
         bool configured = true) =>
         new(
             factory ?? Substitute.For<IAriClientFactory>(),
             leader,
             didRoutes,
             queues,
+            reasonHints ?? NoHintResolver(),
             Substitute.For<IServiceHeartbeat>(),
             AriConfig(configured),
             NullLogger<StasisInboundConsumer>.Instance);
+
+    // Default resolver: no reason hint matches any scope (the implicit-capture path is a no-op).
+    private static IReasonHintResolver NoHintResolver()
+    {
+        var resolver = Substitute.For<IReasonHintResolver>();
+        resolver.ResolveAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<EntityId?>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .Returns((ReasonHint?)null);
+        return resolver;
+    }
+
+    private static ReasonHint Hint(string reasonPath) => new()
+    {
+        HintId = EntityId.New(),
+        TenantId = new TenantId(Tenant),
+        Scope = ReasonHintScope.Did,
+        ScopeRef = Did,
+        ReasonPath = reasonPath,
+    };
 
     private static (IAriClient client, IAriChannelsResource channels) NewClient()
     {
@@ -153,6 +175,64 @@ public sealed class StasisInboundConsumerTests
 
         await channels.Received(1).SetVariableAsync(
             Channel, "QUEUE_NAME", $"{Tenant}-Ventas Norte-2", Arg.Any<CancellationToken>());
+        await channels.Received(1).ContinueAsync(
+            Channel, "stasis-queue", "s", 1, null, Arg.Any<CancellationToken>());
+        await channels.DidNotReceive().HangupAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    // ─── Typification P1 implicit voice capture (VERBARA_REASON channel var) ─────
+
+    [Fact]
+    public async Task HandleInbound_ShouldSetReasonChannelVar_WhenHintResolves()
+    {
+        var (client, channels) = NewClient();
+        channels.GetVariableAsync(Channel, "TENANT_ID", Arg.Any<CancellationToken>())
+            .Returns(new AriVariable { Value = Tenant });
+        var didRoutes = Substitute.For<IDidRouteStore>();
+        var route = Route("q-support");
+        didRoutes.GetByDidAsync(new TenantId(Tenant), Did, Arg.Any<CancellationToken>())
+            .Returns(route);
+        var queues = Substitute.For<IQueueStore>();
+        queues.GetByIdAsync(new TenantId(Tenant), EntityId.From("q-support"), Arg.Any<CancellationToken>())
+            .Returns(Queue("q-support", "Support"));
+        var reasonHints = Substitute.For<IReasonHintResolver>();
+        const string ReasonPath = "[\"CITAS\",\"REPROG\"]";
+        reasonHints.ResolveAsync(
+                new TenantId(Tenant), Did, route.QueueId, ChannelType.Voice, Arg.Any<CancellationToken>())
+            .Returns(Hint(ReasonPath));
+
+        var consumer = NewConsumer(LeaderStub(true), didRoutes, queues, reasonHints: reasonHints);
+        await consumer.HandleStasisStartAsync(client, InboundStart(), CancellationToken.None);
+
+        // The reason taxonomy path rides on the VERBARA_REASON channel var alongside QUEUE_NAME,
+        // and the call still continues into the queue.
+        await channels.Received(1).SetVariableAsync(Channel, "VERBARA_REASON", ReasonPath, Arg.Any<CancellationToken>());
+        await channels.Received(1).SetVariableAsync(Channel, "QUEUE_NAME", $"{Tenant}-Support", Arg.Any<CancellationToken>());
+        await channels.Received(1).ContinueAsync(
+            Channel, "stasis-queue", "s", 1, null, Arg.Any<CancellationToken>());
+        await channels.DidNotReceive().HangupAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleInbound_ShouldNotSetReasonChannelVar_WhenNoHint()
+    {
+        var (client, channels) = NewClient();
+        channels.GetVariableAsync(Channel, "TENANT_ID", Arg.Any<CancellationToken>())
+            .Returns(new AriVariable { Value = Tenant });
+        var didRoutes = Substitute.For<IDidRouteStore>();
+        didRoutes.GetByDidAsync(new TenantId(Tenant), Did, Arg.Any<CancellationToken>())
+            .Returns(Route("q-support"));
+        var queues = Substitute.For<IQueueStore>();
+        queues.GetByIdAsync(new TenantId(Tenant), EntityId.From("q-support"), Arg.Any<CancellationToken>())
+            .Returns(Queue("q-support", "Support"));
+
+        // Default resolver returns null (no hint) — the VERBARA_REASON var must never be set, and the
+        // call routes into the queue unchanged (voice routing never depends on a typification hint).
+        var consumer = NewConsumer(LeaderStub(true), didRoutes, queues);
+        await consumer.HandleStasisStartAsync(client, InboundStart(), CancellationToken.None);
+
+        await channels.DidNotReceive().SetVariableAsync(Channel, "VERBARA_REASON", Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await channels.Received(1).SetVariableAsync(Channel, "QUEUE_NAME", $"{Tenant}-Support", Arg.Any<CancellationToken>());
         await channels.Received(1).ContinueAsync(
             Channel, "stasis-queue", "s", 1, null, Arg.Any<CancellationToken>());
         await channels.DidNotReceive().HangupAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
