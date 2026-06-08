@@ -153,12 +153,16 @@ internal sealed class CollectReasonNodeHandler : IFlowNodeHandler
 
             execution.Variables[retryKey] = (retries + 1).ToString(CultureInfo.InvariantCulture);
 
+            // Re-render the current menu (intro prompt suppressed on a retry), prefixed by
+            // the configured retry hint. Both share the single per-step __outbound_<StepCount>
+            // engine key, so they MUST be composed into ONE message — emitting them
+            // separately would have the menu silently overwrite the retry hint.
             node.Config.TryGetValue("retry_prompt", out var retryPrompt);
-            if (!string.IsNullOrEmpty(retryPrompt))
-                EmitOutbound(execution, retryPrompt);
+            var retryHint = string.IsNullOrEmpty(retryPrompt)
+                ? null
+                : _renderer.Render(retryPrompt, execution.Variables);
 
-            // Re-render the current menu (prompt suppressed on a retry).
-            EmitMenu(execution, node, currentChildren, includePrompt: false);
+            EmitMenu(execution, node, currentChildren, includePrompt: false, retryHint: retryHint);
             return new FlowNodeResult(NextEdgeCondition: null, WaitForInput: true);
         }
 
@@ -267,11 +271,23 @@ internal sealed class CollectReasonNodeHandler : IFlowNodeHandler
         return [.. reversed];
     }
 
-    /// <summary>Emits a numbered menu (optionally prefixed by the config prompt) as an outbound message.</summary>
+    /// <summary>
+    /// Emits a numbered menu as a SINGLE outbound message, optionally prefixed by the config
+    /// intro prompt (first entry) or a pre-rendered retry hint (invalid-selection re-prompt).
+    /// Composing both into one message is required because every emit in a single handler call
+    /// shares the same <c>__outbound_&lt;StepCount&gt;</c> engine key.
+    /// </summary>
     private void EmitMenu(
-        FlowExecution execution, FlowNode node, List<TypificationNode> children, bool includePrompt)
+        FlowExecution execution, FlowNode node, List<TypificationNode> children, bool includePrompt,
+        string? retryHint = null)
     {
         var sb = new StringBuilder();
+
+        if (!string.IsNullOrEmpty(retryHint))
+        {
+            sb.Append(retryHint);
+            sb.Append("\n\n");
+        }
 
         if (includePrompt && node.Config.TryGetValue("prompt", out var prompt) && !string.IsNullOrEmpty(prompt))
         {

@@ -503,8 +503,9 @@ public sealed class TypifyEndpointTests : IDisposable
     [Fact]
     public async Task GetTypificationForm_ShouldReturnPrefilledFieldValues_WhenMetadataPrefillFieldsResolve()
     {
-        // A schema field with PrefillSource{Kind:Metadata, Ref:"patientId"} — only
-        // expressible via direct store seeding (the admin DTO drops PrefillSource).
+        // A schema field with PrefillSource{Kind:Metadata, Ref:"patientId"}. The admin DTO
+        // now round-trips PrefillSource (C9b); this test seeds the store directly to keep the
+        // prefill-resolution assertion focused and independent of the admin write path.
         const string fieldKey = "patient_id";
         var field = new TypificationField
         {

@@ -159,9 +159,57 @@ public sealed class CollectReasonNodeHandlerTests
         result.NextEdgeCondition.Should().BeNull();
         execution.Variables[$"__reason_retries_{nodeId}"].Should().Be("1");
 
-        // The current menu is re-rendered after the retry hint.
+        // The single retry message includes BOTH the configured retry_prompt AND the
+        // re-rendered menu — they must not overwrite each other on the shared step key.
         var outbound = execution.Variables[$"__outbound_{execution.StepCount}"];
+        outbound.Should().Contain("Please pick a valid number.");
         outbound.Should().Contain("1. Citas");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldIncludeRetryPromptAndMenu_WhenInvalidSelectionWithRetryPromptConfigured()
+    {
+        var nodeId = EntityId.New();
+        var handler = MakeHandler(StandardSchema());
+        var node = MakeNode(nodeId, new Dictionary<string, string>
+        {
+            ["retry_prompt"] = "That option is not valid.",
+        });
+        var execution = MakeExecution(nodeId);
+
+        var result = await handler.ExecuteAsync(
+            node, execution, FlowTestHelpers.TextMessage("0"), CancellationToken.None);
+
+        result.WaitForInput.Should().BeTrue();
+        result.NextEdgeCondition.Should().BeNull();
+
+        // ONE outbound message carrying the retry hint followed by the full menu.
+        var outbound = execution.Variables[$"__outbound_{execution.StepCount}"];
+        outbound.Should().Contain("That option is not valid.");
+        outbound.Should().Contain("1. Citas");
+        outbound.Should().Contain("2. Facturación");
+
+        // Retry hint precedes the menu in the composed message.
+        outbound.IndexOf("That option is not valid.", StringComparison.Ordinal)
+            .Should().BeLessThan(outbound.IndexOf("1. Citas", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRenderMenuOnly_WhenInvalidSelectionWithoutRetryPrompt()
+    {
+        var nodeId = EntityId.New();
+        var handler = MakeHandler(StandardSchema());
+        var node = MakeNode(nodeId);
+        var execution = MakeExecution(nodeId);
+
+        var result = await handler.ExecuteAsync(
+            node, execution, FlowTestHelpers.TextMessage("99"), CancellationToken.None);
+
+        result.WaitForInput.Should().BeTrue();
+        execution.Variables[$"__reason_retries_{nodeId}"].Should().Be("1");
+
+        var outbound = execution.Variables[$"__outbound_{execution.StepCount}"];
+        outbound.Should().StartWith("1. Citas");
     }
 
     [Fact]

@@ -82,6 +82,32 @@ public sealed class ReasonHintEndpointsTests :
     }
 
     [Fact]
+    public async Task CreateReasonHint_ShouldReturn400_WhenReasonPathNotJsonArray()
+    {
+        var response = await _admin.PostAsJsonAsync(
+            "/api/v1/admin/reason-hints",
+            new { scope = "Did", scopeRef = UniqueScopeRef(), reasonPath = "CITAS", priority = 0, isActive = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        dto!["error"]!.GetValue<string>().Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task CreateReasonHint_ShouldReturn201_WhenReasonPathIsValidJsonCodesArray()
+    {
+        var scopeRef = UniqueScopeRef();
+
+        var response = await _admin.PostAsJsonAsync(
+            "/api/v1/admin/reason-hints",
+            new { scope = "Did", scopeRef, reasonPath = "[\"CITAS\",\"REPROG\"]", priority = 5, isActive = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var dto = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        dto!["reasonPath"]!.GetValue<string>().Should().Be("[\"CITAS\",\"REPROG\"]");
+    }
+
+    [Fact]
     public async Task ListReasonHints_ShouldReturn402_WhenAdvancedTypificationUnlicensed()
     {
         using var factory = new NoTypificationLicenseFactory();

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Audit;
@@ -74,10 +75,15 @@ internal static class ReasonHintEndpoints
             return Results.BadRequest(new ErrorResponse("ScopeRef is required."));
 
         // ReasonPath is the captured node-Codes JSON (e.g. ["CITAS","REPROG"]).
-        // Minimal validation here: a non-empty string. Deep schema validation is
-        // out of scope for this admin rule editor.
+        // Validate shape (non-empty JSON array of strings) so a malformed value can't be
+        // stored to silently degrade at the resolver. Deep schema validation (do these
+        // codes exist in a published schema?) remains out of scope for this rule editor.
         if (string.IsNullOrWhiteSpace(body.ReasonPath))
             return Results.BadRequest(new ErrorResponse("ReasonPath is required."));
+
+        if (!IsValidReasonPath(body.ReasonPath))
+            return Results.BadRequest(new ErrorResponse(
+                "ReasonPath must be a non-empty JSON array of node codes (e.g. [\"CITAS\",\"REPROG\"])."));
 
         var hint = new ReasonHint
         {
@@ -127,8 +133,15 @@ internal static class ReasonHintEndpoints
         if (body.ScopeRef is not null && string.IsNullOrWhiteSpace(body.ScopeRef))
             return Results.BadRequest(new ErrorResponse("ScopeRef is required."));
 
-        if (body.ReasonPath is not null && string.IsNullOrWhiteSpace(body.ReasonPath))
-            return Results.BadRequest(new ErrorResponse("ReasonPath is required."));
+        if (body.ReasonPath is not null)
+        {
+            if (string.IsNullOrWhiteSpace(body.ReasonPath))
+                return Results.BadRequest(new ErrorResponse("ReasonPath is required."));
+
+            if (!IsValidReasonPath(body.ReasonPath))
+                return Results.BadRequest(new ErrorResponse(
+                    "ReasonPath must be a non-empty JSON array of node codes (e.g. [\"CITAS\",\"REPROG\"])."));
+        }
 
         var updated = existing with
         {
@@ -183,6 +196,36 @@ internal static class ReasonHintEndpoints
             IsActive: h.IsActive);
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// True when <paramref name="reasonPath"/> parses to a non-empty JSON array of strings,
+    /// each non-empty — the shape the prefill resolver consumes. Uses the AOT-safe source-gen
+    /// <see cref="TypificationJsonContext"/> (no reflection). A <see cref="JsonException"/> on a
+    /// malformed value (e.g. plain <c>"CITAS"</c>) is treated as invalid.
+    /// </summary>
+    private static bool IsValidReasonPath(string reasonPath)
+    {
+        string[]? codes;
+        try
+        {
+            codes = JsonSerializer.Deserialize(reasonPath, TypificationJsonContext.Default.StringArray);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (codes is null || codes.Length == 0)
+            return false;
+
+        foreach (var code in codes)
+        {
+            if (string.IsNullOrWhiteSpace(code))
+                return false;
+        }
+
+        return true;
+    }
 
     private static Task RecordAudit(
         HttpContext context,
