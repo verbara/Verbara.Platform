@@ -80,6 +80,18 @@ internal sealed partial class WebChatInboundRouter
         try
         {
             var routeResult = await _router.RouteAsync(routingCtx, ct).ConfigureAwait(false);
+
+            // C5 (implicit capture): stamp any reason/metadata the router resolved (e.g. the
+            // ReasonHintMiddleware's "reasonPath") onto the conversation BEFORE assignment.
+            // WebChat does NOT run the bot here, so there is no C6 FlowMetadata path in this bridge.
+            // AssignToQueueAsync reloads + persists the row, so this metadata round-trips through it.
+            if (routeResult.Metadata is { Count: > 0 })
+            {
+                foreach (var kv in routeResult.Metadata)
+                    conversation.SetMetadata(kv.Key, kv.Value);
+                await _conversationStore.SaveAsync(conversation, ct).ConfigureAwait(false);
+            }
+
             await _switchboard.AssignToQueueAsync(conversation.ConversationId, tenantId, routeResult.QueueId, ct).ConfigureAwait(false);
         }
         catch (InvalidOperationException ex)
