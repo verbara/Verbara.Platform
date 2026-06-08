@@ -9,9 +9,9 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Registers Platform.Typification services: the server-authoritative schema
-    /// validator (D1), the most-specific-wins binding resolver (D2), and the
-    /// most-specific-wins reason-hint resolver (P1). Callers must separately register
-    /// implementations of the store interfaces in
+    /// validator (D1), the most-specific-wins binding resolver (D2), the
+    /// most-specific-wins reason-hint resolver (P1), and the wrap-up prefill resolver
+    /// (P1). Callers must separately register implementations of the store interfaces in
     /// <c>Verbara.Platform.Typification.Stores</c>.
     /// </summary>
     public static IServiceCollection AddPlatformTypification(this IServiceCollection services)
@@ -19,6 +19,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITypificationValidator, DefaultTypificationValidator>();
         services.AddSingleton<ITypificationResolver, DefaultTypificationResolver>();
         services.AddSingleton<IReasonHintResolver, DefaultReasonHintResolver>();
+        services.AddSingleton<ITypificationPrefillResolver, DefaultTypificationPrefillResolver>();
         return services;
     }
 }
