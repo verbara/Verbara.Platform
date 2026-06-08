@@ -13,6 +13,28 @@ _No unreleased changes._
 
 ---
 
+## [2.10.0] — 2026-06-07 — Typification (cascading + conditional disposition forms) — P0
+
+New first-class **Typification** module (ADR-0029) replacing the flat single-select disposition model with cascading, conditional, schema-driven disposition forms. Consumes `Verbara.Sdk.Pro` **v2.7.5-pro** (new `AdvancedTypification` license feature). PRs #48 (Platform) / #2 (Pro) / verbara/Verbara.Platform.Web#82.
+
+### Added
+- **`Verbara.Platform.Typification`** domain project: versioned `TypificationSchema` (cascading `TypificationNode` tree, depth configurable default 5/max 8), conditional `TypificationField`s (`VisibleWhen`), `SchemaBinding` (per queue/campaign/channel/direction + tenant default), `TypificationSubmission`. Server-authoritative validator (publish + submit) + most-specific-wins binding resolver (direction inferred from conversation metadata).
+- Admin endpoints `/admin/typification/{schemas,bindings}` — gated by `LicenseFeature.AdvancedTypification` + new RBAC permission `system:typification:configure`. Runtime `GET /conversations/{id}/typification-form` + `POST /conversations/{id}/typify` (not license-gated — agents always wrap up).
+- Cross-pod `TypificationSubmittedEvent` (registered in `ApiJsonContext`, `PlatformPushJsonContext`, `RemoteEventDispatcher`).
+- InMemory + raw-Npgsql Postgres stores with JSONB schema persistence.
+
+### Changed
+- **Dialer bridge preserved** — an outbound campaign leaf's `dialerCode` maps to the Pro campaign `DispositionCode` (matched by code) and schedules callbacks (`callback_date` conditional field); `CampaignDispositionSubmittedEvent` unchanged.
+- Pinned `Verbara.Sdk.Pro.*` from `2.7.4-pro` to **`2.7.5-pro`** (carries the `AdvancedTypification` flag).
+
+### Removed
+- **Clean-break (pre-launch):** the flat `Disposition` / `WrapUpRecord` domain, `IDispositionStore`/`IWrapUpStore`, and the `POST /conversations/{id}/wrapup` endpoint.
+
+### Database
+- **Migrations consolidated into a single `001_Baseline.sql`** (all prior `001..034` folded into final table shapes — verified byte-identical to the prior chain via Postgres schema-diff — minus the dropped `dispositions`/`wrap_up_records`/`conversations.wrap_up`, plus the 3 `typification_*` tables).
+
+---
+
 ## [2.9.1] — 2026-06-07 — Audit category vocabulary fix
 
 Patch over v2.9.0. Migration **034**. No API behaviour change beyond audit persistence.
