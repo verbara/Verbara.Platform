@@ -22,6 +22,7 @@
     <Project Path="src/Verbara.Platform.Flows/Verbara.Platform.Flows.csproj" />
     <Project Path="src/Verbara.Platform.Bot/Verbara.Platform.Bot.csproj" />
     <Project Path="src/Verbara.Platform.Surveys/Verbara.Platform.Surveys.csproj" />
+    <Project Path="src/Verbara.Platform.Typification/Verbara.Platform.Typification.csproj" />
     <Project Path="src/Verbara.Platform.Automation/Verbara.Platform.Automation.csproj" />
     <Project Path="src/Verbara.Platform.Audit/Verbara.Platform.Audit.csproj" />
     <Project Path="src/Verbara.Platform.Billing/Verbara.Platform.Billing.csproj" />

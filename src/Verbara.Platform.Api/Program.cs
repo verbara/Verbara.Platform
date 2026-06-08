@@ -28,6 +28,7 @@ using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Hosting;
 using Verbara.Platform.KnowledgeBase;
 using Verbara.Platform.Surveys;
+using Verbara.Platform.Typification;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core.Reports;
 using Verbara.Sdk.Pro.Dialer.DependencyInjection;
@@ -180,6 +181,7 @@ builder.Services.AddPlatformAudit();
 builder.Services.AddPlatformMedia();
 builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
+builder.Services.AddPlatformTypification();
 builder.Services.AddPlatformBilling();
 builder.Services.AddWebChat();
 
