@@ -1608,6 +1608,7 @@ v1.MapAuditEndpoints();
 Verbara.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.MapAuditAdminEndpoints(v1);
 v1.MapSurveyEndpoints();
 v1.MapTypificationEndpoints();
+v1.MapReasonHintEndpoints();
 v1.MapScheduledReportEndpoints();
 v1.MapRealtimeEndpoints();
 v1.MapAuthAdminEndpoints();

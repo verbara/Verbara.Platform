@@ -46,6 +46,9 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(SchemaBindingDto[]))]
 [JsonSerializable(typeof(SchemaBindingDto))]
 [JsonSerializable(typeof(PublishResultDto))]
+// Typification — reason-hint admin DTOs (C10)
+[JsonSerializable(typeof(ReasonHintDto[]))]
+[JsonSerializable(typeof(ReasonHintDto))]
 // Typification — runtime typify (replaces flat /wrapup)
 [JsonSerializable(typeof(TypificationFormResponse))]
 // C9 — TypificationFormResponse PREFILL member types (preselected reason node-id
@@ -561,6 +564,8 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateSchemaRequest))]
 [JsonSerializable(typeof(CreateBindingRequest))]
 [JsonSerializable(typeof(UpdateBindingRequest))]
+[JsonSerializable(typeof(CreateReasonHintRequest))]
+[JsonSerializable(typeof(UpdateReasonHintRequest))]
 // Scheduled reports
 [JsonSerializable(typeof(CreateScheduledReportRequest))]
 [JsonSerializable(typeof(UpdateScheduledReportRequest))]
