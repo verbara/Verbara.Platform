@@ -29,7 +29,7 @@ public sealed class WebChatInboundRoutingTests
     private static readonly EntityId QueueId = EntityId.From("q-wc-1");
 
     private static (WebChatInboundRouter sut, InMemoryConversationStore store, string sessionId, IConversationSwitchboard switchboardMock, PlatformEventBus eventBus)
-        BuildWithRealSwitchboard()
+        BuildWithRealSwitchboard(IReadOnlyDictionary<string, string>? routeMetadata = null)
     {
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
@@ -57,7 +57,7 @@ public sealed class WebChatInboundRoutingTests
 
         var router = Substitute.For<IInboundRouter>();
         router.RouteAsync(default!, default).ReturnsForAnyArgs(
-            new RouteResult(QueueId, default, null, null));
+            new RouteResult(QueueId, default, null, routeMetadata));
 
         var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
         var sessionId = sessionManager.ConnectAsync(
@@ -84,6 +84,24 @@ public sealed class WebChatInboundRoutingTests
         reloaded!.Owner.Should().NotBeNull();
         reloaded.Owner!.Kind.Should().Be(ConversationOwnerKind.Queue);
         reloaded.Owner.OwnerId.Should().Be(QueueId);
+    }
+
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldStampRouteMetadata_WhenPresent()
+    {
+        // C5 (implicit): WebChat does NOT run the bot, so only the router's metadata (e.g. the
+        // ReasonHintMiddleware's "reasonPath") is applied — stamped onto the conversation right
+        // after routing and surviving the AssignToQueueAsync reload + save.
+        var (sut, store, sessionId, _, _) = BuildWithRealSwitchboard(
+            new Dictionary<string, string> { ["reasonPath"] = "support/login" });
+
+        await sut.RouteFirstInboundAsync(sessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        var reloaded = await store.GetByIdAsync(Tenant, ConvId, CancellationToken.None);
+        reloaded.Should().NotBeNull();
+        reloaded!.Metadata.Should().ContainKey("reasonPath");
+        reloaded.Metadata["reasonPath"].Should().Be("support/login");
+        reloaded.Owner!.Kind.Should().Be(ConversationOwnerKind.Queue);
     }
 
     [Fact]

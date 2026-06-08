@@ -70,7 +70,7 @@ internal sealed partial class FlowExecutionEngine : IFlowExecutionEngine
 
         if (execution.Status is not (FlowExecutionStatus.Running or FlowExecutionStatus.WaitingForInput))
         {
-            return new FlowStepResult(execution.Status, null, null, null);
+            return new FlowStepResult(execution.Status, null, null, null, BuildFlowMetadata(execution));
         }
 
         var flow = await _flowStore.GetByIdAsync(execution.TenantId, execution.FlowId, ct).ConfigureAwait(false)
@@ -139,8 +139,9 @@ internal sealed partial class FlowExecutionEngine : IFlowExecutionEngine
         var outbound = BuildOutboundMessages(execution, outboundKeys);
         var queueId = TryGetQueueId(execution);
         var priority = TryGetPriority(execution);
+        var metadata = BuildFlowMetadata(execution);
 
-        return new FlowStepResult(execution.Status, outbound, queueId, priority);
+        return new FlowStepResult(execution.Status, outbound, queueId, priority, metadata);
     }
 
     /// <inheritdoc />
@@ -208,6 +209,18 @@ internal sealed partial class FlowExecutionEngine : IFlowExecutionEngine
     {
         if (!execution.Variables.TryGetValue("__enqueue_priority", out var p)) return null;
         return Enum.TryParse<MessagePriority>(p, ignoreCase: true, out var priority) ? priority : null;
+    }
+
+    private static Dictionary<string, string> BuildFlowMetadata(FlowExecution execution)
+    {
+        // Expose user-set variables only; engine-internal keys are prefixed with "__".
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in execution.Variables)
+        {
+            if (!key.StartsWith("__", StringComparison.Ordinal))
+                metadata[key] = value;
+        }
+        return metadata;
     }
 
     // ── LoggerMessage delegates ───────────────────────────────────────────────

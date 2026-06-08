@@ -164,6 +164,68 @@ public sealed class TypificationEndpointTests : IClassFixture<AuthenticatedPlatf
     }
 
     [Fact]
+    public async Task CreateSchema_ShouldPersistFieldPrefillSource_WhenProvided()
+    {
+        var body = SchemaBodyWithField("Prefilled", new
+        {
+            kind = "Metadata",
+            @ref = "patientId",
+        });
+
+        var id = await CreateSchemaAsync(_client, body);
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        var field = schema!["fields"]!.AsArray()[0]!;
+        var prefill = field["prefillSource"]!;
+        prefill["kind"]!.GetValue<string>().Should().Be("Metadata");
+        prefill["ref"]!.GetValue<string>().Should().Be("patientId");
+    }
+
+    [Fact]
+    public async Task CreateSchema_ShouldLeaveFieldPrefillSourceNull_WhenOmitted()
+    {
+        var body = SchemaBodyWithField("NoPrefill", prefillSource: null);
+
+        var id = await CreateSchemaAsync(_client, body);
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        var field = schema!["fields"]!.AsArray()[0]!;
+        field["prefillSource"].Should().BeNull();
+    }
+
+    // A schema with a single global field; the field's prefillSource is supplied by
+    // the caller (null = omitted) to exercise the C9b round-trip both ways.
+    private static object SchemaBodyWithField(string name, object? prefillSource) => new
+    {
+        name,
+        maxDepth = 5,
+        nodes = Array.Empty<object>(),
+        fields = new object[]
+        {
+            new
+            {
+                fieldId = "field-1",
+                key = "patient_id",
+                label = "Patient ID",
+                type = "Text",
+                required = false,
+                options = (object[]?)null,
+                validation = (object?)null,
+                attachToNodeId = (string?)null,
+                visibleWhen = (object?)null,
+                prefillSource,
+                sortOrder = 0,
+            },
+        },
+    };
+
+    [Fact]
     public async Task CreateSchema_ShouldReturn402_WhenAdvancedTypificationMissing()
     {
         // NoTypificationLicenseFactory reports NO licensed features, so the

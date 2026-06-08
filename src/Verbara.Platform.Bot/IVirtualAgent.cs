@@ -26,12 +26,17 @@ public interface IVirtualAgent
 /// <param name="TargetQueueId">Destination queue (populated when Action is <see cref="BotResponseAction.TransferToQueue"/>).</param>
 /// <param name="Priority">Priority for the handoff (populated alongside <paramref name="TargetQueueId"/>).</param>
 /// <param name="HandoffReason">Human-readable reason for a handoff (optional).</param>
+/// <param name="FlowMetadata">
+/// Non-private flow variables captured during bot execution (keys not prefixed with <c>__</c>),
+/// carried through so downstream consumers (e.g. wrap-up pre-fill) can read them. May be empty.
+/// </param>
 public sealed record BotResponse(
     BotResponseAction Action,
     IReadOnlyList<MessageEnvelope>? Messages,
     EntityId? TargetQueueId,
     MessagePriority? Priority,
-    string? HandoffReason);
+    string? HandoffReason,
+    IReadOnlyDictionary<string, string>? FlowMetadata = null);
 
 /// <summary>
 /// Describes the action a bot has decided to take after processing a message.

@@ -198,6 +198,45 @@ public class BotOrchestratorTests : IDisposable
         response.TargetQueueId.Should().Be(fallbackQueueId);
     }
 
+    [Fact]
+    public async Task ProcessMessageAsync_ShouldCopyFlowMetadataIntoBotResponse_WhenHandoff()
+    {
+        var metadata = new Dictionary<string, string> { ["reason"] = "billing", ["topic"] = "refund" };
+        _configStore.GetDefaultAsync(_tenantId, Arg.Any<CancellationToken>())
+                    .Returns(BuildConfig());
+        _flowEngine.GetActiveExecutionAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+                   .Returns(BuildExecution());
+        _flowEngine.ProcessMessageAsync(_executionId, _message, Arg.Any<CancellationToken>())
+                   .Returns(new FlowStepResult(FlowExecutionStatus.HandedOff, null, _queueId, MessagePriority.Normal, metadata));
+
+        var sut = CreateSut();
+        var response = await sut.ProcessMessageAsync(_conversationId, _tenantId, _message, CancellationToken.None);
+
+        response.Action.Should().Be(BotResponseAction.TransferToQueue);
+        response.FlowMetadata.Should().NotBeNull();
+        response.FlowMetadata!.Should().ContainKey("reason").WhoseValue.Should().Be("billing");
+        response.FlowMetadata.Should().ContainKey("topic").WhoseValue.Should().Be("refund");
+    }
+
+    [Fact]
+    public async Task ProcessMessageAsync_ShouldCopyFlowMetadataIntoBotResponse_WhenReply()
+    {
+        var metadata = new Dictionary<string, string> { ["answer"] = "yes" };
+        _configStore.GetDefaultAsync(_tenantId, Arg.Any<CancellationToken>())
+                    .Returns(BuildConfig());
+        _flowEngine.GetActiveExecutionAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+                   .Returns(BuildExecution());
+        _flowEngine.ProcessMessageAsync(_executionId, _message, Arg.Any<CancellationToken>())
+                   .Returns(new FlowStepResult(FlowExecutionStatus.WaitingForInput, null, null, null, metadata));
+
+        var sut = CreateSut();
+        var response = await sut.ProcessMessageAsync(_conversationId, _tenantId, _message, CancellationToken.None);
+
+        response.Action.Should().Be(BotResponseAction.Reply);
+        response.FlowMetadata.Should().NotBeNull();
+        response.FlowMetadata!.Should().ContainKey("answer").WhoseValue.Should().Be("yes");
+    }
+
     // ── completion path ───────────────────────────────────────────────────────
 
     [Fact]

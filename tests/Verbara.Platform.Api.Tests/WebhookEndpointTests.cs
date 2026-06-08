@@ -30,18 +30,19 @@ public sealed class WebhookEndpointTests : IClassFixture<PlatformApiFactory>
     }
 
     [Fact]
-    public async Task Post_ShouldReturn200_WhenWebhookBodyIsIgnored()
+    public async Task Post_ShouldReturn404_WhenChannelNotConfiguredForTenant()
     {
-        // The in-memory channel registry has no handler registered for WebChat by default,
-        // so we expect a 400 (no handler) rather than 500 — which verifies the pipeline
-        // handles missing handlers gracefully without crashing.
+        // The in-memory channel-config store is empty by default, so WebChat is not
+        // configured/active for this tenant. The webhook handler verifies the channel
+        // is configured before dispatching and returns 404 when it is not — proving the
+        // pipeline (incl. the IVirtualAgent → IFlowExecutionEngine dependency now satisfied
+        // by AddPlatformFlows) activates and reaches the config check without crashing.
         var content = new ByteArrayContent(Encoding.UTF8.GetBytes("{}"));
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
 
         var response = await _client.PostAsync("/api/webhooks/tenant123/webchat", content);
 
-        // No handler registered → 400 is valid and expected
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.BadRequest);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -203,6 +204,180 @@ public sealed class BotHandoffLogicTests
         reloaded.Owner.Should().NotBeNull();
         reloaded.Owner!.Kind.Should().Be(ConversationOwnerKind.Queue);
         reloaded.Owner.OwnerId.Should().Be(QueueId);
+    }
+
+    // ── Captured reason / flow metadata (Typification P1 C5 + C6) ─────────────
+
+    [Fact]
+    public async Task HandleWebhook_ShouldCopyRouteMetadataOntoConversation_WhenRouterReturnsReasonPath()
+    {
+        // C5 (implicit): the inbound router resolved metadata (e.g. ReasonHintMiddleware's
+        // "reasonPath"). The webhook branch must stamp it onto the conversation right after
+        // routing and BEFORE assignment, surviving the AssignToQueueAsync reload + save.
+        var store = new Verbara.Platform.Storage.InMemory.InMemoryConversationStore();
+        var capacity = Substitute.For<Verbara.Platform.Queues.Services.IAgentCapacityService>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var eventBus = new PlatformEventBus();
+
+        var conversation = new Conversation
+        {
+            ConversationId = ConvId,
+            TenantId = TestTenant,
+            ContactId = EntityId.From("contact-1"),
+            Channel = ChannelType.WhatsApp,
+            State = ConversationState.Queued,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await store.SaveAsync(conversation, CancellationToken.None);
+
+        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, clock, eventBus);
+        var routeResult = new Verbara.Platform.Routing.Inbound.RouteResult(
+            QueueId,
+            default,
+            null,
+            new Dictionary<string, string> { ["reasonPath"] = "billing/invoice" });
+
+        // Act — execute the WebhookEndpoints route→stamp→assign branch verbatim.
+        if (routeResult.Metadata is { Count: > 0 })
+        {
+            foreach (var kv in routeResult.Metadata)
+                conversation.SetMetadata(kv.Key, kv.Value);
+            await store.SaveAsync(conversation, CancellationToken.None);
+        }
+
+        await switchboard.AssignToQueueAsync(conversation.ConversationId, TestTenant, routeResult.QueueId, CancellationToken.None);
+
+        var reloaded = await store.GetByIdAsync(TestTenant, ConvId, CancellationToken.None);
+        reloaded.Should().NotBeNull();
+        reloaded!.Metadata.Should().ContainKey("reasonPath");
+        reloaded.Metadata["reasonPath"].Should().Be("billing/invoice");
+    }
+
+    [Fact]
+    public async Task HandleWebhook_ShouldApplyFlowMetadataBeforeTransfer_WhenBotHandsOff()
+    {
+        // C6 (explicit): a bot flow produced FlowMetadata at the bot→queue handoff. The webhook
+        // branch must apply it onto the conversation BEFORE TransferToQueueAsync, surviving the
+        // transfer reload + save.
+        var store = new Verbara.Platform.Storage.InMemory.InMemoryConversationStore();
+        var capacity = Substitute.For<Verbara.Platform.Queues.Services.IAgentCapacityService>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var eventBus = new PlatformEventBus();
+
+        var updated = new Conversation
+        {
+            ConversationId = ConvId,
+            TenantId = TestTenant,
+            ContactId = EntityId.From("contact-1"),
+            Channel = ChannelType.WhatsApp,
+            State = ConversationState.Queued,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        updated.TransitionTo(ConversationState.Offered, DateTimeOffset.UtcNow);
+        updated.TransitionTo(ConversationState.Active, DateTimeOffset.UtcNow);
+        updated.Owner = ConversationOwner.ForBot(BotId);
+        await store.SaveAsync(updated, CancellationToken.None);
+
+        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, clock, eventBus);
+        var botResponse = new BotResponse(
+            BotResponseAction.TransferToQueue,
+            null,
+            QueueId,
+            null,
+            "Flow handoff",
+            new Dictionary<string, string> { ["accountType"] = "premium", ["reasonPath"] = "sales/upgrade" });
+
+        // Act — execute the WebhookEndpoints transfer branch verbatim (apply flow metadata, then transfer).
+        if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
+        {
+            if (botResponse.FlowMetadata is { Count: > 0 })
+            {
+                foreach (var kv in botResponse.FlowMetadata)
+                    updated.SetMetadata(kv.Key, kv.Value);
+                await store.SaveAsync(updated, CancellationToken.None);
+            }
+
+            await switchboard.TransferToQueueAsync(updated.ConversationId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
+        }
+
+        var reloaded = await store.GetByIdAsync(TestTenant, ConvId, CancellationToken.None);
+        reloaded.Should().NotBeNull();
+        reloaded!.Metadata.Should().ContainKey("accountType");
+        reloaded.Metadata["accountType"].Should().Be("premium");
+        reloaded.Metadata.Should().ContainKey("reasonPath");
+        reloaded.Metadata["reasonPath"].Should().Be("sales/upgrade");
+    }
+
+    [Fact]
+    public async Task HandleWebhook_ShouldLetFlowMetadataOverrideImplicitReasonPath_WhenBothPresent()
+    {
+        // Precedence: implicit C5 reasonPath is stamped at routing; the bot runs AFTER routing,
+        // so its explicit C6 FlowMetadata reasonPath must OVERWRITE the implicit one (explicit wins).
+        var store = new Verbara.Platform.Storage.InMemory.InMemoryConversationStore();
+        var capacity = Substitute.For<Verbara.Platform.Queues.Services.IAgentCapacityService>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var eventBus = new PlatformEventBus();
+
+        var conversation = new Conversation
+        {
+            ConversationId = ConvId,
+            TenantId = TestTenant,
+            ContactId = EntityId.From("contact-1"),
+            Channel = ChannelType.WhatsApp,
+            State = ConversationState.Queued,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await store.SaveAsync(conversation, CancellationToken.None);
+
+        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, clock, eventBus);
+
+        // 1) Routing stamps the implicit reasonPath, then assigns to the queue.
+        var routeResult = new Verbara.Platform.Routing.Inbound.RouteResult(
+            QueueId,
+            default,
+            null,
+            new Dictionary<string, string> { ["reasonPath"] = "implicit/general" });
+        if (routeResult.Metadata is { Count: > 0 })
+        {
+            foreach (var kv in routeResult.Metadata)
+                conversation.SetMetadata(kv.Key, kv.Value);
+            await store.SaveAsync(conversation, CancellationToken.None);
+        }
+        await switchboard.AssignToQueueAsync(conversation.ConversationId, TestTenant, routeResult.QueueId, CancellationToken.None);
+
+        // 2) The bot runs, transitions the conversation to a bot-owned Active state, and hands off
+        //    with explicit FlowMetadata that also carries reasonPath.
+        var updated = await store.GetByIdAsync(TestTenant, ConvId, CancellationToken.None);
+        updated.Should().NotBeNull();
+        updated!.TransitionTo(ConversationState.Offered, DateTimeOffset.UtcNow);
+        updated.TransitionTo(ConversationState.Active, DateTimeOffset.UtcNow);
+        updated.Owner = ConversationOwner.ForBot(BotId);
+        await store.SaveAsync(updated, CancellationToken.None);
+
+        var botResponse = new BotResponse(
+            BotResponseAction.TransferToQueue,
+            null,
+            QueueId,
+            null,
+            "Flow handoff",
+            new Dictionary<string, string> { ["reasonPath"] = "explicit/billing" });
+        if (botResponse.Action == BotResponseAction.TransferToQueue && botResponse.TargetQueueId is not null)
+        {
+            if (botResponse.FlowMetadata is { Count: > 0 })
+            {
+                foreach (var kv in botResponse.FlowMetadata)
+                    updated.SetMetadata(kv.Key, kv.Value);
+                await store.SaveAsync(updated, CancellationToken.None);
+            }
+            await switchboard.TransferToQueueAsync(updated.ConversationId, TestTenant, botResponse.TargetQueueId.Value, CancellationToken.None);
+        }
+
+        var reloaded = await store.GetByIdAsync(TestTenant, ConvId, CancellationToken.None);
+        reloaded.Should().NotBeNull();
+        reloaded!.Metadata["reasonPath"].Should().Be("explicit/billing");
     }
 
     // ── EndConversation ───────────────────────────────────────────────────────

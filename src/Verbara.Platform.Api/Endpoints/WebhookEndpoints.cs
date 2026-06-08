@@ -105,6 +105,17 @@ internal static class WebhookEndpoints
                 var routingCtx = new RoutingContext(conversation, contact, channelType, result.Message.Content, tid);
                 var routeResult = await router.RouteAsync(routingCtx, ct);
 
+                // C5 (implicit capture): stamp any reason/metadata the router resolved (e.g. the
+                // ReasonHintMiddleware's "reasonPath") onto the conversation BEFORE assignment and
+                // any bot processing. AssignToQueueAsync reloads + persists the row, so this metadata
+                // round-trips through the assignment.
+                if (routeResult.Metadata is { Count: > 0 })
+                {
+                    foreach (var kv in routeResult.Metadata)
+                        conversation.SetMetadata(kv.Key, kv.Value);
+                    await conversationStore.SaveAsync(conversation, ct);
+                }
+
                 await switchboard.AssignToQueueAsync(conversation.ConversationId, tid, routeResult.QueueId, ct);
 
                 // Reload conversation to check owner after assignment
@@ -139,6 +150,18 @@ internal static class WebhookEndpoints
                         }
                         else
                         {
+                            // C6 (explicit capture): apply the bot flow's captured metadata (non-"__"
+                            // flow variables) onto the conversation at the bot→queue handoff, BEFORE the
+                            // transfer. The bot runs AFTER routing, so FlowMetadata intentionally
+                            // OVERWRITES the implicit C5 reasonPath — explicit wins. TransferToQueueAsync
+                            // reloads + persists, so this metadata round-trips through the transfer.
+                            if (botResponse.FlowMetadata is { Count: > 0 })
+                            {
+                                foreach (var kv in botResponse.FlowMetadata)
+                                    updated.SetMetadata(kv.Key, kv.Value);
+                                await conversationStore.SaveAsync(updated, ct);
+                            }
+
                             await switchboard.TransferToQueueAsync(
                                 updated.ConversationId,
                                 tid,

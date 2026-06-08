@@ -131,7 +131,7 @@ internal sealed partial class BotOrchestrator : IVirtualAgent
     // ── private helpers ───────────────────────────────────────────────────────
 
     private static BotResponse BuildReplyResponse(FlowStepResult result)
-        => new(BotResponseAction.Reply, result.OutboundMessages, null, null, null);
+        => new(BotResponseAction.Reply, result.OutboundMessages, null, null, null, result.FlowMetadata);
 
     private BotResponse BuildHandoffResponse(
         BotConfiguration config,
@@ -149,7 +149,7 @@ internal sealed partial class BotOrchestrator : IVirtualAgent
             TurnCount: turns,
             HandoffReason: "Flow handoff"));
 
-        return new BotResponse(BotResponseAction.TransferToQueue, result.OutboundMessages, queueId, result.Priority, "Flow handoff");
+        return new BotResponse(BotResponseAction.TransferToQueue, result.OutboundMessages, queueId, result.Priority, "Flow handoff", result.FlowMetadata);
     }
 
     private BotResponse BuildEndResponse(

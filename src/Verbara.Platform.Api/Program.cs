@@ -13,6 +13,7 @@ using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.DependencyInjection;
+using Verbara.Platform.Flows;
 using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Storage.InMemory;
 using Verbara.Platform.Storage.Postgres;
@@ -176,6 +177,10 @@ builder.Services.AddSwitchboard();
 // path, so a visitor's chat reaches an agent. See WebChatInboundRouter.
 builder.Services.AddSingleton<WebChatInboundRouter>();
 builder.Services.AddPlatformBot();
+// Flow execution engine + node handlers (incl. collect_reason/set_variable for the P1
+// typification capture paths). Ships a default-disabled ILlmProvider so the engine and AI
+// handlers compose; AI nodes fail loudly until a real provider is configured.
+builder.Services.AddPlatformFlows();
 builder.Services.AddHostedService<Verbara.Platform.Api.Services.BotAnalyticsPersistenceService>();
 builder.Services.AddPlatformAudit();
 builder.Services.AddPlatformMedia();
@@ -1608,6 +1613,7 @@ v1.MapAuditEndpoints();
 Verbara.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.MapAuditAdminEndpoints(v1);
 v1.MapSurveyEndpoints();
 v1.MapTypificationEndpoints();
+v1.MapReasonHintEndpoints();
 v1.MapScheduledReportEndpoints();
 v1.MapRealtimeEndpoints();
 v1.MapAuthAdminEndpoints();

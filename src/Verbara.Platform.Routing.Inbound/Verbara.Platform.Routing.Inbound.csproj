@@ -14,6 +14,7 @@
     <ProjectReference Include="..\Verbara.Platform.Conversations\Verbara.Platform.Conversations.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Queues\Verbara.Platform.Queues.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Channels.Core\Verbara.Platform.Channels.Core.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Typification\Verbara.Platform.Typification.csproj" />
   </ItemGroup>
 
   <ItemGroup>

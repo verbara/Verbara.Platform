@@ -43,8 +43,13 @@ public interface IFlowExecutionEngine
 /// <param name="OutboundMessages">Messages produced by send_message nodes during this step.</param>
 /// <param name="TargetQueueId">The queue to hand off to, populated when status is <see cref="FlowExecutionStatus.HandedOff"/>.</param>
 /// <param name="Priority">The handoff priority, populated alongside <paramref name="TargetQueueId"/>.</param>
+/// <param name="FlowMetadata">
+/// Non-private flow variables collected during the run (keys not prefixed with <c>__</c>),
+/// so downstream consumers (e.g. wrap-up pre-fill) can read what the bot captured. May be empty.
+/// </param>
 public sealed record FlowStepResult(
     FlowExecutionStatus Status,
     IReadOnlyList<MessageEnvelope>? OutboundMessages,
     EntityId? TargetQueueId,
-    MessagePriority? Priority);
+    MessagePriority? Priority,
+    IReadOnlyDictionary<string, string>? FlowMetadata = null);

@@ -98,6 +98,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITypificationSchemaStore, InMemoryTypificationSchemaStore>();
         services.AddSingleton<ISchemaBindingStore, InMemorySchemaBindingStore>();
         services.AddSingleton<ITypificationSubmissionStore, InMemoryTypificationSubmissionStore>();
+        services.AddSingleton<IReasonHintStore, InMemoryReasonHintStore>();
 
         // Automation
         services.AddSingleton<ITimerStore, InMemoryTimerStore>();
