@@ -30,18 +30,19 @@ public sealed class WebhookEndpointTests : IClassFixture<PlatformApiFactory>
     }
 
     [Fact]
-    public async Task Post_ShouldReturn200_WhenWebhookBodyIsIgnored()
+    public async Task Post_ShouldReturn404_WhenChannelNotConfiguredForTenant()
     {
-        // The in-memory channel registry has no handler registered for WebChat by default,
-        // so we expect a 400 (no handler) rather than 500 — which verifies the pipeline
-        // handles missing handlers gracefully without crashing.
+        // The in-memory channel-config store is empty by default, so WebChat is not
+        // configured/active for this tenant. The webhook handler verifies the channel
+        // is configured before dispatching and returns 404 when it is not — proving the
+        // pipeline (incl. the IVirtualAgent → IFlowExecutionEngine dependency now satisfied
+        // by AddPlatformFlows) activates and reaches the config check without crashing.
         var content = new ByteArrayContent(Encoding.UTF8.GetBytes("{}"));
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
 
         var response = await _client.PostAsync("/api/webhooks/tenant123/webchat", content);
 
-        // No handler registered → 400 is valid and expected
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.BadRequest);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
