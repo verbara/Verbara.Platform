@@ -113,7 +113,7 @@ public class SupervisorDigitalTests
         await convStore.SaveAsync(conv, CancellationToken.None);
 
         var lifecycleService = new DefaultConversationLifecycleService(convStore, clock);
-        await lifecycleService.CloseAsync(Tenant, conv.ConversationId, wrapUp: null, CancellationToken.None);
+        await lifecycleService.CloseAsync(Tenant, conv.ConversationId, CancellationToken.None);
 
         var updated = await convStore.GetByIdAsync(Tenant, conv.ConversationId, CancellationToken.None);
         updated!.State.Should().Be(ConversationState.Closed);

@@ -180,7 +180,7 @@ internal static class SupervisorEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        await lifecycleService.CloseAsync(tenantId, EntityId.From(id), wrapUp: null, ct);
+        await lifecycleService.CloseAsync(tenantId, EntityId.From(id), ct);
         return Results.Ok(new MessageResponse($"Conversation {id} closed"));
     }
 

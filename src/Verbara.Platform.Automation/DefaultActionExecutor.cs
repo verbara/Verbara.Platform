@@ -117,7 +117,7 @@ public sealed partial class DefaultActionExecutor : IActionExecutor
 
     private async Task<bool> ExecuteCloseConversationAsync(AutomationEvent automationEvent, CancellationToken ct)
     {
-        await _lifecycleService.CloseAsync(automationEvent.TenantId, automationEvent.ConversationId, null, ct).ConfigureAwait(false);
+        await _lifecycleService.CloseAsync(automationEvent.TenantId, automationEvent.ConversationId, ct).ConfigureAwait(false);
         return true;
     }
 

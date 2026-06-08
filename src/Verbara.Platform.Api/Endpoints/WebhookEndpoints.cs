@@ -151,7 +151,7 @@ internal static class WebhookEndpoints
                     }
                     else if (botResponse.Action == BotResponseAction.EndConversation)
                     {
-                        await lifecycleService.CloseAsync(tid, updated.ConversationId, wrapUp: null, ct);
+                        await lifecycleService.CloseAsync(tid, updated.ConversationId, ct);
                     }
                 }
             }

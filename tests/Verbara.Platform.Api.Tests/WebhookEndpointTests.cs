@@ -217,14 +217,13 @@ public sealed class BotHandoffLogicTests
         // Act — simulate the end-conversation branch directly
         if (botResponse.Action == BotResponseAction.EndConversation)
         {
-            await lifecycleService.CloseAsync(TestTenant, ConvId, wrapUp: null, CancellationToken.None);
+            await lifecycleService.CloseAsync(TestTenant, ConvId, CancellationToken.None);
         }
 
         // Assert
         await lifecycleService.Received(1).CloseAsync(
             TestTenant,
             ConvId,
-            null,
             Arg.Any<CancellationToken>());
     }
 
@@ -238,11 +237,11 @@ public sealed class BotHandoffLogicTests
         // Act — Reply action should not trigger close
         if (botResponse.Action == BotResponseAction.EndConversation)
         {
-            await lifecycleService.CloseAsync(TestTenant, ConvId, wrapUp: null, CancellationToken.None);
+            await lifecycleService.CloseAsync(TestTenant, ConvId, CancellationToken.None);
         }
 
         // Assert
-        await lifecycleService.DidNotReceiveWithAnyArgs().CloseAsync(default!, default, null, default);
+        await lifecycleService.DidNotReceiveWithAnyArgs().CloseAsync(default!, default, default);
     }
 
     [Fact]
@@ -263,11 +262,11 @@ public sealed class BotHandoffLogicTests
         }
         else if (botResponse.Action == BotResponseAction.EndConversation)
         {
-            await lifecycleService.CloseAsync(TestTenant, ConvId, wrapUp: null, CancellationToken.None);
+            await lifecycleService.CloseAsync(TestTenant, ConvId, CancellationToken.None);
         }
 
         // Assert
-        await lifecycleService.DidNotReceiveWithAnyArgs().CloseAsync(default!, default, null, default);
+        await lifecycleService.DidNotReceiveWithAnyArgs().CloseAsync(default!, default, default);
         await switchboard.Received(1).TransferToQueueAsync(ConvId, TestTenant, QueueId, Arg.Any<CancellationToken>());
     }
 

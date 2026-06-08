@@ -133,9 +133,7 @@ public static class ServiceCollectionExtensions
         // KnowledgeBase
         services.AddSingleton<IArticleStore, PostgresArticleStore>();
 
-        // Conversations — wrap-up + dispositions + cases
-        services.AddSingleton<IWrapUpStore, PostgresWrapUpStore>();
-        services.AddSingleton<IDispositionStore, PostgresDispositionStore>();
+        // Conversations — cases
         services.AddSingleton<ICaseStore, PostgresCaseStore>();
 
         // Identity — service accounts

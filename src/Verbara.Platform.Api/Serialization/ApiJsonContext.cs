@@ -46,6 +46,10 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(SchemaBindingDto[]))]
 [JsonSerializable(typeof(SchemaBindingDto))]
 [JsonSerializable(typeof(PublishResultDto))]
+// Typification — runtime typify (replaces flat /wrapup)
+[JsonSerializable(typeof(TypificationFormResponse))]
+[JsonSerializable(typeof(TypifyErrorResponse))]
+[JsonSerializable(typeof(Verbara.Platform.Typification.TypificationSubmission))]
 [JsonSerializable(typeof(PagedResult<Conversation>))]
 [JsonSerializable(typeof(PagedResult<Contact>))]
 [JsonSerializable(typeof(PagedResult<ApiKey>))]
@@ -102,7 +106,6 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateDispositionCodeRequest))]
 [JsonSerializable(typeof(CampaignMetricsDto))]
 [JsonSerializable(typeof(List<CampaignMetricsDto>))]
-[JsonSerializable(typeof(WrapUpRequest))]
 [JsonSerializable(typeof(CreateConversationRequest))]
 // AOT (ADR-0022 Phase D): remaining ConversationEndpoints [FromBody] DTOs.
 [JsonSerializable(typeof(SendMessageRequest))]
@@ -480,8 +483,6 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(IReadOnlyList<UserRoleAssignment>))]
 [JsonSerializable(typeof(TenantRole))]
 [JsonSerializable(typeof(IReadOnlyList<TenantRole>))]
-[JsonSerializable(typeof(Disposition))]
-[JsonSerializable(typeof(IReadOnlyList<Disposition>))]
 [JsonSerializable(typeof(RateCardDto))]
 [JsonSerializable(typeof(List<RateCardDto>))]
 [JsonSerializable(typeof(IntervalDto[]))]
@@ -549,9 +550,8 @@ namespace Verbara.Platform.Api.Serialization;
 // Campaigns (Dialer)
 [JsonSerializable(typeof(CreateCampaignRequest))]
 [JsonSerializable(typeof(UpdateCampaignRequest))]
-// Dispositions
-[JsonSerializable(typeof(CreateDispositionRequest))]
 // Typification — request DTOs
+[JsonSerializable(typeof(TypifyRequest))]
 [JsonSerializable(typeof(CreateSchemaRequest))]
 [JsonSerializable(typeof(UpdateSchemaRequest))]
 [JsonSerializable(typeof(CreateBindingRequest))]

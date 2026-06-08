@@ -557,58 +557,6 @@ public sealed class CampaignEndpointTests : IClassFixture<UnifiedPlatformApiFact
         content.Should().Contain("Retry");
     }
 
-    // ─── Wrap-up Bridge ───────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task WrapUp_ShouldReturn404_WhenConversationNotFound()
-    {
-        var body = JsonContent.Create(new { notes = "Test note" });
-        var response = await _client.PostAsync("/api/conversations/nonexistent-campaign-conv/wrapup", body);
-
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-    }
-
-    [Fact]
-    public async Task WrapUp_ShouldWorkNormally_WhenNoCampaignContext()
-    {
-        // WrapUp with no campaignDispositionId should skip the campaign bridge
-        // and return 404 since the conversation doesn't exist
-        var body = JsonContent.Create(new { notes = "Regular wrapup" });
-        var response = await _client.PostAsync("/api/conversations/no-campaign-context/wrapup", body);
-
-        // No conversation → 404 (bridge is never entered without a real conversation)
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-    }
-
-    [Fact]
-    public async Task WrapUp_ShouldPublishSseEvent_WhenCampaignDisposition()
-    {
-        // The wrapup endpoint returns 404 when conversation doesn't exist,
-        // so the SSE publish path only fires when conversation + metadata exist.
-        // This test verifies the endpoint handles the no-conversation case gracefully.
-        var body = JsonContent.Create(new { campaignDispositionId = 1L, notes = "SSE test" });
-        var response = await _client.PostAsync("/api/conversations/missing-conv/wrapup", body);
-
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-    }
-
-    [Fact]
-    public async Task WrapUp_ShouldScheduleCallback_WhenTriggerCallbackTrue()
-    {
-        // Callback scheduling requires conversation metadata with callAttemptId, campaignId, contactId.
-        // Without a real conversation seeded, the endpoint returns 404.
-        // This test verifies the endpoint is reachable and handles missing conversation correctly.
-        var body = JsonContent.Create(new
-        {
-            campaignDispositionId = 1L,
-            callbackDate = DateTimeOffset.UtcNow.AddDays(1).ToString("O"),
-            notes = "Callback test",
-        });
-        var response = await _client.PostAsync("/api/conversations/unknown-conv/wrapup", body);
-
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-    }
-
     // ─── Metrics ─────────────────────────────────────────────────────────────
 
     [Fact]

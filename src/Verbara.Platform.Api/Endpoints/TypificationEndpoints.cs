@@ -327,7 +327,7 @@ internal static class TypificationEndpoints
 
     // ─── DTO ↔ domain mapping (fully explicit, reflection-free) ───────────────
 
-    private static TypificationSchemaDto ToSchemaDto(TypificationSchema s) =>
+    internal static TypificationSchemaDto ToSchemaDto(TypificationSchema s) =>
         new(
             SchemaId: s.SchemaId.Value,
             Name: s.Name,

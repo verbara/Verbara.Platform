@@ -117,6 +117,12 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
     private readonly ConcurrentDictionary<long, Campaign> _campaigns = new();
     private readonly List<(string TenantId, long CampaignId, long ContactId, DateTimeOffset ScheduledAt, string? AgentId)> _callbacks = [];
 
+    /// <summary>
+    /// Observable record of every <see cref="UpdateCallAttemptDispositionAsync"/> call so
+    /// tests (e.g. the typify→dialer bridge) can assert the call-attempt disposition path ran.
+    /// </summary>
+    public List<(string TenantId, long CallAttemptId, long DispositionId, string? AgentComment)> RecordedDispositionUpdates { get; } = [];
+
     public override ValueTask<IReadOnlyList<Campaign>> GetActiveCampaignsAsync(string tenantId, CancellationToken ct)
     {
         var result = _campaigns.Values
@@ -199,7 +205,10 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
     }
 
     public override ValueTask UpdateCallAttemptDispositionAsync(string tenantId, long callAttemptId, long dispositionId, string? agentComment, CancellationToken ct)
-        => ValueTask.CompletedTask;
+    {
+        RecordedDispositionUpdates.Add((tenantId, callAttemptId, dispositionId, agentComment));
+        return ValueTask.CompletedTask;
+    }
 
     public override ValueTask<CampaignMetricsSnapshot> GetCampaignMetricsAsync(string tenantId, long campaignId, CancellationToken ct)
     {

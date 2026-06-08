@@ -1570,7 +1570,6 @@ v1.MapQueueMembersEndpoints();
 v1.MapFlowEndpoints();
 v1.MapChannelConfigEndpoints();
 v1.MapContactEndpoints();
-v1.MapDispositionEndpoints();
 v1.MapSetupEndpoints();
 v1.MapManagementTenantEndpoints();
 v1.MapManagementSystemEndpoints();
