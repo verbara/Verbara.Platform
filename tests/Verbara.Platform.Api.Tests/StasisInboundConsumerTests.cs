@@ -239,6 +239,40 @@ public sealed class StasisInboundConsumerTests
     }
 
     [Fact]
+    public async Task HandleInbound_ShouldStillRoute_WhenReasonHintResolverThrows()
+    {
+        // The reason-hint capture is OPTIONAL best-effort: a transient store/ARI fault during
+        // resolution must NEVER hang up an otherwise-routable caller. The guard around
+        // ResolveAsync + SetVariableAsync(VERBARA_REASON) swallows the failure and the call
+        // still answers + continues into the queue.
+        var (client, channels) = NewClient();
+        channels.GetVariableAsync(Channel, "TENANT_ID", Arg.Any<CancellationToken>())
+            .Returns(new AriVariable { Value = Tenant });
+        var didRoutes = Substitute.For<IDidRouteStore>();
+        var route = Route("q-support");
+        didRoutes.GetByDidAsync(new TenantId(Tenant), Did, Arg.Any<CancellationToken>())
+            .Returns(route);
+        var queues = Substitute.For<IQueueStore>();
+        queues.GetByIdAsync(new TenantId(Tenant), EntityId.From("q-support"), Arg.Any<CancellationToken>())
+            .Returns(Queue("q-support", "Support"));
+        var reasonHints = Substitute.For<IReasonHintResolver>();
+        reasonHints.ResolveAsync(
+                new TenantId(Tenant), Did, route.QueueId, ChannelType.Voice, Arg.Any<CancellationToken>())
+            .Returns<ReasonHint?>(_ => throw new InvalidOperationException("transient store failure"));
+
+        var consumer = NewConsumer(LeaderStub(true), didRoutes, queues, reasonHints: reasonHints);
+        var act = async () => await consumer.HandleStasisStartAsync(client, InboundStart(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        // VERBARA_REASON never stamped (the resolve threw), but the call routes anyway.
+        await channels.DidNotReceive().SetVariableAsync(Channel, "VERBARA_REASON", Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await channels.Received(1).SetVariableAsync(Channel, "QUEUE_NAME", $"{Tenant}-Support", Arg.Any<CancellationToken>());
+        await channels.Received(1).ContinueAsync(
+            Channel, "stasis-queue", "s", 1, null, Arg.Any<CancellationToken>());
+        await channels.DidNotReceive().HangupAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task HandleStasisStartAsync_ShouldHangupAndNotContinue_WhenTenantVarMissing()
     {
         var (client, channels) = NewClient();

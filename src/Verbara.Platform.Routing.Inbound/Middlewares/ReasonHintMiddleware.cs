@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Resolution;
 
@@ -12,13 +13,15 @@ namespace Verbara.Platform.Routing.Inbound.Middlewares;
 /// queue; digital channels carry no DID so resolution falls through Queue → Channel.
 /// Existing downstream metadata keys are never overwritten.
 /// </summary>
-public sealed class ReasonHintMiddleware : InboundRoutingMiddlewareBase
+public sealed partial class ReasonHintMiddleware : InboundRoutingMiddlewareBase
 {
     private readonly IReasonHintResolver _resolver;
+    private readonly ILogger<ReasonHintMiddleware> _logger;
 
-    public ReasonHintMiddleware(IReasonHintResolver resolver)
+    public ReasonHintMiddleware(IReasonHintResolver resolver, ILogger<ReasonHintMiddleware> logger)
     {
         _resolver = resolver;
+        _logger = logger;
     }
 
     public override async Task<RouteResult?> RouteAsync(
@@ -30,26 +33,46 @@ public sealed class ReasonHintMiddleware : InboundRoutingMiddlewareBase
         if (downstream is null)
             return null;
 
-        var hint = await _resolver.ResolveAsync(
-            context.TenantId,
-            did: null,
-            queueId: downstream.QueueId,
-            channel: context.Channel,
-            ct).ConfigureAwait(false);
-
-        if (hint is null || string.IsNullOrEmpty(hint.ReasonPath))
-            return downstream;
-
-        var merged = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (downstream.Metadata is not null)
+        // The reason-hint capture is an OPTIONAL best-effort enrichment: a transient store
+        // failure must NEVER fail the whole route (500 the webhook in WebhookEndpoints, or
+        // escape WebChatInboundRouter's InvalidOperationException-only catch). On ANY failure
+        // we log and return the downstream result unchanged — no metadata stamped.
+        try
         {
-            foreach (var kv in downstream.Metadata)
-                merged[kv.Key] = kv.Value;
+            var hint = await _resolver.ResolveAsync(
+                context.TenantId,
+                did: null,
+                queueId: downstream.QueueId,
+                channel: context.Channel,
+                ct).ConfigureAwait(false);
+
+            if (hint is null || string.IsNullOrEmpty(hint.ReasonPath))
+                return downstream;
+
+            var merged = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (downstream.Metadata is not null)
+            {
+                foreach (var kv in downstream.Metadata)
+                    merged[kv.Key] = kv.Value;
+            }
+
+            if (!merged.ContainsKey(TypificationMetadataKeys.ReasonPath))
+                merged[TypificationMetadataKeys.ReasonPath] = hint.ReasonPath;
+
+            return downstream with { Metadata = merged };
         }
-
-        if (!merged.ContainsKey(TypificationMetadataKeys.ReasonPath))
-            merged[TypificationMetadataKeys.ReasonPath] = hint.ReasonPath;
-
-        return downstream with { Metadata = merged };
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogReasonHintFailed(context.TenantId.Value, ex.Message);
+            return downstream;
+        }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[REASON-HINT] tenant {TenantId}: reason-hint capture failed — routing unchanged: {Reason}")]
+    private partial void LogReasonHintFailed(string tenantId, string reason);
 }

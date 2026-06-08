@@ -332,9 +332,25 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
             // DID/queue and push it to the VERBARA_REASON channel var so VoiceConversationBridge can
             // stamp Conversation.Metadata["reasonPath"] when it creates the call's Conversation. A
             // missing hint simply skips — voice routing never depends on a typification hint existing.
-            var hint = await _reasonHints.ResolveAsync(new TenantId(tenant), did, route.QueueId, ChannelType.Voice, ct);
-            if (hint is not null && !string.IsNullOrEmpty(hint.ReasonPath))
-                await client.Channels.SetVariableAsync(channelId, ReasonVariable, hint.ReasonPath, ct);
+            //
+            // This OPTIONAL best-effort capture is wrapped in its own try/catch so a transient
+            // store/ARI failure during reason resolution can NEVER hang up an otherwise-routable
+            // caller: it logs and continues straight to ContinueAsync. Mirrors the defensive pattern
+            // in VoiceConversationBridge.ResolveReasonFromChannelAsync / ReadTenantAsync.
+            try
+            {
+                var hint = await _reasonHints.ResolveAsync(new TenantId(tenant), did, route.QueueId, ChannelType.Voice, ct);
+                if (hint is not null && !string.IsNullOrEmpty(hint.ReasonPath))
+                    await client.Channels.SetVariableAsync(channelId, ReasonVariable, hint.ReasonPath, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception reasonEx)
+            {
+                LogReasonHintFailed(channelId, tenant, reasonEx.Message);
+            }
 
             await client.Channels.ContinueAsync(
                 channelId, context: StasisQueueContext, extension: QueueEntryExtension, priority: 1, label: null, ct);
@@ -451,6 +467,10 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[STASIS] tenant {TenantId}: did_route points at missing queue '{QueueId}' — hanging up.")]
     private partial void LogQueueMissing(string tenantId, string queueId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[STASIS] Channel {ChannelId} (tenant {TenantId}): reason-hint capture failed — routing call anyway: {Reason}")]
+    private partial void LogReasonHintFailed(string channelId, string tenantId, string reason);
 
     [LoggerMessage(Level = LogLevel.Information,
         Message = "[STASIS] Channel {ChannelId} (tenant {TenantId}, DID {Did}) → queue '{Queue}'.")]
