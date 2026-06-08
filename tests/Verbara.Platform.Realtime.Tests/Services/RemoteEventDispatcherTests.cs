@@ -49,6 +49,11 @@ public sealed class RemoteEventDispatcherTests
             JsonSerializer.Serialize(payload, PlatformPushJsonContext.Default.ConversationStateChangedEvent),
             payload.EventType);
 
+    private static RemotePushEvent MakeTypificationEnvelope(TypificationSubmittedEvent payload) =>
+        MakeEnvelope(
+            JsonSerializer.Serialize(payload, PlatformPushJsonContext.Default.TypificationSubmittedEvent),
+            payload.EventType);
+
     private static RemotePushEvent MakeEnvelope(string json, string originalEventType) =>
         new(
             OriginalEventType: originalEventType,
@@ -106,6 +111,32 @@ public sealed class RemoteEventDispatcherTests
         decoded.ConversationId.Should().Be("conv-1");
         decoded.OldState.Should().Be("queued");
         decoded.NewState.Should().Be("active");
+        decoded.TenantId.Should().Be("acme");
+
+        await dispatcher.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Dispatch_ShouldRepublishTypificationSubmittedEvent_WhenOriginalEventTypeMatches()
+    {
+        using var bus = new FakePushEventBus();
+        var dispatcher = new RemoteEventDispatcher(bus, NullLogger<RemoteEventDispatcher>.Instance);
+        await dispatcher.StartAsync(CancellationToken.None);
+
+        var typed = new TypificationSubmittedEvent(
+            "acme", "conv-7", "schema-1", SchemaVersion: 3, "leaf-99", "agent-5");
+        var envelope = MakeTypificationEnvelope(typed);
+
+        bus.Emit(envelope);
+        await Task.Delay(100);
+
+        bus.Published.Should().ContainSingle(e => e.GetType() == typeof(TypificationSubmittedEvent));
+        var decoded = bus.Published.OfType<TypificationSubmittedEvent>().Single();
+        decoded.ConversationId.Should().Be("conv-7");
+        decoded.SchemaId.Should().Be("schema-1");
+        decoded.SchemaVersion.Should().Be(3);
+        decoded.LeafNodeId.Should().Be("leaf-99");
+        decoded.AgentId.Should().Be("agent-5");
         decoded.TenantId.Should().Be("acme");
 
         await dispatcher.StopAsync(CancellationToken.None);

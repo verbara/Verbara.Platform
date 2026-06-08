@@ -209,6 +209,20 @@ public sealed record CampaignDispositionSubmittedEvent(
     string DispositionCode, string AgentId)
     : PlatformEvent(TenantId, "campaign.disposition_submitted", DateTimeOffset.UtcNow);
 
+/// <summary>
+/// Raised when an agent submits a typification (disposition schema) for a conversation.
+/// Cross-pod broadcast: registered in PlatformPushJsonContext (backplane payload),
+/// RemoteEventDispatcher (cross-node decode/republish), and ApiJsonContext (SSE).
+/// </summary>
+public sealed record TypificationSubmittedEvent(
+    string TenantId,
+    string ConversationId,
+    string SchemaId,
+    int SchemaVersion,
+    string LeafNodeId,
+    string AgentId)
+    : PlatformEvent(TenantId, "typification.submitted", DateTimeOffset.UtcNow);
+
 // ─── Agent Assist Events ──────────────────────────────────────────────────────
 
 /// <summary>Raised when an agent assist suggestion is generated for a live call.</summary>

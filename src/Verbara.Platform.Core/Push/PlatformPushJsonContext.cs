@@ -47,4 +47,5 @@ namespace Verbara.Platform.Core.Push;
 [JsonSerializable(typeof(AgentStateChangedEvent))]
 [JsonSerializable(typeof(AgentPendingStateChangedEvent))]
 [JsonSerializable(typeof(ConversationStateChangedEvent))]
+[JsonSerializable(typeof(TypificationSubmittedEvent))]
 public partial class PlatformPushJsonContext : JsonSerializerContext;

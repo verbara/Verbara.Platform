@@ -173,6 +173,25 @@ public static class RoleTemplateSeeder
     /// </summary>
     public static IReadOnlyList<string> GetCanonicalPermissions() => AllPermissions();
 
+    /// <summary>
+    /// Returns the permission ids granted by the canonical role template with the
+    /// given <paramref name="templateId"/> (e.g. <c>"admin"</c>,
+    /// <c>"platform_admin"</c>), or an empty list if no such template exists.
+    /// Exposed for verification (tests / tooling) of template→permission grants
+    /// without provisioning Postgres.
+    /// </summary>
+    public static IReadOnlyList<string> GetTemplatePermissions(string templateId)
+    {
+        ArgumentNullException.ThrowIfNull(templateId);
+        foreach (var (template, permissions) in GetTemplates())
+        {
+            if (string.Equals(template.TemplateId, templateId, StringComparison.Ordinal))
+                return permissions;
+        }
+
+        return [];
+    }
+
     private static IEnumerable<(TemplateRow Template, string[] Permissions)> GetTemplates()
     {
         // ── Agent ──
@@ -361,7 +380,8 @@ public static class RoleTemplateSeeder
             "routing:flow:view", "routing:flow:edit",
             "analytics:cdr:view", "analytics:cdr:export",
             "analytics:interval:view", "analytics:alert:manage",
-            "system:tenant:configure", "system:integration:manage",
+            "system:tenant:configure", "system:typification:configure",
+            "system:integration:manage",
             "system:audit:view", "system:cluster:manage",
             "system:auth:configure",
             "agentassist:session:view", "agentassist:config:manage",

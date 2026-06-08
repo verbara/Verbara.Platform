@@ -190,9 +190,11 @@ internal static class PermissionSeeder
             "Configure analytics alert rules",
             ["analytics:interval:view"]);
 
-        // ── system (5) ──
+        // ── system (6) ──
         yield return P("system:tenant:configure", "system", "tenant", "configure",
             "Configure tenant settings");
+        yield return P("system:typification:configure", "system", "typification", "configure",
+            "Configure typification (disposition) schemas and bindings");
         yield return P("system:integration:manage", "system", "integration", "manage",
             "Manage integrations (bots, webhooks, etc.)");
         yield return P("system:audit:view", "system", "audit", "view",

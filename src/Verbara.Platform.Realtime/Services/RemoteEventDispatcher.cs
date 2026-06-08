@@ -122,6 +122,9 @@ internal sealed class RemoteEventDispatcher : IHostedService
             case "conversation.state_changed":
                 DecodeAndPublish(envelope, PlatformPushJsonContext.Default.ConversationStateChangedEvent);
                 break;
+            case "typification.submitted":
+                DecodeAndPublish(envelope, PlatformPushJsonContext.Default.TypificationSubmittedEvent);
+                break;
             default:
                 // Not a Platform.Core event — let other consumers (Pro internal
                 // mergers, custom subscribers) handle it directly. The Pro.Push

@@ -73,6 +73,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(CampaignStatusChangedEvent))]
 [JsonSerializable(typeof(CampaignMetricsUpdatedEvent))]
 [JsonSerializable(typeof(CampaignDispositionSubmittedEvent))]
+[JsonSerializable(typeof(TypificationSubmittedEvent))]
 // SSE: Switchboard & Queue events
 [JsonSerializable(typeof(ConversationOfferedEvent))]
 [JsonSerializable(typeof(ConversationOfferExpiredEvent))]
