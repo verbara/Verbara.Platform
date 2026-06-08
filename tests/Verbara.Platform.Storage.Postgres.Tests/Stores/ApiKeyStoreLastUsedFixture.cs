@@ -7,10 +7,9 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 /// <summary>
 /// Testcontainers-backed Postgres fixture for
 /// <see cref="ApiKeyStoreLastUsedTests"/>. Spins up <c>postgres:16-alpine</c>
-/// and creates only the <c>api_keys</c> table — column shape mirrors
-/// migration 001 with the R5.2 PC.5 / B.12 <c>last_used_at</c> column already
-/// applied (migration 020). Avoids dragging in the entire 20-migration
-/// platform schema.
+/// and creates only the <c>api_keys</c> table — column shape mirrors the final
+/// folded table in the consolidated 001_Baseline.sql (incl. the R5.2 PC.5 / B.12
+/// <c>last_used_at</c> column). Avoids dragging in the entire platform schema.
 /// </summary>
 public sealed class ApiKeyStoreLastUsedFixture : IAsyncLifetime
 {
@@ -56,9 +55,9 @@ public sealed class ApiKeyStoreLastUsedFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // Subset of 001_InitialSchema.sql + the 020_ApiKeysLastUsedAt.sql column.
-    // Inlined so the test doesn't have to apply the full 20-migration pipeline
-    // (and its cross-package deps) to exercise a single store method.
+    // Subset of the consolidated 001_Baseline.sql api_keys table (final folded shape,
+    // incl. key_type + last_used_at). Inlined so the test doesn't have to apply the
+    // full migration pipeline (and its cross-package deps) to exercise a single store method.
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS api_keys (
             key_id TEXT NOT NULL,

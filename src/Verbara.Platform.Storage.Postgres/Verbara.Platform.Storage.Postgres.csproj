@@ -22,6 +22,7 @@
     <ProjectReference Include="..\Verbara.Platform.KnowledgeBase\Verbara.Platform.KnowledgeBase.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Media\Verbara.Platform.Media.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Surveys\Verbara.Platform.Surveys.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Typification\Verbara.Platform.Typification.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Audit\Verbara.Platform.Audit.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Billing\Verbara.Platform.Billing.csproj" />
   </ItemGroup>

@@ -40,7 +40,7 @@ public sealed class DefaultConversationLifecycleService : IConversationLifecycle
         await _conversationStore.SaveAsync(conversation, ct).ConfigureAwait(false);
     }
 
-    public async Task CloseAsync(TenantId tenantId, EntityId conversationId, WrapUpRecord? wrapUp, CancellationToken ct)
+    public async Task CloseAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
     {
         var conversation = await _conversationStore.GetByIdAsync(tenantId, conversationId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Conversation '{conversationId}' not found for tenant '{tenantId}'.");

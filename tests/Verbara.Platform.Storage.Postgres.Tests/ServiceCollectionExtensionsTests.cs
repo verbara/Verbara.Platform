@@ -110,19 +110,12 @@ public sealed class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void MigrationSql_ShouldExistAndContainExpectedTables()
+    public void BaselineMigration_ShouldExistAndContainExpectedTables()
     {
-        // The SQL is a file in the Migrations folder — verify it exists on disk
-        var migrationPath = Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..",
-            "src", "Verbara.Platform.Storage.Postgres", "Migrations", "001_InitialSchema.sql");
+        // The migration history was consolidated into a single clean baseline
+        // (001_Baseline.sql) pre-launch — verify it exists on disk.
+        var sql = ReadBaselineMigration();
 
-        var normalizedPath = Path.GetFullPath(migrationPath);
-        File.Exists(normalizedPath).Should().BeTrue(
-            because: "migration file 001_InitialSchema.sql must exist on disk");
-
-        var sql = File.ReadAllText(normalizedPath);
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS users", because: "users table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS api_keys", because: "api_keys table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS conversations", because: "conversations table must be defined");
@@ -136,23 +129,50 @@ public sealed class ServiceCollectionExtensionsTests
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS bot_configurations", because: "bot_configurations table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS automation_rules", because: "automation_rules table must be defined");
         sql.Should().Contain("CREATE TABLE IF NOT EXISTS scheduled_timers", because: "scheduled_timers table must be defined");
+
+        // Folded-in tables that were previously separate migration files.
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS tenants", because: "tenants table must be folded into the baseline");
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS scheduled_reports", because: "scheduled_reports table must be folded into the baseline");
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS report_executions", because: "report_executions table must be folded into the baseline");
     }
 
     [Fact]
-    public void Migration007_ShouldExistAndContainExpectedTables()
+    public void BaselineMigration_ShouldDropFlatDispositionDomain()
+    {
+        var sql = ReadBaselineMigration();
+
+        sql.Should().NotContain("CREATE TABLE IF NOT EXISTS dispositions",
+            because: "the flat-disposition domain was removed in the clean-break baseline");
+        sql.Should().NotContain("CREATE TABLE IF NOT EXISTS wrap_up_records",
+            because: "the flat-disposition wrap-up records table was removed in the clean-break baseline");
+        sql.Should().NotContain("wrap_up JSONB",
+            because: "the conversations.wrap_up column was removed in the clean-break baseline");
+    }
+
+    [Fact]
+    public void BaselineMigration_ShouldContainTypificationTables()
+    {
+        var sql = ReadBaselineMigration();
+
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS typification_schemas",
+            because: "typification_schemas replaces the removed flat-disposition domain");
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS typification_bindings",
+            because: "typification_bindings replaces the removed flat-disposition domain");
+        sql.Should().Contain("CREATE TABLE IF NOT EXISTS typification_submissions",
+            because: "typification_submissions replaces the removed flat-disposition domain");
+    }
+
+    private static string ReadBaselineMigration()
     {
         var migrationPath = Path.Combine(
             AppContext.BaseDirectory,
             "..", "..", "..", "..", "..",
-            "src", "Verbara.Platform.Storage.Postgres", "Migrations", "007_TenantsAndScheduledReports.sql");
+            "src", "Verbara.Platform.Storage.Postgres", "Migrations", "001_Baseline.sql");
 
         var normalizedPath = Path.GetFullPath(migrationPath);
         File.Exists(normalizedPath).Should().BeTrue(
-            because: "migration file 007_TenantsAndScheduledReports.sql must exist on disk");
+            because: "consolidated migration file 001_Baseline.sql must exist on disk");
 
-        var sql = File.ReadAllText(normalizedPath);
-        sql.Should().Contain("CREATE TABLE IF NOT EXISTS tenants", because: "tenants table must be defined");
-        sql.Should().Contain("CREATE TABLE IF NOT EXISTS scheduled_reports", because: "scheduled_reports table must be defined");
-        sql.Should().Contain("CREATE TABLE IF NOT EXISTS report_executions", because: "report_executions table must be defined");
+        return File.ReadAllText(normalizedPath);
     }
 }

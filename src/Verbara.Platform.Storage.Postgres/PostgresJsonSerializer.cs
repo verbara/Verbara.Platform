@@ -8,7 +8,9 @@ using Verbara.Platform.Conversations.Serialization;
 using Verbara.Platform.Core;
 using Verbara.Platform.Flows;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Storage.Postgres.Stores;
 using Verbara.Platform.Surveys;
+using Verbara.Platform.Typification;
 using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Storage.Postgres;
@@ -51,6 +53,27 @@ namespace Verbara.Platform.Storage.Postgres;
 [JsonSerializable(typeof(IReadOnlyList<InvoiceLineItem>))]
 [JsonSerializable(typeof(Dictionary<string, int>))]
 [JsonSerializable(typeof(TenantOptions))]
+// Typification — JSONB columns reachable types (P0 stores).
+// typification_schemas.definition wraps the four definition collections.
+[JsonSerializable(typeof(TypificationSchemaDefinition))]
+[JsonSerializable(typeof(List<TypificationNode>))]
+[JsonSerializable(typeof(IReadOnlyList<TypificationNode>))]
+[JsonSerializable(typeof(List<TypificationField>))]
+[JsonSerializable(typeof(IReadOnlyList<TypificationField>))]
+[JsonSerializable(typeof(List<DataDipDef>))]
+[JsonSerializable(typeof(IReadOnlyList<DataDipDef>))]
+[JsonSerializable(typeof(TypificationNode))]
+[JsonSerializable(typeof(TypificationField))]
+[JsonSerializable(typeof(DataDipDef))]
+[JsonSerializable(typeof(LeafOutcome))]
+[JsonSerializable(typeof(ConditionExpr))]
+[JsonSerializable(typeof(FieldOption))]
+[JsonSerializable(typeof(FieldValidation))]
+[JsonSerializable(typeof(ResponseMapping))]
+[JsonSerializable(typeof(TypificationAiConfig))]
+[JsonSerializable(typeof(PrefillRef))]
+[JsonSerializable(typeof(List<ChannelType>))]
+[JsonSerializable(typeof(IReadOnlyList<ChannelType>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

@@ -30,5 +30,4 @@ public sealed record ConversationAssignedEvent : ConversationEvent
 public sealed record ConversationClosedEvent : ConversationEvent
 {
     public required ConversationState FinalState { get; init; }
-    public WrapUpRecord? WrapUp { get; init; }
 }

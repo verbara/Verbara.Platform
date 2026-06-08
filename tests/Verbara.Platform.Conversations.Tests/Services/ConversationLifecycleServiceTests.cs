@@ -85,7 +85,7 @@ public class ConversationLifecycleServiceTests
         _conversationStore.GetByIdAsync(Tenant, conversation.ConversationId, Arg.Any<CancellationToken>())
             .Returns(conversation);
 
-        await _sut.CloseAsync(Tenant, conversation.ConversationId, null, CancellationToken.None);
+        await _sut.CloseAsync(Tenant, conversation.ConversationId, CancellationToken.None);
 
         conversation.ClosedAt.Should().Be(Now);
     }
@@ -97,7 +97,7 @@ public class ConversationLifecycleServiceTests
         _conversationStore.GetByIdAsync(Tenant, conversation.ConversationId, Arg.Any<CancellationToken>())
             .Returns(conversation);
 
-        await _sut.CloseAsync(Tenant, conversation.ConversationId, null, CancellationToken.None);
+        await _sut.CloseAsync(Tenant, conversation.ConversationId, CancellationToken.None);
 
         conversation.State.Should().Be(ConversationState.Closed);
     }

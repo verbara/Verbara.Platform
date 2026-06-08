@@ -118,13 +118,13 @@ public class ActionExecutorTests
             Type = AutomationActionType.CloseConversation,
             Config = new Dictionary<string, string>(),
         };
-        _lifecycleService.CloseAsync(default, default, null, default).ReturnsForAnyArgs(Task.CompletedTask);
+        _lifecycleService.CloseAsync(default, default, default).ReturnsForAnyArgs(Task.CompletedTask);
 
         var result = await _sut.ExecuteAsync(action, BuildEvent(), default);
 
         result.Should().BeTrue();
         await _lifecycleService.Received(1).CloseAsync(
-            Arg.Any<TenantId>(), Arg.Any<EntityId>(), null, Arg.Any<CancellationToken>());
+            Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>());
     }
 
     // --- ScheduleTimer ---

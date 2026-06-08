@@ -7,11 +7,11 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 /// <summary>
 /// Testcontainers-backed Postgres fixture for
 /// <see cref="PostgresConversationStoreVoiceLinkTests"/>. Spins up
-/// <c>postgres:16-alpine</c> with the <c>conversations</c> table from migration 001
-/// plus the <c>voice_linked_id</c> column + partial unique index from migration 027
-/// and the <c>queue_priority</c> column from migration 031, so the per-call voice
+/// <c>postgres:16-alpine</c> with the final folded <c>conversations</c> table from
+/// the consolidated 001_Baseline.sql (incl. the <c>voice_linked_id</c> column + partial
+/// unique index and the <c>queue_priority</c> column), so the per-call voice
 /// idempotency constraint can be exercised against a real DB.
-/// Avoids dragging in the full 30+ migration platform schema.
+/// Avoids dragging in the full platform schema.
 /// </summary>
 public sealed class ConversationVoiceLinkFixture : IAsyncLifetime
 {
@@ -59,8 +59,8 @@ public sealed class ConversationVoiceLinkFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // conversations DDL from 001_InitialSchema.sql + the 027_VoiceConversationLink delta
-    // + the 031_WorkFailover queue_priority delta.
+    // conversations DDL — subset of the consolidated 001_Baseline.sql (final folded shape:
+    // voice_linked_id + queue_priority included; the legacy wrap_up column was dropped).
     private const string SchemaSql = """
         CREATE TABLE conversations (
             conversation_id TEXT NOT NULL,
