@@ -40,6 +40,12 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ScheduledReportDto))]
 [JsonSerializable(typeof(SurveyDto[]))]
 [JsonSerializable(typeof(SurveyDto))]
+// Typification — response DTOs
+[JsonSerializable(typeof(TypificationSchemaDto[]))]
+[JsonSerializable(typeof(TypificationSchemaDto))]
+[JsonSerializable(typeof(SchemaBindingDto[]))]
+[JsonSerializable(typeof(SchemaBindingDto))]
+[JsonSerializable(typeof(PublishResultDto))]
 [JsonSerializable(typeof(PagedResult<Conversation>))]
 [JsonSerializable(typeof(PagedResult<Contact>))]
 [JsonSerializable(typeof(PagedResult<ApiKey>))]
@@ -544,6 +550,11 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(UpdateCampaignRequest))]
 // Dispositions
 [JsonSerializable(typeof(CreateDispositionRequest))]
+// Typification — request DTOs
+[JsonSerializable(typeof(CreateSchemaRequest))]
+[JsonSerializable(typeof(UpdateSchemaRequest))]
+[JsonSerializable(typeof(CreateBindingRequest))]
+[JsonSerializable(typeof(UpdateBindingRequest))]
 // Scheduled reports
 [JsonSerializable(typeof(CreateScheduledReportRequest))]
 [JsonSerializable(typeof(UpdateScheduledReportRequest))]
