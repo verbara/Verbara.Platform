@@ -24,4 +24,10 @@ public sealed record SchemaBinding : ITenantScoped
     public EntityId? SubTreeRootNodeId { get; init; }
 
     public int Priority { get; init; }
+
+    /// <summary>
+    /// Creation instant; tiebreak for equal-priority same-scope resolution
+    /// (most-recent config wins).
+    /// </summary>
+    public required DateTimeOffset CreatedAt { get; init; }
 }

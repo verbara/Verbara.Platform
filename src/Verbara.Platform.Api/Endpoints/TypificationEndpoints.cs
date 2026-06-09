@@ -230,6 +230,7 @@ internal static class TypificationEndpoints
         [FromBody] CreateBindingRequest body,
         [FromServices] ISchemaBindingStore store,
         [FromServices] IAuditService audit,
+        IClock clock,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -253,6 +254,7 @@ internal static class TypificationEndpoints
             SchemaId = EntityId.From(body.SchemaId),
             SubTreeRootNodeId = body.SubtreeRootNodeId is { Length: > 0 } s ? EntityId.From(s) : null,
             Priority = body.Priority,
+            CreatedAt = clock.UtcNow,
         };
 
         await store.SaveAsync(binding, ct);
@@ -296,6 +298,7 @@ internal static class TypificationEndpoints
             SchemaId = EntityId.From(body.SchemaId),
             SubTreeRootNodeId = body.SubtreeRootNodeId is { Length: > 0 } s ? EntityId.From(s) : null,
             Priority = body.Priority,
+            CreatedAt = existing.CreatedAt,
         };
 
         await store.SaveAsync(updated, ct);

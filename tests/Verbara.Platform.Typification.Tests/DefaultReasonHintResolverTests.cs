@@ -66,11 +66,13 @@ public sealed class DefaultReasonHintResolverTests
     public async Task ResolveAsync_ShouldRespectPriorityThenIdTiebreak_WhenSameScopeMultipleHints()
     {
         var store = new FakeReasonHintStore();
+        // Same priority AND same CreatedAt → the HintId ordinal is the final tiebreak,
+        // so this isolates that last stable tiebreak ("h-high" < "h-zigh").
+        var sameInstant = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero);
         // Highest priority wins regardless of insertion order.
-        store.Add(Hint("h-low", ReasonHintScope.Did, Did, "[\"LOW\"]", priority: 1));
-        store.Add(Hint("h-high", ReasonHintScope.Did, Did, "[\"HIGH\"]", priority: 9));
-        // Same priority as the winner → tie-break by HintId ordinal ("h-high" < "h-zigh").
-        store.Add(Hint("h-zigh", ReasonHintScope.Did, Did, "[\"TIE\"]", priority: 9));
+        store.Add(Hint("h-low", ReasonHintScope.Did, Did, "[\"LOW\"]", priority: 1, createdAt: sameInstant));
+        store.Add(Hint("h-high", ReasonHintScope.Did, Did, "[\"HIGH\"]", priority: 9, createdAt: sameInstant));
+        store.Add(Hint("h-zigh", ReasonHintScope.Did, Did, "[\"TIE\"]", priority: 9, createdAt: sameInstant));
 
         var sut = new DefaultReasonHintResolver(store);
 
@@ -78,6 +80,28 @@ public sealed class DefaultReasonHintResolverTests
 
         result.Should().NotBeNull();
         result!.HintId.Should().Be(EntityId.From("h-high"));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldPreferMostRecentHint_WhenSameScopeAndPriority()
+    {
+        var store = new FakeReasonHintStore();
+
+        var older = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var newer = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Same scope + same priority. The newer hint intentionally has an id that LOSES
+        // the ordinal tiebreak ("h-z" > "h-a"), so a win can only come from the
+        // CreatedAt DESC tiebreak — proving most-recent-wins, not id-wins.
+        store.Add(Hint("h-a", ReasonHintScope.Did, Did, "[\"OLDER\"]", priority: 5, createdAt: older));
+        store.Add(Hint("h-z", ReasonHintScope.Did, Did, "[\"NEWER\"]", priority: 5, createdAt: newer));
+
+        var sut = new DefaultReasonHintResolver(store);
+
+        var result = await sut.ResolveAsync(Tenant, Did, queueId: null, ChannelType.Voice, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.HintId.Should().Be(EntityId.From("h-z"));
     }
 
     // ---------- active filter ----------
@@ -122,7 +146,8 @@ public sealed class DefaultReasonHintResolverTests
         string scopeRef,
         string reasonPath,
         int priority = 0,
-        bool isActive = true) =>
+        bool isActive = true,
+        DateTimeOffset? createdAt = null) =>
         new()
         {
             HintId = EntityId.From(id),
@@ -132,6 +157,7 @@ public sealed class DefaultReasonHintResolverTests
             ReasonPath = reasonPath,
             Priority = priority,
             IsActive = isActive,
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
         };
 
     private sealed class FakeReasonHintStore : IReasonHintStore

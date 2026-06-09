@@ -7,8 +7,9 @@ namespace Verbara.Platform.Typification.Resolution;
 /// Default <see cref="IReasonHintResolver"/>: resolves an inbound context against
 /// active <see cref="ReasonHint"/>s most-specific-wins in the order DID → Queue →
 /// Channel, short-circuiting on the first scope that yields an active hint. Within a
-/// scope the winner is the highest <see cref="ReasonHint.Priority"/>, tie-broken by
-/// <see cref="ReasonHint.HintId"/> ordinal for determinism. A more-specific scope that
+/// scope the winner is the highest <see cref="ReasonHint.Priority"/>, ties broken by
+/// the most-recent <see cref="ReasonHint.CreatedAt"/>, then <see cref="ReasonHint.HintId"/>
+/// ordinal for determinism. A more-specific scope that
 /// produces no active hint falls through to the next (it is "most-specific that
 /// matches", not "most-specific provided").
 /// </summary>
@@ -59,10 +60,12 @@ public sealed class DefaultReasonHintResolver : IReasonHintResolver
         if (hints.Count == 0)
             return null;
 
-        // Highest Priority first; tie-break by HintId ordinal for determinism.
+        // Highest Priority first; then most-recently-created wins; HintId ordinal is
+        // the ultra-final stable tie-break for determinism.
         return hints
             .Where(static h => h.IsActive)
             .OrderByDescending(static h => h.Priority)
+            .ThenByDescending(static h => h.CreatedAt)
             .ThenBy(static h => h.HintId.Value, StringComparer.Ordinal)
             .FirstOrDefault();
     }

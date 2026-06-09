@@ -64,6 +64,7 @@ internal static class ReasonHintEndpoints
         [FromBody] CreateReasonHintRequest body,
         [FromServices] IReasonHintStore store,
         [FromServices] IAuditService audit,
+        IClock clock,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -94,6 +95,7 @@ internal static class ReasonHintEndpoints
             ReasonPath = body.ReasonPath,
             Priority = body.Priority,
             IsActive = body.IsActive,
+            CreatedAt = clock.UtcNow,
         };
 
         await store.SaveAsync(hint, ct);

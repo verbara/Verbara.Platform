@@ -9,7 +9,7 @@ namespace Verbara.Platform.Storage.Postgres.Stores;
 internal sealed class PostgresReasonHintStore : IReasonHintStore
 {
     private const string SelectColumns =
-        "tenant_id, hint_id, scope, scope_ref, reason_path, priority, is_active";
+        "tenant_id, hint_id, scope, scope_ref, reason_path, priority, is_active, created_at";
 
     private readonly NpgsqlDataSource _dataSource;
 
@@ -57,8 +57,10 @@ internal sealed class PostgresReasonHintStore : IReasonHintStore
     {
         await _dataSource.ExecuteAsync(
             "INSERT INTO reason_hints " +
-            "(tenant_id, hint_id, scope, scope_ref, reason_path, priority, is_active) " +
-            "VALUES (@TenantId, @HintId, @Scope, @ScopeRef, @ReasonPath, @Priority, @IsActive) " +
+            "(tenant_id, hint_id, scope, scope_ref, reason_path, priority, is_active, created_at) " +
+            "VALUES (@TenantId, @HintId, @Scope, @ScopeRef, @ReasonPath, @Priority, @IsActive, @CreatedAt) " +
+            // created_at is intentionally NOT updated on conflict: an UPDATE must
+            // preserve the original creation instant (the resolution tiebreak anchor).
             "ON CONFLICT (tenant_id, hint_id) DO UPDATE SET " +
             "  scope = EXCLUDED.scope, scope_ref = EXCLUDED.scope_ref, reason_path = EXCLUDED.reason_path, " +
             "  priority = EXCLUDED.priority, is_active = EXCLUDED.is_active",
@@ -71,6 +73,7 @@ internal sealed class PostgresReasonHintStore : IReasonHintStore
                 p.Add(new NpgsqlParameter("ReasonPath", hint.ReasonPath));
                 p.Add(new NpgsqlParameter("Priority", hint.Priority));
                 p.Add(new NpgsqlParameter("IsActive", hint.IsActive));
+                p.Add(new NpgsqlParameter("CreatedAt", hint.CreatedAt));
             },
             ct);
     }
@@ -96,6 +99,7 @@ internal sealed class PostgresReasonHintStore : IReasonHintStore
         public string reason_path { get; init; } = null!;
         public int priority { get; init; }
         public bool is_active { get; init; }
+        public DateTimeOffset created_at { get; init; }
 
         public static HintRow Map(NpgsqlDataReader r) => new()
         {
@@ -106,6 +110,7 @@ internal sealed class PostgresReasonHintStore : IReasonHintStore
             reason_path = r.GetString("reason_path"),
             priority = r.GetInt32("priority"),
             is_active = r.GetBoolean("is_active"),
+            created_at = r.GetDateTimeOffset("created_at"),
         };
 
         public ReasonHint ToHint() => new()
@@ -117,6 +122,7 @@ internal sealed class PostgresReasonHintStore : IReasonHintStore
             ReasonPath = reason_path,
             Priority = priority,
             IsActive = is_active,
+            CreatedAt = created_at,
         };
     }
 }

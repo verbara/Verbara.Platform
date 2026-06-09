@@ -184,6 +184,7 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
             SchemaId = schemaId,
             SubTreeRootNodeId = null,
             Priority = 10,
+            CreatedAt = DateTimeOffset.UtcNow,
         };
         var tenantBinding = new SchemaBinding
         {
@@ -194,6 +195,7 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
             SchemaId = schemaId,
             SubTreeRootNodeId = EntityId.New(),
             Priority = 0,
+            CreatedAt = DateTimeOffset.UtcNow,
         };
         var otherQueueBinding = new SchemaBinding
         {
@@ -204,6 +206,7 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
             SchemaId = schemaId,
             SubTreeRootNodeId = null,
             Priority = 5,
+            CreatedAt = DateTimeOffset.UtcNow,
         };
 
         await _bindings.SaveAsync(queueBinding, CancellationToken.None);
@@ -215,6 +218,8 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         queue1[0].BindingId.Should().Be(queueBinding.BindingId);
         queue1[0].Scope.Should().Be(BindingScope.Queue);
         queue1[0].ScopeRef.Should().Be("queue-1");
+        // created_at round-trips (the deterministic resolution tiebreak anchor).
+        queue1[0].CreatedAt.Should().BeCloseTo(queueBinding.CreatedAt, TimeSpan.FromSeconds(1));
 
         var tenantDefault = await _bindings.ListByScopeAsync(Tenant, BindingScope.Tenant, null, CancellationToken.None);
         tenantDefault.Should().ContainSingle();
@@ -225,6 +230,35 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         // null scopeRef must NOT match a non-null scope_ref row.
         var queueWithoutRef = await _bindings.ListByScopeAsync(Tenant, BindingScope.Queue, null, CancellationToken.None);
         queueWithoutRef.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldPreserveCreatedAt_WhenUpdatingExistingBinding()
+    {
+        var original = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var attemptedOverwrite = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var binding = new SchemaBinding
+        {
+            BindingId = EntityId.New(),
+            TenantId = Tenant,
+            Scope = BindingScope.Queue,
+            ScopeRef = "queue-1",
+            SchemaId = EntityId.New(),
+            SubTreeRootNodeId = null,
+            Priority = 0,
+            CreatedAt = original,
+        };
+        await _bindings.SaveAsync(binding, CancellationToken.None);
+
+        // Re-save with a DIFFERENT incoming CreatedAt — the ON CONFLICT clause must
+        // NOT overwrite the original creation instant.
+        await _bindings.SaveAsync(binding with { Priority = 9, CreatedAt = attemptedOverwrite }, CancellationToken.None);
+
+        var loaded = await _bindings.GetByIdAsync(Tenant, binding.BindingId, CancellationToken.None);
+        loaded.Should().NotBeNull();
+        loaded!.Priority.Should().Be(9);
+        loaded.CreatedAt.Should().BeCloseTo(original, TimeSpan.FromSeconds(1));
     }
 
     [Fact]
@@ -273,7 +307,7 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         loaded.Duration.Should().Be(TimeSpan.FromSeconds(42));
     }
 
-    private static ReasonHint NewHint(ReasonHintScope scope, string scopeRef, string reasonPath, int priority = 0, bool isActive = true) => new()
+    private static ReasonHint NewHint(ReasonHintScope scope, string scopeRef, string reasonPath, int priority = 0, bool isActive = true, DateTimeOffset? createdAt = null) => new()
     {
         HintId = EntityId.New(),
         TenantId = Tenant,
@@ -282,6 +316,7 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         ReasonPath = reasonPath,
         Priority = priority,
         IsActive = isActive,
+        CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
     };
 
     [Fact]
@@ -300,6 +335,8 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         loaded.ReasonPath.Should().Be("[\"CITAS\",\"REPROG\",\"GINE\"]");
         loaded.Priority.Should().Be(5);
         loaded.IsActive.Should().BeFalse();
+        // created_at round-trips (the deterministic resolution tiebreak anchor).
+        loaded.CreatedAt.Should().BeCloseTo(hint.CreatedAt, TimeSpan.FromSeconds(1));
 
         // Upsert on the same key updates in place (no duplicate row).
         await _reasonHints.SaveAsync(hint with { Priority = 9, IsActive = true }, CancellationToken.None);
@@ -307,6 +344,25 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         all.Should().ContainSingle();
         all[0].Priority.Should().Be(9);
         all[0].IsActive.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldPreserveCreatedAt_WhenUpdatingExistingHint()
+    {
+        var original = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var attemptedOverwrite = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var hint = NewHint(ReasonHintScope.Did, "+15551234567", "[\"CITAS\"]", priority: 0, createdAt: original);
+        await _reasonHints.SaveAsync(hint, CancellationToken.None);
+
+        // Re-save with a DIFFERENT incoming CreatedAt — the ON CONFLICT clause must
+        // NOT overwrite the original creation instant.
+        await _reasonHints.SaveAsync(hint with { Priority = 9, CreatedAt = attemptedOverwrite }, CancellationToken.None);
+
+        var loaded = await _reasonHints.GetByIdAsync(Tenant, hint.HintId, CancellationToken.None);
+        loaded.Should().NotBeNull();
+        loaded!.Priority.Should().Be(9);
+        loaded.CreatedAt.Should().BeCloseTo(original, TimeSpan.FromSeconds(1));
     }
 
     [Fact]

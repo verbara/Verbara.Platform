@@ -35,7 +35,12 @@ internal sealed class InMemoryReasonHintStore : IReasonHintStore
 
     public Task SaveAsync(ReasonHint hint, CancellationToken ct)
     {
-        _items[(hint.TenantId, hint.HintId)] = hint;
+        // Upsert: an INSERT uses the incoming CreatedAt; an UPDATE preserves the
+        // existing CreatedAt (the deterministic resolution tiebreak anchor).
+        _items.AddOrUpdate(
+            (hint.TenantId, hint.HintId),
+            hint,
+            (_, existing) => hint with { CreatedAt = existing.CreatedAt });
         return Task.CompletedTask;
     }
 

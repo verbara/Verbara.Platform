@@ -76,6 +76,7 @@ public sealed class TypificationStoreFixture : IAsyncLifetime
             scope TEXT NOT NULL, scope_ref TEXT,
             schema_id TEXT NOT NULL, subtree_root_node_id TEXT,
             priority INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             PRIMARY KEY (tenant_id, binding_id)
         );
         CREATE INDEX idx_typification_bindings_scope ON typification_bindings (tenant_id, scope, scope_ref);
@@ -101,6 +102,7 @@ public sealed class TypificationStoreFixture : IAsyncLifetime
             reason_path TEXT    NOT NULL,
             priority    INT     NOT NULL DEFAULT 0,
             is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
             PRIMARY KEY (tenant_id, hint_id)
         );
         CREATE INDEX idx_reason_hints_scope ON reason_hints (tenant_id, scope, scope_ref);

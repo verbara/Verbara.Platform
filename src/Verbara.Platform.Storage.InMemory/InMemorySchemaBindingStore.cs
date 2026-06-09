@@ -35,7 +35,12 @@ internal sealed class InMemorySchemaBindingStore : ISchemaBindingStore
 
     public Task SaveAsync(SchemaBinding binding, CancellationToken ct)
     {
-        _items[(binding.TenantId, binding.BindingId)] = binding;
+        // Upsert: an INSERT uses the incoming CreatedAt; an UPDATE preserves the
+        // existing CreatedAt (the deterministic resolution tiebreak anchor).
+        _items.AddOrUpdate(
+            (binding.TenantId, binding.BindingId),
+            binding,
+            (_, existing) => binding with { CreatedAt = existing.CreatedAt });
         return Task.CompletedTask;
     }
 
