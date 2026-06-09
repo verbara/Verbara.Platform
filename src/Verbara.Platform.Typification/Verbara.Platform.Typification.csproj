@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Verbara.Platform.Core\Verbara.Platform.Core.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Conversations\Verbara.Platform.Conversations.csproj" />
+    <ProjectReference Include="..\Verbara.Platform.Llm\Verbara.Platform.Llm.csproj" />
   </ItemGroup>
 
   <ItemGroup>
