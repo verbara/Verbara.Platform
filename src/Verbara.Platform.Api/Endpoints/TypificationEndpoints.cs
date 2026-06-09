@@ -500,7 +500,10 @@ internal static class TypificationEndpoints
         {
             Enabled = dto.Enabled,
             Mode = Enum.TryParse<AiMode>(dto.Mode, ignoreCase: true, out var m) ? m : AiMode.SuggestOnly,
-            ConfidenceThreshold = dto.ConfidenceThreshold,
+            // Clamp to [0, 1]: a confidence threshold > 1 would suppress every suggestion
+            // and < 0 would never suppress, so an out-of-range admin value is corrected
+            // rather than persisted verbatim.
+            ConfidenceThreshold = Math.Clamp(dto.ConfidenceThreshold, 0.0, 1.0),
             SentimentGating = dto.SentimentGating,
             EntityFieldMap = existingEntityFieldMap,
         };

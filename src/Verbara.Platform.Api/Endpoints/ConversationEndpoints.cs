@@ -242,8 +242,16 @@ internal static class ConversationEndpoints
         if (!resolved.Schema.AiConfig.Enabled)
             return Results.Ok(EmptySuggestion);
 
-        // 3. Load the transcript (the classifier caps internally; offset 0 = oldest first).
-        var transcript = await messageStore.GetConversationMessagesAsync(tenantId, conversationId, limit: 200, offset: 0, ct);
+        // 3. Load the transcript. Both message stores ORDER BY created_at ASC (oldest
+        //    first) and IMessageStore has no newest-first query, so a small limit would
+        //    feed the classifier the OLDEST turns; the classifier then keeps only its
+        //    internal last-N (40 msgs / 6000 chars). We pull a generous bound so that for
+        //    all realistic conversations the true most-recent turns (the most
+        //    disposition-relevant context) are included before the internal cap bites. A
+        //    dedicated newest-first store query is a future optimization for pathological
+        //    (>2000-message) conversations.
+        const int TranscriptFetchLimit = 2000;
+        var transcript = await messageStore.GetConversationMessagesAsync(tenantId, conversationId, limit: TranscriptFetchLimit, offset: 0, ct);
 
         // 4. Classify (never throws — degrades to null on no-text / LLM-failure / invalid).
         var classification = await classifier.ClassifyAsync(resolved.Schema, resolved.SubtreeRoot, conversation, transcript, ct);

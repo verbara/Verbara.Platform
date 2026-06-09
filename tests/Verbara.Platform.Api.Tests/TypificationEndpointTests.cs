@@ -283,6 +283,31 @@ public sealed class TypificationEndpointTests : IClassFixture<AuthenticatedPlatf
         ai["sentimentGating"]!.GetValue<bool>().Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(1.5, 1.0)]
+    [InlineData(-0.5, 0.0)]
+    public async Task CreateSchema_ShouldClampConfidenceThreshold_WhenOutOfRange(
+        double submitted, double expected)
+    {
+        // An admin must not be able to persist a threshold outside [0, 1]: > 1 would
+        // suppress every suggestion, < 0 would never suppress. MapAiConfig clamps.
+        var body = SchemaBodyWithAiConfig($"Clamp {submitted}", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            confidenceThreshold = submitted,
+            sentimentGating = false,
+        });
+
+        var id = await CreateSchemaAsync(_client, body);
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        schema!["aiConfig"]!["confidenceThreshold"]!.GetValue<double>().Should().Be(expected);
+    }
+
     // ValidSchemaBody plus an aiConfig block (the only AI-bearing variant of the body).
     private static object SchemaBodyWithAiConfig(string name, object aiConfig) => new
     {
