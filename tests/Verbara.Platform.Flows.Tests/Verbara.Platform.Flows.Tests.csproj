@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Verbara.Platform.Flows\Verbara.Platform.Flows.csproj" />
+    <ProjectReference Include="..\..\src\Verbara.Platform.Llm\Verbara.Platform.Llm.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>LLM completion abstraction (ILlmProvider) for Verbara.Platform — a dependency-free seam consumed by both Verbara.Platform.Flows and Verbara.Platform.Typification.</Description>
+  </PropertyGroup>
+
+</Project>

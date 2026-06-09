@@ -19,6 +19,7 @@
     <Project Path="src/Verbara.Platform.Channels.Twitter/Verbara.Platform.Channels.Twitter.csproj" />
     <Project Path="src/Verbara.Platform.Channels.Rcs/Verbara.Platform.Channels.Rcs.csproj" />
     <Project Path="src/Verbara.Platform.KnowledgeBase/Verbara.Platform.KnowledgeBase.csproj" />
+    <Project Path="src/Verbara.Platform.Llm/Verbara.Platform.Llm.csproj" />
     <Project Path="src/Verbara.Platform.Flows/Verbara.Platform.Flows.csproj" />
     <Project Path="src/Verbara.Platform.Bot/Verbara.Platform.Bot.csproj" />
     <Project Path="src/Verbara.Platform.Surveys/Verbara.Platform.Surveys.csproj" />

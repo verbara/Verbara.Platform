@@ -1,5 +1,6 @@
 using Verbara.Platform.Bot;
 using Verbara.Platform.Flows;
+using Verbara.Platform.Llm;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
