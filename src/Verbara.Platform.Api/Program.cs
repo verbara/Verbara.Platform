@@ -14,6 +14,7 @@ using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.DependencyInjection;
 using Verbara.Platform.Flows;
+using Verbara.Platform.Llm;
 using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Storage.InMemory;
 using Verbara.Platform.Storage.Postgres;
@@ -177,9 +178,25 @@ builder.Services.AddSwitchboard();
 // path, so a visitor's chat reaches an agent. See WebChatInboundRouter.
 builder.Services.AddSingleton<WebChatInboundRouter>();
 builder.Services.AddPlatformBot();
+// Real OpenAI-compatible LLM provider (P2a). Registered BEFORE AddPlatformFlows so it wins the
+// Flows TryAddSingleton<ILlmProvider, DisabledLlmProvider> stub. No-op (stub stays) when the
+// "Llm" config section is incomplete. Manual config read = AOT-safe (no reflection binding).
+builder.Services.AddPlatformLlm(o =>
+{
+    var llm = builder.Configuration.GetSection("Llm");
+    o.BaseUrl = llm["BaseUrl"];
+    o.ApiKey = llm["ApiKey"];
+    o.Model = llm["Model"];
+    if (double.TryParse(llm["Temperature"], System.Globalization.CultureInfo.InvariantCulture, out var temperature))
+        o.Temperature = temperature;
+    if (int.TryParse(llm["MaxTokens"], System.Globalization.CultureInfo.InvariantCulture, out var maxTokens))
+        o.MaxTokens = maxTokens;
+    if (int.TryParse(llm["TimeoutSeconds"], System.Globalization.CultureInfo.InvariantCulture, out var timeoutSeconds))
+        o.TimeoutSeconds = timeoutSeconds;
+});
 // Flow execution engine + node handlers (incl. collect_reason/set_variable for the P1
 // typification capture paths). Ships a default-disabled ILlmProvider so the engine and AI
-// handlers compose; AI nodes fail loudly until a real provider is configured.
+// handlers compose; AI nodes fail loudly until a real provider is configured (P2a wires one above).
 builder.Services.AddPlatformFlows();
 builder.Services.AddHostedService<Verbara.Platform.Api.Services.BotAnalyticsPersistenceService>();
 builder.Services.AddPlatformAudit();
