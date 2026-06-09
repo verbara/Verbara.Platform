@@ -62,4 +62,26 @@ internal static class LicenseTestHelpers
         services.AddSingleton(status);
         return services;
     }
+
+    /// <summary>
+    /// Registers a substitute <see cref="ILicenseStatus"/> reporting EXACTLY the supplied
+    /// features as licensed (valid). Used by the D1 suggestion-endpoint gate test to
+    /// license <c>AdvancedTypification</c> WITHOUT <c>TypificationAi</c> and assert the
+    /// combined-flags gate still returns 402 (both features required).
+    /// </summary>
+    public static IServiceCollection AddExactProFeaturesLicensed(
+        this IServiceCollection services, LicenseFeature features)
+    {
+        var existing = services
+            .Where(d => d.ServiceType == typeof(ILicenseStatus))
+            .ToList();
+        foreach (var d in existing) services.Remove(d);
+
+        var status = Substitute.For<ILicenseStatus>();
+        status.IsValid.Returns(true);
+        status.LicensedFeatures.Returns(features);
+        status.LastResult.Returns(LicenseValidationResult.Valid);
+        services.AddSingleton(status);
+        return services;
+    }
 }

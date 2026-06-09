@@ -239,6 +239,91 @@ public sealed class TypificationEndpointTests : IClassFixture<AuthenticatedPlatf
 
         response.StatusCode.Should().Be(HttpStatusCode.PaymentRequired);
     }
+
+    // ─── D3 — AiConfig admin DTO round-trip ──────────────────────────────────────
+
+    [Fact]
+    public async Task CreateSchema_ShouldPersistAiConfig_WhenProvided()
+    {
+        var body = SchemaBodyWithAiConfig("With AI", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            confidenceThreshold = 0.7,
+            sentimentGating = true,
+        });
+
+        var id = await CreateSchemaAsync(_client, body);
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        var ai = schema!["aiConfig"]!;
+        ai["enabled"]!.GetValue<bool>().Should().BeTrue();
+        ai["mode"]!.GetValue<string>().Should().Be("SuggestOnly");
+        ai["confidenceThreshold"]!.GetValue<double>().Should().Be(0.7);
+        ai["sentimentGating"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateSchema_ShouldDefaultAiConfigDisabled_WhenOmitted()
+    {
+        // ValidSchemaBody carries no aiConfig → server defaults to disabled.
+        var id = await CreateSchemaAsync(_client, ValidSchemaBody("No AI"));
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        var ai = schema!["aiConfig"]!;
+        ai["enabled"]!.GetValue<bool>().Should().BeFalse();
+        ai["mode"]!.GetValue<string>().Should().Be("SuggestOnly", because: "AiMode.SuggestOnly is the default enum value (0)");
+        ai["confidenceThreshold"]!.GetValue<double>().Should().Be(0);
+        ai["sentimentGating"]!.GetValue<bool>().Should().BeFalse();
+    }
+
+    // ValidSchemaBody plus an aiConfig block (the only AI-bearing variant of the body).
+    private static object SchemaBodyWithAiConfig(string name, object aiConfig) => new
+    {
+        name,
+        maxDepth = 5,
+        nodes = new object[]
+        {
+            new
+            {
+                nodeId = "root-1",
+                parentNodeId = (string?)null,
+                label = "Sales",
+                code = "SALES",
+                sortOrder = 0,
+                isLeaf = false,
+                channelApplicability = (string[]?)null,
+                leaf = (object?)null,
+            },
+            new
+            {
+                nodeId = "leaf-1",
+                parentNodeId = "root-1",
+                label = "Closed Won",
+                code = "CLOSED_WON",
+                sortOrder = 0,
+                isLeaf = true,
+                channelApplicability = (string[]?)null,
+                leaf = new
+                {
+                    category = "Success",
+                    triggerRetry = false,
+                    retryDelayMinutes = (int?)null,
+                    triggerCallback = false,
+                    dialerCode = (string?)null,
+                    isActive = true,
+                },
+            },
+        },
+        fields = Array.Empty<object>(),
+        aiConfig,
+    };
 }
 
 /// <summary>

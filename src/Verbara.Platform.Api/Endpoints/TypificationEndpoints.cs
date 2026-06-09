@@ -89,7 +89,8 @@ internal static class TypificationEndpoints
             Nodes = MapNodes(body.Nodes),
             Fields = MapFields(body.Fields),
             DataDips = [],
-            AiConfig = EmptyAiConfig(),
+            // Create: empty EntityFieldMap (no prior schema). Omitted AiConfig → disabled default.
+            AiConfig = MapAiConfig(body.AiConfig, new Dictionary<string, string>()),
             CreatedAt = clock.UtcNow,
             UpdatedAt = null,
         };
@@ -137,7 +138,9 @@ internal static class TypificationEndpoints
             Nodes = MapNodes(body.Nodes),
             Fields = MapFields(body.Fields),
             DataDips = latest.DataDips,
-            AiConfig = latest.AiConfig,
+            // Update: preserve the prior schema's EntityFieldMap (P2b owns map editing).
+            // Omitted AiConfig → disabled default (still carrying the existing map forward).
+            AiConfig = MapAiConfig(body.AiConfig, latest.AiConfig.EntityFieldMap),
             CreatedAt = latest.CreatedAt,
             UpdatedAt = clock.UtcNow,
         };
@@ -336,8 +339,20 @@ internal static class TypificationEndpoints
             MaxDepth: s.MaxDepth,
             Nodes: s.Nodes.Select(ToNodeDto).ToArray(),
             Fields: s.Fields.Select(ToFieldDto).ToArray(),
+            AiConfig: ToAiConfigDto(s.AiConfig),
             CreatedAt: s.CreatedAt,
             UpdatedAt: s.UpdatedAt);
+
+    // D3 — AiConfig round-trip. The EntityFieldMap (AI entity → field Key) is NOT yet
+    // editable over HTTP (that lands in P2b); it is preserved across read/write by the
+    // create/update map (empty on create, the prior schema's map on update), so it is
+    // intentionally absent from the wire DTO.
+    private static AiConfigDto ToAiConfigDto(TypificationAiConfig c) =>
+        new(
+            Enabled: c.Enabled,
+            Mode: c.Mode.ToString(),
+            ConfidenceThreshold: c.ConfidenceThreshold,
+            SentimentGating: c.SentimentGating);
 
     private static TypificationNodeDto ToNodeDto(TypificationNode n) =>
         new(
@@ -471,6 +486,26 @@ internal static class TypificationEndpoints
             EntityFieldMap = new Dictionary<string, string>(),
         };
 
+    // D3 — build the domain AiConfig from the optional request DTO, carrying forward the
+    // existing EntityFieldMap (P2b owns map editing). An omitted DTO yields the disabled
+    // default (matches P0). An unknown Mode string falls back to SuggestOnly (tolerant,
+    // like the PrefillSource map — AI config is optional layered metadata).
+    private static TypificationAiConfig MapAiConfig(
+        AiConfigDto? dto, IReadOnlyDictionary<string, string> existingEntityFieldMap)
+    {
+        if (dto is null)
+            return EmptyAiConfig() with { EntityFieldMap = existingEntityFieldMap };
+
+        return new TypificationAiConfig
+        {
+            Enabled = dto.Enabled,
+            Mode = Enum.TryParse<AiMode>(dto.Mode, ignoreCase: true, out var m) ? m : AiMode.SuggestOnly,
+            ConfidenceThreshold = dto.ConfidenceThreshold,
+            SentimentGating = dto.SentimentGating,
+            EntityFieldMap = existingEntityFieldMap,
+        };
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private static Task RecordAudit(
@@ -513,8 +548,17 @@ internal sealed record TypificationSchemaDto(
     int MaxDepth,
     IReadOnlyList<TypificationNodeDto> Nodes,
     IReadOnlyList<TypificationFieldDto> Fields,
+    AiConfigDto AiConfig,
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt);
+
+// D3 — AI auto-disposition config (P2a). The EntityFieldMap (AI entity → field Key) is
+// NOT carried on the wire yet (P2b owns map editing) and is preserved round-trip server-side.
+internal sealed record AiConfigDto(
+    bool Enabled,
+    string Mode,
+    double ConfidenceThreshold,
+    bool SentimentGating);
 
 internal sealed record TypificationNodeDto(
     string NodeId,
@@ -577,13 +621,15 @@ internal sealed record CreateSchemaRequest(
     string Name,
     int MaxDepth,
     IReadOnlyList<TypificationNodeDto> Nodes,
-    IReadOnlyList<TypificationFieldDto> Fields);
+    IReadOnlyList<TypificationFieldDto> Fields,
+    AiConfigDto? AiConfig = null);
 
 internal sealed record UpdateSchemaRequest(
     string Name,
     int MaxDepth,
     IReadOnlyList<TypificationNodeDto> Nodes,
-    IReadOnlyList<TypificationFieldDto> Fields);
+    IReadOnlyList<TypificationFieldDto> Fields,
+    AiConfigDto? AiConfig = null);
 
 internal sealed record CreateBindingRequest(
     string Scope,

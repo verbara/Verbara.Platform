@@ -46,6 +46,8 @@ namespace Verbara.Platform.Api.Serialization;
 // C9b — field PrefillSource sub-DTO (nested on TypificationFieldDto; the parent is
 // resolved transitively, but the new nested type is registered explicitly).
 [JsonSerializable(typeof(PrefillSourceDto))]
+// D3 (P2a) — schema AiConfig sub-DTO (nested on TypificationSchemaDto + create/update requests).
+[JsonSerializable(typeof(AiConfigDto))]
 [JsonSerializable(typeof(SchemaBindingDto[]))]
 [JsonSerializable(typeof(SchemaBindingDto))]
 [JsonSerializable(typeof(PublishResultDto))]
@@ -60,6 +62,8 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(IReadOnlyList<string>))]
 [JsonSerializable(typeof(IReadOnlyDictionary<string, string>))]
 [JsonSerializable(typeof(TypifyErrorResponse))]
+// D1 (P2a) — AI auto-disposition suggestion response (POST /conversations/{id}/typification-suggestion).
+[JsonSerializable(typeof(TypificationSuggestionResponse))]
 [JsonSerializable(typeof(Verbara.Platform.Typification.TypificationSubmission))]
 [JsonSerializable(typeof(PagedResult<Conversation>))]
 [JsonSerializable(typeof(PagedResult<Contact>))]
