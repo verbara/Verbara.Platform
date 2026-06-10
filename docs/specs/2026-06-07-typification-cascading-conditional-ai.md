@@ -3,7 +3,7 @@
 - **Date:** 2026-06-07
 - **Author:** Verbara maintainer (Harol A. Reina H.)
 - **ADR:** [`0029-typification-cascading-conditional-ai-module`](../decisions/0029-typification-cascading-conditional-ai-module.md)
-- **Status:** **P0 SHIPPED 2026-06-07** (Pro #2 / Platform #48 / Web #82; Pro v2.7.5-pro). **P1 SHIPPED 2026-06-08** (Platform #50 / Web #92; Platform v2.11.0 / Web v3.7.0-web). P2–P4 pending.
+- **Status:** **P0 SHIPPED 2026-06-07** (Pro #2 / Platform #48 / Web #82; Pro v2.7.5-pro). **P1 SHIPPED 2026-06-08** (Platform #50 / Web #92; Platform v2.11.0 / Web v3.7.0-web). **P2a SHIPPED 2026-06-10** (Pro #3 / Platform #52+#53 / Web #93; Pro v2.8.0-pro / Platform v2.12.0 / Web v3.8.0-web). P2b (AutoApply + entities + Pro voice enrichment) + P3–P4 pending.
 - **Repos:** `Verbara.Platform` (domain/API) + `Verbara.Platform.Web` (designer + renderer) + `Verbara.Sdk.Pro` (AI wiring, P2 only)
 
 ## 1. Problem
@@ -232,7 +232,7 @@ No new reflection; Pro engines already exist — P2 is wiring + the suggester + 
 
 ## 11. Phasing
 
-P0 (core, manual) → P1 (shared capture) → P2 (AI) → P3 (data-dips) → P4 (analytics + builder polish). See ADR-0029 §Phasing. **P0 ✅ SHIPPED 2026-06-07** (Pro #2 / Platform #48 / Web #82). **P1 ✅ SHIPPED 2026-06-08** (Platform #50 / Web #92 → Platform v2.11.0 / Web v3.7.0-web; see [P1 spec](2026-06-08-typification-p1-shared-capture.md)). P2–P4 pending; this document is the umbrella spec, with per-phase plans authored via the writing-plans skill.
+P0 (core, manual) → P1 (shared capture) → P2 (AI) → P3 (data-dips) → P4 (analytics + builder polish). See ADR-0029 §Phasing. **P0 ✅ SHIPPED 2026-06-07** (Pro #2 / Platform #48 / Web #82). **P1 ✅ SHIPPED 2026-06-08** (Platform #50 / Web #92 → Platform v2.11.0 / Web v3.7.0-web; see [P1 spec](2026-06-08-typification-p1-shared-capture.md)). **P2a ✅ SHIPPED 2026-06-10** (Pro #3 / Platform #52+#53 / Web #93 → Pro v2.8.0-pro / Platform v2.12.0 / Web v3.8.0-web; first real LLM integration via the new `Verbara.Platform.Llm`; see [P2a spec](2026-06-09-typification-p2-ai-auto-disposition.md)). P2b (AutoApply + entities + Pro voice) + P3–P4 pending; this document is the umbrella spec, with per-phase plans authored via the writing-plans skill.
 
 ## 12. Open scope (lock in P0 plan)
 
