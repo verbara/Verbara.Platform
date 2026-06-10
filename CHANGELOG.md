@@ -9,8 +9,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [2.12.0] — 2026-06-10 — Typification AI auto-disposition (P2a) + deterministic resolution
+
+Phase **P2a** of the Typification module (ADR-0029): AI suggests the disposition node path + field values + confidence at wrap-up; the agent confirms/overrides. The first real LLM integration in the platform. Consumes `Verbara.Sdk.Pro` **2.8.0-pro** (new `TypificationAi` license feature). PR #53 + #52 / Pro #3 / verbara/Verbara.Platform.Web#93.
+
+### Added
+- **`Verbara.Platform.Llm`** (new, open, AOT) — the LLM seam (`ILlmProvider` relocated here to break the `Flows→Typification` cycle) + **`OpenAiCompatibleLlmProvider`** (HttpClient + source-gen JSON + `Sdk.Resilience`; covers OpenAI / Azure OpenAI / local Ollama-vLLM by base-URL+model) + `LlmProviderOptions` (deployment-level config, read AOT-safe from the `Llm` config section) + the `DisabledLlmProvider` stub. Registered before the flow engine — also activates the `ai_classify`/`ai_generate` flow nodes.
+- **`ITypificationAiClassifier`** — reads the conversation transcript + resolved schema → strict JSON `{leafCode, confidence, sentiment, fields}` → validated root→leaf node path. Never throws (graceful degradation everywhere).
+- **`POST /conversations/{id}/typification-suggestion`** — gated `AdvancedTypification + TypificationAi` (402 unless both); confidence-threshold + sentiment gating; `SuggestOnly`. `/typify` records `Source=AutoAi` provenance when an AI suggestion is accepted; `AiConfig` exposed on the schema admin DTO.
+
 ### Fixed
-- **Deterministic typification binding/hint resolution.** Both `DefaultTypificationResolver` and `DefaultReasonHintResolver` tie-broke equal-priority same-scope candidates by a random `EntityId`, so two same-scope/same-priority bindings (or reason hints) resolved to a non-deterministic winner per process. Added `CreatedAt` to `SchemaBinding` + `ReasonHint` (migration `003`, stamped on create and preserved on update) and tie-break by `CreatedAt DESC` (most-recent config wins) with the id as the final stable tiebreak. Also isolated `TypificationEndpointTests` (per-test factory) to remove the last shared-fixture binding-accumulation source. Eliminates an intermittent test flake at its root.
+- **Deterministic typification binding/hint resolution.** Both resolvers tie-broke equal-priority same-scope candidates by a random `EntityId`, so two same-scope/same-priority bindings (or reason hints) resolved non-deterministically per process. Added `CreatedAt` to `SchemaBinding` + `ReasonHint` (migration `003`, stamped on create, preserved on update); tie-break by `CreatedAt DESC` (most-recent wins) with the id as the final stable tiebreak. Isolated `TypificationEndpointTests` (per-test factory). Eliminates an intermittent test flake at its root.
 
 ---
 
