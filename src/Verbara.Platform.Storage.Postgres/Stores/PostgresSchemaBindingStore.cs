@@ -10,7 +10,7 @@ namespace Verbara.Platform.Storage.Postgres.Stores;
 internal sealed class PostgresSchemaBindingStore : ISchemaBindingStore
 {
     private const string SelectColumns =
-        "tenant_id, binding_id, scope, scope_ref, schema_id, subtree_root_node_id, priority";
+        "tenant_id, binding_id, scope, scope_ref, schema_id, subtree_root_node_id, priority, created_at";
 
     private readonly NpgsqlDataSource _dataSource;
 
@@ -59,8 +59,10 @@ internal sealed class PostgresSchemaBindingStore : ISchemaBindingStore
     {
         await _dataSource.ExecuteAsync(
             "INSERT INTO typification_bindings " +
-            "(tenant_id, binding_id, scope, scope_ref, schema_id, subtree_root_node_id, priority) " +
-            "VALUES (@TenantId, @BindingId, @Scope, @ScopeRef, @SchemaId, @SubTreeRootNodeId, @Priority) " +
+            "(tenant_id, binding_id, scope, scope_ref, schema_id, subtree_root_node_id, priority, created_at) " +
+            "VALUES (@TenantId, @BindingId, @Scope, @ScopeRef, @SchemaId, @SubTreeRootNodeId, @Priority, @CreatedAt) " +
+            // created_at is intentionally NOT updated on conflict: an UPDATE must
+            // preserve the original creation instant (the resolution tiebreak anchor).
             "ON CONFLICT (tenant_id, binding_id) DO UPDATE SET " +
             "  scope = EXCLUDED.scope, scope_ref = EXCLUDED.scope_ref, schema_id = EXCLUDED.schema_id, " +
             "  subtree_root_node_id = EXCLUDED.subtree_root_node_id, priority = EXCLUDED.priority",
@@ -73,6 +75,7 @@ internal sealed class PostgresSchemaBindingStore : ISchemaBindingStore
                 p.Add(new NpgsqlParameter("SchemaId", binding.SchemaId.Value));
                 p.Add(new NpgsqlParameter("SubTreeRootNodeId", NpgsqlDbType.Text) { Value = (object?)binding.SubTreeRootNodeId?.Value ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("Priority", binding.Priority));
+                p.Add(new NpgsqlParameter("CreatedAt", binding.CreatedAt));
             },
             ct);
     }
@@ -98,6 +101,7 @@ internal sealed class PostgresSchemaBindingStore : ISchemaBindingStore
         public string schema_id { get; init; } = null!;
         public string? subtree_root_node_id { get; init; }
         public int priority { get; init; }
+        public DateTimeOffset created_at { get; init; }
 
         public static BindingRow Map(NpgsqlDataReader r) => new()
         {
@@ -108,6 +112,7 @@ internal sealed class PostgresSchemaBindingStore : ISchemaBindingStore
             schema_id = r.GetString("schema_id"),
             subtree_root_node_id = r.GetStringOrNull("subtree_root_node_id"),
             priority = r.GetInt32("priority"),
+            created_at = r.GetDateTimeOffset("created_at"),
         };
 
         public SchemaBinding ToBinding() => new()
@@ -119,6 +124,7 @@ internal sealed class PostgresSchemaBindingStore : ISchemaBindingStore
             SchemaId = EntityId.From(schema_id),
             SubTreeRootNodeId = subtree_root_node_id is { } s ? EntityId.From(s) : null,
             Priority = priority,
+            CreatedAt = created_at,
         };
     }
 }

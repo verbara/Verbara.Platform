@@ -115,12 +115,12 @@ public sealed class InMemoryTypificationStoresTests
         var queue1 = new SchemaBinding
         {
             BindingId = EntityId.New(), TenantId = Tenant, Scope = BindingScope.Queue,
-            ScopeRef = "q1", SchemaId = schemaId, Priority = 0,
+            ScopeRef = "q1", SchemaId = schemaId, Priority = 0, CreatedAt = DateTimeOffset.UtcNow,
         };
         var tenantDefault = new SchemaBinding
         {
             BindingId = EntityId.New(), TenantId = Tenant, Scope = BindingScope.Tenant,
-            ScopeRef = null, SchemaId = schemaId, Priority = 0,
+            ScopeRef = null, SchemaId = schemaId, Priority = 0, CreatedAt = DateTimeOffset.UtcNow,
         };
         await store.SaveAsync(queue1, CancellationToken.None);
         await store.SaveAsync(tenantDefault, CancellationToken.None);
@@ -136,6 +136,30 @@ public sealed class InMemoryTypificationStoresTests
         queueNoRef.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task SaveAsync_ShouldPreserveCreatedAt_WhenUpsertingBinding()
+    {
+        var store = new InMemorySchemaBindingStore();
+        var bindingId = EntityId.New();
+        var original = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var attemptedOverwrite = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var binding = new SchemaBinding
+        {
+            BindingId = bindingId, TenantId = Tenant, Scope = BindingScope.Queue,
+            ScopeRef = "q1", SchemaId = EntityId.New(), Priority = 0, CreatedAt = original,
+        };
+        await store.SaveAsync(binding, CancellationToken.None);
+
+        // Update with a DIFFERENT incoming CreatedAt — it must be ignored on upsert.
+        await store.SaveAsync(binding with { Priority = 9, CreatedAt = attemptedOverwrite }, CancellationToken.None);
+
+        var loaded = await store.GetByIdAsync(Tenant, bindingId, CancellationToken.None);
+        loaded.Should().NotBeNull();
+        loaded!.Priority.Should().Be(9);
+        loaded.CreatedAt.Should().Be(original);
+    }
+
     private static ReasonHint MakeHint(ReasonHintScope scope, string scopeRef, string reasonPath, int priority = 0) => new()
     {
         HintId = EntityId.New(),
@@ -144,6 +168,7 @@ public sealed class InMemoryTypificationStoresTests
         ScopeRef = scopeRef,
         ReasonPath = reasonPath,
         Priority = priority,
+        CreatedAt = DateTimeOffset.UtcNow,
     };
 
     [Fact]
@@ -155,7 +180,7 @@ public sealed class InMemoryTypificationStoresTests
         var original = new ReasonHint
         {
             HintId = hintId, TenantId = Tenant, Scope = ReasonHintScope.Queue,
-            ScopeRef = "q1", ReasonPath = "[\"A\"]", Priority = 0,
+            ScopeRef = "q1", ReasonPath = "[\"A\"]", Priority = 0, CreatedAt = DateTimeOffset.UtcNow,
         };
         await store.SaveAsync(original, CancellationToken.None);
 
@@ -169,6 +194,30 @@ public sealed class InMemoryTypificationStoresTests
         loaded.Should().NotBeNull();
         loaded!.ReasonPath.Should().Be("[\"B\"]");
         loaded.Priority.Should().Be(7);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldPreserveCreatedAt_WhenUpsertingHint()
+    {
+        var store = new InMemoryReasonHintStore();
+        var hintId = EntityId.New();
+        var original = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var attemptedOverwrite = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var hint = new ReasonHint
+        {
+            HintId = hintId, TenantId = Tenant, Scope = ReasonHintScope.Queue,
+            ScopeRef = "q1", ReasonPath = "[\"A\"]", Priority = 0, CreatedAt = original,
+        };
+        await store.SaveAsync(hint, CancellationToken.None);
+
+        // Update with a DIFFERENT incoming CreatedAt — it must be ignored on upsert.
+        await store.SaveAsync(hint with { Priority = 9, CreatedAt = attemptedOverwrite }, CancellationToken.None);
+
+        var loaded = await store.GetByIdAsync(Tenant, hintId, CancellationToken.None);
+        loaded.Should().NotBeNull();
+        loaded!.Priority.Should().Be(9);
+        loaded.CreatedAt.Should().Be(original);
     }
 
     [Fact]

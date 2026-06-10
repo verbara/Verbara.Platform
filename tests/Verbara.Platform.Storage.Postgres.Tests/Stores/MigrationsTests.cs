@@ -17,4 +17,11 @@ public class MigrationsTests : IClassFixture<MigrationsFixture>
         (await _fixture.TableExistsAsync("reason_hints")).Should().BeTrue();
         (await _fixture.IndexExistsAsync("idx_reason_hints_scope")).Should().BeTrue();
     }
+
+    [Fact]
+    public async Task Migrations_ShouldAddCreatedAtColumns_WhenApplied()
+    {
+        (await _fixture.ColumnExistsAsync("typification_bindings", "created_at")).Should().BeTrue();
+        (await _fixture.ColumnExistsAsync("reason_hints", "created_at")).Should().BeTrue();
+    }
 }

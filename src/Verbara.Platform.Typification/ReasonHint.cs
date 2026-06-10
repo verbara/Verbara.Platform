@@ -22,4 +22,10 @@ public sealed record ReasonHint : ITenantScoped
     public int Priority { get; init; }
 
     public bool IsActive { get; init; } = true;
+
+    /// <summary>
+    /// Creation instant; tiebreak for equal-priority same-scope resolution
+    /// (most-recent config wins).
+    /// </summary>
+    public required DateTimeOffset CreatedAt { get; init; }
 }

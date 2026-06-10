@@ -17,13 +17,21 @@ namespace Verbara.Platform.Api.Tests;
 /// <see cref="AuthenticatedPlatformApiFactory"/>'s operational-tenant setup but
 /// swaps the licensing substitute to <c>AddNoProFeaturesLicensed()</c>.
 /// </summary>
-public sealed class TypificationEndpointTests : IClassFixture<AuthenticatedPlatformApiFactory>
+public sealed class TypificationEndpointTests : IDisposable
 {
+    private readonly AuthenticatedPlatformApiFactory _factory;
     private readonly HttpClient _client;
 
-    public TypificationEndpointTests(AuthenticatedPlatformApiFactory factory)
+    public TypificationEndpointTests()
     {
-        _client = factory.CreateAuthenticatedClient();
+        _factory = new AuthenticatedPlatformApiFactory();
+        _client = _factory.CreateAuthenticatedClient();
+    }
+
+    public void Dispose()
+    {
+        _client.Dispose();
+        _factory.Dispose();
     }
 
     // A minimal but VALID published-able schema: one root non-leaf + one leaf child.

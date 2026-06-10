@@ -211,6 +211,7 @@ public sealed class TypifyEndpointTests : IDisposable
                 SchemaId = schemaId,
                 SubTreeRootNodeId = null,
                 Priority = 10,
+                CreatedAt = DateTimeOffset.UtcNow,
             },
             CancellationToken.None);
 
@@ -629,6 +630,7 @@ public sealed class TypifyEndpointTests : IDisposable
                     SchemaId = schemaId,
                     SubTreeRootNodeId = null,
                     Priority = 10,
+                    CreatedAt = DateTimeOffset.UtcNow,
                 },
                 CancellationToken.None);
 

@@ -9,7 +9,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Fixed
+- **Deterministic typification binding/hint resolution.** Both `DefaultTypificationResolver` and `DefaultReasonHintResolver` tie-broke equal-priority same-scope candidates by a random `EntityId`, so two same-scope/same-priority bindings (or reason hints) resolved to a non-deterministic winner per process. Added `CreatedAt` to `SchemaBinding` + `ReasonHint` (migration `003`, stamped on create and preserved on update) and tie-break by `CreatedAt DESC` (most-recent config wins) with the id as the final stable tiebreak. Also isolated `TypificationEndpointTests` (per-test factory) to remove the last shared-fixture binding-accumulation source. Eliminates an intermittent test flake at its root.
 
 ---
 

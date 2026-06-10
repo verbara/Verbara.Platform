@@ -93,6 +93,7 @@ public sealed class StasisInboundConsumerTests
         Scope = ReasonHintScope.Did,
         ScopeRef = Did,
         ReasonPath = reasonPath,
+        CreatedAt = DateTimeOffset.UtcNow,
     };
 
     private static (IAriClient client, IAriChannelsResource channels) NewClient()

@@ -131,6 +131,35 @@ public sealed class DefaultTypificationResolverTests
         result!.Schema.SchemaId.Should().Be(highPrioritySchema.SchemaId);
     }
 
+    [Fact]
+    public async Task ResolveForConversation_ShouldPreferMostRecentBinding_WhenSameScopeAndPriority()
+    {
+        var bindings = new FakeBindingStore();
+        var schemas = new FakeSchemaStore();
+
+        var olderSchema = PublishedSchema("schema-older");
+        var newerSchema = PublishedSchema("schema-newer");
+        schemas.Add(olderSchema);
+        schemas.Add(newerSchema);
+
+        var older = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var newer = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Same scope + same priority. The newer binding intentionally has an id that
+        // LOSES the ordinal tiebreak ("b-z" > "b-a"), so a win can only come from the
+        // CreatedAt DESC tiebreak — proving most-recent-wins, not id-wins.
+        bindings.Add(Binding("b-a", BindingScope.Queue, QueueId.Value, olderSchema.SchemaId, priority: 5, createdAt: older));
+        bindings.Add(Binding("b-z", BindingScope.Queue, QueueId.Value, newerSchema.SchemaId, priority: 5, createdAt: newer));
+
+        var sut = new DefaultTypificationResolver(bindings, schemas);
+
+        var result = await sut.ResolveForConversationAsync(
+            Conversation(ChannelType.Voice, queue: QueueId), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Schema.SchemaId.Should().Be(newerSchema.SchemaId);
+    }
+
     // ---------- no match ----------
 
     [Fact]
@@ -191,7 +220,8 @@ public sealed class DefaultTypificationResolverTests
         string? scopeRef,
         EntityId schemaId,
         int priority = 0,
-        EntityId? subtreeRoot = null) =>
+        EntityId? subtreeRoot = null,
+        DateTimeOffset? createdAt = null) =>
         new()
         {
             BindingId = EntityId.From(id),
@@ -201,6 +231,7 @@ public sealed class DefaultTypificationResolverTests
             SchemaId = schemaId,
             SubTreeRootNodeId = subtreeRoot,
             Priority = priority,
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
         };
 
     private static TypificationSchema PublishedSchema(string id) =>

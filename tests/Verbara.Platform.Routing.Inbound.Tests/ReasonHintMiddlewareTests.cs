@@ -41,6 +41,7 @@ public class ReasonHintMiddlewareTests
         Scope = ReasonHintScope.Channel,
         ScopeRef = "scope",
         ReasonPath = reasonPath,
+        CreatedAt = DateTimeOffset.UtcNow,
     };
 
     private sealed class FakeReasonHintResolver : IReasonHintResolver

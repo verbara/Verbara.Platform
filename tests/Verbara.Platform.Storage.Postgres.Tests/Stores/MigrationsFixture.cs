@@ -91,4 +91,18 @@ public sealed class MigrationsFixture : IAsyncLifetime
         var result = await cmd.ExecuteScalarAsync();
         return result is true;
     }
+
+    /// <summary>Returns true if the named column exists on the named table.</summary>
+    public async Task<bool> ColumnExistsAsync(string table, string column)
+    {
+        await using var conn = await DataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns " +
+            "WHERE table_name = @Table AND column_name = @Column)";
+        cmd.Parameters.Add(new NpgsqlParameter("Table", table));
+        cmd.Parameters.Add(new NpgsqlParameter("Column", column));
+        var result = await cmd.ExecuteScalarAsync();
+        return result is true;
+    }
 }

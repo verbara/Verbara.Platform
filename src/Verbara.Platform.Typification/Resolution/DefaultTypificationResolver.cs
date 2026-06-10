@@ -7,7 +7,8 @@ namespace Verbara.Platform.Typification.Resolution;
 /// <summary>
 /// Default <see cref="ITypificationResolver"/>: resolves a conversation against its
 /// published schema bindings most-specific-wins, then by descending
-/// <see cref="SchemaBinding.Priority"/> (tie-broken by <see cref="SchemaBinding.BindingId"/>
+/// <see cref="SchemaBinding.Priority"/> (ties broken by the most-recent
+/// <see cref="SchemaBinding.CreatedAt"/>, then <see cref="SchemaBinding.BindingId"/>
 /// for determinism), returning the first candidate that has a published schema.
 /// </summary>
 public sealed class DefaultTypificationResolver : ITypificationResolver
@@ -80,9 +81,11 @@ public sealed class DefaultTypificationResolver : ITypificationResolver
         if (bindings.Count == 0)
             return null;
 
-        // Highest Priority first; tie-break by BindingId ordinal for determinism.
+        // Highest Priority first; then most-recently-created wins; BindingId ordinal
+        // is the ultra-final stable tie-break for determinism.
         var ordered = bindings
             .OrderByDescending(static b => b.Priority)
+            .ThenByDescending(static b => b.CreatedAt)
             .ThenBy(static b => b.BindingId.Value, StringComparer.Ordinal);
 
         foreach (var binding in ordered)
