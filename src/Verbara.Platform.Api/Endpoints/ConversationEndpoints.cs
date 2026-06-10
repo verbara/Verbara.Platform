@@ -1,15 +1,18 @@
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using Verbara.Platform.Switchboard;
 using Verbara.Platform.Typification;
+using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Resolution;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Platform.Typification.Validation;
 using Verbara.Sdk.Pro.Dialer.Campaign;
 using Verbara.Sdk.Pro.Dialer.Dispositions;
+using Verbara.Sdk.Pro.Licensing;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -30,6 +33,13 @@ internal static class ConversationEndpoints
         group.MapPost("/{id}/close", CloseConversation);
         group.MapGet("/{id}/typification-form", GetTypificationForm);
         group.MapPost("/{id}/typify", TypifyConversation);
+        // D1 — AI auto-disposition suggestion. The conversations group is NOT
+        // license-gated (agents must always be able to close work), so the gate is
+        // applied to THIS endpoint only, requiring BOTH AdvancedTypification AND
+        // TypificationAi: the LicenseGateMiddleware reads one LicenseFeatureMetadata and
+        // checks HasFlag, so a combined flags value gates on EVERY set bit (402 unless both).
+        group.MapPost("/{id}/typification-suggestion", GetTypificationSuggestion)
+            .RequireLicenseFeature(LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi);
         group.MapPost("/{id}/hold", HoldConversation);
         group.MapPost("/{id}/unhold", UnholdConversation);
         group.MapPost("/", CreateConversation);
@@ -201,6 +211,83 @@ internal static class ConversationEndpoints
                 : null));
     }
 
+    // D1 — AI auto-disposition suggestion (P2a, SuggestOnly). Best-effort: every
+    // "can't suggest" path returns 200 with an all-null TypificationSuggestionResponse
+    // (no schema / AI disabled / classifier degraded / below confidence / sentiment-gated)
+    // so the client treats it uniformly as "no suggestion, fall back to manual". The route
+    // is license-gated (AdvancedTypification + TypificationAi) at registration.
+    private static async Task<IResult> GetTypificationSuggestion(
+        string id,
+        HttpContext context,
+        [FromServices] IConversationStore conversationStore,
+        [FromServices] ITypificationResolver resolver,
+        [FromServices] ITypificationAiClassifier classifier,
+        [FromServices] IMessageStore messageStore,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var conversationId = EntityId.From(id);
+
+        // 1. Conversation must exist.
+        var conversation = await conversationStore.GetByIdAsync(tenantId, conversationId, ct);
+        if (conversation is null)
+            return Results.NotFound();
+
+        // 1b. No bound schema → nothing to classify against.
+        var resolved = await resolver.ResolveForConversationAsync(conversation, ct);
+        if (resolved is null)
+            return Results.Ok(EmptySuggestion);
+
+        // 2. AI disabled for this schema → no suggestion.
+        if (!resolved.Schema.AiConfig.Enabled)
+            return Results.Ok(EmptySuggestion);
+
+        // 3. Load the transcript. Both message stores ORDER BY created_at ASC (oldest
+        //    first) and IMessageStore has no newest-first query, so a small limit would
+        //    feed the classifier the OLDEST turns; the classifier then keeps only its
+        //    internal last-N (40 msgs / 6000 chars). We pull a generous bound so that for
+        //    all realistic conversations the true most-recent turns (the most
+        //    disposition-relevant context) are included before the internal cap bites. A
+        //    dedicated newest-first store query is a future optimization for pathological
+        //    (>2000-message) conversations.
+        const int TranscriptFetchLimit = 2000;
+        var transcript = await messageStore.GetConversationMessagesAsync(tenantId, conversationId, limit: TranscriptFetchLimit, offset: 0, ct);
+
+        // 4. Classify (never throws — degrades to null on no-text / LLM-failure / invalid).
+        var classification = await classifier.ClassifyAsync(resolved.Schema, resolved.SubtreeRoot, conversation, transcript, ct);
+        if (classification is null)
+            return Results.Ok(EmptySuggestion);
+
+        var aiConfig = resolved.Schema.AiConfig;
+
+        // 5a. Confidence gate.
+        if (classification.Confidence < aiConfig.ConfidenceThreshold)
+            return Results.Ok(EmptySuggestion);
+
+        // 5b. Sentiment gate: never surface a Success outcome on a very-negative call.
+        if (aiConfig.SentimentGating &&
+            string.Equals(classification.Sentiment, "very_negative", StringComparison.OrdinalIgnoreCase) &&
+            classification.NodePath.Count > 0)
+        {
+            var leafNodeId = classification.NodePath[^1];
+            var leaf = resolved.Schema.Nodes.FirstOrDefault(n => n.NodeId == leafNodeId)?.Leaf;
+            if (leaf?.Category == TypificationCategory.Success)
+                return Results.Ok(EmptySuggestion);
+        }
+
+        // 5c. AiMode: P2a ships SuggestOnly semantics — always return as a suggestion (the
+        // client decides whether to apply). AutoApplyAboveThreshold is a P2b distinction.
+        return Results.Ok(new TypificationSuggestionResponse(
+            SuggestedNodePath: classification.NodePath.Select(n => n.Value).ToArray(),
+            SuggestedFieldValues: classification.FieldValues.Count > 0 ? classification.FieldValues : null,
+            Confidence: classification.Confidence,
+            Sentiment: classification.Sentiment));
+    }
+
+    /// <summary>All-null "no suggestion" payload reused by every degrade path.</summary>
+    private static readonly TypificationSuggestionResponse EmptySuggestion =
+        new(SuggestedNodePath: null, SuggestedFieldValues: null, Confidence: null, Sentiment: null);
+
     private static async Task<IResult> TypifyConversation(
         string id,
         HttpContext context,
@@ -269,9 +356,10 @@ internal static class ConversationEndpoints
             LeafNodeId = leafNodeId,
             FieldValues = body.FieldValues,
             Notes = body.Notes,
-            AiSuggested = false,
+            AiSuggested = body.AiSuggested ?? false,
+            AiConfidence = body.AiConfidence,
             AiAccepted = body.AiAccepted,
-            Source = SubmissionSource.Manual,
+            Source = body.AiSuggested == true ? SubmissionSource.AutoAi : SubmissionSource.Manual,
             Duration = TimeSpan.Zero,
             CompletedAt = clock.UtcNow,
         };
@@ -425,13 +513,31 @@ internal sealed record TransferRequest(string? TargetQueueId, string? TargetAgen
 /// <summary>
 /// Runtime typification submission: the selected root→leaf node path, the captured
 /// field values (key → value, typed-validated server-side), optional free-text notes,
-/// and whether the agent accepted an AI suggestion (P2 — null when no AI involved).
+/// and AI provenance (P2 — null when no AI involved): whether the chosen path originated
+/// from an AI suggestion (<paramref name="AiSuggested"/> → <c>Source = AutoAi</c>), the
+/// suggestion's confidence (<paramref name="AiConfidence"/>), and whether the agent
+/// accepted the suggestion verbatim (<paramref name="AiAccepted"/>).
 /// </summary>
 internal sealed record TypifyRequest(
     IReadOnlyList<string> SelectedNodePath,
     IReadOnlyDictionary<string, string> FieldValues,
     string? Notes = null,
-    bool? AiAccepted = null);
+    bool? AiAccepted = null,
+    bool? AiSuggested = null,
+    double? AiConfidence = null);
+
+/// <summary>
+/// D1 — AI auto-disposition suggestion (P2a). The suggested root→leaf node-id path,
+/// optional captured field values, the model's confidence, and a free-form sentiment
+/// hint. All members are <see langword="null"/> (the all-null payload) when there is no
+/// suggestion — no bound schema, AI disabled, the classifier degraded, the confidence
+/// fell below the schema threshold, or a sentiment-gated Success outcome was suppressed.
+/// </summary>
+internal sealed record TypificationSuggestionResponse(
+    IReadOnlyList<string>? SuggestedNodePath,
+    IReadOnlyDictionary<string, string>? SuggestedFieldValues,
+    double? Confidence,
+    string? Sentiment);
 
 /// <summary>
 /// The resolved typification form for a conversation: the cascading schema, the

@@ -1,7 +1,7 @@
-namespace Verbara.Platform.Flows;
+namespace Verbara.Platform.Llm;
 
 /// <summary>
-/// Default, disabled <see cref="ILlmProvider"/> registered by <see cref="ServiceCollectionExtensions.AddPlatformFlows"/>
+/// Default, disabled <see cref="ILlmProvider"/> registered by <c>AddPlatformFlows</c>
 /// so the flow engine and its full handler graph (including the AI nodes
 /// <c>ai_classify</c>/<c>ai_generate</c>) can be composed even when no LLM backend is configured.
 /// <para>
@@ -16,7 +16,7 @@ namespace Verbara.Platform.Flows;
 /// <c>AddPlatformFlows</c> takes precedence.
 /// </para>
 /// </summary>
-internal sealed class DisabledLlmProvider : ILlmProvider
+public sealed class DisabledLlmProvider : ILlmProvider
 {
     private const string DisabledMessage =
         "AI flow nodes (ai_classify/ai_generate) require an ILlmProvider implementation; " +

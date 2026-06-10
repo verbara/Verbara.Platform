@@ -2,6 +2,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Flows;
 using Verbara.Platform.Flows.Nodes;
 using Verbara.Platform.Flows.Tests.Helpers;
+using Verbara.Platform.Llm;
 using FluentAssertions;
 using NSubstitute;
 

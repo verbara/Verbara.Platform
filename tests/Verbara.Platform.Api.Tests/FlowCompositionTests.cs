@@ -1,5 +1,7 @@
 using Verbara.Platform.Bot;
 using Verbara.Platform.Flows;
+using Verbara.Platform.Llm;
+using Verbara.Platform.Typification.Ai;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -55,5 +57,25 @@ public sealed class FlowCompositionTests : IDisposable
         // (locale-proof + does not require the handler's internal type).
         Assert.Contains(handlers, h => h.NodeType == "collect_reason");
         Assert.Contains(handlers, h => h.NodeType == "set_variable");
+    }
+
+    [Fact]
+    public void Composition_ShouldResolveAiClassifierTransiently_WhenApiHostBuilt()
+    {
+        // The classifier depends on ILlmProvider, which is registered as a
+        // factory-managed typed HttpClient (AddHttpClient<ILlmProvider, ...>). It MUST
+        // be transient — a singleton capturing the transient typed-client is the
+        // IHttpClientFactory captive-dependency anti-pattern (the HttpMessageHandler
+        // would never rotate). Resolving it from two distinct scopes must yield two
+        // distinct instances, proving it is not captured as a singleton.
+        using var scope1 = _factory.Services.CreateScope();
+        using var scope2 = _factory.Services.CreateScope();
+
+        var first = scope1.ServiceProvider.GetRequiredService<ITypificationAiClassifier>();
+        var second = scope2.ServiceProvider.GetRequiredService<ITypificationAiClassifier>();
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.NotSame(first, second);
     }
 }

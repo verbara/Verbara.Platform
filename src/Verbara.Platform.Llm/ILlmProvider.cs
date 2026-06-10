@@ -1,4 +1,4 @@
-namespace Verbara.Platform.Flows;
+namespace Verbara.Platform.Llm;
 
 /// <summary>
 /// Abstraction over a large-language-model completion endpoint.
