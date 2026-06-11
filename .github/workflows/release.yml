@@ -165,11 +165,27 @@ jobs:
           # §"Cosign v3 signing-config requirement" for the full migration trail.
           curl -fsSL https://raw.githubusercontent.com/sigstore/root-signing/refs/heads/main/targets/signing_config.v0.2.json \
             | jq 'del(.rekorTlogUrls)' > "$SIGNING_CONFIG"
-          cosign sign \
-            --key "$KEY_FILE" \
-            --yes \
-            --signing-config "$SIGNING_CONFIG" \
-            "$IMAGE_REF"
+          # Retry to tolerate the ghcr push→HEAD manifest-propagation race: cosign
+          # signs by digest, and a just-pushed manifest can briefly 404 on the HEAD
+          # lookup before ghcr finishes propagating it (observed signing 3/4 images
+          # in the v2.12.0 run). The `if` condition is exempt from `set -e`.
+          signed=false
+          for attempt in 1 2 3 4 5; do
+            if cosign sign \
+                 --key "$KEY_FILE" \
+                 --yes \
+                 --signing-config "$SIGNING_CONFIG" \
+                 "$IMAGE_REF"; then
+              signed=true
+              break
+            fi
+            echo "::warning::cosign sign attempt ${attempt} failed (likely ghcr manifest propagation); retrying in $((attempt * 5))s..."
+            sleep $((attempt * 5))
+          done
+          if [ "$signed" != "true" ]; then
+            echo "::error::cosign sign failed after 5 attempts for $IMAGE_REF"
+            exit 1
+          fi
 
       - name: Verify cosign signature against committed public key
         if: steps.retro.outputs.skip != 'true'
