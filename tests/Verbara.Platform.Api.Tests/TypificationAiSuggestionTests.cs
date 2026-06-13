@@ -335,6 +335,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
                 SchemaId = schemaId,
                 SubTreeRootNodeId = null,
                 Priority = 10,
+                CreatedAt = DateTimeOffset.UtcNow,
             },
             CancellationToken.None);
 
