@@ -1,0 +1,80 @@
+name: CI
+
+# Build + unit-test gate for Verbara.Platform PRs (closes the "no build-time CI"
+# gap — this repo previously had only release/digest/visibility workflows, so PRs
+# were never validated in CI). The Release build is the headline gate: it enforces
+# TreatWarningsAsErrors=true / WarningLevel=9999 (Directory.Build.props) across all
+# ~40 projects. Full Native AOT publish stays in release.yml (slow, tag-triggered);
+# this gate is the fast feedback loop.
+#
+# NOTE (private Pro packages): Verbara.Sdk.Pro.* live on the private GitHub Packages
+# NuGet feed (source `github` in NuGet.Config). Restore authenticates with the
+# PACKAGES_PAT Actions secret (the same one release.yml already uses). Same-repo
+# PRs (verbara/* branches) get the secret; PRs from forks do NOT — fork CI will
+# fail at restore by design (Pro is closed-source).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Cancel superseded PR runs, but never cancel an in-flight main build — every
+  # commit that lands on main must be fully validated (a cancelled run reads as
+  # "cancelled", not "failed", so a half-built main would pass unnoticed).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build + Unit Tests (Release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5.2.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Authenticate private NuGet feed (Verbara.Sdk.Pro.*)
+        # Mirrors the Dockerfile restore-auth: drop the maintainer-only `local`
+        # source (its path doesn't exist on the runner) and inject the GitHub
+        # Packages credentials into the `github` source. PAT passed via env (never
+        # interpolated directly into the run-block) to avoid script injection.
+        env:
+          PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
+        run: |
+          set -euo pipefail
+          dotnet nuget remove source local 2>/dev/null || true
+          dotnet nuget update source github \
+            --username verbara \
+            --password "$PACKAGES_PAT" \
+            --store-password-in-clear-text
+
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build Verbara.Platform.slnx -c Release
+
+      - name: Unit tests
+        # Excludes ONLY the two genuinely container-backed test projects —
+        # Storage.Postgres.Tests (Postgres Testcontainer) and Identity.Redis.Tests
+        # (Redis) — which hard-fail without Docker. The filter targets each
+        # project's namespace PRECISELY rather than the bare tokens
+        # "Postgres"/"Redis"/"Integration": those substrings also appear in
+        # legitimate in-memory unit tests elsewhere (e.g. Api.Tests'
+        # AuthIntegrationTests and PostgresHealthCheckTests use an in-memory
+        # WebApplicationFactory / fakes, no container) which we DO want to run.
+        # Tradeoff: the handful of container-free DI-registration tests that live
+        # INSIDE the two excluded projects are skipped with them — an acceptable
+        # minority. Platform separates unit vs integration by PROJECT, not by a
+        # [Category] trait (only one test in the whole suite is traited).
+        run: >-
+          dotnet test Verbara.Platform.slnx --no-build -c Release
+          --filter "FullyQualifiedName!~Storage.Postgres.Tests&FullyQualifiedName!~Identity.Redis.Tests"
+          --logger "console;verbosity=normal"

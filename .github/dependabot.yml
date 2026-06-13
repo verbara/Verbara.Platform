@@ -1,0 +1,92 @@
+version: 2
+
+# Dependabot for Verbara.Platform. Two ecosystems: NuGet (Directory.Packages.props)
+# and the GitHub Actions used by the workflows.
+#
+# ⚠️ ONE-TIME SETUP — private feed credentials live in a SEPARATE store:
+#   The `registries` block below references a Dependabot secret named PACKAGES_PAT.
+#   Dependabot secrets are NOT the same store as Actions secrets (a cross-repo
+#   gotcha already burned us — see Verbara.Sdk's automerge fix). Add it at:
+#     repo → Settings → Secrets and variables → Dependabot → New repository secret
+#   (value = a PAT with read:packages, same as the Actions PACKAGES_PAT).
+#   Without it, Dependabot logs an auth error against the `github` NuGet source.
+
+registries:
+  github-packages-nuget:
+    type: nuget-feed
+    url: https://nuget.pkg.github.com/verbara/index.json
+    username: verbara
+    password: ${{secrets.PACKAGES_PAT}}
+
+updates:
+  # ── .NET / NuGet ─────────────────────────────────────────────────────────
+  - package-ecosystem: "nuget"
+    directory: "/"
+    registries:
+      - github-packages-nuget
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "nuget"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    # Let freshly published packages settle before bumping (supply-chain cooldown).
+    # Security updates still open immediately when an alert lands.
+    cooldown:
+      default-days: 5
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    ignore:
+      # The Verbara.Sdk.* and Verbara.Sdk.Pro.* pins are advanced deliberately as
+      # part of the cross-repo release cadence (Sdk → Pro → Platform), NOT by
+      # Dependabot. Keeping them out also means Dependabot never needs to resolve
+      # latest-version metadata from the private feed for an update PR.
+      - dependency-name: "Verbara.Sdk.*"  # covers Verbara.Sdk.* AND Verbara.Sdk.Pro.*
+      # FluentAssertions 8.x is a commercial licence; test stack is on xunit 2.9.x.
+      # Pin the test-stack majors until a xunit v3 migration is scheduled.
+      - dependency-name: "FluentAssertions"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "xunit.runner.visualstudio"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.NET.Test.Sdk"
+        update-types: ["version-update:semver-major"]
+    groups:
+      microsoft-extensions:
+        patterns:
+          - "Microsoft.Extensions.*"
+          - "Microsoft.CodeAnalysis.*"
+      test-stack:
+        patterns:
+          - "xunit*"
+          - "FluentAssertions"
+          - "NSubstitute*"
+          - "coverlet.*"
+          - "Microsoft.NET.Test.Sdk"
+      analyzers:
+        patterns:
+          - "Meziantou.*"
+          - "IDisposableAnalyzers"
+          - "Microsoft.VisualStudio.Threading.Analyzers"
+      # Collapse all CVE-driven security updates into a single PR.
+      nuget-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  # ── GitHub Actions ───────────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+    cooldown:
+      default-days: 7

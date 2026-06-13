@@ -1,0 +1,68 @@
+name: CodeQL
+
+# Static security analysis (SAST) for the Platform C# codebase — the crown-jewel
+# API + Pro IP previously had no SAST. Verbara.Platform is a PUBLIC repo, so CodeQL
+# runs on the free tier (no GitHub Advanced Security licence required).
+#
+# CodeQL must BUILD the solution to analyze C#, so this workflow needs the same
+# private-Pro-feed authentication as ci.yml (PACKAGES_PAT). No merge_group trigger:
+# this repo has no merge queue (unlike Verbara.Sdk).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly Sundays 06:00 UTC — keeps the default-branch security baseline fresh
+    # without pressuring weekday CI.
+    - cron: "0 6 * * 0"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (C#)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5.2.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Authenticate private NuGet feed (Verbara.Sdk.Pro.*)
+        env:
+          PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
+        run: |
+          set -euo pipefail
+          dotnet nuget remove source local 2>/dev/null || true
+          dotnet nuget update source github \
+            --username verbara \
+            --password "$PACKAGES_PAT" \
+            --store-password-in-clear-text
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4.36.0
+        with:
+          languages: csharp
+          # Trace exactly the `dotnet build` step below. Without build-mode the
+          # csharp default is autobuild, which would run a second redundant build
+          # (and can analyze a partial DB / miss the traced source). See GitHub's
+          # "build options for compiled languages" docs.
+          build-mode: manual
+          queries: security-extended,security-and-quality
+
+      - name: Build solution
+        run: dotnet build Verbara.Platform.slnx -c Release --no-incremental
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4.36.0
+        with:
+          category: "/language:csharp"
