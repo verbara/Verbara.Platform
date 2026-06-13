@@ -107,6 +107,13 @@
          Reflection-based — incompatible with Native AOT, but the harness itself is
          NO-AOT per ADR-0023; deliverables (Api + Realtime images) remain AOT-clean. -->
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.5" />
+    <!-- Transitive-pin override (CentralPackageTransitivePinningEnabled=true): SignalR's
+         MessagePack protocol pulls MessagePack transitively into Realtime + Realtime.Tests.
+         The version it would otherwise resolve (2.5.187) carries CVE-2026-48109 — a HIGH
+         (CVSS 8.2) DoS in LZ4Block/LZ4BlockArray decompression of untrusted payloads.
+         2.5.301 is the patched release. SignalR does not enable LZ4 by default so real
+         exposure is low, but NuGet audit (NU1903) correctly flags the vulnerable version. -->
+    <PackageVersion Include="MessagePack" Version="2.5.301" />
   </ItemGroup>
 
   <ItemGroup>
