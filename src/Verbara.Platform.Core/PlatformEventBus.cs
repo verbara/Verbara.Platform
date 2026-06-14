@@ -111,7 +111,7 @@ public sealed record ConversationStateChangedEvent(
     string ConversationId,
     string OldState,
     string NewState)
-    : PlatformEvent(TenantId, "conversation.state_changed", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "conversation.state_changed", DateTimeOffset.UtcNow), ICrossPodEvent;
 
 /// <summary>Raised when an agent's presence state changes.</summary>
 public sealed record AgentStateChangedEvent(
@@ -120,7 +120,7 @@ public sealed record AgentStateChangedEvent(
     string AgentName,
     string OldState,
     string NewState)
-    : PlatformEvent(TenantId, "agent.state_changed", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agent.state_changed", DateTimeOffset.UtcNow), ICrossPodEvent;
 
 /// <summary>
 /// W4 — raised when an agent's deferred-pause target is SET (PendingState non-null,
@@ -134,7 +134,7 @@ public sealed record AgentPendingStateChangedEvent(
     string AgentId,
     string AgentName,
     string? PendingState)
-    : PlatformEvent(TenantId, "agent.pending_state_changed", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agent.pending_state_changed", DateTimeOffset.UtcNow), ICrossPodEvent;
 
 /// <summary>
 /// Raised when a conversation is offered to an agent from a queue. Carries <see cref="Channel"/>
@@ -221,7 +221,7 @@ public sealed record TypificationSubmittedEvent(
     int SchemaVersion,
     string LeafNodeId,
     string AgentId)
-    : PlatformEvent(TenantId, "typification.submitted", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "typification.submitted", DateTimeOffset.UtcNow), ICrossPodEvent;
 
 // ─── Agent Assist Events ──────────────────────────────────────────────────────
 
