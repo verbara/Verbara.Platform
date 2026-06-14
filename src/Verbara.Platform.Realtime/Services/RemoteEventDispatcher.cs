@@ -1,4 +1,6 @@
+using System.Collections.Frozen;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Push;
 using Verbara.Sdk.Push.Bus;
@@ -108,50 +110,46 @@ internal sealed class RemoteEventDispatcher : IHostedService
             return;
         }
 
-        // Add a new case here AND a `[JsonSerializable(typeof(YourEvent))]` line
-        // in src/Verbara.Platform.Core/Push/PlatformPushJsonContext.cs. Both
-        // sides MUST agree — silent message loss otherwise.
-        switch (envelope.OriginalEventType)
+        // SINGLE SOURCE OF TRUTH for cross-pod decode. Adding a cross-pod event = add one entry
+        // here AND a [JsonSerializable] line in PlatformPushJsonContext + the ICrossPodEvent marker.
+        // CrossPodEventGuardTests asserts these three stay in lock-step (no silent message loss).
+        if (Handlers.TryGetValue(envelope.OriginalEventType, out var typeInfo))
         {
-            case "agent.state_changed":
-                DecodeAndPublish(envelope, PlatformPushJsonContext.Default.AgentStateChangedEvent);
-                break;
-            case "agent.pending_state_changed":
-                DecodeAndPublish(envelope, PlatformPushJsonContext.Default.AgentPendingStateChangedEvent);
-                break;
-            case "conversation.state_changed":
-                DecodeAndPublish(envelope, PlatformPushJsonContext.Default.ConversationStateChangedEvent);
-                break;
-            case "typification.submitted":
-                DecodeAndPublish(envelope, PlatformPushJsonContext.Default.TypificationSubmittedEvent);
-                break;
-            default:
-                // Not a Platform.Core event — let other consumers (Pro internal
-                // mergers, custom subscribers) handle it directly. The Pro.Push
-                // SignalR Hub Presence path already consumes RemotePushEvent
-                // directly via PresenceMergeConsumer.
-                RemoteEventDispatcherLog.UnknownEventType(_logger, envelope.OriginalEventType);
-                break;
+            DecodeAndPublish(envelope, typeInfo);
+        }
+        else
+        {
+            // Not a Platform.Core event — let other consumers (Pro internal mergers, custom
+            // subscribers, the Pro.Push SignalR Presence path) handle the RemotePushEvent directly.
+            RemoteEventDispatcherLog.UnknownEventType(_logger, envelope.OriginalEventType);
         }
     }
 
-    private void DecodeAndPublish<TEvent>(
-        RemotePushEvent envelope,
-        System.Text.Json.Serialization.Metadata.JsonTypeInfo<TEvent> typeInfo)
-        where TEvent : PushEvent
+    private static readonly FrozenDictionary<string, JsonTypeInfo> Handlers =
+        new Dictionary<string, JsonTypeInfo>
+        {
+            ["agent.state_changed"] = PlatformPushJsonContext.Default.AgentStateChangedEvent,
+            ["agent.pending_state_changed"] = PlatformPushJsonContext.Default.AgentPendingStateChangedEvent,
+            ["conversation.state_changed"] = PlatformPushJsonContext.Default.ConversationStateChangedEvent,
+            ["typification.submitted"] = PlatformPushJsonContext.Default.TypificationSubmittedEvent,
+        }.ToFrozenDictionary();
+
+    /// <summary>The CLR event types this dispatcher decodes cross-pod — derived from
+    /// <see cref="Handlers"/> (single source of truth). The cross-pod guard test asserts this
+    /// equals the set of <c>ICrossPodEvent</c> implementers and the PlatformPushJsonContext set.</summary>
+    internal static readonly IReadOnlySet<Type> HandledEventTypes =
+        Handlers.Values.Select(ti => ti.Type).ToFrozenSet();
+
+    private void DecodeAndPublish(RemotePushEvent envelope, JsonTypeInfo typeInfo)
     {
         var json = System.Text.Encoding.UTF8.GetString(envelope.RawPayload);
-        var decoded = JsonSerializer.Deserialize(json, typeInfo);
-        if (decoded is null)
+        if (JsonSerializer.Deserialize(json, typeInfo) is not PushEvent decoded)
         {
             RemoteEventDispatcherLog.DeserialiseFailed(_logger, envelope.OriginalEventType, "JsonSerializer returned null");
             return;
         }
 
-        // Carry the envelope metadata through so the relay's tenant/user
-        // routing keeps working — without this, decoded.Metadata is whatever
-        // the publishing side serialised, which may be null for events that
-        // override the Metadata getter from their own fields.
+        // Carry the envelope metadata through so tenant/user routing keeps working.
         if (envelope.Metadata is not null)
         {
             decoded = decoded with { Metadata = envelope.Metadata };
@@ -159,11 +157,6 @@ internal sealed class RemoteEventDispatcher : IHostedService
 
         RemoteEventDispatcherLog.Decoded(_logger, envelope.OriginalEventType, envelope.SourceNodeId, envelope.Metadata?.TenantId ?? "(none)");
 
-        // RxPushEventBus.PublishAsync enqueues via a bounded channel; the
-        // ValueTask completes synchronously on the default DropOldest path.
-        // Await to honour CA2012 + surface enqueue-time exceptions; the relay
-        // subscription on the same in-process bus picks the event up
-        // synchronously on the channel-dispatcher thread.
         var pending = _bus.PublishAsync(decoded, CancellationToken.None);
         if (!pending.IsCompletedSuccessfully)
         {
