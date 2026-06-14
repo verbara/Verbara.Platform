@@ -10,6 +10,7 @@ obj/
 TestResults/
 coverage/
 .worktrees/
+CLAUDE.md
 .claude/
 .project-memory/
 .superpowers/
