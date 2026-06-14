@@ -55,37 +55,27 @@ public sealed class SseEndpointsTests
     }
 
     [Fact]
-    public void WriteEventAsync_ShouldSerializeAllEventTypes_WhenUsingAotContext()
+    public void AllPlatformEvents_ShouldResolveInApiJsonContext()
     {
-        var now = DateTimeOffset.UtcNow;
-        PlatformEvent[] events =
-        [
-            new ConversationAssignedEvent("t", "c1", "a1", "Q", "whatsapp", "Alice"),
-            new ConversationMessageEvent("t", "c1", "m1", "agent", "hello"),
-            new ConversationStateChangedEvent("t", "c1", "Active", "Closed"),
-            new ConversationOfferedEvent("t", "c1", "a1", "q1", "WebChat"),
-            new ConversationOfferExpiredEvent("t", "c1", "a1"),
-            new ConversationAbandonedEvent("t", "c1", "q1"),
-            new AgentStateChangedEvent("t", "a1", "Agent 1", "Available", "Busy"),
-            new AgentPendingStateChangedEvent("t", "a1", "Agent 1", "Break"),
-            new AgentCapacityChangedEvent("t", "a1", "voice", 1, 3, true),
-            new CampaignStatusChangedEvent("t", 1, "Camp1", "Paused", "Running"),
-            new CampaignMetricsUpdatedEvent("t", 1, 100, 50, 0.45, 0.02, 5),
-            new CampaignDispositionSubmittedEvent("t", 1, "SALE", "a1"),
-            new AgentAssistSuggestionEvent("t", "s1", "a1", "c1", "sug1", "Try this", "High", "kb", null),
-            new AgentAssistSentimentEvent("t", "s1", "a1", "c1", "customer", 0.8f, "Positive", ["great"]),
-            new AgentAssistComplianceAlertEvent("t", "s1", "a1", "c1", "r1", "forbidden phrase", "Critical"),
-            new AgentAssistTranscriptEvent("t", "s1", "a1", "c1", "agent", "Hello, how can I help?", true),
-            new VoiceScreenPopEvent("t", "conv1", "a1", "Voice", "contact1", "Ada Lovelace", "+15551234", "1780266205.0", "Sales", true),
-            new NotificationEvent("t", "system.generic", now, "n1", "u1",
-                NotificationCategory.System, NotificationSeverity.Info, "Title", "Body", null),
-        ];
+        // SSE serializes events by RUNTIME type (SseEndpoints.cs:195:
+        // JsonSerializer.Serialize(data, data.GetType(), ApiJsonContext.Default)), so a missing
+        // [JsonSerializable] registration is a RUNTIME crash the AOT analyzer cannot see. Enumerate
+        // the closed PlatformEvent hierarchy (reflection is fine — tests are not AOT) and assert
+        // each resolves. This replaces a hardcoded array that had itself gone stale (W4-C1 class).
+        var eventTypes = typeof(PlatformEvent).Assembly.GetTypes()
+            .Where(t => !t.IsAbstract && t.IsAssignableTo(typeof(PlatformEvent)))
+            .ToList();
 
-        foreach (var evt in events)
-        {
-            var json = JsonSerializer.Serialize(evt, evt.GetType(), ApiJsonContext.Default);
-            json.Should().NotBeNullOrEmpty($"event type {evt.Type} must serialize via AOT context");
-        }
+        eventTypes.Should().HaveCountGreaterThan(15, "the PlatformEvent hierarchy should be discovered");
+
+        var unregistered = eventTypes
+            .Where(t => ApiJsonContext.Default.GetTypeInfo(t) is null)
+            .Select(t => t.Name)
+            .OrderBy(n => n)
+            .ToList();
+
+        unregistered.Should().BeEmpty(
+            "every PlatformEvent must be in ApiJsonContext for AOT SSE serialization");
     }
 
     [Fact]
