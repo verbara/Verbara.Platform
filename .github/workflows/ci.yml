@@ -13,17 +13,21 @@ name: CI
 # PRs (verbara/* branches) get the secret; PRs from forks do NOT — fork CI will
 # fail at restore by design (Pro is closed-source).
 
+# Triggers: pull_request validates each PR; merge_group runs the authoritative gate on
+# the tentative merge result before it lands (merge queue). The post-merge push:[main]
+# run was intentionally dropped — it re-tested the exact tree the PR/merge-queue already
+# validated (pure redundancy / double-run per PR). Security baseline freshness on real
+# main is kept in codeql.yml, which retains push:[main] (the merge_group ref is not main).
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+  merge_group:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # Cancel superseded PR runs, but never cancel an in-flight main build — every
-  # commit that lands on main must be fully validated (a cancelled run reads as
-  # "cancelled", not "failed", so a half-built main would pass unnoticed).
+  # Cancel superseded PR runs, but never cancel an in-flight merge-queue run — the
+  # tentative merge must be fully validated before landing (a cancelled run reads as
+  # "cancelled", not "failed", so a half-built result would pass unnoticed).
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
