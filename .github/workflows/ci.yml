@@ -78,3 +78,64 @@ jobs:
           dotnet test Verbara.Platform.slnx --no-build -c Release
           --filter "FullyQualifiedName!~Storage.Postgres.Tests&FullyQualifiedName!~Identity.Redis.Tests"
           --logger "console;verbosity=normal"
+
+  coverage:
+    name: Coverage Ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Blocking line-coverage ratchet, mirroring Platform.Web's coverage job. Runs
+    # the SAME unit subset as build-and-test (the floor must measure the population
+    # CI actually runs), collects coverage via coverlet.runsettings, merges the
+    # per-project cobertura with ReportGenerator, and fails if the merged line-rate
+    # drops below coverage-floor.json. The floor is raised manually (no CI write-back).
+    # Baseline + rationale: docs/research/2026-06-14-platform-coverage-baseline.md.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5.2.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Authenticate private NuGet feed (Verbara.Sdk.Pro.*)
+        env:
+          PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
+        run: |
+          set -euo pipefail
+          dotnet nuget remove source local 2>/dev/null || true
+          dotnet nuget update source github \
+            --username verbara \
+            --password "$PACKAGES_PAT" \
+            --store-password-in-clear-text
+
+      - name: Build (Release)
+        run: dotnet build Verbara.Platform.slnx -c Release
+
+      - name: Unit tests with coverage
+        # Same filter as build-and-test. coverlet.runsettings excludes test asms,
+        # generated code, migrations, and the container-only src assemblies
+        # (Storage.Postgres / Identity.Redis) so the gate measures unit-tested code.
+        run: >-
+          dotnet test Verbara.Platform.slnx --no-build -c Release
+          --filter "FullyQualifiedName!~Storage.Postgres.Tests&FullyQualifiedName!~Identity.Redis.Tests"
+          --collect:"XPlat Code Coverage" --settings coverlet.runsettings
+          --results-directory ${{ github.workspace }}/coverage
+
+      - name: Merge coverage report
+        run: |
+          dotnet tool restore
+          dotnet reportgenerator \
+            -reports:"coverage/**/coverage.cobertura.xml" \
+            -targetdir:"coverage/report" \
+            -reporttypes:"Cobertura;TextSummary;HtmlInline_AzurePipelines"
+
+      - name: Enforce line-coverage floor (manual ratchet)
+        run: python3 scripts/check-coverage-floor.py coverage/report/Cobertura.xml coverage-floor.json
+
+      - name: Upload coverage report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: coverage-${{ github.sha }}
+          path: coverage/report

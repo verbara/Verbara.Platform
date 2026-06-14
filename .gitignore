@@ -8,6 +8,7 @@ obj/
 *.DotSettings.user
 *.lscache
 TestResults/
+coverage/
 .worktrees/
 .claude/
 .project-memory/
