@@ -49,7 +49,16 @@ contexts use compile-checked `Context.Default.X` and the audit store has a try/c
 - **Pre-commit format/lint hooks** — out of scope: `EnforceCodeStyleInBuild=true` + warnings-as-
   errors already enforce format at build.
 
-## Design — defense in depth (4 layers)
+## Design — layers 1 + 2 (+ existing 4); layer 3 dropped
+
+> **Decision (2026-06-13, during planning):** Layer 3 (in-image startup self-check) was
+> **dropped**. Grounding in the code showed it needs reflection enumeration
+> (`Assembly.GetTypes()`) in the shipped AOT host — AOT-analyzer debt — for **marginal**
+> value: the lane-4 "JIT≠AOT" caveat applies to *reflection-based* serialization, not
+> source-gen. Here everything is source-gen, so a `[JsonSerializable]` registration
+> **guarantees** the type is emitted (not trimmed) in AOT — the Layer-1 reflection test
+> (`GetTypeInfo != null`) is therefore a near-perfect proxy for AOT presence, and Layer 4
+> (release.yml AOT smoke) already covers any residue. Ship 1 + 2; rely on existing 4.
 
 ### Layer 2 — `ICrossPodEvent` marker (keystone, build first)
 A marker interface `ICrossPodEvent` on the cross-pod records (`AgentStateChangedEvent`,
@@ -72,12 +81,8 @@ Runs in the `ci.yml` unit-test gate (`dotnet test`, CoreCLR). High-fidelity beca
 emits the same `JsonTypeInfo` table in JIT and AOT, and `JsonSerializerIsReflectionEnabledByDefault=false`
 makes the missing-registration throw identical on CoreCLR.
 
-### Layer 3 — runtime startup self-check (deploy-time backstop)
-An `IStartupFilter`/`IHostedService` in the Api host that, at boot, iterates the `PlatformEvent`
-subtypes and calls the **actually configured** resolver's `GetTypeInfo(t)`; throws on the first
-unresolvable type so the pod fail-fasts (crash-loop visible to readiness) instead of crashing on
-the first SSE publish hours later. Runs **inside the real AOT image**, closing the JIT-proxy gap
-the Layer-1 test cannot fully cover (AOT trim could prune a member the JIT test never exercises).
+### Layer 3 — DROPPED (see decision note above)
+Reflection in the shipped AOT host for marginal value over source-gen's own AOT guarantee.
 
 ### Layer 4 — AOT-publish smoke (release-train net, already exists)
 The full Native AOT publish in `release.yml` is the final end-to-end net. No new work; optionally
@@ -86,8 +91,9 @@ ensure the smoke path exercises one event serialize. Out of scope to build here.
 ## Honest caveat
 
 A JIT `GetTypeInfo() != null` test catches **100% of "forgot the `[JsonSerializable]` line"**
-(the actual W4-C1 / current-near-miss class) but is **not** a perfect proxy for all AOT-trim
-serialization failures. Layer 3 (runs in the AOT image) is what makes this "no shortcuts."
+(the actual W4-C1 / current-near-miss class). For **source-gen** registration this proxy is
+near-perfect — a registered type is emitted, not trimmed, so JIT and AOT agree. Any residual
+AOT-trim risk is covered by **Layer 4** (the release.yml AOT-publish smoke).
 
 ## Key files
 
@@ -95,14 +101,14 @@ serialization failures. Layer 3 (runs in the AOT image) is what makes this "no s
 - `src/Verbara.Platform.Api/Serialization/ApiJsonContext.cs` — SSE registrations (all 19).
 - `src/Verbara.Platform.Core/Push/PlatformPushJsonContext.cs` — cross-pod (4).
 - `src/Verbara.Platform.Realtime/Services/RemoteEventDispatcher.cs:114` — the 4-case switch (expose known set).
-- `src/Verbara.Platform.Api/Endpoints/SseEndpoints.cs:195` — the only crashing site (context only; no change).
-- `tests/Verbara.Platform.Api.Tests/Endpoints/SseEndpointsTests.cs` — replace the broken array test.
-- `src/Verbara.Platform.Api/Program.cs` — wire the Layer-3 startup self-check.
+- `src/Verbara.Platform.Api/Endpoints/SseEndpoints.cs:195` — the only crashing site (no change).
+- `tests/Verbara.Platform.Api.Tests/Endpoints/SseEndpointsTests.cs` — replace the broken array test (Layer 1a).
+- `tests/Verbara.Platform.Realtime.Tests/` — new cross-pod sync guard (Layer 1b/1c).
+- New: `src/Verbara.Platform.Core/ICrossPodEvent.cs` (Layer 2 marker).
 
 ## Verification
 
-- Remove one event's `[JsonSerializable]` line locally → the Layer-1 test goes RED (and the
-  Layer-3 check throws on boot). Restore → green.
+- Remove one event's `[JsonSerializable]` line locally → the Layer-1 test goes RED. Restore → green.
 - Remove a dispatcher `case` for a cross-pod event → Layer-1 (c) goes RED.
 - The test enumerates 19/19 today and passes (confirms current state is consistent — the existing
   array's missing `TypificationSubmittedEvent` is no longer a blind spot).
