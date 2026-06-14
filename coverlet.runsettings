@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Coverage collection settings for the CI coverage-ratchet job.
-  Measures only real src/ production code: excludes test assemblies, generated
-  code (System.Text.Json source-gen carries [GeneratedCode]) and SQL migrations.
+  Measures only the production code the CI unit job actually exercises: excludes
+  test assemblies, generated code (System.Text.Json source-gen carries
+  [GeneratedCode]), SQL migrations, AND the two src assemblies whose ONLY tests are
+  container-backed (Storage.Postgres, Identity.Redis) — those are excluded from the
+  CI unit subset, so counting them at 0% would dilute the number and mask real
+  regressions. Their coverage is tracked only if their container tests ever enter CI.
   See docs/specs/2026-06-14-coverage-ratchet-pilot.md.
 -->
 <RunSettings>
@@ -12,7 +16,7 @@
         <Configuration>
           <Format>cobertura</Format>
           <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
-          <Exclude>[*.Tests]*,[*.Tests.*]*</Exclude>
+          <Exclude>[*.Tests]*,[*.Tests.*]*,[Verbara.Platform.Storage.Postgres]*,[Verbara.Platform.Identity.Redis]*</Exclude>
           <ExcludeByFile>**/Migrations/*.cs</ExcludeByFile>
           <SkipAutoProps>true</SkipAutoProps>
         </Configuration>
