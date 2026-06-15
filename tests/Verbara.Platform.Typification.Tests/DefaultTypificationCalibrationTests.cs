@@ -41,7 +41,7 @@ public sealed class DefaultTypificationCalibrationTests
     {
         var schemaStore = Substitute.For<ITypificationSchemaStore>();
         schemaStore
-            .GetByIdAsync(Tenant, SchemaId, null, Arg.Any<CancellationToken>())
+            .GetLatestPublishedAsync(Tenant, SchemaId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(schema));
 
         var suggestionStore = Substitute.For<IAiSuggestionStore>();
@@ -128,7 +128,7 @@ public sealed class DefaultTypificationCalibrationTests
     }
 
     [Fact]
-    public async Task GetStatus_ShouldReturnNotReady_WhenSchemaMissing()
+    public async Task GetStatus_ShouldReportNotReady_WhenSchemaMissing()
     {
         var (sut, _, _) = BuildSut(
             schema: null,
@@ -141,5 +141,21 @@ public sealed class DefaultTypificationCalibrationTests
         status.AutonomousReady.Should().BeFalse();
         status.Samples.Should().Be(0);
         status.Accuracy.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetStatus_ShouldReportAutonomousReady_WhenAccuracyIsAtExactBoundary()
+    {
+        // Both bands return exactly (200, 0.95) — verifies the >= 0.95 inclusive boundary
+        // for AutonomousReady and the >= 0.85 inclusive boundary for AutoFillReady.
+        var (sut, _, _) = BuildSut(
+            schema: Schema(autoApplyThreshold: 0.85, autonomousThreshold: 0.95),
+            autoApplyResult: (200, 0.95),
+            autonomousResult: (200, 0.95));
+
+        var status = await sut.GetStatusAsync(Tenant, SchemaId, CancellationToken.None);
+
+        status.AutoFillReady.Should().BeTrue("accuracy 0.95 ≥ MinCalibrationAccuracy 0.85");
+        status.AutonomousReady.Should().BeTrue("accuracy 0.95 == MinAutonomousAccuracy 0.95 (inclusive boundary)");
     }
 }

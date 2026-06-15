@@ -49,7 +49,9 @@ internal sealed class DefaultTypificationCalibration : ITypificationCalibration
         CancellationToken ct)
     {
         // Resolve the schema to read its per-schema confidence thresholds.
-        var schema = await _schemaStore.GetByIdAsync(tenantId, schemaId, version: null, ct);
+        // Uses the same published-schema lookup as the suggestion pipeline so that
+        // threshold drift from unpublished drafts cannot affect the calibration gate.
+        var schema = await _schemaStore.GetLatestPublishedAsync(tenantId, schemaId, ct);
         if (schema is null)
             return new CalibrationStatus(0, 0, false, false);
 
