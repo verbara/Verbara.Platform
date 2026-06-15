@@ -99,8 +99,6 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider, IDisposable
 
         using (response)
         {
-            var elapsedMs = sw.Elapsed.TotalMilliseconds;
-
             try
             {
                 // Let callers degrade — the disposition AI-node classifier catches and falls back.
@@ -108,17 +106,21 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider, IDisposable
             }
             catch (Exception ex)
             {
+                sw.Stop();
                 _metrics.Errors.Add(1);
-                LlmMetrics.LogProviderFailure(_logger, elapsedMs, ex);
+                LlmMetrics.LogProviderFailure(_logger, sw.Elapsed.TotalMilliseconds, ex);
                 throw;
             }
-
-            _metrics.RequestLatency.Record(elapsedMs);
-            _metrics.Requests.Add(1);
 
             var parsed = await response.Content
                 .ReadFromJsonAsync(LlmJsonContext.Default.ChatCompletionResponse, ct)
                 .ConfigureAwait(false);
+
+            sw.Stop();
+            var elapsedMs = sw.Elapsed.TotalMilliseconds;
+
+            _metrics.RequestLatency.Record(elapsedMs);
+            _metrics.Requests.Add(1);
 
             var content = parsed?.Choices is { Count: > 0 } choices
                 ? choices[0].Message?.Content

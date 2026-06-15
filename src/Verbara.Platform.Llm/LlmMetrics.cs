@@ -12,6 +12,15 @@ namespace Verbara.Platform.Llm;
 /// optional <see cref="IMeterFactory"/> (production DI path) with a plain
 /// <c>new Meter(...)</c> fallback so unit-test constructors that omit the factory
 /// still compile and run.
+/// <para>
+/// <strong>Disposal:</strong> this type owns and explicitly disposes its <see cref="Meter"/>,
+/// deviating from <c>JwtTokenService</c> (which never disposes its meter). The deviation is
+/// intentional: the typed-<see cref="System.Net.Http.HttpClient"/> provider that hosts
+/// <c>OpenAiCompatibleLlmProvider</c> can be recycled by <c>IHttpClientFactory</c>, so the
+/// provider (and therefore this class) is disposed and re-created over the application lifetime.
+/// Disposing a <see cref="Meter"/> created via <see cref="IMeterFactory"/> a second time is an
+/// idempotent no-op, so explicit disposal is safe and avoids meter leaks across recycling cycles.
+/// </para>
 /// </remarks>
 internal sealed partial class LlmMetrics : IDisposable
 {

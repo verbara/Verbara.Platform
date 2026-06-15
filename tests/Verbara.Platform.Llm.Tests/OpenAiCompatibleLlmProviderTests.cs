@@ -133,6 +133,10 @@ public sealed class OpenAiCompatibleLlmProviderTests
         listener.Counters["llm.tokens.in"].Should().Be(10);
         listener.Counters.Should().ContainKey("llm.tokens.out");
         listener.Counters["llm.tokens.out"].Should().Be(5);
+
+        listener.Histograms.Should().ContainKey("llm.request.latency");
+        listener.Histograms["llm.request.latency"].Should().NotBeEmpty();
+        listener.Histograms["llm.request.latency"].Should().AllSatisfy(v => v.Should().BeGreaterThanOrEqualTo(0));
     }
 
     [Fact]
@@ -157,6 +161,7 @@ public sealed class OpenAiCompatibleLlmProviderTests
     {
         private readonly MeterListener _listener;
         public Dictionary<string, long> Counters { get; } = new();
+        public Dictionary<string, List<double>> Histograms { get; } = new();
 
         public CollectingMeterListener(string meterName)
         {
@@ -174,8 +179,15 @@ public sealed class OpenAiCompatibleLlmProviderTests
             });
             _listener.SetMeasurementEventCallback<double>((instrument, value, _, _) =>
             {
-                // Histogram — not asserted numerically, just ensure no crash
-                _ = value;
+                lock (Histograms)
+                {
+                    if (!Histograms.TryGetValue(instrument.Name, out var list))
+                    {
+                        list = [];
+                        Histograms[instrument.Name] = list;
+                    }
+                    list.Add(value);
+                }
             });
             _listener.Start();
         }
