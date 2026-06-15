@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Verbara.Sdk.Resilience;
 
 namespace Verbara.Platform.Llm;
 
@@ -37,6 +38,17 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddSingleton(Options.Create(options));
+
+        // llm.completions: circuit 3/60s + retry 2/500ms + timeout driven by LlmProviderOptions.TimeoutSeconds.
+        // Mirrors the flow.http-request registration shape in Program.cs (ADR-0029).
+        var timeoutSeconds = options.TimeoutSeconds;
+        services.AddKeyedSingleton<ResiliencePolicy>(
+            OpenAiCompatibleLlmProvider.ResiliencePolicyKey,
+            (_, _) => new ResiliencePolicyBuilder()
+                .WithCircuitBreaker(threshold: 3, openDuration: TimeSpan.FromSeconds(60))
+                .WithRetry(maxAttempts: 2, baseDelay: TimeSpan.FromMilliseconds(500))
+                .WithTimeout(TimeSpan.FromSeconds(timeoutSeconds))
+                .Build());
 
         // Registers the interface→impl typed HttpClient directly, so resolving ILlmProvider
         // yields the OpenAiCompatibleLlmProvider with its own configured HttpClient.
