@@ -14,13 +14,14 @@ public sealed class DefaultTypificationCalibrationTests
 
     private static TypificationSchema Schema(
         double autoApplyThreshold = 0.85,
-        double autonomousThreshold = 0.95) =>
+        double autonomousThreshold = 0.95,
+        int version = 1) =>
         new()
         {
             SchemaId = SchemaId,
             TenantId = Tenant,
             Name = "calibration-test",
-            Version = 1,
+            Version = version,
             IsPublished = true,
             Nodes = [],
             Fields = [],
@@ -52,11 +53,11 @@ public sealed class DefaultTypificationCalibrationTests
             var tenantEntityId = EntityId.From(Tenant.Value);
 
             suggestionStore
-                .QueryAccuracyAsync(tenantEntityId, SchemaId, schema.AiConfig.AutoApplyThreshold, Arg.Any<CancellationToken>())
+                .QueryAccuracyAsync(tenantEntityId, SchemaId, schema.Version, schema.AiConfig.AutoApplyThreshold, Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult(autoApplyResult));
 
             suggestionStore
-                .QueryAccuracyAsync(tenantEntityId, SchemaId, schema.AiConfig.AutonomousThreshold, Arg.Any<CancellationToken>())
+                .QueryAccuracyAsync(tenantEntityId, SchemaId, schema.Version, schema.AiConfig.AutonomousThreshold, Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult(autonomousResult));
         }
 
@@ -141,6 +142,26 @@ public sealed class DefaultTypificationCalibrationTests
         status.AutonomousReady.Should().BeFalse();
         status.Samples.Should().Be(0);
         status.Accuracy.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetStatus_ShouldQueryPublishedSchemaVersion_WhenResolvingAccuracy()
+    {
+        // The published schema is at Version 3; both band queries must be scoped to exactly that
+        // version so republished history (other versions) cannot leak into the calibration gate.
+        var schema = Schema(autoApplyThreshold: 0.85, autonomousThreshold: 0.95, version: 3);
+        var (sut, _, suggestionStore) = BuildSut(
+            schema: schema,
+            autoApplyResult: (200, 0.90),
+            autonomousResult: (200, 0.96));
+
+        _ = await sut.GetStatusAsync(Tenant, SchemaId, CancellationToken.None);
+
+        var tenantEntityId = EntityId.From(Tenant.Value);
+        await suggestionStore.Received(1).QueryAccuracyAsync(
+            tenantEntityId, SchemaId, 3, schema.AiConfig.AutoApplyThreshold, Arg.Any<CancellationToken>());
+        await suggestionStore.Received(1).QueryAccuracyAsync(
+            tenantEntityId, SchemaId, 3, schema.AiConfig.AutonomousThreshold, Arg.Any<CancellationToken>());
     }
 
     [Fact]

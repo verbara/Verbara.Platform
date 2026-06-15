@@ -22,6 +22,7 @@ public sealed class DefaultTypificationProvenanceServiceTests
         Confidence = confidence,
         ModelId = "gpt-4o-mini",
         PromptVersion = "v1",
+        SurfacedBand = TypificationBand.Suggest,
         CreatedAt = DateTimeOffset.UtcNow,
     };
 

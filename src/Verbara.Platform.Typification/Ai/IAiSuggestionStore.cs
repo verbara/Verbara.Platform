@@ -33,16 +33,19 @@ public interface IAiSuggestionStore
         CancellationToken ct);
 
     /// <summary>
-    /// Returns accuracy statistics for reconciled suggestions (those where <c>Accepted</c> is
-    /// not <see langword="null"/>) whose <c>Confidence</c> is ≥ <paramref name="confidenceThreshold"/>.
+    /// Returns accuracy over reconciled suggestions (Accepted not null) that (a) belong to exactly
+    /// <paramref name="schemaVersion"/>, (b) have Confidence ≥ <paramref name="confidenceThreshold"/>,
+    /// and (c) were NOT surfaced as <see cref="TypificationBand.AutoFill"/> (auto-filled rows are
+    /// excluded to avoid measuring the gate's own output).
     /// </summary>
     /// <returns>
-    /// <c>Samples</c>: number of reconciled rows above the threshold.
+    /// <c>Samples</c>: number of qualifying reconciled rows above the threshold.
     /// <c>AcceptRate</c>: fraction accepted (0 when <c>Samples == 0</c>).
     /// </returns>
     Task<(int Samples, double AcceptRate)> QueryAccuracyAsync(
         EntityId tenantId,
         EntityId schemaId,
+        int schemaVersion,
         double confidenceThreshold,
         CancellationToken ct);
 }

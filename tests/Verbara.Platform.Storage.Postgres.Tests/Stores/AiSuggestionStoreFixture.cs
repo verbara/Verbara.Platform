@@ -56,7 +56,7 @@ public sealed class AiSuggestionStoreFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // DDL — mirrors 004_typification_ai_suggestions.sql.
+    // DDL — mirrors 004_typification_ai_suggestions.sql + 007 (surfaced_band).
     private const string SchemaSql = """
         CREATE TABLE typification_ai_suggestions (
             id                      TEXT             NOT NULL,
@@ -71,6 +71,7 @@ public sealed class AiSuggestionStoreFixture : IAsyncLifetime
             sentiment               TEXT,
             model_id                TEXT             NOT NULL,
             prompt_version          TEXT             NOT NULL,
+            surfaced_band           TEXT             NOT NULL DEFAULT 'None',
             created_at              TIMESTAMPTZ      NOT NULL,
             committed_leaf_node_id  TEXT,
             accepted                BOOLEAN,

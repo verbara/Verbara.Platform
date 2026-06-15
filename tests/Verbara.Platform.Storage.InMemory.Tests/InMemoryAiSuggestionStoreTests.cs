@@ -1,5 +1,6 @@
 using Verbara.Platform.Core;
 using Verbara.Platform.Storage.InMemory;
+using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Ai;
 
 namespace Verbara.Platform.Storage.InMemory.Tests;
@@ -12,16 +13,18 @@ public sealed class InMemoryAiSuggestionStoreTests
     private static AiSuggestionRecord MakeRecord(
         EntityId? conversationId = null,
         EntityId? schemaId = null,
+        int schemaVersion = 1,
         double confidence = 0.9,
         DateTimeOffset? createdAt = null,
         bool? accepted = null,
-        EntityId? committedLeafNodeId = null) => new()
+        EntityId? committedLeafNodeId = null,
+        TypificationBand surfacedBand = TypificationBand.Suggest) => new()
     {
         Id = EntityId.New(),
         TenantId = Tenant,
         ConversationId = conversationId ?? EntityId.New(),
         SchemaId = schemaId ?? SchemaId,
-        SchemaVersion = 1,
+        SchemaVersion = schemaVersion,
         SuggestedLeafNodeId = EntityId.New(),
         SuggestedNodePath = ["root", "child"],
         SuggestedFieldValues = new Dictionary<string, string> { ["key"] = "val" },
@@ -29,6 +32,7 @@ public sealed class InMemoryAiSuggestionStoreTests
         Sentiment = null,
         ModelId = "gpt-4o-mini",
         PromptVersion = "v1",
+        SurfacedBand = surfacedBand,
         CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
         CommittedLeafNodeId = committedLeafNodeId,
         Accepted = accepted,
@@ -81,6 +85,7 @@ public sealed class InMemoryAiSuggestionStoreTests
             Confidence = 0.8,
             ModelId = "gpt-4o-mini",
             PromptVersion = "v1",
+            SurfacedBand = TypificationBand.Suggest,
             CreatedAt = DateTimeOffset.UtcNow,
         };
         await store.SaveAsync(otherTenantRecord, CancellationToken.None);
@@ -139,7 +144,7 @@ public sealed class InMemoryAiSuggestionStoreTests
             await store.SaveAsync(r, CancellationToken.None);
 
         var (samples, acceptRate) = await store.QueryAccuracyAsync(
-            Tenant, SchemaId, confidenceThreshold: 0.75, CancellationToken.None);
+            Tenant, SchemaId, schemaVersion: 1, confidenceThreshold: 0.75, CancellationToken.None);
 
         samples.Should().Be(3);
         acceptRate.Should().BeApproximately(2.0 / 3.0, 1e-9);
@@ -155,7 +160,7 @@ public sealed class InMemoryAiSuggestionStoreTests
         await store.SaveAsync(r2, CancellationToken.None);
 
         var (samples, acceptRate) = await store.QueryAccuracyAsync(
-            Tenant, SchemaId, confidenceThreshold: 0.75, CancellationToken.None);
+            Tenant, SchemaId, schemaVersion: 1, confidenceThreshold: 0.75, CancellationToken.None);
 
         samples.Should().Be(0);
         acceptRate.Should().Be(0d);
@@ -167,7 +172,7 @@ public sealed class InMemoryAiSuggestionStoreTests
         var store = new InMemoryAiSuggestionStore();
 
         var (samples, acceptRate) = await store.QueryAccuracyAsync(
-            Tenant, SchemaId, confidenceThreshold: 0.5, CancellationToken.None);
+            Tenant, SchemaId, schemaVersion: 1, confidenceThreshold: 0.5, CancellationToken.None);
 
         samples.Should().Be(0);
         acceptRate.Should().Be(0d);
@@ -189,6 +194,7 @@ public sealed class InMemoryAiSuggestionStoreTests
             SchemaId = otherSchema, SchemaVersion = 1, SuggestedLeafNodeId = EntityId.New(),
             SuggestedNodePath = [], SuggestedFieldValues = new Dictionary<string, string>(),
             Confidence = 0.9, ModelId = "m", PromptVersion = "v1",
+            SurfacedBand = TypificationBand.Suggest,
             CreatedAt = DateTimeOffset.UtcNow, Accepted = true,
         };
         // Different tenant — must not count
@@ -198,6 +204,7 @@ public sealed class InMemoryAiSuggestionStoreTests
             SchemaId = SchemaId, SchemaVersion = 1, SuggestedLeafNodeId = EntityId.New(),
             SuggestedNodePath = [], SuggestedFieldValues = new Dictionary<string, string>(),
             Confidence = 0.9, ModelId = "m", PromptVersion = "v1",
+            SurfacedBand = TypificationBand.Suggest,
             CreatedAt = DateTimeOffset.UtcNow, Accepted = true,
         };
 
@@ -206,9 +213,51 @@ public sealed class InMemoryAiSuggestionStoreTests
         await store.SaveAsync(r3, CancellationToken.None);
 
         var (samples, acceptRate) = await store.QueryAccuracyAsync(
-            Tenant, SchemaId, confidenceThreshold: 0.5, CancellationToken.None);
+            Tenant, SchemaId, schemaVersion: 1, confidenceThreshold: 0.5, CancellationToken.None);
 
         samples.Should().Be(1);
         acceptRate.Should().Be(1d);
+    }
+
+    [Fact]
+    public async Task QueryAccuracy_ShouldExcludeAutoFillBandSamples_WhenComputingAccuracy()
+    {
+        var store = new InMemoryAiSuggestionStore();
+        // 2 Suggest-band reconciled rows above threshold (both accepted) → counted.
+        var s1 = MakeRecord(confidence: 0.9, accepted: true, surfacedBand: TypificationBand.Suggest);
+        var s2 = MakeRecord(confidence: 0.88, accepted: true, surfacedBand: TypificationBand.Suggest);
+        // 2 AutoFill-band reconciled rows above threshold → EXCLUDED (gate must not measure its own output).
+        var a1 = MakeRecord(confidence: 0.95, accepted: true, surfacedBand: TypificationBand.AutoFill);
+        var a2 = MakeRecord(confidence: 0.96, accepted: false, surfacedBand: TypificationBand.AutoFill);
+
+        foreach (var r in new[] { s1, s2, a1, a2 })
+            await store.SaveAsync(r, CancellationToken.None);
+
+        var (samples, acceptRate) = await store.QueryAccuracyAsync(
+            Tenant, SchemaId, schemaVersion: 1, confidenceThreshold: 0.75, CancellationToken.None);
+
+        samples.Should().Be(2, "only the non-AutoFill-band rows count toward calibration");
+        acceptRate.Should().Be(1d);
+    }
+
+    [Fact]
+    public async Task QueryAccuracy_ShouldExcludeOtherSchemaVersions_WhenFiltering()
+    {
+        var store = new InMemoryAiSuggestionStore();
+        // 2 rows at version 1 (the published version queried) → counted.
+        var v1a = MakeRecord(schemaVersion: 1, confidence: 0.9, accepted: true);
+        var v1b = MakeRecord(schemaVersion: 1, confidence: 0.85, accepted: false);
+        // 2 rows at version 2 (a different published version) → EXCLUDED.
+        var v2a = MakeRecord(schemaVersion: 2, confidence: 0.92, accepted: true);
+        var v2b = MakeRecord(schemaVersion: 2, confidence: 0.91, accepted: true);
+
+        foreach (var r in new[] { v1a, v1b, v2a, v2b })
+            await store.SaveAsync(r, CancellationToken.None);
+
+        var (samples, acceptRate) = await store.QueryAccuracyAsync(
+            Tenant, SchemaId, schemaVersion: 1, confidenceThreshold: 0.75, CancellationToken.None);
+
+        samples.Should().Be(2, "only version-1 samples count when querying version 1");
+        acceptRate.Should().Be(0.5);
     }
 }

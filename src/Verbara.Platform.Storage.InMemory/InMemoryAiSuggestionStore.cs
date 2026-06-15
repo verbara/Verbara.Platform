@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Verbara.Platform.Core;
+using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Ai;
 
 namespace Verbara.Platform.Storage.InMemory;
@@ -43,6 +44,7 @@ internal sealed class InMemoryAiSuggestionStore : IAiSuggestionStore
                 Sentiment = existing.Sentiment,
                 ModelId = existing.ModelId,
                 PromptVersion = existing.PromptVersion,
+                SurfacedBand = existing.SurfacedBand,
                 CreatedAt = existing.CreatedAt,
                 CommittedLeafNodeId = committedLeafNodeId,
                 Accepted = accepted,
@@ -52,14 +54,16 @@ internal sealed class InMemoryAiSuggestionStore : IAiSuggestionStore
     }
 
     public Task<(int Samples, double AcceptRate)> QueryAccuracyAsync(
-        EntityId tenantId, EntityId schemaId, double confidenceThreshold, CancellationToken ct)
+        EntityId tenantId, EntityId schemaId, int schemaVersion, double confidenceThreshold, CancellationToken ct)
     {
         var reconciled = _items.Values
             .Where(r =>
                 r.TenantId == tenantId &&
                 r.SchemaId == schemaId &&
+                r.SchemaVersion == schemaVersion &&
                 r.Accepted is not null &&
-                r.Confidence >= confidenceThreshold)
+                r.Confidence >= confidenceThreshold &&
+                r.SurfacedBand != TypificationBand.AutoFill)
             .ToList();
 
         if (reconciled.Count == 0)

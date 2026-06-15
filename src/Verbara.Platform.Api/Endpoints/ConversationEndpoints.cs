@@ -268,9 +268,56 @@ internal static class ConversationEndpoints
         if (classification is null)
             return Results.Ok(EmptySuggestion);
 
-        // B2 — persist every non-null classification, regardless of mode or gating.
-        // The leaf is always the last element of the validated NodePath.
+        // C1 — compute the surfaced band BEFORE persisting, so the stored row records EXACTLY
+        // what the agent saw. Calibration excludes AutoFill-band rows (an auto-filled form biases
+        // "acceptance"), so the persisted band — not a post-save guess — is the calibration input.
+        var aiConfig = resolved.Schema.AiConfig;
         var suggestedLeafNodeId = classification.NodePath[^1];
+
+        // Band table (server decides; client MUST NOT escalate):
+        //   Mode == Shadow                                             → None  (5  — persisted, never surfaced)
+        //   confidence < SuggestThreshold                              → None  (5a)
+        //   sentiment-gated Success leaf on very-negative              → None  (5b)
+        //   SuggestThreshold ≤ confidence < AutoApplyThreshold        → Suggest (5c)
+        //   confidence ≥ AutoApplyThreshold
+        //     AND Mode == AutoFill AND calibration.AutoFillReady       → AutoFill (5c)
+        //     otherwise (SuggestOnly, or Mode == AutoFill but not ready) → Suggest (5c — downgrade)
+        TypificationBand surfacedBand = TypificationBand.None;
+        if (resolved.Schema.AiConfig.Mode == AiMode.Shadow)
+        {
+            // 5 — Shadow mode: persisted but surface nothing to the agent.
+            surfacedBand = TypificationBand.None;
+        }
+        else if (classification.Confidence < aiConfig.SuggestThreshold)
+        {
+            // 5a. Confidence gate: below SuggestThreshold → no suggestion at all (Band.None).
+            surfacedBand = TypificationBand.None;
+        }
+        else if (aiConfig.SentimentGating &&
+                 string.Equals(classification.Sentiment, "very_negative", StringComparison.OrdinalIgnoreCase) &&
+                 classification.NodePath.Count > 0 &&
+                 resolved.Schema.Nodes.FirstOrDefault(n => n.NodeId == suggestedLeafNodeId)?.Leaf?.Category
+                     == TypificationCategory.Success)
+        {
+            // 5b. Sentiment gate: never surface a Success outcome on a very-negative call.
+            surfacedBand = TypificationBand.None;
+        }
+        else if (classification.Confidence < aiConfig.AutoApplyThreshold ||
+                 aiConfig.Mode != AiMode.AutoFill)
+        {
+            // 5c. Below auto-apply, or mode never auto-fills → Suggest.
+            surfacedBand = TypificationBand.Suggest;
+        }
+        else
+        {
+            // 5c. confidence ≥ AutoApplyThreshold AND Mode == AutoFill — check calibration ONLY on
+            //     this AutoFill-eligible branch (preserve round-trip economy for the other paths).
+            var status = await calibration.GetStatusAsync(tenantId, resolved.Schema.SchemaId, ct);
+            surfacedBand = status.AutoFillReady ? TypificationBand.AutoFill : TypificationBand.Suggest;
+        }
+
+        // B2 — persist every non-null classification, regardless of mode or gating, WITH the band
+        // actually surfaced. The leaf is always the last element of the validated NodePath.
         var record = new AiSuggestionRecord
         {
             Id = EntityId.New(),
@@ -285,6 +332,7 @@ internal static class ConversationEndpoints
             Sentiment = classification.Sentiment,
             ModelId = classification.ModelId,
             PromptVersion = classification.PromptVersion,
+            SurfacedBand = surfacedBand,
             CreatedAt = clock.UtcNow,
             CommittedLeafNodeId = null,
             Accepted = null,
@@ -299,54 +347,17 @@ internal static class ConversationEndpoints
             confidence: classification.Confidence,
             mode: resolved.Schema.AiConfig.Mode.ToString());
 
-        // B2 — Shadow mode: persisted but surface nothing to the agent.
-        if (resolved.Schema.AiConfig.Mode == AiMode.Shadow)
+        // Response Band == persisted SurfacedBand. None → empty payload (shadow / below-threshold /
+        // sentiment-gated all collapse here, preserving every prior externally-observable behavior).
+        if (surfacedBand == TypificationBand.None)
             return Results.Ok(EmptySuggestion);
-
-        var aiConfig = resolved.Schema.AiConfig;
-
-        // 5a. Confidence gate: below SuggestThreshold → no suggestion at all (Band.None).
-        if (classification.Confidence < aiConfig.SuggestThreshold)
-            return Results.Ok(EmptySuggestion);
-
-        // 5b. Sentiment gate: never surface a Success outcome on a very-negative call.
-        if (aiConfig.SentimentGating &&
-            string.Equals(classification.Sentiment, "very_negative", StringComparison.OrdinalIgnoreCase) &&
-            classification.NodePath.Count > 0)
-        {
-            var leafNodeId = classification.NodePath[^1];
-            var leaf = resolved.Schema.Nodes.FirstOrDefault(n => n.NodeId == leafNodeId)?.Leaf;
-            if (leaf?.Category == TypificationCategory.Success)
-                return Results.Ok(EmptySuggestion);
-        }
-
-        // 5c. C1 — server-authoritative confidence band decision.
-        //
-        // Band table (server decides; client MUST NOT escalate):
-        //   confidence < SuggestThreshold                              → None  (already handled at 5a)
-        //   SuggestThreshold ≤ confidence < AutoApplyThreshold        → Suggest
-        //   confidence ≥ AutoApplyThreshold
-        //     AND Mode == AutoFill AND calibration.AutoFillReady       → AutoFill
-        //     otherwise (SuggestOnly, or Mode == AutoFill but not ready) → Suggest (downgrade)
-        TypificationBand band;
-        if (classification.Confidence < aiConfig.AutoApplyThreshold ||
-            aiConfig.Mode != AiMode.AutoFill)
-        {
-            band = TypificationBand.Suggest;
-        }
-        else
-        {
-            // confidence ≥ AutoApplyThreshold AND Mode == AutoFill — check calibration.
-            var status = await calibration.GetStatusAsync(tenantId, resolved.Schema.SchemaId, ct);
-            band = status.AutoFillReady ? TypificationBand.AutoFill : TypificationBand.Suggest;
-        }
 
         return Results.Ok(new TypificationSuggestionResponse(
             SuggestedNodePath: classification.NodePath.Select(n => n.Value).ToArray(),
             SuggestedFieldValues: classification.FieldValues.Count > 0 ? classification.FieldValues : null,
             Confidence: classification.Confidence,
             Sentiment: classification.Sentiment,
-            Band: band));
+            Band: surfacedBand));
     }
 
     /// <summary>All-null "no suggestion" payload reused by every degrade path.</summary>

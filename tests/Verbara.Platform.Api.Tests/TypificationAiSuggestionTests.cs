@@ -348,6 +348,70 @@ public sealed class TypificationAiSuggestionTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSuggestion_ShouldPersistSurfacedBand_MatchingResponseBand()
+    {
+        // Suggest path: mid-band confidence → response Band == "Suggest" and the persisted
+        // record's SurfacedBand must equal it (the band is decided BEFORE save in C1).
+        var suggestClassification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.75,
+            Sentiment: "neutral");
+
+        using var suggestFactory = WithFakeClassifier(new FakeAiClassifier(suggestClassification));
+        using var suggestClient = AuthenticatedClient(suggestFactory);
+        var suggestConvId = await SeedSchemaAndConversationAsync(
+            suggestFactory, AiConfigWithModeAndThresholds(
+                enabled: true, mode: AiMode.SuggestOnly, suggestThreshold: 0.6, autoApplyThreshold: 0.85));
+
+        var suggestResponse = await suggestClient.PostAsync(
+            $"/api/conversations/{suggestConvId.Value}/typification-suggestion", content: null);
+        suggestResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var suggestJson = JsonNode.Parse(await suggestResponse.Content.ReadAsStringAsync());
+        suggestJson!["band"]!.GetValue<string>().Should().Be("Suggest");
+
+        using (var scope = suggestFactory.Services.CreateScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            var saved = await store.GetLatestForConversationAsync(
+                EntityId.From(s_tenantId.Value), suggestConvId, CancellationToken.None);
+            saved.Should().NotBeNull();
+            saved!.SurfacedBand.Should().Be(TypificationBand.Suggest);
+        }
+
+        // AutoFill path: high confidence + Mode=AutoFill + calibration ready → response Band ==
+        // "AutoFill" and the persisted record's SurfacedBand must equal it.
+        var autoFillClassification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.92,
+            Sentiment: "neutral");
+
+        using var autoFillFactory = WithFakeClassifierAndCalibration(
+            new FakeAiClassifier(autoFillClassification),
+            new FakeCalibration(autoFillReady: true));
+        using var autoFillClient = AuthenticatedClient(autoFillFactory);
+        var autoFillConvId = await SeedSchemaAndConversationAsync(
+            autoFillFactory, AiConfigWithModeAndThresholds(
+                enabled: true, mode: AiMode.AutoFill, suggestThreshold: 0.6, autoApplyThreshold: 0.85));
+
+        var autoFillResponse = await autoFillClient.PostAsync(
+            $"/api/conversations/{autoFillConvId.Value}/typification-suggestion", content: null);
+        autoFillResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var autoFillJson = JsonNode.Parse(await autoFillResponse.Content.ReadAsStringAsync());
+        autoFillJson!["band"]!.GetValue<string>().Should().Be("AutoFill");
+
+        using (var scope = autoFillFactory.Services.CreateScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            var saved = await store.GetLatestForConversationAsync(
+                EntityId.From(s_tenantId.Value), autoFillConvId, CancellationToken.None);
+            saved.Should().NotBeNull();
+            saved!.SurfacedBand.Should().Be(TypificationBand.AutoFill);
+        }
+    }
+
+    [Fact]
     public async Task GetSuggestion_ShouldDowngradeToSuggest_WhenAboveAutoApplyButCalibrationNotReady()
     {
         // confidence 0.92 ≥ autoApplyThreshold 0.85, Mode=AutoFill, BUT calibration NOT ready → Suggest
@@ -466,6 +530,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
                 Confidence = 0.88,
                 ModelId = "gpt-4o-mini",
                 PromptVersion = "v1",
+                SurfacedBand = TypificationBand.Suggest,
                 CreatedAt = DateTimeOffset.UtcNow,
             }, CancellationToken.None);
         }

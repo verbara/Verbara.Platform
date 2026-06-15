@@ -2,6 +2,7 @@ using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
 using Verbara.Platform.Core;
+using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Ai;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -12,7 +13,7 @@ internal sealed class PostgresAiSuggestionStore : IAiSuggestionStore
     private const string SelectColumns =
         "id, tenant_id, conversation_id, schema_id, schema_version, " +
         "suggested_leaf_node_id, suggested_node_path, suggested_field_values, " +
-        "confidence, sentiment, model_id, prompt_version, created_at, " +
+        "confidence, sentiment, model_id, prompt_version, surfaced_band, created_at, " +
         "committed_leaf_node_id, accepted";
 
     private readonly NpgsqlDataSource _dataSource;
@@ -30,11 +31,11 @@ internal sealed class PostgresAiSuggestionStore : IAiSuggestionStore
             "INSERT INTO typification_ai_suggestions " +
             "(id, tenant_id, conversation_id, schema_id, schema_version, " +
             " suggested_leaf_node_id, suggested_node_path, suggested_field_values, " +
-            " confidence, sentiment, model_id, prompt_version, created_at, " +
+            " confidence, sentiment, model_id, prompt_version, surfaced_band, created_at, " +
             " committed_leaf_node_id, accepted) " +
             "VALUES (@Id, @TenantId, @ConversationId, @SchemaId, @SchemaVersion, " +
             " @SuggestedLeafNodeId, @SuggestedNodePath::jsonb, @SuggestedFieldValues::jsonb, " +
-            " @Confidence, @Sentiment, @ModelId, @PromptVersion, @CreatedAt, " +
+            " @Confidence, @Sentiment, @ModelId, @PromptVersion, @SurfacedBand, @CreatedAt, " +
             " @CommittedLeafNodeId, @Accepted)",
             p =>
             {
@@ -51,6 +52,7 @@ internal sealed class PostgresAiSuggestionStore : IAiSuggestionStore
                     { Value = (object?)record.Sentiment ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("ModelId", record.ModelId));
                 p.Add(new NpgsqlParameter("PromptVersion", record.PromptVersion));
+                p.Add(new NpgsqlParameter("SurfacedBand", record.SurfacedBand.ToString()));
                 p.Add(new NpgsqlParameter("CreatedAt", record.CreatedAt.UtcDateTime));
                 p.Add(new NpgsqlParameter("CommittedLeafNodeId", NpgsqlDbType.Text)
                     { Value = (object?)record.CommittedLeafNodeId?.Value ?? DBNull.Value });
@@ -93,16 +95,21 @@ internal sealed class PostgresAiSuggestionStore : IAiSuggestionStore
     }
 
     public async Task<(int Samples, double AcceptRate)> QueryAccuracyAsync(
-        EntityId tenantId, EntityId schemaId, double confidenceThreshold, CancellationToken ct)
+        EntityId tenantId, EntityId schemaId, int schemaVersion, double confidenceThreshold, CancellationToken ct)
     {
+        // Exact schema_version match + AutoFill-band exclusion (C1, P2b): count ONLY samples at
+        // the published version that the agent did NOT see auto-filled, so the gate never measures
+        // its own output and republishing a schema cannot re-bucket history (see DefaultTypificationCalibration).
         var total = await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM typification_ai_suggestions " +
             "WHERE tenant_id = @TenantId AND schema_id = @SchemaId " +
+            "  AND schema_version = @SchemaVersion AND surfaced_band <> 'AutoFill' " +
             "  AND accepted IS NOT NULL AND confidence >= @Threshold",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("SchemaId", schemaId.Value));
+                p.Add(new NpgsqlParameter("SchemaVersion", schemaVersion));
                 p.Add(new NpgsqlParameter("Threshold", confidenceThreshold));
             },
             ct) ?? 0L;
@@ -113,11 +120,13 @@ internal sealed class PostgresAiSuggestionStore : IAiSuggestionStore
         var accepted = await _dataSource.ExecuteScalarAsync<long?>(
             "SELECT COUNT(*) FROM typification_ai_suggestions " +
             "WHERE tenant_id = @TenantId AND schema_id = @SchemaId " +
+            "  AND schema_version = @SchemaVersion AND surfaced_band <> 'AutoFill' " +
             "  AND accepted = true AND confidence >= @Threshold",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("SchemaId", schemaId.Value));
+                p.Add(new NpgsqlParameter("SchemaVersion", schemaVersion));
                 p.Add(new NpgsqlParameter("Threshold", confidenceThreshold));
             },
             ct) ?? 0L;
@@ -139,6 +148,7 @@ internal sealed class PostgresAiSuggestionStore : IAiSuggestionStore
         public string? sentiment { get; init; }
         public string model_id { get; init; } = null!;
         public string prompt_version { get; init; } = null!;
+        public string surfaced_band { get; init; } = null!;
         public DateTime created_at { get; init; }
         public string? committed_leaf_node_id { get; init; }
         public bool? accepted { get; init; }
@@ -157,6 +167,7 @@ internal sealed class PostgresAiSuggestionStore : IAiSuggestionStore
             sentiment = r.GetStringOrNull("sentiment"),
             model_id = r.GetString("model_id"),
             prompt_version = r.GetString("prompt_version"),
+            surfaced_band = r.GetString("surfaced_band"),
             created_at = r.GetDateTime("created_at"),
             committed_leaf_node_id = r.GetStringOrNull("committed_leaf_node_id"),
             accepted = r.GetBooleanOrNull("accepted"),
@@ -185,6 +196,7 @@ internal sealed class PostgresAiSuggestionStore : IAiSuggestionStore
                 Sentiment = sentiment,
                 ModelId = model_id,
                 PromptVersion = prompt_version,
+                SurfacedBand = Enum.TryParse<TypificationBand>(surfaced_band, out var b) ? b : TypificationBand.None,
                 CreatedAt = new DateTimeOffset(created_at, TimeSpan.Zero),
                 CommittedLeafNodeId = committed_leaf_node_id is null ? null : EntityId.From(committed_leaf_node_id),
                 Accepted = accepted,

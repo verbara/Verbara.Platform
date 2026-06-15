@@ -1,5 +1,6 @@
 using Verbara.Platform.Core;
 using Verbara.Platform.Storage.Postgres.Stores;
+using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Ai;
 
 namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
@@ -31,7 +32,8 @@ public sealed class PostgresAiSuggestionStoreTests : IClassFixture<AiSuggestionS
         EntityId? schemaId = null,
         double confidence = 0.9,
         DateTimeOffset? createdAt = null,
-        string? sentiment = null) => new()
+        string? sentiment = null,
+        TypificationBand surfacedBand = TypificationBand.Suggest) => new()
     {
         Id = EntityId.New(),
         TenantId = Tenant,
@@ -49,6 +51,7 @@ public sealed class PostgresAiSuggestionStoreTests : IClassFixture<AiSuggestionS
         Sentiment = sentiment,
         ModelId = "gpt-4o-mini",
         PromptVersion = "v1.2",
+        SurfacedBand = surfacedBand,
         CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
     };
 
@@ -127,7 +130,7 @@ public sealed class PostgresAiSuggestionStoreTests : IClassFixture<AiSuggestionS
         await _store.MarkReconciledAsync(r4.Id, EntityId.New(), accepted: true, CancellationToken.None);
 
         var (samples, acceptRate) = await _store.QueryAccuracyAsync(
-            Tenant, SchemaId, confidenceThreshold: 0.75, CancellationToken.None);
+            Tenant, SchemaId, schemaVersion: 2, confidenceThreshold: 0.75, CancellationToken.None);
 
         samples.Should().Be(3);
         acceptRate.Should().BeApproximately(2.0 / 3.0, 1e-9);
@@ -144,7 +147,7 @@ public sealed class PostgresAiSuggestionStoreTests : IClassFixture<AiSuggestionS
         await _store.MarkReconciledAsync(r2.Id, EntityId.New(), accepted: false, CancellationToken.None);
 
         var (samples, acceptRate) = await _store.QueryAccuracyAsync(
-            Tenant, SchemaId, confidenceThreshold: 0.75, CancellationToken.None);
+            Tenant, SchemaId, schemaVersion: 2, confidenceThreshold: 0.75, CancellationToken.None);
 
         samples.Should().Be(0);
         acceptRate.Should().Be(0d);

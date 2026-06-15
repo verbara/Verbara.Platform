@@ -59,9 +59,17 @@ internal sealed class DefaultTypificationCalibration : ITypificationCalibration
         // Mirror the conversion from DefaultTypificationProvenanceService (B3).
         var tenantEntityId = EntityId.From(tenantId.Value);
 
+        // The accuracy query is scoped to EXACTLY the currently-published schema.Version and
+        // EXCLUDES AutoFill-band samples (see IAiSuggestionStore.QueryAccuracyAsync). This is the
+        // safe failure direction for a gate: a cosmetic republish (bumping Version) resets
+        // calibration to 0 and CLOSES AutoFill until fresh non-auto-filled samples re-earn it; it
+        // never silently re-opens the gate against possibly-different thresholds. Likewise, once
+        // AutoFill is on its samples stop counting, so the qualifying pool freezes at the
+        // Shadow/Suggest samples that earned the gate — correct for a self-referential safety gate.
+
         // ── AutoFill band ─────────────────────────────────────────────────────
         var (samples, acceptRate) = await _suggestionStore.QueryAccuracyAsync(
-            tenantEntityId, schemaId, schema.AiConfig.AutoApplyThreshold, ct);
+            tenantEntityId, schemaId, schema.Version, schema.AiConfig.AutoApplyThreshold, ct);
 
         var autoFillReady =
             samples >= MinCalibrationSamples &&
@@ -69,7 +77,7 @@ internal sealed class DefaultTypificationCalibration : ITypificationCalibration
 
         // ── Autonomous band ───────────────────────────────────────────────────
         var (autoSamples, autoAcceptRate) = await _suggestionStore.QueryAccuracyAsync(
-            tenantEntityId, schemaId, schema.AiConfig.AutonomousThreshold, ct);
+            tenantEntityId, schemaId, schema.Version, schema.AiConfig.AutonomousThreshold, ct);
 
         var autonomousReady =
             autoSamples >= MinCalibrationSamples &&

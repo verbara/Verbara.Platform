@@ -45,6 +45,15 @@ public sealed class AiSuggestionRecord
     /// <summary>Prompt template version used for this call.</summary>
     public required string PromptVersion { get; init; }
 
+    /// <summary>
+    /// The delivery band that was actually surfaced to the agent for this suggestion
+    /// (<see cref="TypificationBand.None"/> for shadow / below-threshold /
+    /// sentiment-gated). Persisted so calibration can EXCLUDE auto-filled samples — once a form
+    /// is auto-filled the agent's "acceptance" is biased, so AutoFill-band rows must not count
+    /// toward the gate that decides whether AutoFill stays on.
+    /// </summary>
+    public required TypificationBand SurfacedBand { get; init; }
+
     /// <summary>UTC timestamp when the suggestion was generated.</summary>
     public required DateTimeOffset CreatedAt { get; init; }
 

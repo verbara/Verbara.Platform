@@ -579,6 +579,7 @@ public sealed class TypifyEndpointTests : IDisposable
                 Confidence = 0.92,
                 ModelId = "gpt-4o-mini",
                 PromptVersion = "v1",
+                SurfacedBand = TypificationBand.Suggest,
                 CreatedAt = DateTimeOffset.UtcNow,
             }, CancellationToken.None);
         }
@@ -707,6 +708,7 @@ public sealed class TypifyEndpointTests : IDisposable
                 Confidence = 0.75,
                 ModelId = "gpt-4o-mini",
                 PromptVersion = "v1",
+                SurfacedBand = TypificationBand.Suggest,
                 CreatedAt = DateTimeOffset.UtcNow,
             }, CancellationToken.None);
         }
@@ -917,6 +919,7 @@ public sealed class TypifyEndpointTests : IDisposable
                 Confidence = 0.88,
                 ModelId = "gpt-4o-mini",
                 PromptVersion = "v2",
+                SurfacedBand = TypificationBand.Suggest,
                 CreatedAt = DateTimeOffset.UtcNow,
             }, CancellationToken.None);
         }
@@ -1048,6 +1051,7 @@ public sealed class TypifyEndpointTests : IDisposable
                 Confidence = 0.70,
                 ModelId = "gpt-4o-mini",
                 PromptVersion = "v1",
+                SurfacedBand = TypificationBand.Suggest,
                 CreatedAt = DateTimeOffset.UtcNow,
             }, CancellationToken.None);
         }
