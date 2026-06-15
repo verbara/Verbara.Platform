@@ -258,23 +258,49 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         saved.Should().BeNull("classifier returned null so nothing should have been saved");
     }
 
-    // ─── D2 — typify provenance ──────────────────────────────────────────────────
+    // ─── D2 — typify provenance (B3 — server-authoritative) ─────────────────────
 
+    /// <summary>
+    /// Verifies B3 server-authoritative derivation: a stored AI suggestion with the same
+    /// leaf the agent commits → <c>Source=AutoAi</c>, <c>AiAccepted=true</c>.
+    /// Client-supplied AI flags are intentionally ignored by the handler.
+    /// </summary>
     [Fact]
-    public async Task Typify_ShouldRecordAutoAiProvenance_WhenAiSuggestedTrue()
+    public async Task Typify_ShouldRecordAutoAiProvenance_WhenStoredSuggestionMatchesCommittedLeaf()
     {
         using var client = _factory.CreateAuthenticatedClient();
         var convId = await SeedSchemaAndConversationAsync(
             _factory, AiConfig(enabled: false, suggestThreshold: 0.0));
+
+        // Seed a stored suggestion: AI suggested the same leaf the agent is about to commit.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var suggestionStore = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            await suggestionStore.SaveAsync(new AiSuggestionRecord
+            {
+                Id = EntityId.New(),
+                TenantId = EntityId.From(AuthenticatedPlatformApiFactory.TestTenantId),
+                ConversationId = convId,
+                SchemaId = EntityId.New(),
+                SchemaVersion = 1,
+                SuggestedLeafNodeId = EntityId.From(LeafNodeId),
+                SuggestedNodePath = [RootNodeId, LeafNodeId],
+                SuggestedFieldValues = new Dictionary<string, string>(),
+                Confidence = 0.88,
+                ModelId = "gpt-4o-mini",
+                PromptVersion = "v1",
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
 
         var body = JsonContent.Create(new
         {
             selectedNodePath = new[] { RootNodeId, LeafNodeId },
             fieldValues = new Dictionary<string, string>(),
             notes = "ai accepted",
-            aiAccepted = true,
-            aiSuggested = true,
-            aiConfidence = 0.88,
+            // Client flags are IGNORED by B3 — server derives from stored suggestion.
+            aiAccepted = false,
+            aiSuggested = false,
         });
 
         var response = await client.PostAsync($"/api/conversations/{convId.Value}/typify", body);
@@ -283,8 +309,8 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
         json!["source"]!.GetValue<string>().Should().Be("AutoAi");
 
-        using var scope = _factory.Services.CreateScope();
-        var store = scope.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>();
+        using var scope2 = _factory.Services.CreateScope();
+        var store = scope2.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>();
         var saved = await store.GetByConversationIdAsync(s_tenantId, convId, CancellationToken.None);
         saved.Should().NotBeNull();
         saved!.AiSuggested.Should().BeTrue();

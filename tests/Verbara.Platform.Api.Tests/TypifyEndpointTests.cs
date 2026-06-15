@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Typification;
+using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -546,6 +547,237 @@ public sealed class TypifyEndpointTests : IDisposable
         json!["schema"]!["schemaId"]!.GetValue<string>().Should().NotBeNullOrEmpty();
         json["prefilledNodePath"].Should().BeNull();
         json["prefilledFieldValues"].Should().BeNull();
+    }
+
+    // ─── POST /typify — B3 server-authoritative AI provenance ──────────────────
+
+    /// <summary>
+    /// Seeds an AI suggestion for the conversation (leaf X), then submits typify
+    /// with the SAME leaf → provenance service derives AiAccepted=true, Source=AutoAi.
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldDeriveAiAcceptedTrue_WhenCommittedLeafMatchesSuggestion()
+    {
+        await SeedPublishedTenantSchemaAsync("B3 Accepted");
+        var conv = await SeedConversationAsync();
+
+        // Seed a stored suggestion: the AI suggested the same leaf the agent will pick.
+        var suggestedLeaf = EntityId.From(LeafNodeId);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var suggestionStore = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            await suggestionStore.SaveAsync(new AiSuggestionRecord
+            {
+                Id = EntityId.New(),
+                TenantId = EntityId.From(AuthenticatedPlatformApiFactory.TestTenantId),
+                ConversationId = conv.ConversationId,
+                SchemaId = EntityId.New(),
+                SchemaVersion = 1,
+                SuggestedLeafNodeId = suggestedLeaf,
+                SuggestedNodePath = [RootNodeId, LeafNodeId],
+                SuggestedFieldValues = new Dictionary<string, string>(),
+                Confidence = 0.92,
+                ModelId = "gpt-4o-mini",
+                PromptVersion = "v1",
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string> { [RequiredFieldKey] = "ai matched" },
+            // Client sends false — server MUST ignore and derive true from suggestion match.
+            aiSuggested = false,
+            aiAccepted = false,
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["aiSuggested"]!.GetValue<bool>().Should().BeTrue();
+        json["aiAccepted"]!.GetValue<bool>().Should().BeTrue();
+        json["source"]!.GetValue<string>().Should().Be("AutoAi");
+        json["suggestedLeafNodeId"]!.GetValue<string>().Should().Be(LeafNodeId);
+
+        using var scope2 = _factory.Services.CreateScope();
+        var store = scope2.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>();
+        var saved = await store.GetByConversationIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        saved.Should().NotBeNull();
+        saved!.AiSuggested.Should().BeTrue();
+        saved.AiAccepted.Should().BeTrue();
+        saved.Source.Should().Be(SubmissionSource.AutoAi);
+        saved.SuggestedLeafNodeId.Should().Be(EntityId.From(LeafNodeId));
+    }
+
+    /// <summary>
+    /// Stored suggestion leaf X; agent commits leaf Y → AiAccepted=false, Source=Manual,
+    /// SuggestedLeafNodeId=X, LeafNodeId=Y.
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldDeriveAiAcceptedFalse_WhenAgentOverrides()
+    {
+        // Use a schema where we have a second leaf to commit different from the suggestion.
+        // We'll seed the schema directly so we can control node IDs.
+        const string overrideLeafId = "leaf-override";
+        const string overrideLeafCode = "OVERRIDE_LEAF";
+
+        var schemaId = EntityId.New();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var schemaStore = scope.ServiceProvider.GetRequiredService<ITypificationSchemaStore>();
+            var bindingStore = scope.ServiceProvider.GetRequiredService<ISchemaBindingStore>();
+
+            await schemaStore.SaveAsync(new TypificationSchema
+            {
+                SchemaId = schemaId,
+                TenantId = s_tenantId,
+                Name = "B3 Override",
+                Version = 1,
+                IsPublished = true,
+                MaxDepth = 5,
+                Nodes =
+                [
+                    new TypificationNode
+                    {
+                        NodeId = EntityId.From(RootNodeId),
+                        ParentNodeId = null,
+                        Label = "Root",
+                        Code = RootCode,
+                        SortOrder = 0,
+                        IsLeaf = false,
+                    },
+                    new TypificationNode
+                    {
+                        NodeId = EntityId.From(LeafNodeId),
+                        ParentNodeId = EntityId.From(RootNodeId),
+                        Label = "AI Suggested Leaf",
+                        Code = LeafCode,
+                        SortOrder = 0,
+                        IsLeaf = true,
+                        Leaf = new LeafOutcome { Category = TypificationCategory.Success, IsActive = true },
+                    },
+                    new TypificationNode
+                    {
+                        NodeId = EntityId.From(overrideLeafId),
+                        ParentNodeId = EntityId.From(RootNodeId),
+                        Label = "Agent Override Leaf",
+                        Code = overrideLeafCode,
+                        SortOrder = 1,
+                        IsLeaf = true,
+                        Leaf = new LeafOutcome { Category = TypificationCategory.Success, IsActive = true },
+                    },
+                ],
+                Fields = [],
+                DataDips = [],
+                AiConfig = new TypificationAiConfig { Enabled = false, SentimentGating = false, EntityFieldMap = new Dictionary<string, string>() },
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+
+            await bindingStore.SaveAsync(new SchemaBinding
+            {
+                BindingId = EntityId.New(),
+                TenantId = s_tenantId,
+                Scope = BindingScope.Tenant,
+                ScopeRef = null,
+                SchemaId = schemaId,
+                SubTreeRootNodeId = null,
+                Priority = 5,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        var conv = await SeedConversationAsync();
+
+        // Seed suggestion: AI suggested LeafNodeId ("leaf-1").
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var suggestionStore = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            await suggestionStore.SaveAsync(new AiSuggestionRecord
+            {
+                Id = EntityId.New(),
+                TenantId = EntityId.From(AuthenticatedPlatformApiFactory.TestTenantId),
+                ConversationId = conv.ConversationId,
+                SchemaId = schemaId,
+                SchemaVersion = 1,
+                SuggestedLeafNodeId = EntityId.From(LeafNodeId),
+                SuggestedNodePath = [RootNodeId, LeafNodeId],
+                SuggestedFieldValues = new Dictionary<string, string>(),
+                Confidence = 0.75,
+                ModelId = "gpt-4o-mini",
+                PromptVersion = "v1",
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        // Agent commits "leaf-override" — different from the AI suggestion.
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, overrideLeafId },
+            fieldValues = new Dictionary<string, string>(),
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["aiSuggested"]!.GetValue<bool>().Should().BeTrue();
+        json["aiAccepted"]!.GetValue<bool>().Should().BeFalse();
+        json["source"]!.GetValue<string>().Should().Be("Manual");
+        json["leafNodeId"]!.GetValue<string>().Should().Be(overrideLeafId);
+        json["suggestedLeafNodeId"]!.GetValue<string>().Should().Be(LeafNodeId);
+
+        using var scope2 = _factory.Services.CreateScope();
+        var store = scope2.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>();
+        var saved = await store.GetByConversationIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        saved.Should().NotBeNull();
+        saved!.AiAccepted.Should().BeFalse();
+        saved.Source.Should().Be(SubmissionSource.Manual);
+        saved.SuggestedLeafNodeId.Should().Be(EntityId.From(LeafNodeId));
+        saved.LeafNodeId.Value.Should().Be(overrideLeafId);
+    }
+
+    /// <summary>
+    /// Client body claims AiSuggested=true but no stored suggestion exists →
+    /// server must derive AiSuggested=false, Source=Manual.
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldIgnoreClientAssertedAiFlags_WhenNoStoredSuggestion()
+    {
+        await SeedPublishedTenantSchemaAsync("B3 No Suggestion");
+        var conv = await SeedConversationAsync();
+
+        // No suggestion seeded — client lying about AI involvement.
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string> { [RequiredFieldKey] = "client lying" },
+            aiSuggested = true,
+            aiAccepted = true,
+            aiConfidence = 0.99,
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        // Server ignored client-supplied values.
+        json!["aiSuggested"]!.GetValue<bool>().Should().BeFalse();
+        json["source"]!.GetValue<string>().Should().Be("Manual");
+        // aiAccepted and aiConfidence should be null (omitted in JSON when null).
+        json["aiAccepted"].Should().BeNull();
+        json["aiConfidence"].Should().BeNull();
+
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>();
+        var saved = await store.GetByConversationIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        saved.Should().NotBeNull();
+        saved!.AiSuggested.Should().BeFalse();
+        saved.AiAccepted.Should().BeNull();
+        saved.Source.Should().Be(SubmissionSource.Manual);
+        saved.SuggestedLeafNodeId.Should().BeNull();
+        saved.SuggestedNodePath.Should().BeNull();
     }
 
     [Fact]

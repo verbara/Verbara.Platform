@@ -337,6 +337,7 @@ internal static class ConversationEndpoints
         [FromServices] ITypificationResolver resolver,
         [FromServices] ITypificationValidator validator,
         [FromServices] ITypificationSubmissionStore submissionStore,
+        [FromServices] ITypificationProvenanceService provenanceService,
         CampaignStoreBase campaignStore,
         DispositionCodeStoreBase dispositionCodeStore,
         PlatformEventBus eventBus,
@@ -386,7 +387,12 @@ internal static class ConversationEndpoints
 
         var leafNodeId = path[^1];
 
-        // 4. Persist the submission.
+        // 4a. Derive server-authoritative AI provenance (B3). Client-supplied AiSuggested /
+        //     AiAccepted / AiConfidence are intentionally ignored — they are treated as
+        //     unverifiable hints from the wire contract and MUST NOT influence the stored values.
+        var provenance = await provenanceService.DeriveAsync(tenantId, conversationId, leafNodeId, ct);
+
+        // 4b. Persist the submission.
         var submission = new TypificationSubmission
         {
             TenantId = tenantId,
@@ -398,10 +404,12 @@ internal static class ConversationEndpoints
             LeafNodeId = leafNodeId,
             FieldValues = body.FieldValues,
             Notes = body.Notes,
-            AiSuggested = body.AiSuggested ?? false,
-            AiConfidence = body.AiConfidence,
-            AiAccepted = body.AiAccepted,
-            Source = body.AiSuggested == true ? SubmissionSource.AutoAi : SubmissionSource.Manual,
+            AiSuggested = provenance.AiSuggested,
+            AiConfidence = provenance.AiConfidence,
+            AiAccepted = provenance.AiAccepted,
+            Source = provenance.Source,
+            SuggestedLeafNodeId = provenance.SuggestedLeafNodeId,
+            SuggestedNodePath = provenance.SuggestedNodePath,
             Duration = TimeSpan.Zero,
             CompletedAt = clock.UtcNow,
         };

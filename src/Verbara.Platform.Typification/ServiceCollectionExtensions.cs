@@ -42,6 +42,9 @@ public static class ServiceCollectionExtensions
                 sp.GetService<IMeterFactory>(),
                 sp.GetService<ILoggerFactory>()));
 
+        // B3 — server-authoritative provenance derivation + correction signal.
+        services.AddSingleton<ITypificationProvenanceService, DefaultTypificationProvenanceService>();
+
         return services;
     }
 }
