@@ -69,6 +69,10 @@ public sealed class AuditEntry : ITenantScoped
     /// <summary>
     /// SHA-256 (hex) tamper-evidence hash computed by <see cref="DefaultAuditService"/> over the
     /// entry's canonical identifying fields. Non-null for all entries created from v1.4 onwards.
+    /// This is a plain SHA-256 over the entry's canonical fields providing tamper-evidence against
+    /// accidental modification or corruption; it is NOT an HMAC and does not defend against a
+    /// database-level actor who can recompute the hash (that would require a managed secret, which
+    /// is outside the current scope).
     /// </summary>
     public string? IntegrityHash { get; init; }
 

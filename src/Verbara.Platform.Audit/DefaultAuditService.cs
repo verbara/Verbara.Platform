@@ -97,9 +97,9 @@ public sealed class DefaultAuditService : IAuditService
 
     /// <summary>
     /// Computes a deterministic SHA-256 (hex) integrity hash over the entry's canonical
-    /// identifying fields. Metadata keys are sorted alphabetically so the hash is stable
-    /// regardless of insertion order. If a field is null it contributes an empty segment
-    /// so the canonical form never collides across field positions.
+    /// identifying fields. Metadata keys are sorted alphabetically (Ordinal) so the hash is
+    /// stable regardless of insertion order. If a field is null it contributes an empty
+    /// segment so the canonical form never collides across field positions.
     /// </summary>
     private static string ComputeIntegrityHash(
         TenantId tenantId,
@@ -111,19 +111,22 @@ public sealed class DefaultAuditService : IAuditService
         DateTimeOffset occurredAt,
         IReadOnlyDictionary<string, string>? metadata)
     {
-        // Canonical form: pipe-delimited, fixed field order, metadata as sorted k=v pairs.
+        // Canonical form: pipe-delimited fixed fields, metadata as sorted percent-encoded k=v pairs.
+        // Every variable string segment is percent-encoded with Uri.EscapeDataString so that values
+        // containing the delimiters ('|', ',', '=') cannot produce ambiguous canonical strings,
+        // making the hash collision-resistant for arbitrary metadata keys and values.
         var sb = new StringBuilder(256);
-        sb.Append(tenantId.Value);
+        sb.Append(Uri.EscapeDataString(tenantId.Value));
         sb.Append('|');
-        sb.Append(actorType);
+        sb.Append(Uri.EscapeDataString(actorType));
         sb.Append('|');
-        sb.Append(actorId);
+        sb.Append(Uri.EscapeDataString(actorId));
         sb.Append('|');
-        sb.Append(action);
+        sb.Append(Uri.EscapeDataString(action));
         sb.Append('|');
-        sb.Append(targetType ?? string.Empty);
+        sb.Append(Uri.EscapeDataString(targetType ?? string.Empty));
         sb.Append('|');
-        sb.Append(targetId ?? string.Empty);
+        sb.Append(Uri.EscapeDataString(targetId ?? string.Empty));
         sb.Append('|');
         sb.Append(occurredAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
 
@@ -133,6 +136,8 @@ public sealed class DefaultAuditService : IAuditService
             var i = 0;
             foreach (var k in metadata.Keys)
                 keys[i++] = k;
+            // Sort before encoding so the sort order is based on the raw key strings,
+            // matching the stable Ordinal ordering a caller would expect.
             Array.Sort(keys, StringComparer.Ordinal);
 
             sb.Append('|');
@@ -141,9 +146,9 @@ public sealed class DefaultAuditService : IAuditService
             {
                 if (!first) sb.Append(',');
                 first = false;
-                sb.Append(k);
+                sb.Append(Uri.EscapeDataString(k));
                 sb.Append('=');
-                sb.Append(metadata[k]);
+                sb.Append(Uri.EscapeDataString(metadata[k]));
             }
         }
 

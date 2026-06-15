@@ -424,13 +424,12 @@ internal static class ConversationEndpoints
         //     details are recorded in the audit metadata as provenance, not as the actor.
         if (provenance.AiSuggested)
         {
-            var actorSubId = context.User.FindFirst("sub")?.Value ?? agentId.Value;
             await auditService.RecordAsync(
                 tenantId,
                 category: "conversations",
                 action: "typification.ai_disposition",
                 severity: "info",
-                actorId: actorSubId,
+                actorId: agentId.Value,
                 actorType: "user",
                 targetId: conversationId.Value,
                 targetType: "Conversation",

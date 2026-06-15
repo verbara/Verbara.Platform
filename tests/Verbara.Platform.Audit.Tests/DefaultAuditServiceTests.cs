@@ -591,4 +591,42 @@ public class DefaultAuditServiceIntegrityHashTests
         captured[0].IntegrityHash!.Length.Should().Be(64);
         captured[0].IntegrityHash.Should().MatchRegex("^[0-9a-f]{64}$");
     }
+
+    [Fact]
+    public async Task RecordAsync_ShouldHaveDeterministicIntegrityHash_WhenMetadataInsertedInDifferentOrder()
+    {
+        // Metadata key/value pairs are identical but inserted in reverse order.
+        // The hash must be the same because keys are sorted (Ordinal) before encoding.
+        var (service, captured) = Build();
+
+        await service.RecordAsync(
+            Tenant1, "conversations", "typification.ai_disposition", "info",
+            actorId: "user-42", actorType: "user",
+            targetId: "conv-1", targetType: "Conversation",
+            metadata: new Dictionary<string, string>
+            {
+                ["accepted"] = "true",
+                ["confidence"] = "0.92",
+                ["modelId"] = "gpt-4o",
+            },
+            ct: CancellationToken.None);
+
+        await service.RecordAsync(
+            Tenant1, "conversations", "typification.ai_disposition", "info",
+            actorId: "user-42", actorType: "user",
+            targetId: "conv-1", targetType: "Conversation",
+            metadata: new Dictionary<string, string>
+            {
+                ["modelId"] = "gpt-4o",
+                ["confidence"] = "0.92",
+                ["accepted"] = "true",
+            },
+            ct: CancellationToken.None);
+
+        captured.Should().HaveCount(2);
+        captured[0].IntegrityHash.Should().NotBeNullOrEmpty();
+        captured[1].IntegrityHash.Should().NotBeNullOrEmpty();
+        // Insertion order must not affect the hash.
+        captured[0].IntegrityHash.Should().Be(captured[1].IntegrityHash);
+    }
 }
