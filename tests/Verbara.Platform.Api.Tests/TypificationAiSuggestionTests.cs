@@ -123,7 +123,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
     }
 
     [Fact]
-    public async Task GetTypificationSuggestion_ShouldReturnEmpty_WhenBelowConfidenceThreshold()
+    public async Task GetTypificationSuggestion_ShouldReturnEmpty_WhenBelowSuggestThreshold()
     {
         var classification = new AiClassification(
             [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
