@@ -23,7 +23,8 @@ public interface IAiSuggestionStore
 
     /// <summary>
     /// Stamps a suggestion with the agent's actual committed leaf node and whether they accepted
-    /// the AI suggestion. Idempotent — calling again with the same values is a no-op.
+    /// the AI suggestion. Safe to call more than once — a subsequent call overwrites the prior
+    /// reconciliation (the typify path in B3 is the single writer per conversation).
     /// </summary>
     Task MarkReconciledAsync(
         EntityId id,

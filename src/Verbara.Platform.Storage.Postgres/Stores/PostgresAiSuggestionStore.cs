@@ -66,7 +66,7 @@ internal sealed class PostgresAiSuggestionStore : IAiSuggestionStore
         var row = await _dataSource.QueryFirstOrDefaultAsync(
             $"SELECT {SelectColumns} FROM typification_ai_suggestions " +
             "WHERE tenant_id = @TenantId AND conversation_id = @ConversationId " +
-            "ORDER BY created_at DESC",
+            "ORDER BY created_at DESC LIMIT 1",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
