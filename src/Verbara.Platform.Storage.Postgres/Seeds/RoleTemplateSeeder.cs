@@ -284,6 +284,7 @@ public static class RoleTemplateSeeder
                 "routing:skill:view",
                 "analytics:cdr:export",
                 "callanalytics:analysis:view",
+                "typification:ai:configure",
             ]);
 
         // ── Admin ──
@@ -406,6 +407,9 @@ public static class RoleTemplateSeeder
             "partner:customer:manage", "partner:customer:delete",
             "partner:billing:view", "partner:billing:manage",
             "partner:settings:view", "partner:settings:manage",
+            // P2b A5 — typification AI gating
+            "typification:ai:configure",
+            "typification:ai:autonomous",
         ];
     }
 

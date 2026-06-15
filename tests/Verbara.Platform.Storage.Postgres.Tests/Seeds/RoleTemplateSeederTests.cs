@@ -42,4 +42,42 @@ public sealed class RoleTemplateSeederTests
         RoleTemplateSeeder.GetCanonicalPermissions()
             .Should().Contain("system:typification:configure");
     }
+
+    // ── typification:ai:* (P2b A5) ─────────────────────────────────────────
+
+    [Theory]
+    [InlineData("admin")]
+    [InlineData("system_admin")]
+    [InlineData("platform_admin")]
+    [InlineData("manager")]
+    public void Seeder_ShouldGrantTypificationAiConfigure_ToAdminAndManagerTemplates(string templateId)
+    {
+        var permissions = RoleTemplateSeeder.GetTemplatePermissions(templateId);
+
+        permissions.Should().Contain("typification:ai:configure",
+            $"template '{templateId}' must be granted typification:ai:configure");
+    }
+
+    [Theory]
+    [InlineData("admin")]
+    [InlineData("system_admin")]
+    [InlineData("platform_admin")]
+    public void Seeder_ShouldGrantTypificationAiAutonomous_ToAdminTemplatesOnly(string templateId)
+    {
+        var permissions = RoleTemplateSeeder.GetTemplatePermissions(templateId);
+
+        permissions.Should().Contain("typification:ai:autonomous",
+            $"template '{templateId}' must be granted typification:ai:autonomous");
+    }
+
+    [Theory]
+    [InlineData("manager")]
+    [InlineData("agent")]
+    public void Seeder_ShouldNotGrantTypificationAiAutonomous_ToManagerOrAgent(string templateId)
+    {
+        var permissions = RoleTemplateSeeder.GetTemplatePermissions(templateId);
+
+        permissions.Should().NotContain("typification:ai:autonomous",
+            $"template '{templateId}' must NOT be granted typification:ai:autonomous");
+    }
 }
