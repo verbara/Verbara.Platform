@@ -1,6 +1,9 @@
+using System.Text.Json.Serialization;
+
 namespace Verbara.Platform.Typification;
 
 /// <summary>Graduated AI automation band for a typification schema (P2b).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<AiMode>))]
 public enum AiMode
 {
     /// <summary>AI is switched off; no classification is attempted.</summary>

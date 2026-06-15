@@ -39,6 +39,16 @@ public sealed class TypificationAiConfigTests
     // ─── JSON round-trip ──────────────────────────────────────────────────────
 
     [Fact]
+    public void AiMode_ShouldSerializeAsName_NotNumber()
+    {
+        // Verify each member serializes as its NAME (string), not its positional integer.
+        JsonSerializer.Serialize(AiMode.Off, AiConfigTestContext.Default.AiMode).Should().Be("\"Off\"");
+        JsonSerializer.Serialize(AiMode.Shadow, AiConfigTestContext.Default.AiMode).Should().Be("\"Shadow\"");
+        JsonSerializer.Serialize(AiMode.SuggestOnly, AiConfigTestContext.Default.AiMode).Should().Be("\"SuggestOnly\"");
+        JsonSerializer.Serialize(AiMode.AutoFill, AiConfigTestContext.Default.AiMode).Should().Be("\"AutoFill\"");
+    }
+
+    [Fact]
     public void AiConfig_ShouldRoundTripThroughJson_WithNewShape()
     {
         var original = new TypificationAiConfig
@@ -55,6 +65,11 @@ public sealed class TypificationAiConfigTests
         };
 
         var json = JsonSerializer.Serialize(original, AiConfigTestContext.Default.TypificationAiConfig);
+
+        // P2b — Mode must be stored as its name string, not a positional integer.
+        json.Should().Contain("\"AutoFill\"", "mode must be the enum name, not the integer 3");
+        json.Should().NotMatchRegex(@"""mode""\s*:\s*\d", "positional-int storage is fragile and must not be used");
+
         var restored = JsonSerializer.Deserialize(json, AiConfigTestContext.Default.TypificationAiConfig);
 
         restored.Should().NotBeNull();
@@ -95,6 +110,7 @@ public sealed class TypificationAiConfigTests
 /// <c>PostgresJsonContext</c> does in production.
 /// </summary>
 [JsonSerializable(typeof(TypificationAiConfig))]
+[JsonSerializable(typeof(AiMode))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

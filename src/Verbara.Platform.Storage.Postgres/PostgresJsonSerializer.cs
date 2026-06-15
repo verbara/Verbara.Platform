@@ -76,7 +76,8 @@ namespace Verbara.Platform.Storage.Postgres;
 [JsonSerializable(typeof(IReadOnlyList<ChannelType>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    UseStringEnumConverter = true)]
 internal sealed partial class PostgresJsonContext : JsonSerializerContext;
 
 internal static class PostgresJson
