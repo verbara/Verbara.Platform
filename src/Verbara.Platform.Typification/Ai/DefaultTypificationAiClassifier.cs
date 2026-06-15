@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -150,6 +151,9 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
             // BEFORE prefixing the role: one message becomes exactly one "Role: ..." line,
             // so a customer can no longer inject extra transcript lines or forge a turn.
             var sanitized = SanitizeTranscriptText(text);
+            // Covers the all-control/all-format-char message case that the upstream
+            // IsNullOrWhiteSpace(text) guard does NOT catch (control/format chars are not
+            // whitespace, so such a message survives that check but sanitizes to empty).
             if (sanitized.Length == 0)
                 continue;
 
@@ -171,10 +175,15 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
 
     /// <summary>
     /// Collapses every whitespace and control character (newlines, tabs, <c>\r</c>, etc.)
-    /// into a single space (coalescing runs) and trims, then neutralizes any forged copy of
-    /// the <see cref="TranscriptFenceToken"/> by replacing it with <c>[fence]</c>. Plain
-    /// char scanning — no regex (AOT-friendly). The structural defense against transcript
-    /// injection: one customer message becomes exactly one line.
+    /// into a single space (coalescing runs) and trims, drops zero-width / Unicode-format
+    /// characters entirely (U+200B ZWSP, U+200E LRM, U+200F RLM, U+FEFF ZWNBSP/BOM, etc. —
+    /// the <see cref="UnicodeCategory.Format"/> category, which is neither whitespace nor
+    /// control), then neutralizes any forged copy of the <see cref="TranscriptFenceToken"/>
+    /// by replacing it with <c>[fence]</c>. Dropping format chars (rather than spacing
+    /// them) means an invisible char spliced into a forged fence token collapses the
+    /// surrounding text back to the exact token, which the <c>Replace</c> then neutralizes.
+    /// Plain char scanning — no regex (AOT-friendly). The structural defense against
+    /// transcript injection: one customer message becomes exactly one line.
     /// </summary>
     private static string SanitizeTranscriptText(string text)
     {
@@ -184,6 +193,11 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
 
         foreach (var ch in text)
         {
+            // Drop zero-width / format chars outright (no space) so they cannot smuggle
+            // invisible content or splinter the fence token to dodge neutralization.
+            if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.Format)
+                continue;
+
             if (char.IsWhiteSpace(ch) || char.IsControl(ch))
             {
                 // Coalesce runs; only emit a space once a non-space char has been written.
