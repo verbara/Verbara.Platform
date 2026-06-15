@@ -17,6 +17,7 @@ using Verbara.Platform.Core.Reports;
 using Verbara.Platform.Core.Webhooks;
 using Verbara.Platform.Flows;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Typification;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Switchboard;
 using Verbara.Platform.Api.Voice;
@@ -62,8 +63,9 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(IReadOnlyList<string>))]
 [JsonSerializable(typeof(IReadOnlyDictionary<string, string>))]
 [JsonSerializable(typeof(TypifyErrorResponse))]
-// D1 (P2a) — AI auto-disposition suggestion response (POST /conversations/{id}/typification-suggestion).
+// D1 (P2a) / C1 (P2b) — AI auto-disposition suggestion response + delivery band enum.
 [JsonSerializable(typeof(TypificationSuggestionResponse))]
+[JsonSerializable(typeof(TypificationBand))]
 [JsonSerializable(typeof(Verbara.Platform.Typification.TypificationSubmission))]
 [JsonSerializable(typeof(PagedResult<Conversation>))]
 [JsonSerializable(typeof(PagedResult<Contact>))]

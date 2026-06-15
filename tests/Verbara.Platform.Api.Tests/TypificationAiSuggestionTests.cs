@@ -258,6 +258,189 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         saved.Should().BeNull("classifier returned null so nothing should have been saved");
     }
 
+    // ─── C1 — server-side confidence-band gating (None / Suggest / AutoFill) ────
+
+    [Fact]
+    public async Task GetSuggestion_ShouldReturnBandNone_BelowSuggestThreshold()
+    {
+        // confidence 0.4 < suggestThreshold 0.7 → Band.None (empty response)
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.4,
+            Sentiment: "neutral");
+
+        using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithModeAndThresholds(
+                enabled: true,
+                mode: AiMode.SuggestOnly,
+                suggestThreshold: 0.7,
+                autoApplyThreshold: 0.85));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await AssertEmptySuggestionAsync(response);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        // band is omitted when None (WhenWritingNull/default skips default enum via string-enum → "None" value present but semantically empty)
+        // The band field serializes as "None" — assert it's either absent or "None".
+        var bandNode = json!["band"];
+        if (bandNode is not null)
+            bandNode.GetValue<string>().Should().Be("None");
+    }
+
+    [Fact]
+    public async Task GetSuggestion_ShouldReturnBandSuggest_InMidBand()
+    {
+        // confidence 0.75: above suggestThreshold 0.6 but below autoApplyThreshold 0.85 → Suggest
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.75,
+            Sentiment: "neutral");
+
+        using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithModeAndThresholds(
+                enabled: true,
+                mode: AiMode.SuggestOnly,
+                suggestThreshold: 0.6,
+                autoApplyThreshold: 0.85));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["suggestedNodePath"].Should().NotBeNull();
+        json["band"]!.GetValue<string>().Should().Be("Suggest");
+    }
+
+    [Fact]
+    public async Task GetSuggestion_ShouldReturnBandAutoFill_AboveAutoApply_WhenModeAutoFillAndCalibrationReady()
+    {
+        // confidence 0.92 ≥ autoApplyThreshold 0.85, Mode=AutoFill, calibration ready → AutoFill
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.92,
+            Sentiment: "neutral");
+
+        using var factory = WithFakeClassifierAndCalibration(
+            new FakeAiClassifier(classification),
+            new FakeCalibration(autoFillReady: true));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithModeAndThresholds(
+                enabled: true,
+                mode: AiMode.AutoFill,
+                suggestThreshold: 0.6,
+                autoApplyThreshold: 0.85));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["suggestedNodePath"].Should().NotBeNull();
+        json["band"]!.GetValue<string>().Should().Be("AutoFill");
+    }
+
+    [Fact]
+    public async Task GetSuggestion_ShouldDowngradeToSuggest_WhenAboveAutoApplyButCalibrationNotReady()
+    {
+        // confidence 0.92 ≥ autoApplyThreshold 0.85, Mode=AutoFill, BUT calibration NOT ready → Suggest
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.92,
+            Sentiment: "neutral");
+
+        using var factory = WithFakeClassifierAndCalibration(
+            new FakeAiClassifier(classification),
+            new FakeCalibration(autoFillReady: false));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithModeAndThresholds(
+                enabled: true,
+                mode: AiMode.AutoFill,
+                suggestThreshold: 0.6,
+                autoApplyThreshold: 0.85));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["suggestedNodePath"].Should().NotBeNull();
+        json["band"]!.GetValue<string>().Should().Be("Suggest");
+    }
+
+    [Fact]
+    public async Task GetSuggestion_ShouldDowngradeToSuggest_WhenModeIsSuggestOnly_EvenAboveAutoApply()
+    {
+        // confidence 0.92 ≥ autoApplyThreshold 0.85, but Mode=SuggestOnly → always Suggest (never AutoFill)
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.92,
+            Sentiment: "neutral");
+
+        // No need to stub calibration — the mode guard short-circuits before the calibration call.
+        using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithModeAndThresholds(
+                enabled: true,
+                mode: AiMode.SuggestOnly,
+                suggestThreshold: 0.6,
+                autoApplyThreshold: 0.85));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["suggestedNodePath"].Should().NotBeNull();
+        json["band"]!.GetValue<string>().Should().Be("Suggest");
+    }
+
+    [Fact]
+    public async Task GetSuggestion_ShouldReturnEmpty_WhenModeIsOff()
+    {
+        // Mode=Off overrides Enabled=true + high confidence → empty (Band.None authority)
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.99,
+            Sentiment: "positive");
+
+        using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithModeAndThresholds(
+                enabled: true,
+                mode: AiMode.Off,
+                suggestThreshold: 0.0,
+                autoApplyThreshold: 0.0));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await AssertEmptySuggestionAsync(response);
+    }
+
     // ─── D2 — typify provenance (B3 — server-authoritative) ─────────────────────
 
     /// <summary>
@@ -382,6 +565,18 @@ public sealed class TypificationAiSuggestionTests : IDisposable
             EntityFieldMap = new Dictionary<string, string>(),
         };
 
+    private static TypificationAiConfig AiConfigWithModeAndThresholds(
+        bool enabled, AiMode mode, double suggestThreshold, double autoApplyThreshold) =>
+        new()
+        {
+            Enabled = enabled,
+            Mode = mode,
+            SuggestThreshold = suggestThreshold,
+            AutoApplyThreshold = autoApplyThreshold,
+            SentimentGating = false,
+            EntityFieldMap = new Dictionary<string, string>(),
+        };
+
     private WebApplicationFactory<Program> WithFakeClassifier(FakeAiClassifier fake) =>
         _factory.WithWebHostBuilder(builder =>
             builder.ConfigureServices(services =>
@@ -391,6 +586,26 @@ public sealed class TypificationAiSuggestionTests : IDisposable
                     .ToList();
                 foreach (var d in existing) services.Remove(d);
                 services.AddSingleton<ITypificationAiClassifier>(fake);
+            }));
+
+    private WebApplicationFactory<Program> WithFakeClassifierAndCalibration(
+        FakeAiClassifier fakeClassifier, FakeCalibration fakeCalibration) =>
+        _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                // Replace classifier
+                var existingClassifier = services
+                    .Where(d => d.ServiceType == typeof(ITypificationAiClassifier))
+                    .ToList();
+                foreach (var d in existingClassifier) services.Remove(d);
+                services.AddSingleton<ITypificationAiClassifier>(fakeClassifier);
+
+                // Replace calibration
+                var existingCalibration = services
+                    .Where(d => d.ServiceType == typeof(ITypificationCalibration))
+                    .ToList();
+                foreach (var d in existingCalibration) services.Remove(d);
+                services.AddSingleton<ITypificationCalibration>(fakeCalibration);
             }));
 
     private static HttpClient AuthenticatedClient(WebApplicationFactory<Program> factory)
@@ -503,6 +718,26 @@ public sealed class TypificationAiSuggestionTests : IDisposable
             Conversation conversation,
             IReadOnlyList<Message> transcript,
             CancellationToken ct) => Task.FromResult(_result);
+    }
+
+    /// <summary>
+    /// Test double for <see cref="ITypificationCalibration"/> that returns a canned
+    /// <see cref="CalibrationStatus"/> so the C1 AutoFill band gate can be exercised
+    /// deterministically without requiring reconciled sample data in the store.
+    /// </summary>
+    private sealed class FakeCalibration : ITypificationCalibration
+    {
+        private readonly bool _autoFillReady;
+
+        public FakeCalibration(bool autoFillReady) => _autoFillReady = autoFillReady;
+
+        public Task<CalibrationStatus> GetStatusAsync(
+            TenantId tenantId, EntityId schemaId, CancellationToken ct) =>
+            Task.FromResult(new CalibrationStatus(
+                Samples: _autoFillReady ? 300 : 10,
+                Accuracy: _autoFillReady ? 0.90 : 0.50,
+                AutoFillReady: _autoFillReady,
+                AutonomousReady: false));
     }
 }
 

@@ -212,14 +212,15 @@ internal static class ConversationEndpoints
                 : null));
     }
 
-    // D1 — AI auto-disposition suggestion (P2a, SuggestOnly). Best-effort: every
+    // D1 — AI auto-disposition suggestion (P2a/C1). Best-effort: every
     // "can't suggest" path returns 200 with an all-null TypificationSuggestionResponse
-    // (no schema / AI disabled / classifier degraded / below confidence / sentiment-gated)
-    // so the client treats it uniformly as "no suggestion, fall back to manual". The route
-    // is license-gated (AdvancedTypification + TypificationAi) at registration.
+    // (no schema / AI disabled / Mode==Off / classifier degraded / below confidence /
+    // sentiment-gated) so the client treats it uniformly as "no suggestion, fall back
+    // to manual". The route is license-gated (AdvancedTypification + TypificationAi).
     // B2: every non-null classification is persisted to IAiSuggestionStore BEFORE gating
     // (so later reconciliation can cover even shadow-suppressed suggestions). When
     // Mode == Shadow the record is saved but the response surfaces nothing.
+    // C1: the Band field on the response is server-authoritative; client cannot escalate.
     private static async Task<IResult> GetTypificationSuggestion(
         string id,
         HttpContext context,
@@ -230,6 +231,7 @@ internal static class ConversationEndpoints
         [FromServices] IAiSuggestionStore aiSuggestions,
         [FromServices] IClock clock,
         [FromServices] TypificationAiMetrics aiMetrics,
+        [FromServices] ITypificationCalibration calibration,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -245,8 +247,9 @@ internal static class ConversationEndpoints
         if (resolved is null)
             return Results.Ok(EmptySuggestion);
 
-        // 2. AI disabled for this schema → no suggestion.
-        if (!resolved.Schema.AiConfig.Enabled)
+        // 2. AI disabled for this schema, or Mode == Off → no suggestion (C1: Mode==Off
+        //    is now an explicit authority independent of the Enabled flag).
+        if (!resolved.Schema.AiConfig.Enabled || resolved.Schema.AiConfig.Mode == AiMode.Off)
             return Results.Ok(EmptySuggestion);
 
         // 3. Load the transcript. Both message stores ORDER BY created_at ASC (oldest
@@ -302,8 +305,7 @@ internal static class ConversationEndpoints
 
         var aiConfig = resolved.Schema.AiConfig;
 
-        // 5a. Confidence gate (uses SuggestThreshold — the entry band for surfacing any
-        // suggestion to the agent; full band logic for AutoFill / Autonomous lands in C1).
+        // 5a. Confidence gate: below SuggestThreshold → no suggestion at all (Band.None).
         if (classification.Confidence < aiConfig.SuggestThreshold)
             return Results.Ok(EmptySuggestion);
 
@@ -318,13 +320,33 @@ internal static class ConversationEndpoints
                 return Results.Ok(EmptySuggestion);
         }
 
-        // 5c. AiMode: band gating (AutoFill / Autonomous) is enforced in task C1.
-        // For now all enabled modes above Off/Shadow surface as suggestions.
+        // 5c. C1 — server-authoritative confidence band decision.
+        //
+        // Band table (server decides; client MUST NOT escalate):
+        //   confidence < SuggestThreshold                              → None  (already handled at 5a)
+        //   SuggestThreshold ≤ confidence < AutoApplyThreshold        → Suggest
+        //   confidence ≥ AutoApplyThreshold
+        //     AND Mode == AutoFill AND calibration.AutoFillReady       → AutoFill
+        //     otherwise (SuggestOnly, or Mode == AutoFill but not ready) → Suggest (downgrade)
+        TypificationBand band;
+        if (classification.Confidence < aiConfig.AutoApplyThreshold ||
+            aiConfig.Mode != AiMode.AutoFill)
+        {
+            band = TypificationBand.Suggest;
+        }
+        else
+        {
+            // confidence ≥ AutoApplyThreshold AND Mode == AutoFill — check calibration.
+            var status = await calibration.GetStatusAsync(tenantId, resolved.Schema.SchemaId, ct);
+            band = status.AutoFillReady ? TypificationBand.AutoFill : TypificationBand.Suggest;
+        }
+
         return Results.Ok(new TypificationSuggestionResponse(
             SuggestedNodePath: classification.NodePath.Select(n => n.Value).ToArray(),
             SuggestedFieldValues: classification.FieldValues.Count > 0 ? classification.FieldValues : null,
             Confidence: classification.Confidence,
-            Sentiment: classification.Sentiment));
+            Sentiment: classification.Sentiment,
+            Band: band));
     }
 
     /// <summary>All-null "no suggestion" payload reused by every degrade path.</summary>
@@ -607,17 +629,20 @@ internal sealed record TypifyRequest(
     double? AiConfidence = null);
 
 /// <summary>
-/// D1 — AI auto-disposition suggestion (P2a). The suggested root→leaf node-id path,
-/// optional captured field values, the model's confidence, and a free-form sentiment
-/// hint. All members are <see langword="null"/> (the all-null payload) when there is no
-/// suggestion — no bound schema, AI disabled, the classifier degraded, the confidence
-/// fell below the schema threshold, or a sentiment-gated Success outcome was suppressed.
+/// D1 — AI auto-disposition suggestion (P2a/C1). The suggested root→leaf node-id path,
+/// optional captured field values, the model's confidence, a free-form sentiment hint,
+/// and the server-authoritative delivery <see cref="TypificationBand"/>. All members are
+/// <see langword="null"/> / <see cref="TypificationBand.None"/> (the all-null payload)
+/// when there is no suggestion — no bound schema, AI disabled, the classifier degraded,
+/// the confidence fell below the schema threshold, or a sentiment-gated Success outcome
+/// was suppressed.
 /// </summary>
 internal sealed record TypificationSuggestionResponse(
     IReadOnlyList<string>? SuggestedNodePath,
     IReadOnlyDictionary<string, string>? SuggestedFieldValues,
     double? Confidence,
-    string? Sentiment);
+    string? Sentiment,
+    TypificationBand Band = TypificationBand.None);
 
 /// <summary>
 /// The resolved typification form for a conversation: the cascading schema, the
