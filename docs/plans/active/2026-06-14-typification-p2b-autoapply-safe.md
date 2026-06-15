@@ -317,3 +317,21 @@
 - **No Pro pack:** P2b adds no Pro flag; skip the cross-repo pack/restore unless a task proves otherwise.
 - **AOT:** every new DTO/record (usage, suggestion, AiConfig fields, calibration status, verification payload) must be in a source-gen context — Task E6 Step 3 is the gate.
 - **Provenance trust:** client AI flags are ignored (B3); server is the only writer of `Source=AutoAi`.
+
+## Holistic review (A+B) — outcome & deferrals (2026-06-15)
+
+A cross-batch holistic review of the A+B diff (20 commits) was run before the interim review-PR. Result: the A+B foundation is coherent and the reconcile→calibration data path is correctly wired. Items:
+
+**Resolved now**
+- **`AiMode` stored as positional int → now a resilient string** (commit `10d3293c`). The enum was persisted numerically in the schema JSONB; reordering would have silently corrupted modes. No data existed (pre-launch, verified no seeds/fixtures/demo), so switched to `[JsonConverter(JsonStringEnumConverter<AiMode>)]` (AOT-safe) + `UseStringEnumConverter` on `PostgresJsonContext` — no migration needed. This is the sanctioned clean-break (ADR-0029 pre-launch); there is **no P2a→P2b data migration** for AiConfig and any dev/demo DB must be reset.
+
+**Deferred to Batch C1 (where the calibration gate gets enforced — must be addressed there)**
+- **Calibration cross-version pooling:** `IAiSuggestionStore.QueryAccuracyAsync` filters by `schema_id` but NOT `schema_version`, while `DefaultTypificationCalibration` reads the *currently-published* schema's `AutoApplyThreshold`. Republishing a schema with a different threshold re-buckets historical samples. **C1 fix:** add a `schemaVersion` param and gate on the published version's samples.
+- **`Enabled` vs `Mode == Off` overlap:** the suggestion endpoint gates only on `AiConfig.Enabled`, never on `Mode == Off`. **C1 fix:** make `Mode == Off` the authoritative disable (short-circuit early) when band gating lands.
+- **Accept-rate-as-accuracy bias:** once AutoFill pre-fills the agent's form, "acceptance" inflates (agent nudged toward the AI pick). **C1/D fix:** source the calibration signal from non-auto-filled samples (Shadow/SuggestOnly), or record whether the form was auto-filled, so the gate doesn't measure its own output.
+
+**Deferred to Batch D**
+- **PII screen provenance key:** an AI-suggested-then-overridden submission is `Source=Manual` but `AiSuggested=true`; D3's PII/length screen (gated on `Source==AutoAi`) would skip it. **D fix:** key the screen on `AiSuggested || Source==AutoAi`.
+
+**Minor cleanup (track, low urgency)**
+- `EntityId.From(tenantId.Value)` tenant conversion is triplicated (B2/B3/B4a); extract a single helper to avoid silent divergence on a trust seam.
