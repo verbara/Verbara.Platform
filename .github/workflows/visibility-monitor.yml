@@ -70,7 +70,7 @@ jobs:
       WEB_TAG: v3.2.0-web
     steps:
       - name: Checkout source (for .github/cosign.pub)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Assert anonymous docker pull works
         # We dropped the prior gh-api visibility-poll because the org-scoped

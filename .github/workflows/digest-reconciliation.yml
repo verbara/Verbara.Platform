@@ -49,12 +49,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout Platform (for .github/cosign.pub)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: platform
 
       - name: Checkout verbara-website (for data/authorized-digests.json)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: verbara/verbara-website
           path: website
