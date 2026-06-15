@@ -21,6 +21,7 @@ using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Storage.Postgres.Stores;
 using Verbara.Platform.Surveys;
+using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Platform.Core.Webhooks;
 using Verbara.Sdk.Pro.MultiTenant;
@@ -151,6 +152,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISchemaBindingStore, PostgresSchemaBindingStore>();
         services.AddSingleton<ITypificationSubmissionStore, PostgresTypificationSubmissionStore>();
         services.AddSingleton<IReasonHintStore, PostgresReasonHintStore>();
+        services.AddSingleton<IAiSuggestionStore, PostgresAiSuggestionStore>();
 
         // Audit
         services.AddSingleton<IAuditStore, PostgresAuditStore>();
