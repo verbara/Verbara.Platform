@@ -381,6 +381,9 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     // lab validation surfaced this gap: counters existed in JwtTokenService
     // but were never exported.
     .AddMeter("verbara.platform.jwt")
+    // Typification P2b — expose verbara.platform.llm meter (llm.requests /
+    // llm.errors / llm.request.latency / llm.tokens.in / llm.tokens.out).
+    .AddMeter("verbara.platform.llm")
     // ADR-0026 Phase B — realtime.reconciliation.{tenants,memberships,sync_failures}
     // for Verbara queue_memberships → Asterisk Realtime drift observability.
     .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)

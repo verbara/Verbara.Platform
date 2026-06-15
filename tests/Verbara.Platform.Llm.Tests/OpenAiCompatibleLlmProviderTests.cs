@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Net;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
@@ -17,10 +18,14 @@ public sealed class OpenAiCompatibleLlmProviderTests
 
     private static OpenAiCompatibleLlmProvider CreateProvider(
         CapturingHandler handler,
-        LlmProviderOptions? options = null)
+        LlmProviderOptions? options = null,
+        IMeterFactory? meterFactory = null)
     {
         var http = new HttpClient(handler);
-        return new OpenAiCompatibleLlmProvider(http, Options.Create(options ?? ConfiguredOptions()));
+        return new OpenAiCompatibleLlmProvider(
+            http,
+            Options.Create(options ?? ConfiguredOptions()),
+            meterFactory: meterFactory);
     }
 
     private static LlmRequest SampleRequest() => new(
@@ -39,6 +44,7 @@ public sealed class OpenAiCompatibleLlmProviderTests
         var response = await provider.CompleteAsync(SampleRequest(), CancellationToken.None);
 
         response.Content.Should().Be("hello");
+        response.Usage.Should().BeNull();
 
         handler.Request.Should().NotBeNull();
         handler.Request!.Method.Should().Be(HttpMethod.Post);
@@ -104,6 +110,94 @@ public sealed class OpenAiCompatibleLlmProviderTests
         var response = await provider.CompleteAsync(SampleRequest(), CancellationToken.None);
 
         response.Usage.Should().BeNull();
+    }
+
+    // ── Meter tests ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CompleteAsync_ShouldIncrementRequestAndTokenCounters_WhenCalled()
+    {
+        using var meterFactory = new TestMeterFactory();
+        using var listener = new CollectingMeterListener(LlmMetrics.MeterName);
+
+        var handler = new CapturingHandler(
+            HttpStatusCode.OK,
+            """{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}""");
+        var provider = CreateProvider(handler, meterFactory: meterFactory);
+
+        await provider.CompleteAsync(SampleRequest(), CancellationToken.None);
+
+        listener.Counters.Should().ContainKey("llm.requests");
+        listener.Counters["llm.requests"].Should().Be(1);
+        listener.Counters.Should().ContainKey("llm.tokens.in");
+        listener.Counters["llm.tokens.in"].Should().Be(10);
+        listener.Counters.Should().ContainKey("llm.tokens.out");
+        listener.Counters["llm.tokens.out"].Should().Be(5);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ShouldIncrementErrorCounter_WhenProviderFails()
+    {
+        using var meterFactory = new TestMeterFactory();
+        using var listener = new CollectingMeterListener(LlmMetrics.MeterName);
+
+        var handler = new CapturingHandler(HttpStatusCode.InternalServerError, "boom");
+        var provider = CreateProvider(handler, meterFactory: meterFactory);
+
+        var act = () => provider.CompleteAsync(SampleRequest(), CancellationToken.None);
+        await act.Should().ThrowAsync<HttpRequestException>();
+
+        listener.Counters.Should().ContainKey("llm.errors");
+        listener.Counters["llm.errors"].Should().Be(1);
+    }
+
+    // ── Test helpers ─────────────────────────────────────────────────────────
+
+    private sealed class CollectingMeterListener : IDisposable
+    {
+        private readonly MeterListener _listener;
+        public Dictionary<string, long> Counters { get; } = new();
+
+        public CollectingMeterListener(string meterName)
+        {
+            _listener = new MeterListener
+            {
+                InstrumentPublished = (instrument, listener) =>
+                {
+                    if (instrument.Meter.Name == meterName) listener.EnableMeasurementEvents(instrument);
+                },
+            };
+            _listener.SetMeasurementEventCallback<long>((instrument, value, _, _) =>
+            {
+                lock (Counters)
+                    Counters[instrument.Name] = Counters.GetValueOrDefault(instrument.Name) + value;
+            });
+            _listener.SetMeasurementEventCallback<double>((instrument, value, _, _) =>
+            {
+                // Histogram — not asserted numerically, just ensure no crash
+                _ = value;
+            });
+            _listener.Start();
+        }
+
+        public void Dispose() => _listener.Dispose();
+    }
+
+    private sealed class TestMeterFactory : IMeterFactory
+    {
+        private readonly List<Meter> _meters = [];
+
+        public Meter Create(MeterOptions options)
+        {
+            var meter = new Meter(options.Name, options.Version);
+            _meters.Add(meter);
+            return meter;
+        }
+
+        public void Dispose()
+        {
+            foreach (var m in _meters) m.Dispose();
+        }
     }
 
     private sealed class CapturingHandler : HttpMessageHandler

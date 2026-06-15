@@ -17,6 +17,11 @@ public static class ServiceCollectionExtensions
     /// <c>AddPlatformFlows</c>) in place. Call this <em>before</em> <c>AddPlatformFlows</c> so the
     /// real provider wins the <c>TryAdd</c>.
     /// </para>
+    /// <para>
+    /// <see cref="Microsoft.Extensions.Logging.ILogger{TCategoryName}"/> and
+    /// <see cref="System.Diagnostics.Metrics.IMeterFactory"/> are injected automatically from DI
+    /// when present; the provider ctor falls back to no-op stubs otherwise.
+    /// </para>
     /// </summary>
     public static IServiceCollection AddPlatformLlm(
         this IServiceCollection services,
@@ -35,6 +40,9 @@ public static class ServiceCollectionExtensions
 
         // Registers the interface→impl typed HttpClient directly, so resolving ILlmProvider
         // yields the OpenAiCompatibleLlmProvider with its own configured HttpClient.
+        // The DI container resolves IMeterFactory and ILogger<OpenAiCompatibleLlmProvider>
+        // from the service provider when constructing the typed-client instance; the ctor
+        // declares both as nullable so this works even in test containers that omit them.
         services.AddHttpClient<ILlmProvider, OpenAiCompatibleLlmProvider>();
 
         return services;

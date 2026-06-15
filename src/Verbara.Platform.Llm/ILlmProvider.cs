@@ -27,7 +27,11 @@ public sealed record LlmMessage(string Role, string Content);
 /// <summary>Token usage statistics returned by the LLM provider.</summary>
 /// <param name="PromptTokens">Number of tokens consumed by the prompt.</param>
 /// <param name="CompletionTokens">Number of tokens generated in the completion.</param>
-/// <param name="TotalTokens">Total tokens used (prompt + completion).</param>
+/// <param name="TotalTokens">
+/// Total tokens used as reported by the provider; may differ from
+/// <see cref="PromptTokens"/> + <see cref="CompletionTokens"/> when cached tokens
+/// are billed separately.
+/// </param>
 public sealed record LlmUsage(int PromptTokens, int CompletionTokens, int TotalTokens);
 
 /// <summary>The completion text returned by an LLM.</summary>
