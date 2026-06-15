@@ -85,7 +85,11 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider
             ? choices[0].Message?.Content
             : null;
 
-        return new LlmResponse(content ?? string.Empty);
+        var usage = parsed?.Usage is { } u
+            ? new LlmUsage(u.PromptTokens, u.CompletionTokens, u.TotalTokens)
+            : null;
+
+        return new LlmResponse(content ?? string.Empty, usage);
     }
 
     private static ChatMessage[] MapMessages(IReadOnlyList<LlmMessage> messages)

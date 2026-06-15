@@ -24,6 +24,13 @@ public sealed record LlmRequest(
 /// <param name="Content">The text content of the message.</param>
 public sealed record LlmMessage(string Role, string Content);
 
+/// <summary>Token usage statistics returned by the LLM provider.</summary>
+/// <param name="PromptTokens">Number of tokens consumed by the prompt.</param>
+/// <param name="CompletionTokens">Number of tokens generated in the completion.</param>
+/// <param name="TotalTokens">Total tokens used (prompt + completion).</param>
+public sealed record LlmUsage(int PromptTokens, int CompletionTokens, int TotalTokens);
+
 /// <summary>The completion text returned by an LLM.</summary>
 /// <param name="Content">The model's response text.</param>
-public sealed record LlmResponse(string Content);
+/// <param name="Usage">Token usage statistics, or <see langword="null"/> if the provider did not return a usage block.</param>
+public sealed record LlmResponse(string Content, LlmUsage? Usage = null);

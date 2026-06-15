@@ -77,6 +77,35 @@ public sealed class OpenAiCompatibleLlmProviderTests
         response.Content.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task CompleteAsync_ShouldReturnTokenUsage_WhenProviderReturnsUsageBlock()
+    {
+        var handler = new CapturingHandler(
+            HttpStatusCode.OK,
+            """{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":120,"completion_tokens":40,"total_tokens":160}}""");
+        var provider = CreateProvider(handler);
+
+        var response = await provider.CompleteAsync(SampleRequest(), CancellationToken.None);
+
+        response.Usage.Should().NotBeNull();
+        response.Usage!.PromptTokens.Should().Be(120);
+        response.Usage.CompletionTokens.Should().Be(40);
+        response.Usage.TotalTokens.Should().Be(160);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ShouldReturnNullUsage_WhenBodyOmitsUsage()
+    {
+        var handler = new CapturingHandler(
+            HttpStatusCode.OK,
+            """{"choices":[{"message":{"role":"assistant","content":"ok"}}]}""");
+        var provider = CreateProvider(handler);
+
+        var response = await provider.CompleteAsync(SampleRequest(), CancellationToken.None);
+
+        response.Usage.Should().BeNull();
+    }
+
     private sealed class CapturingHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _status;

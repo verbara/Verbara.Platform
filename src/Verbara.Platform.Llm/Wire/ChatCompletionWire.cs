@@ -20,8 +20,15 @@ internal sealed record ChatMessage(
 
 /// <summary>Wire model for an OpenAI-compatible chat-completions response body.</summary>
 internal sealed record ChatCompletionResponse(
-    [property: JsonPropertyName("choices")] IReadOnlyList<ChatChoice>? Choices);
+    [property: JsonPropertyName("choices")] IReadOnlyList<ChatChoice>? Choices,
+    [property: JsonPropertyName("usage")] ChatUsage? Usage);
 
 /// <summary>A single completion choice within a <see cref="ChatCompletionResponse"/>.</summary>
 internal sealed record ChatChoice(
     [property: JsonPropertyName("message")] ChatMessage? Message);
+
+/// <summary>Wire model for the token-usage block in an OpenAI-compatible response.</summary>
+internal sealed record ChatUsage(
+    [property: JsonPropertyName("prompt_tokens")] int PromptTokens,
+    [property: JsonPropertyName("completion_tokens")] int CompletionTokens,
+    [property: JsonPropertyName("total_tokens")] int TotalTokens);
