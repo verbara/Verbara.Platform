@@ -346,16 +346,19 @@ internal static class TypificationEndpoints
             CreatedAt: s.CreatedAt,
             UpdatedAt: s.UpdatedAt);
 
-    // D3 — AiConfig round-trip. The EntityFieldMap (AI entity → field Key) is NOT yet
-    // editable over HTTP (that lands in P2b); it is preserved across read/write by the
-    // create/update map (empty on create, the prior schema's map on update), so it is
-    // intentionally absent from the wire DTO.
+    // P2b — AiConfig round-trip with graduated bands. The EntityFieldMap (AI entity →
+    // field Key) is preserved server-side (empty on create, prior map on update) and is
+    // intentionally absent from the wire DTO until the map-editing surface ships.
     private static AiConfigDto ToAiConfigDto(TypificationAiConfig c) =>
         new(
             Enabled: c.Enabled,
             Mode: c.Mode.ToString(),
-            ConfidenceThreshold: c.ConfidenceThreshold,
-            SentimentGating: c.SentimentGating);
+            SuggestThreshold: c.SuggestThreshold,
+            AutoApplyThreshold: c.AutoApplyThreshold,
+            AutonomousThreshold: c.AutonomousThreshold,
+            Autonomous: c.Autonomous,
+            SentimentGating: c.SentimentGating,
+            DailyTokenBudget: c.DailyTokenBudget);
 
     private static TypificationNodeDto ToNodeDto(TypificationNode n) =>
         new(
@@ -483,16 +486,17 @@ internal static class TypificationEndpoints
         new()
         {
             Enabled = false,
-            Mode = default,
-            ConfidenceThreshold = 0,
-            SentimentGating = false,
+            Mode = AiMode.Off,
+            // Threshold defaults come from the record property initialisers.
+            SentimentGating = true,
             EntityFieldMap = new Dictionary<string, string>(),
         };
 
-    // D3 — build the domain AiConfig from the optional request DTO, carrying forward the
-    // existing EntityFieldMap (P2b owns map editing). An omitted DTO yields the disabled
-    // default (matches P0). An unknown Mode string falls back to SuggestOnly (tolerant,
-    // like the PrefillSource map — AI config is optional layered metadata).
+    // P2b — build the domain AiConfig from the optional request DTO, carrying forward
+    // the existing EntityFieldMap. An omitted DTO yields the disabled default. Unknown
+    // Mode strings fall back to Off (tolerant — AI config is optional layered metadata).
+    // Thresholds are clamped to [0, 1]: a value > 1 suppresses everything; < 0 never
+    // suppresses; both outcomes would be confusing ops mistakes rather than intent.
     private static TypificationAiConfig MapAiConfig(
         AiConfigDto? dto, IReadOnlyDictionary<string, string> existingEntityFieldMap)
     {
@@ -502,12 +506,13 @@ internal static class TypificationEndpoints
         return new TypificationAiConfig
         {
             Enabled = dto.Enabled,
-            Mode = Enum.TryParse<AiMode>(dto.Mode, ignoreCase: true, out var m) ? m : AiMode.SuggestOnly,
-            // Clamp to [0, 1]: a confidence threshold > 1 would suppress every suggestion
-            // and < 0 would never suppress, so an out-of-range admin value is corrected
-            // rather than persisted verbatim.
-            ConfidenceThreshold = Math.Clamp(dto.ConfidenceThreshold, 0.0, 1.0),
+            Mode = Enum.TryParse<AiMode>(dto.Mode, ignoreCase: true, out var m) ? m : AiMode.Off,
+            SuggestThreshold = Math.Clamp(dto.SuggestThreshold, 0.0, 1.0),
+            AutoApplyThreshold = Math.Clamp(dto.AutoApplyThreshold, 0.0, 1.0),
+            AutonomousThreshold = Math.Clamp(dto.AutonomousThreshold, 0.0, 1.0),
+            Autonomous = dto.Autonomous,
             SentimentGating = dto.SentimentGating,
+            DailyTokenBudget = dto.DailyTokenBudget,
             EntityFieldMap = existingEntityFieldMap,
         };
     }
@@ -558,13 +563,17 @@ internal sealed record TypificationSchemaDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt);
 
-// D3 — AI auto-disposition config (P2a). The EntityFieldMap (AI entity → field Key) is
-// NOT carried on the wire yet (P2b owns map editing) and is preserved round-trip server-side.
+// P2b — AI auto-disposition config with graduated bands. The EntityFieldMap (AI entity →
+// field Key) is preserved server-side and is intentionally absent from the wire DTO.
 internal sealed record AiConfigDto(
     bool Enabled,
     string Mode,
-    double ConfidenceThreshold,
-    bool SentimentGating);
+    double SuggestThreshold,
+    double AutoApplyThreshold,
+    double AutonomousThreshold,
+    bool Autonomous,
+    bool SentimentGating,
+    long? DailyTokenBudget);
 
 internal sealed record TypificationNodeDto(
     string NodeId,

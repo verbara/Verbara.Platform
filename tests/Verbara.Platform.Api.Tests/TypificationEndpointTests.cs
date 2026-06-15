@@ -257,8 +257,12 @@ public sealed class TypificationEndpointTests : IDisposable
         {
             enabled = true,
             mode = "SuggestOnly",
-            confidenceThreshold = 0.7,
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
             sentimentGating = true,
+            dailyTokenBudget = (long?)null,
         });
 
         var id = await CreateSchemaAsync(_client, body);
@@ -270,14 +274,17 @@ public sealed class TypificationEndpointTests : IDisposable
         var ai = schema!["aiConfig"]!;
         ai["enabled"]!.GetValue<bool>().Should().BeTrue();
         ai["mode"]!.GetValue<string>().Should().Be("SuggestOnly");
-        ai["confidenceThreshold"]!.GetValue<double>().Should().Be(0.7);
+        ai["suggestThreshold"]!.GetValue<double>().Should().Be(0.7);
+        ai["autoApplyThreshold"]!.GetValue<double>().Should().Be(0.85);
+        ai["autonomousThreshold"]!.GetValue<double>().Should().Be(0.95);
+        ai["autonomous"]!.GetValue<bool>().Should().BeFalse();
         ai["sentimentGating"]!.GetValue<bool>().Should().BeTrue();
     }
 
     [Fact]
     public async Task CreateSchema_ShouldDefaultAiConfigDisabled_WhenOmitted()
     {
-        // ValidSchemaBody carries no aiConfig → server defaults to disabled.
+        // ValidSchemaBody carries no aiConfig → server defaults to disabled (Mode=Off).
         var id = await CreateSchemaAsync(_client, ValidSchemaBody("No AI"));
 
         var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
@@ -286,15 +293,14 @@ public sealed class TypificationEndpointTests : IDisposable
         var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
         var ai = schema!["aiConfig"]!;
         ai["enabled"]!.GetValue<bool>().Should().BeFalse();
-        ai["mode"]!.GetValue<string>().Should().Be("SuggestOnly", because: "AiMode.SuggestOnly is the default enum value (0)");
-        ai["confidenceThreshold"]!.GetValue<double>().Should().Be(0);
-        ai["sentimentGating"]!.GetValue<bool>().Should().BeFalse();
+        ai["mode"]!.GetValue<string>().Should().Be("Off", because: "AiMode.Off is the new default (0)");
+        ai["sentimentGating"]!.GetValue<bool>().Should().BeTrue(because: "SentimentGating defaults true");
     }
 
     [Theory]
     [InlineData(1.5, 1.0)]
     [InlineData(-0.5, 0.0)]
-    public async Task CreateSchema_ShouldClampConfidenceThreshold_WhenOutOfRange(
+    public async Task CreateSchema_ShouldClampSuggestThreshold_WhenOutOfRange(
         double submitted, double expected)
     {
         // An admin must not be able to persist a threshold outside [0, 1]: > 1 would
@@ -303,8 +309,12 @@ public sealed class TypificationEndpointTests : IDisposable
         {
             enabled = true,
             mode = "SuggestOnly",
-            confidenceThreshold = submitted,
+            suggestThreshold = submitted,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
             sentimentGating = false,
+            dailyTokenBudget = (long?)null,
         });
 
         var id = await CreateSchemaAsync(_client, body);
@@ -313,7 +323,7 @@ public sealed class TypificationEndpointTests : IDisposable
         getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
-        schema!["aiConfig"]!["confidenceThreshold"]!.GetValue<double>().Should().Be(expected);
+        schema!["aiConfig"]!["suggestThreshold"]!.GetValue<double>().Should().Be(expected);
     }
 
     // ValidSchemaBody plus an aiConfig block (the only AI-bearing variant of the body).

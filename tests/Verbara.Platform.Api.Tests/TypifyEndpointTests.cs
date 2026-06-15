@@ -189,7 +189,6 @@ public sealed class TypifyEndpointTests : IDisposable
             AiConfig = new TypificationAiConfig
             {
                 Enabled = false,
-                ConfidenceThreshold = 0,
                 SentimentGating = false,
                 EntityFieldMap = new Dictionary<string, string>(),
             },
@@ -612,7 +611,6 @@ public sealed class TypifyEndpointTests : IDisposable
                     AiConfig = new TypificationAiConfig
                     {
                         Enabled = false,
-                        ConfidenceThreshold = 0,
                         SentimentGating = false,
                         EntityFieldMap = new Dictionary<string, string>(),
                     },

@@ -67,7 +67,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         using var client = AuthenticatedClient(factory);
 
         var convId = await SeedSchemaAndConversationAsync(
-            factory, AiConfig(enabled: true, confidenceThreshold: 0.5));
+            factory, AiConfig(enabled: true, suggestThreshold: 0.5));
 
         var response = await client.PostAsync(
             $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
@@ -93,7 +93,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         using var client = factory.CreateAuthenticatedClient();
 
         var convId = await SeedSchemaAndConversationAsync(
-            factory, AiConfig(enabled: true, confidenceThreshold: 0.5));
+            factory, AiConfig(enabled: true, suggestThreshold: 0.5));
 
         var response = await client.PostAsync(
             $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
@@ -113,7 +113,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         using var client = AuthenticatedClient(factory);
 
         var convId = await SeedSchemaAndConversationAsync(
-            factory, AiConfig(enabled: false, confidenceThreshold: 0.0));
+            factory, AiConfig(enabled: false, suggestThreshold: 0.0));
 
         var response = await client.PostAsync(
             $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
@@ -134,7 +134,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
 
         // Threshold 0.8 > classifier 0.4 → suppressed.
         var convId = await SeedSchemaAndConversationAsync(
-            factory, AiConfig(enabled: true, confidenceThreshold: 0.8));
+            factory, AiConfig(enabled: true, suggestThreshold: 0.8));
 
         var response = await client.PostAsync(
             $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
@@ -155,7 +155,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         using var client = AuthenticatedClient(factory);
 
         var convId = await SeedSchemaAndConversationAsync(
-            factory, AiConfig(enabled: true, confidenceThreshold: 0.5, sentimentGating: true));
+            factory, AiConfig(enabled: true, suggestThreshold: 0.5, sentimentGating: true));
 
         var response = await client.PostAsync(
             $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
@@ -171,7 +171,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
     {
         using var client = _factory.CreateAuthenticatedClient();
         var convId = await SeedSchemaAndConversationAsync(
-            _factory, AiConfig(enabled: false, confidenceThreshold: 0.0));
+            _factory, AiConfig(enabled: false, suggestThreshold: 0.0));
 
         var body = JsonContent.Create(new
         {
@@ -204,7 +204,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
     {
         using var client = _factory.CreateAuthenticatedClient();
         var convId = await SeedSchemaAndConversationAsync(
-            _factory, AiConfig(enabled: false, confidenceThreshold: 0.0));
+            _factory, AiConfig(enabled: false, suggestThreshold: 0.0));
 
         var body = JsonContent.Create(new
         {
@@ -241,12 +241,12 @@ public sealed class TypificationAiSuggestionTests : IDisposable
     }
 
     private static TypificationAiConfig AiConfig(
-        bool enabled, double confidenceThreshold, bool sentimentGating = false) =>
+        bool enabled, double suggestThreshold, bool sentimentGating = false) =>
         new()
         {
             Enabled = enabled,
             Mode = AiMode.SuggestOnly,
-            ConfidenceThreshold = confidenceThreshold,
+            SuggestThreshold = suggestThreshold,
             SentimentGating = sentimentGating,
             EntityFieldMap = new Dictionary<string, string>(),
         };

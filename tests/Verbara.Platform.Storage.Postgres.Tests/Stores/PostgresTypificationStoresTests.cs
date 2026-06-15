@@ -34,8 +34,7 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
     private static TypificationAiConfig EmptyAiConfig() => new()
     {
         Enabled = false,
-        Mode = AiMode.SuggestOnly,
-        ConfidenceThreshold = 0,
+        Mode = AiMode.Off,
         SentimentGating = false,
         EntityFieldMap = new Dictionary<string, string>(),
     };

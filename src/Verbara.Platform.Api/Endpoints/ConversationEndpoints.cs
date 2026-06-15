@@ -260,8 +260,9 @@ internal static class ConversationEndpoints
 
         var aiConfig = resolved.Schema.AiConfig;
 
-        // 5a. Confidence gate.
-        if (classification.Confidence < aiConfig.ConfidenceThreshold)
+        // 5a. Confidence gate (uses SuggestThreshold — the entry band for surfacing any
+        // suggestion to the agent; full band logic for AutoFill / Autonomous lands in C1).
+        if (classification.Confidence < aiConfig.SuggestThreshold)
             return Results.Ok(EmptySuggestion);
 
         // 5b. Sentiment gate: never surface a Success outcome on a very-negative call.
@@ -275,8 +276,8 @@ internal static class ConversationEndpoints
                 return Results.Ok(EmptySuggestion);
         }
 
-        // 5c. AiMode: P2a ships SuggestOnly semantics — always return as a suggestion (the
-        // client decides whether to apply). AutoApplyAboveThreshold is a P2b distinction.
+        // 5c. AiMode: band gating (AutoFill / Autonomous) is enforced in task C1.
+        // For now all enabled modes above Off/Shadow surface as suggestions.
         return Results.Ok(new TypificationSuggestionResponse(
             SuggestedNodePath: classification.NodePath.Select(n => n.Value).ToArray(),
             SuggestedFieldValues: classification.FieldValues.Count > 0 ? classification.FieldValues : null,

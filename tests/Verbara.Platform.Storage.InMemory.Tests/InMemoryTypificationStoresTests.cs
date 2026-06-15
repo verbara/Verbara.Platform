@@ -23,8 +23,7 @@ public sealed class InMemoryTypificationStoresTests
         AiConfig = new TypificationAiConfig
         {
             Enabled = false,
-            Mode = AiMode.SuggestOnly,
-            ConfidenceThreshold = 0,
+            Mode = AiMode.Off,
             SentimentGating = false,
             EntityFieldMap = new Dictionary<string, string>(),
         },
