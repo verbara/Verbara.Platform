@@ -45,6 +45,9 @@ public static class ServiceCollectionExtensions
         // B3 — server-authoritative provenance derivation + correction signal.
         services.AddSingleton<ITypificationProvenanceService, DefaultTypificationProvenanceService>();
 
+        // B4a — calibration gate: determines per-schema readiness for AutoFill / autonomous mode.
+        services.AddSingleton<ITypificationCalibration, DefaultTypificationCalibration>();
+
         return services;
     }
 }
