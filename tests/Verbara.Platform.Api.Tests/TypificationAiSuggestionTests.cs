@@ -285,12 +285,6 @@ public sealed class TypificationAiSuggestionTests : IDisposable
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         await AssertEmptySuggestionAsync(response);
-        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
-        // band is omitted when None (WhenWritingNull/default skips default enum via string-enum → "None" value present but semantically empty)
-        // The band field serializes as "None" — assert it's either absent or "None".
-        var bandNode = json!["band"];
-        if (bandNode is not null)
-            bandNode.GetValue<string>().Should().Be("None");
     }
 
     [Fact]
@@ -541,6 +535,8 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         json["suggestedFieldValues"].Should().BeNull();
         json["confidence"].Should().BeNull();
         json["sentiment"].Should().BeNull();
+        // band serializes as "None" (non-null enum value; WhenWritingNull does not suppress it).
+        json["band"]!.GetValue<string>().Should().Be("None");
     }
 
     private static TypificationAiConfig AiConfig(
