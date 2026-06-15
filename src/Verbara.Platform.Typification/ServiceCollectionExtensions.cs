@@ -1,4 +1,6 @@
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Resolution;
 using Verbara.Platform.Typification.Validation;
@@ -33,6 +35,13 @@ public static class ServiceCollectionExtensions
         // fresh instance per resolve is correct; the suggestion endpoint resolves it
         // per-request via [FromServices], so each request gets a factory-rotated handler.
         services.AddTransient<ITypificationAiClassifier, DefaultTypificationAiClassifier>();
+
+        // B2 — suggestion metrics (singleton; owns its Meter + cached logger lifetime).
+        services.AddSingleton<TypificationAiMetrics>(
+            sp => new TypificationAiMetrics(
+                sp.GetService<IMeterFactory>(),
+                sp.GetService<ILoggerFactory>()));
+
         return services;
     }
 }

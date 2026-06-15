@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Conversations;
@@ -13,7 +14,6 @@ using Verbara.Platform.Typification.Validation;
 using Verbara.Sdk.Pro.Dialer.Campaign;
 using Verbara.Sdk.Pro.Dialer.Dispositions;
 using Verbara.Sdk.Pro.Licensing;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
 
@@ -216,6 +216,9 @@ internal static class ConversationEndpoints
     // (no schema / AI disabled / classifier degraded / below confidence / sentiment-gated)
     // so the client treats it uniformly as "no suggestion, fall back to manual". The route
     // is license-gated (AdvancedTypification + TypificationAi) at registration.
+    // B2: every non-null classification is persisted to IAiSuggestionStore BEFORE gating
+    // (so later reconciliation can cover even shadow-suppressed suggestions). When
+    // Mode == Shadow the record is saved but the response surfaces nothing.
     private static async Task<IResult> GetTypificationSuggestion(
         string id,
         HttpContext context,
@@ -223,6 +226,9 @@ internal static class ConversationEndpoints
         [FromServices] ITypificationResolver resolver,
         [FromServices] ITypificationAiClassifier classifier,
         [FromServices] IMessageStore messageStore,
+        [FromServices] IAiSuggestionStore aiSuggestions,
+        [FromServices] IClock clock,
+        [FromServices] TypificationAiMetrics aiMetrics,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -256,6 +262,41 @@ internal static class ConversationEndpoints
         // 4. Classify (never throws — degrades to null on no-text / LLM-failure / invalid).
         var classification = await classifier.ClassifyAsync(resolved.Schema, resolved.SubtreeRoot, conversation, transcript, ct);
         if (classification is null)
+            return Results.Ok(EmptySuggestion);
+
+        // B2 — persist every non-null classification, regardless of mode or gating.
+        // The leaf is always the last element of the validated NodePath.
+        var suggestedLeafNodeId = classification.NodePath[^1];
+        var record = new AiSuggestionRecord
+        {
+            Id = EntityId.New(),
+            TenantId = EntityId.From(tenantId.Value),
+            ConversationId = conversationId,
+            SchemaId = resolved.Schema.SchemaId,
+            SchemaVersion = resolved.Schema.Version,
+            SuggestedLeafNodeId = suggestedLeafNodeId,
+            SuggestedNodePath = classification.NodePath.Select(n => n.Value).ToArray(),
+            SuggestedFieldValues = classification.FieldValues,
+            Confidence = classification.Confidence,
+            Sentiment = classification.Sentiment,
+            ModelId = classification.ModelId,
+            PromptVersion = classification.PromptVersion,
+            CreatedAt = clock.UtcNow,
+            CommittedLeafNodeId = null,
+            Accepted = null,
+        };
+
+        await aiSuggestions.SaveAsync(record, ct);
+        aiMetrics.SuggestionMade.Add(1);
+        aiMetrics.LogSuggestionPersisted(
+            suggestionId: record.Id.Value,
+            conversationId: conversationId.Value,
+            leafNodeId: suggestedLeafNodeId.Value,
+            confidence: classification.Confidence,
+            mode: resolved.Schema.AiConfig.Mode.ToString());
+
+        // B2 — Shadow mode: persisted but surface nothing to the agent.
+        if (resolved.Schema.AiConfig.Mode == AiMode.Shadow)
             return Results.Ok(EmptySuggestion);
 
         var aiConfig = resolved.Schema.AiConfig;

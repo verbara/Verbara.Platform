@@ -164,6 +164,100 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         await AssertEmptySuggestionAsync(response);
     }
 
+    // ─── B2 — shadow mode persists without surfacing ────────────────────────────
+
+    [Fact]
+    public async Task GetTypificationSuggestion_ShouldPersistSuggestion_WhenModeIsShadow()
+    {
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.9,
+            Sentiment: "positive",
+            ModelId: "test-model",
+            PromptVersion: "p2b-1");
+
+        using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithMode(enabled: true, mode: AiMode.Shadow, suggestThreshold: 0.5));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        // Shadow mode must return HTTP 200 but surface nothing to the agent.
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+        await AssertEmptySuggestionAsync(response);
+
+        // The suggestion must have been persisted in the store.
+        using var scope = factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+        var saved = await store.GetLatestForConversationAsync(EntityId.From(s_tenantId.Value), convId, CancellationToken.None);
+        saved.Should().NotBeNull();
+        saved!.SuggestedLeafNodeId.Value.Should().Be(LeafNodeId);
+        saved.Confidence.Should().Be(0.9);
+        saved.ModelId.Should().Be("test-model");
+        saved.PromptVersion.Should().Be("p2b-1");
+        saved.CommittedLeafNodeId.Should().BeNull("reconciliation happens in B3");
+        saved.Accepted.Should().BeNull("reconciliation happens in B3");
+    }
+
+    [Fact]
+    public async Task GetTypificationSuggestion_ShouldPersistAndReturn_WhenModeIsSuggestOnly()
+    {
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string> { ["outcome_notes"] = "deal closed" },
+            Confidence: 0.85,
+            Sentiment: "neutral",
+            ModelId: "test-model",
+            PromptVersion: "p2b-1");
+
+        using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithMode(enabled: true, mode: AiMode.SuggestOnly, suggestThreshold: 0.5));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        // SuggestOnly above threshold: suggestion must be returned AND persisted.
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["suggestedNodePath"].Should().NotBeNull();
+        json["confidence"]!.GetValue<double>().Should().Be(0.85);
+
+        using var scope = factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+        var saved = await store.GetLatestForConversationAsync(EntityId.From(s_tenantId.Value), convId, CancellationToken.None);
+        saved.Should().NotBeNull();
+        saved!.SuggestedLeafNodeId.Value.Should().Be(LeafNodeId);
+    }
+
+    [Fact]
+    public async Task GetTypificationSuggestion_ShouldNotPersist_WhenClassifierReturnsNull()
+    {
+        using var factory = WithFakeClassifier(new FakeAiClassifier(null));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithMode(enabled: true, mode: AiMode.SuggestOnly, suggestThreshold: 0.5));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+        await AssertEmptySuggestionAsync(response);
+
+        // Null classification → nothing persisted.
+        using var scope = factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+        var saved = await store.GetLatestForConversationAsync(EntityId.From(s_tenantId.Value), convId, CancellationToken.None);
+        saved.Should().BeNull("classifier returned null so nothing should have been saved");
+    }
+
     // ─── D2 — typify provenance ──────────────────────────────────────────────────
 
     [Fact]
@@ -246,6 +340,17 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         {
             Enabled = enabled,
             Mode = AiMode.SuggestOnly,
+            SuggestThreshold = suggestThreshold,
+            SentimentGating = sentimentGating,
+            EntityFieldMap = new Dictionary<string, string>(),
+        };
+
+    private static TypificationAiConfig AiConfigWithMode(
+        bool enabled, AiMode mode, double suggestThreshold, bool sentimentGating = false) =>
+        new()
+        {
+            Enabled = enabled,
+            Mode = mode,
             SuggestThreshold = suggestThreshold,
             SentimentGating = sentimentGating,
             EntityFieldMap = new Dictionary<string, string>(),

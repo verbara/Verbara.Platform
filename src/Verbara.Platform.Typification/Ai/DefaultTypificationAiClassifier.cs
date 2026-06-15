@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Llm;
@@ -34,12 +35,20 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
     // Enough for a small JSON object with a handful of captured fields.
     private const int ClassifyMaxTokens = 400;
 
-    private readonly ILlmProvider _llm;
+    /// <summary>
+    /// Classifier prompt template version. Bump this constant whenever the system prompt
+    /// changes so that persisted <see cref="AiSuggestionRecord"/>s carry correct provenance.
+    /// </summary>
+    internal const string CurrentPromptVersion = "p2b-1";
 
-    public DefaultTypificationAiClassifier(ILlmProvider llm)
+    private readonly ILlmProvider _llm;
+    private readonly string _modelId;
+
+    public DefaultTypificationAiClassifier(ILlmProvider llm, IOptions<LlmProviderOptions>? options = null)
     {
         ArgumentNullException.ThrowIfNull(llm);
         _llm = llm;
+        _modelId = options?.Value.Model is { Length: > 0 } m ? m : "unknown";
     }
 
     public async Task<AiClassification?> ClassifyAsync(
@@ -100,7 +109,7 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
         if (parsed is null)
             return null;
 
-        return MapAndValidate(schema, subtreeRoot, parsed);
+        return MapAndValidate(schema, subtreeRoot, parsed, _modelId, CurrentPromptVersion);
     }
 
     /// <summary>
@@ -291,7 +300,8 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
     /// it. Unknown field keys are dropped; confidence is clamped to [0, 1].
     /// </summary>
     private static AiClassification? MapAndValidate(
-        TypificationSchema schema, EntityId? subtreeRoot, AiClassificationResult result)
+        TypificationSchema schema, EntityId? subtreeRoot, AiClassificationResult result,
+        string modelId, string promptVersion)
     {
         if (string.IsNullOrWhiteSpace(result.leafCode))
             return null;
@@ -335,7 +345,7 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
         var confidence = Math.Clamp(result.confidence, 0.0, 1.0);
         var sentiment = string.IsNullOrWhiteSpace(result.sentiment) ? null : result.sentiment;
 
-        return new AiClassification(path, fieldValues, confidence, sentiment);
+        return new AiClassification(path, fieldValues, confidence, sentiment, modelId, promptVersion);
     }
 
     /// <summary>Keeps only field values whose key exists in the schema (drops invented keys).</summary>
