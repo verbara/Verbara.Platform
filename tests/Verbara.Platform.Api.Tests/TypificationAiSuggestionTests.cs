@@ -175,7 +175,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
             Confidence: 0.9,
             Sentiment: "positive",
             ModelId: "test-model",
-            PromptVersion: "p2b-1");
+            PromptVersion: "p2b-2");
 
         using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
         using var client = AuthenticatedClient(factory);
@@ -198,7 +198,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         saved!.SuggestedLeafNodeId.Value.Should().Be(LeafNodeId);
         saved.Confidence.Should().Be(0.9);
         saved.ModelId.Should().Be("test-model");
-        saved.PromptVersion.Should().Be("p2b-1");
+        saved.PromptVersion.Should().Be("p2b-2");
         saved.CommittedLeafNodeId.Should().BeNull("reconciliation happens in B3");
         saved.Accepted.Should().BeNull("reconciliation happens in B3");
     }
@@ -212,7 +212,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
             Confidence: 0.85,
             Sentiment: "neutral",
             ModelId: "test-model",
-            PromptVersion: "p2b-1");
+            PromptVersion: "p2b-2");
 
         using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
         using var client = AuthenticatedClient(factory);
