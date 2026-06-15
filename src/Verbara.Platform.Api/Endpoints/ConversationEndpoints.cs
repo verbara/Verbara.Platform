@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
@@ -338,6 +339,7 @@ internal static class ConversationEndpoints
         [FromServices] ITypificationValidator validator,
         [FromServices] ITypificationSubmissionStore submissionStore,
         [FromServices] ITypificationProvenanceService provenanceService,
+        [FromServices] IAuditService auditService,
         CampaignStoreBase campaignStore,
         DispositionCodeStoreBase dispositionCodeStore,
         PlatformEventBus eventBus,
@@ -415,6 +417,35 @@ internal static class ConversationEndpoints
         };
 
         await submissionStore.SaveAsync(submission, ct);
+
+        // 4c. Emit AI-disposition audit entry (GDPR Art. 22 traceability — B4b).
+        //     Only when an AI suggestion was involved (accepted or overridden).
+        //     The committing actor is always the human agent in this phase; the AI model
+        //     details are recorded in the audit metadata as provenance, not as the actor.
+        if (provenance.AiSuggested)
+        {
+            var actorSubId = context.User.FindFirst("sub")?.Value ?? agentId.Value;
+            await auditService.RecordAsync(
+                tenantId,
+                category: "conversations",
+                action: "typification.ai_disposition",
+                severity: "info",
+                actorId: actorSubId,
+                actorType: "user",
+                targetId: conversationId.Value,
+                targetType: "Conversation",
+                metadata: new Dictionary<string, string>
+                {
+                    ["modelId"] = provenance.ModelId ?? string.Empty,
+                    ["promptVersion"] = provenance.PromptVersion ?? string.Empty,
+                    ["schemaVersion"] = provenance.SchemaVersion?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                    ["confidence"] = provenance.AiConfidence?.ToString("G", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                    ["suggestedLeafNodeId"] = provenance.SuggestedLeafNodeId?.Value ?? string.Empty,
+                    ["committedLeafNodeId"] = leafNodeId.Value,
+                    ["accepted"] = (provenance.AiAccepted ?? false).ToString().ToLowerInvariant(),
+                },
+                ct: ct);
+        }
 
         // 5. Dialer bridge (PRESERVED behavior): a leaf node may carry a DialerCode
         //    that maps to a Pro campaign DispositionCode for the outbound call attempt.

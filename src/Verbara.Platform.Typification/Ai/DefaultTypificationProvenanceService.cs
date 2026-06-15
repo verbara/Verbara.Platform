@@ -63,6 +63,9 @@ internal sealed class DefaultTypificationProvenanceService : ITypificationProven
             Source = aiAccepted ? SubmissionSource.AutoAi : SubmissionSource.Manual,
             SuggestedLeafNodeId = suggestion.SuggestedLeafNodeId,
             SuggestedNodePath = suggestion.SuggestedNodePath,
+            ModelId = suggestion.ModelId,
+            PromptVersion = suggestion.PromptVersion,
+            SchemaVersion = suggestion.SchemaVersion,
         };
     }
 }

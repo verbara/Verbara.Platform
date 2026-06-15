@@ -886,4 +886,226 @@ public sealed class TypifyEndpointTests : IDisposable
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
         json!["schema"]!["schemaId"]!.GetValue<string>().Should().Be(schemaId.Value);
     }
+
+    // ─── POST /typify — B4b AI-disposition audit entries ─────────────────────
+
+    /// <summary>
+    /// Stored suggestion leaf X; agent submits the same leaf X →
+    /// an "typification.ai_disposition" audit entry is written with accepted=true
+    /// and full AI provenance (modelId, promptVersion, schemaVersion, confidence).
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldWriteAiDispositionAudit_WhenSuggestionAccepted()
+    {
+        await SeedPublishedTenantSchemaAsync("B4b Audit Accepted");
+        var conv = await SeedConversationAsync();
+
+        // Seed a suggestion with known provenance fields.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var suggestionStore = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            await suggestionStore.SaveAsync(new AiSuggestionRecord
+            {
+                Id = EntityId.New(),
+                TenantId = EntityId.From(AuthenticatedPlatformApiFactory.TestTenantId),
+                ConversationId = conv.ConversationId,
+                SchemaId = EntityId.New(),
+                SchemaVersion = 3,
+                SuggestedLeafNodeId = EntityId.From(LeafNodeId),
+                SuggestedNodePath = [RootNodeId, LeafNodeId],
+                SuggestedFieldValues = new Dictionary<string, string>(),
+                Confidence = 0.88,
+                ModelId = "gpt-4o-mini",
+                PromptVersion = "v2",
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        // Agent commits the same leaf (accepts the AI suggestion).
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string> { [RequiredFieldKey] = "audit accepted" },
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Verify audit entry was written with AI provenance.
+        using var auditScope = _factory.Services.CreateScope();
+        var auditStore = auditScope.ServiceProvider.GetRequiredService<Verbara.Platform.Audit.IAuditStore>();
+        var hits = await auditStore.SearchAsync(
+            s_tenantId,
+            new Verbara.Platform.Audit.AuditQuery(Action: "typification.ai_disposition", Page: 1, PageSize: 50),
+            CancellationToken.None);
+
+        hits.Items.Should().ContainSingle(e => e.TargetId == conv.ConversationId.Value);
+        var entry = hits.Items.First(e => e.TargetId == conv.ConversationId.Value);
+        entry.Category.Should().Be("conversations");
+        entry.ActorType.Should().Be("user");
+        entry.TargetType.Should().Be("Conversation");
+        entry.Metadata.Should().NotBeNull();
+        entry.Metadata!["modelId"].Should().Be("gpt-4o-mini");
+        entry.Metadata["promptVersion"].Should().Be("v2");
+        entry.Metadata["schemaVersion"].Should().Be("3");
+        entry.Metadata["accepted"].Should().Be("true");
+        entry.Metadata["committedLeafNodeId"].Should().Be(LeafNodeId);
+        entry.Metadata["suggestedLeafNodeId"].Should().Be(LeafNodeId);
+        entry.IntegrityHash.Should().NotBeNullOrEmpty();
+    }
+
+    /// <summary>
+    /// Stored suggestion leaf X; agent commits leaf Y (override) →
+    /// audit entry with accepted=false, suggestedLeafNodeId=X, committedLeafNodeId=Y.
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldWriteAiDispositionAudit_WhenAgentOverrides()
+    {
+        const string overrideLeafId = "leaf-audit-override";
+
+        // Seed a schema with two leaves directly so we can control node IDs.
+        var schemaId = EntityId.New();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var schemaStore = scope.ServiceProvider.GetRequiredService<ITypificationSchemaStore>();
+            var bindingStore = scope.ServiceProvider.GetRequiredService<ISchemaBindingStore>();
+
+            await schemaStore.SaveAsync(new TypificationSchema
+            {
+                SchemaId = schemaId,
+                TenantId = s_tenantId,
+                Name = "B4b Audit Override",
+                Version = 1,
+                IsPublished = true,
+                MaxDepth = 5,
+                Nodes =
+                [
+                    new TypificationNode
+                    {
+                        NodeId = EntityId.From(RootNodeId),
+                        ParentNodeId = null,
+                        Label = "Root",
+                        Code = RootCode,
+                        SortOrder = 0,
+                        IsLeaf = false,
+                    },
+                    new TypificationNode
+                    {
+                        NodeId = EntityId.From(LeafNodeId),
+                        ParentNodeId = EntityId.From(RootNodeId),
+                        Label = "AI Suggested",
+                        Code = LeafCode,
+                        SortOrder = 0,
+                        IsLeaf = true,
+                        Leaf = new LeafOutcome { Category = TypificationCategory.Success, IsActive = true },
+                    },
+                    new TypificationNode
+                    {
+                        NodeId = EntityId.From(overrideLeafId),
+                        ParentNodeId = EntityId.From(RootNodeId),
+                        Label = "Agent Override",
+                        Code = "OVERRIDE",
+                        SortOrder = 1,
+                        IsLeaf = true,
+                        Leaf = new LeafOutcome { Category = TypificationCategory.Success, IsActive = true },
+                    },
+                ],
+                Fields = [],
+                DataDips = [],
+                AiConfig = new TypificationAiConfig { Enabled = false, SentimentGating = false, EntityFieldMap = new Dictionary<string, string>() },
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+
+            await bindingStore.SaveAsync(new SchemaBinding
+            {
+                BindingId = EntityId.New(),
+                TenantId = s_tenantId,
+                Scope = BindingScope.Tenant,
+                ScopeRef = null,
+                SchemaId = schemaId,
+                SubTreeRootNodeId = null,
+                Priority = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        var conv = await SeedConversationAsync();
+
+        // AI suggested LeafNodeId; agent will commit overrideLeafId.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var suggestionStore = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            await suggestionStore.SaveAsync(new AiSuggestionRecord
+            {
+                Id = EntityId.New(),
+                TenantId = EntityId.From(AuthenticatedPlatformApiFactory.TestTenantId),
+                ConversationId = conv.ConversationId,
+                SchemaId = schemaId,
+                SchemaVersion = 1,
+                SuggestedLeafNodeId = EntityId.From(LeafNodeId),
+                SuggestedNodePath = [RootNodeId, LeafNodeId],
+                SuggestedFieldValues = new Dictionary<string, string>(),
+                Confidence = 0.70,
+                ModelId = "gpt-4o-mini",
+                PromptVersion = "v1",
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        // Agent commits the override leaf.
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, overrideLeafId },
+            fieldValues = new Dictionary<string, string>(),
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var auditScope = _factory.Services.CreateScope();
+        var auditStore = auditScope.ServiceProvider.GetRequiredService<Verbara.Platform.Audit.IAuditStore>();
+        var hits = await auditStore.SearchAsync(
+            s_tenantId,
+            new Verbara.Platform.Audit.AuditQuery(Action: "typification.ai_disposition", Page: 1, PageSize: 50),
+            CancellationToken.None);
+
+        hits.Items.Should().ContainSingle(e => e.TargetId == conv.ConversationId.Value);
+        var entry = hits.Items.First(e => e.TargetId == conv.ConversationId.Value);
+        entry.Metadata.Should().NotBeNull();
+        entry.Metadata!["accepted"].Should().Be("false");
+        entry.Metadata["suggestedLeafNodeId"].Should().Be(LeafNodeId);
+        entry.Metadata["committedLeafNodeId"].Should().Be(overrideLeafId);
+        entry.IntegrityHash.Should().NotBeNullOrEmpty();
+    }
+
+    /// <summary>
+    /// Pure manual typify (no stored AI suggestion) → NO audit entry for
+    /// "typification.ai_disposition" is written.
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldNotWriteAiDispositionAudit_WhenNoStoredSuggestion()
+    {
+        await SeedPublishedTenantSchemaAsync("B4b Audit No Suggestion");
+        var conv = await SeedConversationAsync();
+
+        // No suggestion seeded — purely manual typify.
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string> { [RequiredFieldKey] = "manual no audit" },
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var auditScope = _factory.Services.CreateScope();
+        var auditStore = auditScope.ServiceProvider.GetRequiredService<Verbara.Platform.Audit.IAuditStore>();
+        var hits = await auditStore.SearchAsync(
+            s_tenantId,
+            new Verbara.Platform.Audit.AuditQuery(Action: "typification.ai_disposition", Page: 1, PageSize: 50),
+            CancellationToken.None);
+
+        // The conversation has no audit entry — no AI suggestion was involved.
+        hits.Items.Should().NotContain(e => e.TargetId == conv.ConversationId.Value);
+    }
 }

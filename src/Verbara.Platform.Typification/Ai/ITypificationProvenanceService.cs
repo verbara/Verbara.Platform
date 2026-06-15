@@ -42,4 +42,15 @@ public sealed record ProvenanceResult
     public SubmissionSource Source { get; init; }
     public EntityId? SuggestedLeafNodeId { get; init; }
     public IReadOnlyList<string>? SuggestedNodePath { get; init; }
+
+    // ── AI model provenance (B4b — populated only when AiSuggested = true) ──────
+
+    /// <summary>Model identifier from the stored suggestion (e.g. "gpt-4o-mini").</summary>
+    public string? ModelId { get; init; }
+
+    /// <summary>Prompt template version from the stored suggestion.</summary>
+    public string? PromptVersion { get; init; }
+
+    /// <summary>Schema version at suggestion time from the stored suggestion.</summary>
+    public int? SchemaVersion { get; init; }
 }

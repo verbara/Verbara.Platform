@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Verbara.Platform.Core;
 
 namespace Verbara.Platform.Audit;
@@ -41,6 +43,8 @@ public sealed class DefaultAuditService : IAuditService
         ArgumentException.ThrowIfNullOrWhiteSpace(actorId);
         ArgumentException.ThrowIfNullOrWhiteSpace(actorType);
 
+        var occurredAt = _clock.UtcNow;
+
         var entry = new AuditEntry
         {
             EntryId = EntityId.New(),
@@ -55,7 +59,8 @@ public sealed class DefaultAuditService : IAuditService
             CorrelationId = correlationId,
             Changes = changes,
             Metadata = metadata,
-            OccurredAt = _clock.UtcNow,
+            OccurredAt = occurredAt,
+            IntegrityHash = ComputeIntegrityHash(tenantId, actorType, actorId, action, targetType, targetId, occurredAt, metadata),
         };
 
         return _store.SaveAsync(entry, ct);
@@ -89,6 +94,63 @@ public sealed class DefaultAuditService : IAuditService
             ct: ct);
     }
 #pragma warning restore CS0618
+
+    /// <summary>
+    /// Computes a deterministic SHA-256 (hex) integrity hash over the entry's canonical
+    /// identifying fields. Metadata keys are sorted alphabetically so the hash is stable
+    /// regardless of insertion order. If a field is null it contributes an empty segment
+    /// so the canonical form never collides across field positions.
+    /// </summary>
+    private static string ComputeIntegrityHash(
+        TenantId tenantId,
+        string actorType,
+        string actorId,
+        string action,
+        string? targetType,
+        string? targetId,
+        DateTimeOffset occurredAt,
+        IReadOnlyDictionary<string, string>? metadata)
+    {
+        // Canonical form: pipe-delimited, fixed field order, metadata as sorted k=v pairs.
+        var sb = new StringBuilder(256);
+        sb.Append(tenantId.Value);
+        sb.Append('|');
+        sb.Append(actorType);
+        sb.Append('|');
+        sb.Append(actorId);
+        sb.Append('|');
+        sb.Append(action);
+        sb.Append('|');
+        sb.Append(targetType ?? string.Empty);
+        sb.Append('|');
+        sb.Append(targetId ?? string.Empty);
+        sb.Append('|');
+        sb.Append(occurredAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+
+        if (metadata is { Count: > 0 })
+        {
+            var keys = new string[metadata.Count];
+            var i = 0;
+            foreach (var k in metadata.Keys)
+                keys[i++] = k;
+            Array.Sort(keys, StringComparer.Ordinal);
+
+            sb.Append('|');
+            var first = true;
+            foreach (var k in keys)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append(k);
+                sb.Append('=');
+                sb.Append(metadata[k]);
+            }
+        }
+
+        var input = Encoding.UTF8.GetBytes(sb.ToString());
+        var hash = SHA256.HashData(input);
+        return Convert.ToHexStringLower(hash);
+    }
 
     private static string InferCategory(string action) => action switch
     {

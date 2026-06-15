@@ -503,3 +503,92 @@ public class AuditEntryTests
         entry.Metadata.Should().BeNull();
     }
 }
+
+public class DefaultAuditServiceIntegrityHashTests
+{
+    private static readonly TenantId Tenant1 = new("tenant-1");
+    private static readonly DateTimeOffset FixedNow = new(2026, 1, 15, 10, 0, 0, TimeSpan.Zero);
+
+    private static (DefaultAuditService Service, List<AuditEntry> Captured) Build()
+    {
+        var captured = new List<AuditEntry>();
+        var store = Substitute.For<IAuditStore>();
+        store.SaveAsync(Arg.Do<AuditEntry>(e => captured.Add(e)), Arg.Any<CancellationToken>())
+             .Returns(Task.CompletedTask);
+
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(FixedNow);
+
+        var service = new DefaultAuditService(store, clock);
+        return (service, captured);
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldHaveDeterministicIntegrityHash_WhenRecorded()
+    {
+        // Two identical RecordAsync calls (same clock, same fields) must produce the
+        // same hash — the hash is a pure function of the identifying fields.
+        var (service, captured) = Build();
+
+        await service.RecordAsync(
+            Tenant1, "conversations", "typification.ai_disposition", "info",
+            actorId: "user-42", actorType: "user",
+            targetId: "conv-1", targetType: "Conversation",
+            metadata: new Dictionary<string, string> { ["confidence"] = "0.92", ["accepted"] = "true" },
+            ct: CancellationToken.None);
+
+        await service.RecordAsync(
+            Tenant1, "conversations", "typification.ai_disposition", "info",
+            actorId: "user-42", actorType: "user",
+            targetId: "conv-1", targetType: "Conversation",
+            metadata: new Dictionary<string, string> { ["confidence"] = "0.92", ["accepted"] = "true" },
+            ct: CancellationToken.None);
+
+        captured.Should().HaveCount(2);
+        captured[0].IntegrityHash.Should().NotBeNullOrEmpty();
+        captured[1].IntegrityHash.Should().NotBeNullOrEmpty();
+        // Same logical entry → identical hash.
+        captured[0].IntegrityHash.Should().Be(captured[1].IntegrityHash);
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldHaveDifferentIntegrityHash_WhenFieldChanges()
+    {
+        var (service, captured) = Build();
+
+        await service.RecordAsync(
+            Tenant1, "conversations", "typification.ai_disposition", "info",
+            actorId: "user-42", actorType: "user",
+            targetId: "conv-1", targetType: "Conversation",
+            ct: CancellationToken.None);
+
+        // Change only the targetId — hash must differ.
+        await service.RecordAsync(
+            Tenant1, "conversations", "typification.ai_disposition", "info",
+            actorId: "user-42", actorType: "user",
+            targetId: "conv-2", targetType: "Conversation",
+            ct: CancellationToken.None);
+
+        captured.Should().HaveCount(2);
+        captured[0].IntegrityHash.Should().NotBeNullOrEmpty();
+        captured[1].IntegrityHash.Should().NotBeNullOrEmpty();
+        captured[0].IntegrityHash.Should().NotBe(captured[1].IntegrityHash);
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldHaveNonNullIntegrityHash_ForAllEntries()
+    {
+        var (service, captured) = Build();
+
+        await service.RecordAsync(
+            Tenant1, "auth", "login.success", "info",
+            actorId: "user-99", actorType: "user",
+            ct: CancellationToken.None);
+
+        captured.Should().ContainSingle();
+        captured[0].IntegrityHash.Should().NotBeNull();
+        // Lowercase hex SHA-256 is always 64 characters.
+        captured[0].IntegrityHash!.Length.Should().Be(64);
+        captured[0].IntegrityHash.Should().MatchRegex("^[0-9a-f]{64}$");
+    }
+}
