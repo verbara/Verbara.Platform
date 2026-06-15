@@ -21,8 +21,10 @@ namespace Verbara.Platform.Typification.Ai;
 /// to prevent leaks in test or recycled-DI scenarios.
 /// </para>
 /// <para>
-/// Counters <c>suggestion.accepted</c> and <c>suggestion.overridden</c> are reserved here
-/// but not yet incremented — they will be wired in task B3 (provenance reconciliation).
+/// <c>suggestion.made</c> is incremented at suggestion time; <c>suggestion.accepted</c> and
+/// <c>suggestion.overridden</c> are incremented at wrap-up by the provenance reconciliation
+/// (<c>DefaultTypificationProvenanceService</c>) when an agent's committed leaf matches or
+/// differs from the stored suggestion.
 /// </para>
 /// </remarks>
 public sealed partial class TypificationAiMetrics : IDisposable
@@ -41,12 +43,14 @@ public sealed partial class TypificationAiMetrics : IDisposable
     public Counter<long> SuggestionMade { get; }
 
     /// <summary>
-    /// Suggestions accepted verbatim by an agent (B3 — reserved, not yet incremented).
+    /// Suggestions whose committed leaf matched the stored AI suggestion (incremented during
+    /// wrap-up provenance reconciliation).
     /// </summary>
     public Counter<long> SuggestionAccepted { get; }
 
     /// <summary>
-    /// Suggestions where the agent chose a different leaf (B3 — reserved, not yet incremented).
+    /// Suggestions where the agent committed a different leaf than the AI suggested (incremented
+    /// during wrap-up provenance reconciliation).
     /// </summary>
     public Counter<long> SuggestionOverridden { get; }
 
