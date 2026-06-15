@@ -72,9 +72,18 @@ public sealed partial class TypificationAiMetrics : IDisposable
     // ─── Instance log helper (uses pre-cached logger) ───────────────────────────
 
     /// <summary>
-    /// Emits EventId 6310 "suggestion persisted" at Debug level using the pre-cached logger
-    /// so call sites do not need to allocate or pass an <see cref="ILogger"/>.
+    /// Emits EventId 6310 "suggestion persisted" at Debug level using the pre-cached logger.
     /// </summary>
+    /// <remarks>
+    /// <strong>Intentional deviation from <c>LlmMetrics</c>:</strong> <c>LlmMetrics</c> exposes
+    /// <c>internal static partial</c> <c>[LoggerMessage]</c> methods and the consumer owns the
+    /// <see cref="ILogger"/>. Here the metrics class itself owns the logger (resolved once from
+    /// <c>ILoggerFactory</c> in the ctor) and wraps the source-generated static core. This is the
+    /// natural choice because <c>TypificationAiMetrics</c> is a DI singleton (the obvious owner of a
+    /// single cached logger) and it keeps the minimal-API handler from taking yet another
+    /// <c>[FromServices] ILogger</c> parameter (the handler is already near the parameter-count
+    /// threshold — see the B3/C1 extraction note). Both patterns are AOT-safe via source-gen.
+    /// </remarks>
     public void LogSuggestionPersisted(
         string suggestionId,
         string conversationId,
