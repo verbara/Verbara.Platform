@@ -85,6 +85,47 @@ public sealed class TypificationAiConfigTests
     }
 
     [Fact]
+    public void AiConfig_ShouldDefaultPiiPolicyToDenyAll()
+    {
+        var config = new TypificationAiConfig { EntityFieldMap = new Dictionary<string, string>() };
+
+        config.PiiPolicy.Should().BeSameAs(Verbara.Platform.Typification.Ai.PiiPolicy.DenyAll);
+        config.PiiPolicy.AllowStore.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AiConfig_ShouldRoundTripPiiPolicyAllowStore_ThroughJson()
+    {
+        var original = new TypificationAiConfig
+        {
+            EntityFieldMap = new Dictionary<string, string>(),
+            PiiPolicy = new Verbara.Platform.Typification.Ai.PiiPolicy
+            {
+                AllowStore = new HashSet<Verbara.Platform.Typification.Ai.PiiType>
+                {
+                    Verbara.Platform.Typification.Ai.PiiType.Email,
+                    Verbara.Platform.Typification.Ai.PiiType.Phone,
+                },
+            },
+        };
+
+        var json = JsonSerializer.Serialize(original, AiConfigTestContext.Default.TypificationAiConfig);
+
+        // The allow-list types serialize as their enum NAMES, not positional integers.
+        json.Should().Contain("Email");
+        json.Should().Contain("Phone");
+
+        var restored = JsonSerializer.Deserialize(json, AiConfigTestContext.Default.TypificationAiConfig);
+
+        restored.Should().NotBeNull();
+        restored!.PiiPolicy.AllowStore.Should().BeEquivalentTo(new[]
+        {
+            Verbara.Platform.Typification.Ai.PiiType.Email,
+            Verbara.Platform.Typification.Ai.PiiType.Phone,
+        });
+    }
+
+    [Fact]
     public void AiConfig_ShouldRoundTripNullDailyTokenBudget()
     {
         var original = new TypificationAiConfig

@@ -334,6 +334,122 @@ public sealed class DefaultTypificationAiClassifierTests
         lines.Should().NotContain(l => l.StartsWith("System:", StringComparison.Ordinal));
     }
 
+    // ---------- D2: entity extraction + EntityFieldMap remap + PII screen ----------
+
+    [Fact]
+    public async Task ClassifyAsync_ShouldRemapEntityNameToFieldKey_WhenEntityFieldMapMatches()
+    {
+        // The model is told to extract the "order_ref" entity; the schema field Key is
+        // "order_id". EntityFieldMap maps entity name → field Key, so the returned
+        // "order_ref" value must land under "order_id".
+        var sut = ClassifierReturning("""
+            {"leafCode":"GINE","confidence":0.9,"fields":{"order_ref":"ORD-555"}}
+            """);
+        var schema = Schema(
+            fields: WithField("order_id"),
+            entityFieldMap: new Dictionary<string, string> { ["order_ref"] = "order_id" });
+
+        var result = await sut.ClassifyAsync(schema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.FieldValues.Should().ContainKey("order_id").WhoseValue.Should().Be("ORD-555");
+        result.FieldValues.Should().NotContainKey("order_ref");
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_ShouldPreferExplicitFieldKey_WhenBothEntityNameAndFieldKeyReturned()
+    {
+        // Both the entity name ("order_ref") and the direct field Key ("order_id") are
+        // present. Explicit field-Key value wins — an entity must not overwrite a direct
+        // field value (the safer precedence).
+        var sut = ClassifierReturning("""
+            {"leafCode":"GINE","confidence":0.9,
+             "fields":{"order_ref":"FROM-ENTITY","order_id":"FROM-FIELD"}}
+            """);
+        var schema = Schema(
+            fields: WithField("order_id"),
+            entityFieldMap: new Dictionary<string, string> { ["order_ref"] = "order_id" });
+
+        var result = await sut.ClassifyAsync(schema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.FieldValues.Should().ContainKey("order_id").WhoseValue.Should().Be("FROM-FIELD");
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_ShouldPiiScreenExtractedField_WhenPolicyDeniesType()
+    {
+        // Default PiiPolicy.DenyAll → the extracted email is masked.
+        var sut = ClassifierReturning("""
+            {"leafCode":"GINE","confidence":0.9,"fields":{"customer_email":"john@example.com"}}
+            """);
+        var schema = Schema(fields: WithField("customer_email"));
+
+        var result = await sut.ClassifyAsync(schema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.FieldValues.Should().ContainKey("customer_email").WhoseValue.Should().Be("[EMAIL]");
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_ShouldPassPiiField_WhenTypeAllowListed()
+    {
+        // The tenant allow-lists Email → the extracted email passes through unmasked.
+        var sut = ClassifierReturning("""
+            {"leafCode":"GINE","confidence":0.9,"fields":{"customer_email":"john@example.com"}}
+            """);
+        var schema = Schema(
+            fields: WithField("customer_email"),
+            piiPolicy: new PiiPolicy { AllowStore = new HashSet<PiiType> { PiiType.Email } });
+
+        var result = await sut.ClassifyAsync(schema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.FieldValues.Should().ContainKey("customer_email").WhoseValue.Should().Be("john@example.com");
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_ShouldScaleMaxTokens_WithFieldCount()
+    {
+        // Two renders: zero fields vs N fields. MaxTokens must grow with the candidate
+        // field count and stay capped at ≤ 1500.
+        var zeroFieldProvider = new CapturingLlmProvider("""{"leafCode":"GINE","confidence":0.9}""");
+        var manyFieldProvider = new CapturingLlmProvider("""{"leafCode":"GINE","confidence":0.9}""");
+
+        var zeroFieldSchema = Schema();
+        var manyFieldSchema = Schema(fields: ManyFields(8));
+
+        await new DefaultTypificationAiClassifier(zeroFieldProvider)
+            .ClassifyAsync(zeroFieldSchema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+        await new DefaultTypificationAiClassifier(manyFieldProvider)
+            .ClassifyAsync(manyFieldSchema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+
+        zeroFieldProvider.LastRequest.Should().NotBeNull();
+        manyFieldProvider.LastRequest.Should().NotBeNull();
+
+        manyFieldProvider.LastRequest!.MaxTokens.Should().BeGreaterThan(zeroFieldProvider.LastRequest!.MaxTokens);
+        manyFieldProvider.LastRequest!.MaxTokens.Should().BeLessOrEqualTo(1500);
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_ShouldRequestEntityExtraction_WhenEntityFieldMapPresent()
+    {
+        var capturing = new CapturingLlmProvider("""{"leafCode":"GINE","confidence":0.9}""");
+        var sut = new DefaultTypificationAiClassifier(capturing);
+        var schema = Schema(
+            fields: WithField("order_id"),
+            entityFieldMap: new Dictionary<string, string> { ["order_ref"] = "order_id" });
+
+        await sut.ClassifyAsync(schema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+
+        capturing.LastRequest.Should().NotBeNull();
+        var systemContent = capturing.LastRequest!.Messages[0].Content;
+
+        systemContent.Should().Contain("ENTITY EXTRACTION");
+        systemContent.Should().Contain("order_id");
+        systemContent.Should().Contain("order_ref");
+    }
+
     [Fact]
     public async Task ClassifyAsync_ShouldMapByStableCode_RegardlessOfLabelLanguage()
     {
@@ -484,7 +600,10 @@ public sealed class DefaultTypificationAiClassifierTests
         },
     ];
 
-    private static TypificationSchema Schema(IReadOnlyList<TypificationField>? fields = null) =>
+    private static TypificationSchema Schema(
+        IReadOnlyList<TypificationField>? fields = null,
+        IReadOnlyDictionary<string, string>? entityFieldMap = null,
+        PiiPolicy? piiPolicy = null) =>
         new()
         {
             SchemaId = EntityId.New(),
@@ -495,8 +614,40 @@ public sealed class DefaultTypificationAiClassifierTests
             Nodes = CascadeNodes(),
             Fields = fields ?? [],
             DataDips = [],
-            AiConfig = new TypificationAiConfig { EntityFieldMap = new Dictionary<string, string>() },
+            AiConfig = new TypificationAiConfig
+            {
+                EntityFieldMap = entityFieldMap ?? new Dictionary<string, string>(),
+                PiiPolicy = piiPolicy ?? PiiPolicy.DenyAll,
+            },
         };
+
+    private static TypificationField[] WithField(string key) =>
+    [
+        new TypificationField
+        {
+            FieldId = EntityId.New(),
+            Key = key,
+            Label = key,
+            Type = FieldType.Text,
+        },
+    ];
+
+    private static TypificationField[] ManyFields(int count)
+    {
+        var fields = new TypificationField[count];
+        for (var i = 0; i < count; i++)
+        {
+            fields[i] = new TypificationField
+            {
+                FieldId = EntityId.New(),
+                Key = "field_" + i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Label = "Field " + i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Type = FieldType.Text,
+            };
+        }
+
+        return fields;
+    }
 
     /// <summary>A fake provider that always returns canned content (the classifier prompt is irrelevant).</summary>
     private sealed class FakeLlmProvider(string content) : ILlmProvider

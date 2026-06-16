@@ -1,3 +1,5 @@
+using Verbara.Platform.Typification.Ai;
+
 namespace Verbara.Platform.Typification;
 
 /// <summary>
@@ -51,4 +53,12 @@ public sealed record TypificationAiConfig
 
     /// <summary>AI entity name → field <c>Key</c>.</summary>
     public required IReadOnlyDictionary<string, string> EntityFieldMap { get; init; }
+
+    /// <summary>
+    /// PII allow-list applied to AI-extracted field values before they are surfaced/stored.
+    /// Default <see cref="PiiPolicy.DenyAll"/> = mask all detected PII (card/national-id/phone/email);
+    /// admins opt specific types in via the schema designer (D4). Screening is also re-applied on the
+    /// write path (D3) as defense-in-depth.
+    /// </summary>
+    public PiiPolicy PiiPolicy { get; init; } = PiiPolicy.DenyAll;
 }

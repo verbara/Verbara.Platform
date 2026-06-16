@@ -33,8 +33,12 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
     // Low temperature: classification is a deterministic mapping task, not creative.
     private const double ClassifyTemperature = 0.1;
 
-    // Enough for a small JSON object with a handful of captured fields.
-    private const int ClassifyMaxTokens = 400;
+    // Response-token budget scales with the candidate field count: a richer FIELDS catalog
+    // (and entity extraction) lets the model emit more captured values, so it needs more room.
+    // maxTokens = min(BaseMaxTokens + PerFieldTokens * Fields.Count, MaxTokensCap).
+    private const int BaseMaxTokens = 400;   // floor — enough for leafCode + confidence + sentiment.
+    private const int PerFieldTokens = 40;   // headroom per capturable field value.
+    private const int MaxTokensCap = 1500;   // ceiling — bound cost even for very large schemas.
 
     /// <summary>
     /// Classifier prompt template version. Bump this constant whenever the system prompt
@@ -95,6 +99,9 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
         var fencedTranscript = string.Concat(
             TranscriptFenceToken, "\n", transcriptText, "\n", TranscriptFenceToken);
 
+        // Scale the response-token budget with the candidate field count (capped).
+        var maxTokens = Math.Min(BaseMaxTokens + PerFieldTokens * schema.Fields.Count, MaxTokensCap);
+
         var request = new LlmRequest(
             Messages:
             [
@@ -102,7 +109,7 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
                 new LlmMessage("user", fencedTranscript),
             ],
             Temperature: ClassifyTemperature,
-            MaxTokens: ClassifyMaxTokens);
+            MaxTokens: maxTokens);
 
         LlmResponse response;
         try
@@ -309,6 +316,22 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
             }
         }
 
+        // Entity-extraction directive: when the schema maps named conversational entities to
+        // capture fields, tell the model which entity feeds which field Key. The FIELDS catalog
+        // above already lists the field Keys; this binds an entity name to each target field.
+        if (schema.AiConfig.EntityFieldMap.Count > 0)
+        {
+            sb.Append("\nENTITY EXTRACTION — also populate these fields from the conversation when present:\n");
+            foreach (var (entityName, fieldKey) in schema.AiConfig.EntityFieldMap)
+            {
+                sb.Append("- field \"")
+                  .Append(fieldKey)
+                  .Append("\" ← extract the \"")
+                  .Append(entityName)
+                  .Append("\" from the conversation\n");
+            }
+        }
+
         sb.Append(
             "\nRespond with ONLY a JSON object: " +
             "{\"leafCode\": \"<one of the codes>\", \"confidence\": <0.0-1.0>, " +
@@ -425,16 +448,31 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
         if (subtreeRoot is { } root && !path.Contains(root))
             return null;
 
-        var fieldValues = FilterKnownFields(schema, result.fields);
+        var fieldValues = FilterKnownFields(schema, schema.AiConfig, result.fields);
         var confidence = Math.Clamp(result.confidence, 0.0, 1.0);
         var sentiment = string.IsNullOrWhiteSpace(result.sentiment) ? null : result.sentiment;
 
         return new AiClassification(path, fieldValues, confidence, sentiment, modelId, promptVersion);
     }
 
-    /// <summary>Keeps only field values whose key exists in the schema (drops invented keys).</summary>
+    /// <summary>
+    /// Resolves the model's returned <c>fields</c> into validated field values, in three
+    /// stages:
+    /// <list type="number">
+    /// <item><b>EntityFieldMap remap:</b> a returned key that matches an entity name (the
+    /// map's KEY) is moved under the mapped field Key (the map's VALUE). Precedence —
+    /// <i>an explicit field-Key value always wins</i>: an entity-name value is only used
+    /// when the target field Key was not also returned directly, so an extracted entity can
+    /// never overwrite a direct field value (the safer choice).</item>
+    /// <item><b>Allow-list:</b> keep only keys that are real schema field Keys (invented
+    /// keys are dropped, mirroring the prior behavior).</item>
+    /// <item><b>PII screen:</b> every surviving value is screened via
+    /// <see cref="PiiScreen.Apply"/> under the schema's <see cref="PiiPolicy"/>; the
+    /// (possibly masked) value is stored. D3 re-screens on the write path (defense-in-depth).</item>
+    /// </list>
+    /// </summary>
     private static Dictionary<string, string> FilterKnownFields(
-        TypificationSchema schema, IReadOnlyDictionary<string, string>? fields)
+        TypificationSchema schema, TypificationAiConfig aiConfig, IReadOnlyDictionary<string, string>? fields)
     {
         if (fields is null || fields.Count == 0)
             return new Dictionary<string, string>(0, StringComparer.Ordinal);
@@ -443,11 +481,44 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
         foreach (var field in schema.Fields)
             knownKeys.Add(field.Key);
 
-        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Stage 1 — remap entity names to field Keys. Explicit field-Key values take
+        // precedence: copy direct field-Key values first, then fill any still-empty mapped
+        // field Key from its entity-name source (never overwriting a direct value).
+        var remapped = new Dictionary<string, string>(fields.Count, StringComparer.Ordinal);
+        var entityMap = aiConfig.EntityFieldMap;
         foreach (var (key, value) in fields)
         {
-            if (key is not null && value is not null && knownKeys.Contains(key))
-                values[key] = value;
+            if (key is null || value is null)
+                continue;
+
+            // An entity-name key is remapped, not kept under its own name; defer to stage 1b.
+            if (entityMap.ContainsKey(key))
+                continue;
+
+            remapped[key] = value;
+        }
+
+        foreach (var (entityName, fieldKey) in entityMap)
+        {
+            if (fieldKey is null)
+                continue;
+
+            // Explicit field-Key value already present → entity must not overwrite it.
+            if (remapped.ContainsKey(fieldKey))
+                continue;
+
+            if (fields.TryGetValue(entityName, out var value) && value is not null)
+                remapped[fieldKey] = value;
+        }
+
+        // Stages 2 & 3 — allow-list known field Keys, then PII-screen each surviving value.
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in remapped)
+        {
+            if (!knownKeys.Contains(key))
+                continue;
+
+            values[key] = PiiScreen.Apply(value, aiConfig.PiiPolicy).Value;
         }
 
         return values;

@@ -22,8 +22,16 @@ namespace Verbara.Platform.Typification.Resolution;
 /// <see cref="TypificationField.PrefillSource"/> is a
 /// <see cref="PrefillSourceKind.Metadata"/> ref present in the conversation metadata,
 /// the value is projected keyed by the field's <see cref="TypificationField.Key"/>
-/// (matching the Web form's fieldValues keying). AiEntity/DataDip kinds (P2/P3) and
-/// absent keys are ignored.
+/// (matching the Web form's fieldValues keying). DataDip kinds (P3) and absent keys are
+/// ignored.
+/// </para>
+/// <para>
+/// <b>AI-entity prefill is NOT resolved here.</b> It is delivered via the AI suggestion
+/// path — the classifier's screened entity field values surfaced through
+/// <c>/typification-suggestion</c> — not this pure metadata resolver, which has no
+/// suggestion at GET-form time (the Web form fires the suggestion request only AFTER the
+/// form loads, then seeds those field values on Accept/AutoFill). Adding
+/// <see cref="PrefillSourceKind.AiEntity"/> resolution here would be a no-op at load time.
 /// </para>
 /// </summary>
 public sealed class DefaultTypificationPrefillResolver : ITypificationPrefillResolver
