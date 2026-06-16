@@ -395,9 +395,11 @@ internal static class TypificationEndpoints
             CreatedAt: s.CreatedAt,
             UpdatedAt: s.UpdatedAt);
 
-    // P2b — AiConfig round-trip with graduated bands. The EntityFieldMap (AI entity →
-    // field Key) is preserved server-side (empty on create, prior map on update) and is
-    // intentionally absent from the wire DTO until the map-editing surface ships.
+    // P2b — AiConfig round-trip with graduated bands.
+    // D4 — EntityFieldMap (AI entity → field Key) and PiiAllowStore (allow-listed PiiType
+    // names) are now emitted on the wire. PiiAllowStore is rendered in deterministic ordinal
+    // order for stable round-trips/tests; PiiPolicy is non-null in the domain (defaulted
+    // DenyAll), coalesced defensively here.
     private static AiConfigDto ToAiConfigDto(TypificationAiConfig c) =>
         new(
             Enabled: c.Enabled,
@@ -407,7 +409,12 @@ internal static class TypificationEndpoints
             AutonomousThreshold: c.AutonomousThreshold,
             Autonomous: c.Autonomous,
             SentimentGating: c.SentimentGating,
-            DailyTokenBudget: c.DailyTokenBudget);
+            DailyTokenBudget: c.DailyTokenBudget,
+            EntityFieldMap: c.EntityFieldMap,
+            PiiAllowStore: (c.PiiPolicy ?? PiiPolicy.DenyAll).AllowStore
+                .Select(t => t.ToString())
+                .OrderBy(s => s, StringComparer.Ordinal)
+                .ToArray());
 
     private static TypificationNodeDto ToNodeDto(TypificationNode n) =>
         new(
@@ -541,11 +548,14 @@ internal static class TypificationEndpoints
             EntityFieldMap = new Dictionary<string, string>(),
         };
 
-    // P2b — build the domain AiConfig from the optional request DTO, carrying forward
-    // the existing EntityFieldMap. An omitted DTO yields the disabled default. Unknown
-    // Mode strings fall back to Off (tolerant — AI config is optional layered metadata).
-    // Thresholds are clamped to [0, 1]: a value > 1 suppresses everything; < 0 never
-    // suppresses; both outcomes would be confusing ops mistakes rather than intent.
+    // P2b — build the domain AiConfig from the optional request DTO. An omitted DTO yields
+    // the disabled default (preserving the existing EntityFieldMap). Unknown Mode strings fall
+    // back to Off (tolerant — AI config is optional layered metadata). Thresholds are clamped
+    // to [0, 1]: a value > 1 suppresses everything; < 0 never suppresses; both outcomes would
+    // be confusing ops mistakes rather than intent.
+    // D4 — the wire is now authoritative for EntityFieldMap + PiiAllowStore: a provided
+    // EntityFieldMap wins, an omitted one preserves the existing map; PiiAllowStore parses to
+    // the PiiPolicy (null/omitted → DenyAll).
     private static TypificationAiConfig MapAiConfig(
         AiConfigDto? dto, IReadOnlyDictionary<string, string> existingEntityFieldMap)
     {
@@ -562,8 +572,28 @@ internal static class TypificationEndpoints
             Autonomous = dto.Autonomous,
             SentimentGating = dto.SentimentGating,
             DailyTokenBudget = dto.DailyTokenBudget,
-            EntityFieldMap = existingEntityFieldMap,
+            EntityFieldMap = dto.EntityFieldMap ?? existingEntityFieldMap,
+            PiiPolicy = ParsePiiPolicy(dto.PiiAllowStore),
         };
+    }
+
+    // D4 — map the wire PiiAllowStore (PiiType member names) to a domain PiiPolicy. A null
+    // list → DenyAll. Names are parsed case-insensitively (AOT-safe Enum.TryParse) into a
+    // HashSet; unknown names are tolerantly skipped (consistent with the other tolerant parses
+    // in this file). An empty list yields an empty set = DenyAll-equivalent.
+    private static PiiPolicy ParsePiiPolicy(IReadOnlyList<string>? names)
+    {
+        if (names is null)
+            return PiiPolicy.DenyAll;
+
+        var set = new HashSet<PiiType>();
+        foreach (var name in names)
+        {
+            if (Enum.TryParse<PiiType>(name, ignoreCase: true, out var t))
+                set.Add(t);
+        }
+
+        return new PiiPolicy { AllowStore = set };
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -669,8 +699,14 @@ internal sealed record TypificationSchemaDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt);
 
-// P2b — AI auto-disposition config with graduated bands. The EntityFieldMap (AI entity →
-// field Key) is preserved server-side and is intentionally absent from the wire DTO.
+// P2b — AI auto-disposition config with graduated bands.
+// D4 (P2b) — EntityFieldMap (AI entity name → field Key) and PiiAllowStore (the PiiType
+// member NAMES the tenant has allow-listed, e.g. ["Email","Phone"]) are now editable on the
+// wire so the Web schema designer can manage them. Both are nullable: an omitting client
+// preserves the existing EntityFieldMap and defaults PiiAllowStore to DenyAll (empty), the
+// same robustness pattern as the rest of the config. PiiAllowStore is a names array (not the
+// PiiPolicy object / PiiType enum) to keep the wire simple and the PiiPolicyJsonConverter
+// out of the API surface; MapAiConfig maps names ↔ PiiPolicy.
 internal sealed record AiConfigDto(
     bool Enabled,
     string Mode,
@@ -679,7 +715,9 @@ internal sealed record AiConfigDto(
     double AutonomousThreshold,
     bool Autonomous,
     bool SentimentGating,
-    long? DailyTokenBudget);
+    long? DailyTokenBudget,
+    IReadOnlyDictionary<string, string>? EntityFieldMap = null,
+    IReadOnlyList<string>? PiiAllowStore = null);
 
 internal sealed record TypificationNodeDto(
     string NodeId,

@@ -327,6 +327,87 @@ public sealed class TypificationEndpointTests : IDisposable
         schema!["aiConfig"]!["suggestThreshold"]!.GetValue<double>().Should().Be(expected);
     }
 
+    // ─── D4 — entityFieldMap + PII allow-list wire round-trip ─────────────────────
+
+    [Fact]
+    public async Task CreateSchema_ShouldPersistEntityFieldMap_WhenProvided()
+    {
+        var body = SchemaBodyWithAiConfig("With Entity Map", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+            entityFieldMap = new Dictionary<string, string> { ["email"] = "customer_email" },
+        });
+
+        var id = await CreateSchemaAsync(_client, body);
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        schema!["aiConfig"]!["entityFieldMap"]!["email"]!.GetValue<string>()
+            .Should().Be("customer_email");
+    }
+
+    [Fact]
+    public async Task CreateSchema_ShouldPersistPiiAllowStore_WhenProvided()
+    {
+        var body = SchemaBodyWithAiConfig("With PII Allow", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+            piiAllowStore = new List<string> { "Email" },
+        });
+
+        var id = await CreateSchemaAsync(_client, body);
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        var allow = schema!["aiConfig"]!["piiAllowStore"]!.AsArray()
+            .Select(n => n!.GetValue<string>());
+        allow.Should().Contain("Email");
+    }
+
+    [Fact]
+    public async Task CreateSchema_ShouldDefaultPiiAllowStoreEmpty_WhenOmitted()
+    {
+        var body = SchemaBodyWithAiConfig("No PII Allow", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+        });
+
+        var id = await CreateSchemaAsync(_client, body);
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        var ai = schema!["aiConfig"]!;
+        ai["piiAllowStore"]!.AsArray().Should().BeEmpty(because: "default policy is DenyAll");
+        ai["entityFieldMap"]!.AsObject().Should().BeEmpty(because: "no entity map on create");
+    }
+
     // ─── C4 — calibration-status endpoint + AutoFill/autonomous write guards ──────
 
     [Fact]
