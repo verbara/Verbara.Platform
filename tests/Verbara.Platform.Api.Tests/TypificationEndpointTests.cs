@@ -184,10 +184,13 @@ public sealed class TypificationEndpointTests : IDisposable
             schemaId,
             subtreeRootNodeId = (string?)null,
             priority = 0,
+            // SuggestOnly (not AutoFill): the E1 write-gate now rejects AutoFill on an
+            // uncalibrated schema, so a persisting round-trip test must stay in a band that
+            // doesn't trip the gate. AutoFill-rejection is covered by its own test below.
             aiConfigOverride = new
             {
                 enabled = true,
-                mode = "AutoFill",
+                mode = "SuggestOnly",
                 suggestThreshold = 0.6,
                 autoApplyThreshold = 0.85,
                 autonomousThreshold = 0.95,
@@ -207,8 +210,82 @@ public sealed class TypificationEndpointTests : IDisposable
         getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var fetched = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
         fetched!["aiConfigOverride"].Should().NotBeNull();
-        fetched["aiConfigOverride"]!["mode"]!.GetValue<string>().Should().Be("AutoFill");
+        fetched["aiConfigOverride"]!["mode"]!.GetValue<string>().Should().Be("SuggestOnly");
         fetched["aiConfigOverride"]!["enabled"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateBinding_ShouldReject_WhenOverrideAutonomousWithoutPermission()
+    {
+        // E1 gate-bypass closure: a per-binding AiConfigOverride must pass the SAME
+        // autonomous-permission gate as a schema's AiConfig. The default factory's API-key
+        // admin has no resolvable RBAC perms, so autonomous=true must 403. Mode stays
+        // SuggestOnly so ONLY the autonomous gate is exercised (not the AutoFill gate).
+        var schemaId = await CreateSchemaAsync(_client, ValidSchemaBody("Override Autonomous No Perm"));
+
+        var body = new
+        {
+            scope = "Tenant",
+            scopeRef = (string?)null,
+            schemaId,
+            subtreeRootNodeId = (string?)null,
+            priority = 0,
+            aiConfigOverride = new
+            {
+                enabled = true,
+                mode = "SuggestOnly",
+                suggestThreshold = 0.6,
+                autoApplyThreshold = 0.85,
+                autonomousThreshold = 0.95,
+                autonomous = true,
+                sentimentGating = true,
+                dailyTokenBudget = (long?)null,
+                entityFieldMap = new Dictionary<string, string>(),
+            },
+        };
+
+        var response = await _client.PostAsync("/api/admin/typification/bindings", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task CreateBinding_ShouldReject_WhenOverrideModeIsAutoFillWithoutCalibration()
+    {
+        // E1 gate-bypass closure: a per-binding AiConfigOverride must pass the SAME AutoFill
+        // calibration gate as a schema's AiConfig. A freshly-created schema has no published
+        // calibration, so an override with Mode=AutoFill must be rejected at write time (400).
+        var schemaId = await CreateSchemaAsync(_client, ValidSchemaBody("Override AutoFill Premature"));
+
+        var body = new
+        {
+            scope = "Tenant",
+            scopeRef = (string?)null,
+            schemaId,
+            subtreeRootNodeId = (string?)null,
+            priority = 0,
+            aiConfigOverride = new
+            {
+                enabled = true,
+                mode = "AutoFill",
+                suggestThreshold = 0.6,
+                autoApplyThreshold = 0.85,
+                autonomousThreshold = 0.95,
+                autonomous = false,
+                sentimentGating = true,
+                dailyTokenBudget = (long?)null,
+                entityFieldMap = new Dictionary<string, string>(),
+            },
+        };
+
+        var response = await _client.PostAsync("/api/admin/typification/bindings", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var error = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        error!["ok"]!.GetValue<bool>().Should().BeFalse();
+        var firstError = error["errors"]!.AsArray()[0]!;
+        firstError["field"]!.GetValue<string>().Should().Be("aiConfig.mode");
+        firstError["message"]!.GetValue<string>().Should().Contain("calibration");
     }
 
     [Fact]

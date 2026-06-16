@@ -283,6 +283,8 @@ internal static class TypificationEndpoints
         [FromBody] CreateBindingRequest body,
         [FromServices] ISchemaBindingStore store,
         [FromServices] IAuditService audit,
+        [FromServices] PermissionResolver permissionResolver,
+        [FromServices] ITypificationCalibration calibration,
         IClock clock,
         CancellationToken ct)
     {
@@ -298,6 +300,21 @@ internal static class TypificationEndpoints
                 Ok: false,
                 Errors: [new PublishErrorDto("scopeRef", $"ScopeRef is required for scope '{scope}'.")]));
 
+        var aiConfigOverride = MapBindingAiConfigOverride(body.AiConfigOverride);
+
+        // E1 — close the gate-bypass: a per-binding AI override is subject to the SAME write-time
+        // guards as a schema's AiConfig (autonomous permission + AutoFill calibration). Calibration
+        // keys on the override's target schema (body.SchemaId) — the schema this override pilots.
+        // Skipped entirely when there is no override (no behavior change for non-AI bindings); the
+        // gate runs BEFORE persist/audit so a rejection neither saves nor records the binding.
+        if (aiConfigOverride is not null)
+        {
+            var gate = await ValidateAiConfigWriteAsync(
+                context, permissionResolver, calibration, tenantId, EntityId.From(body.SchemaId), aiConfigOverride, ct);
+            if (gate is not null)
+                return gate;
+        }
+
         var binding = new SchemaBinding
         {
             BindingId = EntityId.New(),
@@ -307,7 +324,7 @@ internal static class TypificationEndpoints
             SchemaId = EntityId.From(body.SchemaId),
             SubTreeRootNodeId = body.SubtreeRootNodeId is { Length: > 0 } s ? EntityId.From(s) : null,
             Priority = body.Priority,
-            AiConfigOverride = MapBindingAiConfigOverride(body.AiConfigOverride),
+            AiConfigOverride = aiConfigOverride,
             CreatedAt = clock.UtcNow,
         };
 
@@ -325,6 +342,8 @@ internal static class TypificationEndpoints
         [FromBody] UpdateBindingRequest body,
         [FromServices] ISchemaBindingStore store,
         [FromServices] IAuditService audit,
+        [FromServices] PermissionResolver permissionResolver,
+        [FromServices] ITypificationCalibration calibration,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -343,6 +362,20 @@ internal static class TypificationEndpoints
                 Ok: false,
                 Errors: [new PublishErrorDto("scopeRef", $"ScopeRef is required for scope '{scope}'.")]));
 
+        var aiConfigOverride = MapBindingAiConfigOverride(body.AiConfigOverride);
+
+        // E1 — close the gate-bypass: a per-binding AI override is subject to the SAME write-time
+        // guards as a schema's AiConfig (autonomous permission + AutoFill calibration). Calibration
+        // keys on the override's target schema (body.SchemaId). Skipped entirely when there is no
+        // override; runs BEFORE persist/audit so a rejection neither saves nor records the binding.
+        if (aiConfigOverride is not null)
+        {
+            var gate = await ValidateAiConfigWriteAsync(
+                context, permissionResolver, calibration, tenantId, EntityId.From(body.SchemaId), aiConfigOverride, ct);
+            if (gate is not null)
+                return gate;
+        }
+
         var updated = new SchemaBinding
         {
             BindingId = bindingId,
@@ -352,7 +385,7 @@ internal static class TypificationEndpoints
             SchemaId = EntityId.From(body.SchemaId),
             SubTreeRootNodeId = body.SubtreeRootNodeId is { Length: > 0 } s ? EntityId.From(s) : null,
             Priority = body.Priority,
-            AiConfigOverride = MapBindingAiConfigOverride(body.AiConfigOverride),
+            AiConfigOverride = aiConfigOverride,
             CreatedAt = existing.CreatedAt,
         };
 

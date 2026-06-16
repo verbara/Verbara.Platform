@@ -582,10 +582,19 @@ internal static class ConversationEndpoints
     /// Only free-text field values (Text/Textarea/Lookup) are screened via
     /// <see cref="PiiScreen.Apply(string, PiiPolicy?)"/> under the EFFECTIVE
     /// <see cref="TypificationAiConfig.PiiPolicy"/> (E1 — the binding override's policy when
-    /// present, else the schema's), so a per-binding override that TIGHTENS PII still drives
-    /// write-path screening; a <c>Phone</c> field legitimately holds a phone number and is left
-    /// untouched (masking it would break it). Entries whose key has no matching schema field,
+    /// present, else the schema's). A <c>Phone</c> field legitimately holds a phone number and is
+    /// left untouched (masking it would break it). Entries whose key has no matching schema field,
     /// and all non-free-text fields, are copied through unchanged.
+    /// <para>
+    /// E1 scope note (extraction is NOT override-aware): the classifier still EXTRACTS under the
+    /// SCHEMA's AiConfig (its EntityFieldMap + its extraction-time PII), so a per-binding override's
+    /// map / PII allow-list is NOT honored at extraction. The binding override's PiiPolicy drives the
+    /// WRITE-PATH re-screen (this method), and its band / mode drives suggestion gating — but a
+    /// TIGHTENING override does NOT re-mask at the suggestion SURFACE (only here at persist), and a
+    /// LOOSENING override over-masks at extraction (fail-safe: extraction-time masking under the
+    /// schema policy can only ever be more restrictive than a looser override would allow).
+    /// See "E1-ext (follow-up)" in docs/plans/active/2026-06-14-typification-p2b-autoapply-safe.md.
+    /// </para>
     /// </summary>
     private static Dictionary<string, string> ScreenFreeTextPii(
         TypificationSchema schema,

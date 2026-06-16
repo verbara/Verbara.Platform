@@ -499,6 +499,40 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         await AssertEmptySuggestionAsync(response);
     }
 
+    // ─── E1 — effective config (binding override wins over schema AiConfig) ──────
+
+    [Fact]
+    public async Task Suggestion_ShouldHonorBindingOverride_WhenOverrideDisablesAi()
+    {
+        // End-to-end E1 proof: the SCHEMA's AiConfig is enabled + SuggestOnly (would otherwise
+        // surface a high-confidence suggestion), but the BINDING's AiConfigOverride sets Mode=Off.
+        // The suggestion handler reads resolved.EffectiveAiConfig (override ?? schema), so it must
+        // see Mode=Off and return the empty suggestion — proving the consumer reads the EFFECTIVE
+        // config, NOT Schema.AiConfig. If it regressed to Schema.AiConfig, a suggestion would surface.
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.99,
+            Sentiment: "positive");
+
+        using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory,
+            // Schema AiConfig: enabled + SuggestOnly (would surface) — proves the override, not the
+            // schema, is what disables AI here.
+            AiConfigWithMode(enabled: true, mode: AiMode.SuggestOnly, suggestThreshold: 0.5),
+            // Binding override: AI Off → EffectiveAiConfig.Mode == Off → empty suggestion.
+            bindingAiConfigOverride: AiConfigWithMode(enabled: true, mode: AiMode.Off, suggestThreshold: 0.5));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await AssertEmptySuggestionAsync(response);
+    }
+
     // ─── D2 — typify provenance (B3 — server-authoritative) ─────────────────────
 
     /// <summary>
@@ -682,9 +716,16 @@ public sealed class TypificationAiSuggestionTests : IDisposable
     /// binding + an Active conversation directly into the factory's in-memory stores, and
     /// returns the conversation id. A required field is intentionally omitted — the schema
     /// has one Success-category leaf so the sentiment gate has something to suppress.
+    /// <para>
+    /// When <paramref name="bindingAiConfigOverride"/> is non-null it is stored on the binding's
+    /// <see cref="SchemaBinding.AiConfigOverride"/> so the resolver's <c>EffectiveAiConfig</c>
+    /// becomes the override (not the schema's AiConfig) — exercising the E1 effective-config path.
+    /// </para>
     /// </summary>
     private static async Task<EntityId> SeedSchemaAndConversationAsync(
-        WebApplicationFactory<Program> factory, TypificationAiConfig aiConfig)
+        WebApplicationFactory<Program> factory,
+        TypificationAiConfig aiConfig,
+        TypificationAiConfig? bindingAiConfigOverride = null)
     {
         var schemaId = EntityId.New();
         var convId = EntityId.New();
@@ -742,6 +783,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
                 SchemaId = schemaId,
                 SubTreeRootNodeId = null,
                 Priority = 10,
+                AiConfigOverride = bindingAiConfigOverride,
                 CreatedAt = DateTimeOffset.UtcNow,
             },
             CancellationToken.None);

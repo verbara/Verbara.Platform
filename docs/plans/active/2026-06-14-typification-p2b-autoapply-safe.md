@@ -274,6 +274,8 @@
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5 — commit:** `feat(typification): per-binding AI config override (single-queue pilots)`.
 
+**E1-ext (follow-up):** thread `EffectiveAiConfig` into `ClassifyAsync` so a binding override's EntityFieldMap + extraction-time PII are honored at extraction (today extraction uses the schema config; the override is honored at suggestion-gating + write-screen only, fail-safe). Deferred — not required for the pilot use case (mode/threshold override).
+
 ### Task E2: Multilingual hardening
 
 **Files:** Modify `Ai/DefaultTypificationAiClassifier.cs`; Test `TypificationMultilingualTests.cs`.
