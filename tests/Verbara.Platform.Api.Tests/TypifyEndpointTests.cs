@@ -782,6 +782,97 @@ public sealed class TypifyEndpointTests : IDisposable
         saved.SuggestedNodePath.Should().BeNull();
     }
 
+    // ─── POST /typify — D3 PII screen on the AI write path ─────────────────────
+
+    /// <summary>
+    /// A stored suggestion matches the committed leaf → Source=AutoAi, so the persisted
+    /// free-text field value is PII-screened (default DenyAll policy): the raw email is
+    /// replaced with the [EMAIL] token before storage (defense-in-depth re-screen at commit).
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldScreenPiiInFreeText_WhenDispositionIsAutoAi()
+    {
+        await SeedPublishedTenantSchemaAsync("D3 Screen AutoAi");
+        var conv = await SeedConversationAsync();
+
+        // Seed a suggestion for the same leaf the agent will commit → provenance derives AutoAi.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var suggestionStore = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            await suggestionStore.SaveAsync(new AiSuggestionRecord
+            {
+                Id = EntityId.New(),
+                TenantId = EntityId.From(AuthenticatedPlatformApiFactory.TestTenantId),
+                ConversationId = conv.ConversationId,
+                SchemaId = EntityId.New(),
+                SchemaVersion = 1,
+                SuggestedLeafNodeId = EntityId.From(LeafNodeId),
+                SuggestedNodePath = [RootNodeId, LeafNodeId],
+                SuggestedFieldValues = new Dictionary<string, string>(),
+                Confidence = 0.9,
+                ModelId = "gpt-4o-mini",
+                PromptVersion = "v1",
+                SurfacedBand = TypificationBand.Suggest,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string>
+            {
+                [RequiredFieldKey] = "contact me at john@example.com please",
+            },
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var scope2 = _factory.Services.CreateScope();
+        var store = scope2.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>();
+        var saved = await store.GetByConversationIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        saved.Should().NotBeNull();
+        saved!.Source.Should().Be(SubmissionSource.AutoAi);
+
+        // Email masked: token present, raw email absent.
+        saved.FieldValues[RequiredFieldKey].Should().Contain("[EMAIL]");
+        saved.FieldValues[RequiredFieldKey].Should().NotContain("john@example.com");
+    }
+
+    /// <summary>
+    /// No stored suggestion → Source=Manual, so human-captured free-text is persisted
+    /// UNMASKED — the PII screen only runs on the AI write path (current behavior preserved).
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldNotScreenFreeText_WhenDispositionIsManual()
+    {
+        await SeedPublishedTenantSchemaAsync("D3 No Screen Manual");
+        var conv = await SeedConversationAsync();
+
+        // No suggestion seeded → Source=Manual.
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string>
+            {
+                [RequiredFieldKey] = "contact me at john@example.com please",
+            },
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>();
+        var saved = await store.GetByConversationIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        saved.Should().NotBeNull();
+        saved!.Source.Should().Be(SubmissionSource.Manual);
+
+        // Human value persists verbatim — NOT screened.
+        saved.FieldValues[RequiredFieldKey].Should().Be("contact me at john@example.com please");
+    }
+
     [Fact]
     public async Task GetTypificationForm_ShouldNotBeLicenseGated_WhenTenantUnlicensed()
     {

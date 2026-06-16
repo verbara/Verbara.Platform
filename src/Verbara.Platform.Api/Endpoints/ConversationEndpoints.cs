@@ -398,9 +398,18 @@ internal static class ConversationEndpoints
         // 2. Map the selected node-path strings → EntityId list.
         var path = body.SelectedNodePath.Select(EntityId.From).ToList();
 
-        // 3. Server-authoritative validation of the submission FIRST — a validation
-        //    failure must NOT mutate or persist any conversation state.
-        var validation = validator.ValidateSubmission(schema, path, body.FieldValues);
+        // 3a. Derive server-authoritative AI provenance (B3) BEFORE validation so validation
+        //     is Source-aware (D3: AI free-text length cap). This is the read-only provenance
+        //     derivation only — NO state transition / persistence happens before validation.
+        //     Empty-path guard: only derive when a leaf exists; an empty path collapses to
+        //     Manual provenance (validation will reject the empty path below anyway).
+        var provenance = path.Count > 0
+            ? await provenanceService.DeriveAsync(tenantId, conversationId, path[^1], ct)
+            : new ProvenanceResult();
+
+        // 3b. Server-authoritative validation of the submission FIRST — a validation
+        //     failure must NOT mutate or persist any conversation state.
+        var validation = validator.ValidateSubmission(schema, path, body.FieldValues, provenance.Source);
         if (!validation.IsValid)
         {
             return Results.BadRequest(new TypifyErrorResponse(
@@ -422,10 +431,13 @@ internal static class ConversationEndpoints
 
         var leafNodeId = path[^1];
 
-        // 4a. Derive server-authoritative AI provenance (B3). Client-supplied AiSuggested /
-        //     AiAccepted / AiConfidence are intentionally ignored — they are treated as
-        //     unverifiable hints from the wire contract and MUST NOT influence the stored values.
-        var provenance = await provenanceService.DeriveAsync(tenantId, conversationId, leafNodeId, ct);
+        // 4a. PII screen (D3, defense-in-depth): on the AI write path re-screen free-text field
+        //     values (Text/Textarea/Lookup ONLY — a Phone field legitimately holds a phone) before
+        //     persisting. D2 screens at extraction; this re-screens at commit. Manual submissions
+        //     persist the captured values unchanged.
+        var fieldValues = provenance.Source == SubmissionSource.AutoAi
+            ? ScreenFreeTextPii(schema, body.FieldValues)
+            : body.FieldValues;
 
         // 4b. Persist the submission.
         var submission = new TypificationSubmission
@@ -437,7 +449,7 @@ internal static class ConversationEndpoints
             SchemaVersion = schema.Version,
             SelectedNodePath = path,
             LeafNodeId = leafNodeId,
-            FieldValues = body.FieldValues,
+            FieldValues = fieldValues,
             Notes = body.Notes,
             AiSuggested = provenance.AiSuggested,
             AiConfidence = provenance.AiConfidence,
@@ -532,6 +544,39 @@ internal static class ConversationEndpoints
             agentId.Value));
 
         return Results.Ok(submission);
+    }
+
+    /// <summary>
+    /// Builds a PII-screened copy of <paramref name="fieldValues"/> for the AI write path (D3).
+    /// Only free-text field values (Text/Textarea/Lookup) are screened via
+    /// <see cref="PiiScreen.Apply(string, PiiPolicy?)"/> under the schema's
+    /// <see cref="TypificationAiConfig.PiiPolicy"/>; a <c>Phone</c> field legitimately holds a
+    /// phone number and is left untouched (masking it would break it). Entries whose key has no
+    /// matching schema field, and all non-free-text fields, are copied through unchanged.
+    /// </summary>
+    private static Dictionary<string, string> ScreenFreeTextPii(
+        TypificationSchema schema,
+        IReadOnlyDictionary<string, string> fieldValues)
+    {
+        var fieldsByKey = new Dictionary<string, TypificationField>(StringComparer.Ordinal);
+        foreach (var field in schema.Fields)
+            fieldsByKey[field.Key] = field;
+
+        var screened = new Dictionary<string, string>(fieldValues.Count, StringComparer.Ordinal);
+        foreach (var (key, value) in fieldValues)
+        {
+            if (fieldsByKey.TryGetValue(key, out var field)
+                && field.Type is FieldType.Text or FieldType.Textarea or FieldType.Lookup)
+            {
+                screened[key] = PiiScreen.Apply(value, schema.AiConfig.PiiPolicy).Value;
+            }
+            else
+            {
+                screened[key] = value;
+            }
+        }
+
+        return screened;
     }
 
     private static async Task<IResult> CreateConversation(

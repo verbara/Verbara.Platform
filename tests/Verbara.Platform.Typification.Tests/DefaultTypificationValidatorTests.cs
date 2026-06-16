@@ -183,6 +183,68 @@ public sealed class DefaultTypificationValidatorTests
         result.Errors.Should().Contain(e => e.Field == "amount" && e.Message.Contains("number"));
     }
 
+    // ---------- ValidateSubmission — D3 Source-aware free-text length cap ----------
+
+    [Fact]
+    public void ValidateSubmission_ShouldRejectOverlongText_WhenSourceIsAutoAi()
+    {
+        var root = Node("root", "ROOT", isLeaf: false);
+        var leaf = Node("leaf", "LEAF", isLeaf: true, parent: root.NodeId, leaf: Outcome());
+        // Free-text field with NO MaxLength configured → AI cap (2000) applies.
+        var notes = Field("notes", FieldType.Text);
+
+        var schema = Schema(nodes: [root, leaf], fields: [notes]);
+
+        var result = _validator.ValidateSubmission(
+            schema,
+            [root.NodeId, leaf.NodeId],
+            new Dictionary<string, string> { ["notes"] = new string('x', 2001) },
+            SubmissionSource.AutoAi);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Field == "notes" && e.Message.Contains("2000"));
+    }
+
+    [Fact]
+    public void ValidateSubmission_ShouldAllowOverlongText_WhenSourceIsManual()
+    {
+        var root = Node("root", "ROOT", isLeaf: false);
+        var leaf = Node("leaf", "LEAF", isLeaf: true, parent: root.NodeId, leaf: Outcome());
+        var notes = Field("notes", FieldType.Text);
+
+        var schema = Schema(nodes: [root, leaf], fields: [notes]);
+
+        // Default source (Manual) → the AI cap does NOT apply; current behavior preserved.
+        var result = _validator.ValidateSubmission(
+            schema,
+            [root.NodeId, leaf.NodeId],
+            new Dictionary<string, string> { ["notes"] = new string('x', 2001) });
+
+        result.IsValid.Should().BeTrue(because: string.Join("; ", result.Errors.Select(e => e.Message)));
+    }
+
+    [Fact]
+    public void ValidateSubmission_ShouldRespectFieldMaxLength_WhenSmaller()
+    {
+        var root = Node("root", "ROOT", isLeaf: false);
+        var leaf = Node("leaf", "LEAF", isLeaf: true, parent: root.NodeId, leaf: Outcome());
+        // Configured MaxLength (50) is smaller than the AI cap (2000): the smaller wins,
+        // and only a SINGLE error is reported (no double-report).
+        var notes = Field("notes", FieldType.Text, validation: new FieldValidation { MaxLength = 50 });
+
+        var schema = Schema(nodes: [root, leaf], fields: [notes]);
+
+        var result = _validator.ValidateSubmission(
+            schema,
+            [root.NodeId, leaf.NodeId],
+            new Dictionary<string, string> { ["notes"] = new string('x', 100) },
+            SubmissionSource.AutoAi);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.Field == "notes");
+        result.Errors.Should().Contain(e => e.Field == "notes" && e.Message.Contains("50"));
+    }
+
     // ---------- EvaluateCondition ----------
 
     [Fact]
