@@ -7,6 +7,7 @@ using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using NSubstitute;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -326,6 +327,91 @@ public sealed class TypificationEndpointTests : IDisposable
         schema!["aiConfig"]!["suggestThreshold"]!.GetValue<double>().Should().Be(expected);
     }
 
+    // ─── C4 — calibration-status endpoint + AutoFill/autonomous write guards ──────
+
+    [Fact]
+    public async Task GetCalibrationStatus_ShouldReturn403_WhenCallerLacksConfigurePermission()
+    {
+        // Default factory: API-key admin with NO seeded role assignments, so
+        // PermissionResolver.ResolveAsync yields an empty permission set.
+        var id = await CreateSchemaAsync(_client, ValidSchemaBody("No Perm"));
+
+        var response = await _client.GetAsync(
+            $"/api/admin/typification/schemas/{id}/calibration-status");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task GetCalibrationStatus_ShouldReturnNotReadyStatus_WhenCallerHasPermissionAndNoSamples()
+    {
+        using var factory = new ConfigurePermissionTypificationFactory();
+        var client = factory.CreateAuthenticatedClient();
+
+        var id = await CreateSchemaAsync(client, ValidSchemaBody("Calib Ready Perm"));
+
+        var response = await client.GetAsync(
+            $"/api/admin/typification/schemas/{id}/calibration-status");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var status = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        status!["samples"]!.GetValue<int>().Should().Be(0);
+        status["accuracy"]!.GetValue<double>().Should().Be(0);
+        status["autoFillReady"]!.GetValue<bool>().Should().BeFalse();
+        status["autonomousReady"]!.GetValue<bool>().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateSchema_ShouldReject_WhenModeIsAutoFillWithoutCalibration()
+    {
+        // A brand-new schema has no published calibration, so AutoFill must be rejected
+        // at write time (defense-in-depth mirror of the runtime band gate).
+        var body = SchemaBodyWithAiConfig("AutoFill Premature", new
+        {
+            enabled = true,
+            mode = "AutoFill",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+        });
+
+        var response = await _client.PostAsync(
+            "/api/admin/typification/schemas", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var error = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        error!["ok"]!.GetValue<bool>().Should().BeFalse();
+        var firstError = error["errors"]!.AsArray()[0]!;
+        firstError["field"]!.GetValue<string>().Should().Be("aiConfig.mode");
+        firstError["message"]!.GetValue<string>().Should().Contain("calibration");
+    }
+
+    [Fact]
+    public async Task CreateSchema_ShouldReject_WhenAutonomousWithoutPermission()
+    {
+        // Default factory has no typification:ai:autonomous permission. Keep mode
+        // SuggestOnly so only the autonomous gate is exercised (not the AutoFill gate).
+        var body = SchemaBodyWithAiConfig("Autonomous No Perm", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = true,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+        });
+
+        var response = await _client.PostAsync(
+            "/api/admin/typification/schemas", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
     // ValidSchemaBody plus an aiConfig block (the only AI-bearing variant of the body).
     private static object SchemaBodyWithAiConfig(string name, object aiConfig) => new
     {
@@ -399,6 +485,74 @@ public sealed class NoTypificationLicenseFactory : WebApplicationFactory<Program
                 services.AddSingleton<byte[]>([]);
 
             AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
+        });
+
+        var host = base.CreateHost(builder);
+
+        AuthenticatedPlatformApiFactory.SeedEnterpriseFeatureGate(host.Services, TestTenantId);
+        AuthenticatedPlatformApiFactory.SeedTestCustomerTenant(host.Services, TestTenantId);
+
+        return host;
+    }
+
+    public HttpClient CreateAuthenticatedClient()
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {TestApiKey}");
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", TestTenantId);
+        return client;
+    }
+
+    private static string HashKey(string rawKey)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawKey));
+        return Convert.ToHexStringLower(bytes);
+    }
+}
+
+/// <summary>
+/// Variant of <see cref="AuthenticatedPlatformApiFactory"/> whose test caller resolves
+/// the <c>typification:ai:configure</c> permission. The default factory's API-key admin
+/// has no seeded role assignments (empty effective permissions); here the
+/// <see cref="IUserRoleStore"/> is replaced with a substitute granting the configure
+/// permission so the calibration-status endpoint's RBAC gate passes (pattern mirrors
+/// <c>ImpersonationPrivilegeEscalationTests.HierarchyImpersonationFactory</c>).
+/// </summary>
+public sealed class ConfigurePermissionTypificationFactory : WebApplicationFactory<Program>
+{
+    public const string TestApiKey = "test-api-key-12345";
+    public const string TestTenantId = "tenant-test-001";
+    public const string TestUserId = "test-admin-user";
+
+    private static readonly string s_hashedKey = HashKey(TestApiKey);
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        builder.UseEnvironment("Testing");
+
+        builder.ConfigureServices(services =>
+        {
+            AuthenticatedPlatformApiFactory.SetupTestAuth(services, s_hashedKey, TestTenantId, TestUserId);
+            AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
+
+            services.AddAllProFeaturesLicensed();
+            if (!services.Any(d => d.ServiceType == typeof(byte[])))
+                services.AddSingleton<byte[]>([]);
+
+            AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
+
+            // Grant typification:ai:configure to the caller via IUserRoleStore so
+            // PermissionResolver.ResolveAsync returns it. Arg.Any matches the
+            // API-key principal id, which the endpoint resolves from the claims.
+            var roleStoreDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IUserRoleStore));
+            if (roleStoreDescriptor is not null) services.Remove(roleStoreDescriptor);
+
+            var roleStore = Substitute.For<IUserRoleStore>();
+            var perms = new HashSet<string>(StringComparer.Ordinal) { "typification:ai:configure" };
+            roleStore.GetEffectivePermissionsAsync(
+                    Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<IReadOnlySet<string>>(perms));
+            services.AddSingleton(roleStore);
         });
 
         var host = base.CreateHost(builder);

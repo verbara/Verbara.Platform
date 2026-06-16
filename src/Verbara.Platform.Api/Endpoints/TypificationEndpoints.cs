@@ -1,7 +1,10 @@
+using System.Security.Claims;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Typification;
+using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Platform.Typification.Validation;
 using Verbara.Sdk.Pro.Licensing;
@@ -31,6 +34,7 @@ internal static class TypificationEndpoints
         group.MapPut("/schemas/{id}", UpdateSchema);
         group.MapDelete("/schemas/{id}", DeleteSchema);
         group.MapPost("/schemas/{id}/publish", PublishSchema);
+        group.MapGet("/schemas/{id}/calibration-status", GetCalibrationStatus);
 
         // ── Bindings ─────────────────────────────────────────────────────────
         group.MapGet("/bindings", ListBindings);
@@ -68,6 +72,8 @@ internal static class TypificationEndpoints
         [FromBody] CreateSchemaRequest body,
         [FromServices] ITypificationSchemaStore store,
         [FromServices] IAuditService audit,
+        [FromServices] PermissionResolver permissionResolver,
+        [FromServices] ITypificationCalibration calibration,
         IClock clock,
         CancellationToken ct)
     {
@@ -95,6 +101,14 @@ internal static class TypificationEndpoints
             UpdatedAt = null,
         };
 
+        // C4 — fail-fast write-time guards (autonomous permission + AutoFill calibration).
+        // The schema id is brand-new, so an AutoFill request always rejects (no published
+        // calibration yet) — by design: publish in Shadow/SuggestOnly first.
+        var aiGate = await ValidateAiConfigWriteAsync(
+            context, permissionResolver, calibration, tenantId, schema.SchemaId, schema.AiConfig, ct);
+        if (aiGate is not null)
+            return aiGate;
+
         await store.SaveAsync(schema, ct);
         await RecordAudit(context, audit, tenantId, "typification.schema.created",
             targetId: schema.SchemaId.Value, before: null,
@@ -109,6 +123,8 @@ internal static class TypificationEndpoints
         [FromBody] UpdateSchemaRequest body,
         [FromServices] ITypificationSchemaStore store,
         [FromServices] IAuditService audit,
+        [FromServices] PermissionResolver permissionResolver,
+        [FromServices] ITypificationCalibration calibration,
         IClock clock,
         CancellationToken ct)
     {
@@ -144,6 +160,14 @@ internal static class TypificationEndpoints
             CreatedAt = latest.CreatedAt,
             UpdatedAt = clock.UtcNow,
         };
+
+        // C4 — fail-fast write-time guards (autonomous permission + AutoFill calibration)
+        // against the EXISTING schema id, before persisting. Rejecting here means no save
+        // and no audit entry.
+        var aiGate = await ValidateAiConfigWriteAsync(
+            context, permissionResolver, calibration, tenantId, schemaId, updated.AiConfig, ct);
+        if (aiGate is not null)
+            return aiGate;
 
         await store.SaveAsync(updated, ct);
         await RecordAudit(context, audit, tenantId, "typification.schema.updated",
@@ -203,6 +227,31 @@ internal static class TypificationEndpoints
             after: new { published.SchemaId, published.Version, published.IsPublished }, ct);
 
         return Results.Ok(new PublishResultDto(Ok: true, Errors: []));
+    }
+
+    // C4 — calibration snapshot for the AI-config admin surface. Reads the empirical
+    // readiness (sample count, accuracy, AutoFill/autonomous gates) so the designer UI
+    // can show whether AutoFill / autonomous can yet be enabled. Requires the
+    // `typification:ai:configure` permission (same audience that edits AiConfig).
+    private static async Task<IResult> GetCalibrationStatus(
+        string id,
+        HttpContext context,
+        [FromServices] ITypificationCalibration calibration,
+        [FromServices] PermissionResolver permissionResolver,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+
+        var perms = await ResolveCallerPermissions(context, permissionResolver, tenantId, ct);
+        if (!PermissionResolver.HasPermission(perms, "typification:ai:configure"))
+            return Results.Forbid();
+
+        // GetStatusAsync returns an all-zero / not-ready snapshot for a missing or
+        // unpublished schema — that IS the correct "not calibrated" answer, so there
+        // is no NotFound special-casing here.
+        var status = await calibration.GetStatusAsync(tenantId, EntityId.From(id), ct);
+        return Results.Ok(new CalibrationStatusDto(
+            status.Samples, status.Accuracy, status.AutoFillReady, status.AutonomousReady));
     }
 
     // ─── Binding handlers ────────────────────────────────────────────────────
@@ -547,6 +596,59 @@ internal static class TypificationEndpoints
 
         throw new InvalidOperationException("Tenant ID not resolved");
     }
+
+    // C4 — resolve the caller's effective permissions for the current tenant. The caller
+    // user id comes from the JWT `sub` claim (NameClaimType) or the long-form
+    // ClaimTypes.NameIdentifier, mirroring ManagementImpersonationEndpoints. A caller
+    // with no resolvable id yields an empty permission set (so every gate fails closed).
+    private static async Task<IReadOnlySet<string>> ResolveCallerPermissions(
+        HttpContext context,
+        PermissionResolver permissionResolver,
+        TenantId tenantId,
+        CancellationToken ct)
+    {
+        var callerUserId = context.User.FindFirstValue("sub")
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrEmpty(callerUserId))
+            return new HashSet<string>(StringComparer.Ordinal);
+
+        return await permissionResolver.ResolveAsync(tenantId, EntityId.From(callerUserId), ct);
+    }
+
+    // C4 — defense-in-depth write-time AI-config validation (Create + Update). Returns a
+    // non-null IResult (the error response) when the write must be rejected; null when OK.
+    private static async Task<IResult?> ValidateAiConfigWriteAsync(
+        HttpContext context,
+        PermissionResolver permissionResolver,
+        ITypificationCalibration calibration,
+        TenantId tenantId,
+        EntityId schemaId,
+        TypificationAiConfig aiConfig,
+        CancellationToken ct)
+    {
+        // Autonomous disposition is the highest-risk setting → stricter permission.
+        if (aiConfig.Autonomous)
+        {
+            var perms = await ResolveCallerPermissions(context, permissionResolver, tenantId, ct);
+            if (!PermissionResolver.HasPermission(perms, "typification:ai:autonomous"))
+                return Results.Forbid();
+        }
+
+        // AutoFill must be earned: reject enabling it on a schema whose published
+        // version hasn't reached the calibration bar (mirrors the runtime band gate).
+        if (aiConfig.Mode == AiMode.AutoFill)
+        {
+            var status = await calibration.GetStatusAsync(tenantId, schemaId, ct);
+            if (!status.AutoFillReady)
+                return Results.BadRequest(new PublishResultDto(
+                    Ok: false,
+                    Errors: [new PublishErrorDto("aiConfig.mode",
+                        "AutoFill requires the schema to reach the calibration bar (samples + accuracy). Run in Shadow/SuggestOnly until calibration is ready.")]));
+        }
+
+        return null;
+    }
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
@@ -663,3 +765,10 @@ internal sealed record UpdateBindingRequest(
 internal sealed record PublishResultDto(bool Ok, IReadOnlyList<PublishErrorDto> Errors);
 
 internal sealed record PublishErrorDto(string Field, string Message);
+
+// C4 — calibration snapshot DTO for GET /schemas/{id}/calibration-status.
+internal sealed record CalibrationStatusDto(
+    int Samples,
+    double Accuracy,
+    bool AutoFillReady,
+    bool AutonomousReady);

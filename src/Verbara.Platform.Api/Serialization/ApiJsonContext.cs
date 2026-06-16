@@ -52,6 +52,8 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(SchemaBindingDto[]))]
 [JsonSerializable(typeof(SchemaBindingDto))]
 [JsonSerializable(typeof(PublishResultDto))]
+// C4 (P2b) — calibration-status response DTO.
+[JsonSerializable(typeof(CalibrationStatusDto))]
 // Typification — reason-hint admin DTOs (C10)
 [JsonSerializable(typeof(ReasonHintDto[]))]
 [JsonSerializable(typeof(ReasonHintDto))]
