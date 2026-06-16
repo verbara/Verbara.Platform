@@ -518,7 +518,146 @@ public sealed class DefaultTypificationAiClassifierTests
         englishResult!.NodePath.Should().Equal(spanishResult.NodePath);
     }
 
+    // ---------- E4: prompt-size guard — cap enumerated candidate leaves ----------
+
+    [Fact]
+    public async Task BuildPrompt_ShouldCapCandidateLeaves_WhenTaxonomyExceedsMax()
+    {
+        // A taxonomy with FAR more leaves than the cap (100 > 80) under a single root.
+        // The system prompt must enumerate AT MOST DefaultTypificationAiClassifier.MaxCandidateLeaves
+        // outcome bullet lines so the prompt cannot blow past the model window.
+        const int leafCount = 100;
+        var capturing = new CapturingLlmProvider("""{"leafCode":"WIDE-0","confidence":0.9}""");
+        var sut = new DefaultTypificationAiClassifier(capturing);
+        var schema = SchemaWithNodes(WideCascadeNodes(leafCount));
+
+        await sut.ClassifyAsync(schema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+
+        capturing.LastRequest.Should().NotBeNull();
+        var systemContent = capturing.LastRequest!.Messages[0].Content;
+
+        // Count outcome bullet lines: every leaf is rendered as "- <Code>: <Label> ...".
+        var outcomeLines = CountOutcomeBulletLines(systemContent);
+        outcomeLines.Should().Be(DefaultTypificationAiClassifier.MaxCandidateLeaves);
+        outcomeLines.Should().BeLessThan(leafCount);
+    }
+
+    [Fact]
+    public async Task CollectCandidateLeaves_ShouldPreferSubtree_OverCap()
+    {
+        // A huge taxonomy (200 leaves) but a subtreeRoot that narrows to a small set
+        // (2 leaves, well below the cap). Subtree narrowing must win: the cap is never hit
+        // and the prompt enumerates ONLY the subtree's leaves.
+        const int wideLeafCount = 200;
+        var capturing = new CapturingLlmProvider("""{"leafCode":"GINE","confidence":0.9}""");
+        var sut = new DefaultTypificationAiClassifier(capturing);
+
+        // Reuse the canonical cascade (CITAS → REPROG → {GINE, PEDIA}) plus many extra
+        // top-level leaves, then bind the subtree to REPROG (which has exactly 2 leaves).
+        var nodes = new List<TypificationNode>(CascadeNodes());
+        nodes.AddRange(WideTopLevelLeaves(wideLeafCount));
+        var schema = SchemaWithNodes(nodes);
+
+        await sut.ClassifyAsync(schema, subtreeRoot: ReprogId, Conversation(), Transcript(), CancellationToken.None);
+
+        capturing.LastRequest.Should().NotBeNull();
+        var systemContent = capturing.LastRequest!.Messages[0].Content;
+
+        // Only the 2 subtree leaves are enumerated — cap (80) not approached.
+        var outcomeLines = CountOutcomeBulletLines(systemContent);
+        outcomeLines.Should().Be(2);
+        outcomeLines.Should().BeLessThan(DefaultTypificationAiClassifier.MaxCandidateLeaves);
+        systemContent.Should().Contain("GINE");
+        systemContent.Should().Contain("PEDIA");
+        systemContent.Should().NotContain("WIDE-");
+    }
+
+    [Fact]
+    public async Task ClassifyMaxTokens_ShouldScaleWithFieldCount()
+    {
+        // Confirms the D2 output-token scaling: maxTokens grows with the candidate field
+        // count and stays capped at 1500. (Equivalent assertion to the D2-era
+        // ClassifyAsync_ShouldScaleMaxTokens_WithFieldCount; kept distinct here to satisfy
+        // the E4 acceptance list and to also pin the 1500 ceiling under a very large field set.)
+        var zeroFieldProvider = new CapturingLlmProvider("""{"leafCode":"GINE","confidence":0.9}""");
+        var manyFieldProvider = new CapturingLlmProvider("""{"leafCode":"GINE","confidence":0.9}""");
+        var hugeFieldProvider = new CapturingLlmProvider("""{"leafCode":"GINE","confidence":0.9}""");
+
+        await new DefaultTypificationAiClassifier(zeroFieldProvider)
+            .ClassifyAsync(Schema(), subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+        await new DefaultTypificationAiClassifier(manyFieldProvider)
+            .ClassifyAsync(Schema(fields: ManyFields(8)), subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+        await new DefaultTypificationAiClassifier(hugeFieldProvider)
+            .ClassifyAsync(Schema(fields: ManyFields(500)), subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+
+        zeroFieldProvider.LastRequest.Should().NotBeNull();
+        manyFieldProvider.LastRequest.Should().NotBeNull();
+        hugeFieldProvider.LastRequest.Should().NotBeNull();
+
+        manyFieldProvider.LastRequest!.MaxTokens.Should().BeGreaterThan(zeroFieldProvider.LastRequest!.MaxTokens);
+        manyFieldProvider.LastRequest!.MaxTokens.Should().BeLessOrEqualTo(1500);
+        // A very large field count is clamped to the 1500 ceiling.
+        hugeFieldProvider.LastRequest!.MaxTokens.Should().Be(1500);
+    }
+
     // ---------- helpers ----------
+
+    /// <summary>Counts the OUTCOMES catalog bullet lines ("- " lines before the FIELDS section).</summary>
+    private static int CountOutcomeBulletLines(string systemContent)
+    {
+        var fieldsMarker = systemContent.IndexOf("FIELDS (optional capture", StringComparison.Ordinal);
+        var outcomesRegion = fieldsMarker >= 0 ? systemContent[..fieldsMarker] : systemContent;
+        return outcomesRegion
+            .Split('\n')
+            .Count(l => l.StartsWith("- ", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A single-root taxonomy with <paramref name="leafCount"/> leaves (codes "WIDE-0"..),
+    /// used to exceed the candidate-leaf cap.
+    /// </summary>
+    private static List<TypificationNode> WideCascadeNodes(int leafCount)
+    {
+        var rootId = EntityId.New();
+        var nodes = new List<TypificationNode>(leafCount + 1)
+        {
+            new() { NodeId = rootId, ParentNodeId = null, Label = "Wide Root", Code = "WIDE-ROOT", IsLeaf = false },
+        };
+
+        for (var i = 0; i < leafCount; i++)
+        {
+            nodes.Add(new TypificationNode
+            {
+                NodeId = EntityId.New(),
+                ParentNodeId = rootId,
+                Label = "Leaf " + i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Code = "WIDE-" + i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                SortOrder = i,
+                IsLeaf = true,
+                Leaf = new LeafOutcome { Category = TypificationCategory.Success },
+            });
+        }
+
+        return nodes;
+    }
+
+    /// <summary>A batch of top-level (root) leaves to bulk up a schema beyond the cap.</summary>
+    private static IEnumerable<TypificationNode> WideTopLevelLeaves(int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            yield return new TypificationNode
+            {
+                NodeId = EntityId.New(),
+                ParentNodeId = null,
+                Label = "Wide " + i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Code = "WIDE-" + i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                SortOrder = i,
+                IsLeaf = true,
+                Leaf = new LeafOutcome { Category = TypificationCategory.Success },
+            };
+        }
+    }
 
     private static int CountOccurrences(string haystack, string needle)
     {

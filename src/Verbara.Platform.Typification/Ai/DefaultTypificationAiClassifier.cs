@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
@@ -21,7 +23,7 @@ namespace Verbara.Platform.Typification.Ai;
 /// <see langword="null"/> so the caller can fall back to manual disposition.
 /// </para>
 /// </summary>
-public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
+public sealed partial class DefaultTypificationAiClassifier : ITypificationAiClassifier
 {
     // Defensive transcript caps: classification only needs recent context, and the model
     // has a finite window. Keep at most the last N messages and the last M characters of
@@ -41,6 +43,21 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
     private const int MaxTokensCap = 1500;   // ceiling — bound cost even for very large schemas.
 
     /// <summary>
+    /// Last-resort INPUT-side safety bound on the number of candidate leaves enumerated in the
+    /// system prompt. A taxonomy with thousands of leaves would otherwise blow the system prompt
+    /// past the model's context window. This cap keeps the prompt bounded, but it is a safety net,
+    /// NOT the intended mechanism for large taxonomies: the real lever is binding a
+    /// <c>subtreeRoot</c> so the candidate set is narrowed to the relevant branch BEFORE the cap
+    /// ever bites (<see cref="CollectCandidateLeaves"/> prefers <c>subtreeRoot</c> filtering).
+    /// When the cap DOES truncate, a Warning is logged (see <see cref="LogCandidateLeavesTruncated"/>)
+    /// so operators know a too-large taxonomy needs a <c>subtreeRoot</c> binding. Truncating a leaf
+    /// out of the prompt is safe for correctness: a model that returns a code not in the prompt
+    /// simply won't be in the catalog and the allow-list in <c>MapAndValidate</c> rejects it
+    /// (degrade to null) — the Warning is the operator signal that it happened.
+    /// </summary>
+    internal const int MaxCandidateLeaves = 80;
+
+    /// <summary>
     /// Classifier prompt template version. Bump this constant whenever the system prompt
     /// changes so that persisted <see cref="AiSuggestionRecord"/>s carry correct provenance.
     /// </summary>
@@ -56,12 +73,25 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
 
     private readonly ILlmProvider _llm;
     private readonly string _modelId;
+    private readonly ILogger _logger;
 
-    public DefaultTypificationAiClassifier(ILlmProvider llm, IOptions<LlmProviderOptions>? options = null)
+    /// <param name="llm">The LLM completion provider.</param>
+    /// <param name="options">Provider options (used only for the model id stamped on provenance).</param>
+    /// <param name="loggerFactory">
+    /// Optional logger factory (defaults to a Null logger when omitted, mirroring
+    /// <see cref="TypificationAiMetrics"/>). One <see cref="ILogger"/> is cached so existing
+    /// <c>new DefaultTypificationAiClassifier(llm)</c> call sites and tests keep working unchanged.
+    /// </param>
+    public DefaultTypificationAiClassifier(
+        ILlmProvider llm,
+        IOptions<LlmProviderOptions>? options = null,
+        ILoggerFactory? loggerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(llm);
         _llm = llm;
         _modelId = options?.Value.Model is { Length: > 0 } m ? m : "unknown";
+        _logger = (loggerFactory ?? NullLoggerFactory.Instance)
+            .CreateLogger("Verbara.Platform.Typification.Ai.DefaultTypificationAiClassifier");
     }
 
     public async Task<AiClassification?> ClassifyAsync(
@@ -249,8 +279,17 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
     /// <summary>
     /// Leaf nodes applicable to <paramref name="channel"/> and, when
     /// <paramref name="subtreeRoot"/> is set, under that sub-tree.
+    /// <para>
+    /// When the collected set still exceeds <see cref="MaxCandidateLeaves"/> (a taxonomy too
+    /// large even after channel + sub-tree filtering, or no <c>subtreeRoot</c> bound at all),
+    /// the set is deterministically capped to the first <see cref="MaxCandidateLeaves"/> leaves
+    /// — ordered by <see cref="TypificationNode.SortOrder"/> then <see cref="TypificationNode.Code"/>
+    /// (Ordinal) so the truncation is stable across calls — and a Warning is logged. Binding a
+    /// <c>subtreeRoot</c> to narrow the candidate set is the proper fix; the cap is a last-resort
+    /// safety bound so the system prompt cannot blow past the model window.
+    /// </para>
     /// </summary>
-    private static List<TypificationNode> CollectCandidateLeaves(
+    private List<TypificationNode> CollectCandidateLeaves(
         TypificationSchema schema, EntityId? subtreeRoot, ChannelType channel)
     {
         var byId = BuildNodeIndex(schema);
@@ -269,6 +308,25 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
 
             leaves.Add(node);
         }
+
+        if (leaves.Count <= MaxCandidateLeaves)
+            return leaves;
+
+        // Too many candidates for one prompt. Order deterministically BEFORE capping so the
+        // surviving subset is stable run-to-run (SortOrder is the author's intended order;
+        // Code is the Ordinal tie-breaker). Then keep only the first MaxCandidateLeaves.
+        var total = leaves.Count;
+        leaves.Sort(static (a, b) =>
+        {
+            var bySort = a.SortOrder.CompareTo(b.SortOrder);
+            return bySort != 0 ? bySort : string.CompareOrdinal(a.Code, b.Code);
+        });
+        leaves.RemoveRange(MaxCandidateLeaves, leaves.Count - MaxCandidateLeaves);
+
+        // The Warning IS the truncation signal: if the correct leaf was dropped, the model's
+        // returned code won't be in the catalog and MapAndValidate's allow-list degrades to
+        // null — operators need to see that a subtreeRoot binding is required.
+        LogCandidateLeavesTruncated(_logger, schema.SchemaId.Value, total, MaxCandidateLeaves);
 
         return leaves;
     }
@@ -561,4 +619,21 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
 
         return false;
     }
+
+    // ─── Structured log events (EventIds 6320+) ─────────────────────────────────
+
+    /// <summary>
+    /// Warns that the candidate-leaf set was truncated to the prompt-size cap. This is the
+    /// operator signal that a too-large taxonomy needs a <c>subtreeRoot</c> binding to narrow
+    /// the candidate set (the cap is only a last-resort safety bound). Warning level: it can
+    /// silently drop the correct leaf from the prompt, so it must be visible — but it never
+    /// throws (the never-throws contract holds).
+    /// </summary>
+    [LoggerMessage(EventId = 6320, Level = LogLevel.Warning,
+        Message = "Candidate leaf set truncated to the prompt-size cap (schema={SchemaId}, total={TotalLeaves}, cap={Cap}). Bind a subtreeRoot to narrow the candidate set; otherwise the correct leaf may be dropped from the prompt and the classification degrades to null.")]
+    private static partial void LogCandidateLeavesTruncated(
+        ILogger logger,
+        string schemaId,
+        int totalLeaves,
+        int cap);
 }
