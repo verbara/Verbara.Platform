@@ -225,6 +225,21 @@
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5 — commit:** `feat(typification): AI entity extraction + AiEntity prefill resolution`.
 
+> **D2 architecture decision (2026-06-15) — corrected after runtime tracing.** The Web form fires
+> `POST /typification-suggestion` *after* `GET /typification-form` returns, so **no AI suggestion exists
+> at form-load on first open**. The pure, metadata-only `ResolvePrefill` therefore cannot resolve
+> `AiEntity` from a suggestion at GET time — the original "resolver resolves AiEntity" framing (and the
+> `Resolver_ShouldResolveAiEntity` test) is unsound. **Adopted design:** entity prefill is delivered
+> **through the suggestion path** (the single LLM call returns leaf + entity field values; C3 already
+> seeds `suggestedFieldValues` on Accept/AutoFill). D2 is therefore **classifier-side only**: extract the
+> `EntityFieldMap` entities, remap entity→field-Key, **PII-screen each value (D1)**, emit into the
+> classification's `FieldValues`; scale `ClassifyMaxTokens` with field count. Add `PiiPolicy` to
+> `TypificationAiConfig` (default `PiiPolicy.DenyAll`; the wire DTO + Web editor are D4). The pure
+> resolver stays **metadata-only**, with a doc note pointing AI-entity prefill at the suggestion path.
+> Screening is **defense-in-depth**: at extraction here (D2) *and* on the write path (D3).
+> **Future refinement (NOT D2):** decouple AI *field* prefill from *leaf* Accept so extracted facts
+> survive a leaf override — a C3-style Web change, deferred to Batch E / a follow-up.
+
 ### Task D3: Tighten Text/Textarea/Lookup validation on AI write path
 
 **Files:** Modify `Validation/DefaultTypificationValidator.cs` (~449-453); Test `TypificationValidatorTests.cs`.
