@@ -92,4 +92,50 @@ public sealed class PiiScreenTests
         value.Should().Be(input);
         masked.Should().BeFalse();
     }
+
+    [Fact]
+    public void Apply_ShouldMaskAllTypes_WhenValueHasMultipleMixedPii()
+    {
+        var (value, masked) = PiiScreen.Apply(
+            "call +1 415-555-0132 or john@example.com card 4111111111111111",
+            PiiPolicy.DenyAll);
+
+        value.Should().Be("call [PHONE] or [EMAIL] card [CARD]");
+        masked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Apply_ShouldMaskOnlyNonAllowListed_WhenMixedTypesAndPartialAllowList()
+    {
+        var (value, masked) = PiiScreen.Apply(
+            "john@example.com 4111111111111111",
+            Allow(PiiType.Email));
+
+        value.Should().Be("john@example.com [CARD]");
+        masked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Apply_ShouldMaskCard_WhenWrittenWithSpaces()
+    {
+        var (value, masked) = PiiScreen.Apply("4111 1111 1111 1111", PiiPolicy.DenyAll);
+
+        value.Should().Be("[CARD]");
+        masked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Apply_ShouldMaskUnicodeDigitCard_WhenFullwidthDigits()
+    {
+        // A valid-Luhn card rendered in fullwidth (U+FF10..U+FF19) decimal digits. Before the
+        // I-2 fix this slipped through unmasked (\d matched but ASCII Luhn rejected it); after
+        // the fix the digits are normalized to ASCII for matching/Luhn and masked in place.
+        const string card = "5555555555554444";
+        var fullwidth = new string(card.Select(c => (char)('０' + (c - '0'))).ToArray());
+
+        var (value, masked) = PiiScreen.Apply(fullwidth, PiiPolicy.DenyAll);
+
+        value.Should().Be("[CARD]");
+        masked.Should().BeTrue();
+    }
 }

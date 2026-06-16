@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace Verbara.Platform.Typification.Ai;
 
 /// <summary>
@@ -15,5 +17,9 @@ public sealed class PiiPolicy
     public required IReadOnlySet<PiiType> AllowStore { get; init; }
 
     /// <summary>The most restrictive policy: every detected PII type is masked.</summary>
-    public static PiiPolicy DenyAll { get; } = new() { AllowStore = new HashSet<PiiType>() };
+    /// <remarks>
+    /// Backed by <see cref="FrozenSet{T}.Empty"/> so this shared singleton is genuinely immutable
+    /// (cannot be down-cast and mutated) and its <c>Contains</c> stays fast on the screening hot path.
+    /// </remarks>
+    public static PiiPolicy DenyAll { get; } = new() { AllowStore = FrozenSet<PiiType>.Empty };
 }
