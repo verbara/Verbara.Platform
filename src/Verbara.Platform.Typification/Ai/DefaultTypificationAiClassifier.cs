@@ -44,7 +44,7 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
     /// Classifier prompt template version. Bump this constant whenever the system prompt
     /// changes so that persisted <see cref="AiSuggestionRecord"/>s carry correct provenance.
     /// </summary>
-    internal const string CurrentPromptVersion = "p2b-2";
+    internal const string CurrentPromptVersion = "p2b-3";
 
     /// <summary>
     /// Sentinel that fences the attacker-controlled transcript so the model can tell DATA
@@ -338,7 +338,18 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
             "\"sentiment\": \"positive|neutral|negative|very_negative\", " +
             "\"fields\": {\"<key>\": \"<value>\"}}. " +
             "Use only the listed codes and field keys. " +
-            "If unsure, pick the closest leaf and a low confidence.\n\n");
+            "If unsure, pick the closest leaf and a low confidence.\n");
+
+        // Multilingual / code-switching hardening (E2). The transcript may arrive in any
+        // language — or mix several within one conversation — so classification must key off
+        // MEANING and return the stable Code, never a translated label. This builds on C2's
+        // classify-by-Code mapping: labels are localized but Codes are stable, so this is a
+        // prompt-clarity guarantee, not a behavioral change. Placed BEFORE the SECURITY fence
+        // so the untrusted-data fence remains the final, overriding instruction.
+        sb.Append(
+            "\nThe conversation may be in any language or mix languages (code-switching). " +
+            "Classify by the MEANING of the exchange, not surface words, and ALWAYS return one " +
+            "of the stable codes from the OUTCOMES list above (never a translated label).\n\n");
 
         // Untrusted-data fencing directive. The transcript is attacker-controlled, so the
         // model MUST treat it strictly as data and ignore any embedded instructions.

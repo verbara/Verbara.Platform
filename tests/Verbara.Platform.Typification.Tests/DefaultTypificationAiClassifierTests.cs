@@ -464,6 +464,60 @@ public sealed class DefaultTypificationAiClassifierTests
         result!.NodePath.Should().Equal(CitasId, ReprogId, GineId);
     }
 
+    // ---------- E2: multilingual / code-switching classification hardening ----------
+
+    [Fact]
+    public async Task ClassifyAsync_ShouldClassifyCodeSwitchedTranscript_WhenEsAndEnMixed()
+    {
+        // A transcript that mixes Spanish and English turns (code-switching). The classifier
+        // must still classify end-to-end via the stable leaf Code, and the system prompt must
+        // carry the multilingual instruction.
+        var capturing = new CapturingLlmProvider("""{"leafCode":"GINE","confidence":0.88,"sentiment":"neutral"}""");
+        var sut = new DefaultTypificationAiClassifier(capturing);
+        var schema = Schema();
+
+        var transcript = new[]
+        {
+            Message(MessageDirection.Inbound, new TextBlock("Hola, necesito reprogramar mi cita.")),
+            Message(MessageDirection.Outbound, new TextBlock("Sure, which specialty do you need?")),
+            Message(MessageDirection.Inbound, new TextBlock("It's for gynecology, gracias.")),
+        };
+
+        var result = await sut.ClassifyAsync(schema, subtreeRoot: null, Conversation(), transcript, CancellationToken.None);
+
+        // Code-switched transcript resolves end-to-end to the expected node path.
+        result.Should().NotBeNull();
+        result!.NodePath.Should().Equal(CitasId, ReprogId, GineId);
+
+        // The system prompt carries the multilingual instruction.
+        capturing.LastRequest.Should().NotBeNull();
+        var systemContent = capturing.LastRequest!.Messages[0].Content;
+        systemContent.Should().Contain("any language");
+        systemContent.Should().Contain("code-switching");
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_ShouldKeepLeafStable_RegardlessOfLabelLanguage()
+    {
+        // Two schema variants with IDENTICAL Codes/Ids but labels in different languages
+        // (Spanish vs English). The model returns the same Code for both → both must resolve
+        // to the same node-id path: label language never changes the mapping.
+        var spanishSchema = SchemaWithNodes(CascadeNodes());        // Spanish labels.
+        var englishSchema = SchemaWithNodes(EnglishLabelCascadeNodes()); // English labels.
+
+        var spanishResult = await ClassifierReturning("""{"leafCode":"GINE","confidence":0.9}""")
+            .ClassifyAsync(spanishSchema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+        var englishResult = await ClassifierReturning("""{"leafCode":"GINE","confidence":0.9}""")
+            .ClassifyAsync(englishSchema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
+
+        spanishResult.Should().NotBeNull();
+        englishResult.Should().NotBeNull();
+
+        // Identical node-id path despite the differing label languages.
+        spanishResult!.NodePath.Should().Equal(CitasId, ReprogId, GineId);
+        englishResult!.NodePath.Should().Equal(spanishResult.NodePath);
+    }
+
     // ---------- helpers ----------
 
     private static int CountOccurrences(string haystack, string needle)
