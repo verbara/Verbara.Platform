@@ -412,6 +412,77 @@ public sealed class TypificationEndpointTests : IDisposable
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
+    [Fact]
+    public async Task CreateSchema_ShouldPersistAutonomous_WhenCallerHasAutonomousPermission()
+    {
+        // The perms-granting factory resolves typification:ai:autonomous for the owning
+        // user id (the API-key `user_id` claim). This proves the autonomous gate is a real
+        // gate that opens for an authorized caller — NOT a hard deny — and is the exact test
+        // that would have caught C-1 (which resolved the key id → empty perms → 403).
+        using var factory = new ConfigurePermissionTypificationFactory();
+        var client = factory.CreateAuthenticatedClient();
+
+        var body = SchemaBodyWithAiConfig("Autonomous Authorized", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = true,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+        });
+
+        var id = await CreateSchemaAsync(client, body);
+
+        var getResponse = await client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        schema!["aiConfig"]!["autonomous"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateSchema_ShouldReject_WhenModeChangedToAutoFillWithoutCalibration()
+    {
+        // Create a SuggestOnly schema (allowed), then PUT it switching mode to AutoFill.
+        // The Update path re-checks the calibration bar (distinct from Create) and must
+        // reject — the anti-bypass guarantee that AutoFill can't be smuggled in via update.
+        var id = await CreateSchemaAsync(_client, SchemaBodyWithAiConfig("Update To AutoFill", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+        }));
+
+        var updateBody = SchemaBodyWithAiConfig("Update To AutoFill", new
+        {
+            enabled = true,
+            mode = "AutoFill",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+        });
+
+        var response = await _client.PutAsync(
+            $"/api/admin/typification/schemas/{id}", JsonContent.Create(updateBody));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var error = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        error!["ok"]!.GetValue<bool>().Should().BeFalse();
+        var firstError = error["errors"]!.AsArray()[0]!;
+        firstError["field"]!.GetValue<string>().Should().Be("aiConfig.mode");
+        firstError["message"]!.GetValue<string>().Should().Contain("calibration");
+    }
+
     // ValidSchemaBody plus an aiConfig block (the only AI-bearing variant of the body).
     private static object SchemaBodyWithAiConfig(string name, object aiConfig) => new
     {
@@ -511,12 +582,15 @@ public sealed class NoTypificationLicenseFactory : WebApplicationFactory<Program
 }
 
 /// <summary>
-/// Variant of <see cref="AuthenticatedPlatformApiFactory"/> whose test caller resolves
-/// the <c>typification:ai:configure</c> permission. The default factory's API-key admin
-/// has no seeded role assignments (empty effective permissions); here the
-/// <see cref="IUserRoleStore"/> is replaced with a substitute granting the configure
-/// permission so the calibration-status endpoint's RBAC gate passes (pattern mirrors
-/// <c>ImpersonationPrivilegeEscalationTests.HierarchyImpersonationFactory</c>).
+/// Variant of <see cref="AuthenticatedPlatformApiFactory"/> whose test caller resolves the
+/// <c>typification:ai:configure</c> AND <c>typification:ai:autonomous</c> permissions. The
+/// default factory's API-key admin has no seeded role assignments (empty effective
+/// permissions); here the <see cref="IUserRoleStore"/> is replaced with a substitute that
+/// grants those permissions ONLY when the resolved caller id equals the owning user id
+/// (<see cref="AuthenticatedPlatformApiFactory.TestUserId"/>) — and an empty set for any
+/// other id. That id-specific stub is the tripwire for C-1: if the endpoint regresses to
+/// resolving the API-key id (NameIdentifier) instead of the owning-user <c>user_id</c>
+/// claim, the granted permissions no longer match and every AI-config gate 403s.
 /// </summary>
 public sealed class ConfigurePermissionTypificationFactory : WebApplicationFactory<Program>
 {
@@ -541,17 +615,30 @@ public sealed class ConfigurePermissionTypificationFactory : WebApplicationFacto
 
             AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
 
-            // Grant typification:ai:configure to the caller via IUserRoleStore so
-            // PermissionResolver.ResolveAsync returns it. Arg.Any matches the
-            // API-key principal id, which the endpoint resolves from the claims.
+            // Grant typification:ai:configure + typification:ai:autonomous via IUserRoleStore
+            // so PermissionResolver.ResolveAsync returns them — but ONLY for the owning user id
+            // (TestUserId, carried in the API-key `user_id` claim). Any other id (e.g. the
+            // API-key id NameIdentifier) gets an empty set: this is the C-1 tripwire.
             var roleStoreDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IUserRoleStore));
             if (roleStoreDescriptor is not null) services.Remove(roleStoreDescriptor);
 
             var roleStore = Substitute.For<IUserRoleStore>();
-            var perms = new HashSet<string>(StringComparer.Ordinal) { "typification:ai:configure" };
+            var perms = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "typification:ai:configure",
+                "typification:ai:autonomous",
+            };
+            var empty = new HashSet<string>(StringComparer.Ordinal);
             roleStore.GetEffectivePermissionsAsync(
-                    Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+                    Arg.Any<TenantId>(),
+                    Arg.Is<EntityId>(e => e.Value == AuthenticatedPlatformApiFactory.TestUserId),
+                    Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult<IReadOnlySet<string>>(perms));
+            roleStore.GetEffectivePermissionsAsync(
+                    Arg.Any<TenantId>(),
+                    Arg.Is<EntityId>(e => e.Value != AuthenticatedPlatformApiFactory.TestUserId),
+                    Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<IReadOnlySet<string>>(empty));
             services.AddSingleton(roleStore);
         });
 

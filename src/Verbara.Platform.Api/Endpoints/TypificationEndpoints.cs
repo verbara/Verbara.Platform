@@ -598,17 +598,21 @@ internal static class TypificationEndpoints
     }
 
     // C4 — resolve the caller's effective permissions for the current tenant. The caller
-    // user id comes from the JWT `sub` claim (NameClaimType) or the long-form
-    // ClaimTypes.NameIdentifier, mirroring ManagementImpersonationEndpoints. A caller
-    // with no resolvable id yields an empty permission set (so every gate fails closed).
+    // user id is resolved in the canonical order used by PermissionAuthorizationHandler and
+    // PlatformAdminAuthorizationHandler: `user_id` ?? ClaimTypes.NameIdentifier ?? `sub`.
+    // For API-key callers `user_id` is the owning-user claim while NameIdentifier is the
+    // key id — so `user_id` MUST win, otherwise the key id resolves to an empty permission
+    // set and every gate 403s even for authorized callers. JWT callers carry only `sub`.
+    // A caller with no resolvable id yields an empty permission set (so every gate fails closed).
     private static async Task<IReadOnlySet<string>> ResolveCallerPermissions(
         HttpContext context,
         PermissionResolver permissionResolver,
         TenantId tenantId,
         CancellationToken ct)
     {
-        var callerUserId = context.User.FindFirstValue("sub")
-            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var callerUserId = context.User.FindFirstValue("user_id")
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? context.User.FindFirstValue("sub");
 
         if (string.IsNullOrEmpty(callerUserId))
             return new HashSet<string>(StringComparer.Ordinal);
