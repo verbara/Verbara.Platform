@@ -398,18 +398,25 @@ internal static class ConversationEndpoints
         // 2. Map the selected node-path strings → EntityId list.
         var path = body.SelectedNodePath.Select(EntityId.From).ToList();
 
-        // 3a. Derive server-authoritative AI provenance (B3) BEFORE validation so validation
-        //     is Source-aware (D3: AI free-text length cap). This is the read-only provenance
-        //     derivation only — NO state transition / persistence happens before validation.
-        //     Empty-path guard: only derive when a leaf exists; an empty path collapses to
-        //     Manual provenance (validation will reject the empty path below anyway).
-        var provenance = path.Count > 0
-            ? await provenanceService.DeriveAsync(tenantId, conversationId, path[^1], ct)
-            : new ProvenanceResult();
+        // 3a. Derive the server-authoritative AI Source READ-ONLY BEFORE validation so validation
+        //     (D3: AI free-text length cap) and the PII screen are Source-aware WITHOUT any
+        //     mutation. This is a pure read — it does NOT reconcile the suggestion or touch
+        //     metrics (the bug D3 introduced: DeriveAsync, which DOES reconcile + bump metrics,
+        //     ran here before validation, so an invalid submission still marked the suggestion
+        //     accepted, polluting calibration accuracy). The full reconciling derive (DeriveAsync)
+        //     now runs only after the disposition is committed (step 4a). Empty-path guard: only
+        //     derive when a leaf exists; an empty path collapses to Manual (validation rejects the
+        //     empty path below anyway).
+        //     Note: the latest suggestion is read twice — once here (read-only) and once in
+        //     DeriveAsync post-persist. That's an acceptable cost (a cheap indexed read).
+        var aiSource = path.Count > 0
+            ? await provenanceService.DeriveSourceAsync(tenantId, conversationId, path[^1], ct)
+            : SubmissionSource.Manual;
 
         // 3b. Server-authoritative validation of the submission FIRST — a validation
-        //     failure must NOT mutate or persist any conversation state.
-        var validation = validator.ValidateSubmission(schema, path, body.FieldValues, provenance.Source);
+        //     failure must NOT mutate or persist any conversation state, and (post-D3-fix)
+        //     must NOT reconcile any AI suggestion.
+        var validation = validator.ValidateSubmission(schema, path, body.FieldValues, aiSource);
         if (!validation.IsValid)
         {
             return Results.BadRequest(new TypifyErrorResponse(
@@ -431,11 +438,24 @@ internal static class ConversationEndpoints
 
         var leafNodeId = path[^1];
 
-        // 4a. PII screen (D3, defense-in-depth): on the AI write path re-screen free-text field
-        //     values (Text/Textarea/Lookup ONLY — a Phone field legitimately holds a phone) before
-        //     persisting. D2 screens at extraction; this re-screens at commit. Manual submissions
-        //     persist the captured values unchanged.
-        var fieldValues = provenance.Source == SubmissionSource.AutoAi
+        // 4a. Derive the FULL server-authoritative AI provenance (B3) NOW — only after validation
+        //     succeeded AND the disposition is committed (WrapUp + SaveAsync). DeriveAsync is the
+        //     MUTATING derive: it reconciles the stored suggestion (MarkReconciledAsync) and bumps
+        //     the accept/override metrics, so it MUST fire exactly once and only on a committed
+        //     disposition — never on a rejected submission (that was the D3 regression). The
+        //     persisted submission below uses this provenance.* plus the screened fieldValues.
+        //     This re-reads the latest suggestion (already read read-only in step 3a) — an
+        //     acceptable cheap indexed read.
+        var provenance = path.Count > 0
+            ? await provenanceService.DeriveAsync(tenantId, conversationId, leafNodeId, ct)
+            : new ProvenanceResult();
+
+        // 4a (cont.). PII screen (D3, defense-in-depth): on the AI write path re-screen free-text
+        //     field values (Text/Textarea/Lookup ONLY — a Phone field legitimately holds a phone)
+        //     before persisting. D2 screens at extraction; this re-screens at commit. Manual
+        //     submissions persist the captured values unchanged. Uses the read-only-derived
+        //     aiSource (identical to provenance.Source) decided pre-validation.
+        var fieldValues = aiSource == SubmissionSource.AutoAi
             ? ScreenFreeTextPii(schema, body.FieldValues)
             : body.FieldValues;
 
@@ -450,6 +470,9 @@ internal static class ConversationEndpoints
             SelectedNodePath = path,
             LeafNodeId = leafNodeId,
             FieldValues = fieldValues,
+            // I2 — Notes is human-authored wrap-up free text (never AI-extracted), so it is
+            // intentionally NOT PII-screened even on the AutoAi path. Only AI-sourced free-text
+            // field values (Text/Textarea/Lookup, via ScreenFreeTextPii) are screened.
             Notes = body.Notes,
             AiSuggested = provenance.AiSuggested,
             AiConfidence = provenance.AiConfidence,
@@ -510,6 +533,10 @@ internal static class ConversationEndpoints
 
                 if (dispo is not null)
                 {
+                    // I1/M4 — the dialer bridge intentionally reads RAW body.* (the
+                    // disposition note here, the callback date below): the disposition note is
+                    // the human-authored wrap-up note (not AI-extracted), and callback_date is
+                    // a Date field, never a free-text field, so neither is PII-screened.
                     await campaignStore.UpdateCallAttemptDispositionAsync(
                         tenantStr, callAttemptId, dispo.Id, body.Notes, ct);
                 }
@@ -566,7 +593,7 @@ internal static class ConversationEndpoints
         foreach (var (key, value) in fieldValues)
         {
             if (fieldsByKey.TryGetValue(key, out var field)
-                && field.Type is FieldType.Text or FieldType.Textarea or FieldType.Lookup)
+                && field.Type.IsFreeText())
             {
                 screened[key] = PiiScreen.Apply(value, schema.AiConfig.PiiPolicy).Value;
             }

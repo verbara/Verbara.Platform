@@ -473,10 +473,6 @@ public sealed class DefaultTypificationValidator : ITypificationValidator
         ApplyStringValidation(field, value, source, errors);
     }
 
-    /// <summary>True for the free-text field types subject to the AI implicit length cap (D3).</summary>
-    private static bool IsFreeText(FieldType type) =>
-        type is FieldType.Text or FieldType.Textarea or FieldType.Lookup;
-
     private static void ApplyStringValidation(
         TypificationField field,
         string value,
@@ -487,7 +483,7 @@ public sealed class DefaultTypificationValidator : ITypificationValidator
         // free-text) the implicit AI cap. A single error is reported, so a field whose configured
         // MaxLength is already smaller than the AI cap is never double-reported.
         int? effectiveMaxLength = field.Validation?.MaxLength;
-        if (source == SubmissionSource.AutoAi && IsFreeText(field.Type))
+        if (source == SubmissionSource.AutoAi && field.Type.IsFreeText())
         {
             effectiveMaxLength = effectiveMaxLength is { } configured
                 ? Math.Min(configured, AiFreeTextMaxLength)
@@ -499,7 +495,7 @@ public sealed class DefaultTypificationValidator : ITypificationValidator
             // When the cap is the implicit AI cap (no configured MaxLength), word it as an
             // AI-sourced cap; otherwise it is the configured per-field maximum.
             var aiCapApplied = source == SubmissionSource.AutoAi
-                && IsFreeText(field.Type)
+                && field.Type.IsFreeText()
                 && field.Validation?.MaxLength is null;
 
             errors.Add(new ValidationError(

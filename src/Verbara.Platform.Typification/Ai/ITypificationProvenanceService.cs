@@ -28,6 +28,14 @@ public interface ITypificationProvenanceService
         EntityId conversationId,
         EntityId committedLeafNodeId,
         CancellationToken ct);
+
+    /// <summary>
+    /// Reads the latest stored suggestion for the conversation and returns ONLY the derived
+    /// <see cref="SubmissionSource"/> (AutoAi when the committed leaf matches the suggestion,
+    /// else Manual). Pure read — does NOT reconcile the suggestion or touch metrics. Used to
+    /// make the /typify validation + PII-screen Source-aware BEFORE the (mutating) reconcile.
+    /// </summary>
+    Task<SubmissionSource> DeriveSourceAsync(TenantId tenantId, EntityId conversationId, EntityId committedLeafNodeId, CancellationToken ct);
 }
 
 /// <summary>

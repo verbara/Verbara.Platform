@@ -1173,6 +1173,197 @@ public sealed class TypifyEndpointTests : IDisposable
         entry.IntegrityHash.Should().NotBeNullOrEmpty();
     }
 
+    // ─── POST /typify — C1 regression: no premature reconcile on validation failure ──
+
+    /// <summary>
+    /// C1 regression (D3 split fix): the stored suggestion's leaf MATCHES the leaf the
+    /// request commits — so the (mutating) <see cref="ITypificationProvenanceService.DeriveAsync"/>
+    /// WOULD reconcile + bump metrics — BUT the submission is INVALID (required field omitted),
+    /// so validation fails (400). The reconcile must NOT have fired: the stored suggestion must
+    /// remain un-reconciled (<c>Accepted == null</c>, <c>CommittedLeafNodeId == null</c>) and NO
+    /// <see cref="TypificationSubmission"/> may be persisted. Pre-fix this reconciled the
+    /// suggestion before validation, polluting calibration accuracy.
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldNotReconcileSuggestion_WhenValidationFails()
+    {
+        await SeedPublishedTenantSchemaAsync("C1 No Premature Reconcile");
+        var conv = await SeedConversationAsync();
+
+        // Seed a suggestion whose leaf == the leaf the request commits → DeriveAsync WOULD reconcile.
+        var suggestionId = EntityId.New();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var suggestionStore = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            await suggestionStore.SaveAsync(new AiSuggestionRecord
+            {
+                Id = suggestionId,
+                TenantId = EntityId.From(AuthenticatedPlatformApiFactory.TestTenantId),
+                ConversationId = conv.ConversationId,
+                SchemaId = EntityId.New(),
+                SchemaVersion = 1,
+                SuggestedLeafNodeId = EntityId.From(LeafNodeId),
+                SuggestedNodePath = [RootNodeId, LeafNodeId],
+                SuggestedFieldValues = new Dictionary<string, string>(),
+                Confidence = 0.95,
+                ModelId = "gpt-4o-mini",
+                PromptVersion = "v1",
+                SurfacedBand = TypificationBand.Suggest,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        // INVALID submission: required field omitted → server validation fails.
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string>(),
+            notes = "invalid: missing required field",
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        using var scope2 = _factory.Services.CreateScope();
+
+        // The suggestion must remain UN-reconciled — DeriveAsync must not have run.
+        var suggestions = scope2.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+        var stored = await suggestions.GetLatestForConversationAsync(
+            EntityId.From(AuthenticatedPlatformApiFactory.TestTenantId), conv.ConversationId, CancellationToken.None);
+        stored.Should().NotBeNull();
+        stored!.Accepted.Should().BeNull();
+        stored.CommittedLeafNodeId.Should().BeNull();
+
+        // No submission persisted (validation rejected before any commit).
+        var submissionStore = scope2.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>();
+        var saved = await submissionStore.GetByConversationIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        saved.Should().BeNull();
+    }
+
+    /// <summary>
+    /// A stored suggestion matches the committed leaf → Source=AutoAi, so the PII screen runs —
+    /// but it only screens FREE-TEXT field values (Text/Textarea/Lookup). A <c>Phone</c>-type
+    /// field legitimately holds a phone number, so its value must persist RAW (not masked to
+    /// <c>[PHONE]</c>), proving the screening scope is free-text-only.
+    /// </summary>
+    [Fact]
+    public async Task Typify_ShouldNotScreenPhoneField_WhenDispositionIsAutoAi()
+    {
+        const string phoneFieldKey = "callback_phone";
+        const string phoneValue = "+1 555 123 4567";
+
+        // Seed a schema directly so it carries a Phone-type field (the admin DTO path is
+        // not needed; this keeps the field-type assertion focused).
+        var schemaId = EntityId.New();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var schemaStore = scope.ServiceProvider.GetRequiredService<ITypificationSchemaStore>();
+            var bindingStore = scope.ServiceProvider.GetRequiredService<ISchemaBindingStore>();
+
+            await schemaStore.SaveAsync(new TypificationSchema
+            {
+                SchemaId = schemaId,
+                TenantId = s_tenantId,
+                Name = "C1 Phone Not Screened",
+                Version = 1,
+                IsPublished = true,
+                MaxDepth = 5,
+                Nodes =
+                [
+                    new TypificationNode
+                    {
+                        NodeId = EntityId.From(RootNodeId),
+                        ParentNodeId = null,
+                        Label = "Root",
+                        Code = RootCode,
+                        SortOrder = 0,
+                        IsLeaf = false,
+                    },
+                    new TypificationNode
+                    {
+                        NodeId = EntityId.From(LeafNodeId),
+                        ParentNodeId = EntityId.From(RootNodeId),
+                        Label = "Leaf",
+                        Code = LeafCode,
+                        SortOrder = 0,
+                        IsLeaf = true,
+                        Leaf = new LeafOutcome { Category = TypificationCategory.Success, IsActive = true },
+                    },
+                ],
+                Fields =
+                [
+                    new TypificationField
+                    {
+                        FieldId = EntityId.New(),
+                        Key = phoneFieldKey,
+                        Label = "Callback Phone",
+                        Type = FieldType.Phone,
+                        Required = false,
+                        SortOrder = 0,
+                    },
+                ],
+                DataDips = [],
+                AiConfig = new TypificationAiConfig { Enabled = false, SentimentGating = false, EntityFieldMap = new Dictionary<string, string>() },
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+
+            await bindingStore.SaveAsync(new SchemaBinding
+            {
+                BindingId = EntityId.New(),
+                TenantId = s_tenantId,
+                Scope = BindingScope.Tenant,
+                ScopeRef = null,
+                SchemaId = schemaId,
+                SubTreeRootNodeId = null,
+                Priority = 7,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        var conv = await SeedConversationAsync();
+
+        // Suggestion matches the committed leaf → Source=AutoAi → PII screen runs.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var suggestionStore = scope.ServiceProvider.GetRequiredService<IAiSuggestionStore>();
+            await suggestionStore.SaveAsync(new AiSuggestionRecord
+            {
+                Id = EntityId.New(),
+                TenantId = EntityId.From(AuthenticatedPlatformApiFactory.TestTenantId),
+                ConversationId = conv.ConversationId,
+                SchemaId = schemaId,
+                SchemaVersion = 1,
+                SuggestedLeafNodeId = EntityId.From(LeafNodeId),
+                SuggestedNodePath = [RootNodeId, LeafNodeId],
+                SuggestedFieldValues = new Dictionary<string, string>(),
+                Confidence = 0.9,
+                ModelId = "gpt-4o-mini",
+                PromptVersion = "v1",
+                SurfacedBand = TypificationBand.Suggest,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string> { [phoneFieldKey] = phoneValue },
+        });
+
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var scope2 = _factory.Services.CreateScope();
+        var store = scope2.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>();
+        var saved = await store.GetByConversationIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        saved.Should().NotBeNull();
+        saved!.Source.Should().Be(SubmissionSource.AutoAi);
+
+        // Phone is NOT free-text → persisted raw (NOT masked to [PHONE]).
+        saved.FieldValues[phoneFieldKey].Should().Be(phoneValue);
+        saved.FieldValues[phoneFieldKey].Should().NotContain("[PHONE]");
+    }
+
     /// <summary>
     /// Pure manual typify (no stored AI suggestion) → NO audit entry for
     /// "typification.ai_disposition" is written.

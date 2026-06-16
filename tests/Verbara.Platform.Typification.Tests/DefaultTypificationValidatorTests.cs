@@ -245,6 +245,28 @@ public sealed class DefaultTypificationValidatorTests
         result.Errors.Should().Contain(e => e.Field == "notes" && e.Message.Contains("50"));
     }
 
+    [Fact]
+    public void ValidateSubmission_ShouldClampToAiCap_WhenFieldMaxLengthExceedsAiCap()
+    {
+        var root = Node("root", "ROOT", isLeaf: false);
+        var leaf = Node("leaf", "LEAF", isLeaf: true, parent: root.NodeId, leaf: Outcome());
+        // Configured MaxLength (5000) is LARGER than the AI cap (2000): the AI cap clamps below
+        // the configured length, so a 3000-char AI value (under the configured 5000 but over the
+        // 2000 cap) is rejected — proving the cap binds when the configured length is larger.
+        var notes = Field("notes", FieldType.Text, validation: new FieldValidation { MaxLength = 5000 });
+
+        var schema = Schema(nodes: [root, leaf], fields: [notes]);
+
+        var result = _validator.ValidateSubmission(
+            schema,
+            [root.NodeId, leaf.NodeId],
+            new Dictionary<string, string> { ["notes"] = new string('x', 3000) },
+            SubmissionSource.AutoAi);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Field == "notes" && e.Message.Contains("2000"));
+    }
+
     // ---------- EvaluateCondition ----------
 
     [Fact]

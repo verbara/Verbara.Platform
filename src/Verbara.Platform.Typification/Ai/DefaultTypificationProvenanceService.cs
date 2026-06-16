@@ -68,4 +68,27 @@ internal sealed class DefaultTypificationProvenanceService : ITypificationProven
             SchemaVersion = suggestion.SchemaVersion,
         };
     }
+
+    /// <inheritdoc />
+    public async Task<SubmissionSource> DeriveSourceAsync(
+        TenantId tenantId,
+        EntityId conversationId,
+        EntityId committedLeafNodeId,
+        CancellationToken ct)
+    {
+        // Pure read — mirrors exactly how DeriveAsync decides Source (same store read + same
+        // leaf-match comparison) but performs NO MarkReconciledAsync and NO metrics increment.
+        // The (mutating) reconcile happens only later, in DeriveAsync, on a committed disposition.
+        var tenantEntityId = EntityId.From(tenantId.Value);
+
+        var suggestion = await _suggestionStore.GetLatestForConversationAsync(
+            tenantEntityId, conversationId, ct);
+
+        if (suggestion is null)
+            return SubmissionSource.Manual;
+
+        return suggestion.SuggestedLeafNodeId == committedLeafNodeId
+            ? SubmissionSource.AutoAi
+            : SubmissionSource.Manual;
+    }
 }
