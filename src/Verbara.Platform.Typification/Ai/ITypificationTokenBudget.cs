@@ -14,6 +14,15 @@ namespace Verbara.Platform.Typification.Ai;
 /// The default <see cref="InMemoryTypificationTokenBudget"/> is an in-process accumulator
 /// (accurate for a single instance; a multi-instance deployment would back this with Redis —
 /// a future enhancement).
+/// <para>
+/// <b>Redis-seam decision point (fail direction):</b> a future Redis-backed implementation MUST
+/// decide its own fail direction when the budget store is unavailable. The suggestion endpoint
+/// currently lets a budget-store exception propagate (→ HTTP 500); the in-memory implementation
+/// cannot throw, so no endpoint change exists today. A Redis implementation should catch the outage
+/// <i>internally</i> and choose either <b>fail-open</b> (allow the call, uncapped during the outage)
+/// or <b>fail-closed</b> (degrade to the empty suggestion) — that policy decision belongs with the
+/// Redis implementation, not the endpoint.
+/// </para>
 /// </remarks>
 public interface ITypificationTokenBudget
 {

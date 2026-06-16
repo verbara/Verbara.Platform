@@ -637,11 +637,12 @@ public sealed class TypificationAiSuggestionTests : IDisposable
 
     // ─── E3 — dedicated per-tenant "llm" rate-limit policy ──────────────────────
 
-    /// <summary>The "__global__" pre-auth fallback partition's small permit limit (no X-Tenant-Id).
-    /// Mirrors the literal in <see cref="TenantRateLimitPolicy"/>'s "llm" policy; proving the
-    /// per-tenant bucket is strictly larger than this rules out the old "everything collapses to
-    /// __global__" bug.</summary>
-    private const int GlobalFallbackPermitLimit = 5;
+    /// <summary>The OLD punitive "__global__" fallback permit (5) — used here purely as a lower-bound
+    /// sentinel. Proving a single tenant's burst yields strictly MORE than this rules out the old
+    /// "everything collapses to a 5/min __global__ bucket" bug, regardless of the current fallback
+    /// value (raised to <see cref="TenantRateLimitPolicy.GlobalFallbackPermitLimit"/> == 30 by the
+    /// E3 review hedge). The per-tenant bucket under test is <see cref="TenantRateLimitPolicy.LlmPermitLimit"/> (30).</summary>
+    private const int OldPunitiveGlobalFallback = 5;
 
     [Fact]
     public async Task Suggestion_ShouldRateLimit_PerTenant()
@@ -689,9 +690,9 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         var okCount = statuses.Count(s => s == HttpStatusCode.OK);
         okCount.Should().BeLessThanOrEqualTo(TenantRateLimitPolicy.LlmPermitLimit,
             "no more than the per-tenant permit limit (30) may succeed inside one sliding window");
-        okCount.Should().BeGreaterThan(GlobalFallbackPermitLimit,
-            "the per-tenant 30 bucket (not the old global 5 bucket) must absorb the burst — proving "
-            + "the limiter partitions on X-Tenant-Id, not the unset Items[\"TenantId\"]");
+        okCount.Should().BeGreaterThan(OldPunitiveGlobalFallback,
+            "the per-tenant 30 bucket (not the old punitive global 5 bucket) must absorb the burst — "
+            + "proving the limiter partitions on X-Tenant-Id, not the unset Items[\"TenantId\"]");
     }
 
     [Fact]

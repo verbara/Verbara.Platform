@@ -109,6 +109,32 @@ public sealed class InMemoryTypificationTokenBudgetTests
     }
 
     [Fact]
+    public async Task RecordUsage_ShouldNotLoseUpdates_UnderConcurrentRecords()
+    {
+        // Lost-update guard: fire many parallel RecordUsageAsync calls against one accumulator and
+        // assert the running sum is EXACTLY their total (no read-modify-write races dropped any).
+        // This locks in the atomicity of the AddOrUpdate accumulator against a future refactor to a
+        // non-atomic read-modify-write.
+        const int Records = 100;
+        const long TokensPerRecord = 10;
+        const long ExpectedSum = Records * TokensPerRecord; // 1000
+
+        var clock = new FakeClock(new DateTimeOffset(2026, 6, 16, 12, 0, 0, TimeSpan.Zero));
+        var sut = new InMemoryTypificationTokenBudget(clock);
+
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, Records),
+            async (_, ct) => await sut.RecordUsageAsync(Tenant, TokensPerRecord, ct));
+
+        // The accumulated sum must be exactly 1000 — over a budget of (1000 - 1) yet NOT over
+        // (1000 + 1). Any lost update would leave the sum < 1000 and fail the first assertion.
+        (await sut.IsOverBudgetAsync(Tenant, dailyBudget: ExpectedSum - 1, CancellationToken.None))
+            .Should().BeTrue("the accumulated sum must be >= 999 (no concurrent update was lost)");
+        (await sut.IsOverBudgetAsync(Tenant, dailyBudget: ExpectedSum + 1, CancellationToken.None))
+            .Should().BeFalse("the accumulated sum must be < 1001 (no update was double-counted)");
+    }
+
+    [Fact]
     public async Task IsOverBudget_ShouldBeIsolatedPerTenant_WhenDifferentTenantsRecordUsage()
     {
         var clock = new FakeClock(new DateTimeOffset(2026, 6, 16, 12, 0, 0, TimeSpan.Zero));

@@ -18,6 +18,18 @@ internal static class TenantRateLimitPolicy
     /// </summary>
     internal const int LlmPermitLimit = 30;
 
+    /// <summary>
+    /// E3 — permit limit for the shared <c>"__global__"</c> fallback partition of the <c>llm</c>
+    /// policy. Set equal to <see cref="LlmPermitLimit"/> (30): a header-less authenticated caller
+    /// (JWT-<c>tid</c>-only, no <c>X-Tenant-Id</c> header, no tenant subdomain) cannot be partitioned
+    /// per tenant at this pre-auth pipeline position, so it lands in this shared bucket. Capping it at
+    /// the per-tenant limit (rather than a punitive low value) keeps cost control without starving
+    /// that real caller class — proper per-tenant partitioning for them requires resolving the
+    /// authenticated tenant, which needs the deferred <c>UseRateLimiter()</c> pipeline reorder
+    /// (see the E3 follow-up in the P2b plan).
+    /// </summary>
+    internal const int GlobalFallbackPermitLimit = 30;
+
     /// <summary>Window length for the <c>llm</c> sliding-window limiter.</summary>
     internal static readonly TimeSpan LlmWindow = TimeSpan.FromMinutes(1);
 
@@ -77,9 +89,15 @@ internal static class TenantRateLimitPolicy
         {
             var tenantId = ResolveTenantKey(context);
 
-            // Pre-auth / no-tenant traffic gets a small partition of its own (it never reaches
-            // the authenticated suggestion route in practice, but keep it bounded).
-            var permitLimit = tenantId == "__global__" ? 5 : LlmPermitLimit;
+            // The "__global__" fallback is NOT only pre-auth traffic: a header-less authenticated
+            // caller (JWT-tid-only, no X-Tenant-Id header, no tenant subdomain) DOES land here and
+            // shares this single bucket — the route's primary caller (the Web app) sends the header,
+            // so this is an edge case, but a real one. Cap the shared bucket at the per-tenant limit
+            // (GlobalFallbackPermitLimit == LlmPermitLimit) so it stays bounded without punitively
+            // starving that caller class. TRUE per-tenant partitioning for header-less authenticated
+            // callers requires resolving the authenticated tenant, which needs the deferred
+            // UseRateLimiter() pipeline reorder (tracked as the E3 follow-up in the P2b plan).
+            var permitLimit = tenantId == "__global__" ? GlobalFallbackPermitLimit : LlmPermitLimit;
 
             return RateLimitPartition.GetSlidingWindowLimiter(tenantId, _ => new SlidingWindowRateLimiterOptions
             {
@@ -122,7 +140,11 @@ internal static class TenantRateLimitPolicy
     ///   <item><c>Items["TenantId"]</c> as string — honored first in case a future middleware-order
     ///   change populates it early.</item>
     ///   <item>the <c>X-Tenant-Id</c> request header — the primary tenant signal the Web sends.</item>
-    ///   <item><c>"__global__"</c> — the bounded pre-auth / no-tenant fallback.</item>
+    ///   <item><c>"__global__"</c> — the bounded shared fallback. Note this is NOT only pre-auth /
+    ///   no-tenant traffic: a header-less authenticated caller (JWT-<c>tid</c>-only, no
+    ///   <c>X-Tenant-Id</c> header, no tenant subdomain) also lands here and shares this bucket
+    ///   (capped at <see cref="GlobalFallbackPermitLimit"/>) until the pipeline reorder lets us
+    ///   partition on the authenticated tenant.</item>
     /// </list>
     /// </summary>
     private static string ResolveTenantKey(HttpContext context)

@@ -309,6 +309,8 @@ internal static class ConversationEndpoints
         // 4b. E3 — record the call's token usage against the tenant's UTC-day running sum. The LLM
         //     call happened (classification is non-null), so record once regardless of band/mode —
         //     subsequent calls that push the tenant past DailyTokenBudget will fail-closed above.
+        // A provider that returns no usage block records 0 → that call's real cost isn't counted
+        // toward the budget (Verbara's OpenAI-compatible provider does populate usage).
         await budget.RecordUsageAsync(tenantId, classification.Usage?.TotalTokens ?? 0, ct);
 
         // C1 — compute the surfaced band BEFORE persisting, so the stored row records EXACTLY
