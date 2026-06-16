@@ -32,6 +32,18 @@ public sealed record TypificationSubmission : ITenantScoped
 
     public SubmissionSource Source { get; init; }
 
+    /// <summary>
+    /// The leaf node the AI suggested at classification time (null when no suggestion exists).
+    /// Captured for correction-signal analysis (B3).
+    /// </summary>
+    public EntityId? SuggestedLeafNodeId { get; init; }
+
+    /// <summary>
+    /// Full node path (root→leaf) the AI suggested (null when no suggestion exists).
+    /// Captured for correction-signal analysis (B3).
+    /// </summary>
+    public IReadOnlyList<string>? SuggestedNodePath { get; init; }
+
     public TimeSpan Duration { get; init; }
 
     public DateTimeOffset CompletedAt { get; init; }

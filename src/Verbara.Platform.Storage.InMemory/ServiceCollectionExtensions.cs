@@ -15,6 +15,7 @@ using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Surveys;
+using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Platform.Core.Branding;
 using Verbara.Platform.Core.Notifications;
@@ -99,6 +100,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISchemaBindingStore, InMemorySchemaBindingStore>();
         services.AddSingleton<ITypificationSubmissionStore, InMemoryTypificationSubmissionStore>();
         services.AddSingleton<IReasonHintStore, InMemoryReasonHintStore>();
+        services.AddSingleton<IAiSuggestionStore, InMemoryAiSuggestionStore>();
 
         // Automation
         services.AddSingleton<ITimerStore, InMemoryTimerStore>();

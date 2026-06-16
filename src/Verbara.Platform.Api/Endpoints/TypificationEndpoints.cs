@@ -1,7 +1,11 @@
+using System.Collections.Frozen;
+using System.Security.Claims;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Typification;
+using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Platform.Typification.Validation;
 using Verbara.Sdk.Pro.Licensing;
@@ -31,6 +35,7 @@ internal static class TypificationEndpoints
         group.MapPut("/schemas/{id}", UpdateSchema);
         group.MapDelete("/schemas/{id}", DeleteSchema);
         group.MapPost("/schemas/{id}/publish", PublishSchema);
+        group.MapGet("/schemas/{id}/calibration-status", GetCalibrationStatus);
 
         // ── Bindings ─────────────────────────────────────────────────────────
         group.MapGet("/bindings", ListBindings);
@@ -68,6 +73,8 @@ internal static class TypificationEndpoints
         [FromBody] CreateSchemaRequest body,
         [FromServices] ITypificationSchemaStore store,
         [FromServices] IAuditService audit,
+        [FromServices] PermissionResolver permissionResolver,
+        [FromServices] ITypificationCalibration calibration,
         IClock clock,
         CancellationToken ct)
     {
@@ -95,6 +102,14 @@ internal static class TypificationEndpoints
             UpdatedAt = null,
         };
 
+        // C4 — fail-fast write-time guards (autonomous permission + AutoFill calibration).
+        // The schema id is brand-new, so an AutoFill request always rejects (no published
+        // calibration yet) — by design: publish in Shadow/SuggestOnly first.
+        var aiGate = await ValidateAiConfigWriteAsync(
+            context, permissionResolver, calibration, tenantId, schema.SchemaId, schema.AiConfig, ct);
+        if (aiGate is not null)
+            return aiGate;
+
         await store.SaveAsync(schema, ct);
         await RecordAudit(context, audit, tenantId, "typification.schema.created",
             targetId: schema.SchemaId.Value, before: null,
@@ -109,6 +124,8 @@ internal static class TypificationEndpoints
         [FromBody] UpdateSchemaRequest body,
         [FromServices] ITypificationSchemaStore store,
         [FromServices] IAuditService audit,
+        [FromServices] PermissionResolver permissionResolver,
+        [FromServices] ITypificationCalibration calibration,
         IClock clock,
         CancellationToken ct)
     {
@@ -144,6 +161,14 @@ internal static class TypificationEndpoints
             CreatedAt = latest.CreatedAt,
             UpdatedAt = clock.UtcNow,
         };
+
+        // C4 — fail-fast write-time guards (autonomous permission + AutoFill calibration)
+        // against the EXISTING schema id, before persisting. Rejecting here means no save
+        // and no audit entry.
+        var aiGate = await ValidateAiConfigWriteAsync(
+            context, permissionResolver, calibration, tenantId, schemaId, updated.AiConfig, ct);
+        if (aiGate is not null)
+            return aiGate;
 
         await store.SaveAsync(updated, ct);
         await RecordAudit(context, audit, tenantId, "typification.schema.updated",
@@ -205,6 +230,31 @@ internal static class TypificationEndpoints
         return Results.Ok(new PublishResultDto(Ok: true, Errors: []));
     }
 
+    // C4 — calibration snapshot for the AI-config admin surface. Reads the empirical
+    // readiness (sample count, accuracy, AutoFill/autonomous gates) so the designer UI
+    // can show whether AutoFill / autonomous can yet be enabled. Requires the
+    // `typification:ai:configure` permission (same audience that edits AiConfig).
+    private static async Task<IResult> GetCalibrationStatus(
+        string id,
+        HttpContext context,
+        [FromServices] ITypificationCalibration calibration,
+        [FromServices] PermissionResolver permissionResolver,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+
+        var perms = await ResolveCallerPermissions(context, permissionResolver, tenantId, ct);
+        if (!PermissionResolver.HasPermission(perms, "typification:ai:configure"))
+            return Results.Forbid();
+
+        // GetStatusAsync returns an all-zero / not-ready snapshot for a missing or
+        // unpublished schema — that IS the correct "not calibrated" answer, so there
+        // is no NotFound special-casing here.
+        var status = await calibration.GetStatusAsync(tenantId, EntityId.From(id), ct);
+        return Results.Ok(new CalibrationStatusDto(
+            status.Samples, status.Accuracy, status.AutoFillReady, status.AutonomousReady));
+    }
+
     // ─── Binding handlers ────────────────────────────────────────────────────
 
     private static async Task<IResult> ListBindings(
@@ -233,6 +283,8 @@ internal static class TypificationEndpoints
         [FromBody] CreateBindingRequest body,
         [FromServices] ISchemaBindingStore store,
         [FromServices] IAuditService audit,
+        [FromServices] PermissionResolver permissionResolver,
+        [FromServices] ITypificationCalibration calibration,
         IClock clock,
         CancellationToken ct)
     {
@@ -248,6 +300,21 @@ internal static class TypificationEndpoints
                 Ok: false,
                 Errors: [new PublishErrorDto("scopeRef", $"ScopeRef is required for scope '{scope}'.")]));
 
+        var aiConfigOverride = MapBindingAiConfigOverride(body.AiConfigOverride);
+
+        // E1 — close the gate-bypass: a per-binding AI override is subject to the SAME write-time
+        // guards as a schema's AiConfig (autonomous permission + AutoFill calibration). Calibration
+        // keys on the override's target schema (body.SchemaId) — the schema this override pilots.
+        // Skipped entirely when there is no override (no behavior change for non-AI bindings); the
+        // gate runs BEFORE persist/audit so a rejection neither saves nor records the binding.
+        if (aiConfigOverride is not null)
+        {
+            var gate = await ValidateAiConfigWriteAsync(
+                context, permissionResolver, calibration, tenantId, EntityId.From(body.SchemaId), aiConfigOverride, ct);
+            if (gate is not null)
+                return gate;
+        }
+
         var binding = new SchemaBinding
         {
             BindingId = EntityId.New(),
@@ -257,6 +324,7 @@ internal static class TypificationEndpoints
             SchemaId = EntityId.From(body.SchemaId),
             SubTreeRootNodeId = body.SubtreeRootNodeId is { Length: > 0 } s ? EntityId.From(s) : null,
             Priority = body.Priority,
+            AiConfigOverride = aiConfigOverride,
             CreatedAt = clock.UtcNow,
         };
 
@@ -274,6 +342,8 @@ internal static class TypificationEndpoints
         [FromBody] UpdateBindingRequest body,
         [FromServices] ISchemaBindingStore store,
         [FromServices] IAuditService audit,
+        [FromServices] PermissionResolver permissionResolver,
+        [FromServices] ITypificationCalibration calibration,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -292,6 +362,20 @@ internal static class TypificationEndpoints
                 Ok: false,
                 Errors: [new PublishErrorDto("scopeRef", $"ScopeRef is required for scope '{scope}'.")]));
 
+        var aiConfigOverride = MapBindingAiConfigOverride(body.AiConfigOverride);
+
+        // E1 — close the gate-bypass: a per-binding AI override is subject to the SAME write-time
+        // guards as a schema's AiConfig (autonomous permission + AutoFill calibration). Calibration
+        // keys on the override's target schema (body.SchemaId). Skipped entirely when there is no
+        // override; runs BEFORE persist/audit so a rejection neither saves nor records the binding.
+        if (aiConfigOverride is not null)
+        {
+            var gate = await ValidateAiConfigWriteAsync(
+                context, permissionResolver, calibration, tenantId, EntityId.From(body.SchemaId), aiConfigOverride, ct);
+            if (gate is not null)
+                return gate;
+        }
+
         var updated = new SchemaBinding
         {
             BindingId = bindingId,
@@ -301,6 +385,7 @@ internal static class TypificationEndpoints
             SchemaId = EntityId.From(body.SchemaId),
             SubTreeRootNodeId = body.SubtreeRootNodeId is { Length: > 0 } s ? EntityId.From(s) : null,
             Priority = body.Priority,
+            AiConfigOverride = aiConfigOverride,
             CreatedAt = existing.CreatedAt,
         };
 
@@ -346,16 +431,26 @@ internal static class TypificationEndpoints
             CreatedAt: s.CreatedAt,
             UpdatedAt: s.UpdatedAt);
 
-    // D3 — AiConfig round-trip. The EntityFieldMap (AI entity → field Key) is NOT yet
-    // editable over HTTP (that lands in P2b); it is preserved across read/write by the
-    // create/update map (empty on create, the prior schema's map on update), so it is
-    // intentionally absent from the wire DTO.
+    // P2b — AiConfig round-trip with graduated bands.
+    // D4 — EntityFieldMap (AI entity → field Key) and PiiAllowStore (allow-listed PiiType
+    // names) are now emitted on the wire. PiiAllowStore is rendered in deterministic ordinal
+    // order for stable round-trips/tests; PiiPolicy is non-null in the domain (defaulted
+    // DenyAll), coalesced defensively here.
     private static AiConfigDto ToAiConfigDto(TypificationAiConfig c) =>
         new(
             Enabled: c.Enabled,
             Mode: c.Mode.ToString(),
-            ConfidenceThreshold: c.ConfidenceThreshold,
-            SentimentGating: c.SentimentGating);
+            SuggestThreshold: c.SuggestThreshold,
+            AutoApplyThreshold: c.AutoApplyThreshold,
+            AutonomousThreshold: c.AutonomousThreshold,
+            Autonomous: c.Autonomous,
+            SentimentGating: c.SentimentGating,
+            DailyTokenBudget: c.DailyTokenBudget,
+            EntityFieldMap: c.EntityFieldMap,
+            PiiAllowStore: (c.PiiPolicy ?? PiiPolicy.DenyAll).AllowStore
+                .Select(t => t.ToString())
+                .OrderBy(s => s, StringComparer.Ordinal)
+                .ToArray());
 
     private static TypificationNodeDto ToNodeDto(TypificationNode n) =>
         new(
@@ -404,7 +499,9 @@ internal static class TypificationEndpoints
             ScopeRef: b.ScopeRef,
             SchemaId: b.SchemaId.Value,
             SubtreeRootNodeId: b.SubTreeRootNodeId?.Value,
-            Priority: b.Priority);
+            Priority: b.Priority,
+            // E1 — emit the override only when present (null = inherit the schema's AiConfig).
+            AiConfigOverride: b.AiConfigOverride is null ? null : ToAiConfigDto(b.AiConfigOverride));
 
     private static List<TypificationNode> MapNodes(IReadOnlyList<TypificationNodeDto> dtos) =>
         dtos.Select(n => new TypificationNode
@@ -483,16 +580,27 @@ internal static class TypificationEndpoints
         new()
         {
             Enabled = false,
-            Mode = default,
-            ConfidenceThreshold = 0,
-            SentimentGating = false,
+            Mode = AiMode.Off,
+            // Threshold defaults come from the record property initialisers.
+            SentimentGating = true,
             EntityFieldMap = new Dictionary<string, string>(),
         };
 
-    // D3 — build the domain AiConfig from the optional request DTO, carrying forward the
-    // existing EntityFieldMap (P2b owns map editing). An omitted DTO yields the disabled
-    // default (matches P0). An unknown Mode string falls back to SuggestOnly (tolerant,
-    // like the PrefillSource map — AI config is optional layered metadata).
+    // P2b — build the domain AiConfig from the optional request DTO. An omitted DTO yields
+    // the disabled default (preserving the existing EntityFieldMap). Unknown Mode strings fall
+    // back to Off (tolerant — AI config is optional layered metadata). Thresholds are clamped
+    // to [0, 1]: a value > 1 suppresses everything; < 0 never suppresses; both outcomes would
+    // be confusing ops mistakes rather than intent.
+    // D4 — the wire is now authoritative for EntityFieldMap + PiiAllowStore, with a DELIBERATE
+    // asymmetry on omission:
+    //  • EntityFieldMap: a provided map wins; an OMITTED map PRESERVES the existing one
+    //    (`?? existingEntityFieldMap`).
+    //  • PiiAllowStore:  a provided list parses to a PiiPolicy; an OMITTED list RESETS the
+    //    policy to DenyAll (ParsePiiPolicy(null) → DenyAll) — it does NOT preserve.
+    // The reset is safe BY DESIGN: DenyAll is the restrictive/fail-closed direction, so a reset
+    // can only re-mask PII, never silently leak it. Callers that own the policy (the Web schema
+    // designer, D4-web) MUST always send piiAllowStore on every write so an edit elsewhere in
+    // the config never accidentally un-allow-lists a tenant's permitted PII types.
     private static TypificationAiConfig MapAiConfig(
         AiConfigDto? dto, IReadOnlyDictionary<string, string> existingEntityFieldMap)
     {
@@ -502,14 +610,52 @@ internal static class TypificationEndpoints
         return new TypificationAiConfig
         {
             Enabled = dto.Enabled,
-            Mode = Enum.TryParse<AiMode>(dto.Mode, ignoreCase: true, out var m) ? m : AiMode.SuggestOnly,
-            // Clamp to [0, 1]: a confidence threshold > 1 would suppress every suggestion
-            // and < 0 would never suppress, so an out-of-range admin value is corrected
-            // rather than persisted verbatim.
-            ConfidenceThreshold = Math.Clamp(dto.ConfidenceThreshold, 0.0, 1.0),
+            Mode = Enum.TryParse<AiMode>(dto.Mode, ignoreCase: true, out var m) ? m : AiMode.Off,
+            SuggestThreshold = Math.Clamp(dto.SuggestThreshold, 0.0, 1.0),
+            AutoApplyThreshold = Math.Clamp(dto.AutoApplyThreshold, 0.0, 1.0),
+            AutonomousThreshold = Math.Clamp(dto.AutonomousThreshold, 0.0, 1.0),
+            Autonomous = dto.Autonomous,
             SentimentGating = dto.SentimentGating,
-            EntityFieldMap = existingEntityFieldMap,
+            DailyTokenBudget = dto.DailyTokenBudget,
+            EntityFieldMap = dto.EntityFieldMap ?? existingEntityFieldMap,
+            PiiPolicy = ParsePiiPolicy(dto.PiiAllowStore),
         };
+    }
+
+    // E1 — map an optional per-binding AI config OVERRIDE DTO to the domain. A null DTO yields
+    // null (the binding inherits the schema's AiConfig). Unlike a schema's AiConfig, a binding
+    // override carries its OWN EntityFieldMap on the wire (there is no schema-map to preserve for
+    // an override), so the override DTO's own map is passed as the "existing" map to MapAiConfig:
+    // a provided map wins; an omitted map collapses to empty (no prior binding-override map to
+    // carry forward). PiiAllowStore follows MapAiConfig's reset-to-DenyAll-on-omission semantics.
+    private static TypificationAiConfig? MapBindingAiConfigOverride(AiConfigDto? dto) =>
+        dto is null
+            ? null
+            : MapAiConfig(dto, dto.EntityFieldMap ?? new Dictionary<string, string>());
+
+    // D4 — map the wire PiiAllowStore (PiiType member names) to a domain PiiPolicy. A null
+    // list → the canonical DenyAll singleton. Names are parsed case-insensitively (AOT-safe
+    // Enum.TryParse); unknown names are tolerantly skipped (consistent with the other tolerant
+    // parses in this file). An empty / all-unknown list also collapses to DenyAll. A non-empty
+    // result is backed by a FrozenSet so the domain holds an immutable, fast-Contains policy —
+    // never a mutable HashSet behind IReadOnlySet (no down-cast-and-mutate hole), and its empty
+    // shape matches the canonical DenyAll (FrozenSet<PiiType>.Empty). Mirrors
+    // PiiPolicyJsonConverter.Read, which also frozen-backs the parsed set.
+    private static PiiPolicy ParsePiiPolicy(IReadOnlyList<string>? names)
+    {
+        if (names is null)
+            return PiiPolicy.DenyAll;
+
+        var set = new HashSet<PiiType>();
+        foreach (var name in names)
+        {
+            if (Enum.TryParse<PiiType>(name, ignoreCase: true, out var t))
+                set.Add(t);
+        }
+
+        return set.Count == 0
+            ? PiiPolicy.DenyAll
+            : new PiiPolicy { AllowStore = set.ToFrozenSet() };
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -542,6 +688,63 @@ internal static class TypificationEndpoints
 
         throw new InvalidOperationException("Tenant ID not resolved");
     }
+
+    // C4 — resolve the caller's effective permissions for the current tenant. The caller
+    // user id is resolved in the canonical order used by PermissionAuthorizationHandler and
+    // PlatformAdminAuthorizationHandler: `user_id` ?? ClaimTypes.NameIdentifier ?? `sub`.
+    // For API-key callers `user_id` is the owning-user claim while NameIdentifier is the
+    // key id — so `user_id` MUST win, otherwise the key id resolves to an empty permission
+    // set and every gate 403s even for authorized callers. JWT callers carry only `sub`.
+    // A caller with no resolvable id yields an empty permission set (so every gate fails closed).
+    private static async Task<IReadOnlySet<string>> ResolveCallerPermissions(
+        HttpContext context,
+        PermissionResolver permissionResolver,
+        TenantId tenantId,
+        CancellationToken ct)
+    {
+        var callerUserId = context.User.FindFirstValue("user_id")
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? context.User.FindFirstValue("sub");
+
+        if (string.IsNullOrEmpty(callerUserId))
+            return new HashSet<string>(StringComparer.Ordinal);
+
+        return await permissionResolver.ResolveAsync(tenantId, EntityId.From(callerUserId), ct);
+    }
+
+    // C4 — defense-in-depth write-time AI-config validation (Create + Update). Returns a
+    // non-null IResult (the error response) when the write must be rejected; null when OK.
+    private static async Task<IResult?> ValidateAiConfigWriteAsync(
+        HttpContext context,
+        PermissionResolver permissionResolver,
+        ITypificationCalibration calibration,
+        TenantId tenantId,
+        EntityId schemaId,
+        TypificationAiConfig aiConfig,
+        CancellationToken ct)
+    {
+        // Autonomous disposition is the highest-risk setting → stricter permission.
+        if (aiConfig.Autonomous)
+        {
+            var perms = await ResolveCallerPermissions(context, permissionResolver, tenantId, ct);
+            if (!PermissionResolver.HasPermission(perms, "typification:ai:autonomous"))
+                return Results.Forbid();
+        }
+
+        // AutoFill must be earned: reject enabling it on a schema whose published
+        // version hasn't reached the calibration bar (mirrors the runtime band gate).
+        if (aiConfig.Mode == AiMode.AutoFill)
+        {
+            var status = await calibration.GetStatusAsync(tenantId, schemaId, ct);
+            if (!status.AutoFillReady)
+                return Results.BadRequest(new PublishResultDto(
+                    Ok: false,
+                    Errors: [new PublishErrorDto("aiConfig.mode",
+                        "AutoFill requires the schema to reach the calibration bar (samples + accuracy). Run in Shadow/SuggestOnly until calibration is ready.")]));
+        }
+
+        return null;
+    }
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
@@ -558,13 +761,25 @@ internal sealed record TypificationSchemaDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt);
 
-// D3 — AI auto-disposition config (P2a). The EntityFieldMap (AI entity → field Key) is
-// NOT carried on the wire yet (P2b owns map editing) and is preserved round-trip server-side.
+// P2b — AI auto-disposition config with graduated bands.
+// D4 (P2b) — EntityFieldMap (AI entity name → field Key) and PiiAllowStore (the PiiType
+// member NAMES the tenant has allow-listed, e.g. ["Email","Phone"]) are now editable on the
+// wire so the Web schema designer can manage them. Both are nullable: an omitting client
+// preserves the existing EntityFieldMap and defaults PiiAllowStore to DenyAll (empty), the
+// same robustness pattern as the rest of the config. PiiAllowStore is a names array (not the
+// PiiPolicy object / PiiType enum) to keep the wire simple and the PiiPolicyJsonConverter
+// out of the API surface; MapAiConfig maps names ↔ PiiPolicy.
 internal sealed record AiConfigDto(
     bool Enabled,
     string Mode,
-    double ConfidenceThreshold,
-    bool SentimentGating);
+    double SuggestThreshold,
+    double AutoApplyThreshold,
+    double AutonomousThreshold,
+    bool Autonomous,
+    bool SentimentGating,
+    long? DailyTokenBudget,
+    IReadOnlyDictionary<string, string>? EntityFieldMap = null,
+    IReadOnlyList<string>? PiiAllowStore = null);
 
 internal sealed record TypificationNodeDto(
     string NodeId,
@@ -619,7 +834,11 @@ internal sealed record SchemaBindingDto(
     string? ScopeRef,
     string SchemaId,
     string? SubtreeRootNodeId,
-    int Priority);
+    int Priority,
+    // E1 — optional per-binding AI config override (null = inherit the schema's AiConfig).
+    // Carries its OWN EntityFieldMap on the wire; the effective config resolved at runtime is
+    // `AiConfigOverride ?? schema.AiConfig`.
+    AiConfigDto? AiConfigOverride = null);
 
 // ─── Request DTOs ───────────────────────────────────────────────────────────
 
@@ -642,15 +861,26 @@ internal sealed record CreateBindingRequest(
     string? ScopeRef,
     string SchemaId,
     string? SubtreeRootNodeId,
-    int Priority);
+    int Priority,
+    // E1 — optional per-binding AI config override (null = inherit the schema's AiConfig).
+    AiConfigDto? AiConfigOverride = null);
 
 internal sealed record UpdateBindingRequest(
     string Scope,
     string? ScopeRef,
     string SchemaId,
     string? SubtreeRootNodeId,
-    int Priority);
+    int Priority,
+    // E1 — optional per-binding AI config override (null = inherit the schema's AiConfig).
+    AiConfigDto? AiConfigOverride = null);
 
 internal sealed record PublishResultDto(bool Ok, IReadOnlyList<PublishErrorDto> Errors);
 
 internal sealed record PublishErrorDto(string Field, string Message);
+
+// C4 — calibration snapshot DTO for GET /schemas/{id}/calibration-status.
+internal sealed record CalibrationStatusDto(
+    int Samples,
+    double Accuracy,
+    bool AutoFillReady,
+    bool AutonomousReady);

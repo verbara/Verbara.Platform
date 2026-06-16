@@ -16,4 +16,5 @@ namespace Verbara.Platform.Llm;
 [JsonSerializable(typeof(ChatCompletionResponse))]
 [JsonSerializable(typeof(ChatMessage))]
 [JsonSerializable(typeof(ChatChoice))]
+[JsonSerializable(typeof(ChatUsage))]
 internal sealed partial class LlmJsonContext : JsonSerializerContext;

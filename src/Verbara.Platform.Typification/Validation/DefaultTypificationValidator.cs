@@ -13,6 +13,14 @@ public sealed class DefaultTypificationValidator : ITypificationValidator
     private const int MinAllowedDepth = 1;
     private const int MaxAllowedDepth = 8;
 
+    /// <summary>
+    /// Hard length cap (chars) for AI-sourced free-text values (Text/Textarea/Lookup) that
+    /// declare no explicit <see cref="FieldValidation.MaxLength"/> — guards the AI write path
+    /// against the model emitting a huge unbounded blob (D3). For Manual submissions only the
+    /// configured per-field MaxLength applies (no implicit cap).
+    /// </summary>
+    private const int AiFreeTextMaxLength = 2000;
+
     /// <summary>Bounded match time to avoid catastrophic-backtracking (ReDoS).</summary>
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(100);
 
@@ -192,7 +200,8 @@ public sealed class DefaultTypificationValidator : ITypificationValidator
     public ValidationResult ValidateSubmission(
         TypificationSchema schema,
         IReadOnlyList<EntityId> selectedNodePath,
-        IReadOnlyDictionary<string, string> fieldValues)
+        IReadOnlyDictionary<string, string> fieldValues,
+        SubmissionSource source = SubmissionSource.Manual)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(selectedNodePath);
@@ -311,7 +320,7 @@ public sealed class DefaultTypificationValidator : ITypificationValidator
                 continue;
             }
 
-            ValidateTypedValue(field, rawValue!, errors);
+            ValidateTypedValue(field, rawValue!, source, errors);
         }
 
         return errors.Count == 0 ? ValidationResult.Success : new ValidationResult(errors);
@@ -368,7 +377,11 @@ public sealed class DefaultTypificationValidator : ITypificationValidator
         }
     }
 
-    private static void ValidateTypedValue(TypificationField field, string value, List<ValidationError> errors)
+    private static void ValidateTypedValue(
+        TypificationField field,
+        string value,
+        SubmissionSource source,
+        List<ValidationError> errors)
     {
         switch (field.Type)
         {
@@ -449,28 +462,52 @@ public sealed class DefaultTypificationValidator : ITypificationValidator
             case FieldType.Text:
             case FieldType.Textarea:
             case FieldType.Lookup:
-                // String types: only the generic FieldValidation applies (below).
+                // Free-text types: the generic FieldValidation applies (below), and on the
+                // AI write path an additional implicit length cap defends against huge blobs.
                 break;
 
             default:
                 break;
         }
 
-        ApplyStringValidation(field, value, errors);
+        ApplyStringValidation(field, value, source, errors);
     }
 
-    private static void ApplyStringValidation(TypificationField field, string value, List<ValidationError> errors)
+    private static void ApplyStringValidation(
+        TypificationField field,
+        string value,
+        SubmissionSource source,
+        List<ValidationError> errors)
     {
+        // Effective length cap = the smaller of the configured MaxLength and (for AI-sourced
+        // free-text) the implicit AI cap. A single error is reported, so a field whose configured
+        // MaxLength is already smaller than the AI cap is never double-reported.
+        int? effectiveMaxLength = field.Validation?.MaxLength;
+        if (source == SubmissionSource.AutoAi && field.Type.IsFreeText())
+        {
+            effectiveMaxLength = effectiveMaxLength is { } configured
+                ? Math.Min(configured, AiFreeTextMaxLength)
+                : AiFreeTextMaxLength;
+        }
+
+        if (effectiveMaxLength is { } maxLength && value.Length > maxLength)
+        {
+            // When the cap is the implicit AI cap (no configured MaxLength), word it as an
+            // AI-sourced cap; otherwise it is the configured per-field maximum.
+            var aiCapApplied = source == SubmissionSource.AutoAi
+                && field.Type.IsFreeText()
+                && field.Validation?.MaxLength is null;
+
+            errors.Add(new ValidationError(
+                field.Key,
+                aiCapApplied
+                    ? $"Field '{field.Key}' AI-sourced value exceeds the maximum length of {maxLength}."
+                    : $"Field '{field.Key}' exceeds the maximum length of {maxLength}."));
+        }
+
         if (field.Validation is not { } validation)
         {
             return;
-        }
-
-        if (validation.MaxLength is { } maxLength && value.Length > maxLength)
-        {
-            errors.Add(new ValidationError(
-                field.Key,
-                $"Field '{field.Key}' exceeds the maximum length of {maxLength}."));
         }
 
         if (validation.Regex is { Length: > 0 } pattern)

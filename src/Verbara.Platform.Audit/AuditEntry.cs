@@ -40,7 +40,9 @@ public sealed class AuditEntry : ITenantScoped
     public string ActorId { get; init; } = "system";
 
     /// <summary>
-    /// Type of actor: "user", "api_key", or "system".
+    /// Type of actor: "user", "api_key", "system", or "ai".
+    /// The "ai" value is used for entries describing automated decisions made by the AI
+    /// typification classifier (GDPR Art. 22 traceability — migration 006).
     /// </summary>
     public string ActorType { get; init; } = "system";
 
@@ -65,7 +67,12 @@ public sealed class AuditEntry : ITenantScoped
     public AuditChanges? Changes { get; init; }
 
     /// <summary>
-    /// Reserved for tamper-evidence in v1.4.
+    /// SHA-256 (hex) tamper-evidence hash computed by <see cref="DefaultAuditService"/> over the
+    /// entry's canonical identifying fields. Non-null for all entries created from v1.4 onwards.
+    /// This is a plain SHA-256 over the entry's canonical fields providing tamper-evidence against
+    /// accidental modification or corruption; it is NOT an HMAC and does not defend against a
+    /// database-level actor who can recompute the hash (that would require a managed secret, which
+    /// is outside the current scope).
     /// </summary>
     public string? IntegrityHash { get; init; }
 

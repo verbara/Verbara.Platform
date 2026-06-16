@@ -1,4 +1,6 @@
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Resolution;
 using Verbara.Platform.Typification.Validation;
@@ -33,6 +35,25 @@ public static class ServiceCollectionExtensions
         // fresh instance per resolve is correct; the suggestion endpoint resolves it
         // per-request via [FromServices], so each request gets a factory-rotated handler.
         services.AddTransient<ITypificationAiClassifier, DefaultTypificationAiClassifier>();
+
+        // B2 — suggestion metrics (singleton; owns its Meter + cached logger lifetime).
+        services.AddSingleton<TypificationAiMetrics>(
+            sp => new TypificationAiMetrics(
+                sp.GetService<IMeterFactory>(),
+                sp.GetService<ILoggerFactory>()));
+
+        // B3 — server-authoritative provenance derivation + correction signal.
+        services.AddSingleton<ITypificationProvenanceService, DefaultTypificationProvenanceService>();
+
+        // B4a — calibration gate: determines per-schema readiness for AutoFill / autonomous mode.
+        services.AddSingleton<ITypificationCalibration, DefaultTypificationCalibration>();
+
+        // E3 — per-tenant daily LLM token budget (fail-closed). SINGLETON: the accumulator is an
+        // in-process running per-(tenant, UTC-day) token sum, so a single shared instance is the
+        // whole point (a transient would reset the count every request). Single-instance accurate;
+        // a multi-instance deployment would back this with Redis (future — the interface is the seam).
+        services.AddSingleton<ITypificationTokenBudget, InMemoryTypificationTokenBudget>();
+
         return services;
     }
 }

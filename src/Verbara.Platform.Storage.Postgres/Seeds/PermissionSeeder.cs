@@ -190,6 +190,12 @@ internal static class PermissionSeeder
             "Configure analytics alert rules",
             ["analytics:interval:view"]);
 
+        // ── typification:ai (2) — P2b A5 ──
+        yield return P("typification:ai:configure", "typification", "ai", "configure",
+            "Enable AI classification, AutoFill, and configure thresholds for typification");
+        yield return P("typification:ai:autonomous", "typification", "ai", "autonomous",
+            "Allow autonomous (no-human) typification commits via AI classification");
+
         // ── system (6) ──
         yield return P("system:tenant:configure", "system", "tenant", "configure",
             "Configure tenant settings");

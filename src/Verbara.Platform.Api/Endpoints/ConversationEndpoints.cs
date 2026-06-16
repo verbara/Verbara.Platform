@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Mvc;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
@@ -13,7 +15,6 @@ using Verbara.Platform.Typification.Validation;
 using Verbara.Sdk.Pro.Dialer.Campaign;
 using Verbara.Sdk.Pro.Dialer.Dispositions;
 using Verbara.Sdk.Pro.Licensing;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
 
@@ -38,8 +39,11 @@ internal static class ConversationEndpoints
         // applied to THIS endpoint only, requiring BOTH AdvancedTypification AND
         // TypificationAi: the LicenseGateMiddleware reads one LicenseFeatureMetadata and
         // checks HasFlag, so a combined flags value gates on EVERY set bit (402 unless both).
+        // E3 — also apply the dedicated per-tenant "llm" rate-limit policy (separate from the
+        // generic per-tenant limiter and NOT tier-bypassed): LLM calls are expensive at every tier.
         group.MapPost("/{id}/typification-suggestion", GetTypificationSuggestion)
-            .RequireLicenseFeature(LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi);
+            .RequireLicenseFeature(LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi)
+            .RequireRateLimiting("llm");
         group.MapPost("/{id}/hold", HoldConversation);
         group.MapPost("/{id}/unhold", UnholdConversation);
         group.MapPost("/", CreateConversation);
@@ -211,11 +215,15 @@ internal static class ConversationEndpoints
                 : null));
     }
 
-    // D1 — AI auto-disposition suggestion (P2a, SuggestOnly). Best-effort: every
+    // D1 — AI auto-disposition suggestion (P2a/C1). Best-effort: every
     // "can't suggest" path returns 200 with an all-null TypificationSuggestionResponse
-    // (no schema / AI disabled / classifier degraded / below confidence / sentiment-gated)
-    // so the client treats it uniformly as "no suggestion, fall back to manual". The route
-    // is license-gated (AdvancedTypification + TypificationAi) at registration.
+    // (no schema / AI disabled / Mode==Off / classifier degraded / below confidence /
+    // sentiment-gated) so the client treats it uniformly as "no suggestion, fall back
+    // to manual". The route is license-gated (AdvancedTypification + TypificationAi).
+    // B2: every non-null classification is persisted to IAiSuggestionStore BEFORE gating
+    // (so later reconciliation can cover even shadow-suppressed suggestions). When
+    // Mode == Shadow the record is saved but the response surfaces nothing.
+    // C1: the Band field on the response is server-authoritative; client cannot escalate.
     private static async Task<IResult> GetTypificationSuggestion(
         string id,
         HttpContext context,
@@ -223,6 +231,12 @@ internal static class ConversationEndpoints
         [FromServices] ITypificationResolver resolver,
         [FromServices] ITypificationAiClassifier classifier,
         [FromServices] IMessageStore messageStore,
+        [FromServices] IAiSuggestionStore aiSuggestions,
+        [FromServices] IClock clock,
+        [FromServices] TypificationAiMetrics aiMetrics,
+        [FromServices] ITypificationCalibration calibration,
+        [FromServices] ITypificationTokenBudget budget,
+        [FromServices] IAuditService auditService,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -238,8 +252,11 @@ internal static class ConversationEndpoints
         if (resolved is null)
             return Results.Ok(EmptySuggestion);
 
-        // 2. AI disabled for this schema → no suggestion.
-        if (!resolved.Schema.AiConfig.Enabled)
+        // 2. AI disabled for this schema, or Mode == Off → no suggestion (C1: Mode==Off
+        //    is now an explicit authority independent of the Enabled flag).
+        //    E1 — read the EFFECTIVE config (binding override ?? schema) so a per-binding
+        //    pilot can enable/disable AI for one scope without touching the schema default.
+        if (!resolved.EffectiveAiConfig.Enabled || resolved.EffectiveAiConfig.Mode == AiMode.Off)
             return Results.Ok(EmptySuggestion);
 
         // 3. Load the transcript. Both message stores ORDER BY created_at ASC (oldest
@@ -253,35 +270,141 @@ internal static class ConversationEndpoints
         const int TranscriptFetchLimit = 2000;
         var transcript = await messageStore.GetConversationMessagesAsync(tenantId, conversationId, limit: TranscriptFetchLimit, offset: 0, ct);
 
+        // 3b. E3 — per-tenant daily token budget (fail-closed). When the EFFECTIVE config sets a
+        //     DailyTokenBudget and the tenant has ALREADY consumed ≥ that many LLM tokens today
+        //     (UTC day), DEGRADE to the empty suggestion WITHOUT calling the LLM (the classify call
+        //     is the cost). Gated here — immediately before ClassifyAsync — regardless of AiMode:
+        //     Shadow mode still persists suggestions, but the budget controls whether we CALL the LLM,
+        //     and the classify is the expensive operation. Increment the fail-closed counter + audit.
+        if (resolved.EffectiveAiConfig.DailyTokenBudget is { } dailyBudget &&
+            await budget.IsOverBudgetAsync(tenantId, dailyBudget, ct))
+        {
+            aiMetrics.BudgetExceeded.Add(1);
+            aiMetrics.LogBudgetExceeded(tenantId.Value, conversationId.Value, dailyBudget);
+
+            await auditService.RecordAsync(
+                tenantId,
+                category: "config",
+                action: "typification.ai.budget_exceeded",
+                severity: "warning",
+                actorId: "system",
+                actorType: "system",
+                targetId: conversationId.Value,
+                targetType: "Conversation",
+                metadata: new Dictionary<string, string>
+                {
+                    ["dailyTokenBudget"] = dailyBudget.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["dayUtc"] = clock.UtcNow.UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                },
+                ct: ct);
+
+            return Results.Ok(EmptySuggestion);
+        }
+
         // 4. Classify (never throws — degrades to null on no-text / LLM-failure / invalid).
         var classification = await classifier.ClassifyAsync(resolved.Schema, resolved.SubtreeRoot, conversation, transcript, ct);
         if (classification is null)
             return Results.Ok(EmptySuggestion);
 
-        var aiConfig = resolved.Schema.AiConfig;
+        // 4b. E3 — record the call's token usage against the tenant's UTC-day running sum. The LLM
+        //     call happened (classification is non-null), so record once regardless of band/mode —
+        //     subsequent calls that push the tenant past DailyTokenBudget will fail-closed above.
+        // A provider that returns no usage block records 0 → that call's real cost isn't counted
+        // toward the budget (Verbara's OpenAI-compatible provider does populate usage).
+        await budget.RecordUsageAsync(tenantId, classification.Usage?.TotalTokens ?? 0, ct);
 
-        // 5a. Confidence gate.
-        if (classification.Confidence < aiConfig.ConfidenceThreshold)
-            return Results.Ok(EmptySuggestion);
+        // C1 — compute the surfaced band BEFORE persisting, so the stored row records EXACTLY
+        // what the agent saw. Calibration excludes AutoFill-band rows (an auto-filled form biases
+        // "acceptance"), so the persisted band — not a post-save guess — is the calibration input.
+        // E1 — all band/gating decisions below read the EFFECTIVE config (binding override
+        // ?? schema), so a single binding can pilot a different automation band.
+        var aiConfig = resolved.EffectiveAiConfig;
+        var suggestedLeafNodeId = classification.NodePath[^1];
 
-        // 5b. Sentiment gate: never surface a Success outcome on a very-negative call.
-        if (aiConfig.SentimentGating &&
-            string.Equals(classification.Sentiment, "very_negative", StringComparison.OrdinalIgnoreCase) &&
-            classification.NodePath.Count > 0)
+        // Band table (server decides; client MUST NOT escalate):
+        //   Mode == Shadow                                             → None  (5  — persisted, never surfaced)
+        //   confidence < SuggestThreshold                              → None  (5a)
+        //   sentiment-gated Success leaf on very-negative              → None  (5b)
+        //   SuggestThreshold ≤ confidence < AutoApplyThreshold        → Suggest (5c)
+        //   confidence ≥ AutoApplyThreshold
+        //     AND Mode == AutoFill AND calibration.AutoFillReady       → AutoFill (5c)
+        //     otherwise (SuggestOnly, or Mode == AutoFill but not ready) → Suggest (5c — downgrade)
+        TypificationBand surfacedBand = TypificationBand.None;
+        if (aiConfig.Mode == AiMode.Shadow)
         {
-            var leafNodeId = classification.NodePath[^1];
-            var leaf = resolved.Schema.Nodes.FirstOrDefault(n => n.NodeId == leafNodeId)?.Leaf;
-            if (leaf?.Category == TypificationCategory.Success)
-                return Results.Ok(EmptySuggestion);
+            // 5 — Shadow mode: persisted but surface nothing to the agent.
+            surfacedBand = TypificationBand.None;
+        }
+        else if (classification.Confidence < aiConfig.SuggestThreshold)
+        {
+            // 5a. Confidence gate: below SuggestThreshold → no suggestion at all (Band.None).
+            surfacedBand = TypificationBand.None;
+        }
+        else if (aiConfig.SentimentGating &&
+                 string.Equals(classification.Sentiment, "very_negative", StringComparison.OrdinalIgnoreCase) &&
+                 classification.NodePath.Count > 0 &&
+                 resolved.Schema.Nodes.FirstOrDefault(n => n.NodeId == suggestedLeafNodeId)?.Leaf?.Category
+                     == TypificationCategory.Success)
+        {
+            // 5b. Sentiment gate: never surface a Success outcome on a very-negative call.
+            surfacedBand = TypificationBand.None;
+        }
+        else if (classification.Confidence < aiConfig.AutoApplyThreshold ||
+                 aiConfig.Mode != AiMode.AutoFill)
+        {
+            // 5c. Below auto-apply, or mode never auto-fills → Suggest.
+            surfacedBand = TypificationBand.Suggest;
+        }
+        else
+        {
+            // 5c. confidence ≥ AutoApplyThreshold AND Mode == AutoFill — check calibration ONLY on
+            //     this AutoFill-eligible branch (preserve round-trip economy for the other paths).
+            var status = await calibration.GetStatusAsync(tenantId, resolved.Schema.SchemaId, ct);
+            surfacedBand = status.AutoFillReady ? TypificationBand.AutoFill : TypificationBand.Suggest;
         }
 
-        // 5c. AiMode: P2a ships SuggestOnly semantics — always return as a suggestion (the
-        // client decides whether to apply). AutoApplyAboveThreshold is a P2b distinction.
+        // B2 — persist every non-null classification, regardless of mode or gating, WITH the band
+        // actually surfaced. The leaf is always the last element of the validated NodePath.
+        var record = new AiSuggestionRecord
+        {
+            Id = EntityId.New(),
+            TenantId = EntityId.From(tenantId.Value),
+            ConversationId = conversationId,
+            SchemaId = resolved.Schema.SchemaId,
+            SchemaVersion = resolved.Schema.Version,
+            SuggestedLeafNodeId = suggestedLeafNodeId,
+            SuggestedNodePath = classification.NodePath.Select(n => n.Value).ToArray(),
+            SuggestedFieldValues = classification.FieldValues,
+            Confidence = classification.Confidence,
+            Sentiment = classification.Sentiment,
+            ModelId = classification.ModelId,
+            PromptVersion = classification.PromptVersion,
+            SurfacedBand = surfacedBand,
+            CreatedAt = clock.UtcNow,
+            CommittedLeafNodeId = null,
+            Accepted = null,
+        };
+
+        await aiSuggestions.SaveAsync(record, ct);
+        aiMetrics.SuggestionMade.Add(1);
+        aiMetrics.LogSuggestionPersisted(
+            suggestionId: record.Id.Value,
+            conversationId: conversationId.Value,
+            leafNodeId: suggestedLeafNodeId.Value,
+            confidence: classification.Confidence,
+            mode: aiConfig.Mode.ToString());
+
+        // Response Band == persisted SurfacedBand. None → empty payload (shadow / below-threshold /
+        // sentiment-gated all collapse here, preserving every prior externally-observable behavior).
+        if (surfacedBand == TypificationBand.None)
+            return Results.Ok(EmptySuggestion);
+
         return Results.Ok(new TypificationSuggestionResponse(
             SuggestedNodePath: classification.NodePath.Select(n => n.Value).ToArray(),
             SuggestedFieldValues: classification.FieldValues.Count > 0 ? classification.FieldValues : null,
             Confidence: classification.Confidence,
-            Sentiment: classification.Sentiment));
+            Sentiment: classification.Sentiment,
+            Band: surfacedBand));
     }
 
     /// <summary>All-null "no suggestion" payload reused by every degrade path.</summary>
@@ -295,6 +418,8 @@ internal static class ConversationEndpoints
         [FromServices] ITypificationResolver resolver,
         [FromServices] ITypificationValidator validator,
         [FromServices] ITypificationSubmissionStore submissionStore,
+        [FromServices] ITypificationProvenanceService provenanceService,
+        [FromServices] IAuditService auditService,
         CampaignStoreBase campaignStore,
         DispositionCodeStoreBase dispositionCodeStore,
         PlatformEventBus eventBus,
@@ -320,9 +445,25 @@ internal static class ConversationEndpoints
         // 2. Map the selected node-path strings → EntityId list.
         var path = body.SelectedNodePath.Select(EntityId.From).ToList();
 
-        // 3. Server-authoritative validation of the submission FIRST — a validation
-        //    failure must NOT mutate or persist any conversation state.
-        var validation = validator.ValidateSubmission(schema, path, body.FieldValues);
+        // 3a. Derive the server-authoritative AI Source READ-ONLY BEFORE validation so validation
+        //     (D3: AI free-text length cap) and the PII screen are Source-aware WITHOUT any
+        //     mutation. This is a pure read — it does NOT reconcile the suggestion or touch
+        //     metrics (the bug D3 introduced: DeriveAsync, which DOES reconcile + bump metrics,
+        //     ran here before validation, so an invalid submission still marked the suggestion
+        //     accepted, polluting calibration accuracy). The full reconciling derive (DeriveAsync)
+        //     now runs only after the disposition is committed (step 4a). Empty-path guard: only
+        //     derive when a leaf exists; an empty path collapses to Manual (validation rejects the
+        //     empty path below anyway).
+        //     Note: the latest suggestion is read twice — once here (read-only) and once in
+        //     DeriveAsync post-persist. That's an acceptable cost (a cheap indexed read).
+        var aiSource = path.Count > 0
+            ? await provenanceService.DeriveSourceAsync(tenantId, conversationId, path[^1], ct)
+            : SubmissionSource.Manual;
+
+        // 3b. Server-authoritative validation of the submission FIRST — a validation
+        //     failure must NOT mutate or persist any conversation state, and (post-D3-fix)
+        //     must NOT reconcile any AI suggestion.
+        var validation = validator.ValidateSubmission(schema, path, body.FieldValues, aiSource);
         if (!validation.IsValid)
         {
             return Results.BadRequest(new TypifyErrorResponse(
@@ -344,7 +485,28 @@ internal static class ConversationEndpoints
 
         var leafNodeId = path[^1];
 
-        // 4. Persist the submission.
+        // 4a. Derive the FULL server-authoritative AI provenance (B3) NOW — only after validation
+        //     succeeded AND the disposition is committed (WrapUp + SaveAsync). DeriveAsync is the
+        //     MUTATING derive: it reconciles the stored suggestion (MarkReconciledAsync) and bumps
+        //     the accept/override metrics, so it MUST fire exactly once and only on a committed
+        //     disposition — never on a rejected submission (that was the D3 regression). The
+        //     persisted submission below uses this provenance.* plus the screened fieldValues.
+        //     This re-reads the latest suggestion (already read read-only in step 3a) — an
+        //     acceptable cheap indexed read.
+        var provenance = path.Count > 0
+            ? await provenanceService.DeriveAsync(tenantId, conversationId, leafNodeId, ct)
+            : new ProvenanceResult();
+
+        // 4a (cont.). PII screen (D3, defense-in-depth): on the AI write path re-screen free-text
+        //     field values (Text/Textarea/Lookup ONLY — a Phone field legitimately holds a phone)
+        //     before persisting. D2 screens at extraction; this re-screens at commit. Manual
+        //     submissions persist the captured values unchanged. Uses the read-only-derived
+        //     aiSource (identical to provenance.Source) decided pre-validation.
+        var fieldValues = aiSource == SubmissionSource.AutoAi
+            ? ScreenFreeTextPii(schema, resolved.EffectiveAiConfig, body.FieldValues)
+            : body.FieldValues;
+
+        // 4b. Persist the submission.
         var submission = new TypificationSubmission
         {
             TenantId = tenantId,
@@ -354,17 +516,50 @@ internal static class ConversationEndpoints
             SchemaVersion = schema.Version,
             SelectedNodePath = path,
             LeafNodeId = leafNodeId,
-            FieldValues = body.FieldValues,
+            FieldValues = fieldValues,
+            // I2 — Notes is human-authored wrap-up free text (never AI-extracted), so it is
+            // intentionally NOT PII-screened even on the AutoAi path. Only AI-sourced free-text
+            // field values (Text/Textarea/Lookup, via ScreenFreeTextPii) are screened.
             Notes = body.Notes,
-            AiSuggested = body.AiSuggested ?? false,
-            AiConfidence = body.AiConfidence,
-            AiAccepted = body.AiAccepted,
-            Source = body.AiSuggested == true ? SubmissionSource.AutoAi : SubmissionSource.Manual,
+            AiSuggested = provenance.AiSuggested,
+            AiConfidence = provenance.AiConfidence,
+            AiAccepted = provenance.AiAccepted,
+            Source = provenance.Source,
+            SuggestedLeafNodeId = provenance.SuggestedLeafNodeId,
+            SuggestedNodePath = provenance.SuggestedNodePath,
             Duration = TimeSpan.Zero,
             CompletedAt = clock.UtcNow,
         };
 
         await submissionStore.SaveAsync(submission, ct);
+
+        // 4c. Emit AI-disposition audit entry (GDPR Art. 22 traceability — B4b).
+        //     Only when an AI suggestion was involved (accepted or overridden).
+        //     The committing actor is always the human agent in this phase; the AI model
+        //     details are recorded in the audit metadata as provenance, not as the actor.
+        if (provenance.AiSuggested)
+        {
+            await auditService.RecordAsync(
+                tenantId,
+                category: "conversations",
+                action: "typification.ai_disposition",
+                severity: "info",
+                actorId: agentId.Value,
+                actorType: "user",
+                targetId: conversationId.Value,
+                targetType: "Conversation",
+                metadata: new Dictionary<string, string>
+                {
+                    ["modelId"] = provenance.ModelId ?? string.Empty,
+                    ["promptVersion"] = provenance.PromptVersion ?? string.Empty,
+                    ["schemaVersion"] = provenance.SchemaVersion?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                    ["confidence"] = provenance.AiConfidence?.ToString("G", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                    ["suggestedLeafNodeId"] = provenance.SuggestedLeafNodeId?.Value ?? string.Empty,
+                    ["committedLeafNodeId"] = leafNodeId.Value,
+                    ["accepted"] = (provenance.AiAccepted ?? false).ToString().ToLowerInvariant(),
+                },
+                ct: ct);
+        }
 
         // 5. Dialer bridge (PRESERVED behavior): a leaf node may carry a DialerCode
         //    that maps to a Pro campaign DispositionCode for the outbound call attempt.
@@ -385,6 +580,10 @@ internal static class ConversationEndpoints
 
                 if (dispo is not null)
                 {
+                    // I1/M4 — the dialer bridge intentionally reads RAW body.* (the
+                    // disposition note here, the callback date below): the disposition note is
+                    // the human-authored wrap-up note (not AI-extracted), and callback_date is
+                    // a Date field, never a free-text field, so neither is PII-screened.
                     await campaignStore.UpdateCallAttemptDispositionAsync(
                         tenantStr, callAttemptId, dispo.Id, body.Notes, ct);
                 }
@@ -419,6 +618,51 @@ internal static class ConversationEndpoints
             agentId.Value));
 
         return Results.Ok(submission);
+    }
+
+    /// <summary>
+    /// Builds a PII-screened copy of <paramref name="fieldValues"/> for the AI write path (D3).
+    /// Only free-text field values (Text/Textarea/Lookup) are screened via
+    /// <see cref="PiiScreen.Apply(string, PiiPolicy?)"/> under the EFFECTIVE
+    /// <see cref="TypificationAiConfig.PiiPolicy"/> (E1 — the binding override's policy when
+    /// present, else the schema's). A <c>Phone</c> field legitimately holds a phone number and is
+    /// left untouched (masking it would break it). Entries whose key has no matching schema field,
+    /// and all non-free-text fields, are copied through unchanged.
+    /// <para>
+    /// E1 scope note (extraction is NOT override-aware): the classifier still EXTRACTS under the
+    /// SCHEMA's AiConfig (its EntityFieldMap + its extraction-time PII), so a per-binding override's
+    /// map / PII allow-list is NOT honored at extraction. The binding override's PiiPolicy drives the
+    /// WRITE-PATH re-screen (this method), and its band / mode drives suggestion gating — but a
+    /// TIGHTENING override does NOT re-mask at the suggestion SURFACE (only here at persist), and a
+    /// LOOSENING override over-masks at extraction (fail-safe: extraction-time masking under the
+    /// schema policy can only ever be more restrictive than a looser override would allow).
+    /// See "E1-ext (follow-up)" in docs/plans/active/2026-06-14-typification-p2b-autoapply-safe.md.
+    /// </para>
+    /// </summary>
+    private static Dictionary<string, string> ScreenFreeTextPii(
+        TypificationSchema schema,
+        TypificationAiConfig effectiveAiConfig,
+        IReadOnlyDictionary<string, string> fieldValues)
+    {
+        var fieldsByKey = new Dictionary<string, TypificationField>(StringComparer.Ordinal);
+        foreach (var field in schema.Fields)
+            fieldsByKey[field.Key] = field;
+
+        var screened = new Dictionary<string, string>(fieldValues.Count, StringComparer.Ordinal);
+        foreach (var (key, value) in fieldValues)
+        {
+            if (fieldsByKey.TryGetValue(key, out var field)
+                && field.Type.IsFreeText())
+            {
+                screened[key] = PiiScreen.Apply(value, effectiveAiConfig.PiiPolicy).Value;
+            }
+            else
+            {
+                screened[key] = value;
+            }
+        }
+
+        return screened;
     }
 
     private static async Task<IResult> CreateConversation(
@@ -527,17 +771,20 @@ internal sealed record TypifyRequest(
     double? AiConfidence = null);
 
 /// <summary>
-/// D1 — AI auto-disposition suggestion (P2a). The suggested root→leaf node-id path,
-/// optional captured field values, the model's confidence, and a free-form sentiment
-/// hint. All members are <see langword="null"/> (the all-null payload) when there is no
-/// suggestion — no bound schema, AI disabled, the classifier degraded, the confidence
-/// fell below the schema threshold, or a sentiment-gated Success outcome was suppressed.
+/// D1 — AI auto-disposition suggestion (P2a/C1). The suggested root→leaf node-id path,
+/// optional captured field values, the model's confidence, a free-form sentiment hint,
+/// and the server-authoritative delivery <see cref="TypificationBand"/>. All members are
+/// <see langword="null"/> / <see cref="TypificationBand.None"/> (the all-null payload)
+/// when there is no suggestion — no bound schema, AI disabled, the classifier degraded,
+/// the confidence fell below the schema threshold, or a sentiment-gated Success outcome
+/// was suppressed.
 /// </summary>
 internal sealed record TypificationSuggestionResponse(
     IReadOnlyList<string>? SuggestedNodePath,
     IReadOnlyDictionary<string, string>? SuggestedFieldValues,
     double? Confidence,
-    string? Sentiment);
+    string? Sentiment,
+    TypificationBand Band = TypificationBand.None);
 
 /// <summary>
 /// The resolved typification form for a conversation: the cascading schema, the

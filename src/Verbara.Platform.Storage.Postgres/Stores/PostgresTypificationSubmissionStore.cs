@@ -12,7 +12,8 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
 {
     private const string SelectColumns =
         "tenant_id, conversation_id, agent_id, schema_id, schema_version, selected_node_path, leaf_node_id, " +
-        "field_values, notes, ai_suggested, ai_confidence, ai_accepted, source, duration_ms, completed_at";
+        "field_values, notes, ai_suggested, ai_confidence, ai_accepted, source, duration_ms, completed_at, " +
+        "suggested_leaf_node_id, suggested_node_path";
 
     private readonly NpgsqlDataSource _dataSource;
 
@@ -24,18 +25,26 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
         var nodePathJson = JsonSerializer.Serialize(nodePath, PostgresJson.Ctx.IReadOnlyListString);
         var fieldValuesJson = JsonSerializer.Serialize(submission.FieldValues, PostgresJson.Ctx.IReadOnlyDictionaryStringString);
 
+        var suggestedNodePathJson = submission.SuggestedNodePath is not null
+            ? JsonSerializer.Serialize(submission.SuggestedNodePath, PostgresJson.Ctx.IReadOnlyListString)
+            : null;
+
         await _dataSource.ExecuteAsync(
             "INSERT INTO typification_submissions " +
             "(tenant_id, conversation_id, agent_id, schema_id, schema_version, selected_node_path, leaf_node_id, " +
-            " field_values, notes, ai_suggested, ai_confidence, ai_accepted, source, duration_ms, completed_at) " +
+            " field_values, notes, ai_suggested, ai_confidence, ai_accepted, source, duration_ms, completed_at, " +
+            " suggested_leaf_node_id, suggested_node_path) " +
             "VALUES (@TenantId, @ConversationId, @AgentId, @SchemaId, @SchemaVersion, @SelectedNodePath::jsonb, @LeafNodeId, " +
-            " @FieldValues::jsonb, @Notes, @AiSuggested, @AiConfidence, @AiAccepted, @Source, @DurationMs, @CompletedAt) " +
+            " @FieldValues::jsonb, @Notes, @AiSuggested, @AiConfidence, @AiAccepted, @Source, @DurationMs, @CompletedAt, " +
+            " @SuggestedLeafNodeId, @SuggestedNodePath::jsonb) " +
             "ON CONFLICT (tenant_id, conversation_id) DO UPDATE SET " +
             "  agent_id = EXCLUDED.agent_id, schema_id = EXCLUDED.schema_id, schema_version = EXCLUDED.schema_version, " +
             "  selected_node_path = EXCLUDED.selected_node_path, leaf_node_id = EXCLUDED.leaf_node_id, " +
             "  field_values = EXCLUDED.field_values, notes = EXCLUDED.notes, ai_suggested = EXCLUDED.ai_suggested, " +
             "  ai_confidence = EXCLUDED.ai_confidence, ai_accepted = EXCLUDED.ai_accepted, source = EXCLUDED.source, " +
-            "  duration_ms = EXCLUDED.duration_ms, completed_at = EXCLUDED.completed_at",
+            "  duration_ms = EXCLUDED.duration_ms, completed_at = EXCLUDED.completed_at, " +
+            "  suggested_leaf_node_id = EXCLUDED.suggested_leaf_node_id, " +
+            "  suggested_node_path = EXCLUDED.suggested_node_path",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", submission.TenantId.Value));
@@ -53,6 +62,8 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
                 p.Add(new NpgsqlParameter("Source", submission.Source.ToString()));
                 p.Add(new NpgsqlParameter("DurationMs", (long)submission.Duration.TotalMilliseconds));
                 p.Add(new NpgsqlParameter("CompletedAt", submission.CompletedAt.UtcDateTime));
+                p.Add(new NpgsqlParameter("SuggestedLeafNodeId", NpgsqlDbType.Text) { Value = (object?)submission.SuggestedLeafNodeId?.Value ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("SuggestedNodePath", NpgsqlDbType.Text) { Value = (object?)suggestedNodePathJson ?? DBNull.Value });
             },
             ct);
     }
@@ -88,6 +99,8 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
         public string source { get; init; } = null!;
         public long duration_ms { get; init; }
         public DateTime completed_at { get; init; }
+        public string? suggested_leaf_node_id { get; init; }
+        public string? suggested_node_path { get; init; }
 
         public static SubmissionRow Map(NpgsqlDataReader r) => new()
         {
@@ -106,6 +119,8 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
             source = r.GetString("source"),
             duration_ms = r.GetInt64("duration_ms"),
             completed_at = r.GetDateTime("completed_at"),
+            suggested_leaf_node_id = r.GetStringOrNull("suggested_leaf_node_id"),
+            suggested_node_path = r.GetStringOrNull("suggested_node_path"),
         };
 
         public TypificationSubmission ToSubmission()
@@ -114,6 +129,10 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
                        ?? (IReadOnlyList<string>)[];
             var values = JsonSerializer.Deserialize(field_values, PostgresJson.Ctx.IReadOnlyDictionaryStringString)
                          ?? (IReadOnlyDictionary<string, string>)new Dictionary<string, string>();
+
+            IReadOnlyList<string>? suggestedPath = suggested_node_path is not null
+                ? JsonSerializer.Deserialize(suggested_node_path, PostgresJson.Ctx.IReadOnlyListString)
+                : null;
 
             return new TypificationSubmission
             {
@@ -132,6 +151,8 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
                 Source = Enum.Parse<SubmissionSource>(source),
                 Duration = TimeSpan.FromMilliseconds(duration_ms),
                 CompletedAt = new DateTimeOffset(completed_at, TimeSpan.Zero),
+                SuggestedLeafNodeId = suggested_leaf_node_id is not null ? EntityId.From(suggested_leaf_node_id) : null,
+                SuggestedNodePath = suggestedPath,
             };
         }
     }

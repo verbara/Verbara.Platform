@@ -200,6 +200,60 @@ public sealed class DefaultTypificationResolverTests
         result!.Schema.SchemaId.Should().Be(tenantSchema.SchemaId);
     }
 
+    // ---------- E1: effective AI config (binding override ?? schema) ----------
+
+    [Fact]
+    public async Task Resolve_ShouldUseBindingAiConfigOverride_WhenPresent()
+    {
+        var bindings = new FakeBindingStore();
+        var schemas = new FakeSchemaStore();
+
+        // Schema default is SuggestOnly; the binding override pilots AutoFill on this queue only.
+        var schema = PublishedSchema("schema-queue", mode: AiMode.SuggestOnly);
+        schemas.Add(schema);
+
+        var overrideConfig = new TypificationAiConfig
+        {
+            Enabled = true,
+            Mode = AiMode.AutoFill,
+            EntityFieldMap = new Dictionary<string, string>(),
+        };
+        bindings.Add(Binding("b-queue", BindingScope.Queue, QueueId.Value, schema.SchemaId, aiConfigOverride: overrideConfig));
+
+        var sut = new DefaultTypificationResolver(bindings, schemas);
+
+        var result = await sut.ResolveForConversationAsync(
+            Conversation(ChannelType.Voice, queue: QueueId), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Schema.SchemaId.Should().Be(schema.SchemaId);
+        // The schema's own default is unchanged; the EFFECTIVE config is the override.
+        result.Schema.AiConfig.Mode.Should().Be(AiMode.SuggestOnly);
+        result.EffectiveAiConfig.Mode.Should().Be(AiMode.AutoFill);
+    }
+
+    [Fact]
+    public async Task Resolve_ShouldFallBackToSchemaAiConfig_WhenNoOverride()
+    {
+        var bindings = new FakeBindingStore();
+        var schemas = new FakeSchemaStore();
+
+        var schema = PublishedSchema("schema-queue", mode: AiMode.SuggestOnly);
+        schemas.Add(schema);
+
+        // No AiConfigOverride on the binding → the effective config is the schema's own.
+        bindings.Add(Binding("b-queue", BindingScope.Queue, QueueId.Value, schema.SchemaId));
+
+        var sut = new DefaultTypificationResolver(bindings, schemas);
+
+        var result = await sut.ResolveForConversationAsync(
+            Conversation(ChannelType.Voice, queue: QueueId), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.EffectiveAiConfig.Should().BeSameAs(schema.AiConfig);
+        result.EffectiveAiConfig.Mode.Should().Be(AiMode.SuggestOnly);
+    }
+
     // ---------- helpers ----------
 
     private static Conversation Conversation(ChannelType channel, EntityId? queue = null) =>
@@ -221,7 +275,8 @@ public sealed class DefaultTypificationResolverTests
         EntityId schemaId,
         int priority = 0,
         EntityId? subtreeRoot = null,
-        DateTimeOffset? createdAt = null) =>
+        DateTimeOffset? createdAt = null,
+        TypificationAiConfig? aiConfigOverride = null) =>
         new()
         {
             BindingId = EntityId.From(id),
@@ -231,10 +286,11 @@ public sealed class DefaultTypificationResolverTests
             SchemaId = schemaId,
             SubTreeRootNodeId = subtreeRoot,
             Priority = priority,
+            AiConfigOverride = aiConfigOverride,
             CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
         };
 
-    private static TypificationSchema PublishedSchema(string id) =>
+    private static TypificationSchema PublishedSchema(string id, AiMode mode = AiMode.Off) =>
         new()
         {
             SchemaId = EntityId.From(id),
@@ -245,7 +301,12 @@ public sealed class DefaultTypificationResolverTests
             Nodes = [],
             Fields = [],
             DataDips = [],
-            AiConfig = new TypificationAiConfig { EntityFieldMap = new Dictionary<string, string>() },
+            AiConfig = new TypificationAiConfig
+            {
+                Enabled = mode != AiMode.Off,
+                Mode = mode,
+                EntityFieldMap = new Dictionary<string, string>(),
+            },
         };
 
     private sealed class FakeBindingStore : ISchemaBindingStore

@@ -3,6 +3,7 @@ using Npgsql;
 using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Typification;
+using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -151,10 +152,17 @@ internal sealed class PostgresTypificationSchemaStore : ITypificationSchemaStore
                 Nodes = def?.Nodes ?? (IReadOnlyList<TypificationNode>)[],
                 Fields = def?.Fields ?? (IReadOnlyList<TypificationField>)[],
                 DataDips = def?.DataDips ?? (IReadOnlyList<DataDipDef>)[],
-                AiConfig = def?.AiConfig ?? new TypificationAiConfig
-                {
-                    EntityFieldMap = new Dictionary<string, string>(),
-                },
+                // Defense-in-depth: STJ source-gen does NOT honor TypificationAiConfig's
+                // `PiiPolicy = DenyAll` initializer, so a pre-D2 schema (no piiPolicy key)
+                // deserializes with a null nested PiiPolicy. Coalesce it to the safe DenyAll
+                // default so EVERY direct reader of the in-memory domain model (e.g. D3's
+                // validator) sees a non-null policy, not just the PiiScreen.Apply chokepoint.
+                AiConfig = def?.AiConfig is { } ai
+                    ? ai with { PiiPolicy = ai.PiiPolicy ?? PiiPolicy.DenyAll }
+                    : new TypificationAiConfig
+                    {
+                        EntityFieldMap = new Dictionary<string, string>(),
+                    },
                 CreatedAt = new DateTimeOffset(created_at, TimeSpan.Zero),
                 UpdatedAt = updated_at is { } u ? new DateTimeOffset(u, TimeSpan.Zero) : null,
             };

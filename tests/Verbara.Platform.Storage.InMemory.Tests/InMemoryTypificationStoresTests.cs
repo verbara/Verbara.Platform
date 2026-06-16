@@ -23,8 +23,7 @@ public sealed class InMemoryTypificationStoresTests
         AiConfig = new TypificationAiConfig
         {
             Enabled = false,
-            Mode = AiMode.SuggestOnly,
-            ConfidenceThreshold = 0,
+            Mode = AiMode.Off,
             SentimentGating = false,
             EntityFieldMap = new Dictionary<string, string>(),
         },
@@ -158,6 +157,51 @@ public sealed class InMemoryTypificationStoresTests
         loaded.Should().NotBeNull();
         loaded!.Priority.Should().Be(9);
         loaded.CreatedAt.Should().Be(original);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldRoundTripAiConfigOverride_WhenSetOnBinding()
+    {
+        var store = new InMemorySchemaBindingStore();
+        var bindingId = EntityId.New();
+
+        var overrideConfig = new TypificationAiConfig
+        {
+            Enabled = true,
+            Mode = AiMode.AutoFill,
+            EntityFieldMap = new Dictionary<string, string>(),
+        };
+        var binding = new SchemaBinding
+        {
+            BindingId = bindingId, TenantId = Tenant, Scope = BindingScope.Queue,
+            ScopeRef = "q1", SchemaId = EntityId.New(), Priority = 0,
+            AiConfigOverride = overrideConfig, CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await store.SaveAsync(binding, CancellationToken.None);
+
+        var loaded = await store.GetByIdAsync(Tenant, bindingId, CancellationToken.None);
+        loaded.Should().NotBeNull();
+        loaded!.AiConfigOverride.Should().NotBeNull();
+        loaded.AiConfigOverride!.Mode.Should().Be(AiMode.AutoFill);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldLeaveAiConfigOverrideNull_WhenNotSetOnBinding()
+    {
+        var store = new InMemorySchemaBindingStore();
+        var bindingId = EntityId.New();
+
+        var binding = new SchemaBinding
+        {
+            BindingId = bindingId, TenantId = Tenant, Scope = BindingScope.Queue,
+            ScopeRef = "q1", SchemaId = EntityId.New(), Priority = 0,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await store.SaveAsync(binding, CancellationToken.None);
+
+        var loaded = await store.GetByIdAsync(Tenant, bindingId, CancellationToken.None);
+        loaded.Should().NotBeNull();
+        loaded!.AiConfigOverride.Should().BeNull();
     }
 
     private static ReasonHint MakeHint(ReasonHintScope scope, string scopeRef, string reasonPath, int priority = 0) => new()

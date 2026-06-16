@@ -21,10 +21,22 @@ public interface ITypificationValidator
     /// node path must be a valid root→leaf chain, and every ACTIVE field must
     /// satisfy required/typed/format constraints. Collects ALL errors.
     /// </summary>
+    /// <param name="schema">The published schema the submission is validated against.</param>
+    /// <param name="selectedNodePath">The selected root→leaf node-id chain.</param>
+    /// <param name="fieldValues">The captured field values keyed by field <c>Key</c>.</param>
+    /// <param name="source">
+    /// Server-derived provenance of the submission (D3). When
+    /// <see cref="SubmissionSource.AutoAi"/>, free-text fields
+    /// (<c>Text</c>/<c>Textarea</c>/<c>Lookup</c>) are length-capped even when the field
+    /// declares no <c>MaxLength</c> — a defense against the model emitting a huge blob.
+    /// Defaults to <see cref="SubmissionSource.Manual"/>, preserving prior behavior for
+    /// existing callers.
+    /// </param>
     ValidationResult ValidateSubmission(
         TypificationSchema schema,
         IReadOnlyList<EntityId> selectedNodePath,
-        IReadOnlyDictionary<string, string> fieldValues);
+        IReadOnlyDictionary<string, string> fieldValues,
+        SubmissionSource source = SubmissionSource.Manual);
 
     /// <summary>
     /// Evaluates a single show/hide condition against the captured field values

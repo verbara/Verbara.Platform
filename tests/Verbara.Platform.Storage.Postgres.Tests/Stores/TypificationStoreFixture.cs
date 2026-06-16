@@ -76,6 +76,7 @@ public sealed class TypificationStoreFixture : IAsyncLifetime
             scope TEXT NOT NULL, scope_ref TEXT,
             schema_id TEXT NOT NULL, subtree_root_node_id TEXT,
             priority INT NOT NULL DEFAULT 0,
+            ai_config_override JSONB NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             PRIMARY KEY (tenant_id, binding_id)
         );
@@ -89,6 +90,8 @@ public sealed class TypificationStoreFixture : IAsyncLifetime
             ai_suggested BOOLEAN NOT NULL DEFAULT false, ai_confidence DOUBLE PRECISION, ai_accepted BOOLEAN,
             source TEXT NOT NULL DEFAULT 'Manual', duration_ms BIGINT NOT NULL DEFAULT 0,
             completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            -- migration 005: server-side AI provenance (suggested-vs-committed correction signal)
+            suggested_leaf_node_id TEXT NULL, suggested_node_path JSONB NULL,
             PRIMARY KEY (tenant_id, conversation_id)
         );
         CREATE INDEX idx_typification_submissions_leaf ON typification_submissions (tenant_id, leaf_node_id, completed_at DESC);

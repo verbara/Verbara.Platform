@@ -26,6 +26,15 @@ public sealed record SchemaBinding : ITenantScoped
     public int Priority { get; init; }
 
     /// <summary>
+    /// Optional per-binding override of the schema's <see cref="TypificationAiConfig"/>
+    /// (E1). <see langword="null"/> = inherit the schema's AiConfig; a non-null value lets
+    /// a single scope (e.g. one queue/campaign) pilot a different AI automation band
+    /// without changing the schema default. The effective config is
+    /// <c>AiConfigOverride ?? schema.AiConfig</c>.
+    /// </summary>
+    public TypificationAiConfig? AiConfigOverride { get; init; }
+
+    /// <summary>
     /// Creation instant; tiebreak for equal-priority same-scope resolution
     /// (most-recent config wins).
     /// </summary>
