@@ -304,7 +304,21 @@
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5 — commit:** `feat(typification): prompt-size + output-token guards`.
 
-### Task E5: Autonomous-commit worker (ships disabled)
+### Task E5: Autonomous-commit worker (ships disabled) — **DEFERRED to a dedicated spec (2026-06-16)**
+
+> **E5 deferral decision (2026-06-16).** After deep analysis, E5 is **deferred to its own dedicated spec
+> (`P2d-autonomous`-style)** rather than shipped as a P2b batch-tail task. Rationale: (1) autonomous commit
+> is **latent for the foreseeable future** — it requires ≥200 reconciled samples at ≥95% accuracy at the
+> *autonomous* band, unreachable without months of prior Shadow/Suggest operation; (2) auto-closing
+> conversations with no human review is **GDPR Art. 22 automated decision-making** — the plan's E5 covers the
+> *mechanics* (worker + verification pass + `ai`-actor audit) but NOT the compliance surface required to
+> responsibly enable it (tenant opt-in attestation, the data subject's right to contest, a dispute/reopen
+> path); shipping mechanics-only would be a half-build; (3) it matches the project's own P2a/P2b/P2c/P2d
+> decomposition for risky/distinct capabilities. The autonomous **config** substrate already built
+> (`AutonomousThreshold`, `autonomousReady` calibration, `typification:ai:autonomous` permission, the
+> C4-api autonomous write-gate) stands alone as forward-compatible configuration — only its *consumer*
+> (the worker) waits. P2b ships the complete **human-in-the-loop** AutoFill product (Suggest + AutoFill
+> bands). The autonomous spec will pair the worker mechanics below with the Art. 22 compliance layer.
 
 **Files:** Create `Api/Workers/AutonomousTypificationWorker.cs`; Modify `Program.cs`, classifier (verification pass); Test `AutonomousTypificationWorkerTests.cs`.
 
