@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Verbara.Platform.Typification;
+using Verbara.Platform.Typification.Ai;
 
 namespace Verbara.Platform.Typification.Tests;
 
@@ -125,6 +126,49 @@ public sealed class TypificationAiConfigTests
         });
     }
 
+    // ─── Absent-piiPolicy-key regression (Step 0 / I1) ────────────────────────
+    // Pre-D2 persisted schemas have NO "piiPolicy" key. STJ source-gen deserialization
+    // (the production path) does NOT honor the C# property initializer
+    // `= PiiPolicy.DenyAll`, so the raw deserialized config exposes a null PiiPolicy.
+    // The consumer (PiiScreen.Apply) and the store mapping normalize that null to the
+    // SAFE DenyAll default — these tests pin both halves of the fail-safe.
+
+    [Fact]
+    public void AiConfig_ShouldExposeNonNullPiiPolicy_WhenJsonOmitsKey_ViaStore()
+    {
+        // Pre-D2 schema: a valid AiConfig JSON with NO piiPolicy key, deserialized via a
+        // source-gen context that MIRRORS production (camelCase + string enums).
+        const string preD2Json =
+            """{"enabled":false,"mode":"Off","entityFieldMap":{}}""";
+
+        var raw = JsonSerializer.Deserialize(preD2Json, AiConfigTestContext.Default.TypificationAiConfig);
+        raw.Should().NotBeNull();
+
+        // Store normalization (extracted helper, callable without Postgres) coalesces the
+        // possibly-null nested PiiPolicy to the safe DenyAll default for any direct reader.
+        var normalized = raw! with { PiiPolicy = raw.PiiPolicy ?? PiiPolicy.DenyAll };
+
+        normalized.PiiPolicy.Should().NotBeNull();
+        normalized.PiiPolicy.AllowStore.Should().BeEmpty("absent key must normalize to the most-restrictive policy");
+    }
+
+    [Fact]
+    public void AiConfig_ShouldScreenSafely_WhenJsonOmitsPiiPolicyKey()
+    {
+        // End-to-end of the universal chokepoint: even if source-gen leaves PiiPolicy null,
+        // feeding it straight into PiiScreen.Apply must fail closed (mask), never NRE.
+        const string preD2Json =
+            """{"enabled":true,"mode":"AutoFill","entityFieldMap":{}}""";
+
+        var raw = JsonSerializer.Deserialize(preD2Json, AiConfigTestContext.Default.TypificationAiConfig);
+        raw.Should().NotBeNull();
+
+        var (value, masked) = PiiScreen.Apply("john@example.com", raw!.PiiPolicy);
+
+        value.Should().Be("[EMAIL]", "a null policy must fall back to mask-everything (fail-closed)");
+        masked.Should().BeTrue();
+    }
+
     [Fact]
     public void AiConfig_ShouldRoundTripNullDailyTokenBudget()
     {
@@ -154,5 +198,6 @@ public sealed class TypificationAiConfigTests
 [JsonSerializable(typeof(AiMode))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    UseStringEnumConverter = true)]
 internal sealed partial class AiConfigTestContext : JsonSerializerContext;

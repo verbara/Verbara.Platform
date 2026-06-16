@@ -8,6 +8,17 @@ public sealed class PiiScreenTests
         new() { AllowStore = new HashSet<PiiType>(types) };
 
     [Fact]
+    public void Apply_ShouldTreatNullPolicyAsDenyAll()
+    {
+        // A null policy (e.g. a pre-D2 config whose source-gen deserialization left
+        // PiiPolicy null) must fail CLOSED: mask everything, never NRE.
+        var (value, masked) = PiiScreen.Apply("john@example.com", null);
+
+        value.Should().Be("[EMAIL]");
+        masked.Should().BeTrue();
+    }
+
+    [Fact]
     public void Apply_ShouldMaskCard_WhenNotAllowListed()
     {
         var (value, masked) = PiiScreen.Apply("4111111111111111", PiiPolicy.DenyAll);

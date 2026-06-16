@@ -60,8 +60,20 @@ public static partial class PiiScreen
     /// whether any masking occurred. Never throws; a null/empty/whitespace value returns
     /// (value, false).
     /// </summary>
-    public static (string Value, bool Masked) Apply(string value, PiiPolicy policy)
+    /// <param name="value">The single AI-extracted field value to screen.</param>
+    /// <param name="policy">
+    /// The tenant PII allow-list. A <see langword="null"/> policy is treated as
+    /// <see cref="PiiPolicy.DenyAll"/> — the SAFE, mask-everything default. This makes the
+    /// screen fail-CLOSED: a config persisted before D2 (no <c>piiPolicy</c> key) whose
+    /// STJ source-gen deserialization leaves the property null can never NRE here, and never
+    /// silently passes unmasked PII. Fail-closed is the only correct direction for a PII screen.
+    /// </param>
+    public static (string Value, bool Masked) Apply(string value, PiiPolicy? policy)
     {
+        // Fail-closed: an absent/null policy collapses to the most-restrictive DenyAll so a
+        // null can NEVER be dereferenced below and unmasked PII can NEVER leak (see <param>).
+        policy ??= PiiPolicy.DenyAll;
+
         if (string.IsNullOrWhiteSpace(value))
             return (value, false);
 

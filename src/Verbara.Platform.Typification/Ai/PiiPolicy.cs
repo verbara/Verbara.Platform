@@ -38,9 +38,24 @@ public sealed class PiiPolicy
 /// Reflection-free (Native AOT) JSON converter for <see cref="PiiPolicy"/>: reads/writes a
 /// <c>{ "allowStore": ["Email", ...] }</c> object, mapping the array to a
 /// <see cref="FrozenSet{T}"/> on read and enumerating <see cref="PiiPolicy.AllowStore"/> on
-/// write. <see cref="PiiType"/> members serialize as their names via the enum's own
-/// <see cref="JsonStringEnumConverter{TEnum}"/>.
+/// write.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Enum encoding:</b> <see cref="Write"/> emits each <see cref="PiiType"/> member as its
+/// PascalCase name via <see cref="object.ToString()"/> (AOT-safe, reflection-free — it does
+/// NOT route through the enum's <c>JsonStringEnumConverter&lt;PiiType&gt;</c>). <see cref="Read"/>
+/// accepts those names case-insensitively (and ordinals) via <see cref="Enum.TryParse{TEnum}(string, bool, out TEnum)"/>.
+/// </para>
+/// <para>
+/// <b>Absent key:</b> an absent <c>piiPolicy</c> key on a pre-D2 persisted schema is NOT
+/// repaired here, nor by the <see cref="TypificationAiConfig.PiiPolicy"/> property initializer
+/// (STJ source-gen does not honor C# initializers, leaving the property <see langword="null"/>).
+/// It is normalized to <see cref="PiiPolicy.DenyAll"/> downstream by the consumer
+/// (<see cref="PiiScreen.Apply"/>, which treats a null policy as DenyAll) and by the Postgres
+/// store mapping (which coalesces a null nested policy to DenyAll) — fail-closed, defense-in-depth.
+/// </para>
+/// </remarks>
 public sealed class PiiPolicyJsonConverter : JsonConverter<PiiPolicy>
 {
     private const string AllowStorePropertyName = "allowStore";
