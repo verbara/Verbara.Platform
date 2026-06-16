@@ -54,6 +54,12 @@ public sealed partial class TypificationAiMetrics : IDisposable
     /// </summary>
     public Counter<long> SuggestionOverridden { get; }
 
+    /// <summary>
+    /// AI suggestions degraded to the empty suggestion (no LLM call) because the tenant's daily
+    /// token budget was already exhausted (E3 — fail-closed cost control).
+    /// </summary>
+    public Counter<long> BudgetExceeded { get; }
+
     public TypificationAiMetrics(IMeterFactory? meterFactory = null, ILoggerFactory? loggerFactory = null)
     {
         _meter = meterFactory is null ? new Meter(MeterName) : meterFactory.Create(MeterName);
@@ -71,6 +77,10 @@ public sealed partial class TypificationAiMetrics : IDisposable
         SuggestionOverridden = _meter.CreateCounter<long>(
             "suggestion.overridden",
             description: "AI typification suggestions where the agent chose a different leaf (reconciled in B3).");
+
+        BudgetExceeded = _meter.CreateCounter<long>(
+            "suggestion.budget_exceeded",
+            description: "AI suggestions degraded to empty because the tenant's daily token budget was exhausted");
     }
 
     // ─── Instance log helper (uses pre-cached logger) ───────────────────────────
@@ -96,6 +106,13 @@ public sealed partial class TypificationAiMetrics : IDisposable
         string mode) =>
         LogSuggestionPersistedCore(_logger, suggestionId, conversationId, leafNodeId, confidence, mode);
 
+    /// <summary>
+    /// Emits EventId 6311 "budget exceeded — degraded to empty" at Debug level using the
+    /// pre-cached logger (E3 fail-closed degrade).
+    /// </summary>
+    public void LogBudgetExceeded(string tenantId, string conversationId, long dailyBudget) =>
+        LogBudgetExceededCore(_logger, tenantId, conversationId, dailyBudget);
+
     // ─── Structured log events (EventIds 6310+) ─────────────────────────────────
 
     [LoggerMessage(EventId = 6310, Level = LogLevel.Debug,
@@ -107,6 +124,14 @@ public sealed partial class TypificationAiMetrics : IDisposable
         string leafNodeId,
         double confidence,
         string mode);
+
+    [LoggerMessage(EventId = 6311, Level = LogLevel.Debug,
+        Message = "AI typification suggestion degraded to empty — tenant daily token budget exhausted (tenant={TenantId}, conversation={ConversationId}, dailyBudget={DailyBudget}).")]
+    private static partial void LogBudgetExceededCore(
+        ILogger logger,
+        string tenantId,
+        string conversationId,
+        long dailyBudget);
 
     public void Dispose() => _meter.Dispose();
 }

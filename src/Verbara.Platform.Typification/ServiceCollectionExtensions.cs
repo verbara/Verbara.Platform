@@ -48,6 +48,12 @@ public static class ServiceCollectionExtensions
         // B4a — calibration gate: determines per-schema readiness for AutoFill / autonomous mode.
         services.AddSingleton<ITypificationCalibration, DefaultTypificationCalibration>();
 
+        // E3 — per-tenant daily LLM token budget (fail-closed). SINGLETON: the accumulator is an
+        // in-process running per-(tenant, UTC-day) token sum, so a single shared instance is the
+        // whole point (a transient would reset the count every request). Single-instance accurate;
+        // a multi-instance deployment would back this with Redis (future — the interface is the seam).
+        services.AddSingleton<ITypificationTokenBudget, InMemoryTypificationTokenBudget>();
+
         return services;
     }
 }

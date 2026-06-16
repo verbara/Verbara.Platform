@@ -131,7 +131,7 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
         if (parsed is null)
             return null;
 
-        return MapAndValidate(schema, subtreeRoot, parsed, _modelId, CurrentPromptVersion);
+        return MapAndValidate(schema, subtreeRoot, parsed, _modelId, CurrentPromptVersion, response.Usage);
     }
 
     /// <summary>
@@ -419,7 +419,7 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
     /// </summary>
     private static AiClassification? MapAndValidate(
         TypificationSchema schema, EntityId? subtreeRoot, AiClassificationResult result,
-        string modelId, string promptVersion)
+        string modelId, string promptVersion, LlmUsage? usage)
     {
         if (string.IsNullOrWhiteSpace(result.leafCode))
             return null;
@@ -463,7 +463,7 @@ public sealed class DefaultTypificationAiClassifier : ITypificationAiClassifier
         var confidence = Math.Clamp(result.confidence, 0.0, 1.0);
         var sentiment = string.IsNullOrWhiteSpace(result.sentiment) ? null : result.sentiment;
 
-        return new AiClassification(path, fieldValues, confidence, sentiment, modelId, promptVersion);
+        return new AiClassification(path, fieldValues, confidence, sentiment, modelId, promptVersion, usage);
     }
 
     /// <summary>

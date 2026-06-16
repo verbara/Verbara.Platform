@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Typification;
@@ -533,6 +535,149 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         await AssertEmptySuggestionAsync(response);
     }
 
+    // ─── E3 — per-tenant daily LLM token budget (fail-closed) ───────────────────
+
+    [Fact]
+    public async Task Suggestion_ShouldDegradeToEmpty_WhenDailyTokenBudgetExceeded()
+    {
+        // The classifier WOULD return a high-confidence suggestion, but the tenant is already
+        // over its daily token budget → fail-closed degrade to the empty suggestion, the LLM is
+        // never called, the budget_exceeded counter increments, and an audit entry is written.
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.99,
+            Sentiment: "positive",
+            ModelId: "test-model",
+            PromptVersion: "p2b-3",
+            Usage: new Verbara.Platform.Llm.LlmUsage(100, 50, 150));
+
+        var fake = new FakeAiClassifier(classification);
+        using var factory = WithFakeClassifier(fake);
+        using var client = AuthenticatedClient(factory);
+
+        // DailyTokenBudget = 1000; pre-seed the shared budget singleton so the tenant is already over.
+        const long budget = 1000;
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithBudget(enabled: true, mode: AiMode.SuggestOnly, suggestThreshold: 0.5, dailyTokenBudget: budget));
+
+        using (var seedScope = factory.Services.CreateScope())
+        {
+            var tokenBudget = seedScope.ServiceProvider.GetRequiredService<ITypificationTokenBudget>();
+            await tokenBudget.RecordUsageAsync(s_tenantId, budget, CancellationToken.None);
+        }
+
+        using var listener = new CountingMeterListener(TypificationAiMetrics.MeterName, "suggestion.budget_exceeded");
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await AssertEmptySuggestionAsync(response);
+
+        // The LLM (classifier) must NOT have been called — the budget gate short-circuits before classify.
+        fake.CallCount.Should().Be(0, "the budget gate degrades BEFORE the expensive classify call");
+
+        // The fail-closed counter must have incremented.
+        listener.Total.Should().Be(1);
+
+        // An audit entry must have been written.
+        using var scope = factory.Services.CreateScope();
+        var auditStore = scope.ServiceProvider.GetRequiredService<IAuditStore>();
+        var hits = await auditStore.SearchAsync(
+            s_tenantId,
+            new AuditQuery(Action: "typification.ai.budget_exceeded", Page: 1, PageSize: 100),
+            CancellationToken.None);
+        hits.Items.Should().ContainSingle(e =>
+            e.TargetId == convId.Value
+            && e.Category == "config"
+            && e.ActorType == "system"
+            && e.Metadata != null
+            && e.Metadata["dailyTokenBudget"] == budget.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task Suggestion_ShouldRecordUsageAndAllow_WhenUnderBudget()
+    {
+        // First call: under budget → a normal suggestion is returned AND the call's token usage is
+        // recorded against the tenant's running UTC-day sum. A budget tiny enough that the FIRST
+        // call's recorded usage pushes the tenant over means a SECOND call must fail-closed —
+        // proving RecordUsageAsync actually moved the accumulator.
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.9,
+            Sentiment: "positive",
+            ModelId: "test-model",
+            PromptVersion: "p2b-3",
+            Usage: new Verbara.Platform.Llm.LlmUsage(80, 20, 100));
+
+        var fake = new FakeAiClassifier(classification);
+        using var factory = WithFakeClassifier(fake);
+        using var client = AuthenticatedClient(factory);
+
+        // Budget 100, classifier reports 100 tokens: first call is under (sum starts at 0), the
+        // recorded 100 then reaches the budget so the second call degrades.
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfigWithBudget(enabled: true, mode: AiMode.SuggestOnly, suggestThreshold: 0.5, dailyTokenBudget: 100));
+
+        var first = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        var firstJson = JsonNode.Parse(await first.Content.ReadAsStringAsync());
+        firstJson!["suggestedNodePath"].Should().NotBeNull("the first call is under budget so a suggestion is returned");
+        fake.CallCount.Should().Be(1, "the first call actually invokes the classifier");
+
+        var second = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        await AssertEmptySuggestionAsync(second);
+        fake.CallCount.Should().Be(1, "the second call is over budget so the classifier is NOT called again");
+    }
+
+    // ─── E3 — dedicated per-tenant "llm" rate-limit policy ──────────────────────
+
+    [Fact]
+    public async Task Suggestion_ShouldRateLimit_PerTenant()
+    {
+        // The suggestion route carries the dedicated "llm" policy (PermitLimit = 30 / 1-min sliding
+        // window). Firing more than the limit from one tenant must eventually yield a 429. The base
+        // factory licenses a tenant on the Unlimited tier, so a 429 here ALSO proves the "llm" policy
+        // is NOT tier-bypassed (unlike the generic per-tenant limiter).
+        var classification = new AiClassification(
+            NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+            FieldValues: new Dictionary<string, string>(),
+            Confidence: 0.9,
+            Sentiment: "positive");
+
+        using var factory = WithFakeClassifier(new FakeAiClassifier(classification));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfig(enabled: true, suggestThreshold: 0.5));
+
+        var url = $"/api/conversations/{convId.Value}/typification-suggestion";
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < TenantRateLimitPolicy.LlmPermitLimit + 10; i++)
+        {
+            var resp = await client.PostAsync(url, content: null);
+            statuses.Add(resp.StatusCode);
+        }
+
+        // The "llm" policy throttles this tenant within a single window. Firing well past the permit
+        // limit MUST surface a 429 (proving the policy is wired + applied AND — since the base factory
+        // is an Unlimited-tier tenant — NOT tier-bypassed). Some requests succeed first; the exact
+        // success count is a sliding-window implementation detail, so we only assert both occur.
+        statuses.Should().Contain(HttpStatusCode.TooManyRequests,
+            "more than the per-tenant llm permit limit was fired in one window");
+        statuses.Should().Contain(HttpStatusCode.OK,
+            "requests at the start of the window succeed before the limit is hit");
+        var okCount = statuses.Count(s => s == HttpStatusCode.OK);
+        okCount.Should().BeLessThanOrEqualTo(TenantRateLimitPolicy.LlmPermitLimit,
+            "no more than the permit limit may succeed inside one sliding window");
+    }
+
     // ─── D2 — typify provenance (B3 — server-authoritative) ─────────────────────
 
     /// <summary>
@@ -669,6 +814,18 @@ public sealed class TypificationAiSuggestionTests : IDisposable
             SuggestThreshold = suggestThreshold,
             AutoApplyThreshold = autoApplyThreshold,
             SentimentGating = false,
+            EntityFieldMap = new Dictionary<string, string>(),
+        };
+
+    private static TypificationAiConfig AiConfigWithBudget(
+        bool enabled, AiMode mode, double suggestThreshold, long dailyTokenBudget) =>
+        new()
+        {
+            Enabled = enabled,
+            Mode = mode,
+            SuggestThreshold = suggestThreshold,
+            SentimentGating = false,
+            DailyTokenBudget = dailyTokenBudget,
             EntityFieldMap = new Dictionary<string, string>(),
         };
 
@@ -815,12 +972,19 @@ public sealed class TypificationAiSuggestionTests : IDisposable
 
         public FakeAiClassifier(AiClassification? result) => _result = result;
 
+        /// <summary>Number of times <see cref="ClassifyAsync"/> was invoked (E3 — proves the budget gate skips the LLM call).</summary>
+        public int CallCount { get; private set; }
+
         public Task<AiClassification?> ClassifyAsync(
             TypificationSchema schema,
             EntityId? subtreeRoot,
             Conversation conversation,
             IReadOnlyList<Message> transcript,
-            CancellationToken ct) => Task.FromResult(_result);
+            CancellationToken ct)
+        {
+            CallCount++;
+            return Task.FromResult(_result);
+        }
     }
 
     /// <summary>
@@ -841,6 +1005,40 @@ public sealed class TypificationAiSuggestionTests : IDisposable
                 Accuracy: _autoFillReady ? 0.90 : 0.50,
                 AutoFillReady: _autoFillReady,
                 AutonomousReady: false));
+    }
+
+    /// <summary>
+    /// Minimal <see cref="System.Diagnostics.Metrics.MeterListener"/> that sums measurements for a
+    /// single named long-counter instrument on a given meter (E3 — asserts the
+    /// <c>suggestion.budget_exceeded</c> counter incremented).
+    /// </summary>
+    private sealed class CountingMeterListener : IDisposable
+    {
+        private readonly System.Diagnostics.Metrics.MeterListener _listener;
+        private readonly string _meterName;
+        private readonly string _instrumentName;
+        private long _total;
+
+        public CountingMeterListener(string meterName, string instrumentName)
+        {
+            _meterName = meterName;
+            _instrumentName = instrumentName;
+            _listener = new System.Diagnostics.Metrics.MeterListener
+            {
+                InstrumentPublished = (instrument, listener) =>
+                {
+                    if (instrument.Meter.Name == _meterName && instrument.Name == _instrumentName)
+                        listener.EnableMeasurementEvents(instrument);
+                },
+            };
+            _listener.SetMeasurementEventCallback<long>(
+                (_, measurement, _, _) => Interlocked.Add(ref _total, measurement));
+            _listener.Start();
+        }
+
+        public long Total => Interlocked.Read(ref _total);
+
+        public void Dispose() => _listener.Dispose();
     }
 }
 

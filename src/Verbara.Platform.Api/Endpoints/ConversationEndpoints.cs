@@ -39,8 +39,11 @@ internal static class ConversationEndpoints
         // applied to THIS endpoint only, requiring BOTH AdvancedTypification AND
         // TypificationAi: the LicenseGateMiddleware reads one LicenseFeatureMetadata and
         // checks HasFlag, so a combined flags value gates on EVERY set bit (402 unless both).
+        // E3 — also apply the dedicated per-tenant "llm" rate-limit policy (separate from the
+        // generic per-tenant limiter and NOT tier-bypassed): LLM calls are expensive at every tier.
         group.MapPost("/{id}/typification-suggestion", GetTypificationSuggestion)
-            .RequireLicenseFeature(LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi);
+            .RequireLicenseFeature(LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi)
+            .RequireRateLimiting("llm");
         group.MapPost("/{id}/hold", HoldConversation);
         group.MapPost("/{id}/unhold", UnholdConversation);
         group.MapPost("/", CreateConversation);
@@ -232,6 +235,8 @@ internal static class ConversationEndpoints
         [FromServices] IClock clock,
         [FromServices] TypificationAiMetrics aiMetrics,
         [FromServices] ITypificationCalibration calibration,
+        [FromServices] ITypificationTokenBudget budget,
+        [FromServices] IAuditService auditService,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -265,10 +270,46 @@ internal static class ConversationEndpoints
         const int TranscriptFetchLimit = 2000;
         var transcript = await messageStore.GetConversationMessagesAsync(tenantId, conversationId, limit: TranscriptFetchLimit, offset: 0, ct);
 
+        // 3b. E3 — per-tenant daily token budget (fail-closed). When the EFFECTIVE config sets a
+        //     DailyTokenBudget and the tenant has ALREADY consumed ≥ that many LLM tokens today
+        //     (UTC day), DEGRADE to the empty suggestion WITHOUT calling the LLM (the classify call
+        //     is the cost). Gated here — immediately before ClassifyAsync — regardless of AiMode:
+        //     Shadow mode still persists suggestions, but the budget controls whether we CALL the LLM,
+        //     and the classify is the expensive operation. Increment the fail-closed counter + audit.
+        if (resolved.EffectiveAiConfig.DailyTokenBudget is { } dailyBudget &&
+            await budget.IsOverBudgetAsync(tenantId, dailyBudget, ct))
+        {
+            aiMetrics.BudgetExceeded.Add(1);
+            aiMetrics.LogBudgetExceeded(tenantId.Value, conversationId.Value, dailyBudget);
+
+            await auditService.RecordAsync(
+                tenantId,
+                category: "config",
+                action: "typification.ai.budget_exceeded",
+                severity: "warning",
+                actorId: "system",
+                actorType: "system",
+                targetId: conversationId.Value,
+                targetType: "Conversation",
+                metadata: new Dictionary<string, string>
+                {
+                    ["dailyTokenBudget"] = dailyBudget.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["dayUtc"] = clock.UtcNow.UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                },
+                ct: ct);
+
+            return Results.Ok(EmptySuggestion);
+        }
+
         // 4. Classify (never throws — degrades to null on no-text / LLM-failure / invalid).
         var classification = await classifier.ClassifyAsync(resolved.Schema, resolved.SubtreeRoot, conversation, transcript, ct);
         if (classification is null)
             return Results.Ok(EmptySuggestion);
+
+        // 4b. E3 — record the call's token usage against the tenant's UTC-day running sum. The LLM
+        //     call happened (classification is non-null), so record once regardless of band/mode —
+        //     subsequent calls that push the tenant past DailyTokenBudget will fail-closed above.
+        await budget.RecordUsageAsync(tenantId, classification.Usage?.TotalTokens ?? 0, ct);
 
         // C1 — compute the surfaced band BEFORE persisting, so the stored row records EXACTLY
         // what the agent saw. Calibration excludes AutoFill-band rows (an auto-filled form biases
