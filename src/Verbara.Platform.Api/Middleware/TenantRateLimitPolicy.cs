@@ -12,7 +12,9 @@ internal static class TenantRateLimitPolicy
     /// <summary>
     /// E3 — per-tenant permit limit for the dedicated <c>llm</c> policy (sliding 1-minute window).
     /// LLM calls are expensive at EVERY tier, so this policy is NOT tier-bypassed (it applies to
-    /// every tenant, including the Unlimited tier — cost control is universal). Deliberately modest.
+    /// every tenant, regardless of rate-limit tier — cost control is universal). Deliberately modest.
+    /// The partition is keyed per tenant via the request (see <see cref="ResolveTenantKey"/>), so each
+    /// tenant gets its own 30/min bucket — not a single shared global cap.
     /// </summary>
     internal const int LlmPermitLimit = 30;
 
@@ -31,7 +33,15 @@ internal static class TenantRateLimitPolicy
             o.PermitLimit = 3000;
         });
 
-        // Per-tenant partitioned policy
+        // Per-tenant partitioned policy.
+        // PRE-EXISTING FLAW (out of scope for E3): UseRateLimiter() runs BEFORE
+        // TenantResolutionMiddleware (the sole writer of Items["TenantId"]), so at this
+        // pipeline position Items["TenantId"] is UNSET and every request collapses to the
+        // "__global__" key → Unlimited tier → NoLimiter (this policy never throttles anyone).
+        // The "llm" policy below works around this by resolving the tenant key directly from
+        // the request (header). The proper fix for "per-tenant" is to move UseRateLimiter()
+        // AFTER tenant resolution — a cross-cutting pipeline reorder affecting every
+        // rate-limited route, tracked as a separate follow-up.
         options.AddPolicy("per-tenant", context =>
         {
             var tenantId = context.Items.TryGetValue("TenantId", out var val) && val is string s
@@ -56,12 +66,16 @@ internal static class TenantRateLimitPolicy
         // E3 — dedicated per-tenant LLM rate-limit policy. Applied to the expensive
         // AI-suggestion route ONLY (in addition to the generic per-tenant limiter). Unlike
         // "per-tenant" this policy is NOT tier-bypassed: an LLM call costs real money at every
-        // tier, so even an Unlimited-tier tenant is throttled here. Partition key matches
-        // "per-tenant" (the resolved TenantId, or "__global__" pre-auth) so the budget is per-tenant.
+        // tier, so even an Unlimited-tier tenant is throttled here.
+        //
+        // The partition key is resolved DIRECTLY from the request (see ResolveTenantKey) rather
+        // than from Items["TenantId"]: UseRateLimiter() runs before TenantResolutionMiddleware,
+        // so Items["TenantId"] is not yet populated at this pipeline position. Reading the
+        // X-Tenant-Id header (the primary tenant signal the Web sends) gives each tenant its own
+        // 30/min bucket instead of collapsing every tenant into a single global 5/min partition.
         options.AddPolicy("llm", context =>
         {
-            var tenantId = context.Items.TryGetValue("TenantId", out var val) && val is string s
-                ? s : "__global__";
+            var tenantId = ResolveTenantKey(context);
 
             // Pre-auth / no-tenant traffic gets a small partition of its own (it never reaches
             // the authenticated suggestion route in practice, but keep it bounded).
@@ -98,5 +112,31 @@ internal static class TenantRateLimitPolicy
             await context.HttpContext.Response.WriteAsync(
                 JsonSerializer.Serialize(problem, ApiJsonContext.Default.ProblemDetails), ct);
         };
+    }
+
+    /// <summary>
+    /// Resolves the rate-limit partition key for the <c>llm</c> policy WITHOUT depending on
+    /// <c>Items["TenantId"]</c> being populated (it is not, at the <c>UseRateLimiter()</c> pipeline
+    /// position — that runs before <see cref="TenantResolutionMiddleware"/>). Resolution order:
+    /// <list type="number">
+    ///   <item><c>Items["TenantId"]</c> as string — honored first in case a future middleware-order
+    ///   change populates it early.</item>
+    ///   <item>the <c>X-Tenant-Id</c> request header — the primary tenant signal the Web sends.</item>
+    ///   <item><c>"__global__"</c> — the bounded pre-auth / no-tenant fallback.</item>
+    /// </list>
+    /// </summary>
+    private static string ResolveTenantKey(HttpContext context)
+    {
+        if (context.Items.TryGetValue("TenantId", out var val) && val is string s && !string.IsNullOrWhiteSpace(s))
+            return s;
+
+        if (context.Request.Headers.TryGetValue("X-Tenant-Id", out var header))
+        {
+            var headerValue = header.ToString();
+            if (!string.IsNullOrWhiteSpace(headerValue))
+                return headerValue;
+        }
+
+        return "__global__";
     }
 }

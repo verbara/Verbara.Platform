@@ -296,6 +296,8 @@
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5 — commit:** `feat(typification): per-tenant LLM token budget + rate limit`.
 
+**E3 follow-up (pre-existing, out of scope):** the `per-tenant` rate-limit policy resolves the tenant from `Items[TenantId]` before `TenantResolutionMiddleware` runs, collapsing to `__global__`; the `llm` policy now reads the header directly. A proper fix (move `UseRateLimiter` after tenant resolution) is a separate cross-cutting change.
+
 ### Task E4: Prompt-size guard
 
 **Files:** Modify `Ai/DefaultTypificationAiClassifier.cs` (`CollectCandidateLeaves`, `ClassifyMaxTokens`); Test `TypificationPromptSizeTests.cs`.
