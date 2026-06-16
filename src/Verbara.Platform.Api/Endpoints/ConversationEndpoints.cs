@@ -249,7 +249,9 @@ internal static class ConversationEndpoints
 
         // 2. AI disabled for this schema, or Mode == Off → no suggestion (C1: Mode==Off
         //    is now an explicit authority independent of the Enabled flag).
-        if (!resolved.Schema.AiConfig.Enabled || resolved.Schema.AiConfig.Mode == AiMode.Off)
+        //    E1 — read the EFFECTIVE config (binding override ?? schema) so a per-binding
+        //    pilot can enable/disable AI for one scope without touching the schema default.
+        if (!resolved.EffectiveAiConfig.Enabled || resolved.EffectiveAiConfig.Mode == AiMode.Off)
             return Results.Ok(EmptySuggestion);
 
         // 3. Load the transcript. Both message stores ORDER BY created_at ASC (oldest
@@ -271,7 +273,9 @@ internal static class ConversationEndpoints
         // C1 — compute the surfaced band BEFORE persisting, so the stored row records EXACTLY
         // what the agent saw. Calibration excludes AutoFill-band rows (an auto-filled form biases
         // "acceptance"), so the persisted band — not a post-save guess — is the calibration input.
-        var aiConfig = resolved.Schema.AiConfig;
+        // E1 — all band/gating decisions below read the EFFECTIVE config (binding override
+        // ?? schema), so a single binding can pilot a different automation band.
+        var aiConfig = resolved.EffectiveAiConfig;
         var suggestedLeafNodeId = classification.NodePath[^1];
 
         // Band table (server decides; client MUST NOT escalate):
@@ -283,7 +287,7 @@ internal static class ConversationEndpoints
         //     AND Mode == AutoFill AND calibration.AutoFillReady       → AutoFill (5c)
         //     otherwise (SuggestOnly, or Mode == AutoFill but not ready) → Suggest (5c — downgrade)
         TypificationBand surfacedBand = TypificationBand.None;
-        if (resolved.Schema.AiConfig.Mode == AiMode.Shadow)
+        if (aiConfig.Mode == AiMode.Shadow)
         {
             // 5 — Shadow mode: persisted but surface nothing to the agent.
             surfacedBand = TypificationBand.None;
@@ -345,7 +349,7 @@ internal static class ConversationEndpoints
             conversationId: conversationId.Value,
             leafNodeId: suggestedLeafNodeId.Value,
             confidence: classification.Confidence,
-            mode: resolved.Schema.AiConfig.Mode.ToString());
+            mode: aiConfig.Mode.ToString());
 
         // Response Band == persisted SurfacedBand. None → empty payload (shadow / below-threshold /
         // sentiment-gated all collapse here, preserving every prior externally-observable behavior).
@@ -456,7 +460,7 @@ internal static class ConversationEndpoints
         //     submissions persist the captured values unchanged. Uses the read-only-derived
         //     aiSource (identical to provenance.Source) decided pre-validation.
         var fieldValues = aiSource == SubmissionSource.AutoAi
-            ? ScreenFreeTextPii(schema, body.FieldValues)
+            ? ScreenFreeTextPii(schema, resolved.EffectiveAiConfig, body.FieldValues)
             : body.FieldValues;
 
         // 4b. Persist the submission.
@@ -576,13 +580,16 @@ internal static class ConversationEndpoints
     /// <summary>
     /// Builds a PII-screened copy of <paramref name="fieldValues"/> for the AI write path (D3).
     /// Only free-text field values (Text/Textarea/Lookup) are screened via
-    /// <see cref="PiiScreen.Apply(string, PiiPolicy?)"/> under the schema's
-    /// <see cref="TypificationAiConfig.PiiPolicy"/>; a <c>Phone</c> field legitimately holds a
-    /// phone number and is left untouched (masking it would break it). Entries whose key has no
-    /// matching schema field, and all non-free-text fields, are copied through unchanged.
+    /// <see cref="PiiScreen.Apply(string, PiiPolicy?)"/> under the EFFECTIVE
+    /// <see cref="TypificationAiConfig.PiiPolicy"/> (E1 — the binding override's policy when
+    /// present, else the schema's), so a per-binding override that TIGHTENS PII still drives
+    /// write-path screening; a <c>Phone</c> field legitimately holds a phone number and is left
+    /// untouched (masking it would break it). Entries whose key has no matching schema field,
+    /// and all non-free-text fields, are copied through unchanged.
     /// </summary>
     private static Dictionary<string, string> ScreenFreeTextPii(
         TypificationSchema schema,
+        TypificationAiConfig effectiveAiConfig,
         IReadOnlyDictionary<string, string> fieldValues)
     {
         var fieldsByKey = new Dictionary<string, TypificationField>(StringComparer.Ordinal);
@@ -595,7 +602,7 @@ internal static class ConversationEndpoints
             if (fieldsByKey.TryGetValue(key, out var field)
                 && field.Type.IsFreeText())
             {
-                screened[key] = PiiScreen.Apply(value, schema.AiConfig.PiiPolicy).Value;
+                screened[key] = PiiScreen.Apply(value, effectiveAiConfig.PiiPolicy).Value;
             }
             else
             {

@@ -92,7 +92,11 @@ public sealed class DefaultTypificationResolver : ITypificationResolver
         {
             var schema = await _schemaStore.GetLatestPublishedAsync(tenantId, binding.SchemaId, ct).ConfigureAwait(false);
             if (schema is not null)
-                return new ResolvedTypification(schema, binding.SubTreeRootNodeId);
+                // E1 — effective AI config: the binding's override wins, else the schema's own.
+                return new ResolvedTypification(
+                    schema,
+                    binding.SubTreeRootNodeId,
+                    binding.AiConfigOverride ?? schema.AiConfig);
         }
 
         // No candidate in this scope has a published schema → fall through to the next scope.

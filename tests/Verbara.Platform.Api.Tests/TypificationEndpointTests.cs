@@ -173,6 +173,72 @@ public sealed class TypificationEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateBinding_ShouldPersistAiConfigOverride_WhenProvided()
+    {
+        var schemaId = await CreateSchemaAsync(_client, ValidSchemaBody("Override Schema"));
+
+        var body = new
+        {
+            scope = "Tenant",
+            scopeRef = (string?)null,
+            schemaId,
+            subtreeRootNodeId = (string?)null,
+            priority = 0,
+            aiConfigOverride = new
+            {
+                enabled = true,
+                mode = "AutoFill",
+                suggestThreshold = 0.6,
+                autoApplyThreshold = 0.85,
+                autonomousThreshold = 0.95,
+                autonomous = false,
+                sentimentGating = true,
+                dailyTokenBudget = (long?)null,
+                entityFieldMap = new Dictionary<string, string>(),
+            },
+        };
+        var response = await _client.PostAsync("/api/admin/typification/bindings", JsonContent.Create(body));
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var created = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var bindingId = created!["bindingId"]!.GetValue<string>();
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/bindings/{bindingId}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var fetched = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        fetched!["aiConfigOverride"].Should().NotBeNull();
+        fetched["aiConfigOverride"]!["mode"]!.GetValue<string>().Should().Be("AutoFill");
+        fetched["aiConfigOverride"]!["enabled"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateBinding_ShouldLeaveOverrideNull_WhenOmitted()
+    {
+        var schemaId = await CreateSchemaAsync(_client, ValidSchemaBody("No Override Schema"));
+
+        var body = new
+        {
+            scope = "Tenant",
+            scopeRef = (string?)null,
+            schemaId,
+            subtreeRootNodeId = (string?)null,
+            priority = 0,
+        };
+        var response = await _client.PostAsync("/api/admin/typification/bindings", JsonContent.Create(body));
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var created = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var bindingId = created!["bindingId"]!.GetValue<string>();
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/bindings/{bindingId}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var fetched = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        // Omitted override → null on the wire (DefaultIgnoreCondition.WhenWritingNull may drop
+        // the key entirely; either absent or explicit null is acceptable "no override").
+        (fetched!["aiConfigOverride"] is null).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task CreateSchema_ShouldPersistFieldPrefillSource_WhenProvided()
     {
         var body = SchemaBodyWithField("Prefilled", new

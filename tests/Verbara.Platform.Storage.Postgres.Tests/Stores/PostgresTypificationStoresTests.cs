@@ -261,6 +261,62 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
     }
 
     [Fact]
+    public async Task BindingStore_ShouldRoundTripAiConfigOverrideJsonb_WhenSet()
+    {
+        var binding = new SchemaBinding
+        {
+            BindingId = EntityId.New(),
+            TenantId = Tenant,
+            Scope = BindingScope.Queue,
+            ScopeRef = "queue-1",
+            SchemaId = EntityId.New(),
+            SubTreeRootNodeId = null,
+            Priority = 3,
+            AiConfigOverride = new TypificationAiConfig
+            {
+                Enabled = true,
+                Mode = AiMode.AutoFill,
+                SuggestThreshold = 0.55,
+                AutoApplyThreshold = 0.9,
+                EntityFieldMap = new Dictionary<string, string> { ["amount"] = "amount" },
+            },
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        await _bindings.SaveAsync(binding, CancellationToken.None);
+        var loaded = await _bindings.GetByIdAsync(Tenant, binding.BindingId, CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.AiConfigOverride.Should().NotBeNull();
+        loaded.AiConfigOverride!.Mode.Should().Be(AiMode.AutoFill);
+        loaded.AiConfigOverride.Enabled.Should().BeTrue();
+        loaded.AiConfigOverride.SuggestThreshold.Should().BeApproximately(0.55, 1e-9);
+        loaded.AiConfigOverride.EntityFieldMap.Should().ContainKey("amount");
+    }
+
+    [Fact]
+    public async Task BindingStore_ShouldRoundTripNullAiConfigOverride_WhenNotSet()
+    {
+        var binding = new SchemaBinding
+        {
+            BindingId = EntityId.New(),
+            TenantId = Tenant,
+            Scope = BindingScope.Tenant,
+            ScopeRef = null,
+            SchemaId = EntityId.New(),
+            SubTreeRootNodeId = null,
+            Priority = 0,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        await _bindings.SaveAsync(binding, CancellationToken.None);
+        var loaded = await _bindings.GetByIdAsync(Tenant, binding.BindingId, CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.AiConfigOverride.Should().BeNull();
+    }
+
+    [Fact]
     public async Task SubmissionStore_ShouldRoundTripFieldValuesJsonb_WhenSaved()
     {
         var conversationId = EntityId.New();

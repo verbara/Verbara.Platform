@@ -307,6 +307,7 @@ internal static class TypificationEndpoints
             SchemaId = EntityId.From(body.SchemaId),
             SubTreeRootNodeId = body.SubtreeRootNodeId is { Length: > 0 } s ? EntityId.From(s) : null,
             Priority = body.Priority,
+            AiConfigOverride = MapBindingAiConfigOverride(body.AiConfigOverride),
             CreatedAt = clock.UtcNow,
         };
 
@@ -351,6 +352,7 @@ internal static class TypificationEndpoints
             SchemaId = EntityId.From(body.SchemaId),
             SubTreeRootNodeId = body.SubtreeRootNodeId is { Length: > 0 } s ? EntityId.From(s) : null,
             Priority = body.Priority,
+            AiConfigOverride = MapBindingAiConfigOverride(body.AiConfigOverride),
             CreatedAt = existing.CreatedAt,
         };
 
@@ -464,7 +466,9 @@ internal static class TypificationEndpoints
             ScopeRef: b.ScopeRef,
             SchemaId: b.SchemaId.Value,
             SubtreeRootNodeId: b.SubTreeRootNodeId?.Value,
-            Priority: b.Priority);
+            Priority: b.Priority,
+            // E1 — emit the override only when present (null = inherit the schema's AiConfig).
+            AiConfigOverride: b.AiConfigOverride is null ? null : ToAiConfigDto(b.AiConfigOverride));
 
     private static List<TypificationNode> MapNodes(IReadOnlyList<TypificationNodeDto> dtos) =>
         dtos.Select(n => new TypificationNode
@@ -584,6 +588,17 @@ internal static class TypificationEndpoints
             PiiPolicy = ParsePiiPolicy(dto.PiiAllowStore),
         };
     }
+
+    // E1 — map an optional per-binding AI config OVERRIDE DTO to the domain. A null DTO yields
+    // null (the binding inherits the schema's AiConfig). Unlike a schema's AiConfig, a binding
+    // override carries its OWN EntityFieldMap on the wire (there is no schema-map to preserve for
+    // an override), so the override DTO's own map is passed as the "existing" map to MapAiConfig:
+    // a provided map wins; an omitted map collapses to empty (no prior binding-override map to
+    // carry forward). PiiAllowStore follows MapAiConfig's reset-to-DenyAll-on-omission semantics.
+    private static TypificationAiConfig? MapBindingAiConfigOverride(AiConfigDto? dto) =>
+        dto is null
+            ? null
+            : MapAiConfig(dto, dto.EntityFieldMap ?? new Dictionary<string, string>());
 
     // D4 — map the wire PiiAllowStore (PiiType member names) to a domain PiiPolicy. A null
     // list → the canonical DenyAll singleton. Names are parsed case-insensitively (AOT-safe
@@ -786,7 +801,11 @@ internal sealed record SchemaBindingDto(
     string? ScopeRef,
     string SchemaId,
     string? SubtreeRootNodeId,
-    int Priority);
+    int Priority,
+    // E1 — optional per-binding AI config override (null = inherit the schema's AiConfig).
+    // Carries its OWN EntityFieldMap on the wire; the effective config resolved at runtime is
+    // `AiConfigOverride ?? schema.AiConfig`.
+    AiConfigDto? AiConfigOverride = null);
 
 // ─── Request DTOs ───────────────────────────────────────────────────────────
 
@@ -809,14 +828,18 @@ internal sealed record CreateBindingRequest(
     string? ScopeRef,
     string SchemaId,
     string? SubtreeRootNodeId,
-    int Priority);
+    int Priority,
+    // E1 — optional per-binding AI config override (null = inherit the schema's AiConfig).
+    AiConfigDto? AiConfigOverride = null);
 
 internal sealed record UpdateBindingRequest(
     string Scope,
     string? ScopeRef,
     string SchemaId,
     string? SubtreeRootNodeId,
-    int Priority);
+    int Priority,
+    // E1 — optional per-binding AI config override (null = inherit the schema's AiConfig).
+    AiConfigDto? AiConfigOverride = null);
 
 internal sealed record PublishResultDto(bool Ok, IReadOnlyList<PublishErrorDto> Errors);
 
