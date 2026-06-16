@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Security.Claims;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Services;
@@ -553,9 +554,16 @@ internal static class TypificationEndpoints
     // back to Off (tolerant — AI config is optional layered metadata). Thresholds are clamped
     // to [0, 1]: a value > 1 suppresses everything; < 0 never suppresses; both outcomes would
     // be confusing ops mistakes rather than intent.
-    // D4 — the wire is now authoritative for EntityFieldMap + PiiAllowStore: a provided
-    // EntityFieldMap wins, an omitted one preserves the existing map; PiiAllowStore parses to
-    // the PiiPolicy (null/omitted → DenyAll).
+    // D4 — the wire is now authoritative for EntityFieldMap + PiiAllowStore, with a DELIBERATE
+    // asymmetry on omission:
+    //  • EntityFieldMap: a provided map wins; an OMITTED map PRESERVES the existing one
+    //    (`?? existingEntityFieldMap`).
+    //  • PiiAllowStore:  a provided list parses to a PiiPolicy; an OMITTED list RESETS the
+    //    policy to DenyAll (ParsePiiPolicy(null) → DenyAll) — it does NOT preserve.
+    // The reset is safe BY DESIGN: DenyAll is the restrictive/fail-closed direction, so a reset
+    // can only re-mask PII, never silently leak it. Callers that own the policy (the Web schema
+    // designer, D4-web) MUST always send piiAllowStore on every write so an edit elsewhere in
+    // the config never accidentally un-allow-lists a tenant's permitted PII types.
     private static TypificationAiConfig MapAiConfig(
         AiConfigDto? dto, IReadOnlyDictionary<string, string> existingEntityFieldMap)
     {
@@ -578,9 +586,13 @@ internal static class TypificationEndpoints
     }
 
     // D4 — map the wire PiiAllowStore (PiiType member names) to a domain PiiPolicy. A null
-    // list → DenyAll. Names are parsed case-insensitively (AOT-safe Enum.TryParse) into a
-    // HashSet; unknown names are tolerantly skipped (consistent with the other tolerant parses
-    // in this file). An empty list yields an empty set = DenyAll-equivalent.
+    // list → the canonical DenyAll singleton. Names are parsed case-insensitively (AOT-safe
+    // Enum.TryParse); unknown names are tolerantly skipped (consistent with the other tolerant
+    // parses in this file). An empty / all-unknown list also collapses to DenyAll. A non-empty
+    // result is backed by a FrozenSet so the domain holds an immutable, fast-Contains policy —
+    // never a mutable HashSet behind IReadOnlySet (no down-cast-and-mutate hole), and its empty
+    // shape matches the canonical DenyAll (FrozenSet<PiiType>.Empty). Mirrors
+    // PiiPolicyJsonConverter.Read, which also frozen-backs the parsed set.
     private static PiiPolicy ParsePiiPolicy(IReadOnlyList<string>? names)
     {
         if (names is null)
@@ -593,7 +605,9 @@ internal static class TypificationEndpoints
                 set.Add(t);
         }
 
-        return new PiiPolicy { AllowStore = set };
+        return set.Count == 0
+            ? PiiPolicy.DenyAll
+            : new PiiPolicy { AllowStore = set.ToFrozenSet() };
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

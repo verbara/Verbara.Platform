@@ -408,6 +408,87 @@ public sealed class TypificationEndpointTests : IDisposable
         ai["entityFieldMap"]!.AsObject().Should().BeEmpty(because: "no entity map on create");
     }
 
+    [Fact]
+    public async Task UpdateSchema_ShouldPreserveEntityFieldMap_WhenWireOmitsIt()
+    {
+        // Create a schema carrying an entityFieldMap, then PUT-update it with an aiConfig
+        // body that OMITS entityFieldMap entirely (the `?? existingEntityFieldMap` preserve
+        // path). The map must survive the round-trip. Mode stays SuggestOnly so the AutoFill
+        // calibration gate doesn't reject the update.
+        var createBody = SchemaBodyWithAiConfig("Preserve Entity Map", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+            entityFieldMap = new Dictionary<string, string> { ["email"] = "customer_email" },
+        });
+        var id = await CreateSchemaAsync(_client, createBody);
+
+        // Update body: same shape but the aiConfig DELIBERATELY omits entityFieldMap (absent
+        // key → null on the wire → preserve path). Change a threshold so the update is real.
+        var updateBody = SchemaBodyWithAiConfig("Preserve Entity Map Renamed", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            suggestThreshold = 0.6,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+        });
+
+        var putResponse = await _client.PutAsync(
+            $"/api/admin/typification/schemas/{id}", JsonContent.Create(updateBody));
+        putResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // The draft is edited in place (latest unpublished), so GET by id returns it directly.
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        schema!["aiConfig"]!["entityFieldMap"]!["email"]!.GetValue<string>()
+            .Should().Be("customer_email", because: "an omitted entityFieldMap preserves the existing map");
+        schema["aiConfig"]!["suggestThreshold"]!.GetValue<double>()
+            .Should().Be(0.6, because: "the update was applied");
+    }
+
+    [Fact]
+    public async Task CreateSchema_ShouldTolerateUnknownAndCasingInPiiAllowStore()
+    {
+        // ParsePiiPolicy is case-insensitive and tolerantly drops unknown names. The result
+        // is rendered in deterministic ordinal name order, so ["email","Bogus","PHONE"]
+        // round-trips to ["Email","Phone"].
+        var body = SchemaBodyWithAiConfig("PII Tolerant Parse", new
+        {
+            enabled = true,
+            mode = "SuggestOnly",
+            suggestThreshold = 0.7,
+            autoApplyThreshold = 0.85,
+            autonomousThreshold = 0.95,
+            autonomous = false,
+            sentimentGating = true,
+            dailyTokenBudget = (long?)null,
+            piiAllowStore = new List<string> { "email", "Bogus", "PHONE" },
+        });
+
+        var id = await CreateSchemaAsync(_client, body);
+
+        var getResponse = await _client.GetAsync($"/api/admin/typification/schemas/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
+        var allow = schema!["aiConfig"]!["piiAllowStore"]!.AsArray()
+            .Select(n => n!.GetValue<string>())
+            .ToArray();
+        allow.Should().Equal("Email", "Phone");
+    }
+
     // ─── C4 — calibration-status endpoint + AutoFill/autonomous write guards ──────
 
     [Fact]
