@@ -13,6 +13,40 @@ _No unreleased changes._
 
 ---
 
+## [2.13.0] — 2026-06-18 — Typification AI AutoFill (safe) + entity prefill (P2b)
+
+Phase **P2b** of the Typification module (ADR-0029): **human-in-the-loop** AI auto-fill of the wrap-up disposition (cascade + field values) once measured calibration clears a graduated confidence band — on top of the trust / safety / calibration / observability substrate that makes it production-safe. The agent always commits; autonomous (no-human-review) commit is intentionally **deferred** (see below). No new Pro license feature (RBAC lives in Platform) — still consumes `Verbara.Sdk.Pro` **2.8.0-pro**. PR #70 / verbara/Verbara.Platform.Web#112.
+
+### Added
+- **LLM operability foundation** — token-usage capture on `LlmResponse`; the `verbara.platform.llm` meter + `[LoggerMessage]` events + OTel; the `llm.completions` keyed resilience policy (previously a silent no-op); the `typification_ai_suggestions` shadow/provenance store (migration `004`). New RBAC permissions `typification:ai:configure` + `typification:ai:autonomous`.
+- **Graduated `AiMode {Off, Shadow, SuggestOnly, AutoFill}`** + confidence bands (clean break of the flat `ConfidenceThreshold`, persisted as a resilient string). Shadow mode persists every suggestion (model id + prompt version) for reconciliation.
+- **Calibration gate** — `ITypificationCalibration` derives AutoFill/autonomous readiness from reconciled accuracy at the published thresholds; exposed via a calibration-status endpoint and surfaced in the admin Mode selector.
+- **Entity prefill under a PII allow-list** — AI named-entity extraction remapped to fields via `EntityFieldMap`, PII-screened **at extraction** (card/Luhn, national-id, phone, email; Unicode-digit normalized) and re-screened on the AI write path (defense-in-depth).
+- **Per-binding AI config override** — effective-config resolution with the autonomous/AutoFill write-gates applied.
+- **Cost & abuse controls** — per-tenant daily token budget (**fail-closed**: degrades before the LLM call) + a dedicated per-tenant `llm` rate-limit + a prompt-size guard (caps enumerated leaves, prefers subtree).
+- **Frontend** (Web #112) — admin Mode selector gated on calibration + bands + calibration panel + entity-map / PII allow-list editor + per-binding override + anti-clobber AutoFill UX with Undo.
+- Migrations `004`–`008` (additive / idempotent): AI-suggestion shadow store, submission AI-provenance + suggested-vs-committed correction signal, audit `ai` actor type, `surfaced_band` for calibration correctness, schema-binding AI override.
+
+### Changed
+- **`/typify` provenance is now server-authoritative** — client-sent source flags are ignored; the server derives `Source` and records the suggested-vs-committed correction signal (migration `005`).
+- **Calibration accuracy is integrity-scoped** — counts only samples from the published `schema_version` and **excludes** AutoFill-band samples to avoid self-confirmation (migration `007` `surfaced_band`).
+
+### Security
+- **Prompt-injection hardening** — untrusted-transcript fence, role-marker neutralization, Unicode / zero-width stripping; classification keyed on the stable leaf `Code`. Multilingual / code-switching hardening.
+- **AI-disposition audit** — tamper-evident `AuditEntry.IntegrityHash` + a dedicated `ai` actor on automated writes (migration `006`).
+
+### Fixed
+- **AOT** — STJ source-gen ignores C# property initializers for keys absent from the JSON, so `PiiPolicy` deserialized to `null` and would have **silently disabled AI on every pre-existing schema**; now fail-safe to `DenyAll` (coalesce at consumer + normalize on store read).
+- Server-authoritative provenance now reconciles on validation **failure** (calibration-accuracy integrity).
+- API-key callers are resolved via the `user_id` claim for AI-config authorization.
+- Per-binding overrides no longer bypass the autonomous/AutoFill write-gates.
+- The `llm` rate-limit now partitions **per tenant** — a prior bug collapsed every tenant into a single shared bucket.
+
+### Deferred
+- **E5 autonomous-commit worker** (auto-close with no human review) → its own dedicated spec: it is GDPR **Art. 22** automated decision-making and needs a compliance layer (tenant opt-in attestation, right to contest, dispute/reopen) beyond the worker mechanics. Its config substrate (autonomous threshold / calibration / permission / write-gate) ships here, forward-compatible.
+
+---
+
 ## [2.12.0] — 2026-06-10 — Typification AI auto-disposition (P2a) + deterministic resolution
 
 Phase **P2a** of the Typification module (ADR-0029): AI suggests the disposition node path + field values + confidence at wrap-up; the agent confirms/overrides. The first real LLM integration in the platform. Consumes `Verbara.Sdk.Pro` **2.8.0-pro** (new `TypificationAi` license feature). PR #53 + #52 / Pro #3 / verbara/Verbara.Platform.Web#93.
