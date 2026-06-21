@@ -9,7 +9,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Fixed
+- **Auth-event double-write on graceful shutdown** — `AuthWriteQueue`'s drain on shutdown could re-enqueue an in-flight item and persist a duplicate `auth_events` row. The drain now de-dupes the in-flight write (PR #72). _Merged to `main` 2026-06-21, after the `v2.13.0` tag (`5877e8c4`); ships in the next release._
 
 ---
 
