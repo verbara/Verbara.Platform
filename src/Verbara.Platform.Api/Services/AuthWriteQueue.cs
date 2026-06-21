@@ -131,8 +131,19 @@ internal sealed partial class AuthWriteQueue : BackgroundService
 
                     if (batch.Count > 0)
                     {
-                        await ProcessBatchAsync(batch, stoppingToken).ConfigureAwait(false);
-                        batch.Clear();
+                        // Clear in finally: if a store call throws OperationCanceledException
+                        // mid-batch on shutdown, ProcessBatchAsync propagates it and skips a
+                        // bare Clear() — leaving this already-processed batch to be RE-run by
+                        // the drain below. auth_events INSERTs are non-idempotent (new Guid per
+                        // row), so re-processing a partially-flushed batch duplicates rows.
+                        try
+                        {
+                            await ProcessBatchAsync(batch, stoppingToken).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            batch.Clear();
+                        }
                     }
 
                     // Inter-batch pause lets more commands accumulate so we can

@@ -198,6 +198,40 @@ public sealed class AuthWriteQueueTests
     }
 
     [Fact]
+    public async Task Consumer_ShouldNotDoubleWrite_WhenBatchInterruptedByCancellationMidProcessing()
+    {
+        // Regression: graceful shutdown must not re-process an already-handled batch.
+        // A real store (Npgsql) throws OperationCanceledException when its write is
+        // cancelled mid-batch on shutdown. The consumer must NOT re-run the
+        // partially-processed batch in its drain: auth_events INSERTs are
+        // non-idempotent (new Guid per row), so re-processing duplicates rows.
+        var (_, authEventStore, services) = NewStubStores();
+        // Raised once the consumer's MAIN-LOOP batch has persisted u_ok, so the test
+        // deterministically reaches the mid-batch failure (rather than the drain-only
+        // path that runs when shutdown pre-empts the main loop entirely).
+        var okPersisted = new TaskCompletionSource();
+        authEventStore
+            .SaveAsync(Arg.Is<AuthEvent>(e => e.UserId == "u_ok"), Arg.Any<CancellationToken>())
+            .Returns(_ => { okPersisted.TrySetResult(); return Task.CompletedTask; });
+        authEventStore
+            .SaveAsync(Arg.Is<AuthEvent>(e => e.UserId == "u_cancel"), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new OperationCanceledException()));
+        using var sut = NewQueue(services: services, flushInterval: TimeSpan.FromSeconds(5));
+
+        // u_ok is persisted first; u_cancel then throws OCE inside the same batch.
+        sut.TryEnqueue(new LogSuccessEventCommand("t1", "u_ok", "login_success", null, null));
+        sut.TryEnqueue(new LogSuccessEventCommand("t1", "u_cancel", "login_success", null, null));
+
+        await sut.StartAsync(CancellationToken.None);
+        await okPersisted.Task;   // main-loop batch has run and hit the mid-batch OCE
+        await sut.StopAsync(CancellationToken.None);
+
+        // The already-persisted event must be written EXACTLY once (no drain re-run).
+        await authEventStore.Received(1).SaveAsync(
+            Arg.Is<AuthEvent>(e => e.UserId == "u_ok"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Consumer_ShouldContinueProcessing_WhenIndividualCommandFails()
     {
         var (userStore, authEventStore, services) = NewStubStores();
