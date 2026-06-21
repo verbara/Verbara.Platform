@@ -50,7 +50,7 @@ jobs:
             dockerfile: src/Verbara.Platform.Mail/Dockerfile.mail
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # fetch-depth: 0 so we can read the annotated tag message in the
           # retroactive-tag guard below. Default depth=1 has no tag annotations.
