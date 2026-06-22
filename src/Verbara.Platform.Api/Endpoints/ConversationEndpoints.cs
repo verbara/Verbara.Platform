@@ -302,7 +302,11 @@ internal static class ConversationEndpoints
         }
 
         // 4. Classify (never throws — degrades to null on no-text / LLM-failure / invalid).
-        var classification = await classifier.ClassifyAsync(resolved.Schema, resolved.SubtreeRoot, conversation, transcript, ct);
+        //    P2c.1 — pass the tenant id FIRST so the classifier resolves THIS tenant's BYO LLM
+        //    provider; a tenant with no configured / disabled provider degrades to the empty
+        //    suggestion below (the §0 fail-closed seam — AI is strictly opt-in).
+        var classification = await classifier.ClassifyAsync(
+            EntityId.From(tenantId.Value), resolved.Schema, resolved.SubtreeRoot, conversation, transcript, ct);
         if (classification is null)
             return Results.Ok(EmptySuggestion);
 

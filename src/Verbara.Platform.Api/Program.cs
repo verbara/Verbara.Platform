@@ -268,6 +268,12 @@ if (!string.IsNullOrEmpty(coreConnectionString))
     // to leave registered — re-runs are no-ops once every row is encrypted.
     builder.Services.AddOidcClientSecretEncryptionMigrator();
 
+    // P2c.1 (§6) — one-shot, idempotent seed of the appsettings global LLM key into the single
+    // operational tenant's per-tenant tenant_llm_config row (the single-tenant / dev migration off
+    // the retired shared global key). No-op unless the global key is set AND exactly one operational
+    // tenant exists AND it has no config row yet. Runs after schema migrations + DataProtection.
+    builder.Services.AddTenantLlmConfigSeedMigrator();
+
     // Override in-memory capacity with persistent version for restart recovery
     builder.Services.AddSingleton<IAgentCapacityService>(sp =>
         new PersistentAgentCapacityService(
@@ -1636,6 +1642,8 @@ v1.MapAuditEndpoints();
 Verbara.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.MapAuditAdminEndpoints(v1);
 v1.MapSurveyEndpoints();
 v1.MapTypificationEndpoints();
+// P2c.1 — per-tenant BYO LLM provider admin (typification:ai:configure gated, no license gate).
+v1.MapTenantLlmConfigEndpoints();
 v1.MapReasonHintEndpoints();
 v1.MapScheduledReportEndpoints();
 v1.MapRealtimeEndpoints();

@@ -1,82 +1,57 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Verbara.Platform.Llm.Wire;
 using Verbara.Sdk.Resilience;
 
 namespace Verbara.Platform.Llm;
 
 /// <summary>
-/// The first concrete <see cref="ILlmProvider"/>: an OpenAI-compatible chat-completions client.
-/// Works against any endpoint implementing the OpenAI <c>POST /chat/completions</c> contract
-/// (OpenAI, Azure OpenAI-compatible gateways, vLLM, Ollama's OpenAI shim, etc.).
+/// Azure OpenAI <see cref="ILlmProvider"/>. Speaks the same OpenAI chat-completions wire
+/// (<see cref="ChatCompletionRequest"/> / <see cref="LlmJsonContext"/>) but with Azure's
+/// deployment-scoped URL and the <c>api-key</c> header (NOT <c>Authorization: Bearer</c>).
 /// <para>
-/// AOT-safe: all (de)serialization goes through the source-generated <see cref="LlmJsonContext"/>.
+/// Endpoint: <c>{BaseUrl}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}</c>.
+/// Resilience + metrics structure mirror <see cref="OpenAiCompatibleLlmProvider"/>.
 /// </para>
 /// </summary>
-public sealed class OpenAiCompatibleLlmProvider : ILlmProvider, IDisposable
+public sealed class AzureOpenAiLlmProvider : ILlmProvider, IDisposable
 {
-    /// <summary>
-    /// Keyed-service name for the <see cref="ResiliencePolicy"/> that wraps the HTTP send
-    /// (circuit + retry). The per-call deadline comes from <see cref="LlmProviderOptions.TimeoutSeconds"/>
-    /// via a linked cancellation source, mirroring the Flows <c>http_request</c> handler pattern.
-    /// </summary>
-    public const string ResiliencePolicyKey = "llm.completions";
+    /// <summary>Keyed-service name for the shared <see cref="ResiliencePolicy"/> (see OpenAI provider).</summary>
+    public const string ResiliencePolicyKey = OpenAiCompatibleLlmProvider.ResiliencePolicyKey;
+
+    private const string ApiKeyHeader = "api-key";
 
     private readonly HttpClient _http;
     private readonly LlmEffectiveOptions _options;
+    private readonly string _deployment;
+    private readonly string _apiVersion;
     private readonly ResiliencePolicy _policy;
     private readonly LlmMetrics _metrics;
-    private readonly ILogger<OpenAiCompatibleLlmProvider> _logger;
+    private readonly ILogger<AzureOpenAiLlmProvider> _logger;
 
-    /// <summary>
-    /// Global typed-client ctor (legacy Flows path): builds <see cref="LlmEffectiveOptions"/>
-    /// from the host-bound <see cref="LlmProviderOptions"/> so the single global
-    /// <c>AddHttpClient&lt;ILlmProvider, OpenAiCompatibleLlmProvider&gt;</c> registration is
-    /// unchanged. The DI container supplies <see cref="IMeterFactory"/>/<see cref="ILogger{T}"/>
-    /// when present; both are nullable so test containers that omit them still construct.
-    /// <para>
-    /// Marked <see cref="ActivatorUtilitiesConstructorAttribute"/> so the typed-client factory
-    /// deterministically selects this ctor (not the effective-options one, which the resolver
-    /// calls directly) — both take <see cref="HttpClient"/> first, so without this the factory
-    /// throws "multiple constructors".
-    /// </para>
-    /// </summary>
-    [ActivatorUtilitiesConstructor]
-    public OpenAiCompatibleLlmProvider(
-        HttpClient http,
-        IOptions<LlmProviderOptions> options,
-        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null,
-        IMeterFactory? meterFactory = null,
-        ILogger<OpenAiCompatibleLlmProvider>? logger = null)
-        : this(http, LlmEffectiveOptions.FromProviderOptions(options.Value), policy, meterFactory, logger)
-    {
-    }
-
-    /// <summary>
-    /// Effective-options ctor (per-tenant resolver path): the resolver materialises the
-    /// decrypted key and the per-tenant base url / model / timeout into
-    /// <see cref="LlmEffectiveOptions"/> and builds the provider directly.
-    /// </summary>
-    public OpenAiCompatibleLlmProvider(
+    public AzureOpenAiLlmProvider(
         HttpClient http,
         LlmEffectiveOptions options,
+        string deployment,
+        string apiVersion,
         ResiliencePolicy? policy = null,
         IMeterFactory? meterFactory = null,
-        ILogger<OpenAiCompatibleLlmProvider>? logger = null)
+        ILogger<AzureOpenAiLlmProvider>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(deployment);
+        ArgumentNullException.ThrowIfNull(apiVersion);
         _http = http;
         _options = options;
+        _deployment = deployment;
+        _apiVersion = apiVersion;
         _policy = policy ?? ResiliencePolicy.NoOp;
         _metrics = new LlmMetrics(meterFactory);
-        _logger = logger ?? NullLogger<OpenAiCompatibleLlmProvider>.Instance;
+        _logger = logger ?? NullLogger<AzureOpenAiLlmProvider>.Instance;
     }
 
     /// <inheritdoc />
@@ -90,13 +65,11 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider, IDisposable
             Temperature: request.Temperature,
             MaxTokens: request.MaxTokens);
 
-        var endpoint = BuildEndpoint(_options.BaseUrl);
+        var endpoint = BuildEndpoint(_options.BaseUrl, _deployment, _apiVersion);
         var timeout = TimeSpan.FromSeconds(_options.TimeoutSeconds);
 
         var sw = Stopwatch.StartNew();
 
-        // The ResiliencePolicy owns circuit + retry; the per-call timeout below is layered on top
-        // via a linked CTS so each attempt gets a fresh deadline. Mirrors HttpRequestNodeHandler.
         HttpResponseMessage response;
         try
         {
@@ -113,8 +86,10 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider, IDisposable
                             wireRequest,
                             LlmJsonContext.Default.ChatCompletionRequest),
                     };
-                    httpRequest.Headers.Authorization =
-                        new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+                    // Guard a null/empty key defensively so a keyless probe degrades to an auth
+                    // failure from the provider rather than an ArgumentNullException on header add.
+                    if (!string.IsNullOrEmpty(_options.ApiKey))
+                        httpRequest.Headers.Add(ApiKeyHeader, _options.ApiKey);
 
                     return await _http.SendAsync(httpRequest, perCallCts.Token).ConfigureAwait(false);
                 },
@@ -132,7 +107,6 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider, IDisposable
         {
             try
             {
-                // Let callers degrade — the disposition AI-node classifier catches and falls back.
                 response.EnsureSuccessStatusCode();
             }
             catch (Exception ex)
@@ -148,9 +122,7 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider, IDisposable
                 .ConfigureAwait(false);
 
             sw.Stop();
-            var elapsedMs = sw.Elapsed.TotalMilliseconds;
-
-            _metrics.RequestLatency.Record(elapsedMs);
+            _metrics.RequestLatency.Record(sw.Elapsed.TotalMilliseconds);
             _metrics.Requests.Add(1);
 
             var content = parsed?.Choices is { Count: > 0 } choices
@@ -186,8 +158,10 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider, IDisposable
         return mapped;
     }
 
-    private static string BuildEndpoint(string? baseUrl) =>
-        $"{(baseUrl ?? string.Empty).TrimEnd('/')}/chat/completions";
+    private static string BuildEndpoint(string? baseUrl, string deployment, string apiVersion) =>
+        // Escape the deployment path segment + the api-version query value so a deployment name or
+        // version with URL-significant characters (spaces, '/', '?', '&') can't break the URL.
+        $"{(baseUrl ?? string.Empty).TrimEnd('/')}/openai/deployments/{Uri.EscapeDataString(deployment)}/chat/completions?api-version={Uri.EscapeDataString(apiVersion)}";
 
     /// <inheritdoc />
     public void Dispose() => _metrics.Dispose();

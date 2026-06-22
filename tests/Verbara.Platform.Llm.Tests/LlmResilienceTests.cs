@@ -43,13 +43,14 @@ public sealed class LlmResilienceTests
     }
 
     [Fact]
-    public void AddPlatformLlm_ShouldNotRegisterKeyedResiliencePolicy_WhenUnconfigured()
+    public void AddPlatformLlm_ShouldStillRegisterKeyedResiliencePolicy_WhenUnconfigured()
     {
-        // When LLM config is incomplete, AddPlatformLlm is a no-op — nothing registered.
+        // P2c.1: the keyed llm.completions policy is now registered ALWAYS — per-tenant BYO
+        // providers (built by the resolver) need it even when no global key is configured.
         var services = new ServiceCollection();
         services.AddPlatformLlm(o =>
         {
-            // Deliberately incomplete: no ApiKey
+            // Deliberately incomplete: no ApiKey ⇒ no global typed-client, but the policy stays.
             o.BaseUrl = "https://api.example.test/v1/";
             o.Model = "gpt-test";
         });
@@ -57,7 +58,10 @@ public sealed class LlmResilienceTests
         using var sp = services.BuildServiceProvider();
         var policy = sp.GetKeyedService<ResiliencePolicy>(OpenAiCompatibleLlmProvider.ResiliencePolicyKey);
 
-        policy.Should().BeNull("no-op path must not register the keyed policy");
+        policy.Should().NotBeNull("the keyed policy is shared by per-tenant providers and is always registered");
+
+        // But the global typed-client ILlmProvider must NOT be registered (Flows still TryAdds the stub).
+        sp.GetService<ILlmProvider>().Should().BeNull("no global key ⇒ no global typed-client");
     }
 
     // ── Retry behaviour ──────────────────────────────────────────────────────

@@ -26,14 +26,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IReasonHintResolver, DefaultReasonHintResolver>();
         services.AddSingleton<ITypificationPrefillResolver, DefaultTypificationPrefillResolver>();
 
-        // Transient (NOT singleton): DefaultTypificationAiClassifier depends on
-        // ILlmProvider, which AddPlatformLlm registers as a factory-managed typed
-        // HttpClient (AddHttpClient<ILlmProvider, ...>). A singleton capturing a
-        // transient typed-client is the IHttpClientFactory captive-dependency
-        // anti-pattern — the HttpMessageHandler would never rotate (stale DNS on
-        // long-running pods). The classifier is stateless (only ctor deps) so a
-        // fresh instance per resolve is correct; the suggestion endpoint resolves it
-        // per-request via [FromServices], so each request gets a factory-rotated handler.
+        // Transient (NOT singleton): DefaultTypificationAiClassifier resolves the per-tenant BYO
+        // provider through ILlmProviderResolver (P2c.1), which builds providers over
+        // IHttpClientFactory named clients (AddHttpClient("llm.<type>")). A singleton classifier
+        // would itself be fine (the resolver is the long-lived singleton and rotates handlers via
+        // the factory), but the classifier is kept transient/stateless so each suggestion request
+        // resolves a fresh instance via [FromServices] with no captured per-request state. The
+        // resolver — not the classifier — owns the per-tenant provider cache + handler rotation.
         services.AddTransient<ITypificationAiClassifier, DefaultTypificationAiClassifier>();
 
         // B2 — suggestion metrics (singleton; owns its Meter + cached logger lifetime).

@@ -118,7 +118,7 @@ public sealed class OpenAiCompatibleLlmProviderTests
     public async Task CompleteAsync_ShouldIncrementRequestAndTokenCounters_WhenCalled()
     {
         using var meterFactory = new TestMeterFactory();
-        using var listener = new CollectingMeterListener(LlmMetrics.MeterName);
+        using var listener = new CollectingMeterListener(meterFactory);
 
         var handler = new CapturingHandler(
             HttpStatusCode.OK,
@@ -143,7 +143,7 @@ public sealed class OpenAiCompatibleLlmProviderTests
     public async Task CompleteAsync_ShouldIncrementErrorCounter_WhenProviderFails()
     {
         using var meterFactory = new TestMeterFactory();
-        using var listener = new CollectingMeterListener(LlmMetrics.MeterName);
+        using var listener = new CollectingMeterListener(meterFactory);
 
         var handler = new CapturingHandler(HttpStatusCode.InternalServerError, "boom");
         var provider = CreateProvider(handler, meterFactory: meterFactory);
@@ -163,13 +163,17 @@ public sealed class OpenAiCompatibleLlmProviderTests
         public Dictionary<string, long> Counters { get; } = new();
         public Dictionary<string, List<double>> Histograms { get; } = new();
 
-        public CollectingMeterListener(string meterName)
+        public CollectingMeterListener(TestMeterFactory factory)
         {
             _listener = new MeterListener
             {
                 InstrumentPublished = (instrument, listener) =>
                 {
-                    if (instrument.Meter.Name == meterName) listener.EnableMeasurementEvents(instrument);
+                    // Filter by the specific Meter instances this test's factory created —
+                    // NOT by meter name — so measurements from providers in other test
+                    // classes running in parallel (which emit to the same-named
+                    // "verbara.platform.llm" meter) cannot pollute this listener's counters.
+                    if (factory.Owns(instrument.Meter)) listener.EnableMeasurementEvents(instrument);
                 },
             };
             _listener.SetMeasurementEventCallback<long>((instrument, value, _, _) =>
@@ -205,6 +209,8 @@ public sealed class OpenAiCompatibleLlmProviderTests
             _meters.Add(meter);
             return meter;
         }
+
+        public bool Owns(Meter meter) => _meters.Contains(meter);
 
         public void Dispose()
         {

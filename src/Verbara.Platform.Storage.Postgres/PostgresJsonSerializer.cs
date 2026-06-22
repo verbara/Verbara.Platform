@@ -72,6 +72,8 @@ namespace Verbara.Platform.Storage.Postgres;
 [JsonSerializable(typeof(ResponseMapping))]
 [JsonSerializable(typeof(TypificationAiConfig))]
 [JsonSerializable(typeof(PrefillRef))]
+// P2c.1 — per-tenant BYO LLM config: provider_settings JSONB column.
+[JsonSerializable(typeof(Verbara.Platform.Llm.ProviderSettings))]
 [JsonSerializable(typeof(List<ChannelType>))]
 [JsonSerializable(typeof(IReadOnlyList<ChannelType>))]
 [JsonSourceGenerationOptions(

@@ -1039,6 +1039,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         public int CallCount { get; private set; }
 
         public Task<AiClassification?> ClassifyAsync(
+            EntityId tenantId,
             TypificationSchema schema,
             EntityId? subtreeRoot,
             Conversation conversation,

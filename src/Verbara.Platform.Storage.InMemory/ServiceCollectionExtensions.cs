@@ -10,6 +10,7 @@ using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Flows;
 using Verbara.Platform.Identity;
 using Verbara.Platform.KnowledgeBase;
+using Verbara.Platform.Llm;
 using Verbara.Platform.Media;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
@@ -101,6 +102,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITypificationSubmissionStore, InMemoryTypificationSubmissionStore>();
         services.AddSingleton<IReasonHintStore, InMemoryReasonHintStore>();
         services.AddSingleton<IAiSuggestionStore, InMemoryAiSuggestionStore>();
+        services.AddSingleton<ITenantLlmConfigStore, InMemoryTenantLlmConfigStore>();
 
         // Automation
         services.AddSingleton<ITimerStore, InMemoryTimerStore>();
