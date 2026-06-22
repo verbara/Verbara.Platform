@@ -109,4 +109,38 @@ public sealed class AnthropicLlmProviderTests
 
         await act.Should().ThrowAsync<HttpRequestException>();
     }
+
+    [Fact]
+    public async Task CompleteAsync_ShouldSelectFirstTextBlock_WhenNonTextBlockPrecedesText()
+    {
+        // A tool_use / thinking block may precede the text block; the provider must pick the first
+        // block whose type == "text", not content[0] blindly.
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            """{"content":[{"type":"tool_use","text":null},{"type":"text","text":"the answer"}]}""");
+        var provider = CreateProvider(handler);
+
+        var response = await provider.CompleteAsync(SampleRequest(), CancellationToken.None);
+
+        response.Content.Should().Be("the answer");
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ShouldOmitApiKeyHeader_WhenKeyless()
+    {
+        // A keyless probe must NOT throw on header add — the x-api-key header is simply omitted and
+        // the provider degrades to whatever the endpoint returns.
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            """{"content":[{"type":"text","text":"ok"}]}""");
+        var keylessOptions = new LlmEffectiveOptions(
+            BaseUrl: null, ApiKey: null, Model: "claude-3-5-haiku-latest",
+            Temperature: 0.2, MaxTokens: 800, TimeoutSeconds: 20);
+        var provider = new AnthropicLlmProvider(new HttpClient(handler), keylessOptions);
+
+        var act = () => provider.CompleteAsync(SampleRequest(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        handler.Request!.Headers.Contains("x-api-key").Should().BeFalse();
+    }
 }

@@ -28,7 +28,7 @@ namespace Verbara.Platform.Storage.Postgres.Stores;
 ///   admin-configured provider).</description></item>
 /// </list>
 /// <para>
-/// On seed it INSERTs a row: <c>provider_type = openai_compatible</c>, model + base url from the
+/// On seed it INSERTs a row: <c>provider_type = OpenAiCompatible</c>, model + base url from the
 /// options, the key <see cref="IDataProtector"/>-protected under the SAME purpose the Postgres
 /// store uses (<c>Verbara.Platform.Typification.TenantLlmApiKey.v1</c>), <c>enabled = true</c>.
 /// </para>
@@ -108,7 +108,8 @@ internal sealed partial class TenantLlmConfigSeedMigrator : IHostedService
 
             var now = DateTime.UtcNow;
             var encryptedKey = _protector.Protect(_options.ApiKey!);
-            var last4 = _options.ApiKey!.Length >= 4 ? _options.ApiKey[^4..] : _options.ApiKey;
+            // Never let the hint be the whole secret: a key shorter than 4 chars has no safe last-4.
+            var last4 = _options.ApiKey!.Length >= 4 ? _options.ApiKey[^4..] : null;
             // Mirror the store's jsonb shape: serialize a ProviderSettings (only BaseUrl is relevant
             // for openai_compatible) through the same source-gen context the store reads with.
             var settingsJson = System.Text.Json.JsonSerializer.Serialize(
@@ -128,7 +129,8 @@ internal sealed partial class TenantLlmConfigSeedMigrator : IHostedService
                     p.Add(new NpgsqlParameter("ProviderType", ProviderType.OpenAiCompatible.ToString()));
                     p.Add(new NpgsqlParameter("Model", _options.Model!));
                     p.Add(new NpgsqlParameter("ApiKeyEncrypted", encryptedKey));
-                    p.Add(new NpgsqlParameter("ApiKeyLast4", last4));
+                    p.Add(new NpgsqlParameter("ApiKeyLast4", NpgsqlDbType.Text)
+                        { Value = (object?)last4 ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("ProviderSettings", settingsJson));
                     p.Add(new NpgsqlParameter("CreatedAt", now));
                     p.Add(new NpgsqlParameter("UpdatedAt", now));

@@ -78,4 +78,42 @@ public sealed class AzureOpenAiLlmProviderTests
 
         await act.Should().ThrowAsync<HttpRequestException>();
     }
+
+    [Fact]
+    public async Task CompleteAsync_ShouldEscapeDeploymentAndApiVersion_InUrl()
+    {
+        // A deployment name / api-version with URL-significant characters must be escaped so they
+        // can't break out of their URL segment / query value.
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            """{"choices":[{"message":{"role":"assistant","content":"ok"}}]}""");
+        var provider = CreateProvider(handler, deployment: "my deploy/2", apiVersion: "2024-06-01&x");
+
+        await provider.CompleteAsync(SampleRequest(), CancellationToken.None);
+
+        // AbsoluteUri preserves the percent-encoding (ToString() cosmetically decodes %20). The
+        // load-bearing escapes: '/' → %2F (can't break the path segment) and '&' → %26 (can't break
+        // the query).
+        var url = handler.Request!.RequestUri!.AbsoluteUri;
+        url.Should().Contain("/openai/deployments/my%20deploy%2F2/chat/completions");
+        url.Should().Contain("api-version=2024-06-01%26x");
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ShouldOmitApiKeyHeader_WhenKeyless()
+    {
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            """{"choices":[{"message":{"role":"assistant","content":"ok"}}]}""");
+        var keylessOptions = new LlmEffectiveOptions(
+            BaseUrl: "https://my-resource.openai.azure.com/", ApiKey: null, Model: "gpt-4o",
+            Temperature: 0.2, MaxTokens: 800, TimeoutSeconds: 20);
+        var provider = new AzureOpenAiLlmProvider(
+            new HttpClient(handler), keylessOptions, "prod-gpt4o", "2024-06-01");
+
+        var act = () => provider.CompleteAsync(SampleRequest(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        handler.Request!.Headers.Contains("api-key").Should().BeFalse();
+    }
 }

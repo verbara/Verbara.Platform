@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using NpgsqlTypes;
 using Verbara.Platform.Core;
@@ -15,7 +17,7 @@ namespace Verbara.Platform.Storage.Postgres.Stores;
 /// mirroring <see cref="PostgresTenantAuthConfigStore"/>'s OIDC-secret column. The
 /// type-specific <c>provider_settings</c> is a JSONB column (de)serialized reflection-free.
 /// </summary>
-internal sealed class PostgresTenantLlmConfigStore : ITenantLlmConfigStore
+internal sealed partial class PostgresTenantLlmConfigStore : ITenantLlmConfigStore
 {
     /// <summary>
     /// DataProtection purpose for the per-tenant LLM API key column. Concern-specific so this
@@ -29,20 +31,27 @@ internal sealed class PostgresTenantLlmConfigStore : ITenantLlmConfigStore
 
     private readonly NpgsqlDataSource _dataSource;
     private readonly IDataProtector _protector;
+    private readonly ILogger<PostgresTenantLlmConfigStore> _logger;
 
-    public PostgresTenantLlmConfigStore(NpgsqlDataSource dataSource, IDataProtectionProvider dataProtectionProvider)
+    public PostgresTenantLlmConfigStore(
+        NpgsqlDataSource dataSource,
+        IDataProtectionProvider dataProtectionProvider,
+        ILogger<PostgresTenantLlmConfigStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentNullException.ThrowIfNull(dataProtectionProvider);
         _dataSource = dataSource;
         _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
+        _logger = logger ?? NullLogger<PostgresTenantLlmConfigStore>.Instance;
     }
 
     /// <summary>
     /// Unwraps the stored API key to plaintext for server-side use (the resolver materialises it
-    /// at provider-build time; it never leaves the server). On <see cref="CryptographicException"/>
-    /// — a legacy plaintext row a future migrator hasn't yet rewritten — the value is returned
-    /// verbatim so an early request between deploy and migrator completion doesn't fail.
+    /// at provider-build time; it never leaves the server). This is a NEW table with no legacy
+    /// plaintext, so on a <see cref="CryptographicException"/> (an undecryptable ciphertext — key
+    /// ring lost/rotated, corruption) we FAIL CLOSED: log a structured Warning (NO key material)
+    /// and return <see langword="null"/> so the resolver treats the tenant as AI-off, rather than
+    /// passing the undecryptable ciphertext through as a literal API key.
     /// </summary>
     internal string? UnprotectKey(string? value)
     {
@@ -54,7 +63,8 @@ internal sealed class PostgresTenantLlmConfigStore : ITenantLlmConfigStore
         }
         catch (CryptographicException)
         {
-            return value;
+            LogUndecryptableKey(_logger);
+            return null;
         }
     }
 
@@ -148,10 +158,23 @@ internal sealed class PostgresTenantLlmConfigStore : ITenantLlmConfigStore
             var settings = JsonSerializer.Deserialize(provider_settings, PostgresJson.Ctx.ProviderSettings)
                 ?? new ProviderSettings();
 
+            // Tolerate (case-insensitively) but never silently default a bad discriminator: log a
+            // Warning so an unrecognized provider_type surfaces rather than masquerading as OpenAI.
+            ProviderType providerType;
+            if (Enum.TryParse(provider_type, ignoreCase: true, out providerType))
+            {
+                // parsed
+            }
+            else
+            {
+                providerType = ProviderType.OpenAiCompatible;
+                LogUnknownProviderType(store._logger, provider_type, tenant_id);
+            }
+
             return new TenantLlmConfig
             {
                 TenantId = EntityId.From(tenant_id),
-                ProviderType = Enum.TryParse<ProviderType>(provider_type, out var pt) ? pt : ProviderType.OpenAiCompatible,
+                ProviderType = providerType,
                 Model = model,
                 // Unwrap on read — server-only; the API layer masks it to keySet + last4 so plaintext
                 // never crosses the HTTP boundary.
@@ -164,4 +187,12 @@ internal sealed class PostgresTenantLlmConfigStore : ITenantLlmConfigStore
             };
         }
     }
+
+    [LoggerMessage(EventId = 4110, Level = LogLevel.Warning,
+        Message = "tenant_llm_config api_key_encrypted could not be decrypted (data-protection key unavailable/rotated); treating tenant as AI-off")]
+    private static partial void LogUndecryptableKey(ILogger logger);
+
+    [LoggerMessage(EventId = 4111, Level = LogLevel.Warning,
+        Message = "tenant_llm_config.provider_type '{ProviderType}' for tenant {TenantId} is unrecognized; defaulting to OpenAiCompatible")]
+    private static partial void LogUnknownProviderType(ILogger logger, string providerType, string tenantId);
 }

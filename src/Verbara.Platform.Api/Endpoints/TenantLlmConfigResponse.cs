@@ -33,7 +33,9 @@ public sealed record TenantLlmConfigResponse(
             Model: config.Model,
             Settings: config.Settings,
             Enabled: config.Enabled,
-            KeySet: !string.IsNullOrEmpty(config.ApiKey) || !string.IsNullOrEmpty(config.ApiKeyLast4),
+            // KeySet reflects ACTUAL key presence — not the last4 display hint (which is an
+            // independent, non-secret hint that may be absent even when a key is set).
+            KeySet: !string.IsNullOrEmpty(config.ApiKey),
             KeyLast4: config.ApiKeyLast4,
             UpdatedAt: config.UpdatedAt);
     }

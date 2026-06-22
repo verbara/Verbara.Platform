@@ -135,14 +135,20 @@ public sealed class DefaultTypificationAiClassifierTests
     public async Task ClassifyAsync_ShouldReturnNull_WhenTenantHasNoResolvedProvider()
     {
         // P2c.1 fail-closed seam: a tenant whose resolver yields null (no config / disabled) is a
-        // valid "AI off" state → degrade to null WITHOUT calling any provider.
-        var sut = new DefaultTypificationAiClassifier(NullResolver());
+        // valid "AI off" state → degrade to null WITHOUT calling any provider. Regression-lock the
+        // "never re-sent" invariant: the LLM provider must NEVER be invoked when the resolver is null.
+        var provider = Substitute.For<ILlmProvider>();
+        var resolver = Substitute.For<ILlmProviderResolver>();
+        resolver.ResolveAsync(Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<ResolvedLlmProvider?>(null));
+        var sut = new DefaultTypificationAiClassifier(resolver);
         var schema = Schema();
 
         var result = await sut.ClassifyAsync(
             TenantEntityId, schema, subtreeRoot: null, Conversation(), Transcript(), CancellationToken.None);
 
         result.Should().BeNull();
+        await provider.DidNotReceive().CompleteAsync(Arg.Any<LlmRequest>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -782,15 +788,6 @@ public sealed class DefaultTypificationAiClassifierTests
         var resolver = Substitute.For<ILlmProviderResolver>();
         resolver.ResolveAsync(Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<ResolvedLlmProvider?>(new ResolvedLlmProvider(provider, TestModelId)));
-        return resolver;
-    }
-
-    /// <summary>A resolver that resolves every tenant to <see langword="null"/> (no BYO provider).</summary>
-    private static ILlmProviderResolver NullResolver()
-    {
-        var resolver = Substitute.For<ILlmProviderResolver>();
-        resolver.ResolveAsync(Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<ResolvedLlmProvider?>(null));
         return resolver;
     }
 

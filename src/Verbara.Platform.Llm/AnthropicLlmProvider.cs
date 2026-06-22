@@ -95,7 +95,10 @@ public sealed class AnthropicLlmProvider : ILlmProvider, IDisposable
                             wireRequest,
                             AnthropicJsonContext.Default.AnthropicMessagesRequest),
                     };
-                    httpRequest.Headers.Add(ApiKeyHeader, _options.ApiKey);
+                    // Guard a null/empty key defensively so a keyless probe degrades to an auth
+                    // failure from the provider rather than an ArgumentNullException on header add.
+                    if (!string.IsNullOrEmpty(_options.ApiKey))
+                        httpRequest.Headers.Add(ApiKeyHeader, _options.ApiKey);
                     httpRequest.Headers.Add(VersionHeader, _anthropicVersion);
 
                     return await _http.SendAsync(httpRequest, perCallCts.Token).ConfigureAwait(false);
@@ -132,8 +135,12 @@ public sealed class AnthropicLlmProvider : ILlmProvider, IDisposable
             _metrics.RequestLatency.Record(sw.Elapsed.TotalMilliseconds);
             _metrics.Requests.Add(1);
 
+            // Anthropic may interleave non-text blocks (e.g. tool_use/thinking) ahead of the text.
+            // Pick the first explicit "text" block; fall back to the first block carrying any text.
             var content = parsed?.Content is { Count: > 0 } blocks
-                ? blocks[0].Text
+                ? blocks.FirstOrDefault(b => b.Type == "text")?.Text
+                    ?? blocks.FirstOrDefault(b => b.Text is not null)?.Text
+                    ?? string.Empty
                 : null;
 
             if (string.IsNullOrEmpty(content))

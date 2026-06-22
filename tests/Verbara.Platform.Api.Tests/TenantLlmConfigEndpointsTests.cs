@@ -260,6 +260,140 @@ public sealed class TenantLlmConfigEndpointsTests
             Arg.Is<TenantLlmConfig>(c => c.ApiKey == "sk-draft-3333" && c.Model == "gpt-4o-mini"));
     }
 
+    [Fact]
+    public async Task Test_ShouldRequireExplicitKey_WhenDraftOverridesDestination()
+    {
+        using var factory = new LlmConfigApiFactory();
+        factory.ProbeProvider = new StubProvider(succeed: true);
+        using var client = factory.CreateAuthenticatedClient();
+
+        // Saved config points at the OpenAI endpoint with a stored key.
+        await SeedConfigAsync(factory, apiKey: "sk-stored-9999", model: "gpt-4o-mini");
+
+        // A draft that REDIRECTS the base url to an attacker endpoint but omits the key MUST NOT fall
+        // back to the stored key — the stored credential could be exfiltrated to the new destination.
+        var body = new
+        {
+            model = "gpt-4o-mini",
+            settings = new { baseUrl = "https://attacker.example/v1" },
+        };
+
+        var response = await client.PostAsync("/api/admin/ai/llm-config/test", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["reachable"]!.GetValue<bool>().Should().BeFalse();
+        json["authOk"]!.GetValue<bool>().Should().BeFalse();
+        json["modelOk"]!.GetValue<bool>().Should().BeFalse();
+        json["error"]!.GetValue<string>().Should().Contain("explicit apiKey");
+
+        // The probe must NEVER have been built — the stored key was never materialised for the draft.
+        factory.Resolver.DidNotReceive().BuildTransient(Arg.Any<TenantLlmConfig>());
+    }
+
+    [Fact]
+    public async Task Test_ShouldUseStoredKey_WhenDraftKeepsSameDestination()
+    {
+        using var factory = new LlmConfigApiFactory();
+        factory.ProbeProvider = new StubProvider(succeed: true);
+        using var client = factory.CreateAuthenticatedClient();
+
+        // Saved config + stored key on the OpenAI endpoint.
+        await SeedConfigAsync(factory, apiKey: "sk-stored-8888", model: "gpt-4o-mini");
+
+        // A draft that changes ONLY the model (same base url, same provider type) may reuse the
+        // stored key — the destination is unchanged so there's no exfiltration risk.
+        var body = new
+        {
+            model = "gpt-4o",
+            settings = new { baseUrl = "https://api.openai.com/v1" },
+        };
+
+        var response = await client.PostAsync("/api/admin/ai/llm-config/test", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["reachable"]!.GetValue<bool>().Should().BeTrue();
+
+        // The probe reused the stored key for the same-destination draft.
+        factory.Resolver.Received().BuildTransient(
+            Arg.Is<TenantLlmConfig>(c => c.ApiKey == "sk-stored-8888" && c.Model == "gpt-4o"));
+    }
+
+    // ─── Azure required-field validation ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task Put_ShouldReturn400_WhenAzureDeploymentMissing()
+    {
+        using var factory = new LlmConfigApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var body = new
+        {
+            providerType = "AzureOpenAi",
+            model = "gpt-4o",
+            apiKey = "sk-azure-1234",
+            settings = new { baseUrl = "https://r.openai.azure.com", azureApiVersion = "2024-06-01" },
+            enabled = true,
+        };
+
+        var response = await client.PutAsync("/api/admin/ai/llm-config", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await LoadConfigAsync(factory)).Should().BeNull(because: "a malformed Azure config must not persist");
+    }
+
+    [Fact]
+    public async Task Put_ShouldReturn400_WhenAzureApiVersionMissing()
+    {
+        using var factory = new LlmConfigApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var body = new
+        {
+            providerType = "AzureOpenAi",
+            model = "gpt-4o",
+            apiKey = "sk-azure-1234",
+            settings = new { baseUrl = "https://r.openai.azure.com", azureDeployment = "prod-gpt4o" },
+            enabled = true,
+        };
+
+        var response = await client.PutAsync("/api/admin/ai/llm-config", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await LoadConfigAsync(factory)).Should().BeNull(because: "a malformed Azure config must not persist");
+    }
+
+    [Fact]
+    public async Task Put_ShouldPersist_WhenAzureDeploymentAndVersionPresent()
+    {
+        using var factory = new LlmConfigApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var body = new
+        {
+            providerType = "AzureOpenAi",
+            model = "gpt-4o",
+            apiKey = "sk-azure-1234",
+            settings = new
+            {
+                baseUrl = "https://r.openai.azure.com",
+                azureDeployment = "prod-gpt4o",
+                azureApiVersion = "2024-06-01",
+            },
+            enabled = true,
+        };
+
+        var response = await client.PutAsync("/api/admin/ai/llm-config", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var stored = await LoadConfigAsync(factory);
+        stored.Should().NotBeNull();
+        stored!.ProviderType.Should().Be(ProviderType.AzureOpenAi);
+        stored.Settings.AzureDeployment.Should().Be("prod-gpt4o");
+        stored.Settings.AzureApiVersion.Should().Be("2024-06-01");
+    }
+
     // ─── helpers ────────────────────────────────────────────────────────────────────
 
     private static async Task SeedConfigAsync(LlmConfigApiFactory factory, string apiKey, string model)

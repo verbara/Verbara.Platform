@@ -86,7 +86,10 @@ public sealed class AzureOpenAiLlmProvider : ILlmProvider, IDisposable
                             wireRequest,
                             LlmJsonContext.Default.ChatCompletionRequest),
                     };
-                    httpRequest.Headers.Add(ApiKeyHeader, _options.ApiKey);
+                    // Guard a null/empty key defensively so a keyless probe degrades to an auth
+                    // failure from the provider rather than an ArgumentNullException on header add.
+                    if (!string.IsNullOrEmpty(_options.ApiKey))
+                        httpRequest.Headers.Add(ApiKeyHeader, _options.ApiKey);
 
                     return await _http.SendAsync(httpRequest, perCallCts.Token).ConfigureAwait(false);
                 },
@@ -156,7 +159,9 @@ public sealed class AzureOpenAiLlmProvider : ILlmProvider, IDisposable
     }
 
     private static string BuildEndpoint(string? baseUrl, string deployment, string apiVersion) =>
-        $"{(baseUrl ?? string.Empty).TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+        // Escape the deployment path segment + the api-version query value so a deployment name or
+        // version with URL-significant characters (spaces, '/', '?', '&') can't break the URL.
+        $"{(baseUrl ?? string.Empty).TrimEnd('/')}/openai/deployments/{Uri.EscapeDataString(deployment)}/chat/completions?api-version={Uri.EscapeDataString(apiVersion)}";
 
     /// <inheritdoc />
     public void Dispose() => _metrics.Dispose();

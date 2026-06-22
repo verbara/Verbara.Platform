@@ -80,6 +80,17 @@ internal static class TenantLlmConfigEndpoints
         if (string.IsNullOrWhiteSpace(body.Model))
             return Results.BadRequest(new ErrorResponse("Model is required."));
 
+        // Azure OpenAI builds a deployment-scoped URL (`/openai/deployments/{deployment}/chat/
+        // completions?api-version={apiVersion}`); both segments are mandatory. Reject a malformed
+        // Azure config at write time so no malformed URL can ever reach the provider at call time.
+        if (body.ProviderType == ProviderType.AzureOpenAi)
+        {
+            if (string.IsNullOrWhiteSpace(body.Settings?.AzureDeployment))
+                return Results.BadRequest(new ErrorResponse("settings.azureDeployment is required for the AzureOpenAi provider."));
+            if (string.IsNullOrWhiteSpace(body.Settings?.AzureApiVersion))
+                return Results.BadRequest(new ErrorResponse("settings.azureApiVersion is required for the AzureOpenAi provider."));
+        }
+
         var entityTenantId = EntityId.From(tenantId.Value);
         var existing = await store.GetAsync(entityTenantId, ct);
 
@@ -162,9 +173,11 @@ internal static class TenantLlmConfigEndpoints
         var saved = await store.GetAsync(entityTenantId, ct);
 
         // Build the probe config: a DRAFT (any field present in the body) is built in-memory only;
-        // otherwise the SAVED config is probed. A draft that omits the key reuses the stored key for
-        // the probe (so "test before save" works when only non-key settings changed). NOTHING from
-        // the draft is persisted or logged.
+        // otherwise the SAVED config is probed. A draft that omits the key MAY reuse the stored key —
+        // but ONLY when the draft probes the SAME destination (base url + provider type) as the saved
+        // config. If the draft OVERRIDES the destination, falling back to the stored key would let an
+        // admin exfiltrate the decrypted provider credential to an arbitrary endpoint, so we require
+        // an explicit key in that case. NOTHING from the draft is persisted or logged.
         var isDraft = body.ProviderType is not null
             || !string.IsNullOrEmpty(body.Model)
             || !string.IsNullOrEmpty(body.ApiKey)
@@ -174,6 +187,24 @@ internal static class TenantLlmConfigEndpoints
         if (isDraft)
         {
             var now = clock.UtcNow;
+
+            // Does the draft point at a DIFFERENT destination than the saved config? A different base
+            // url OR a different provider type means the stored key would be sent somewhere new.
+            var overridesBaseUrl = body.Settings?.BaseUrl is not null
+                && !string.Equals(body.Settings.BaseUrl, saved?.Settings.BaseUrl, StringComparison.Ordinal);
+            var overridesProviderType = body.ProviderType is not null
+                && body.ProviderType != saved?.ProviderType;
+            var overridesDestination = overridesBaseUrl || overridesProviderType;
+
+            if (overridesDestination && string.IsNullOrEmpty(body.ApiKey))
+            {
+                // Refuse to send the stored key to a different provider/endpoint — never the stored key.
+                return Results.Ok(new TestLlmConnectionResponse(
+                    Reachable: false, AuthOk: false, ModelOk: false, LatencyMs: 0,
+                    Error: "An explicit apiKey is required when testing a different provider or endpoint than the saved configuration."));
+            }
+
+            // Reuse the saved key ONLY when the destination matches; otherwise an explicit key was supplied above.
             var draftKey = !string.IsNullOrEmpty(body.ApiKey) ? body.ApiKey : saved?.ApiKey;
             probe = new TenantLlmConfig
             {
@@ -247,8 +278,9 @@ internal static class TenantLlmConfigEndpoints
 
     // ─── helpers ────────────────────────────────────────────────────────────────
 
+    // Never let the hint be the whole secret: a key shorter than 4 chars has no safe last-4 to show.
     private static string? Last4(string key) =>
-        key.Length >= 4 ? key[^4..] : key;
+        key.Length >= 4 ? key[^4..] : null;
 
     /// <summary>A short, secret-free description of an HTTP error from a probe (status only, never the body).</summary>
     private static string DescribeHttpError(HttpRequestException ex) =>

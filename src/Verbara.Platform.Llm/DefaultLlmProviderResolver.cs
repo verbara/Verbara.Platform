@@ -56,10 +56,13 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
     public async Task<ResolvedLlmProvider?> ResolveAsync(EntityId tenantId, CancellationToken ct)
     {
         var config = await _store.GetAsync(tenantId, ct).ConfigureAwait(false);
-        if (config is null || !config.Enabled)
+        if (config is null || !config.Enabled || string.IsNullOrEmpty(config.ApiKey))
         {
-            // Fail-closed: no config / disabled is a valid "AI off" state. Drop any stale entry.
-            _cache.TryRemove(tenantId.Value, out _);
+            // Fail-closed: no config / disabled / enabled-but-keyless are all valid "AI off" states —
+            // a keyless provider would throw at call time, so treat it as cleanly off. Drop any stale
+            // entry (disposing its provider).
+            if (_cache.TryRemove(tenantId.Value, out var stale))
+                (stale.Resolved.Provider as IDisposable)?.Dispose();
             return null;
         }
 
@@ -69,18 +72,39 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
             return cached.Resolved;
 
         var resolved = Build(config);
+
+        // Replace the entry; dispose the outgoing provider (fingerprint change) so its Meter/handler
+        // resources don't leak.
+        if (_cache.TryGetValue(tenantId.Value, out var previous) && previous.Fingerprint != fingerprint)
+            (previous.Resolved.Provider as IDisposable)?.Dispose();
         _cache[tenantId.Value] = new CacheEntry(fingerprint, resolved);
         return resolved;
     }
 
     /// <inheritdoc />
-    public void Invalidate(EntityId tenantId) => _cache.TryRemove(tenantId.Value, out _);
+    public void Invalidate(EntityId tenantId)
+    {
+        // Dispose the outgoing provider on eviction so its Meter/HTTP-handler resources don't leak.
+        if (_cache.TryRemove(tenantId.Value, out var removed))
+            (removed.Resolved.Provider as IDisposable)?.Dispose();
+    }
 
+    // Production resolve path: share the keyed `llm.completions` circuit + retry policy across tenants.
     private ResolvedLlmProvider Build(TenantLlmConfig config) =>
-        new(BuildTransient(config), config.Model);
+        new(BuildWithPolicy(config, _policy), config.Model);
 
     /// <inheritdoc />
     public ILlmProvider BuildTransient(TenantLlmConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+
+        // /test probes use an isolated NO-OP policy so a failing probe (a typo'd endpoint, a bad key)
+        // never trips the SHARED production `llm.completions` circuit breaker that every tenant's
+        // real classify calls flow through.
+        return BuildWithPolicy(config, ResiliencePolicy.NoOp);
+    }
+
+    private ILlmProvider BuildWithPolicy(TenantLlmConfig config, ResiliencePolicy? policy)
     {
         ArgumentNullException.ThrowIfNull(config);
 
@@ -99,7 +123,7 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
                 effective,
                 config.Settings.AzureDeployment ?? string.Empty,
                 config.Settings.AzureApiVersion ?? string.Empty,
-                _policy,
+                policy,
                 _meterFactory,
                 _loggerFactory?.CreateLogger<AzureOpenAiLlmProvider>()),
 
@@ -107,14 +131,14 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
                 _httpFactory.CreateClient(AnthropicClientName),
                 effective,
                 config.Settings.AnthropicVersion,
-                _policy,
+                policy,
                 _meterFactory,
                 _loggerFactory?.CreateLogger<AnthropicLlmProvider>()),
 
             _ => new OpenAiCompatibleLlmProvider(
                 _httpFactory.CreateClient(OpenAiClientName),
                 effective,
-                _policy,
+                policy,
                 _meterFactory,
                 _loggerFactory?.CreateLogger<OpenAiCompatibleLlmProvider>()),
         };
@@ -122,14 +146,15 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
 
     /// <summary>
     /// A stable fingerprint of the persisted config — provider type, model, settings, enabled flag,
-    /// and a key fingerprint (last 4 / length, never the key itself). Used as the cache version token
-    /// so a config change rebuilds the provider without a cryptographic hash.
+    /// and a key fingerprint. The key fingerprint folds in <see cref="TenantLlmConfig.UpdatedAt"/>
+    /// (bumped on every upsert) so a key ROTATION that keeps the same length + last-4 still yields a
+    /// new fingerprint and rebuilds the provider. The raw key is NEVER logged or persisted here.
     /// </summary>
     private static string ComputeFingerprint(TenantLlmConfig config)
     {
         var s = config.Settings;
         var keyFingerprint = config.ApiKey is { Length: > 0 } k
-            ? $"{k.Length}:{(k.Length >= 4 ? k[^4..] : k)}"
+            ? $"{k.Length}:{(k.Length >= 4 ? k[^4..] : k)}:{config.UpdatedAt.UtcTicks}"
             : "none";
 
         return string.Join(
