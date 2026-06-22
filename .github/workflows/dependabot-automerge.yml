@@ -1,0 +1,45 @@
+name: Dependabot Auto-merge
+
+# Enables auto-merge ONLY for low-risk Dependabot PRs:
+#   * any github-actions bump (patch/minor)
+#   * the "analyzers" NuGet group (patch/minor)
+# Majors are always excluded and require manual review. The merge still
+# waits for the required status checks defined in main's branch protection.
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    name: Auto-merge safe Dependabot PRs
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v3
+
+      - name: Enable auto-merge for safe updates
+        if: >-
+          steps.meta.outputs.update-type != 'version-update:semver-major' &&
+          (
+            steps.meta.outputs.package-ecosystem == 'github_actions' ||
+            steps.meta.outputs.dependency-group == 'analyzers'
+          )
+        # No merge-method flag: with the merge queue active on main, the queue
+        # ruleset dictates the strategy (SQUASH). Passing --squash here is rejected
+        # ("The merge strategy for main is set by the merge queue") and silently
+        # fails to enqueue the PR. --auto simply adds it to the queue when ready.
+        run: gh pr merge --auto "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          # Use AUTOMERGE_PAT instead of GITHUB_TOKEN so the merge_group event
+          # this enqueue creates is attributed to a non-bot identity. GitHub's
+          # anti-recursion rule blocks workflows triggered by GITHUB_TOKEN from
+          # triggering further workflows, which means a queue enqueue done with
+          # GITHUB_TOKEN leaves the merge_group CI/CodeQL checks never starting
+          # and the PR stuck. See github/community#70310 and the 2026-05-22
+          # session that diagnosed this on Verbara.Sdk PR #19/#20.
+          GH_TOKEN: ${{ secrets.AUTOMERGE_PAT }}
