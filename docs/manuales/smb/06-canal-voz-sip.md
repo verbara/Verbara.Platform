@@ -405,6 +405,62 @@ Estas funciones **no están todavía** y por eso no las documentamos como operat
 
 El patrón base sigue intacto: **voz entrante → cola → (teléfono SIP externo §6 **o** softphone navegador §9)**, con la cadena trunk → Stasis → cola validada end-to-end.
 
+## 11. IA de tipificación — proveedor LLM por tenant (P2c.1)
+
+La tipificación con IA (sugerir la disposición de la conversación al cerrar el wrap-up) es **opcional y opt-in**: sin proveedor LLM configurado, el agente tipifica a mano y **nada falla**. Es un modo válido, no un error.
+
+> ⚠️ **Cambio importante (multi-tenant):** la **clave LLM global compartida quedó retirada**. Ahora **cada tenant configura su propio proveedor** (BYO — *bring your own*) con su propia clave **cifrada en reposo**. Esto da aislamiento, control de costo por tenant y residencia de datos.
+
+### 11.1 Instalación single-tenant / dev — sembrado automático
+
+Si tu instalación tiene **un solo tenant operativo (Customer)** y ya tenías la clave LLM global en `appsettings` / variables de entorno (`Llm__BaseUrl`, `Llm__ApiKey`, `Llm__Model`), al **arrancar la API** se **siembra automáticamente** la config por-tenant de ese único tenant a partir de esos valores:
+
+- Sólo siembra si: hay clave global configurada **Y** existe **exactamente un** tenant operativo **Y** ese tenant **todavía no tiene** config propia.
+- Es **idempotente**: en arranques posteriores no vuelve a escribir (encuentra la fila ya creada).
+- La clave se guarda **cifrada** (DataProtection); el proveedor sembrado es `openai_compatible` con el `model` + `baseUrl` de tus variables, y queda **habilitado**.
+
+No tenés que hacer nada manual en single-tenant: arrancá la API y la IA queda lista con tu clave existente. La administrás luego desde la página de admin (§11.2).
+
+### 11.2 Configurar / administrar el proveedor (admin)
+
+Un admin con el permiso `typification:ai:configure` (incluido en los roles Manager / Admin / System Admin) gestiona el proveedor del tenant. Vía API:
+
+```bash
+# Ver la config actual (la clave NUNCA se devuelve — viene enmascarada).
+curl -s https://TU_HOST/api/admin/ai/llm-config \
+  -H "X-Api-Key: $MGMT" -H "X-Tenant-Id: $TENANT"
+# → { "configured": false }                              ← sin proveedor (modo manual)
+# → { "providerType":"OpenAiCompatible", "model":"gpt-4o-mini",
+#     "keySet":true, "keyLast4":"7777", "enabled":true, ... }
+
+# Crear / actualizar el proveedor (PUT). La clave se cifra al guardar.
+curl -s -X PUT https://TU_HOST/api/admin/ai/llm-config \
+  -H "X-Api-Key: $MGMT" -H "X-Tenant-Id: $TENANT" -H "Content-Type: application/json" \
+  -d '{
+        "providerType":"OpenAiCompatible",
+        "model":"gpt-4o-mini",
+        "apiKey":"sk-tu-clave-real",
+        "settings":{"baseUrl":"https://api.openai.com/v1"},
+        "enabled":true
+      }'
+
+# Editar SIN rotar la clave: omití "apiKey" (o mandalo vacío) → se preserva la guardada.
+# Probar la conexión antes/después de guardar (clave de borrador = sólo en memoria, no se persiste):
+curl -s -X POST https://TU_HOST/api/admin/ai/llm-config/test \
+  -H "X-Api-Key: $MGMT" -H "X-Tenant-Id: $TENANT" -H "Content-Type: application/json" -d '{}'
+# → { "reachable":true, "authOk":true, "modelOk":true, "latencyMs":312, "error":null }
+
+# Quitar el proveedor → el tenant vuelve a modo manual (sin error).
+curl -s -X DELETE https://TU_HOST/api/admin/ai/llm-config \
+  -H "X-Api-Key: $MGMT" -H "X-Tenant-Id: $TENANT"
+```
+
+Proveedores soportados: `OpenAiCompatible` (OpenAI / vLLM / Ollama-shim — header `Authorization: Bearer`), `AzureOpenAi` (deployment + `api-version` + header `api-key`) y `Anthropic` (`x-api-key` + `anthropic-version`). El campo `settings` lleva la config específica del tipo (`baseUrl`, `azureDeployment`, `azureApiVersion`, `anthropicVersion`).
+
+> 🔒 **La clave nunca sale del servidor:** el GET la enmascara a `keySet` + `keyLast4`; en disco va cifrada. Si dejás `enabled:false` (o no hay proveedor), la IA queda apagada y el formulario manual sigue funcionando igual — la IA es estrictamente **opt-in**.
+
+Desde el **Web UI** esto se administra en la página de configuración de IA de tipificación (sección admin), sin tocar `curl`.
+
 ## Próximo paso
 
 → [07-validacion-e2e.md](07-validacion-e2e.md) — checklist de validación + cómo correr una llamada de prueba con SIPp sin depender del carrier.

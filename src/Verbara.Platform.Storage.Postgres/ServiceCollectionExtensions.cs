@@ -9,6 +9,7 @@ using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Flows;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Llm;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
@@ -153,6 +154,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITypificationSubmissionStore, PostgresTypificationSubmissionStore>();
         services.AddSingleton<IReasonHintStore, PostgresReasonHintStore>();
         services.AddSingleton<IAiSuggestionStore, PostgresAiSuggestionStore>();
+        services.AddSingleton<ITenantLlmConfigStore, PostgresTenantLlmConfigStore>();
 
         // Audit
         services.AddSingleton<IAuditStore, PostgresAuditStore>();
@@ -214,6 +216,21 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddHostedService<OidcClientSecretEncryptionMigrator>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers <see cref="TenantLlmConfigSeedMigrator"/> as an
+    /// <see cref="Microsoft.Extensions.Hosting.IHostedService"/> (P2c.1, spec §6). Materialises the
+    /// appsettings global <c>LlmProviderOptions</c> into the single operational tenant's
+    /// <c>tenant_llm_config</c> row — the single-tenant / dev migration off the retired shared
+    /// global LLM key. Idempotent + fail-safe (no-op when unconfigured, when there is not exactly
+    /// one operational tenant, or when a config row already exists); safe to register unconditionally.
+    /// </summary>
+    public static IServiceCollection AddTenantLlmConfigSeedMigrator(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddHostedService<TenantLlmConfigSeedMigrator>();
         return services;
     }
 }

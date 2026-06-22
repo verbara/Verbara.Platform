@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Llm;
@@ -71,30 +70,32 @@ public sealed partial class DefaultTypificationAiClassifier : ITypificationAiCla
     /// </summary>
     private const string TranscriptFenceToken = "=====UNTRUSTED TRANSCRIPT=====";
 
-    private readonly ILlmProvider _llm;
-    private readonly string _modelId;
+    private readonly ILlmProviderResolver _resolver;
     private readonly ILogger _logger;
 
-    /// <param name="llm">The LLM completion provider.</param>
-    /// <param name="options">Provider options (used only for the model id stamped on provenance).</param>
+    /// <param name="resolver">
+    /// Per-tenant BYO LLM provider resolver (P2c.1). <see cref="ClassifyAsync"/> resolves the
+    /// tenant's provider at call time; a tenant with no configured / disabled provider resolves to
+    /// <see langword="null"/> and the classification degrades to <see langword="null"/>. The
+    /// resolver also carries the configured model id for the provenance stamp (replacing the old
+    /// <c>IOptions&lt;LlmProviderOptions&gt;</c>-derived global model id).
+    /// </param>
     /// <param name="loggerFactory">
     /// Optional logger factory (defaults to a Null logger when omitted, mirroring
-    /// <see cref="TypificationAiMetrics"/>). One <see cref="ILogger"/> is cached so existing
-    /// <c>new DefaultTypificationAiClassifier(llm)</c> call sites and tests keep working unchanged.
+    /// <see cref="TypificationAiMetrics"/>). One <see cref="ILogger"/> is cached.
     /// </param>
     public DefaultTypificationAiClassifier(
-        ILlmProvider llm,
-        IOptions<LlmProviderOptions>? options = null,
+        ILlmProviderResolver resolver,
         ILoggerFactory? loggerFactory = null)
     {
-        ArgumentNullException.ThrowIfNull(llm);
-        _llm = llm;
-        _modelId = options?.Value.Model is { Length: > 0 } m ? m : "unknown";
+        ArgumentNullException.ThrowIfNull(resolver);
+        _resolver = resolver;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance)
             .CreateLogger("Verbara.Platform.Typification.Ai.DefaultTypificationAiClassifier");
     }
 
     public async Task<AiClassification?> ClassifyAsync(
+        EntityId tenantId,
         TypificationSchema schema,
         EntityId? subtreeRoot,
         Conversation conversation,
@@ -104,6 +105,12 @@ public sealed partial class DefaultTypificationAiClassifier : ITypificationAiCla
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(conversation);
         ArgumentNullException.ThrowIfNull(transcript);
+
+        // Resolve the tenant's BYO provider first (P2c.1). No config / disabled is a valid
+        // "AI off" state → degrade to null exactly like every other failure mode below.
+        var resolved = await _resolver.ResolveAsync(tenantId, ct).ConfigureAwait(false);
+        if (resolved is null)
+            return null;
 
         var transcriptText = BuildTranscriptText(transcript);
         if (string.IsNullOrWhiteSpace(transcriptText))
@@ -144,7 +151,7 @@ public sealed partial class DefaultTypificationAiClassifier : ITypificationAiCla
         LlmResponse response;
         try
         {
-            response = await _llm.CompleteAsync(request, ct).ConfigureAwait(false);
+            response = await resolved.Provider.CompleteAsync(request, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -161,7 +168,8 @@ public sealed partial class DefaultTypificationAiClassifier : ITypificationAiCla
         if (parsed is null)
             return null;
 
-        return MapAndValidate(schema, subtreeRoot, parsed, _modelId, CurrentPromptVersion, response.Usage);
+        var modelId = resolved.ModelId is { Length: > 0 } m ? m : "unknown";
+        return MapAndValidate(schema, subtreeRoot, parsed, modelId, CurrentPromptVersion, response.Usage);
     }
 
     /// <summary>

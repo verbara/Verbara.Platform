@@ -9,6 +9,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Per-tenant BYO LLM configuration (Typification P2c.1)** — each tenant configures its **own** LLM provider + **encrypted** credentials for typification AI, replacing the single shared global key. Multi-provider (`OpenAiCompatible` / `AzureOpenAi` / `Anthropic`), resolved per-tenant at classify time and **fail-closed** ("no provider configured" is a valid, non-error state — AI stays strictly opt-in). New admin surface `/admin/ai/llm-config` (GET masked to `keySet` + `keyLast4` — the key is **never** returned; PUT preserves the stored key when omitted; DELETE; `POST /test` probes a saved-or-draft config), gated on the `typification:ai:configure` permission (no license gate). API key encrypted at rest via DataProtection (purpose `Verbara.Platform.Typification.TenantLlmApiKey.v1`); `tenant_llm_config` table (migration `009`).
+
+### Changed
+- **BREAKING (multi-tenant) — the shared global LLM key is retired.** The typification classifier now resolves **each tenant's own** provider (`ITypificationAiClassifier.ClassifyAsync` takes the tenant id first; a tenant with no configured/disabled provider degrades to the empty suggestion). Tenants that want AI typification **MUST configure their own provider** at the new admin page. **Single-tenant / dev installs are migrated automatically:** an idempotent startup seed materialises the appsettings global `LlmProviderOptions` into the single operational tenant's per-tenant config (only when a global key is set, exactly one operational tenant exists, and it has no config row yet). The global `ILlmProvider` registration is **kept** for the Flows engine (`ai_classify`/`ai_generate`) — unchanged.
+
 ### Fixed
 - **Auth-event double-write on graceful shutdown** — `AuthWriteQueue`'s drain on shutdown could re-enqueue an in-flight item and persist a duplicate `auth_events` row. The drain now de-dupes the in-flight write (PR #72). _Merged to `main` 2026-06-21, after the `v2.13.0` tag (`5877e8c4`); ships in the next release._
 

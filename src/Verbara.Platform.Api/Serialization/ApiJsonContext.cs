@@ -54,6 +54,17 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(PublishResultDto))]
 // C4 (P2b) — calibration-status response DTO.
 [JsonSerializable(typeof(CalibrationStatusDto))]
+// C2 (P2c.1) — per-tenant BYO LLM config admin DTOs. The masked GET (key → keySet+keyLast4),
+// the "no provider" empty body, the upsert request, and the test-connection request/response.
+[JsonSerializable(typeof(TenantLlmConfigResponse))]
+[JsonSerializable(typeof(EmptyLlmConfigResponse))]
+[JsonSerializable(typeof(UpsertLlmConfigRequest))]
+[JsonSerializable(typeof(TestLlmConnectionRequest))]
+[JsonSerializable(typeof(TestLlmConnectionResponse))]
+// ProviderSettings is a member of the above DTOs; ProviderType is a JsonStringEnum-converted
+// member. Both are registered explicitly for the no-reflection AOT contract.
+[JsonSerializable(typeof(Verbara.Platform.Llm.ProviderSettings))]
+[JsonSerializable(typeof(Verbara.Platform.Llm.ProviderType))]
 // Typification — reason-hint admin DTOs (C10)
 [JsonSerializable(typeof(ReasonHintDto[]))]
 [JsonSerializable(typeof(ReasonHintDto))]
