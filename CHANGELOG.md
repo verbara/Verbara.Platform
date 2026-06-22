@@ -9,6 +9,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [2.14.0] — 2026-06-21 — Typification P2c.1 (per-tenant BYO LLM config) + auth drain fix
+
 ### Added
 - **Per-tenant BYO LLM configuration (Typification P2c.1)** — each tenant configures its **own** LLM provider + **encrypted** credentials for typification AI, replacing the single shared global key. Multi-provider (`OpenAiCompatible` / `AzureOpenAi` / `Anthropic`), resolved per-tenant at classify time and **fail-closed** ("no provider configured" is a valid, non-error state — AI stays strictly opt-in). New admin surface `/admin/ai/llm-config` (GET masked to `keySet` + `keyLast4` — the key is **never** returned; PUT preserves the stored key when omitted; DELETE; `POST /test` probes a saved-or-draft config), gated on the `typification:ai:configure` permission (no license gate). API key encrypted at rest via DataProtection (purpose `Verbara.Platform.Typification.TenantLlmApiKey.v1`); `tenant_llm_config` table (migration `009`).
 
