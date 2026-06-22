@@ -1,0 +1,42 @@
+schema: spec-driven
+
+context: |
+  Verbara.Platform — API host and composition root for an omnichannel contact center.
+  Stack: .NET 10, C# 14, PostgreSQL 18 (raw Npgsql via Verbara.Sdk.Data.Npgsql — NEVER Dapper),
+  Redis (sessions/cache), S3 (media). The Api host (src/Verbara.Platform.Api) publishes Native AOT.
+  Consumes Verbara.Sdk (MIT) + Verbara.Sdk.Pro (private) via the local NuGet feed.
+  Position in the dependency chain: Sdk -> Sdk.Pro -> Platform <- Platform.Web (API-first).
+
+  Hard constraints (ADR-0022, non-negotiable):
+  - Native AOT: no reflection, no Activator.CreateInstance, no dynamic proxies. Use source generators.
+  - Every (de)serialized DTO MUST live in a [JsonSerializable] context (ApiJsonContext / RealtimeContractsJsonContext);
+    JsonSerializerIsReflectionEnabledByDefault=false.
+  - Dapper / Dapper.AOT / Verbara.Sdk.Dapper.Stubs are PERMANENTLY BANNED (BanDapperPackageReferences MSBuild guard).
+  - TreatWarningsAsErrors=true, WarningLevel=9999 — zero warnings.
+  - Never return anonymous `new {}`; use typed sealed records registered in ApiJsonContext.
+
+  Architecture: dual-scheme auth (JWT RS256 + X-Api-Key), RBAC (permission strings, role templates),
+  multi-tenant (X-Tenant-Id header / subdomain wins over JWT tid), 70 endpoint groups (some feature-gated
+  via FeatureGateService). Middleware order: ErrorHandling -> CORS -> RateLimiter -> TenantResolution
+  -> Authentication -> Authorization.
+
+  Cross-repo standards (CI gating, context hygiene, branch protection) live in the private verbara-meta repo as ADRs.
+
+rules:
+  proposal:
+    - "Set a `tier` in frontmatter: GRANDE (cross-repo, >3 days, or a product decision), MEDIANO (one repo, 1-3 days), or PEQUEÑO (bug fix, <1 day). PEQUEÑO may keep the proposal light."
+    - "Add product-ownership frontmatter: owner, approver, stakeholder, roadmap_ref (link to a verbara-meta/docs/roadmap.md item). With a single developer, owner = approver."
+    - "State the problem (what pain, for whom) for GRANDE and MEDIANO tiers."
+  specs:
+    - "Use RFC 2119 keywords: SHALL/MUST for non-negotiable requirements, SHOULD for desirable, MAY for optional."
+    - "Write scenarios as GIVEN/WHEN/THEN."
+    - "Call out cross-repo impact explicitly along the chain Sdk -> Sdk.Pro -> Platform <- Platform.Web."
+    - "Include an Architectural Risk section: Level (LOW/MEDIUM/HIGH), Affected (areas/repos that can break), Mitigation."
+  design:
+    - "Reference existing ADRs when relevant using the repo/ADR-NNNN format (e.g. Platform/ADR-0022)."
+    - "Honor the AOT constraint: no reflection, [JsonSerializable] source-gen for every DTO, NO Dapper — use Verbara.Sdk.Data.Npgsql."
+    - "Record any durable architectural decision as an ADR in docs/decisions/, not only in this design."
+  tasks:
+    - "When the change spans repos, spell out the cross-repo sequence: edit Sdk/Pro -> dotnet pack to local-nuget-feed -> clear NuGet cache -> dotnet restore the consumer."
+    - "Verification tasks MUST include `dotnet test` green and CI green, with zero warnings (TreatWarningsAsErrors)."
+    - "Use Subagent-Driven Development with FCM batching: Phase A foundation (batch) -> Phase B critical components (focused) -> Phase C integration (batch)."
