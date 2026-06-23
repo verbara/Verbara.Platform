@@ -17,7 +17,9 @@ namespace Verbara.Platform.Api.Services;
 /// <remarks>
 /// <para>
 /// <b>Capacity</b>: bounded at 4 096 items with
-/// <see cref="BoundedChannelFullMode.DropWrite"/>. Drops are reported via the
+/// <see cref="BoundedChannelFullMode.Wait"/> — a full channel makes the
+/// producer's <c>TryWrite</c> return <c>false</c> synchronously (no
+/// blocking) rather than silently discarding. Drops are reported via the
 /// <c>auth.write.dropped</c> counter; under DoS-style sustained &gt;10×
 /// knee load some success-side writes are intentionally lost. Audit failures
 /// never use this queue (see ADR-0011 §"Failure-path invariant").
@@ -114,6 +116,20 @@ internal sealed partial class AuthWriteQueue : BackgroundService
         LogQueueFull(_logger, command.TypeName);
         return false;
     }
+
+    /// <summary>
+    /// Completes the channel writer so the consumer's read loop drains every
+    /// buffered command and then exits naturally (the next
+    /// <c>WaitToReadAsync</c> returns <c>false</c> on the now-empty, completed
+    /// channel). <b>Test-only affordance</b> — production never calls this: the
+    /// hosted service runs continuously and is stopped via
+    /// <see cref="BackgroundService.StopAsync(CancellationToken)"/>. Exposed
+    /// <c>internal</c> for the API test assembly (<c>InternalsVisibleTo</c>) to
+    /// build a deterministic, causal drain barrier — enqueue, start, call this,
+    /// then await <see cref="BackgroundService.ExecuteTask"/> — instead of a
+    /// flaky wall-clock <c>Task.Delay</c> guess.
+    /// </summary>
+    internal void CompleteWriter() => _channel.Writer.Complete();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
