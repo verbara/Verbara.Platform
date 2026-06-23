@@ -60,6 +60,26 @@ internal static class ManagementImpersonationEndpoints
         "partner:settings:view",
     };
 
+    /// <summary>
+    /// Resolves the calling principal's user id using the canonical claim order
+    /// <c>user_id ?? NameIdentifier ?? sub</c> (same order used by
+    /// <c>PlatformAdminAuthorizationHandler</c> / <c>PermissionAuthorizationHandler</c>
+    /// and <c>TypificationEndpoints.ResolveCallerPermissions</c>).
+    ///
+    /// <para>
+    /// The <c>user_id</c> claim MUST win: for API-key callers
+    /// <see cref="ClaimTypes.NameIdentifier"/> carries the <i>key id</i>
+    /// (<c>ApiKeyAuthenticationHandler</c> sets it from <c>apiKey.KeyId.Value</c>),
+    /// while the owning user is in <c>user_id</c>. Resolving NameIdentifier first
+    /// would feed the key id into per-tenant permission / audit lookups — failing
+    /// the impersonate check closed for management keys and mis-attributing audit.
+    /// </para>
+    /// </summary>
+    internal static string? ResolveCallerUserId(ClaimsPrincipal user)
+        => user.FindFirstValue("user_id")
+            ?? user.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? user.FindFirstValue("sub");
+
     public static void MapManagementImpersonationEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/management").RequireAuthorization("PlatformAdminOnly");
@@ -90,8 +110,7 @@ internal static class ManagementImpersonationEndpoints
         [FromServices] TimeProvider clock,
         CancellationToken ct)
     {
-        var callerUserId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? context.User.FindFirstValue("sub");
+        var callerUserId = ResolveCallerUserId(context.User);
         var callerTenantId = context.User.FindFirstValue("tid")
             ?? context.User.FindFirstValue("tenant_id");
 
@@ -329,8 +348,7 @@ internal static class ManagementImpersonationEndpoints
         if (!isImpersonating)
             return Results.BadRequest(new ErrorResponse("Not currently impersonating."));
 
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? context.User.FindFirstValue("sub");
+        var userId = ResolveCallerUserId(context.User);
         var impersonatorTenant = context.User.FindFirstValue("impersonator_tenant");
         var sessionId = context.User.FindFirstValue("impersonation_session_id");
 
@@ -404,9 +422,7 @@ internal static class ManagementImpersonationEndpoints
         if (scopeTenant is not null && !string.Equals(scopeTenant, session.ActorTenantId, StringComparison.Ordinal))
             return Results.Forbid();
 
-        var actorUserId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? context.User.FindFirstValue("sub")
-            ?? "system";
+        var actorUserId = ResolveCallerUserId(context.User) ?? "system";
         var actorTenantId = context.User.FindFirstValue("tid")
             ?? context.User.FindFirstValue("tenant_id")
             ?? "platform";
