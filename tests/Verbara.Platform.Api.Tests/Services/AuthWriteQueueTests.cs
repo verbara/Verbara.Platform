@@ -178,6 +178,21 @@ public sealed class AuthWriteQueueTests
     public async Task Consumer_ShouldDrainPendingItems_OnGracefulShutdown()
     {
         var (_, authEventStore, services) = NewStubStores();
+
+        // Counting barrier: release once all 5 independent auth_events rows have
+        // been persisted, so we trigger shutdown AFTER the work is observably
+        // done — not after a wall-clock Task.Delay guess (the old barrier flaked
+        // under CI load). Log events are not coalesced, so the store-call count
+        // equals the enqueue count (5).
+        var remaining = 5;
+        var allPersisted = new TaskCompletionSource();
+        authEventStore.SaveAsync(Arg.Any<AuthEvent>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                if (Interlocked.Decrement(ref remaining) == 0)
+                    allPersisted.TrySetResult();
+                return Task.CompletedTask;
+            });
         using var sut = NewQueue(services: services, flushInterval: TimeSpan.FromSeconds(5));
 
         // Many items enqueued before StartAsync runs the consumer.
@@ -188,8 +203,7 @@ public sealed class AuthWriteQueueTests
 
         var cts = new CancellationTokenSource();
         await sut.StartAsync(cts.Token);
-        // Brief sleep to let the first batch process; then ask shutdown to drain.
-        await Task.Delay(100);
+        await allPersisted.Task.WaitAsync(TimeSpan.FromSeconds(5)); // all 5 persisted
         cts.Cancel();
         await sut.StopAsync(CancellationToken.None);
 
@@ -297,16 +311,19 @@ public sealed class AuthWriteQueueTests
     };
 
     /// <summary>
-    /// Run the consumer until the channel is empty, then stop. Used by tests
-    /// that don't care about graceful-shutdown drain semantics.
+    /// Deterministically run the consumer to completion: complete the channel
+    /// writer so the reader loop drains every <b>already-enqueued</b> item and
+    /// then exits naturally, and await the <c>BackgroundService.ExecuteTask</c>.
+    /// The barrier is <b>causal</b> — it observes the loop finishing — not a
+    /// wall-clock <c>Task.Delay</c> guess, so it does not flake under CI load.
+    /// Callers MUST enqueue all items BEFORE calling. Used by tests that don't
+    /// care about graceful-shutdown drain semantics.
     /// </summary>
     private static async Task StartAndDrain(AuthWriteQueue sut)
     {
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        await sut.StartAsync(cts.Token);
-        // Give the consumer a couple of flush cycles to process pending items.
-        await Task.Delay(100);
-        cts.Cancel();
+        await sut.StartAsync(CancellationToken.None);
+        sut.CompleteWriter();
+        await sut.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await sut.StopAsync(CancellationToken.None);
     }
 }
