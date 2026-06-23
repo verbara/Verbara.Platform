@@ -1,0 +1,70 @@
+# Release dry-run: pre-flight safety net for Verbara.Platform releases.
+#
+# The real release (release.yml) fires on a pushed `v*` tag and is irreversible
+# (it pushes + cosign-signs public images whose digests bind customer licenses,
+# ADR-0023/0024). This workflow runs the cheap pre-conditions FIRST, manually,
+# so you catch the mistakes that have actually broken releases before — missing
+# CHANGELOG entry, un-bumped PackageVersion, a tag that already exists — without
+# touching ghcr.io. It builds and publishes NOTHING.
+#
+# Run it from the Actions tab (or `gh workflow run release-dryrun.yml -f version=2.15.0`)
+# on the commit you intend to tag. Green here ⇒ safe to bump + tag for real.
+
+name: Release dry-run
+
+"on":
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version WITHOUT the v prefix (e.g. 2.15.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Release pre-flight checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate inputs and release pre-conditions
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          echo "::group::Validating release v$VERSION"
+
+          # 1. Semantic version format (X.Y.Z, optional -suffix).
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a valid semantic version (expected X.Y.Z)."
+            exit 1
+          fi
+
+          # 2. Tag must not already exist (re-tagging would overwrite a published digest).
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION already exists. Pick a new version (ADR-0024: never re-tag)."
+            exit 1
+          fi
+
+          # 3. PackageVersion must already be bumped to this version
+          #    (the version bump IS the release trigger; a stale value silently ships the old one).
+          PKG=$(grep -oE '<PackageVersion>[^<]+</PackageVersion>' Directory.Build.props \
+                | sed -E 's/<\/?PackageVersion>//g' | head -1)
+          if [ "$PKG" != "$VERSION" ]; then
+            echo "::error::Directory.Build.props PackageVersion is '$PKG', expected '$VERSION'. Bump it before tagging."
+            exit 1
+          fi
+
+          # 4. CHANGELOG must carry a section for this version (CHANGELOG before tag).
+          if ! grep -qE "^## \[$VERSION\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section. Add the release notes before tagging."
+            exit 1
+          fi
+
+          echo "::endgroup::"
+          echo "✅ Pre-flight passed — v$VERSION is safe to bump-tag-release."
