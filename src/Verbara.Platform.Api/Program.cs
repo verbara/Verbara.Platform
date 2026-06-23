@@ -1518,9 +1518,13 @@ app.UseMiddleware<VersionRedirectMiddleware>();
 app.UseRouting();
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
+// Middleware-order invariant: TenantResolutionMiddleware MUST run BEFORE UseRateLimiter()
+// so the "per-tenant" partition resolver sees Items["TenantId"] (otherwise every request
+// collapses to the shared "__global__" bucket). UseRateLimiter() MUST stay BEFORE
+// UseAuthentication() so throttling happens before the (expensive) auth work.
+app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseRateLimiter();
 app.UseMiddleware<RateLimitHeadersMiddleware>();
-app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 // MT-001 (PREPUB-2026-05-09): rejects header/subdomain-driven tenant overrides
