@@ -109,9 +109,10 @@ internal static class TenantRateLimitPolicy
             // shares this single bucket — the route's primary caller (the Web app) sends the header,
             // so this is an edge case, but a real one. Cap the shared bucket at the per-tenant limit
             // (GlobalFallbackPermitLimit == LlmPermitLimit) so it stays bounded without punitively
-            // starving that caller class. TRUE per-tenant partitioning for header-less authenticated
-            // callers requires resolving the authenticated tenant, which needs the deferred
-            // UseRateLimiter() pipeline reorder (tracked as the E3 follow-up in the P2b plan).
+            // starving that caller class. These header-less JWT-tid callers still can't be
+            // partitioned per tenant: UseRateLimiter() now runs AFTER TenantResolutionMiddleware but
+            // stays BEFORE UseAuthentication (throttle before auth work), so the JWT tid claim is not
+            // yet applied to Items["TenantId"] at this pipeline position.
             var permitLimit = tenantId == "__global__" ? GlobalFallbackPermitLimit : LlmPermitLimit;
 
             return RateLimitPartition.GetSlidingWindowLimiter(tenantId, _ => new SlidingWindowRateLimiterOptions
