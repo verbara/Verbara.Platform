@@ -13,6 +13,14 @@ _No unreleased changes._
 
 ---
 
+## [2.14.1] — 2026-06-23 — Impersonation caller-id + rate-limiter ordering fixes
+
+### Fixed
+- **Management impersonation fail-closed for API-key callers** — the impersonation endpoints resolved the calling user as `NameIdentifier ?? sub`, but for API-key callers `NameIdentifier` is the **key id** (the owning user is in the `user_id` claim). A management key whose key id differs from its owning user id resolved to the key id, found no per-tenant permissions, and failed the impersonate check closed (403). Caller-id resolution now uses the canonical order `user_id ?? NameIdentifier ?? sub` (matching `PlatformAdminAuthorizationHandler` / `TypificationEndpoints`), applied via a shared `ResolveCallerUserId` helper across start / end / revoke (the revoke path also fixes audit-actor attribution).
+- **Per-tenant rate-limit partition collapse** — `app.UseRateLimiter()` ran **before** `TenantResolutionMiddleware`, so the `per-tenant` policy's partition resolver read an unset `Items["TenantId"]` and every request collapsed to the shared `__global__` partition. The rate limiter now runs **after** tenant resolution (and still before authentication), so each header/subdomain-identified tenant gets its own bucket. _(Latent until now: the `per-tenant` policy is not yet attached to any route — the live `llm` policy already resolved the tenant directly — so this is a forward-looking correctness fix.)_
+
+---
+
 ## [2.14.0] — 2026-06-21 — Typification P2c.1 (per-tenant BYO LLM config) + auth drain fix
 
 ### Added
