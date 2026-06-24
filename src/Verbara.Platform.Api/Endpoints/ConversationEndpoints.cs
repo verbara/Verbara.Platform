@@ -1,11 +1,14 @@
 using Microsoft.AspNetCore.Mvc;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Audit;
+using Verbara.Platform.Billing;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
+using Verbara.Platform.Llm;
 using Verbara.Platform.Switchboard;
 using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Ai;
@@ -237,10 +240,19 @@ internal static class ConversationEndpoints
         [FromServices] ITypificationCalibration calibration,
         [FromServices] ITypificationTokenBudget budget,
         [FromServices] IAuditService auditService,
+        [FromServices] IQuotaEnforcementService quota,
+        [FromServices] ITypificationCreditMeter creditMeter,
+        [FromServices] ITenantLlmConfigStore llmConfigStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var conversationId = EntityId.From(id);
+
+        // P2c.2 (C3) — read the tenant's LLM source ONCE. Quota gating + credit metering apply
+        // ONLY when the tenant opted into the platform-managed LLM (Verbara operator key); BYO
+        // (or no config) is never metered or quota-gated here — the tenant pays its own provider.
+        var llmConfig = await llmConfigStore.GetAsync(EntityId.From(tenantId.Value), ct);
+        var isPlatformManaged = llmConfig is { AiSource: AiSource.PlatformManaged };
 
         // 1. Conversation must exist.
         var conversation = await conversationStore.GetByIdAsync(tenantId, conversationId, ct);
@@ -269,6 +281,24 @@ internal static class ConversationEndpoints
         //    (>2000-message) conversations.
         const int TranscriptFetchLimit = 2000;
         var transcript = await messageStore.GetConversationMessagesAsync(tenantId, conversationId, limit: TranscriptFetchLimit, offset: 0, ct);
+
+        // 3a-platform. P2c.2 (C3) — platform-managed AI credit quota pre-check. Only when the tenant
+        //     opted into Verbara's operator-managed LLM: a SoftBlock/HardBlock on the monthly AiAnalysis
+        //     credit allowance gates the (metered) classify. SoftBlock degrades to the empty suggestion
+        //     (AI opt-in floor — same uniform "no suggestion" the client already handles); HardBlock is
+        //     surfaced as 402 Payment Required. BYO tenants skip this entirely.
+        if (isPlatformManaged)
+        {
+            var q = await quota.CheckQuotaAsync(tenantId, UsageType.AiAnalysis, additionalQuantity: 1m, ct);
+            if (!q.Allowed)
+            {
+                // SoftBlock + HardBlock both set Allowed=false; map HardBlock to 402, SoftBlock to degrade.
+                var qq = await quota.GetQuotaStatusAsync(tenantId, ct);
+                if (qq.Quota?.QuotaAction == QuotaAction.HardBlock)
+                    return Results.Json(new ErrorResponse("AI credit allowance exhausted."), ApiJsonContext.Default.ErrorResponse, statusCode: 402);
+                return Results.Ok(EmptySuggestion);
+            }
+        }
 
         // 3b. E3 — per-tenant daily token budget (fail-closed). When the EFFECTIVE config sets a
         //     DailyTokenBudget and the tenant has ALREADY consumed ≥ that many LLM tokens today
@@ -316,6 +346,20 @@ internal static class ConversationEndpoints
         // A provider that returns no usage block records 0 → that call's real cost isn't counted
         // toward the budget (Verbara's OpenAI-compatible provider does populate usage).
         await budget.RecordUsageAsync(tenantId, classification.Usage?.TotalTokens ?? 0, ct);
+
+        // 4c. P2c.2 (C3) — meter the platform-managed classify in AI Credits. ONLY for
+        //     platform-managed tenants (BYO is never metered), and only when the provider reported a
+        //     usage block. The meter records ONE AiAnalysis/Tokens UsageRecord (total tokens, with
+        //     in/out + model in metadata); it is a no-op for non-positive totals. Records regardless
+        //     of band/mode — the LLM call happened, so its real cost is billed (mirrors the budget
+        //     accounting above).
+        if (isPlatformManaged && classification.Usage is { } usage)
+        {
+            await creditMeter.RecordAsync(
+                tenantId, conversationId.Value,
+                usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens,
+                classification.ModelId, ct);
+        }
 
         // C1 — compute the surfaced band BEFORE persisting, so the stored row records EXACTLY
         // what the agent saw. Calibration excludes AutoFill-band rows (an auto-filled form biases

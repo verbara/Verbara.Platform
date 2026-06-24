@@ -11,4 +11,6 @@ public enum UsageUnit
     Bytes,
     Count,
     Hours,
+    /// <summary>Raw LLM tokens (technical unit). Commercialized as AI Credits via PlatformLlmOptions.CreditTokenRatio.</summary>
+    Tokens = 6,
 }

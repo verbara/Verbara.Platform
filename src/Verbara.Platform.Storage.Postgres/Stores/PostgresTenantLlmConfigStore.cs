@@ -27,7 +27,7 @@ internal sealed partial class PostgresTenantLlmConfigStore : ITenantLlmConfigSto
 
     private const string SelectColumns =
         "tenant_id, provider_type, model, api_key_encrypted, api_key_last4, " +
-        "provider_settings, enabled, created_at, updated_at";
+        "provider_settings, enabled, ai_source, created_at, updated_at";
 
     private readonly NpgsqlDataSource _dataSource;
     private readonly IDataProtector _protector;
@@ -92,9 +92,9 @@ internal sealed partial class PostgresTenantLlmConfigStore : ITenantLlmConfigSto
         await _dataSource.ExecuteAsync(
             "INSERT INTO tenant_llm_config " +
             "(tenant_id, provider_type, model, api_key_encrypted, api_key_last4, " +
-            " provider_settings, enabled, created_at, updated_at) " +
+            " provider_settings, enabled, ai_source, created_at, updated_at) " +
             "VALUES (@TenantId, @ProviderType, @Model, @ApiKeyEncrypted, @ApiKeyLast4, " +
-            " @ProviderSettings::jsonb, @Enabled, @CreatedAt, @UpdatedAt) " +
+            " @ProviderSettings::jsonb, @Enabled, @AiSource, @CreatedAt, @UpdatedAt) " +
             "ON CONFLICT (tenant_id) DO UPDATE SET " +
             "  provider_type = EXCLUDED.provider_type, " +
             "  model = EXCLUDED.model, " +
@@ -102,6 +102,7 @@ internal sealed partial class PostgresTenantLlmConfigStore : ITenantLlmConfigSto
             "  api_key_last4 = EXCLUDED.api_key_last4, " +
             "  provider_settings = EXCLUDED.provider_settings, " +
             "  enabled = EXCLUDED.enabled, " +
+            "  ai_source = EXCLUDED.ai_source, " +
             "  updated_at = EXCLUDED.updated_at",
             p =>
             {
@@ -114,6 +115,7 @@ internal sealed partial class PostgresTenantLlmConfigStore : ITenantLlmConfigSto
                     { Value = (object?)config.ApiKeyLast4 ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("ProviderSettings", settingsJson));
                 p.Add(new NpgsqlParameter("Enabled", config.Enabled));
+                p.Add(new NpgsqlParameter("AiSource", config.AiSource.ToString()));
                 p.Add(new NpgsqlParameter("CreatedAt", config.CreatedAt.UtcDateTime));
                 p.Add(new NpgsqlParameter("UpdatedAt", config.UpdatedAt.UtcDateTime));
             },
@@ -137,6 +139,7 @@ internal sealed partial class PostgresTenantLlmConfigStore : ITenantLlmConfigSto
         public string? api_key_last4 { get; init; }
         public string provider_settings { get; init; } = null!;
         public bool enabled { get; init; }
+        public string ai_source { get; init; } = "Byo";
         public DateTime created_at { get; init; }
         public DateTime updated_at { get; init; }
 
@@ -149,6 +152,7 @@ internal sealed partial class PostgresTenantLlmConfigStore : ITenantLlmConfigSto
             api_key_last4 = r.GetStringOrNull("api_key_last4"),
             provider_settings = r.GetString("provider_settings"),
             enabled = r.GetBoolean("enabled"),
+            ai_source = r.GetString("ai_source"),
             created_at = r.GetDateTime("created_at"),
             updated_at = r.GetDateTime("updated_at"),
         };
@@ -182,6 +186,7 @@ internal sealed partial class PostgresTenantLlmConfigStore : ITenantLlmConfigSto
                 ApiKeyLast4 = api_key_last4,
                 Settings = settings,
                 Enabled = enabled,
+                AiSource = Enum.TryParse<AiSource>(ai_source, ignoreCase: true, out var src) ? src : AiSource.Byo,
                 CreatedAt = new DateTimeOffset(created_at, TimeSpan.Zero),
                 UpdatedAt = new DateTimeOffset(updated_at, TimeSpan.Zero),
             };

@@ -36,7 +36,8 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddPlatformLlm(
         this IServiceCollection services,
-        Action<LlmProviderOptions>? configure = null)
+        Action<LlmProviderOptions>? configure = null,
+        Action<PlatformLlmOptions>? configurePlatform = null)
     {
         var options = new LlmProviderOptions();
         configure?.Invoke(options);
@@ -61,6 +62,11 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient(DefaultLlmProviderResolver.AnthropicClientName);
 
         services.TryAddSingleton<ILlmProviderResolver, DefaultLlmProviderResolver>();
+
+        // ── ALWAYS: platform-managed operator options (Enabled defaults false) ────────────────
+        var platformOptions = new PlatformLlmOptions();
+        configurePlatform?.Invoke(platformOptions);
+        services.AddSingleton(Microsoft.Extensions.Options.Options.Create(platformOptions));
 
         // ── ONLY WHEN CONFIGURED: the global typed-client the Flows engine resolves ────────────
 

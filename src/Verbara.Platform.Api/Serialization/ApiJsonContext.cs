@@ -65,6 +65,10 @@ namespace Verbara.Platform.Api.Serialization;
 // member. Both are registered explicitly for the no-reflection AOT contract.
 [JsonSerializable(typeof(Verbara.Platform.Llm.ProviderSettings))]
 [JsonSerializable(typeof(Verbara.Platform.Llm.ProviderType))]
+// AiSource (Byo / PlatformManaged) — JsonStringEnum-converted member of the LLM config DTOs (P2c.2).
+[JsonSerializable(typeof(Verbara.Platform.Llm.AiSource))]
+// C2 (P2c.2) — tenant AI credit usage readout (GET /admin/ai/credits).
+[JsonSerializable(typeof(AiCreditsResponse))]
 // Typification — reason-hint admin DTOs (C10)
 [JsonSerializable(typeof(ReasonHintDto[]))]
 [JsonSerializable(typeof(ReasonHintDto))]

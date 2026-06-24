@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Security.Claims;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Llm;
@@ -45,6 +46,7 @@ internal static class TenantLlmConfigEndpoints
         HttpContext context,
         [FromServices] ITenantLlmConfigStore store,
         [FromServices] PermissionResolver permissionResolver,
+        [FromServices] IFeatureGateService featureGate,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -53,11 +55,13 @@ internal static class TenantLlmConfigEndpoints
         if (forbid is not null)
             return forbid;
 
+        var available = featureGate.IsFeatureEnabled(tenantId.Value, PlanFeature.PlatformLlm);
+
         var config = await store.GetAsync(EntityId.From(tenantId.Value), ct);
         if (config is null)
-            return Results.Ok(new EmptyLlmConfigResponse(Configured: false));
+            return Results.Ok(new EmptyLlmConfigResponse(Configured: false, PlatformLlmAvailable: available));
 
-        return Results.Ok(TenantLlmConfigResponse.FromConfig(config));
+        return Results.Ok(TenantLlmConfigResponse.FromConfig(config, platformLlmAvailable: available));
     }
 
     // ─── PUT — upsert (preserve stored key when omitted) ─────────────────────────
@@ -68,6 +72,7 @@ internal static class TenantLlmConfigEndpoints
         [FromServices] ITenantLlmConfigStore store,
         [FromServices] ILlmProviderResolver resolver,
         [FromServices] PermissionResolver permissionResolver,
+        [FromServices] IFeatureGateService featureGate,
         [FromServices] IClock clock,
         CancellationToken ct)
     {
@@ -79,6 +84,16 @@ internal static class TenantLlmConfigEndpoints
 
         if (string.IsNullOrWhiteSpace(body.Model))
             return Results.BadRequest(new ErrorResponse("Model is required."));
+
+        // Platform-managed AI is a licensed entitlement: gate the opt-in on PlanFeature.PlatformLlm.
+        // BYO (the default) is a baseline capability and stays ungated.
+        var platformLlmAvailable = featureGate.IsFeatureEnabled(tenantId.Value, PlanFeature.PlatformLlm);
+        if (body.AiSource == AiSource.PlatformManaged && !platformLlmAvailable)
+        {
+            return Results.Json(
+                new ErrorResponse("Platform-managed AI is not included in this tenant's plan."),
+                ApiJsonContext.Default.ErrorResponse, statusCode: StatusCodes.Status403Forbidden);
+        }
 
         // Azure OpenAI builds a deployment-scoped URL (`/openai/deployments/{deployment}/chat/
         // completions?api-version={apiVersion}`); both segments are mandatory. Reject a malformed
@@ -120,6 +135,7 @@ internal static class TenantLlmConfigEndpoints
             ApiKeyLast4 = effectiveLast4,
             Settings = body.Settings ?? new ProviderSettings(),
             Enabled = body.Enabled,
+            AiSource = body.AiSource,
             CreatedAt = existing?.CreatedAt ?? now,
             UpdatedAt = now,
         };
@@ -127,7 +143,7 @@ internal static class TenantLlmConfigEndpoints
         await store.UpsertAsync(config, ct);
         resolver.Invalidate(entityTenantId);
 
-        return Results.Ok(TenantLlmConfigResponse.FromConfig(config));
+        return Results.Ok(TenantLlmConfigResponse.FromConfig(config, platformLlmAvailable: platformLlmAvailable));
     }
 
     // ─── DELETE — remove the row (back to manual/agent-driven mode) ──────────────

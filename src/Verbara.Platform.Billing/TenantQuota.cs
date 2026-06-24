@@ -14,6 +14,8 @@ public sealed class TenantQuota : ITenantScoped
     public long? MaxMonthlyMessages { get; set; }
     public long? MaxStorageBytes { get; set; }
     public int? MaxActiveAgents { get; set; }
+    /// <summary>Monthly platform-LLM allowance in <b>AI Credits</b> (1 credit = PlatformLlmOptions.CreditTokenRatio tokens). Null = unlimited / pay-as-you-go.</summary>
+    public long? AiCreditsMonthly { get; set; }
     public QuotaAction QuotaAction { get; set; } = QuotaAction.Warn;
 }
 

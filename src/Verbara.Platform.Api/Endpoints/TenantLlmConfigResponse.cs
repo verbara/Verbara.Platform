@@ -12,6 +12,8 @@ namespace Verbara.Platform.Api.Endpoints;
 /// <param name="Model">The configured model identifier.</param>
 /// <param name="Settings">Type-specific (non-secret) provider settings.</param>
 /// <param name="Enabled">Whether AI is enabled for this tenant.</param>
+/// <param name="AiSource">BYO (tenant key) vs platform-managed (Verbara operator key, metered in AI Credits).</param>
+/// <param name="PlatformLlmAvailable">Whether the tenant's plan entitles it to the platform-managed LLM (<c>PlanFeature.PlatformLlm</c>).</param>
 /// <param name="KeySet">Whether an API key is currently stored (the key value is never returned).</param>
 /// <param name="KeyLast4">Last 4 chars of the stored key (non-secret display hint), or <see langword="null"/>.</param>
 /// <param name="UpdatedAt">UTC timestamp of the most recent upsert.</param>
@@ -20,12 +22,16 @@ public sealed record TenantLlmConfigResponse(
     string Model,
     ProviderSettings Settings,
     bool Enabled,
+    AiSource AiSource,
+    bool PlatformLlmAvailable,
     bool KeySet,
     string? KeyLast4,
     DateTimeOffset UpdatedAt)
 {
     /// <summary>Projects a stored <see cref="TenantLlmConfig"/> to the masked HTTP response.</summary>
-    public static TenantLlmConfigResponse FromConfig(TenantLlmConfig config)
+    /// <param name="config">The stored config to project.</param>
+    /// <param name="platformLlmAvailable">Whether the tenant's plan entitles it to the platform-managed LLM.</param>
+    public static TenantLlmConfigResponse FromConfig(TenantLlmConfig config, bool platformLlmAvailable)
     {
         ArgumentNullException.ThrowIfNull(config);
         return new TenantLlmConfigResponse(
@@ -33,6 +39,8 @@ public sealed record TenantLlmConfigResponse(
             Model: config.Model,
             Settings: config.Settings,
             Enabled: config.Enabled,
+            AiSource: config.AiSource,
+            PlatformLlmAvailable: platformLlmAvailable,
             // KeySet reflects ACTUAL key presence — not the last4 display hint (which is an
             // independent, non-secret hint that may be absent even when a key is set).
             KeySet: !string.IsNullOrEmpty(config.ApiKey),
@@ -47,7 +55,8 @@ public sealed record TenantLlmConfigResponse(
 /// simply runs manual/agent-driven typification.
 /// </summary>
 /// <param name="Configured">Always <see langword="false"/> — the discriminator the Web client switches on.</param>
-public sealed record EmptyLlmConfigResponse(bool Configured);
+/// <param name="PlatformLlmAvailable">Whether the tenant's plan entitles it to the platform-managed LLM (<c>PlanFeature.PlatformLlm</c>).</param>
+public sealed record EmptyLlmConfigResponse(bool Configured, bool PlatformLlmAvailable);
 
 /// <summary>
 /// Upsert request for a tenant's LLM config (P2c.1, <c>PUT /admin/ai/llm-config</c>).
@@ -61,12 +70,18 @@ public sealed record EmptyLlmConfigResponse(bool Configured);
 /// </param>
 /// <param name="Settings">Type-specific provider settings (base URL, Azure deployment/version, Anthropic version).</param>
 /// <param name="Enabled">Whether AI is enabled for this tenant.</param>
+/// <param name="AiSource">
+/// BYO (tenant key, default) vs platform-managed (Verbara operator key, metered in AI Credits).
+/// Defaulted to <see cref="AiSource.Byo"/> so existing BYO callers stay source-compatible.
+/// <see cref="AiSource.PlatformManaged"/> requires the <c>PlanFeature.PlatformLlm</c> entitlement.
+/// </param>
 public sealed record UpsertLlmConfigRequest(
     ProviderType ProviderType,
     string Model,
     string? ApiKey,
     ProviderSettings? Settings,
-    bool Enabled);
+    bool Enabled,
+    AiSource AiSource = AiSource.Byo);
 
 /// <summary>
 /// "Test connection" request (P2c.1, <c>POST /admin/ai/llm-config/test</c>). When all fields are

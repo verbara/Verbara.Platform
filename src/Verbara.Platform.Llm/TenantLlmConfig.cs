@@ -74,6 +74,9 @@ public sealed class TenantLlmConfig
     /// <summary>Whether AI is enabled for this tenant. Default <see langword="false"/> (opt-in).</summary>
     public bool Enabled { get; init; }
 
+    /// <summary>BYO (tenant key) vs platform-managed (Verbara operator key). Defaults to <see cref="AiSource.Byo"/>.</summary>
+    public AiSource AiSource { get; init; }
+
     /// <summary>UTC timestamp when the config was first created.</summary>
     public required DateTimeOffset CreatedAt { get; init; }
 

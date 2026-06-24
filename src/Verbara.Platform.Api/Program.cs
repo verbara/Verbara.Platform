@@ -181,19 +181,40 @@ builder.Services.AddPlatformBot();
 // Real OpenAI-compatible LLM provider (P2a). Registered BEFORE AddPlatformFlows so it wins the
 // Flows TryAddSingleton<ILlmProvider, DisabledLlmProvider> stub. No-op (stub stays) when the
 // "Llm" config section is incomplete. Manual config read = AOT-safe (no reflection binding).
-builder.Services.AddPlatformLlm(o =>
-{
-    var llm = builder.Configuration.GetSection("Llm");
-    o.BaseUrl = llm["BaseUrl"];
-    o.ApiKey = llm["ApiKey"];
-    o.Model = llm["Model"];
-    if (double.TryParse(llm["Temperature"], System.Globalization.CultureInfo.InvariantCulture, out var temperature))
-        o.Temperature = temperature;
-    if (int.TryParse(llm["MaxTokens"], System.Globalization.CultureInfo.InvariantCulture, out var maxTokens))
-        o.MaxTokens = maxTokens;
-    if (int.TryParse(llm["TimeoutSeconds"], System.Globalization.CultureInfo.InvariantCulture, out var timeoutSeconds))
-        o.TimeoutSeconds = timeoutSeconds;
-});
+builder.Services.AddPlatformLlm(
+    configure: o =>
+    {
+        var llm = builder.Configuration.GetSection("Llm");
+        o.BaseUrl = llm["BaseUrl"];
+        o.ApiKey = llm["ApiKey"];
+        o.Model = llm["Model"];
+        if (double.TryParse(llm["Temperature"], System.Globalization.CultureInfo.InvariantCulture, out var temperature))
+            o.Temperature = temperature;
+        if (int.TryParse(llm["MaxTokens"], System.Globalization.CultureInfo.InvariantCulture, out var maxTokens))
+            o.MaxTokens = maxTokens;
+        if (int.TryParse(llm["TimeoutSeconds"], System.Globalization.CultureInfo.InvariantCulture, out var timeoutSeconds))
+            o.TimeoutSeconds = timeoutSeconds;
+    },
+    // P2c.2 (C4) — operator-managed (platform) LLM bound from "Llm:Platform". Manual key-by-key read
+    // (NOT IConfiguration.Bind) keeps this AOT-safe (reflection-free), mirroring the BYO block above.
+    // The operator ApiKey lives only here — never per-tenant, never serialized to any DTO.
+    configurePlatform: p =>
+    {
+        var plat = builder.Configuration.GetSection("Llm:Platform");
+        if (bool.TryParse(plat["Enabled"], out var enabled))
+            p.Enabled = enabled;
+        p.BaseUrl = plat["BaseUrl"];
+        p.ApiKey = plat["ApiKey"];
+        p.Model = plat["Model"] ?? p.Model;
+        if (double.TryParse(plat["Temperature"], System.Globalization.CultureInfo.InvariantCulture, out var temperature))
+            p.Temperature = temperature;
+        if (int.TryParse(plat["MaxTokens"], System.Globalization.CultureInfo.InvariantCulture, out var maxTokens))
+            p.MaxTokens = maxTokens;
+        if (int.TryParse(plat["TimeoutSeconds"], System.Globalization.CultureInfo.InvariantCulture, out var timeoutSeconds))
+            p.TimeoutSeconds = timeoutSeconds;
+        if (long.TryParse(plat["CreditTokenRatio"], System.Globalization.CultureInfo.InvariantCulture, out var ratio))
+            p.CreditTokenRatio = ratio;
+    });
 // Flow execution engine + node handlers (incl. collect_reason/set_variable for the P1
 // typification capture paths). Ships a default-disabled ILlmProvider so the engine and AI
 // handlers compose; AI nodes fail loudly until a real provider is configured (P2a wires one above).
@@ -205,6 +226,11 @@ builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
 builder.Services.AddPlatformTypification();
 builder.Services.AddPlatformBilling();
+// P2c.2 (C3/C4) — platform-managed Typification LLM credit meter (records AiAnalysis/Tokens usage via
+// the Billing IMeteringService). Depends on IMeteringService (Billing) + IClock; registered here so
+// the suggestion handler can resolve ITypificationCreditMeter.
+builder.Services.AddSingleton<Verbara.Platform.Typification.Ai.ITypificationCreditMeter,
+    Verbara.Platform.Api.Services.BillingTypificationCreditMeter>();
 builder.Services.AddWebChat();
 
 // ─── Twilio SMS (conditional on config) ─────────────────────────────────────
@@ -1648,6 +1674,8 @@ v1.MapSurveyEndpoints();
 v1.MapTypificationEndpoints();
 // P2c.1 — per-tenant BYO LLM provider admin (typification:ai:configure gated, no license gate).
 v1.MapTenantLlmConfigEndpoints();
+// P2c.2 — tenant AI credit usage readout (GET /admin/ai/credits).
+v1.MapAiCreditsEndpoints();
 v1.MapReasonHintEndpoints();
 v1.MapScheduledReportEndpoints();
 v1.MapRealtimeEndpoints();

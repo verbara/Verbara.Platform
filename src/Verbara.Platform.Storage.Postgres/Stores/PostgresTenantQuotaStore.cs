@@ -16,7 +16,7 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT tenant_id, max_concurrent_channels, max_active_campaigns, " +
-            "max_monthly_voice_minutes, max_monthly_messages, max_storage_bytes, max_active_agents, quota_action " +
+            "max_monthly_voice_minutes, max_monthly_messages, max_storage_bytes, max_active_agents, quota_action, ai_credits_monthly " +
             "FROM tenant_quotas WHERE tenant_id = @TenantId",
             p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
             QuotaRow.Map, ct);
@@ -28,9 +28,9 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
     {
         await _dataSource.ExecuteAsync(
             "INSERT INTO tenant_quotas (tenant_id, max_concurrent_channels, max_active_campaigns, " +
-            "max_monthly_voice_minutes, max_monthly_messages, max_storage_bytes, max_active_agents, quota_action) " +
+            "max_monthly_voice_minutes, max_monthly_messages, max_storage_bytes, max_active_agents, quota_action, ai_credits_monthly) " +
             "VALUES (@TenantId, @MaxConcurrentChannels, @MaxActiveCampaigns, " +
-            "@MaxMonthlyVoiceMinutes, @MaxMonthlyMessages, @MaxStorageBytes, @MaxActiveAgents, @QuotaAction) " +
+            "@MaxMonthlyVoiceMinutes, @MaxMonthlyMessages, @MaxStorageBytes, @MaxActiveAgents, @QuotaAction, @AiCreditsMonthly) " +
             "ON CONFLICT (tenant_id) DO UPDATE SET " +
             "max_concurrent_channels = EXCLUDED.max_concurrent_channels, " +
             "max_active_campaigns = EXCLUDED.max_active_campaigns, " +
@@ -38,7 +38,8 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
             "max_monthly_messages = EXCLUDED.max_monthly_messages, " +
             "max_storage_bytes = EXCLUDED.max_storage_bytes, " +
             "max_active_agents = EXCLUDED.max_active_agents, " +
-            "quota_action = EXCLUDED.quota_action",
+            "quota_action = EXCLUDED.quota_action, " +
+            "ai_credits_monthly = EXCLUDED.ai_credits_monthly",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", quota.TenantId.Value));
@@ -49,6 +50,8 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
                 p.Add(new NpgsqlParameter("MaxStorageBytes", NpgsqlDbType.Bigint) { Value = (object?)quota.MaxStorageBytes ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("MaxActiveAgents", NpgsqlDbType.Integer) { Value = (object?)quota.MaxActiveAgents ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("QuotaAction", (short)quota.QuotaAction));
+                p.Add(new NpgsqlParameter("AiCreditsMonthly", NpgsqlDbType.Bigint)
+                    { Value = (object?)quota.AiCreditsMonthly ?? DBNull.Value });
             },
             ct);
     }
@@ -71,6 +74,7 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
         public long? max_storage_bytes { get; init; }
         public int? max_active_agents { get; init; }
         public short quota_action { get; init; }
+        public long? ai_credits_monthly { get; init; }
 
         public static QuotaRow Map(NpgsqlDataReader r) => new()
         {
@@ -82,6 +86,7 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
             max_storage_bytes = r.GetInt64OrNull("max_storage_bytes"),
             max_active_agents = r.GetInt32OrNull("max_active_agents"),
             quota_action = r.GetInt16("quota_action"),
+            ai_credits_monthly = r.GetInt64OrNull("ai_credits_monthly"),
         };
 
         public TenantQuota ToQuota() => new()
@@ -94,6 +99,7 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
             MaxStorageBytes = max_storage_bytes,
             MaxActiveAgents = max_active_agents,
             QuotaAction = (QuotaAction)quota_action,
+            AiCreditsMonthly = ai_credits_monthly,
         };
     }
 }
