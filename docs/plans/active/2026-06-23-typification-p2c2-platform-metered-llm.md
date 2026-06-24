@@ -783,7 +783,7 @@ git commit -m "feat(api): platform-managed opt-in toggle gated by PlanFeature.Pl
 
 The endpoint reads the tenant quota + current-period `AiAnalysis` token summary, converts to credits via `PlatformLlmOptions.CreditTokenRatio`, and returns allowance/consumed/remaining/percent.
 
-- [ ] **Step 1 — DTO**
+- [x] **Step 1 — DTO**
 
 In a new `AiCreditsEndpoints.cs` (namespace `Verbara.Platform.Api.Endpoints`):
 ```csharp
@@ -796,11 +796,11 @@ public sealed record AiCreditsResponse(
     QuotaAction ActionOnExhaustion);
 ```
 
-- [ ] **Step 2 — Failing test** (`AiCreditsEndpointTests.cs`): seed quota `AiCreditsMonthly=10`, usage summary `TotalQuantity=5000` tokens, ratio 1000 → expect `ConsumedCredits=5`, `RemainingCredits=5`, `UsagePercent=50`. Assert 200 + body. (Mirror the BYO llm-config endpoint test fixture.)
+- [x] **Step 2 — Failing test** (`AiCreditsEndpointTests.cs`): seed quota `AiCreditsMonthly=10`, usage summary `TotalQuantity=5000` tokens, ratio 1000 → expect `ConsumedCredits=5`, `RemainingCredits=5`, `UsagePercent=50`. Assert 200 + body. (Mirror the BYO llm-config endpoint test fixture.)
 
-- [ ] **Step 3 — Run; verify fail.** `dotnet test ... --filter "FullyQualifiedName~AiCreditsEndpointTests" -c Release` → FAIL.
+- [x] **Step 3 — Run; verify fail.** `dotnet test ... --filter "FullyQualifiedName~AiCreditsEndpointTests" -c Release` → FAIL.
 
-- [ ] **Step 4 — Handler** (RBAC `typification:ai:configure`, `AdminOnly`, `RequireOperationalTenant`):
+- [x] **Step 4 — Handler** (RBAC `typification:ai:configure`, `AdminOnly`, `RequireOperationalTenant`):
 ```csharp
 public static void MapAiCreditsEndpoints(this IEndpointRouteBuilder app)
 {
@@ -847,16 +847,16 @@ private static async Task<IResult> GetCredits(
 ```
 (`GetTenantId` + `ResolveCallerPermissions` mirror the `TypificationEndpoints` helpers — copy the same private helpers into this file, or factor a shared helper; keep consistent with the existing pattern.)
 
-- [ ] **Step 5 — Register the DTO** in `ApiJsonContext.cs` (next to the llm-config block, L63):
+- [x] **Step 5 — Register the DTO** in `ApiJsonContext.cs` (next to the llm-config block, L63):
 ```csharp
 [JsonSerializable(typeof(AiCreditsResponse))]
 ```
 
-- [ ] **Step 6 — Map** in `Program.cs` near `MapTenantLlmConfigEndpoints()`: `app.MapAiCreditsEndpoints();`
+- [x] **Step 6 — Map** in `Program.cs` near `MapTenantLlmConfigEndpoints()`: `app.MapAiCreditsEndpoints();`
 
-- [ ] **Step 7 — Run; verify pass.** `dotnet test ... --filter "FullyQualifiedName~AiCreditsEndpointTests" -c Release` → PASS.
+- [x] **Step 7 — Run; verify pass.** `dotnet test ... --filter "FullyQualifiedName~AiCreditsEndpointTests" -c Release` → PASS.
 
-- [ ] **Step 8 — Commit**
+- [x] **Step 8 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Api/Endpoints/AiCreditsEndpoints.cs src/Verbara.Platform.Api/Serialization/ApiJsonContext.cs src/Verbara.Platform.Api/Program.cs tests/Verbara.Platform.Api.Tests/Endpoints/AiCreditsEndpointTests.cs
