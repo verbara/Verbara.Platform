@@ -205,6 +205,11 @@ builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
 builder.Services.AddPlatformTypification();
 builder.Services.AddPlatformBilling();
+// P2c.2 (C3) — platform-managed Typification LLM credit meter (records AiAnalysis/Tokens usage via
+// the Billing IMeteringService). Depends on IMeteringService (Billing) + IClock; registered here so
+// the suggestion handler can resolve ITypificationCreditMeter. (DI also reaffirmed in C4.)
+builder.Services.AddSingleton<Verbara.Platform.Typification.Ai.ITypificationCreditMeter,
+    Verbara.Platform.Api.Services.BillingTypificationCreditMeter>();
 builder.Services.AddWebChat();
 
 // ─── Twilio SMS (conditional on config) ─────────────────────────────────────
