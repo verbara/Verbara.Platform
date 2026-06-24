@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Options;
 using Verbara.Platform.Core;
+using Verbara.Platform.Llm;
 
 namespace Verbara.Platform.Billing;
 
@@ -7,15 +9,18 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
     private readonly ITenantQuotaStore _quotaStore;
     private readonly IUsageRecordStore _usageStore;
     private readonly IClock _clock;
+    private readonly long _creditTokenRatio;
 
-    public DefaultQuotaEnforcementService(ITenantQuotaStore quotaStore, IUsageRecordStore usageStore, IClock clock)
+    public DefaultQuotaEnforcementService(ITenantQuotaStore quotaStore, IUsageRecordStore usageStore, IClock clock, IOptions<PlatformLlmOptions> platformOptions)
     {
         ArgumentNullException.ThrowIfNull(quotaStore);
         ArgumentNullException.ThrowIfNull(usageStore);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(platformOptions);
         _quotaStore = quotaStore;
         _usageStore = usageStore;
         _clock = clock;
+        _creditTokenRatio = Math.Max(1, platformOptions.Value.CreditTokenRatio);
     }
 
     public async Task<QuotaCheckResult> CheckQuotaAsync(TenantId tenantId, UsageType type, decimal additionalQuantity, CancellationToken ct)
@@ -64,7 +69,7 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
         return (start, start.AddMonths(1));
     }
 
-    private static long? GetLimitForType(TenantQuota quota, UsageType type) => type switch
+    private long? GetLimitForType(TenantQuota quota, UsageType type) => type switch
     {
         UsageType.VoiceInbound or UsageType.VoiceOutbound => quota.MaxMonthlyVoiceMinutes,
         UsageType.SmsInbound or UsageType.SmsOutbound or
@@ -72,6 +77,7 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
         UsageType.EmailInbound or UsageType.EmailOutbound or
         UsageType.TelegramInbound or UsageType.TelegramOutbound => quota.MaxMonthlyMessages,
         UsageType.RecordingStorage or UsageType.MediaStorage => quota.MaxStorageBytes,
+        UsageType.AiAnalysis => quota.AiCreditsMonthly is { } c ? c * _creditTokenRatio : null, // credits → token-equiv
         _ => null,
     };
 }

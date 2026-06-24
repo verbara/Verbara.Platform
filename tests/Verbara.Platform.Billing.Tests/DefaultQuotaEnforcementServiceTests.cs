@@ -1,5 +1,7 @@
+using Microsoft.Extensions.Options;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
+using Verbara.Platform.Llm;
 
 namespace Verbara.Platform.Billing.Tests;
 
@@ -17,7 +19,8 @@ public class DefaultQuotaEnforcementServiceTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(FixedNow);
 
-        var service = new DefaultQuotaEnforcementService(quotaStore, usageStore, clock);
+        var service = new DefaultQuotaEnforcementService(quotaStore, usageStore, clock,
+            Options.Create(new PlatformLlmOptions { CreditTokenRatio = 1000 }));
         return (service, quotaStore, usageStore);
     }
 
