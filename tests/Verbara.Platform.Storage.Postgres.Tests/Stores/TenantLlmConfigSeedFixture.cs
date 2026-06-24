@@ -10,8 +10,9 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 /// Testcontainers-backed fixture for the P2c.1 <c>TenantLlmConfigSeedMigrator</c> suite. Spins up
 /// <c>postgres:16-alpine</c> and creates the minimum schema the migrator touches: a <c>tenants</c>
 /// table with a <c>type</c> column (the operational-tenant discriminator) and the
-/// <c>tenant_llm_config</c> table (matching migration 009). We do NOT replay the full migration
-/// ledger — this is a two-table seed test.
+/// <c>tenant_llm_config</c> table with every column the store reads (through migration 010's
+/// <c>ai_source</c>). We do NOT replay the full migration ledger — this is a two-table seed test,
+/// so columns added by later additive migrations must be mirrored here in lock-step with the store.
 ///
 /// DataProtection runs with ephemeral in-memory keys scoped to the fixture lifetime so encrypted
 /// ciphertext is deterministic across the same fixture and Unprotect round-trips.
@@ -134,6 +135,7 @@ public sealed class TenantLlmConfigSeedFixture : IAsyncLifetime
             api_key_last4      TEXT,
             provider_settings  JSONB       NOT NULL DEFAULT '{}',
             enabled            BOOLEAN     NOT NULL DEFAULT false,
+            ai_source          TEXT        NOT NULL DEFAULT 'Byo',
             created_at         TIMESTAMPTZ NOT NULL,
             updated_at         TIMESTAMPTZ NOT NULL,
             PRIMARY KEY (tenant_id)

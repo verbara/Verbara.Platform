@@ -243,6 +243,7 @@ internal static class ConversationEndpoints
         [FromServices] IQuotaEnforcementService quota,
         [FromServices] ITypificationCreditMeter creditMeter,
         [FromServices] ITenantLlmConfigStore llmConfigStore,
+        [FromServices] IFeatureGateService featureGate,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -270,6 +271,39 @@ internal static class ConversationEndpoints
         //    pilot can enable/disable AI for one scope without touching the schema default.
         if (!resolved.EffectiveAiConfig.Enabled || resolved.EffectiveAiConfig.Mode == AiMode.Off)
             return Results.Ok(EmptySuggestion);
+
+        // 2b. ADR-0032 — runtime entitlement re-check for platform-managed tenants. The PlatformLlm
+        //     entitlement is enforced at opt-in (PUT /admin/ai/llm-config) but can be revoked OUTSIDE
+        //     that flow (plan downgrade, add-on expiry, partner-customer suspension, dunning) while the
+        //     stored AiSource still says PlatformManaged. FeatureGateService reads the per-request
+        //     FeatureGateCache (no TTL — repopulated by TenantStatusMiddleware), so a revocation bites
+        //     on the very next request. Placed BEFORE the quota pre-check so a downgraded-and-exhausted
+        //     tenant degrades cleanly to 200 (NOT 402) and is NEVER metered (no involuntary billing).
+        //     Immediate cutoff (option A); the stored AiSource is NOT mutated, so re-entitlement
+        //     self-heals. BYO / no-config tenants are unaffected (guarded by isPlatformManaged).
+        if (isPlatformManaged && !featureGate.IsFeatureEnabled(tenantId.Value, PlanFeature.PlatformLlm))
+        {
+            aiMetrics.PlatformLlmEntitlementMissing.Add(1);
+            aiMetrics.LogPlatformLlmEntitlementMissing(tenantId.Value, conversationId.Value);
+
+            await auditService.RecordAsync(
+                tenantId,
+                category: "config",
+                action: "typification.ai.platformllm.entitlement_missing",
+                severity: "warning",
+                actorId: "system",
+                actorType: "system",
+                targetId: conversationId.Value,
+                targetType: "Conversation",
+                metadata: new Dictionary<string, string>
+                {
+                    ["aiSource"] = AiSource.PlatformManaged.ToString(),
+                    ["reason"] = "PlatformLlm entitlement not enabled for tenant at runtime",
+                },
+                ct: ct);
+
+            return Results.Ok(EmptySuggestion);
+        }
 
         // 3. Load the transcript. Both message stores ORDER BY created_at ASC (oldest
         //    first) and IMessageStore has no newest-first query, so a small limit would
