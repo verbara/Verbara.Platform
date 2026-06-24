@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Resilience;
 
@@ -30,6 +31,7 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
     private readonly ResiliencePolicy? _policy;
     private readonly IMeterFactory? _meterFactory;
     private readonly ILoggerFactory? _loggerFactory;
+    private readonly PlatformLlmOptions _platform;
 
     // tenantId.Value → (fingerprint, resolved). One entry per tenant; Invalidate evicts by tenant.
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.Ordinal);
@@ -39,7 +41,8 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
         IHttpClientFactory httpFactory,
         IServiceProvider serviceProvider,
         IMeterFactory? meterFactory = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        IOptions<PlatformLlmOptions>? platformOptions = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(httpFactory);
@@ -50,28 +53,36 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
             OpenAiCompatibleLlmProvider.ResiliencePolicyKey);
         _meterFactory = meterFactory;
         _loggerFactory = loggerFactory;
+        _platform = platformOptions?.Value ?? new PlatformLlmOptions();
     }
 
     /// <inheritdoc />
     public async Task<ResolvedLlmProvider?> ResolveAsync(EntityId tenantId, CancellationToken ct)
     {
         var config = await _store.GetAsync(tenantId, ct).ConfigureAwait(false);
-        if (config is null || !config.Enabled || string.IsNullOrEmpty(config.ApiKey))
+        var unusable = config is null
+            || !config.Enabled
+            || (config.AiSource == AiSource.PlatformManaged
+                    ? !_platform.Enabled                       // platform: operator switch
+                    : string.IsNullOrEmpty(config!.ApiKey));   // BYO: tenant key required
+        if (unusable)
         {
-            // Fail-closed: no config / disabled / enabled-but-keyless are all valid "AI off" states —
-            // a keyless provider would throw at call time, so treat it as cleanly off. Drop any stale
-            // entry (disposing its provider).
+            // Fail-closed: no config / disabled, plus a BYO config with no key OR a platform-managed
+            // config with the operator switch off, are all valid "AI off" states — a keyless provider
+            // would throw at call time, so treat it as cleanly off. Drop any stale entry (disposing
+            // its provider).
             if (_cache.TryRemove(tenantId.Value, out var stale))
                 (stale.Resolved.Provider as IDisposable)?.Dispose();
             return null;
         }
 
-        var fingerprint = ComputeFingerprint(config);
+        // The `unusable` guard above already returned on `config is null`.
+        var fingerprint = ComputeFingerprint(config!);
 
         if (_cache.TryGetValue(tenantId.Value, out var cached) && cached.Fingerprint == fingerprint)
             return cached.Resolved;
 
-        var resolved = Build(config);
+        var resolved = Build(config!);
 
         // Replace the entry; dispose the outgoing provider (fingerprint change) so its Meter/handler
         // resources don't leak.
@@ -91,7 +102,8 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
 
     // Production resolve path: share the keyed `llm.completions` circuit + retry policy across tenants.
     private ResolvedLlmProvider Build(TenantLlmConfig config) =>
-        new(BuildWithPolicy(config, _policy), config.Model);
+        new(BuildWithPolicy(config, _policy),
+            config.AiSource == AiSource.PlatformManaged ? _platform.Model : config.Model);
 
     /// <inheritdoc />
     public ILlmProvider BuildTransient(TenantLlmConfig config)
@@ -107,6 +119,22 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
     private ILlmProvider BuildWithPolicy(TenantLlmConfig config, ResiliencePolicy? policy)
     {
         ArgumentNullException.ThrowIfNull(config);
+
+        if (config.AiSource == AiSource.PlatformManaged)
+        {
+            var platformEffective = new LlmEffectiveOptions(
+                BaseUrl:        _platform.BaseUrl,
+                ApiKey:         _platform.ApiKey,
+                Model:          _platform.Model,
+                Temperature:    _platform.Temperature,
+                MaxTokens:      _platform.MaxTokens,
+                TimeoutSeconds: _platform.TimeoutSeconds);
+            return new OpenAiCompatibleLlmProvider(
+                _httpFactory.CreateClient(OpenAiClientName),
+                platformEffective,
+                policy, _meterFactory,
+                _loggerFactory?.CreateLogger<OpenAiCompatibleLlmProvider>());
+        }
 
         var effective = new LlmEffectiveOptions(
             BaseUrl: config.Settings.BaseUrl,
@@ -150,7 +178,7 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
     /// (bumped on every upsert) so a key ROTATION that keeps the same length + last-4 still yields a
     /// new fingerprint and rebuilds the provider. The raw key is NEVER logged or persisted here.
     /// </summary>
-    private static string ComputeFingerprint(TenantLlmConfig config)
+    private string ComputeFingerprint(TenantLlmConfig config)
     {
         var s = config.Settings;
         var keyFingerprint = config.ApiKey is { Length: > 0 } k
@@ -166,7 +194,11 @@ public sealed class DefaultLlmProviderResolver : ILlmProviderResolver
             s.AzureApiVersion ?? string.Empty,
             s.AnthropicVersion ?? string.Empty,
             config.Enabled ? "1" : "0",
-            keyFingerprint);
+            keyFingerprint,
+            config.AiSource.ToString(),
+            config.AiSource == AiSource.PlatformManaged
+                ? $"plat:{_platform.Enabled}:{_platform.Model}:{_platform.BaseUrl}:{(_platform.ApiKey is { Length: >= 4 } pk ? pk[^4..] : "none")}"
+                : "byo");
     }
 
     // Per-tenant request shaping defaults (P2b's per-tenant token budget + llm rate-limit sit
