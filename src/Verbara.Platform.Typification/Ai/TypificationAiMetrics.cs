@@ -60,6 +60,13 @@ public sealed partial class TypificationAiMetrics : IDisposable
     /// </summary>
     public Counter<long> BudgetExceeded { get; }
 
+    /// <summary>
+    /// Platform-managed AI suggestions degraded to the empty suggestion because the tenant's
+    /// <c>PlanFeature.PlatformLlm</c> entitlement was revoked at runtime (ADR-0032 — immediate
+    /// cutoff; degrade before the quota pre-check / classifier / credit meter).
+    /// </summary>
+    public Counter<long> PlatformLlmEntitlementMissing { get; }
+
     public TypificationAiMetrics(IMeterFactory? meterFactory = null, ILoggerFactory? loggerFactory = null)
     {
         _meter = meterFactory is null ? new Meter(MeterName) : meterFactory.Create(MeterName);
@@ -81,6 +88,10 @@ public sealed partial class TypificationAiMetrics : IDisposable
         BudgetExceeded = _meter.CreateCounter<long>(
             "suggestion.budget_exceeded",
             description: "AI suggestions degraded to empty because the tenant's daily token budget was exhausted");
+
+        PlatformLlmEntitlementMissing = _meter.CreateCounter<long>(
+            "platformllm.degrade.entitlement_missing",
+            description: "Platform-managed AI suggestions degraded to empty because the tenant's PlatformLlm entitlement was revoked at runtime (ADR-0032)");
     }
 
     // ─── Instance log helper (uses pre-cached logger) ───────────────────────────
@@ -113,6 +124,13 @@ public sealed partial class TypificationAiMetrics : IDisposable
     public void LogBudgetExceeded(string tenantId, string conversationId, long dailyBudget) =>
         LogBudgetExceededCore(_logger, tenantId, conversationId, dailyBudget);
 
+    /// <summary>
+    /// Emits EventId 6312 "platform-managed LLM entitlement missing — degraded to empty" at Warning
+    /// level using the pre-cached logger (ADR-0032 runtime entitlement re-check).
+    /// </summary>
+    public void LogPlatformLlmEntitlementMissing(string tenantId, string conversationId) =>
+        LogPlatformLlmEntitlementMissingCore(_logger, tenantId, conversationId);
+
     // ─── Structured log events (EventIds 6310+) ─────────────────────────────────
 
     [LoggerMessage(EventId = 6310, Level = LogLevel.Debug,
@@ -132,6 +150,13 @@ public sealed partial class TypificationAiMetrics : IDisposable
         string tenantId,
         string conversationId,
         long dailyBudget);
+
+    [LoggerMessage(EventId = 6312, Level = LogLevel.Warning,
+        Message = "Platform-managed AI typification suggestion degraded to empty — tenant PlatformLlm entitlement revoked at runtime (tenant={TenantId}, conversation={ConversationId}). ADR-0032 immediate cutoff.")]
+    private static partial void LogPlatformLlmEntitlementMissingCore(
+        ILogger logger,
+        string tenantId,
+        string conversationId);
 
     public void Dispose() => _meter.Dispose();
 }
