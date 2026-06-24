@@ -13,6 +13,23 @@ _No unreleased changes._
 
 ---
 
+## [2.15.0] — 2026-06-24 — Typification P2c.2 (platform-managed metered LLM / AI Credits)
+
+Phase **P2c.2** of the Typification module (ADR-0029), building on P2c.1 (per-tenant BYO LLM). Lets an **entitled** tenant use a **Verbara-operated** LLM instead of bringing its own — **metered in AI Credits** (= tokens ÷ a configurable ratio), **gated** by a new plan entitlement, and **capped** by a monthly credit allowance enforced through the Billing package. **AI stays strictly opt-in; BYO is unaffected and never metered.** No Pro SDK release (the gate is a Platform `PlanFeature`; the Pro `TypificationAi` license already ships). Pairs with **Web v3.11.0-web** (the opt-in toggle + credit-usage UI). Consumes **Verbara.Sdk.Pro 2.8.0-pro** (unchanged).
+
+### Added
+- **Platform-managed LLM provider** — `TenantLlmConfig.AiSource` (`Byo` / `PlatformManaged`); a tenant opts in via `PUT /admin/ai/llm-config` (`aiSource`). The provider is built from host-bound `PlatformLlmOptions` (Verbara's operator key/model — **never** per-tenant, never serialized/logged/returned), resolved through the existing provider seam (`DefaultLlmProviderResolver` gains a platform branch; the BYO key-guard is bypassed; fail-closed when the operator switch is off).
+- **Entitlement gate** — new `PlanFeature.PlatformLlm` (included in the Enterprise plan). Opting into platform-managed without it returns 403.
+- **Metering in AI Credits** — every platform-managed classify records a durable `UsageRecord` (`UsageType.AiAnalysis`, `UsageUnit.Tokens`, quantity = total tokens) with input/output token counts + model in metadata. Credits are derived by **aggregation** (Σtokens ÷ `CreditTokenRatio`) — no per-call rounding. Invoicing reuses the existing rate-card flow.
+- **Monthly credit allowance** — `TenantQuota.AiCreditsMonthly` enforced via `IQuotaEnforcementService` (summed from Postgres usage records → cross-replica exact). Pre-classify: Warn (proceed), SoftBlock (degrade to the empty suggestion), HardBlock (402). `null` = unlimited / pay-as-you-go.
+- **`GET /admin/ai/credits`** — current-period allowance / consumed / remaining / usage %, gated on `typification:ai:configure`.
+- Migration **010** (`tenant_llm_config.ai_source`, `tenant_quotas.ai_credits_monthly`; idempotent).
+
+### Fixed
+- **Flaky `AuthWriteQueue` drain test** — the `StartAndDrain` test barrier used a wall-clock `Task.Delay` that raced the consumer under CI load; replaced with a causal barrier (`CompleteWriter()` + `await ExecuteTask`). Test-only; no production behavior change (PR #79).
+
+---
+
 ## [2.14.1] — 2026-06-23 — Impersonation caller-id + rate-limiter ordering fixes
 
 ### Fixed
