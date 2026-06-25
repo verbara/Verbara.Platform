@@ -126,6 +126,33 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
         };
     }
 
+    public async Task<AiTokenBreakdown> GetAiTokenBreakdownAsync(TenantId tenantId, UsageType type, DateTimeOffset from, DateTimeOffset until, CancellationToken ct)
+    {
+        // Single-row aggregate (COALESCE → always exactly one row). Uses jsonb_exists(...) rather than the
+        // `?` operator to avoid Npgsql positional-placeholder ambiguity. NULL/missing-key rows fall to the
+        // unsplit (Quantity) bucket and are never silently dropped.
+        var row = await _dataSource.QuerySingleAsync(
+            "SELECT " +
+            "COALESCE(SUM(CASE WHEN metadata IS NOT NULL AND jsonb_exists(metadata, 'inputTokens') AND jsonb_exists(metadata, 'outputTokens') " +
+            "THEN (metadata->>'inputTokens')::numeric ELSE 0 END), 0) AS input_tokens, " +
+            "COALESCE(SUM(CASE WHEN metadata IS NOT NULL AND jsonb_exists(metadata, 'inputTokens') AND jsonb_exists(metadata, 'outputTokens') " +
+            "THEN (metadata->>'outputTokens')::numeric ELSE 0 END), 0) AS output_tokens, " +
+            "COALESCE(SUM(CASE WHEN metadata IS NULL OR NOT (jsonb_exists(metadata, 'inputTokens') AND jsonb_exists(metadata, 'outputTokens')) " +
+            "THEN quantity ELSE 0 END), 0) AS unsplit_tokens " +
+            "FROM usage_records " +
+            "WHERE tenant_id = @TenantId AND usage_type = @UsageType AND recorded_at >= @From AND recorded_at < @Until",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("UsageType", (short)type));
+                p.Add(new NpgsqlParameter("From", from.UtcDateTime));
+                p.Add(new NpgsqlParameter("Until", until.UtcDateTime));
+            },
+            BreakdownRow.Map, ct);
+
+        return new AiTokenBreakdown(row.input_tokens, row.output_tokens, row.unsplit_tokens);
+    }
+
     public async Task<IReadOnlyList<UsageRecord>> ListAsync(TenantId tenantId, DateTimeOffset from, DateTimeOffset until, UsageType? type, int page, int pageSize, CancellationToken ct)
     {
         List<RecordRow> rows;
@@ -206,6 +233,20 @@ internal sealed class PostgresUsageRecordStore : IUsageRecordStore
             total_quantity = r.GetDecimal("total_quantity"),
             record_count = r.GetInt32("record_count"),
             last_updated_at = r.GetDateTime("last_updated_at"),
+        };
+    }
+
+    private sealed class BreakdownRow
+    {
+        public decimal input_tokens { get; init; }
+        public decimal output_tokens { get; init; }
+        public decimal unsplit_tokens { get; init; }
+
+        public static BreakdownRow Map(NpgsqlDataReader r) => new()
+        {
+            input_tokens = r.GetDecimal("input_tokens"),
+            output_tokens = r.GetDecimal("output_tokens"),
+            unsplit_tokens = r.GetDecimal("unsplit_tokens"),
         };
     }
 

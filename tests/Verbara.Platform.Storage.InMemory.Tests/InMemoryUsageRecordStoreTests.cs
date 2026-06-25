@@ -15,7 +15,8 @@ public sealed class InMemoryUsageRecordStoreTests
         UsageType type = UsageType.VoiceInbound,
         decimal quantity = 5m,
         UsageUnit unit = UsageUnit.Minutes,
-        DateTimeOffset? recordedAt = null) => new()
+        DateTimeOffset? recordedAt = null,
+        Dictionary<string, string>? metadata = null) => new()
     {
         RecordId = EntityId.New(),
         TenantId = tenantId ?? Tenant1,
@@ -23,6 +24,7 @@ public sealed class InMemoryUsageRecordStoreTests
         Quantity = quantity,
         Unit = unit,
         RecordedAt = recordedAt ?? BaseTime,
+        Metadata = metadata,
     };
 
     [Fact]
@@ -197,5 +199,53 @@ public sealed class InMemoryUsageRecordStoreTests
 
         result.Should().HaveCount(1);
         result[0].Quantity.Should().Be(10m);
+    }
+
+    [Fact]
+    public async Task GetAiTokenBreakdownAsync_ShouldSumSplitAndUnsplitBuckets_WhenMixedMetadata()
+    {
+        var store = new InMemoryUsageRecordStore();
+        // Split record: metadata has both keys -> input/output buckets.
+        await store.SaveAsync(MakeRecord(
+            type: UsageType.AiAnalysis, quantity: 400m, unit: UsageUnit.Tokens,
+            metadata: new Dictionary<string, string> { ["inputTokens"] = "300", ["outputTokens"] = "100", ["model"] = "gpt-4o" }),
+            CancellationToken.None);
+        // Unsplit record: null metadata -> falls into unsplit (Quantity) bucket.
+        await store.SaveAsync(MakeRecord(
+            type: UsageType.AiAnalysis, quantity: 500m, unit: UsageUnit.Tokens, metadata: null),
+            CancellationToken.None);
+        // Unsplit record: metadata present but missing outputTokens -> unsplit bucket.
+        await store.SaveAsync(MakeRecord(
+            type: UsageType.AiAnalysis, quantity: 70m, unit: UsageUnit.Tokens,
+            metadata: new Dictionary<string, string> { ["inputTokens"] = "70" }),
+            CancellationToken.None);
+        // Different type in range -> excluded.
+        await store.SaveAsync(MakeRecord(type: UsageType.VoiceInbound, quantity: 999m), CancellationToken.None);
+        // AiAnalysis but out of range -> excluded.
+        await store.SaveAsync(MakeRecord(
+            type: UsageType.AiAnalysis, quantity: 999m, unit: UsageUnit.Tokens,
+            recordedAt: BaseTime.AddMonths(2),
+            metadata: new Dictionary<string, string> { ["inputTokens"] = "1", ["outputTokens"] = "1" }),
+            CancellationToken.None);
+
+        var breakdown = await store.GetAiTokenBreakdownAsync(
+            Tenant1, UsageType.AiAnalysis, BaseTime, BaseTime.AddMonths(1), CancellationToken.None);
+
+        breakdown.InputTokens.Should().Be(300m);
+        breakdown.OutputTokens.Should().Be(100m);
+        breakdown.UnsplitTokens.Should().Be(570m); // 500 (null metadata) + 70 (missing outputTokens)
+    }
+
+    [Fact]
+    public async Task GetAiTokenBreakdownAsync_ShouldReturnZeros_WhenNoRecords()
+    {
+        var store = new InMemoryUsageRecordStore();
+
+        var breakdown = await store.GetAiTokenBreakdownAsync(
+            Tenant1, UsageType.AiAnalysis, BaseTime, BaseTime.AddMonths(1), CancellationToken.None);
+
+        breakdown.InputTokens.Should().Be(0m);
+        breakdown.OutputTokens.Should().Be(0m);
+        breakdown.UnsplitTokens.Should().Be(0m);
     }
 }

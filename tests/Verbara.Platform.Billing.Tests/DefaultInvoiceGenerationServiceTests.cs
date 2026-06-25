@@ -1,5 +1,7 @@
+using Microsoft.Extensions.Options;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
+using Verbara.Platform.Llm;
 
 namespace Verbara.Platform.Billing.Tests;
 
@@ -10,14 +12,16 @@ public class DefaultInvoiceGenerationServiceTests
     private static readonly DateTimeOffset PeriodEnd = new(2026, 4, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset FixedNow = new(2026, 4, 1, 12, 0, 0, TimeSpan.Zero);
 
-    private static (DefaultInvoiceGenerationService Service, IRateCardStore RateCardStore, IUsageRecordStore UsageStore, IClock Clock) Build()
+    private static (DefaultInvoiceGenerationService Service, IRateCardStore RateCardStore, IUsageRecordStore UsageStore, IClock Clock) Build(
+        PlatformLlmOptions? platformOptions = null)
     {
         var rateCardStore = Substitute.For<IRateCardStore>();
         var usageStore = Substitute.For<IUsageRecordStore>();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(FixedNow);
 
-        var service = new DefaultInvoiceGenerationService(rateCardStore, usageStore, clock);
+        var service = new DefaultInvoiceGenerationService(rateCardStore, usageStore, clock,
+            Options.Create(platformOptions ?? new PlatformLlmOptions { CreditTokenRatio = 1000 }));
         return (service, rateCardStore, usageStore, clock);
     }
 
@@ -302,5 +306,67 @@ public class DefaultInvoiceGenerationServiceTests
         // Tier 2: 500 × $0.05 = $25.00
         // Total = $35.00
         invoice.LineItems[0].Amount.Should().Be(35.00m);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ShouldDescribePerDirectionPricing_WhenRatiosConfigured()
+    {
+        var (service, rateCardStore, usageStore, _) = Build(new PlatformLlmOptions
+        {
+            CreditTokenRatio = 1000,
+            InputCreditTokenRatio = 2000,
+            OutputCreditTokenRatio = 500,
+        });
+        var rateCard = MakeFlatRateCard(
+            new RateEntry { UsageType = UsageType.AiAnalysis, UnitPrice = 0.001m });
+
+        rateCardStore.GetActiveAsync(Tenant1, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(rateCard);
+        usageStore.GetSummaryAsync(Tenant1, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>
+            {
+                new()
+                {
+                    TenantId = Tenant1, PeriodStart = PeriodStart, PeriodEnd = PeriodEnd,
+                    UsageType = UsageType.AiAnalysis, TotalQuantity = 10000m,
+                    RecordCount = 5, LastUpdatedAt = FixedNow,
+                },
+            });
+
+        var invoice = await service.GenerateAsync(Tenant1, PeriodStart, PeriodEnd, CancellationToken.None);
+
+        var line = invoice.LineItems[0];
+        line.UsageType.Should().Be(UsageType.AiAnalysis);
+        line.Description.Should().Be("AiAnalysis (input/output pricing)");
+        // Amount unchanged — rate-card driven (10000 × 0.001 = 10.00).
+        line.Amount.Should().Be(10.00m);
+        line.Quantity.Should().Be(10000m);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ShouldUseStandardDescription_WhenFlatRatioOnly()
+    {
+        var (service, rateCardStore, usageStore, _) = Build(new PlatformLlmOptions { CreditTokenRatio = 1000 });
+        var rateCard = MakeFlatRateCard(
+            new RateEntry { UsageType = UsageType.AiAnalysis, UnitPrice = 0.001m });
+
+        rateCardStore.GetActiveAsync(Tenant1, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(rateCard);
+        usageStore.GetSummaryAsync(Tenant1, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>
+            {
+                new()
+                {
+                    TenantId = Tenant1, PeriodStart = PeriodStart, PeriodEnd = PeriodEnd,
+                    UsageType = UsageType.AiAnalysis, TotalQuantity = 10000m,
+                    RecordCount = 5, LastUpdatedAt = FixedNow,
+                },
+            });
+
+        var invoice = await service.GenerateAsync(Tenant1, PeriodStart, PeriodEnd, CancellationToken.None);
+
+        var line = invoice.LineItems[0];
+        line.Description.Should().Be("AiAnalysis");
+        line.Amount.Should().Be(10.00m);
     }
 }

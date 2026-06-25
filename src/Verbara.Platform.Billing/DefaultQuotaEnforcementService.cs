@@ -10,6 +10,8 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
     private readonly IUsageRecordStore _usageStore;
     private readonly IClock _clock;
     private readonly long _creditTokenRatio;
+    private readonly long? _inputRatio;
+    private readonly long? _outputRatio;
 
     public DefaultQuotaEnforcementService(ITenantQuotaStore quotaStore, IUsageRecordStore usageStore, IClock clock, IOptions<PlatformLlmOptions> platformOptions)
     {
@@ -21,10 +23,18 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
         _usageStore = usageStore;
         _clock = clock;
         _creditTokenRatio = Math.Max(1, platformOptions.Value.CreditTokenRatio);
+        _inputRatio = platformOptions.Value.InputCreditTokenRatio;
+        _outputRatio = platformOptions.Value.OutputCreditTokenRatio;
     }
+
+    /// <summary>Per-direction (input/output) credit pricing is active only when BOTH ratios are set and &gt; 0.</summary>
+    private bool PerDirectionActive => _inputRatio is > 0 && _outputRatio is > 0;
 
     public async Task<QuotaCheckResult> CheckQuotaAsync(TenantId tenantId, UsageType type, decimal additionalQuantity, CancellationToken ct)
     {
+        if (type == UsageType.AiAnalysis && PerDirectionActive)
+            return await CheckAiCreditQuotaPerDirectionAsync(tenantId, type, additionalQuantity, ct);
+
         var quota = await _quotaStore.GetAsync(tenantId, ct);
         if (quota is null)
             return new QuotaCheckResult(true, null, 0);
@@ -43,6 +53,43 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
             return new QuotaCheckResult(true, null, usagePercent);
 
         var reason = $"{type} quota exceeded: {projectedUsage:F1}/{limit.Value} ({usagePercent:F1}%)";
+
+        return quota.QuotaAction switch
+        {
+            QuotaAction.Warn => new QuotaCheckResult(true, reason, usagePercent),
+            QuotaAction.SoftBlock => new QuotaCheckResult(false, reason, usagePercent),
+            QuotaAction.HardBlock => new QuotaCheckResult(false, reason, usagePercent),
+            _ => new QuotaCheckResult(true, reason, usagePercent),
+        };
+    }
+
+    // typification-llm-inout-pricing — differentiated AI-Credit aggregation (opt-in). Works in CREDITS:
+    // currentCredits = Σ(input/inRatio + output/outRatio) over split records + Σ(quantity/flatRatio) over unsplit,
+    // decomposed via the store's single GetAiTokenBreakdownAsync aggregation. The limit is AiCreditsMonthly
+    // directly (credits, NOT multiplied by a ratio). additionalQuantity (nominal tokens) → credits via the flat ratio.
+    private async Task<QuotaCheckResult> CheckAiCreditQuotaPerDirectionAsync(TenantId tenantId, UsageType type, decimal additionalQuantity, CancellationToken ct)
+    {
+        var quota = await _quotaStore.GetAsync(tenantId, ct);
+        if (quota is null)
+            return new QuotaCheckResult(true, null, 0);
+
+        if (quota.AiCreditsMonthly is not { } creditsLimit)
+            return new QuotaCheckResult(true, null, 0); // null = unlimited / pay-as-you-go
+
+        var (periodStart, periodEnd) = GetCurrentPeriod();
+        var bd = await _usageStore.GetAiTokenBreakdownAsync(tenantId, type, periodStart, periodEnd, ct);
+
+        var currentCredits = bd.InputTokens / _inputRatio!.Value
+            + bd.OutputTokens / _outputRatio!.Value
+            + bd.UnsplitTokens / _creditTokenRatio;
+        var additionalCredits = additionalQuantity / _creditTokenRatio;
+        var projectedCredits = currentCredits + additionalCredits;
+        var usagePercent = (double)(projectedCredits / creditsLimit * 100m);
+
+        if (projectedCredits <= creditsLimit)
+            return new QuotaCheckResult(true, null, usagePercent);
+
+        var reason = $"{type} credit quota exceeded: {projectedCredits:F2}/{creditsLimit} ({usagePercent:F1}%)";
 
         return quota.QuotaAction switch
         {

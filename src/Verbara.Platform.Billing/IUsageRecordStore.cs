@@ -19,9 +19,28 @@ public interface IUsageRecordStore
     /// <summary>Returns the aggregated summary for a specific usage type within a date range.</summary>
     Task<UsageSummary?> GetSummaryByTypeAsync(TenantId tenantId, UsageType type, DateTimeOffset from, DateTimeOffset until, CancellationToken ct);
 
+    /// <summary>
+    /// Returns the aggregate per-direction token breakdown for differentiated AI-Credit pricing.
+    /// Records whose <see cref="UsageRecord.Metadata"/> contains BOTH <c>inputTokens</c> and <c>outputTokens</c>
+    /// contribute to <see cref="AiTokenBreakdown.InputTokens"/>/<see cref="AiTokenBreakdown.OutputTokens"/>; all
+    /// other records (NULL metadata or missing either key) contribute their <see cref="UsageRecord.Quantity"/> to
+    /// <see cref="AiTokenBreakdown.UnsplitTokens"/> (the flat-fallback bucket). A single aggregation; equivalent to
+    /// per-record evaluation.
+    /// </summary>
+    Task<AiTokenBreakdown> GetAiTokenBreakdownAsync(TenantId tenantId, UsageType type, DateTimeOffset from, DateTimeOffset until, CancellationToken ct);
+
     /// <summary>Returns paginated individual usage records for a tenant within a date range, optionally filtered by type.</summary>
     Task<IReadOnlyList<UsageRecord>> ListAsync(TenantId tenantId, DateTimeOffset from, DateTimeOffset until, UsageType? type, int page, int pageSize, CancellationToken ct);
 
     /// <summary>Deletes usage records older than cutoff and returns the count deleted (retention policy).</summary>
     Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct);
 }
+
+/// <summary>
+/// Aggregate token sums for differentiated AI-Credit pricing over a tenant + usage type + period.
+/// <paramref name="InputTokens"/>/<paramref name="OutputTokens"/> are summed over records carrying BOTH
+/// per-direction metadata keys; <paramref name="UnsplitTokens"/> is the summed <c>Quantity</c> of records
+/// lacking the split (NULL metadata or missing either key — the flat-fallback bucket). Internal billing
+/// plumbing — never serialized over the API.
+/// </summary>
+public sealed record AiTokenBreakdown(decimal InputTokens, decimal OutputTokens, decimal UnsplitTokens);
