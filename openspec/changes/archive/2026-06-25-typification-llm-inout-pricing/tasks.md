@@ -39,7 +39,7 @@
 
 ## 6. Verification
 
-- [ ] 6.1 `dotnet build Verbara.Platform.slnx` — zero warnings (TreatWarningsAsErrors, WarningLevel 9999).
-- [ ] 6.2 `dotnet test Verbara.Platform.slnx` — all green incl. new tests (Billing.Tests, Api.Tests, Storage.InMemory.Tests, Storage.Postgres.Tests).
-- [ ] 6.3 AOT gate: `dotnet publish src/Verbara.Platform.Api -r linux-x64 -c Release -p:PublishAot=true` — no IL2026/IL3050/IL207x; native ELF.
-- [ ] 6.4 CI green on the feature branch.
+- [x] 6.1 `dotnet build Verbara.Platform.slnx` — zero warnings (TreatWarningsAsErrors, WarningLevel 9999).
+- [x] 6.2 `dotnet test Verbara.Platform.slnx` — all green incl. new tests (Billing.Tests, Api.Tests, Storage.InMemory.Tests, Storage.Postgres.Tests).
+- [x] 6.3 AOT gate: `dotnet publish src/Verbara.Platform.Api -r linux-x64 -c Release -p:PublishAot=true` — no IL2026/IL3050/IL207x; native ELF.
+- [x] 6.4 CI green on the feature branch.
