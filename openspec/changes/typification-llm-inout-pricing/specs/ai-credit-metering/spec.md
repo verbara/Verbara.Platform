@@ -1,58 +1,72 @@
 ## ADDED Requirements
 
 ### Requirement: Per-direction credit ratio configuration
-`PlatformLlmOptions` SHALL expose two optional per-direction ratio properties — `InputCreditTokenRatio` and `OutputCreditTokenRatio` — alongside the existing `CreditTokenRatio`. When both per-direction ratios are set (non-null, greater than zero), the credit aggregation path MUST use them in place of the flat ratio. When either per-direction ratio is absent or zero, the system SHALL fall back to `CreditTokenRatio` for that computation.
+`PlatformLlmOptions` SHALL expose two optional per-direction ratio properties — `InputCreditTokenRatio` and `OutputCreditTokenRatio` (both `long?`) — alongside the existing `CreditTokenRatio` (`long`, default 1000). Per-direction pricing is ACTIVE only when BOTH per-direction ratios are non-null and greater than zero; otherwise the system falls back to the flat `CreditTokenRatio`. Both keys are read from the `Llm:Platform` config section in `Program.cs` via the existing AOT-safe per-key `long.TryParse` pattern (no `IConfiguration.Bind`).
 
 #### Scenario: Both per-direction ratios configured
 - **GIVEN** `PlatformLlmOptions` has `InputCreditTokenRatio = 2000` and `OutputCreditTokenRatio = 500`
-- **WHEN** the credit aggregation path resolves the effective ratio
-- **THEN** input tokens are divided by 2000 and output tokens are divided by 500 to yield the credit totals
+- **WHEN** the credit aggregation path resolves the effective pricing
+- **THEN** input tokens are divided by 2000 and output tokens by 500 to yield credit totals
 
 #### Scenario: Only flat ratio configured (legacy default)
-- **GIVEN** `PlatformLlmOptions` has `CreditTokenRatio = 1000` and `InputCreditTokenRatio` and `OutputCreditTokenRatio` are null
-- **WHEN** the credit aggregation path resolves the effective ratio
-- **THEN** total tokens are divided by 1000 using the flat ratio, preserving backward-compatible behavior
+- **GIVEN** `PlatformLlmOptions` has `CreditTokenRatio = 1000` and `InputCreditTokenRatio`/`OutputCreditTokenRatio` null (or zero)
+- **WHEN** the credit aggregation path resolves the effective pricing
+- **THEN** the existing flat token-vs-token quota path is used unchanged, preserving backward-compatible behavior
 
-### Requirement: Input/output-differentiated credit aggregation
-The quota enforcement service SHALL compute the AI Credit equivalent for `UsageType.AiAnalysis` records using the per-direction token counts stored in `UsageRecord.Metadata` (`inputTokens`, `outputTokens`) when per-direction ratios are configured. For each record the system MUST: (a) parse `inputTokens` and `outputTokens` from metadata; (b) apply `InputCreditTokenRatio` and `OutputCreditTokenRatio` respectively; (c) sum the two partial credit values as the record's credit contribution. Records whose metadata does not contain both keys MUST fall back to dividing the record's `Quantity` (total tokens) by the flat `CreditTokenRatio`.
+### Requirement: Aggregated per-direction token breakdown query
+`IUsageRecordStore` SHALL expose a method that returns, for a tenant + `UsageType` + period, the aggregate token sums needed for differentiated credit pricing — without enumerating individual records on the caller side. The method returns three decimals: the sum of `inputTokens` and the sum of `outputTokens` over records whose `Metadata` contains BOTH keys, and the sum of `Quantity` over records lacking the split (NULL metadata or missing either key — the flat-fallback bucket). This decomposition is mathematically equivalent to per-record evaluation (`Σ(input/inRatio + output/outRatio)` over split records `+ Σ(quantity/flatRatio)` over unsplit records) while remaining a single aggregation on the database hot path.
 
-#### Scenario: Record with full metadata and per-direction ratios active
-- **GIVEN** a `UsageRecord` with `Quantity = 400`, `Metadata["inputTokens"] = "300"`, `Metadata["outputTokens"] = "100"`, and `InputCreditTokenRatio = 2000`, `OutputCreditTokenRatio = 500`
-- **WHEN** the aggregation path computes this record's credit contribution
-- **THEN** the contribution is `(300 / 2000) + (100 / 500) = 0.15 + 0.20 = 0.35` credits
+#### Scenario: Postgres aggregation sums split and unsplit buckets
+- **GIVEN** AiAnalysis usage records in a period, some with `Metadata["inputTokens"]`/`["outputTokens"]` and some with NULL/absent metadata
+- **WHEN** the breakdown is queried for that tenant + `UsageType.AiAnalysis` + period
+- **THEN** it returns `InputTokens` = Σ of split records' `inputTokens`, `OutputTokens` = Σ of split records' `outputTokens`, and `UnsplitTokens` = Σ `Quantity` of records lacking the split — NULL-metadata records counting toward `UnsplitTokens`, never silently dropped
+- **THEN** the InMemory store implementation returns identical results for the same data
 
-#### Scenario: Record without metadata falls back to flat ratio
-- **GIVEN** a `UsageRecord` with `Quantity = 500` and no `Metadata` (or metadata without `inputTokens`/`outputTokens` keys), and `CreditTokenRatio = 1000`
-- **WHEN** the aggregation path computes this record's credit contribution
-- **THEN** the contribution is `500 / 1000 = 0.5` credits, using the flat fallback
+### Requirement: Input/output-differentiated credit aggregation in quota enforcement
+When per-direction ratios are active, the quota enforcement service SHALL compute the AI-Credit equivalent for `UsageType.AiAnalysis` in CREDITS (not tokens): current usage credits = `InputTokens/InputCreditTokenRatio + OutputTokens/OutputCreditTokenRatio + UnsplitTokens/CreditTokenRatio` from the breakdown query, compared against the limit `TenantQuota.AiCreditsMonthly` (in credits, NOT multiplied by a ratio). The `additionalQuantity` parameter (nominal tokens) is converted to credits via the flat `CreditTokenRatio` for the projection. When per-direction ratios are NOT active, the existing flat path (`limit = AiCreditsMonthly × CreditTokenRatio` tokens, compared to summed `TotalQuantity` tokens) is used UNCHANGED.
 
-#### Scenario: Mixed-record aggregation
-- **GIVEN** a period containing two `UsageRecord` rows — one with metadata and per-direction ratios active, one without metadata — with a flat `CreditTokenRatio = 1000`, `InputCreditTokenRatio = 2000`, `OutputCreditTokenRatio = 500`
-- **WHEN** the aggregation path sums credits for the period
-- **THEN** each record is evaluated by its own applicable path (per-direction or flat) and the results are summed without cross-contamination
+#### Scenario: Split record contributes per-direction credits
+- **GIVEN** a breakdown of `InputTokens = 300`, `OutputTokens = 100`, `UnsplitTokens = 0`, with `InputCreditTokenRatio = 2000`, `OutputCreditTokenRatio = 500`
+- **WHEN** the quota service computes current usage credits
+- **THEN** the total is `(300 / 2000) + (100 / 500) = 0.15 + 0.20 = 0.35` credits
+
+#### Scenario: Unsplit tokens fall back to the flat ratio
+- **GIVEN** a breakdown of `InputTokens = 0`, `OutputTokens = 0`, `UnsplitTokens = 500`, with `CreditTokenRatio = 1000` and per-direction ratios configured
+- **WHEN** the quota service computes current usage credits
+- **THEN** the unsplit contribution is `500 / 1000 = 0.5` credits, using the flat fallback
+
+#### Scenario: Mixed buckets summed without cross-contamination
+- **GIVEN** a breakdown of `InputTokens = 300`, `OutputTokens = 100`, `UnsplitTokens = 500`, with `CreditTokenRatio = 1000`, `InputCreditTokenRatio = 2000`, `OutputCreditTokenRatio = 500`
+- **WHEN** the quota service computes current usage credits
+- **THEN** the total is `0.15 + 0.20 + 0.50 = 0.85` credits — split and unsplit buckets each use their own ratio
 
 #### Scenario: Quota enforcement uses differentiated credit total
-- **GIVEN** a tenant with `AiCreditsMonthly = 10`, per-direction ratios configured, and consumed records whose differentiated-credit sum equals 10 credits
+- **GIVEN** a tenant with `AiCreditsMonthly = 10`, per-direction ratios configured, and a breakdown whose differentiated-credit sum equals 10 credits
+- **WHEN** `CheckQuotaAsync` is called for `UsageType.AiAnalysis` with a nominal `additionalQuantity`
+- **THEN** the projected credit usage exceeds the 10-credit limit and the configured `QuotaAction` (SoftBlock/HardBlock) is applied
+
+#### Scenario: Flat path unchanged when per-direction ratios absent
+- **GIVEN** only `CreditTokenRatio = 1000` is set (per-direction ratios null)
 - **WHEN** `CheckQuotaAsync` is called for `UsageType.AiAnalysis`
-- **THEN** the quota is reported as exhausted and the configured `QuotaAction` is applied
+- **THEN** the service uses the existing summary-based token comparison (`AiCreditsMonthly × CreditTokenRatio` vs summed `TotalQuantity`), byte-identical to current behavior — no breakdown query is issued
 
 ### Requirement: Invoice line-item reflects differentiated pricing
-When per-direction ratios are configured, the `AiAnalysis` invoice line-item MUST reflect that differentiated pricing was applied. The line-item description SHALL include an indication (e.g., `"AI Analysis (input/output pricing)"`) when split ratios are active, and the standard description (`"AiAnalysis"`) when only the flat ratio is in use.
+When per-direction ratios are configured, the `AiAnalysis` invoice line-item description MUST indicate that input/output differentiated pricing applies (e.g. `"AiAnalysis (input/output pricing)"`); otherwise the description is the unchanged enum name (`"AiAnalysis"`). The line-item AMOUNT is unchanged — it remains rate-card-driven (`overage × UnitPrice` on metered `TotalQuantity`), because the rate card prices tokens; differentiated credit pricing governs the AI-Credit allowance (quota), not the token rate card. `DefaultInvoiceGenerationService` gains `IOptions<PlatformLlmOptions>` to detect active per-direction ratios.
 
 #### Scenario: Invoice generated with per-direction ratios
-- **GIVEN** per-direction ratios `InputCreditTokenRatio` and `OutputCreditTokenRatio` are both configured
+- **GIVEN** both `InputCreditTokenRatio` and `OutputCreditTokenRatio` are configured and the rate card has an `AiAnalysis` rate
 - **WHEN** `DefaultInvoiceGenerationService.GenerateAsync` produces the `AiAnalysis` line-item
-- **THEN** the `InvoiceLineItem.Description` reflects that input/output differentiated pricing was applied
+- **THEN** the `InvoiceLineItem.Description` indicates input/output differentiated pricing was applied
 
 #### Scenario: Invoice generated with flat ratio (no change to existing behavior)
-- **GIVEN** only `CreditTokenRatio` is set and per-direction ratios are absent
+- **GIVEN** only `CreditTokenRatio` is set (per-direction ratios absent)
 - **WHEN** `DefaultInvoiceGenerationService.GenerateAsync` produces the `AiAnalysis` line-item
-- **THEN** the `InvoiceLineItem.Description` is unchanged from the current behavior (no differentiated-pricing indicator)
+- **THEN** the `InvoiceLineItem.Description` is `"AiAnalysis"` and the amount is unchanged from current behavior
 
 ## Architectural Risk
 
-**Level:** LOW
+**Level:** LOW–MEDIUM
 
-**Affected:** `Verbara.Platform.Billing` (aggregation + invoicing), `Verbara.Platform.Llm` (options class). No cross-repo impact — `PlatformLlmOptions` is host-internal and not part of the Sdk/Sdk.Pro public surface; `UsageRecord` and `UsageRecordStore` are unchanged.
+**Affected:** `Verbara.Platform.Billing` (`DefaultQuotaEnforcementService` differentiated branch, `DefaultInvoiceGenerationService` description, new `AiTokenBreakdown` record + `IUsageRecordStore` method), `Verbara.Platform.Storage.Postgres` + `Verbara.Platform.Storage.InMemory` (the new aggregation impl), `Verbara.Platform.Llm` (`PlatformLlmOptions` +2 props), `Verbara.Platform.Api` (`Program.cs` config binding for the 2 new keys). No DB migration — `usage_records.metadata` jsonb already holds the split. No cross-repo SDK/Pro change. No Web change (credit/quota responses stay numeric).
 
-**Mitigation:** The fallback path (flat `CreditTokenRatio` when metadata is absent) is exercised by all existing records, so the feature is entirely opt-in via configuration. No DB migration is required. The `BanDapperPackageReferences` guard and AOT constraints are unaffected — all new logic is reflection-free arithmetic on parsed strings, with no new serialized DTOs.
+**Mitigation:** Differentiated pricing is entirely opt-in (both ratios must be set); when absent, the flat path and the summary query are used byte-identically, so all existing records and tests are unaffected and no breakdown query is issued. The new aggregation is a single SQL `SUM` over an already-indexed (tenant_id, recorded_at) range using `jsonb_exists` (not the `?` operator, to avoid Npgsql placeholder ambiguity) and an explicit NULL-metadata guard so null-metadata rows count toward the flat-fallback bucket. AOT-safe: reflection-free arithmetic + invariant-culture parse confined to the InMemory impl; no new serialized DTO over the API (`AiTokenBreakdown` is internal billing plumbing). The `BanDapperPackageReferences` guard and `IsAotCompatible` are unaffected.

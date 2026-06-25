@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Options;
 using Verbara.Platform.Core;
+using Verbara.Platform.Llm;
 
 namespace Verbara.Platform.Billing;
 
@@ -7,15 +9,20 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
     private readonly IRateCardStore _rateCardStore;
     private readonly IUsageRecordStore _usageStore;
     private readonly IClock _clock;
+    private readonly bool _perDirectionPricing;
 
-    public DefaultInvoiceGenerationService(IRateCardStore rateCardStore, IUsageRecordStore usageStore, IClock clock)
+    public DefaultInvoiceGenerationService(IRateCardStore rateCardStore, IUsageRecordStore usageStore, IClock clock, IOptions<PlatformLlmOptions> platformOptions)
     {
         ArgumentNullException.ThrowIfNull(rateCardStore);
         ArgumentNullException.ThrowIfNull(usageStore);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(platformOptions);
         _rateCardStore = rateCardStore;
         _usageStore = usageStore;
         _clock = clock;
+        // typification-llm-inout-pricing — differentiated description active when BOTH per-direction ratios set & > 0.
+        _perDirectionPricing = platformOptions.Value.InputCreditTokenRatio is > 0
+            && platformOptions.Value.OutputCreditTokenRatio is > 0;
     }
 
     public async Task<Invoice> GenerateAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
@@ -72,7 +79,13 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
         };
     }
 
-    private static InvoiceLineItem CalculateFlatLineItem(RateEntry rate, UsageSummary summary)
+    // Differentiated AI-pricing reflected in the description only; AMOUNT stays rate-card/token-driven.
+    private string DescribeRate(RateEntry rate) =>
+        rate.UsageType == UsageType.AiAnalysis && _perDirectionPricing
+            ? "AiAnalysis (input/output pricing)"
+            : rate.UsageType.ToString();
+
+    private InvoiceLineItem CalculateFlatLineItem(RateEntry rate, UsageSummary summary)
     {
         var overage = Math.Max(0m, summary.TotalQuantity - rate.IncludedQuantity);
         var amount = overage * rate.UnitPrice;
@@ -80,7 +93,7 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
         return new InvoiceLineItem
         {
             UsageType = rate.UsageType,
-            Description = rate.UsageType.ToString(),
+            Description = DescribeRate(rate),
             Quantity = summary.TotalQuantity,
             UnitPrice = rate.UnitPrice,
             Amount = amount,
@@ -89,7 +102,7 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
         };
     }
 
-    private static InvoiceLineItem CalculateTieredLineItem(RateEntry rate, UsageSummary summary)
+    private InvoiceLineItem CalculateTieredLineItem(RateEntry rate, UsageSummary summary)
     {
         var remaining = summary.TotalQuantity;
         var totalAmount = 0m;
@@ -110,7 +123,7 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
         return new InvoiceLineItem
         {
             UsageType = rate.UsageType,
-            Description = rate.UsageType.ToString(),
+            Description = DescribeRate(rate),
             Quantity = summary.TotalQuantity,
             UnitPrice = rate.Tiers![0].UnitPrice,
             Amount = totalAmount,

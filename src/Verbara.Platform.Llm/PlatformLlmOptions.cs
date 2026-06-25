@@ -17,6 +17,17 @@ public sealed class PlatformLlmOptions
     public int MaxTokens { get; set; } = 800;
     public int TimeoutSeconds { get; set; } = 20;
 
-    /// <summary>Tokens per AI Credit (commercial unit). Default 1000. Credits = Σtokens ÷ this ratio (aggregate, never per-call).</summary>
+    /// <summary>Tokens per AI Credit (commercial unit). Default 1000. Credits = Σtokens ÷ this ratio (aggregate, never per-call).
+    /// Also the <b>flat fallback</b> ratio for records whose metadata lacks the per-direction split.</summary>
     public long CreditTokenRatio { get; set; } = 1000;
+
+    /// <summary>Tokens per AI Credit for <b>input</b> (prompt) tokens. Optional. Per-direction pricing is ACTIVE only
+    /// when BOTH this and <see cref="OutputCreditTokenRatio"/> are non-null and &gt; 0; otherwise the flat
+    /// <see cref="CreditTokenRatio"/> applies.</summary>
+    public long? InputCreditTokenRatio { get; set; }
+
+    /// <summary>Tokens per AI Credit for <b>output</b> (completion) tokens. Optional. Per-direction pricing is ACTIVE only
+    /// when BOTH this and <see cref="InputCreditTokenRatio"/> are non-null and &gt; 0; otherwise the flat
+    /// <see cref="CreditTokenRatio"/> applies.</summary>
+    public long? OutputCreditTokenRatio { get; set; }
 }

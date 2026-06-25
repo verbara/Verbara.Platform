@@ -24,6 +24,24 @@ public class DefaultQuotaEnforcementServiceTests
         return (service, quotaStore, usageStore);
     }
 
+    private static (DefaultQuotaEnforcementService Service, ITenantQuotaStore QuotaStore, IUsageRecordStore UsageStore) BuildPerDirection(
+        long creditTokenRatio = 1000, long? inputRatio = 2000, long? outputRatio = 500)
+    {
+        var quotaStore = Substitute.For<ITenantQuotaStore>();
+        var usageStore = Substitute.For<IUsageRecordStore>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(FixedNow);
+
+        var service = new DefaultQuotaEnforcementService(quotaStore, usageStore, clock,
+            Options.Create(new PlatformLlmOptions
+            {
+                CreditTokenRatio = creditTokenRatio,
+                InputCreditTokenRatio = inputRatio,
+                OutputCreditTokenRatio = outputRatio,
+            }));
+        return (service, quotaStore, usageStore);
+    }
+
     [Fact]
     public async Task CheckQuotaAsync_ShouldAllow_WhenNoQuotaConfigured()
     {
@@ -195,5 +213,122 @@ public class DefaultQuotaEnforcementServiceTests
         status.TenantId.Should().Be(Tenant1);
         status.Quota.Should().BeSameAs(quota);
         status.CurrentUsage.Should().BeSameAs(summaries);
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldUsePerDirectionCredits_WhenRatiosActive()
+    {
+        // input 300/2000 = 0.15, output 100/500 = 0.20 -> 0.35 credits, of a 10-credit allowance.
+        var (service, quotaStore, usageStore) = BuildPerDirection(creditTokenRatio: 1000, inputRatio: 2000, outputRatio: 500);
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.HardBlock });
+        usageStore.GetAiTokenBreakdownAsync(Arg.Any<TenantId>(), UsageType.AiAnalysis,
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(new AiTokenBreakdown(300m, 100m, 0m));
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 0m, CancellationToken.None);
+
+        result.Allowed.Should().BeTrue();
+        // 0.35 credits / 10 limit = 3.5%
+        result.UsagePercent.Should().BeApproximately(3.5, 0.001);
+        await usageStore.DidNotReceive().GetSummaryByTypeAsync(Arg.Any<TenantId>(), Arg.Any<UsageType>(),
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldFallBackToFlatRatio_WhenUnsplitTokens()
+    {
+        // unsplit 500 / flat 1000 = 0.5 credits of a 10-credit allowance.
+        var (service, quotaStore, usageStore) = BuildPerDirection(creditTokenRatio: 1000, inputRatio: 2000, outputRatio: 500);
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.HardBlock });
+        usageStore.GetAiTokenBreakdownAsync(Arg.Any<TenantId>(), UsageType.AiAnalysis,
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(new AiTokenBreakdown(0m, 0m, 500m));
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 0m, CancellationToken.None);
+
+        result.Allowed.Should().BeTrue();
+        // 0.5 credits / 10 limit = 5%
+        result.UsagePercent.Should().BeApproximately(5.0, 0.001);
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldSumMixedBuckets_WithoutCrossContamination()
+    {
+        // 300/2000 + 100/500 + 500/1000 = 0.15 + 0.20 + 0.50 = 0.85 credits of a 10-credit allowance.
+        var (service, quotaStore, usageStore) = BuildPerDirection(creditTokenRatio: 1000, inputRatio: 2000, outputRatio: 500);
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.HardBlock });
+        usageStore.GetAiTokenBreakdownAsync(Arg.Any<TenantId>(), UsageType.AiAnalysis,
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(new AiTokenBreakdown(300m, 100m, 500m));
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 0m, CancellationToken.None);
+
+        result.Allowed.Should().BeTrue();
+        // 0.85 credits / 10 limit = 8.5%
+        result.UsagePercent.Should().BeApproximately(8.5, 0.001);
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldUseFlatTokenPath_WhenPerDirectionRatiosAbsent()
+    {
+        // Only flat ratio configured -> existing summary-based token path, no breakdown query.
+        var (service, quotaStore, usageStore) = Build();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.SoftBlock });
+        usageStore.GetSummaryByTypeAsync(Tenant1, UsageType.AiAnalysis, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new UsageSummary
+            {
+                TenantId = Tenant1,
+                PeriodStart = PeriodStart,
+                PeriodEnd = PeriodEnd,
+                UsageType = UsageType.AiAnalysis,
+                TotalQuantity = 5000m, // 5 of 10 credits (× 1000 ratio = 5000 of 10000 tokens)
+                RecordCount = 1,
+                LastUpdatedAt = FixedNow,
+            });
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 0m, CancellationToken.None);
+
+        result.Allowed.Should().BeTrue();
+        result.UsagePercent.Should().BeApproximately(50.0, 0.001);
+        await usageStore.DidNotReceive().GetAiTokenBreakdownAsync(Arg.Any<TenantId>(), Arg.Any<UsageType>(),
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldExhaust_WhenDifferentiatedCreditsReachLimit()
+    {
+        // Differentiated credits == limit, plus additional pushes over -> deny under HardBlock.
+        var (service, quotaStore, usageStore) = BuildPerDirection(creditTokenRatio: 1000, inputRatio: 2000, outputRatio: 500);
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.HardBlock });
+        // input 20000/2000 = 10, output 0, unsplit 0 -> 10 credits == limit.
+        usageStore.GetAiTokenBreakdownAsync(Arg.Any<TenantId>(), UsageType.AiAnalysis,
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(new AiTokenBreakdown(20000m, 0m, 0m));
+
+        // additionalQuantity 1000 tokens / flat 1000 = +1 credit -> projected 11 > 10.
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        result.Allowed.Should().BeFalse();
+        result.Reason.Should().Contain("AiAnalysis");
+        result.UsagePercent.Should().BeGreaterThan(100);
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldAllowUnlimited_WhenAiCreditsNull_AndPerDirectionActive()
+    {
+        var (service, quotaStore, usageStore) = BuildPerDirection(creditTokenRatio: 1000, inputRatio: 2000, outputRatio: 500);
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = null, QuotaAction = QuotaAction.HardBlock });
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 999999m, CancellationToken.None);
+
+        result.Allowed.Should().BeTrue();
+        await usageStore.DidNotReceive().GetAiTokenBreakdownAsync(Arg.Any<TenantId>(), Arg.Any<UsageType>(),
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 }

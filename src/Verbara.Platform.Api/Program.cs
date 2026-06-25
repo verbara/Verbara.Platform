@@ -214,6 +214,11 @@ builder.Services.AddPlatformLlm(
             p.TimeoutSeconds = timeoutSeconds;
         if (long.TryParse(plat["CreditTokenRatio"], System.Globalization.CultureInfo.InvariantCulture, out var ratio))
             p.CreditTokenRatio = ratio;
+        // typification-llm-inout-pricing — opt-in per-direction ratios; only set when present (null otherwise).
+        if (long.TryParse(plat["InputCreditTokenRatio"], System.Globalization.CultureInfo.InvariantCulture, out var inRatio))
+            p.InputCreditTokenRatio = inRatio;
+        if (long.TryParse(plat["OutputCreditTokenRatio"], System.Globalization.CultureInfo.InvariantCulture, out var outRatio))
+            p.OutputCreditTokenRatio = outRatio;
     });
 // Flow execution engine + node handlers (incl. collect_reason/set_variable for the P1
 // typification capture paths). Ships a default-disabled ILlmProvider so the engine and AI

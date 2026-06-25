@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 
@@ -76,6 +77,30 @@ internal sealed class InMemoryUsageRecordStore : IUsageRecordStore
         };
 
         return Task.FromResult<UsageSummary?>(summary);
+    }
+
+    public Task<AiTokenBreakdown> GetAiTokenBreakdownAsync(TenantId tenantId, UsageType type, DateTimeOffset from, DateTimeOffset until, CancellationToken ct)
+    {
+        var filtered = GetTenantRecords(tenantId)
+            .Where(r => r.UsageType == type && r.RecordedAt >= from && r.RecordedAt < until);
+
+        decimal inSum = 0m, outSum = 0m, unsplit = 0m;
+        foreach (var r in filtered)
+        {
+            if (r.Metadata is { } m
+                && m.TryGetValue("inputTokens", out var inStr)
+                && m.TryGetValue("outputTokens", out var outStr))
+            {
+                inSum += decimal.Parse(inStr, CultureInfo.InvariantCulture);
+                outSum += decimal.Parse(outStr, CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                unsplit += r.Quantity;
+            }
+        }
+
+        return Task.FromResult(new AiTokenBreakdown(inSum, outSum, unsplit));
     }
 
     public Task<IReadOnlyList<UsageRecord>> ListAsync(TenantId tenantId, DateTimeOffset from, DateTimeOffset until, UsageType? type, int page, int pageSize, CancellationToken ct)
