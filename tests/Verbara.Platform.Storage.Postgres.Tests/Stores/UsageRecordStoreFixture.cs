@@ -18,8 +18,6 @@ public sealed class UsageRecordStoreFixture : IAsyncLifetime
         $"Host={_container!.Hostname};Port={_container.GetMappedPublicPort(5432)};" +
         "Database=postgres;Username=postgres;Password=postgres";
 
-    public NpgsqlDataSource DataSource { get; private set; } = null!;
-
     public async Task InitializeAsync()
     {
         _container = new ContainerBuilder("postgres:16-alpine")
@@ -31,9 +29,9 @@ public sealed class UsageRecordStoreFixture : IAsyncLifetime
             .Build();
 
         await _container.StartAsync();
-        DataSource = NpgsqlDataSource.Create(ConnectionString);
 
-        await using var conn = await DataSource.OpenConnectionAsync();
+        await using var conn = new NpgsqlConnection(ConnectionString);
+        await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = SchemaSql;
         await cmd.ExecuteNonQueryAsync();
@@ -41,14 +39,14 @@ public sealed class UsageRecordStoreFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (DataSource is not null) await DataSource.DisposeAsync();
         if (_container is not null) await _container.DisposeAsync();
     }
 
     /// <summary>Truncate the usage_records table between tests for isolation.</summary>
     public async Task ResetAsync()
     {
-        await using var conn = await DataSource.OpenConnectionAsync();
+        await using var conn = new NpgsqlConnection(ConnectionString);
+        await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "TRUNCATE usage_records RESTART IDENTITY CASCADE";
         await cmd.ExecuteNonQueryAsync();
@@ -72,3 +70,8 @@ public sealed class UsageRecordStoreFixture : IAsyncLifetime
         CREATE INDEX idx_usage_tenant_type ON usage_records (tenant_id, usage_type, recorded_at DESC);
         """;
 }
+
+#pragma warning disable CA1711 // Identifiers should not have incorrect suffix - xunit convention
+[CollectionDefinition("UsageRecordStore")]
+public class UsageRecordStoreCollection : ICollectionFixture<UsageRecordStoreFixture>;
+#pragma warning restore CA1711
