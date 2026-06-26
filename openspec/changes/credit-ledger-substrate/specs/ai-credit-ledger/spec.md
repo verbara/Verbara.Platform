@@ -85,7 +85,7 @@ equivalence.
 refactor), `Storage.Postgres` (migration 012 + store), `Storage.InMemory` (store twin), DI registration.
 
 **Mitigation:** The change is inert — no enforcement/metering/invoice/API path reads the ledger, so there is
-no behavioural surface to regress. The only edit to existing code is replacing five identical inlined
+no behavioural surface to regress. The only edit to existing code is replacing four identical inlined
 `GetCurrentPeriod()` computations with one shared helper, guarded by characterization tests that assert the
 boundary is unchanged. The migration is additive and idempotent. The atomic primitive is exercised by unit
 tests (including the concurrent-debit race) on both store twins.
