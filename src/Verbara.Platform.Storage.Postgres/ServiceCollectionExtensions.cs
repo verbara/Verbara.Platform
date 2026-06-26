@@ -165,6 +165,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRateCardStore, PostgresRateCardStore>();
         services.AddSingleton<IInvoiceStore, PostgresInvoiceStore>();
         services.AddSingleton<IPartnerRevenueStore, PostgresPartnerRevenueStore>();
+        services.AddSingleton<ICreditLedgerStore, PostgresCreditLedgerStore>();
 
         // GDPR
         services.AddSingleton<IPurgeLogStore, PostgresPurgeLogStore>();
