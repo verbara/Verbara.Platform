@@ -544,6 +544,7 @@ builder.Services.Configure<DunningConfig>(o =>
     if (int.TryParse(s["PaymentTermDays"], out var ptd)) o.PaymentTermDays = ptd;
 });
 builder.Services.AddHostedService<DunningService>();
+builder.Services.AddHostedService<OverageInvoiceIssuanceWorker>();
 
 // ─── ACD Distribution ───────────────────────────────────────────────────────
 builder.Services.Configure<DistributionOptions>(o =>
@@ -895,9 +896,12 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
 builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
     BotAnalyticsPersistenceService.ResiliencePolicyKey, (_, _) => BuildDbHeavyWorkerPolicy());
 
-// Hourly-cadence worker
+// Hourly-cadence workers (dunning + overage-invoice issuance share the CheckIntervalHours cadence)
 builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
     Verbara.Platform.Billing.DunningService.ResiliencePolicyKey,
+    (_, _) => BuildHourlyWorkerPolicy());
+builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
+    Verbara.Platform.Billing.OverageInvoiceIssuanceWorker.ResiliencePolicyKey,
     (_, _) => BuildHourlyWorkerPolicy());
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────

@@ -21,7 +21,7 @@ public sealed class InvoiceStoreFixture : IAsyncLifetime
 
     public string ConnectionString =>
         $"Host={_container!.Hostname};Port={_container.GetMappedPublicPort(5432)};" +
-        "Database=postgres;Username=postgres;Password=postgres";
+        "Database=postgres;Username=postgres;Password=postgres;SSL Mode=Disable";
 
     public async Task InitializeAsync()
     {

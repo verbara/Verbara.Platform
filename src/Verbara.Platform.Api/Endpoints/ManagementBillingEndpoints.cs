@@ -6,6 +6,7 @@ using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace Verbara.Platform.Api.Endpoints;
 
@@ -252,6 +253,8 @@ internal static class ManagementBillingEndpoints
         [FromQuery] string tenantId,
         [FromServices] IInvoiceStore store,
         [FromServices] IAuditService audit,
+        [FromServices] IClock clock,
+        [FromServices] IOptions<DunningConfig> dunningConfig,
         CancellationToken ct)
     {
         var tid = new TenantId(tenantId);
@@ -260,7 +263,15 @@ internal static class ManagementBillingEndpoints
             return Results.NotFound();
 
         var statusBefore = invoice.Status;
-        await store.UpdateStatusAsync(tid, EntityId.From(id), InvoiceStatus.Issued, ct);
+
+        // Stamp issuance + a due date derived from the configured payment term so the
+        // dunning cycle (which skips invoices whose DueDate is null) can observe it.
+        // SaveAsync (not UpdateStatusAsync) carries DueDate/IssuedAt through to storage.
+        var now = clock.UtcNow;
+        invoice.Status = InvoiceStatus.Issued;
+        invoice.IssuedAt = now;
+        invoice.DueDate = now.AddDays(dunningConfig.Value.PaymentTermDays);
+        await store.SaveAsync(invoice, ct);
 
         // BILL-001: emit audit on invoice issue.
         await audit.RecordAsync(
