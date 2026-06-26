@@ -225,6 +225,41 @@ public sealed class ManagementBillingEndpointTests : IClassFixture<PlatformAdmin
     }
 
     [Fact]
+    public async Task IssueInvoice_ShouldSetDueDateFromPaymentTerm_WhenIssued()
+    {
+        // Create a draft invoice via store
+        var tid = new TenantId(TestTenantId);
+        var invoiceId = EntityId.New();
+        var invoiceStore = _factory.Services.GetRequiredService<IInvoiceStore>();
+        await invoiceStore.SaveAsync(new Invoice
+        {
+            InvoiceId = invoiceId,
+            TenantId = tid,
+            PeriodStart = new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero),
+            PeriodEnd = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero),
+            Currency = "USD",
+            LineItems = [],
+            Subtotal = 0m,
+            Tax = 0m,
+            Total = 0m,
+            GeneratedAt = DateTimeOffset.UtcNow,
+        }, CancellationToken.None);
+
+        var issuedAtRequest = DateTimeOffset.UtcNow;
+        var response = await _client.PostAsync($"/api/management/invoices/{invoiceId.Value}/issue?tenantId={TestTenantId}", null);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // The endpoint stamps DueDate = clock.UtcNow + DunningConfig.PaymentTermDays (default 14)
+        // and IssuedAt, and persists the Issued status.
+        var persisted = await invoiceStore.GetByIdAsync(tid, invoiceId, CancellationToken.None);
+        persisted.Should().NotBeNull();
+        persisted!.Status.Should().Be(InvoiceStatus.Issued);
+        persisted.IssuedAt.Should().NotBeNull();
+        persisted.DueDate.Should().NotBeNull();
+        persisted.DueDate!.Value.Should().BeCloseTo(issuedAtRequest.AddDays(14), TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
     public async Task IssueInvoice_ShouldReturnNotFound_WhenMissing()
     {
         var response = await _client.PostAsync($"/api/management/invoices/nonexistent/issue?tenantId={TestTenantId}", null);

@@ -12,17 +12,18 @@ public class DefaultInvoiceGenerationServiceTests
     private static readonly DateTimeOffset PeriodEnd = new(2026, 4, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset FixedNow = new(2026, 4, 1, 12, 0, 0, TimeSpan.Zero);
 
-    private static (DefaultInvoiceGenerationService Service, IRateCardStore RateCardStore, IUsageRecordStore UsageStore, IClock Clock) Build(
+    private static (DefaultInvoiceGenerationService Service, IRateCardStore RateCardStore, IUsageRecordStore UsageStore, ITenantQuotaStore QuotaStore, IClock Clock) Build(
         PlatformLlmOptions? platformOptions = null)
     {
         var rateCardStore = Substitute.For<IRateCardStore>();
         var usageStore = Substitute.For<IUsageRecordStore>();
+        var quotaStore = Substitute.For<ITenantQuotaStore>();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(FixedNow);
 
-        var service = new DefaultInvoiceGenerationService(rateCardStore, usageStore, clock,
+        var service = new DefaultInvoiceGenerationService(rateCardStore, usageStore, quotaStore, clock,
             Options.Create(platformOptions ?? new PlatformLlmOptions { CreditTokenRatio = 1000 }));
-        return (service, rateCardStore, usageStore, clock);
+        return (service, rateCardStore, usageStore, quotaStore, clock);
     }
 
     private static RateCard MakeFlatRateCard(params RateEntry[] rates) => new()
@@ -39,7 +40,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldThrowInvalidOperation_WhenNoActiveRateCard()
     {
-        var (service, rateCardStore, _, _) = Build();
+        var (service, rateCardStore, _, _, _) = Build();
         rateCardStore.GetActiveAsync(Tenant1, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns((RateCard?)null);
 
@@ -52,7 +53,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldReturnEmptyInvoice_WhenNoUsage()
     {
-        var (service, rateCardStore, usageStore, _) = Build();
+        var (service, rateCardStore, usageStore, _, _) = Build();
         var rateCard = MakeFlatRateCard(
             new RateEntry { UsageType = UsageType.VoiceInbound, UnitPrice = 0.05m });
 
@@ -74,7 +75,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldCalculateFlatRate_WhenNoTiers()
     {
-        var (service, rateCardStore, usageStore, _) = Build();
+        var (service, rateCardStore, usageStore, _, _) = Build();
         var rateCard = MakeFlatRateCard(
             new RateEntry { UsageType = UsageType.VoiceInbound, UnitPrice = 0.05m });
 
@@ -112,7 +113,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldSubtractIncludedQuantity_WhenConfigured()
     {
-        var (service, rateCardStore, usageStore, _) = Build();
+        var (service, rateCardStore, usageStore, _, _) = Build();
         var rateCard = MakeFlatRateCard(
             new RateEntry { UsageType = UsageType.SmsOutbound, UnitPrice = 0.02m, IncludedQuantity = 100m });
 
@@ -141,7 +142,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldReturnZeroAmount_WhenUsageBelowIncluded()
     {
-        var (service, rateCardStore, usageStore, _) = Build();
+        var (service, rateCardStore, usageStore, _, _) = Build();
         var rateCard = MakeFlatRateCard(
             new RateEntry { UsageType = UsageType.SmsOutbound, UnitPrice = 0.02m, IncludedQuantity = 500m });
 
@@ -168,7 +169,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldApplyTieredPricing_WhenTiersConfigured()
     {
-        var (service, rateCardStore, usageStore, _) = Build();
+        var (service, rateCardStore, usageStore, _, _) = Build();
         var rateCard = MakeFlatRateCard(
             new RateEntry
             {
@@ -209,7 +210,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldHandleMultipleUsageTypes()
     {
-        var (service, rateCardStore, usageStore, _) = Build();
+        var (service, rateCardStore, usageStore, _, _) = Build();
         var rateCard = MakeFlatRateCard(
             new RateEntry { UsageType = UsageType.VoiceInbound, UnitPrice = 0.05m },
             new RateEntry { UsageType = UsageType.SmsOutbound, UnitPrice = 0.02m });
@@ -242,7 +243,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldSkipUsageTypes_WhenNotInRateCard()
     {
-        var (service, rateCardStore, usageStore, _) = Build();
+        var (service, rateCardStore, usageStore, _, _) = Build();
         var rateCard = MakeFlatRateCard(
             new RateEntry { UsageType = UsageType.VoiceInbound, UnitPrice = 0.05m });
 
@@ -274,7 +275,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldApplyTieredPricing_WithUnboundedLastTier()
     {
-        var (service, rateCardStore, usageStore, _) = Build();
+        var (service, rateCardStore, usageStore, _, _) = Build();
         var rateCard = MakeFlatRateCard(
             new RateEntry
             {
@@ -311,7 +312,7 @@ public class DefaultInvoiceGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_ShouldDescribePerDirectionPricing_WhenRatiosConfigured()
     {
-        var (service, rateCardStore, usageStore, _) = Build(new PlatformLlmOptions
+        var (service, rateCardStore, usageStore, quotaStore, _) = Build(new PlatformLlmOptions
         {
             CreditTokenRatio = 1000,
             InputCreditTokenRatio = 2000,
@@ -323,50 +324,174 @@ public class DefaultInvoiceGenerationServiceTests
         rateCardStore.GetActiveAsync(Tenant1, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(rateCard);
         usageStore.GetSummaryAsync(Tenant1, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
-            .Returns(new List<UsageSummary>
-            {
-                new()
-                {
-                    TenantId = Tenant1, PeriodStart = PeriodStart, PeriodEnd = PeriodEnd,
-                    UsageType = UsageType.AiAnalysis, TotalQuantity = 10000m,
-                    RecordCount = 5, LastUpdatedAt = FixedNow,
-                },
-            });
+            .Returns(new List<UsageSummary>());
+        // null allowance → pay-as-you-go; the per-direction breakdown drives consumed credits.
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = null });
+        // 2000 input/2000 + 4000 output/500 = 1 + 8 = 9 credits.
+        usageStore.GetAiTokenBreakdownAsync(Tenant1, UsageType.AiAnalysis, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new AiTokenBreakdown(2000m, 4000m, 0m));
 
         var invoice = await service.GenerateAsync(Tenant1, PeriodStart, PeriodEnd, CancellationToken.None);
 
         var line = invoice.LineItems[0];
         line.UsageType.Should().Be(UsageType.AiAnalysis);
         line.Description.Should().Be("AiAnalysis (input/output pricing)");
-        // Amount unchanged — rate-card driven (10000 × 0.001 = 10.00).
-        line.Amount.Should().Be(10.00m);
-        line.Quantity.Should().Be(10000m);
+        line.Quantity.Should().Be(9m);
+        line.IncludedQuantity.Should().Be(0m);
+        line.OverageQuantity.Should().Be(9m);
+        line.Amount.Should().Be(9m * 0.001m);
     }
 
     [Fact]
     public async Task GenerateAsync_ShouldUseStandardDescription_WhenFlatRatioOnly()
     {
-        var (service, rateCardStore, usageStore, _) = Build(new PlatformLlmOptions { CreditTokenRatio = 1000 });
+        var (service, rateCardStore, usageStore, quotaStore, _) = Build(new PlatformLlmOptions { CreditTokenRatio = 1000 });
         var rateCard = MakeFlatRateCard(
             new RateEntry { UsageType = UsageType.AiAnalysis, UnitPrice = 0.001m });
 
         rateCardStore.GetActiveAsync(Tenant1, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(rateCard);
-        usageStore.GetSummaryAsync(Tenant1, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
-            .Returns(new List<UsageSummary>
+        usageStore.GetSummaryByTypeAsync(Tenant1, UsageType.AiAnalysis, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new UsageSummary
             {
-                new()
-                {
-                    TenantId = Tenant1, PeriodStart = PeriodStart, PeriodEnd = PeriodEnd,
-                    UsageType = UsageType.AiAnalysis, TotalQuantity = 10000m,
-                    RecordCount = 5, LastUpdatedAt = FixedNow,
-                },
+                TenantId = Tenant1, PeriodStart = PeriodStart, PeriodEnd = PeriodEnd,
+                UsageType = UsageType.AiAnalysis, TotalQuantity = 10000m,
+                RecordCount = 5, LastUpdatedAt = FixedNow,
             });
+        usageStore.GetSummaryAsync(Tenant1, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>());
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = null });
 
         var invoice = await service.GenerateAsync(Tenant1, PeriodStart, PeriodEnd, CancellationToken.None);
 
         var line = invoice.LineItems[0];
         line.Description.Should().Be("AiAnalysis");
-        line.Amount.Should().Be(10.00m);
+        // Flat: 10000 tokens / 1000 = 10 credits; null allowance → full billing.
+        line.Quantity.Should().Be(10m);
+        line.IncludedQuantity.Should().Be(0m);
+        line.OverageQuantity.Should().Be(10m);
+        line.Amount.Should().Be(10m * 0.001m);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ShouldProduceNoOverageAmount_WhenAiCreditsWithinAllowance()
+    {
+        var (service, rateCardStore, usageStore, quotaStore, _) = Build(new PlatformLlmOptions { CreditTokenRatio = 1000 });
+        var rateCard = MakeFlatRateCard(
+            new RateEntry { UsageType = UsageType.AiAnalysis, UnitPrice = 0.02m });
+
+        rateCardStore.GetActiveAsync(Tenant1, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(rateCard);
+        usageStore.GetSummaryAsync(Tenant1, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>());
+        // 800000 tokens / 1000 = 800 credits consumed.
+        usageStore.GetSummaryByTypeAsync(Tenant1, UsageType.AiAnalysis, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new UsageSummary
+            {
+                TenantId = Tenant1, PeriodStart = PeriodStart, PeriodEnd = PeriodEnd,
+                UsageType = UsageType.AiAnalysis, TotalQuantity = 800000m,
+                RecordCount = 5, LastUpdatedAt = FixedNow,
+            });
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 1000 });
+
+        var invoice = await service.GenerateAsync(Tenant1, PeriodStart, PeriodEnd, CancellationToken.None);
+
+        var line = invoice.LineItems.Single(li => li.UsageType == UsageType.AiAnalysis);
+        line.IncludedQuantity.Should().Be(1000m);
+        line.Quantity.Should().Be(800m);
+        line.OverageQuantity.Should().Be(0m);
+        line.Amount.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ShouldProducePositiveOverage_WhenAiCreditsExceedAllowance()
+    {
+        var (service, rateCardStore, usageStore, quotaStore, _) = Build(new PlatformLlmOptions { CreditTokenRatio = 1000 });
+        var rateCard = MakeFlatRateCard(
+            new RateEntry { UsageType = UsageType.AiAnalysis, UnitPrice = 0.02m });
+
+        rateCardStore.GetActiveAsync(Tenant1, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(rateCard);
+        usageStore.GetSummaryAsync(Tenant1, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>());
+        // 1350000 tokens / 1000 = 1350 credits consumed.
+        usageStore.GetSummaryByTypeAsync(Tenant1, UsageType.AiAnalysis, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new UsageSummary
+            {
+                TenantId = Tenant1, PeriodStart = PeriodStart, PeriodEnd = PeriodEnd,
+                UsageType = UsageType.AiAnalysis, TotalQuantity = 1350000m,
+                RecordCount = 5, LastUpdatedAt = FixedNow,
+            });
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 1000 });
+
+        var invoice = await service.GenerateAsync(Tenant1, PeriodStart, PeriodEnd, CancellationToken.None);
+
+        var line = invoice.LineItems.Single(li => li.UsageType == UsageType.AiAnalysis);
+        line.IncludedQuantity.Should().Be(1000m);
+        line.Quantity.Should().Be(1350m);
+        line.OverageQuantity.Should().Be(350m);
+        line.Amount.Should().Be(350m * 0.02m);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ShouldBillFullConsumption_WhenAiCreditsAllowanceIsNull()
+    {
+        var (service, rateCardStore, usageStore, quotaStore, _) = Build(new PlatformLlmOptions { CreditTokenRatio = 1000 });
+        var rateCard = MakeFlatRateCard(
+            new RateEntry { UsageType = UsageType.AiAnalysis, UnitPrice = 0.02m });
+
+        rateCardStore.GetActiveAsync(Tenant1, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(rateCard);
+        usageStore.GetSummaryAsync(Tenant1, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>());
+        // 500000 tokens / 1000 = 500 credits consumed.
+        usageStore.GetSummaryByTypeAsync(Tenant1, UsageType.AiAnalysis, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new UsageSummary
+            {
+                TenantId = Tenant1, PeriodStart = PeriodStart, PeriodEnd = PeriodEnd,
+                UsageType = UsageType.AiAnalysis, TotalQuantity = 500000m,
+                RecordCount = 5, LastUpdatedAt = FixedNow,
+            });
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = null });
+
+        var invoice = await service.GenerateAsync(Tenant1, PeriodStart, PeriodEnd, CancellationToken.None);
+
+        var line = invoice.LineItems.Single(li => li.UsageType == UsageType.AiAnalysis);
+        line.IncludedQuantity.Should().Be(0m);
+        line.Quantity.Should().Be(500m);
+        line.OverageQuantity.Should().Be(500m);
+        line.Amount.Should().Be(500m * 0.02m);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ShouldProduceNoAiAnalysisLine_WhenNoAiAnalysisRateEntry()
+    {
+        var (service, rateCardStore, usageStore, quotaStore, _) = Build(new PlatformLlmOptions { CreditTokenRatio = 1000 });
+        // Rate card has NO AiAnalysis rate entry — only VoiceInbound.
+        var rateCard = MakeFlatRateCard(
+            new RateEntry { UsageType = UsageType.VoiceInbound, UnitPrice = 0.05m });
+
+        rateCardStore.GetActiveAsync(Tenant1, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(rateCard);
+        usageStore.GetSummaryAsync(Tenant1, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>());
+        usageStore.GetSummaryByTypeAsync(Tenant1, UsageType.AiAnalysis, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new UsageSummary
+            {
+                TenantId = Tenant1, PeriodStart = PeriodStart, PeriodEnd = PeriodEnd,
+                UsageType = UsageType.AiAnalysis, TotalQuantity = 5000000m,
+                RecordCount = 5, LastUpdatedAt = FixedNow,
+            });
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 1000 });
+
+        var invoice = await service.GenerateAsync(Tenant1, PeriodStart, PeriodEnd, CancellationToken.None);
+
+        invoice.LineItems.Should().NotContain(li => li.UsageType == UsageType.AiAnalysis);
     }
 }

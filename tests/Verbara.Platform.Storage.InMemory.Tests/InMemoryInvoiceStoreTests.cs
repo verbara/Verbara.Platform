@@ -123,4 +123,33 @@ public class InMemoryInvoiceStoreTests
         // Should not throw
         await _store.UpdateStatusAsync(Tenant1, EntityId.New(), InvoiceStatus.Void, CancellationToken.None);
     }
+
+    [Fact]
+    public async Task SaveAsync_ShouldRoundTripDueDateAndPaymentStatus_WhenSet()
+    {
+        var due = new DateTimeOffset(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
+        var invoice = MakeInvoice(Tenant1, DateTimeOffset.UtcNow);
+        invoice.DueDate = due;
+        invoice.PaymentStatus = PaymentStatus.Overdue;
+        await _store.SaveAsync(invoice, CancellationToken.None);
+
+        var result = await _store.GetByIdAsync(Tenant1, invoice.InvoiceId, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.DueDate.Should().Be(due);
+        result.PaymentStatus.Should().Be(PaymentStatus.Overdue);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldPersistPaymentStatusMutation_WhenReSaved()
+    {
+        var invoice = MakeInvoice(Tenant1, DateTimeOffset.UtcNow);
+        await _store.SaveAsync(invoice, CancellationToken.None);
+
+        invoice.PaymentStatus = PaymentStatus.Delinquent;
+        await _store.SaveAsync(invoice, CancellationToken.None);
+
+        var result = await _store.GetByIdAsync(Tenant1, invoice.InvoiceId, CancellationToken.None);
+        result!.PaymentStatus.Should().Be(PaymentStatus.Delinquent);
+    }
 }
