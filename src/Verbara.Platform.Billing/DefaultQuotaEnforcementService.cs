@@ -43,7 +43,7 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
         if (limit is null)
             return new QuotaCheckResult(true, null, 0);
 
-        var (periodStart, periodEnd) = GetCurrentPeriod();
+        var (periodStart, periodEnd, _) = BillingPeriod.Current(_clock);
         var summary = await _usageStore.GetSummaryByTypeAsync(tenantId, type, periodStart, periodEnd, ct);
         var currentUsage = summary?.TotalQuantity ?? 0m;
         var projectedUsage = currentUsage + additionalQuantity;
@@ -76,7 +76,7 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
         if (quota.AiCreditsMonthly is not { } creditsLimit)
             return new QuotaCheckResult(true, null, 0); // null = unlimited / pay-as-you-go
 
-        var (periodStart, periodEnd) = GetCurrentPeriod();
+        var (periodStart, periodEnd, _) = BillingPeriod.Current(_clock);
         var bd = await _usageStore.GetAiTokenBreakdownAsync(tenantId, type, periodStart, periodEnd, ct);
 
         var currentCredits = bd.InputTokens / _inputRatio!.Value
@@ -103,17 +103,10 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
     public async Task<TenantQuotaStatus> GetQuotaStatusAsync(TenantId tenantId, CancellationToken ct)
     {
         var quota = await _quotaStore.GetAsync(tenantId, ct);
-        var (periodStart, periodEnd) = GetCurrentPeriod();
+        var (periodStart, periodEnd, _) = BillingPeriod.Current(_clock);
         var summaries = await _usageStore.GetSummaryAsync(tenantId, periodStart, periodEnd, ct);
 
         return new TenantQuotaStatus(tenantId, quota, summaries);
-    }
-
-    private (DateTimeOffset Start, DateTimeOffset End) GetCurrentPeriod()
-    {
-        var now = _clock.UtcNow;
-        var start = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        return (start, start.AddMonths(1));
     }
 
     private long? GetLimitForType(TenantQuota quota, UsageType type) => type switch

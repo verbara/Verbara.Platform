@@ -120,6 +120,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITenantAddOnStore, InMemoryTenantAddOnStore>();
         services.AddSingleton<IDunningStore, InMemoryDunningStore>();
         services.AddSingleton<IPartnerRevenueStore, InMemoryPartnerRevenueStore>();
+        services.AddSingleton<ICreditLedgerStore, InMemoryCreditLedgerStore>();
 
         // Branding
         services.AddSingleton<ITenantBrandingStore, InMemoryTenantBrandingStore>();

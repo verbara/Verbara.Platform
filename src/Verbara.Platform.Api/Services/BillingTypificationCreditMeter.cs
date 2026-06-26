@@ -104,7 +104,7 @@ internal sealed partial class BillingTypificationCreditMeter(
         if (quota?.AiCreditsMonthly is not { } allowance || allowance <= 0)
             return;
 
-        var (periodStart, periodEnd) = GetCurrentPeriod();
+        var (periodStart, periodEnd, _) = BillingPeriod.Current(_clock);
         var currentCredits = await GetCurrentPeriodCreditsAsync(tenantId, periodStart, periodEnd, ct).ConfigureAwait(false);
         var thisRecordCredits = CreditsForRecord(promptTokens, completionTokens, totalTokens);
         var previousCredits = currentCredits - thisRecordCredits;
@@ -164,13 +164,6 @@ internal sealed partial class BillingTypificationCreditMeter(
         => PerDirectionActive
             ? (decimal)promptTokens / _inputRatio!.Value + (decimal)completionTokens / _outputRatio!.Value
             : (decimal)totalTokens / _creditTokenRatio;
-
-    private (DateTimeOffset Start, DateTimeOffset End) GetCurrentPeriod()
-    {
-        var now = _clock.UtcNow;
-        var start = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        return (start, start.AddMonths(1));
-    }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "AI-credit threshold notification dispatch failed for tenant {TenantId}; metering already recorded.")]
     private static partial void ThresholdNotificationFailed(ILogger logger, string tenantId, Exception exception);
