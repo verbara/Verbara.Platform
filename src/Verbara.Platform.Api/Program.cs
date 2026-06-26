@@ -540,6 +540,8 @@ builder.Services.Configure<DunningConfig>(o =>
     if (int.TryParse(s["SuspendedDays"], out var sd)) o.SuspendedDays = sd;
     if (int.TryParse(s["PendingDeletionDays"], out var pdd)) o.PendingDeletionDays = pdd;
     if (int.TryParse(s["CheckIntervalHours"], out var cih)) o.CheckIntervalHours = cih;
+    if (int.TryParse(s["OverageGraceDays"], out var ogd)) o.OverageGraceDays = ogd;
+    if (int.TryParse(s["PaymentTermDays"], out var ptd)) o.PaymentTermDays = ptd;
 });
 builder.Services.AddHostedService<DunningService>();
 

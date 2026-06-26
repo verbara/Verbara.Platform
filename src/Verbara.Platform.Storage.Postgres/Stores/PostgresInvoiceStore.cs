@@ -21,8 +21,13 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
         var lineItemsJson = JsonSerializer.Serialize(invoice.LineItems, PostgresJson.Ctx.IReadOnlyListInvoiceLineItem);
 
         await _dataSource.ExecuteAsync(
-            "INSERT INTO invoices (invoice_id, tenant_id, period_start, period_end, currency, line_items, subtotal, tax, total, status, generated_at, issued_at, paid_at) " +
-            "VALUES (@InvoiceId, @TenantId, @PeriodStart, @PeriodEnd, @Currency, @LineItems::jsonb, @Subtotal, @Tax, @Total, @Status, @GeneratedAt, @IssuedAt, @PaidAt)",
+            "INSERT INTO invoices (invoice_id, tenant_id, period_start, period_end, currency, line_items, subtotal, tax, total, status, generated_at, issued_at, paid_at, due_date, payment_status) " +
+            "VALUES (@InvoiceId, @TenantId, @PeriodStart, @PeriodEnd, @Currency, @LineItems::jsonb, @Subtotal, @Tax, @Total, @Status, @GeneratedAt, @IssuedAt, @PaidAt, @DueDate, @PaymentStatus) " +
+            "ON CONFLICT (invoice_id) DO UPDATE SET " +
+            "tenant_id = EXCLUDED.tenant_id, period_start = EXCLUDED.period_start, period_end = EXCLUDED.period_end, " +
+            "currency = EXCLUDED.currency, line_items = EXCLUDED.line_items, subtotal = EXCLUDED.subtotal, " +
+            "tax = EXCLUDED.tax, total = EXCLUDED.total, status = EXCLUDED.status, generated_at = EXCLUDED.generated_at, " +
+            "issued_at = EXCLUDED.issued_at, paid_at = EXCLUDED.paid_at, due_date = EXCLUDED.due_date, payment_status = EXCLUDED.payment_status",
             p =>
             {
                 p.Add(new NpgsqlParameter("InvoiceId",   invoice.InvoiceId.Value));
@@ -38,6 +43,8 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
                 p.Add(new NpgsqlParameter("GeneratedAt", invoice.GeneratedAt));
                 p.Add(new NpgsqlParameter("IssuedAt", NpgsqlDbType.TimestampTz) { Value = (object?)invoice.IssuedAt ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("PaidAt", NpgsqlDbType.TimestampTz) { Value = (object?)invoice.PaidAt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("DueDate", NpgsqlDbType.TimestampTz) { Value = (object?)invoice.DueDate ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("PaymentStatus", (short)invoice.PaymentStatus));
             },
             ct);
     }
@@ -45,7 +52,7 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
     public async Task<Invoice?> GetByIdAsync(TenantId tenantId, EntityId invoiceId, CancellationToken ct)
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
-            "SELECT invoice_id, tenant_id, period_start, period_end, currency, line_items, subtotal, tax, total, status, generated_at, issued_at, paid_at " +
+            "SELECT invoice_id, tenant_id, period_start, period_end, currency, line_items, subtotal, tax, total, status, generated_at, issued_at, paid_at, due_date, payment_status " +
             "FROM invoices WHERE tenant_id = @TenantId AND invoice_id = @InvoiceId",
             p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("InvoiceId", invoiceId.Value)); },
             InvoiceRow.Map, ct);
@@ -56,7 +63,7 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
     public async Task<IReadOnlyList<Invoice>> ListAsync(TenantId tenantId, int page, int pageSize, CancellationToken ct)
     {
         var rows = await _dataSource.QueryListAsync(
-            "SELECT invoice_id, tenant_id, period_start, period_end, currency, line_items, subtotal, tax, total, status, generated_at, issued_at, paid_at " +
+            "SELECT invoice_id, tenant_id, period_start, period_end, currency, line_items, subtotal, tax, total, status, generated_at, issued_at, paid_at, due_date, payment_status " +
             "FROM invoices WHERE tenant_id = @TenantId ORDER BY period_start DESC " +
             "LIMIT @PageSize OFFSET @Offset",
             p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("PageSize", pageSize)); p.Add(new NpgsqlParameter("Offset", (page - 1) * pageSize)); },
@@ -84,7 +91,7 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
     public async Task<IReadOnlyList<Invoice>> ListByStatusAsync(InvoiceStatus status, CancellationToken ct = default)
     {
         var rows = await _dataSource.QueryListAsync(
-            "SELECT invoice_id, tenant_id, period_start, period_end, currency, line_items, subtotal, tax, total, status, generated_at, issued_at, paid_at " +
+            "SELECT invoice_id, tenant_id, period_start, period_end, currency, line_items, subtotal, tax, total, status, generated_at, issued_at, paid_at, due_date, payment_status " +
             "FROM invoices WHERE status = @Status ORDER BY period_start DESC",
             p => p.Add(new NpgsqlParameter("Status", (short)status)),
             InvoiceRow.Map, ct);
@@ -107,22 +114,26 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
         public DateTime generated_at { get; init; }
         public DateTime? issued_at { get; init; }
         public DateTime? paid_at { get; init; }
+        public DateTime? due_date { get; init; }
+        public short payment_status { get; init; }
 
         public static InvoiceRow Map(NpgsqlDataReader r) => new()
         {
-            invoice_id   = r.GetString("invoice_id"),
-            tenant_id    = r.GetString("tenant_id"),
-            period_start = r.GetDateTime("period_start"),
-            period_end   = r.GetDateTime("period_end"),
-            currency     = r.GetString("currency"),
-            line_items   = r.GetString("line_items"),
-            subtotal     = r.GetDecimal("subtotal"),
-            tax          = r.GetDecimal("tax"),
-            total        = r.GetDecimal("total"),
-            status       = r.GetInt16("status"),
-            generated_at = r.GetDateTime("generated_at"),
-            issued_at    = r.GetDateTimeOrNull("issued_at"),
-            paid_at      = r.GetDateTimeOrNull("paid_at"),
+            invoice_id     = r.GetString("invoice_id"),
+            tenant_id      = r.GetString("tenant_id"),
+            period_start   = r.GetDateTime("period_start"),
+            period_end     = r.GetDateTime("period_end"),
+            currency       = r.GetString("currency"),
+            line_items     = r.GetString("line_items"),
+            subtotal       = r.GetDecimal("subtotal"),
+            tax            = r.GetDecimal("tax"),
+            total          = r.GetDecimal("total"),
+            status         = r.GetInt16("status"),
+            generated_at   = r.GetDateTime("generated_at"),
+            issued_at      = r.GetDateTimeOrNull("issued_at"),
+            paid_at        = r.GetDateTimeOrNull("paid_at"),
+            due_date       = r.GetDateTimeOrNull("due_date"),
+            payment_status = r.GetInt16("payment_status"),
         };
 
         public Invoice ToInvoice() => new()
@@ -140,6 +151,8 @@ public sealed class PostgresInvoiceStore : IInvoiceStore
             GeneratedAt = generated_at,
             IssuedAt = issued_at,
             PaidAt = paid_at,
+            DueDate = due_date,
+            PaymentStatus = (PaymentStatus)payment_status,
         };
     }
 }
