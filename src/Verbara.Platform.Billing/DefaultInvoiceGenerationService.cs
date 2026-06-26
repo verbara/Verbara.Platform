@@ -8,21 +8,29 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
 {
     private readonly IRateCardStore _rateCardStore;
     private readonly IUsageRecordStore _usageStore;
+    private readonly ITenantQuotaStore _quotaStore;
     private readonly IClock _clock;
+    private readonly long _creditTokenRatio;
+    private readonly long? _inputRatio;
+    private readonly long? _outputRatio;
     private readonly bool _perDirectionPricing;
 
-    public DefaultInvoiceGenerationService(IRateCardStore rateCardStore, IUsageRecordStore usageStore, IClock clock, IOptions<PlatformLlmOptions> platformOptions)
+    public DefaultInvoiceGenerationService(IRateCardStore rateCardStore, IUsageRecordStore usageStore, ITenantQuotaStore quotaStore, IClock clock, IOptions<PlatformLlmOptions> platformOptions)
     {
         ArgumentNullException.ThrowIfNull(rateCardStore);
         ArgumentNullException.ThrowIfNull(usageStore);
+        ArgumentNullException.ThrowIfNull(quotaStore);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(platformOptions);
         _rateCardStore = rateCardStore;
         _usageStore = usageStore;
+        _quotaStore = quotaStore;
         _clock = clock;
+        _creditTokenRatio = Math.Max(1, platformOptions.Value.CreditTokenRatio);
+        _inputRatio = platformOptions.Value.InputCreditTokenRatio;
+        _outputRatio = platformOptions.Value.OutputCreditTokenRatio;
         // typification-llm-inout-pricing — differentiated description active when BOTH per-direction ratios set & > 0.
-        _perDirectionPricing = platformOptions.Value.InputCreditTokenRatio is > 0
-            && platformOptions.Value.OutputCreditTokenRatio is > 0;
+        _perDirectionPricing = _inputRatio is > 0 && _outputRatio is > 0;
     }
 
     public async Task<Invoice> GenerateAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
@@ -32,7 +40,7 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
 
         var summaries = await _usageStore.GetSummaryAsync(tenantId, periodStart, periodEnd, ct);
 
-        return BuildInvoice(tenantId, rateCard, summaries, periodStart, periodEnd);
+        return await BuildInvoiceAsync(tenantId, rateCard, summaries, periodStart, periodEnd, ct);
     }
 
     public async Task<Invoice> GenerateWithRateCardAsync(TenantId tenantId, RateCard rateCard, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
@@ -41,10 +49,10 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
 
         var summaries = await _usageStore.GetSummaryAsync(tenantId, periodStart, periodEnd, ct);
 
-        return BuildInvoice(tenantId, rateCard, summaries, periodStart, periodEnd);
+        return await BuildInvoiceAsync(tenantId, rateCard, summaries, periodStart, periodEnd, ct);
     }
 
-    private Invoice BuildInvoice(TenantId tenantId, RateCard rateCard, IReadOnlyList<UsageSummary> summaries, DateTimeOffset periodStart, DateTimeOffset periodEnd)
+    private async Task<Invoice> BuildInvoiceAsync(TenantId tenantId, RateCard rateCard, IReadOnlyList<UsageSummary> summaries, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
     {
         var summaryByType = summaries.ToDictionary(s => s.UsageType);
 
@@ -52,6 +60,11 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
 
         foreach (var rate in rateCard.Rates)
         {
+            // AiAnalysis is billed against the per-tenant AI-credit allowance (see BuildAiCreditLineItemAsync),
+            // NOT the generic token-denominated rate-card IncludedQuantity — never both (no double-count).
+            if (rate.UsageType == UsageType.AiAnalysis)
+                continue;
+
             if (!summaryByType.TryGetValue(rate.UsageType, out var summary))
                 continue;
 
@@ -61,6 +74,10 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
 
             lineItems.Add(lineItem);
         }
+
+        var aiRate = rateCard.Rates.FirstOrDefault(r => r.UsageType == UsageType.AiAnalysis);
+        if (aiRate is not null)
+            lineItems.Add(await BuildAiCreditLineItemAsync(tenantId, aiRate, periodStart, periodEnd, ct));
 
         var subtotal = lineItems.Sum(li => li.Amount);
 
@@ -76,6 +93,42 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
             Tax = 0m,
             Total = subtotal,
             GeneratedAt = _clock.UtcNow,
+        };
+    }
+
+    // Allowance-based AI-credit overage. Consumed credits mirror DefaultQuotaEnforcementService:
+    // per-direction (Σ input/inRatio + output/outRatio + unsplit/flatRatio) when BOTH direction ratios are
+    // set & > 0; otherwise flat (Σtokens / CreditTokenRatio). The allowance is TenantQuota.AiCreditsMonthly
+    // expressed directly in CREDITS (0 when null = pay-as-you-go). Amount = overage × rate-card UnitPrice.
+    private async Task<InvoiceLineItem> BuildAiCreditLineItemAsync(TenantId tenantId, RateEntry aiRate, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
+    {
+        decimal consumedCredits;
+        if (_perDirectionPricing)
+        {
+            var bd = await _usageStore.GetAiTokenBreakdownAsync(tenantId, UsageType.AiAnalysis, periodStart, periodEnd, ct);
+            consumedCredits = bd.InputTokens / _inputRatio!.Value
+                + bd.OutputTokens / _outputRatio!.Value
+                + bd.UnsplitTokens / _creditTokenRatio;
+        }
+        else
+        {
+            var summary = await _usageStore.GetSummaryByTypeAsync(tenantId, UsageType.AiAnalysis, periodStart, periodEnd, ct);
+            consumedCredits = (summary?.TotalQuantity ?? 0m) / _creditTokenRatio;
+        }
+
+        var quota = await _quotaStore.GetAsync(tenantId, ct);
+        var allowance = quota?.AiCreditsMonthly is { } a ? a : 0m;
+        var overage = Math.Max(0m, consumedCredits - allowance);
+
+        return new InvoiceLineItem
+        {
+            UsageType = UsageType.AiAnalysis,
+            Description = DescribeRate(aiRate),
+            Quantity = consumedCredits,
+            UnitPrice = aiRate.UnitPrice,
+            Amount = overage * aiRate.UnitPrice,
+            IncludedQuantity = allowance,
+            OverageQuantity = overage,
         };
     }
 
