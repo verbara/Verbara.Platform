@@ -39,9 +39,7 @@ public sealed class DefaultMeteringService : IMeteringService
 
     public Task<IReadOnlyList<UsageSummary>> GetCurrentPeriodSummaryAsync(TenantId tenantId, CancellationToken ct)
     {
-        var now = _clock.UtcNow;
-        var periodStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        var periodEnd = periodStart.AddMonths(1);
+        var (periodStart, periodEnd, _) = BillingPeriod.Current(_clock);
 
         return _store.GetSummaryAsync(tenantId, periodStart, periodEnd, ct);
     }

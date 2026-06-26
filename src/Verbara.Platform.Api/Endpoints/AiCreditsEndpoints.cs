@@ -45,9 +45,7 @@ internal static class AiCreditsEndpoints
             return Results.Forbid();
 
         var ratio = Math.Max(1, platform.Value.CreditTokenRatio);
-        var now = clock.UtcNow;
-        var start = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        var end = start.AddMonths(1);
+        var (start, end, _) = BillingPeriod.Current(clock);
 
         var summary = await usageStore.GetSummaryByTypeAsync(tenantId, UsageType.AiAnalysis, start, end, ct);
         var consumedTokens = summary?.TotalQuantity ?? 0m;
