@@ -49,4 +49,17 @@ public sealed class PlatformLlmOptions
     /// and the shadow reconciliation confirms <c>Σ PostPaid == max(0, consumed − allowance)</c> per tenant.
     /// </summary>
     public bool LedgerInvoiceReadEnabled { get; set; }
+
+    /// <summary>
+    /// One-time cutover seed switch (default <c>false</c>) for the AI-credit ledger back-fill (ADR-0033, change b,
+    /// task B7). The ratio basis that converts <c>usage_records</c> tokens to credits lives only in this
+    /// <see cref="PlatformLlmOptions"/> config (not in raw SQL), so the current-period back-fill is a config-gated
+    /// hosted service rather than a migration. The operator flips this on for the single cutover deploy: the
+    /// <c>CreditLedgerBackfillService</c> seeds each AI-credit tenant's current-period Subscription grant and an
+    /// idempotent covered-consumption debit (covered drawn from the grant, the remainder as a PostPaid tail) once,
+    /// logs completion, then the operator flips it back off. The seed is idempotent (a <c>backfill:{periodKey}</c>
+    /// marker row), so a re-run with the flag left on is a safe no-op; it overlaps harmlessly with the
+    /// <c>CreditGrantMintWorker</c> (both grant idempotently on the same period key).
+    /// </summary>
+    public bool RunLedgerBackfill { get; set; }
 }

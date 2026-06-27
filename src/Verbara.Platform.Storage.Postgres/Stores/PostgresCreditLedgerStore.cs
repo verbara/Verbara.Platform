@@ -185,6 +185,69 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         return new MeteredDebitResult(newBalance, covered, tail);
     }
 
+    public async Task PostBackfillConsumptionAsync(TenantId tenantId, decimal consumed, string periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKey);
+
+        var now = DateTimeOffset.UtcNow;
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // A non-positive consumption seeds nothing — commit the empty transaction and return.
+        if (consumed <= 0m)
+        {
+            await tx.CommitAsync(ct);
+            return;
+        }
+
+        // Lock the projection cell for the duration of the transaction so the covered draw reads a stable
+        // balance (an absent row reads as 0). Mirrors PostMeteredDebitAsync.
+        var balance = await ReadBalanceForUpdateAsync(conn, tx, tenantId, ct);
+
+        var covered = Math.Min(balance, consumed);
+        var tail = consumed - covered;
+
+        // The covered (Subscription) debit row carries the idempotency marker external_ref = "backfill:{periodKey}".
+        // ON CONFLICT DO NOTHING against the migration-012 partial unique index (tenant_id, external_ref) is the
+        // arbiter: a second back-fill of the same period inserts 0 rows and the whole operation short-circuits.
+        var externalRef = $"backfill:{periodKey}";
+        var inserted = await InsertBackfillCoveredRowAsync(conn, tx, tenantId, -covered, externalRef, now, ct);
+
+        if (inserted == 0)
+        {
+            // Already back-filled for this period — a complete no-op (no balance decrement, no PostPaid tail).
+            await tx.CommitAsync(ct);
+            return;
+        }
+
+        if (covered > 0m)
+        {
+            // Guarded decrement of the prepaid stock drawn down by this period's covered consumption. FOR UPDATE
+            // already serialises this; the WHERE guard keeps the projection from ever going negative.
+            await conn.ExecuteAsync(
+                "UPDATE tenant_credit_balance SET " +
+                "balance = balance - @Covered, version = version + 1, updated_at = @Now " +
+                "WHERE tenant_id = @TenantId AND balance >= @Covered",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                    p.Add(new NpgsqlParameter("Covered", covered));
+                    p.Add(new NpgsqlParameter("Now", now));
+                },
+                tx, ct);
+        }
+
+        if (tail > 0m)
+        {
+            // Unconditional billable PostPaid tail (external_ref NULL — the covered marker alone guards the whole
+            // operation, so this is written exactly once). Does NOT touch the projection.
+            await InsertDebitRowAsync(conn, tx, tenantId, CreditSource.PostPaid, -tail, usageRecordId: null, now, ct);
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
     public async Task<decimal> GetPostPaidDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
     {
         // PostPaid debit amounts are negative; negate the SUM to surface the positive customer-owed overage.
@@ -228,6 +291,36 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
                 p.Add(new NpgsqlParameter("ExternalRef", NpgsqlDbType.Text) { Value = DBNull.Value });
                 p.Add(new NpgsqlParameter("ExpiresAt", NpgsqlDbType.TimestampTz) { Value = DBNull.Value });
                 p.Add(new NpgsqlParameter("UsageRecordId", NpgsqlDbType.Text) { Value = (object?)usageRecordId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedAt", NpgsqlDbType.TimestampTz) { Value = now });
+            },
+            tx, ct);
+    }
+
+    private static async Task<int> InsertBackfillCoveredRowAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        TenantId tenantId,
+        decimal signedAmount,
+        string externalRef,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        // Covered (Subscription) back-fill debit carrying the idempotency marker external_ref. ON CONFLICT
+        // DO NOTHING against the partial unique index (tenant_id, external_ref) WHERE external_ref IS NOT NULL
+        // (migration 012) makes a re-back-fill of the same period a 0-row no-op — the operation's idempotency arbiter.
+        return await conn.ExecuteAsync(
+            "INSERT INTO ai_credit_ledger " +
+            "(entry_id, tenant_id, entry_type, source, amount, period_key, external_ref, expires_at, usage_record_id, created_at) " +
+            "VALUES (@EntryId, @TenantId, @EntryType, @Source, @Amount, NULL, @ExternalRef, NULL, NULL, @CreatedAt) " +
+            "ON CONFLICT DO NOTHING",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("EntryId", NpgsqlDbType.Text) { Value = EntityId.New().Value });
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("EntryType", NpgsqlDbType.Smallint) { Value = (short)CreditEntryType.Debit });
+                p.Add(new NpgsqlParameter("Source", NpgsqlDbType.Smallint) { Value = (short)CreditSource.Subscription });
+                p.Add(new NpgsqlParameter("Amount", NpgsqlDbType.Numeric) { Value = signedAmount });
+                p.Add(new NpgsqlParameter("ExternalRef", NpgsqlDbType.Text) { Value = externalRef });
                 p.Add(new NpgsqlParameter("CreatedAt", NpgsqlDbType.TimestampTz) { Value = now });
             },
             tx, ct);

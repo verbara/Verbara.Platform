@@ -382,4 +382,48 @@ public sealed class PostgresCreditLedgerStoreTests
             CancellationToken.None);
         emptyTotal.Should().Be(0m);
     }
+
+    // Scenario: the cutover back-fill draws covered from the grant and bills the tail as PostPaid, floored at 0.
+    [Fact]
+    public async Task PostBackfillConsumptionAsync_ShouldDrawCoveredAndBillTail_WhenConsumedOverBalance()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("backfill-over");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 10m, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostBackfillConsumptionAsync(tenant, 12m, "2026-06", CancellationToken.None);
+
+        // Balance floors at 0; covered 10 (Subscription marker debit) + tail 2 (PostPaid debit).
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(1);
+
+        var periodStart = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        (await store.GetPostPaidDebitsTotalAsync(tenant, periodStart, periodEnd, CancellationToken.None)).Should().Be(2m);
+    }
+
+    // Scenario: a second back-fill of the same period is a complete no-op (the backfill: marker is the arbiter).
+    [Fact]
+    public async Task PostBackfillConsumptionAsync_ShouldBeNoOp_WhenRunTwiceForSamePeriod()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("backfill-idem");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 10m, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostBackfillConsumptionAsync(tenant, 12m, "2026-06", CancellationToken.None);
+        await store.PostBackfillConsumptionAsync(tenant, 12m, "2026-06", CancellationToken.None);
+
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+        // One grant + one covered Subscription debit + one PostPaid tail — no duplicates from the re-run.
+        (await _fixture.LedgerRowCountAsync(tenant.Value)).Should().Be(3);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(1);
+    }
 }

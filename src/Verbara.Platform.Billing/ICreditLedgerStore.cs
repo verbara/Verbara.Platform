@@ -71,4 +71,19 @@ public interface ICreditLedgerStore
 
     /// <summary>Returns the tenant's ledger entries, most recent first, paginated (1-based <paramref name="page"/>).</summary>
     Task<IReadOnlyList<CreditLedgerEntry>> GetEntriesAsync(TenantId tenantId, int page, int pageSize, CancellationToken ct);
+
+    /// <summary>
+    /// Idempotently seeds one period's already-realised AI-credit consumption onto the ledger for the cutover
+    /// back-fill (ADR-0033 addendum, task B7). Splits <paramref name="consumed"/> exactly as the runtime metered
+    /// debit would have: <c>covered = min(balance, consumed)</c> is drawn from the (already-minted) Subscription
+    /// grant and recorded as a <see cref="CreditSource.Subscription"/> debit row, and the uncovered
+    /// <c>tail = consumed − covered</c> is recorded as an unconditional <see cref="CreditSource.PostPaid"/> debit
+    /// (the customer-owed overage) that does <b>not</b> touch the projection. The <b>whole</b> operation is
+    /// idempotent on a single covered-marker row carrying <c>external_ref = "backfill:{periodKey}"</c> (the
+    /// migration-012 partial unique index on <c>(tenant_id, external_ref)</c> is the arbiter): a re-run finds the
+    /// marker already present and is a complete no-op (no second debit, no second balance decrement, no second
+    /// PostPaid tail). A non-positive <paramref name="consumed"/> is a no-op. This seeds at most one Subscription
+    /// debit and one PostPaid debit per <paramref name="periodKey"/>.
+    /// </summary>
+    Task PostBackfillConsumptionAsync(TenantId tenantId, decimal consumed, string periodKey, CancellationToken ct);
 }

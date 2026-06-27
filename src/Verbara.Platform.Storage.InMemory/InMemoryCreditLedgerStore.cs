@@ -133,6 +133,63 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         }
     }
 
+    public Task PostBackfillConsumptionAsync(TenantId tenantId, decimal consumed, string periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKey);
+
+        var now = DateTimeOffset.UtcNow;
+
+        var ledger = _ledgers.GetOrAdd(tenantId, _ => new TenantLedger());
+
+        lock (ledger.Gate)
+        {
+            // A non-positive consumption seeds nothing.
+            if (consumed <= 0m)
+                return Task.CompletedTask;
+
+            // Idempotency arbiter — the InMemory twin of the migration-012 partial unique index on
+            // (tenant_id, external_ref): a covered marker row carrying external_ref = "backfill:{periodKey}".
+            // If it already exists the whole operation is a complete no-op (mirrors ON CONFLICT DO NOTHING +
+            // the 0-row short-circuit in Postgres).
+            var externalRef = $"backfill:{periodKey}";
+            if (ledger.Entries.Any(e => e.ExternalRef == externalRef))
+                return Task.CompletedTask;
+
+            var covered = Math.Min(ledger.Balance, consumed);
+            var tail = consumed - covered;
+
+            // Covered (Subscription) marker debit row carrying the external_ref idempotency marker.
+            ledger.Entries.Add(new CreditLedgerEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenantId,
+                EntryType = CreditEntryType.Debit,
+                Source = CreditSource.Subscription,
+                Amount = -covered,
+                PeriodKey = null,
+                ExternalRef = externalRef,
+                ExpiresAt = null,
+                UsageRecordId = null,
+                CreatedAt = now,
+            });
+
+            if (covered > 0m)
+            {
+                // Draw covered from the prepaid stock; the projection floors at 0 (covered <= balance).
+                ledger.Balance -= covered;
+                ledger.Version++;
+            }
+
+            if (tail > 0m)
+            {
+                // Unconditional billable PostPaid tail — does NOT change the (floored) projection balance.
+                AppendDebit(ledger, tenantId, CreditSource.PostPaid, -tail, usageRecordId: null, now);
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
     public Task<IReadOnlyList<CreditLedgerEntry>> GetEntriesAsync(TenantId tenantId, int page, int pageSize, CancellationToken ct)
     {
         if (!_ledgers.TryGetValue(tenantId, out var ledger))

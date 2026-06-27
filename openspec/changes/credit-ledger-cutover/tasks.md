@@ -58,12 +58,20 @@
   `BillingPeriod.Current(clock).Key`, amount = allowance, `expires_at = periodEnd` (idempotent). Needs a
   tenant enumeration source — ground the available store (e.g. `ITenantQuotaStore` listing or the tenant
   catalog) before coding.
-- [ ] B7. **Back-fill migration 013** (`Storage.Postgres/Migrations/013_credit_ledger_backfill.sql`): for each
-  tenant with non-null `ai_credits_monthly`, INSERT the current-period `Subscription` grant (`ON CONFLICT DO
-  NOTHING`), a covered debit, and — if reconstructed consumed > allowance — a `PostPaid` debit with
-  `external_ref = 'backfill:<period>'`, then upsert the projection. **`consumedSoFar` reconstructed from
-  `usage_records` on the frozen ratio basis.** Idempotent (`IF NOT EXISTS` / `ON CONFLICT`). Verify ordering
-  vs the mint worker (back-fill owns the seed; mint `ON CONFLICT` makes overlap safe).
+- [ ] B7. **Back-fill as a config-gated one-time hosted service** (`Verbara.Platform.Billing/CreditLedgerBackfillService.cs`),
+  NOT a SQL migration — the per-tenant `consumedSoFar` must be reconstructed on the **frozen ratio basis**
+  (`CreditTokenRatio`/`Input`/`Output`), which lives in app config (`PlatformLlmOptions`), not reachable from
+  raw SQL. Follows the repo's one-time data-migration-service precedent (`OidcClientSecretEncryptionMigrator`,
+  `JwtLegacyKeyMigrationService`). Gated by `PlatformLlmOptions.RunLedgerBackfill` (default false). For each
+  tenant with non-null `AiCreditsMonthly`: (1) reconstruct `consumedSoFar` for `BillingPeriod.Current` via
+  `GetAiTokenBreakdownAsync` (per-direction) or `GetSummaryByTypeAsync` (flat) — same basis the runtime meter
+  uses; (2) `PostGrantAsync` the current-period `Subscription` grant (idempotent); (3) post the consumed via a
+  new **idempotent** `ICreditLedgerStore.PostBackfillConsumptionAsync(tenant, consumed, periodKey, ct)` — in one
+  tx: INSERT the covered debit (`source=Subscription`, `external_ref="backfill:{period}"`) `ON CONFLICT DO
+  NOTHING` as the idempotency marker; only if freshly inserted, decrement the projection by covered and INSERT
+  the `PostPaid` tail. Re-run is a whole no-op via `uq_ai_credit_ledger_extref`. Mint-worker overlap is safe
+  (grant `ON CONFLICT`). Postgres + InMemory twins + tests (fresh seed, re-run no-op, over-allowance tail,
+  under-allowance no tail).
 
 ## Phase C — Integration (batch)
 
