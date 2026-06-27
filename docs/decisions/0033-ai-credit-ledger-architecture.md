@@ -135,3 +135,50 @@ must complete before the invoice-read flip is enabled.
 Pre-LLM reservation/holds; per-classification idempotency id (only if at-least-once delivery is added);
 expiry sweeper (reporting only); ordered multi-lot consumption (lands with change c when a 2nd source
 ships); a real payment rail (a webhook writing a `+TopUp` entry keyed by `external_ref`).
+
+## Addendum (2026-06-27): Warn-overflow reconciliation — the debit is two-step, not block-at-zero-for-all
+
+Grounding change (b) against the shipped code (a judge-panel + completeness-critic design study) surfaced an
+**internal contradiction in this ADR + the (b) spec** that must be resolved authoritatively before (b)
+implements. The body above (notably the Decision bullet "a depleted balance ⇒ `HardBlock` regardless of
+`TenantQuota.QuotaAction`") reads as **strict prepaid block-at-zero**. But change #4 (shipped `b51ecaa4`) is
+**postpaid for `Warn` tenants** — the default action `Warn` *proceeds past the allowance and the excess is
+invoiced as overage* — and the (b) spec simultaneously asserts byte-identical preservation of that overage
+(scenario: `AiCreditsMonthly=1000`, 1350 consumed ⇒ overage 350). A `Warn` tenant cannot both hard-block at
+zero **and** overflow into billable overage. The PO decision (2026-06-27) is **preserve #4 — postpaid for
+`Warn`** (no revenue write-off, no behaviour change on flag-flip). The reconciliation:
+
+- **The metered debit is two-step (Model C), in one transaction:** `covered = min(balance, debit)` is drawn
+  from the prepaid stock via the guarded `UPDATE … WHERE balance >= @covered` (the projection floors at 0 —
+  the prepaid lot stays un-overdrawable, honouring the original block-at-zero intent **for the prepaid
+  stock**); the **uncovered remainder** `tail = debit − covered` is posted as an unconditional ledger debit
+  row tagged `source = PostPaid`, which does **not** touch the projection. So `block-at-zero` governs the
+  *prepaid lot*; `Warn` tenants overflow the tail into `PostPaid`.
+- **Quota outcome (corrected):** exhausted **prepaid** balance ⇒ `HardBlock` only for
+  `QuotaAction ∈ {SoftBlock→degrade, HardBlock→402}`; a `Warn` tenant is **never hard-blocked at zero** — it
+  overflows to `PostPaid` and keeps serving. `QuotaOutcome` still becomes the contract the endpoint switches
+  on (dropping the second `GetQuotaStatusAsync` read); the enforcement service is still the sole authority.
+- **Invoicing:** customer-owed overage = `Σ (period debit rows where source = PostPaid)`. This is **exactly**
+  the change-(c) "Invoice customer-owed = Σ allocations to PostPaid lots" shape at n=1 lots — zero rework.
+- **Balance/audit invariant (restated):** the projection is no longer `balance == Σ amount`; it is
+  `balance == max(0, Σ amount over non-PostPaid lots − Σ covered draws)` — i.e. the prepaid sub-ledger
+  re-derives the projection; `PostPaid` debits accrue *outside* the floored projection as the billable tail.
+- **Substrate correctness fix (mandatory, was a latent bug):** (a)'s `TryPostDebitAsync` hard-codes
+  `source = PostPaid` for **every** debit. A *covered* prepaid draw must record the lot it drew from
+  (`Subscription` in v1). Left unfixed, a `Σ source=PostPaid` invoice over-bills **100% of consumption** for
+  every allowance-only tenant. (b) parameterises the debit source (covered ⇒ `Subscription`, tail ⇒ `PostPaid`).
+- **Rollout discipline (C-on-D):** (b) lands all code behind feature flags **default-off**, gating **all
+  three** read seams (quota, meter, invoice) — not only invoice. Ordering: back-fill 100% **and** one
+  confirmed mint-worker tick for the current period ⇒ enable enforcement (quota+meter on ledger) ⇒ run the
+  invoice **Σ-PostPaid in shadow** for one billing period, asserting `Σ PostPaid == max(0, consumed −
+  allowance)` per tenant ⇒ only then flip the invoice read. The dual computation is a **time-boxed
+  reconciliation gate**, never the resting architecture. Back-fill seed debits carry
+  `external_ref = "backfill:{period}"` (debits are otherwise un-keyed) so re-runs are no-ops via
+  `uq_ai_credit_ledger_extref`. Ratios (`CreditTokenRatio` / `Input` / `Output`) are **frozen** across the
+  back-fill→flip window (the back-fill must reconstruct `consumedSoFar` on the same `PerDirectionActive` basis
+  the runtime meter will use).
+- **Boundary:** `balance >= projectedDebit ⇒ Allow` (use `>=`, matching the existing `<=` so "exactly at the
+  limit = allowed"). The flat-path `Reason` string becomes credit-denominated under the ledger (it is
+  internal-only — no endpoint echoes it); the change-(a) characterization tests are **re-seeded against the
+  ledger** to the same consumed values and assert the same outcomes (task "5.1 stays green unchanged" was
+  impossible as written — the tests inject `usage_records` mocks and never seeded a balance).
