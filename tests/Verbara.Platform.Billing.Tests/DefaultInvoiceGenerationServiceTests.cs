@@ -20,8 +20,9 @@ public class DefaultInvoiceGenerationServiceTests
         var quotaStore = Substitute.For<ITenantQuotaStore>();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(FixedNow);
+        var ledger = Substitute.For<ICreditLedgerStore>();
 
-        var service = new DefaultInvoiceGenerationService(rateCardStore, usageStore, quotaStore, clock,
+        var service = new DefaultInvoiceGenerationService(rateCardStore, usageStore, quotaStore, clock, ledger,
             Options.Create(platformOptions ?? new PlatformLlmOptions { CreditTokenRatio = 1000 }));
         return (service, rateCardStore, usageStore, quotaStore, clock);
     }
