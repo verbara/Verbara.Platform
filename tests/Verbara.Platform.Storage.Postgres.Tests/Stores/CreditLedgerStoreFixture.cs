@@ -78,6 +78,20 @@ public sealed class CreditLedgerStoreFixture : IAsyncLifetime
         return result is null or DBNull ? 0L : (long)result;
     }
 
+    /// <summary>Returns the count of debit rows for a tenant tagged with a given <c>source</c> ordinal.</summary>
+    public async Task<long> DebitRowCountBySourceAsync(string tenantId, short source)
+    {
+        await using var conn = new NpgsqlConnection(ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(*) FROM ai_credit_ledger WHERE tenant_id = @t AND entry_type = 1 AND source = @s";
+        cmd.Parameters.Add(new NpgsqlParameter("t", tenantId));
+        cmd.Parameters.Add(new NpgsqlParameter("s", source));
+        var result = await cmd.ExecuteScalarAsync();
+        return result is null or DBNull ? 0L : (long)result;
+    }
+
     // DDL — mirrors ai_credit_ledger + tenant_credit_balance in 012_credit_ledger.sql VERBATIM.
     private const string SchemaSql = """
         CREATE TABLE ai_credit_ledger (

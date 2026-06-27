@@ -52,13 +52,11 @@ public sealed class TypificationSuggestionMeteringTests : IDisposable
         var classification = Classification(0.9, new LlmUsage(30, 70, 100));
         var meter = Substitute.For<ITypificationCreditMeter>();
         var quota = Substitute.For<IQuotaEnforcementService>();
-        // SoftBlock: CheckQuotaAsync denies; GetQuotaStatusAsync reports a SoftBlock action so the
+        // SoftBlock: CheckQuotaAsync denies and surfaces Outcome=SoftBlock — the enforcement service is the
+        // sole authority (the endpoint switches on Outcome; no second GetQuotaStatusAsync re-read), so the
         // handler degrades to the empty suggestion (NOT 402) and never classifies/meters.
         quota.CheckQuotaAsync(Arg.Any<TenantId>(), UsageType.AiAnalysis, Arg.Any<decimal>(), Arg.Any<CancellationToken>())
-            .Returns(new QuotaCheckResult(Allowed: false, Reason: "exhausted", UsagePercent: 100));
-        quota.GetQuotaStatusAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new TenantQuotaStatus(s_tenantId,
-                new TenantQuota { TenantId = s_tenantId, QuotaAction = QuotaAction.SoftBlock }, []));
+            .Returns(new QuotaCheckResult(Allowed: false, Reason: "exhausted", UsagePercent: 100, Outcome: QuotaOutcome.SoftBlock));
 
         using var factory = WithFakesAndMeter(new FakeAiClassifier(classification), meter, quota);
         using var client = AuthenticatedClient(factory);
@@ -82,11 +80,10 @@ public sealed class TypificationSuggestionMeteringTests : IDisposable
         var classification = Classification(0.9, new LlmUsage(30, 70, 100));
         var meter = Substitute.For<ITypificationCreditMeter>();
         var quota = Substitute.For<IQuotaEnforcementService>();
+        // HardBlock: CheckQuotaAsync denies and surfaces Outcome=HardBlock — the endpoint maps it to 402
+        // directly off the QuotaCheckResult (no second GetQuotaStatusAsync re-read).
         quota.CheckQuotaAsync(Arg.Any<TenantId>(), UsageType.AiAnalysis, Arg.Any<decimal>(), Arg.Any<CancellationToken>())
-            .Returns(new QuotaCheckResult(Allowed: false, Reason: "exhausted", UsagePercent: 100));
-        quota.GetQuotaStatusAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new TenantQuotaStatus(s_tenantId,
-                new TenantQuota { TenantId = s_tenantId, QuotaAction = QuotaAction.HardBlock }, []));
+            .Returns(new QuotaCheckResult(Allowed: false, Reason: "exhausted", UsagePercent: 100, Outcome: QuotaOutcome.HardBlock));
 
         using var factory = WithFakesAndMeter(new FakeAiClassifier(classification), meter, quota);
         using var client = AuthenticatedClient(factory);

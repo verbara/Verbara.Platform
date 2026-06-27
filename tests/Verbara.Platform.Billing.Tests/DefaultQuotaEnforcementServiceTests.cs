@@ -19,7 +19,8 @@ public class DefaultQuotaEnforcementServiceTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(FixedNow);
 
-        var service = new DefaultQuotaEnforcementService(quotaStore, usageStore, clock,
+        var ledger = Substitute.For<ICreditLedgerStore>();
+        var service = new DefaultQuotaEnforcementService(quotaStore, usageStore, clock, ledger,
             Options.Create(new PlatformLlmOptions { CreditTokenRatio = 1000 }));
         return (service, quotaStore, usageStore);
     }
@@ -32,7 +33,8 @@ public class DefaultQuotaEnforcementServiceTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(FixedNow);
 
-        var service = new DefaultQuotaEnforcementService(quotaStore, usageStore, clock,
+        var ledger = Substitute.For<ICreditLedgerStore>();
+        var service = new DefaultQuotaEnforcementService(quotaStore, usageStore, clock, ledger,
             Options.Create(new PlatformLlmOptions
             {
                 CreditTokenRatio = creditTokenRatio,
@@ -330,5 +332,149 @@ public class DefaultQuotaEnforcementServiceTests
         result.Allowed.Should().BeTrue();
         await usageStore.DidNotReceive().GetAiTokenBreakdownAsync(Arg.Any<TenantId>(), Arg.Any<UsageType>(),
             Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    // ─── Credit-ledger cutover (B3 / ADR-0033 addendum, Model C) — LedgerEnforcementEnabled = true ──────
+
+    private static (DefaultQuotaEnforcementService Service, ITenantQuotaStore QuotaStore, ICreditLedgerStore Ledger) BuildLedger(
+        long creditTokenRatio = 1000)
+    {
+        var quotaStore = Substitute.For<ITenantQuotaStore>();
+        var usageStore = Substitute.For<IUsageRecordStore>();
+        var ledger = Substitute.For<ICreditLedgerStore>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(FixedNow);
+
+        var service = new DefaultQuotaEnforcementService(quotaStore, usageStore, clock, ledger,
+            Options.Create(new PlatformLlmOptions
+            {
+                CreditTokenRatio = creditTokenRatio,
+                LedgerEnforcementEnabled = true,
+            }));
+        return (service, quotaStore, ledger);
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldAllow_WhenLedgerEnabled_AndAllowanceNull()
+    {
+        var (service, quotaStore, ledger) = BuildLedger();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = null, QuotaAction = QuotaAction.HardBlock });
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        result.Allowed.Should().BeTrue();
+        result.Outcome.Should().Be(QuotaOutcome.Allow);
+        // null allowance = unlimited / pay-as-you-go — the ledger balance is never consulted.
+        await ledger.DidNotReceive().GetBalanceAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldAllow_WhenLedgerEnabled_AndBalanceCoversDebit()
+    {
+        var (service, quotaStore, ledger) = BuildLedger();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.HardBlock });
+        ledger.GetBalanceAsync(Tenant1, Arg.Any<CancellationToken>()).Returns(5m); // 5 credits remain
+
+        // additional 1000 tokens / 1000 ratio = 1 credit; balance 5 >= 1 → covered.
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        result.Allowed.Should().BeTrue();
+        result.Outcome.Should().Be(QuotaOutcome.Allow);
+        result.Reason.Should().BeNull();
+        // consumed = 10 - 5 = 5, projected = 5 + 1 = 6, of 10 → 60%.
+        result.UsagePercent.Should().BeApproximately(60.0, 0.001);
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldAllowAndWarn_WhenLedgerEnabled_AndBalanceZero_AndWarn()
+    {
+        var (service, quotaStore, ledger) = BuildLedger();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.Warn });
+        ledger.GetBalanceAsync(Tenant1, Arg.Any<CancellationToken>()).Returns(0m);
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        // Warn tenant overflows into billable PostPaid — keeps serving (Allowed=true, Outcome=Warn).
+        result.Allowed.Should().BeTrue();
+        result.Outcome.Should().Be(QuotaOutcome.Warn);
+        result.Reason.Should().Contain("AiAnalysis");
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldHardBlock_WhenLedgerEnabled_AndBalanceZero_AndHardBlock()
+    {
+        var (service, quotaStore, ledger) = BuildLedger();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.HardBlock });
+        ledger.GetBalanceAsync(Tenant1, Arg.Any<CancellationToken>()).Returns(0m);
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        result.Allowed.Should().BeFalse();
+        result.Outcome.Should().Be(QuotaOutcome.HardBlock);
+        result.Reason.Should().Contain("AiAnalysis");
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldSoftBlock_WhenLedgerEnabled_AndBalanceZero_AndSoftBlock()
+    {
+        var (service, quotaStore, ledger) = BuildLedger();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.SoftBlock });
+        ledger.GetBalanceAsync(Tenant1, Arg.Any<CancellationToken>()).Returns(0m);
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        result.Allowed.Should().BeFalse();
+        result.Outcome.Should().Be(QuotaOutcome.SoftBlock);
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldAllow_WhenLedgerEnabled_AndBalanceExactlyCoversDebit()
+    {
+        // Boundary: balance == additionalCredits → the stock exactly covers this debit (>= serves).
+        var (service, quotaStore, ledger) = BuildLedger();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.HardBlock });
+        ledger.GetBalanceAsync(Tenant1, Arg.Any<CancellationToken>()).Returns(1m); // exactly 1 credit
+
+        // additional 1000 tokens / 1000 = 1 credit; balance 1 >= 1 → covered (boundary inclusive).
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        result.Allowed.Should().BeTrue();
+        result.Outcome.Should().Be(QuotaOutcome.Allow);
+        result.Reason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldSetHardBlockOutcome_WhenLedgerDisabled_AndFlatPathExceeded()
+    {
+        // Flag OFF: the legacy flat token path runs; the Outcome must now be set (flag-independent endpoint switch).
+        // Existing numeric/string outputs (Allowed/Reason/UsagePercent) MUST stay byte-identical.
+        var (service, quotaStore, usageStore) = Build();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10, QuotaAction = QuotaAction.HardBlock });
+        usageStore.GetSummaryByTypeAsync(Tenant1, UsageType.AiAnalysis, PeriodStart, PeriodEnd, Arg.Any<CancellationToken>())
+            .Returns(new UsageSummary
+            {
+                TenantId = Tenant1,
+                PeriodStart = PeriodStart,
+                PeriodEnd = PeriodEnd,
+                UsageType = UsageType.AiAnalysis,
+                TotalQuantity = 10000m, // 10 of 10 credits (× 1000 ratio)
+                RecordCount = 1,
+                LastUpdatedAt = FixedNow,
+            });
+
+        // additional 1000 tokens pushes projected over the 10000-token (10-credit) limit.
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        result.Allowed.Should().BeFalse();
+        result.Outcome.Should().Be(QuotaOutcome.HardBlock);
+        result.Reason.Should().Be("AiAnalysis quota exceeded: 11000.0/10000 (110.0%)");
+        result.UsagePercent.Should().BeApproximately(110.0, 0.001);
     }
 }

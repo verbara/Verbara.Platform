@@ -219,6 +219,15 @@ builder.Services.AddPlatformLlm(
             p.InputCreditTokenRatio = inRatio;
         if (long.TryParse(plat["OutputCreditTokenRatio"], System.Globalization.CultureInfo.InvariantCulture, out var outRatio))
             p.OutputCreditTokenRatio = outRatio;
+        // credit-ledger-cutover (ADR-0033) — two default-off kill-switches gating the ledger read seams.
+        if (bool.TryParse(plat["LedgerEnforcementEnabled"], out var ledgerEnf))
+            p.LedgerEnforcementEnabled = ledgerEnf;
+        if (bool.TryParse(plat["LedgerInvoiceReadEnabled"], out var ledgerInv))
+            p.LedgerInvoiceReadEnabled = ledgerInv;
+        // credit-ledger-cutover (ADR-0033, task B7) — one-time current-period back-fill seed switch. Default off;
+        // the operator sets it once for the cutover deploy, the hosted service runs once and logs completion.
+        if (bool.TryParse(plat["RunLedgerBackfill"], out var runBf))
+            p.RunLedgerBackfill = runBf;
     });
 // Flow execution engine + node handlers (incl. collect_reason/set_variable for the P1
 // typification capture paths). Ships a default-disabled ILlmProvider so the engine and AI
@@ -545,6 +554,10 @@ builder.Services.Configure<DunningConfig>(o =>
 });
 builder.Services.AddHostedService<DunningService>();
 builder.Services.AddHostedService<OverageInvoiceIssuanceWorker>();
+builder.Services.AddHostedService<CreditGrantMintWorker>();
+// credit-ledger-cutover (ADR-0033, task B7) — one-time current-period back-fill seed, gated by
+// Llm:Platform:RunLedgerBackfill (default off); runs once and logs completion, idempotent on re-run.
+builder.Services.AddHostedService<CreditLedgerBackfillService>();
 
 // ─── ACD Distribution ───────────────────────────────────────────────────────
 builder.Services.Configure<DistributionOptions>(o =>
@@ -902,6 +915,9 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
     (_, _) => BuildHourlyWorkerPolicy());
 builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
     Verbara.Platform.Billing.OverageInvoiceIssuanceWorker.ResiliencePolicyKey,
+    (_, _) => BuildHourlyWorkerPolicy());
+builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
+    Verbara.Platform.Billing.CreditGrantMintWorker.ResiliencePolicyKey,
     (_, _) => BuildHourlyWorkerPolicy());
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────

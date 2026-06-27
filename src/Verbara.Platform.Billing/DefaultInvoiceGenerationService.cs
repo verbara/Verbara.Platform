@@ -10,27 +10,32 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
     private readonly IUsageRecordStore _usageStore;
     private readonly ITenantQuotaStore _quotaStore;
     private readonly IClock _clock;
+    private readonly ICreditLedgerStore _ledger;
     private readonly long _creditTokenRatio;
     private readonly long? _inputRatio;
     private readonly long? _outputRatio;
     private readonly bool _perDirectionPricing;
+    private readonly bool _ledgerInvoiceReadEnabled;
 
-    public DefaultInvoiceGenerationService(IRateCardStore rateCardStore, IUsageRecordStore usageStore, ITenantQuotaStore quotaStore, IClock clock, IOptions<PlatformLlmOptions> platformOptions)
+    public DefaultInvoiceGenerationService(IRateCardStore rateCardStore, IUsageRecordStore usageStore, ITenantQuotaStore quotaStore, IClock clock, ICreditLedgerStore ledger, IOptions<PlatformLlmOptions> platformOptions)
     {
         ArgumentNullException.ThrowIfNull(rateCardStore);
         ArgumentNullException.ThrowIfNull(usageStore);
         ArgumentNullException.ThrowIfNull(quotaStore);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(ledger);
         ArgumentNullException.ThrowIfNull(platformOptions);
         _rateCardStore = rateCardStore;
         _usageStore = usageStore;
         _quotaStore = quotaStore;
         _clock = clock;
+        _ledger = ledger;
         _creditTokenRatio = Math.Max(1, platformOptions.Value.CreditTokenRatio);
         _inputRatio = platformOptions.Value.InputCreditTokenRatio;
         _outputRatio = platformOptions.Value.OutputCreditTokenRatio;
         // typification-llm-inout-pricing — differentiated description active when BOTH per-direction ratios set & > 0.
         _perDirectionPricing = _inputRatio is > 0 && _outputRatio is > 0;
+        _ledgerInvoiceReadEnabled = platformOptions.Value.LedgerInvoiceReadEnabled;
     }
 
     public async Task<Invoice> GenerateAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
@@ -102,6 +107,31 @@ public sealed class DefaultInvoiceGenerationService : IInvoiceGenerationService
     // expressed directly in CREDITS (0 when null = pay-as-you-go). Amount = overage × rate-card UnitPrice.
     private async Task<InvoiceLineItem> BuildAiCreditLineItemAsync(TenantId tenantId, RateEntry aiRate, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
     {
+        // Credit-ledger cutover (ADR-0033 addendum, Model C). When the kill-switch is on, the customer-owed
+        // overage is read straight from the ledger — Σ|PostPaid debits| in the period, the already-positive
+        // billable remainder (no re-Math.Max). The display Quantity (true consumed credits) is reconstructed
+        // from the allowance and the post-debit balance: under-allowance ⇒ allowance−balance, over-allowance ⇒
+        // allowance+overage. Default-off: the legacy usage_records computation below runs byte-for-byte unchanged.
+        if (_ledgerInvoiceReadEnabled)
+        {
+            var ledgerQuota = await _quotaStore.GetAsync(tenantId, ct);
+            var ledgerAllowance = ledgerQuota?.AiCreditsMonthly is { } la ? la : 0m;
+            var ledgerOverage = await _ledger.GetPostPaidDebitsTotalAsync(tenantId, periodStart, periodEnd, ct);
+            var ledgerBalance = await _ledger.GetBalanceAsync(tenantId, ct);
+            var ledgerConsumed = Math.Max(0m, ledgerAllowance - ledgerBalance) + ledgerOverage;
+
+            return new InvoiceLineItem
+            {
+                UsageType = UsageType.AiAnalysis,
+                Description = DescribeRate(aiRate),
+                Quantity = ledgerConsumed,
+                UnitPrice = aiRate.UnitPrice,
+                Amount = ledgerOverage * aiRate.UnitPrice,
+                IncludedQuantity = ledgerAllowance,
+                OverageQuantity = ledgerOverage,
+            };
+        }
+
         decimal consumedCredits;
         if (_perDirectionPricing)
         {

@@ -113,7 +113,7 @@ public sealed class InMemoryCreditLedgerStoreTests
         var store = new InMemoryCreditLedgerStore();
         await store.PostGrantAsync(MakeGrant(amount: 300m), CancellationToken.None);
 
-        var result = await store.TryPostDebitAsync(Tenant1, 100m, "usage-1", CancellationToken.None);
+        var result = await store.TryPostDebitAsync(Tenant1, 100m, CreditSource.Subscription, "usage-1", CancellationToken.None);
 
         result.IsPosted.Should().BeTrue();
         result.Outcome.Should().Be(CreditDebitOutcome.Posted);
@@ -126,6 +126,8 @@ public sealed class InMemoryCreditLedgerStoreTests
         var debit = entries[0]; // most-recent-first
         debit.EntryType.Should().Be(CreditEntryType.Debit);
         debit.Amount.Should().Be(-100m);
+        // A covered draw records the lot it drew from (Subscription), NOT a hard-coded PostPaid.
+        debit.Source.Should().Be(CreditSource.Subscription);
         debit.UsageRecordId.Should().Be("usage-1");
     }
 
@@ -135,7 +137,7 @@ public sealed class InMemoryCreditLedgerStoreTests
         var store = new InMemoryCreditLedgerStore();
         await store.PostGrantAsync(MakeGrant(amount: 50m), CancellationToken.None);
 
-        var result = await store.TryPostDebitAsync(Tenant1, 100m, "usage-1", CancellationToken.None);
+        var result = await store.TryPostDebitAsync(Tenant1, 100m, CreditSource.Subscription, "usage-1", CancellationToken.None);
 
         result.IsPosted.Should().BeFalse();
         result.Outcome.Should().Be(CreditDebitOutcome.RejectedInsufficientBalance);
@@ -152,7 +154,7 @@ public sealed class InMemoryCreditLedgerStoreTests
     {
         var store = new InMemoryCreditLedgerStore();
 
-        var result = await store.TryPostDebitAsync(Tenant1, 1m, null, CancellationToken.None);
+        var result = await store.TryPostDebitAsync(Tenant1, 1m, CreditSource.Subscription, null, CancellationToken.None);
 
         result.IsPosted.Should().BeFalse();
         result.Outcome.Should().Be(CreditDebitOutcome.RejectedInsufficientBalance);
@@ -169,7 +171,7 @@ public sealed class InMemoryCreditLedgerStoreTests
 
         const int concurrency = 64;
         var tasks = Enumerable.Range(0, concurrency)
-            .Select(_ => Task.Run(() => store.TryPostDebitAsync(Tenant1, 5m, null, CancellationToken.None)))
+            .Select(_ => Task.Run(() => store.TryPostDebitAsync(Tenant1, 5m, CreditSource.Subscription, null, CancellationToken.None)))
             .ToArray();
 
         var results = await Task.WhenAll(tasks);
@@ -189,8 +191,8 @@ public sealed class InMemoryCreditLedgerStoreTests
     {
         var store = new InMemoryCreditLedgerStore();
         await store.PostGrantAsync(MakeGrant(amount: 1000m), CancellationToken.None);
-        await store.TryPostDebitAsync(Tenant1, 10m, "u1", CancellationToken.None);
-        await store.TryPostDebitAsync(Tenant1, 20m, "u2", CancellationToken.None);
+        await store.TryPostDebitAsync(Tenant1, 10m, CreditSource.Subscription, "u1", CancellationToken.None);
+        await store.TryPostDebitAsync(Tenant1, 20m, CreditSource.Subscription, "u2", CancellationToken.None);
 
         var page1 = await store.GetEntriesAsync(Tenant1, 1, 2, CancellationToken.None);
         page1.Should().HaveCount(2);
@@ -212,5 +214,122 @@ public sealed class InMemoryCreditLedgerStoreTests
 
         (await store.GetBalanceAsync(Tenant1, CancellationToken.None)).Should().Be(300m);
         (await store.GetBalanceAsync(tenant2, CancellationToken.None)).Should().Be(50m);
+    }
+
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldDrawFromCoveredLot_WhenFullyCovered()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 10m), CancellationToken.None);
+
+        var result = await store.PostMeteredDebitAsync(Tenant1, 4m, CreditSource.Subscription, "usage-c", CancellationToken.None);
+
+        result.NewBalance.Should().Be(6m);
+        result.CoveredAmount.Should().Be(4m);
+        result.PostPaidAmount.Should().Be(0m);
+        (await store.GetBalanceAsync(Tenant1, CancellationToken.None)).Should().Be(6m);
+
+        var entries = await store.GetEntriesAsync(Tenant1, 1, 50, CancellationToken.None);
+        var debits = entries.Where(e => e.EntryType == CreditEntryType.Debit).ToList();
+        debits.Should().HaveCount(1);
+        debits[0].Source.Should().Be(CreditSource.Subscription);
+        debits[0].Amount.Should().Be(-4m);
+    }
+
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldFloorAndPostPostPaidTail_WhenOverflowing()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 3m), CancellationToken.None);
+
+        var result = await store.PostMeteredDebitAsync(Tenant1, 5m, CreditSource.Subscription, "usage-o", CancellationToken.None);
+
+        result.NewBalance.Should().Be(0m);
+        result.CoveredAmount.Should().Be(3m);
+        result.PostPaidAmount.Should().Be(2m);
+        (await store.GetBalanceAsync(Tenant1, CancellationToken.None)).Should().Be(0m);
+
+        var entries = await store.GetEntriesAsync(Tenant1, 1, 50, CancellationToken.None);
+        var debits = entries.Where(e => e.EntryType == CreditEntryType.Debit).ToList();
+        debits.Count(d => d.Source == CreditSource.Subscription && d.Amount == -3m).Should().Be(1);
+        debits.Count(d => d.Source == CreditSource.PostPaid && d.Amount == -2m).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldPostFullPostPaidTail_WhenNoPrepaidBalance()
+    {
+        var store = new InMemoryCreditLedgerStore();
+
+        var result = await store.PostMeteredDebitAsync(Tenant1, 7m, CreditSource.Subscription, "usage-z", CancellationToken.None);
+
+        result.NewBalance.Should().Be(0m);
+        result.CoveredAmount.Should().Be(0m);
+        result.PostPaidAmount.Should().Be(7m);
+        (await store.GetBalanceAsync(Tenant1, CancellationToken.None)).Should().Be(0m);
+
+        var entries = await store.GetEntriesAsync(Tenant1, 1, 50, CancellationToken.None);
+        var debits = entries.Where(e => e.EntryType == CreditEntryType.Debit).ToList();
+        debits.Should().HaveCount(1);
+        debits[0].Source.Should().Be(CreditSource.PostPaid);
+        debits[0].Amount.Should().Be(-7m);
+    }
+
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldNeverOverdrawPrepaid_WhenConcurrent()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 4m), CancellationToken.None);
+
+        const int concurrency = 32;
+        var tasks = Enumerable.Range(0, concurrency)
+            .Select(_ => Task.Run(() => store.PostMeteredDebitAsync(Tenant1, 3m, CreditSource.Subscription, null, CancellationToken.None)))
+            .ToArray();
+
+        var results = await Task.WhenAll(tasks);
+
+        // The projection never goes negative; total covered across all calls equals the original balance.
+        (await store.GetBalanceAsync(Tenant1, CancellationToken.None)).Should().Be(0m);
+        results.Sum(r => r.CoveredAmount).Should().Be(4m);
+        // Every call posts its full debit; the uncovered remainder all lands as PostPaid tail.
+        results.Sum(r => r.PostPaidAmount).Should().Be(concurrency * 3m - 4m);
+    }
+
+    [Fact]
+    public async Task GetPostPaidDebitsTotalAsync_ShouldSumOnlyPeriodPostPaidDebits_WhenMixedEntries()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 3m), CancellationToken.None);
+
+        // Covered 3 + PostPaid tail 2, then a pure PostPaid debit of 4 (balance already 0).
+        await store.PostMeteredDebitAsync(Tenant1, 5m, CreditSource.Subscription, "u1", CancellationToken.None);
+        await store.PostMeteredDebitAsync(Tenant1, 4m, CreditSource.Subscription, "u2", CancellationToken.None);
+
+        var periodStart = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var total = await store.GetPostPaidDebitsTotalAsync(Tenant1, periodStart, periodEnd, CancellationToken.None);
+
+        // PostPaid tail 2 + PostPaid 4 = 6 (the -3 covered Subscription debit is excluded).
+        total.Should().Be(6m);
+
+        var emptyTotal = await store.GetPostPaidDebitsTotalAsync(
+            Tenant1,
+            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2020, 2, 1, 0, 0, 0, TimeSpan.Zero),
+            CancellationToken.None);
+        emptyTotal.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task GetPostPaidDebitsTotalAsync_ShouldReturnZero_WhenNoLedger()
+    {
+        var store = new InMemoryCreditLedgerStore();
+
+        var total = await store.GetPostPaidDebitsTotalAsync(
+            Tenant1,
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            CancellationToken.None);
+
+        total.Should().Be(0m);
     }
 }

@@ -27,6 +27,7 @@ internal sealed partial class BillingTypificationCreditMeter(
     IUsageRecordStore usageStore,
     ITenantQuotaStore quotaStore,
     INotificationService notifications,
+    ICreditLedgerStore ledger,
     IOptions<PlatformLlmOptions> platformOptions) : ITypificationCreditMeter
 {
     private const decimal WarningFraction = 0.8m;
@@ -36,11 +37,13 @@ internal sealed partial class BillingTypificationCreditMeter(
     private readonly IUsageRecordStore _usageStore = usageStore ?? throw new ArgumentNullException(nameof(usageStore));
     private readonly ITenantQuotaStore _quotaStore = quotaStore ?? throw new ArgumentNullException(nameof(quotaStore));
     private readonly INotificationService _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+    private readonly ICreditLedgerStore _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
     private readonly ILogger<BillingTypificationCreditMeter>? _logger;
 
     private readonly long _creditTokenRatio = Math.Max(1, platformOptions.Value.CreditTokenRatio);
     private readonly long? _inputRatio = platformOptions.Value.InputCreditTokenRatio;
     private readonly long? _outputRatio = platformOptions.Value.OutputCreditTokenRatio;
+    private readonly bool _ledgerEnforcementEnabled = platformOptions.Value.LedgerEnforcementEnabled;
 
     public BillingTypificationCreditMeter(
         IMeteringService metering,
@@ -48,9 +51,10 @@ internal sealed partial class BillingTypificationCreditMeter(
         IUsageRecordStore usageStore,
         ITenantQuotaStore quotaStore,
         INotificationService notifications,
+        ICreditLedgerStore ledger,
         IOptions<PlatformLlmOptions> platformOptions,
         ILogger<BillingTypificationCreditMeter> logger)
-        : this(metering, clock, usageStore, quotaStore, notifications, platformOptions)
+        : this(metering, clock, usageStore, quotaStore, notifications, ledger, platformOptions)
         => _logger = logger;
 
     /// <summary>Per-direction (input/output) credit pricing is active only when BOTH ratios are set and &gt; 0.</summary>
@@ -79,6 +83,26 @@ internal sealed partial class BillingTypificationCreditMeter(
             },
         };
         await _metering.RecordBatchAsync(new[] { record }, ct).ConfigureAwait(false);
+
+        // Best-effort ledger debit (Model C two-step covered + PostPaid tail) — independently fenced and
+        // gated behind LedgerEnforcementEnabled. The usage_records audit row above is already written
+        // unconditionally; a thrown/failed debit only logs and MUST NEVER break metering.
+        if (_ledgerEnforcementEnabled)
+        {
+            try
+            {
+                var credits = CreditsForRecord(promptTokens, completionTokens, totalTokens);
+                if (credits > 0m)
+                {
+                    _ = await _ledger.PostMeteredDebitAsync(tenantId, credits, CreditSource.Subscription, record.RecordId.Value, ct).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (_logger is not null)
+                    LedgerDebitFailed(_logger, tenantId.Value, ex);
+            }
+        }
 
         // Best-effort threshold notification — MUST NEVER break metering.
         try
@@ -167,4 +191,7 @@ internal sealed partial class BillingTypificationCreditMeter(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "AI-credit threshold notification dispatch failed for tenant {TenantId}; metering already recorded.")]
     private static partial void ThresholdNotificationFailed(ILogger logger, string tenantId, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "AI-credit ledger debit failed for tenant {TenantId}; metering already recorded.")]
+    private static partial void LedgerDebitFailed(ILogger logger, string tenantId, Exception exception);
 }

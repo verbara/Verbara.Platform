@@ -30,4 +30,36 @@ public sealed class PlatformLlmOptions
     /// when BOTH this and <see cref="InputCreditTokenRatio"/> are non-null and &gt; 0; otherwise the flat
     /// <see cref="CreditTokenRatio"/> applies.</summary>
     public long? OutputCreditTokenRatio { get; set; }
+
+    /// <summary>
+    /// Cutover kill-switch (default <c>false</c>) for the AI-credit ledger (ADR-0033, change b). When on, the
+    /// AiAnalysis quota check and the metering funnel read the ledger projection + post a metered debit instead
+    /// of recomputing from <c>usage_records</c> against the <c>AiCreditsMonthly</c> scalar; when off the legacy
+    /// path runs unchanged. This gates <b>both</b> the quota and meter seams. The cutover flip order is
+    /// enforcement → invoice-read-shadow → invoice-read, so this flag flips first (after back-fill + one
+    /// mint-worker tick); see <see cref="LedgerInvoiceReadEnabled"/>.
+    /// </summary>
+    public bool LedgerEnforcementEnabled { get; set; }
+
+    /// <summary>
+    /// Cutover kill-switch (default <c>false</c>) for the invoice Σ-PostPaid flip (ADR-0033, change b). When on,
+    /// <c>BuildAiCreditLineItemAsync</c> derives customer-owed AiAnalysis overage as the sum of the period's
+    /// <c>PostPaid</c> debit rows instead of recomputing from <c>usage_records</c>; when off the legacy invoice
+    /// path runs unchanged. This flag flips <b>last</b> — only after <see cref="LedgerEnforcementEnabled"/> is on
+    /// and the shadow reconciliation confirms <c>Σ PostPaid == max(0, consumed − allowance)</c> per tenant.
+    /// </summary>
+    public bool LedgerInvoiceReadEnabled { get; set; }
+
+    /// <summary>
+    /// One-time cutover seed switch (default <c>false</c>) for the AI-credit ledger back-fill (ADR-0033, change b,
+    /// task B7). The ratio basis that converts <c>usage_records</c> tokens to credits lives only in this
+    /// <see cref="PlatformLlmOptions"/> config (not in raw SQL), so the current-period back-fill is a config-gated
+    /// hosted service rather than a migration. The operator flips this on for the single cutover deploy: the
+    /// <c>CreditLedgerBackfillService</c> seeds each AI-credit tenant's current-period Subscription grant and an
+    /// idempotent covered-consumption debit (covered drawn from the grant, the remainder as a PostPaid tail) once,
+    /// logs completion, then the operator flips it back off. The seed is idempotent (a <c>backfill:{periodKey}</c>
+    /// marker row), so a re-run with the flag left on is a safe no-op; it overlaps harmlessly with the
+    /// <c>CreditGrantMintWorker</c> (both grant idempotently on the same period key).
+    /// </summary>
+    public bool RunLedgerBackfill { get; set; }
 }

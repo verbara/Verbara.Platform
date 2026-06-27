@@ -18,19 +18,33 @@ public sealed class BillingTypificationCreditMeterTests
         out IUsageRecordStore usageStore,
         out ITenantQuotaStore quotaStore,
         out INotificationService notifications,
+        out ICreditLedgerStore ledger,
         IOptions<PlatformLlmOptions>? options = null)
     {
         usageStore = Substitute.For<IUsageRecordStore>();
         quotaStore = Substitute.For<ITenantQuotaStore>();
         notifications = Substitute.For<INotificationService>();
+        ledger = Substitute.For<ICreditLedgerStore>();
         return new BillingTypificationCreditMeter(
             metering,
             Substitute.For<IClock>(),
             usageStore,
             quotaStore,
             notifications,
+            ledger,
             options ?? FlatOptions());
     }
+
+    private static BillingTypificationCreditMeter CreateSut(
+        IMeteringService metering,
+        out IUsageRecordStore usageStore,
+        out ITenantQuotaStore quotaStore,
+        out INotificationService notifications,
+        IOptions<PlatformLlmOptions>? options = null)
+        => CreateSut(metering, out usageStore, out quotaStore, out notifications, out _, options);
+
+    private static IOptions<PlatformLlmOptions> LedgerOnOptions(long ratio = 1)
+        => Options.Create(new PlatformLlmOptions { CreditTokenRatio = ratio, LedgerEnforcementEnabled = true });
 
     private static void StubQuota(ITenantQuotaStore quotaStore, TenantId tenant, long? allowance)
         => quotaStore.GetAsync(tenant, Arg.Any<CancellationToken>())
@@ -158,5 +172,77 @@ public sealed class BillingTypificationCreditMeterTests
 
         await notifications.DidNotReceive().CreateAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldPostMeteredSubscriptionDebit_WhenLedgerEnforcementEnabled()
+    {
+        // CreditTokenRatio=10 → 250 tokens / 10 = 25 credits, drawn against the Subscription lot.
+        var tenant = new TenantId("t1");
+        var metering = Substitute.For<IMeteringService>();
+        var sut = CreateSut(metering, out var usageStore, out var quotaStore, out _, out var ledger, LedgerOnOptions(ratio: 10));
+        StubQuota(quotaStore, tenant, null);
+        StubPeriodTotal(usageStore, tenant, postRecordTotalTokens: 250);
+
+        // Capture the usage_record id that the audit write produced so we can assert the back-reference.
+        string? recordedUsageId = null;
+        await metering.RecordBatchAsync(
+            Arg.Do<IReadOnlyList<UsageRecord>>(r => recordedUsageId = r[0].RecordId.Value),
+            Arg.Any<CancellationToken>());
+
+        await sut.RecordAsync(tenant, "conv1", promptTokens: 100, completionTokens: 150, totalTokens: 250, "gpt-x", CancellationToken.None);
+
+        recordedUsageId.Should().NotBeNull();
+        await ledger.Received(1).PostMeteredDebitAsync(
+            tenant,
+            25m,
+            CreditSource.Subscription,
+            recordedUsageId,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldNotPostLedgerDebit_WhenLedgerEnforcementDisabled()
+    {
+        var tenant = new TenantId("t1");
+        var metering = Substitute.For<IMeteringService>();
+        var sut = CreateSut(metering, out var usageStore, out var quotaStore, out _, out var ledger);
+        StubQuota(quotaStore, tenant, null);
+        StubPeriodTotal(usageStore, tenant, postRecordTotalTokens: 250);
+
+        await sut.RecordAsync(tenant, "conv1", promptTokens: 100, completionTokens: 150, totalTokens: 250, "gpt-x", CancellationToken.None);
+
+        await ledger.DidNotReceive().PostMeteredDebitAsync(
+            Arg.Any<TenantId>(), Arg.Any<decimal>(), Arg.Any<CreditSource>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldStillRecordMetering_WhenLedgerDebitThrows()
+    {
+        var tenant = new TenantId("t1");
+        var metering = Substitute.For<IMeteringService>();
+        var sut = CreateSut(metering, out var usageStore, out var quotaStore, out _, out var ledger, LedgerOnOptions());
+        StubQuota(quotaStore, tenant, null);
+        StubPeriodTotal(usageStore, tenant, postRecordTotalTokens: 100);
+        ledger.PostMeteredDebitAsync(Arg.Any<TenantId>(), Arg.Any<decimal>(), Arg.Any<CreditSource>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns<Task<MeteredDebitResult>>(_ => throw new InvalidOperationException("ledger down"));
+
+        var act = async () => await sut.RecordAsync(tenant, "conv1", promptTokens: 30, completionTokens: 70, totalTokens: 100, "gpt-x", CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        await metering.Received(1).RecordBatchAsync(Arg.Any<IReadOnlyList<UsageRecord>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldNotPostLedgerDebit_WhenTotalTokensNonPositive()
+    {
+        var tenant = new TenantId("t1");
+        var metering = Substitute.For<IMeteringService>();
+        var sut = CreateSut(metering, out _, out _, out _, out var ledger, LedgerOnOptions());
+
+        await sut.RecordAsync(tenant, "conv1", 0, 0, 0, "gpt-x", CancellationToken.None);
+
+        await ledger.DidNotReceive().PostMeteredDebitAsync(
+            Arg.Any<TenantId>(), Arg.Any<decimal>(), Arg.Any<CreditSource>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 }

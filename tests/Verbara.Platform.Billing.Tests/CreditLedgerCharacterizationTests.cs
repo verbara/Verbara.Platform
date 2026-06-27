@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Platform.Llm;
+using Verbara.Platform.Storage.InMemory;
 
 namespace Verbara.Platform.Billing.Tests;
 
@@ -31,7 +32,8 @@ public class CreditLedgerCharacterizationTests
     {
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(QuotaNow);
-        return new DefaultQuotaEnforcementService(quotaStore, usageStore, clock,
+        var ledger = Substitute.For<ICreditLedgerStore>();
+        return new DefaultQuotaEnforcementService(quotaStore, usageStore, clock, ledger,
             Options.Create(new PlatformLlmOptions
             {
                 CreditTokenRatio = creditTokenRatio,
@@ -146,16 +148,19 @@ public class CreditLedgerCharacterizationTests
 
     private static DefaultInvoiceGenerationService BuildInvoice(
         IRateCardStore rateCardStore, IUsageRecordStore usageStore, ITenantQuotaStore quotaStore,
-        long creditTokenRatio, long? inputRatio, long? outputRatio)
+        long creditTokenRatio, long? inputRatio, long? outputRatio,
+        ICreditLedgerStore? ledger = null, bool ledgerInvoiceReadEnabled = false)
     {
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(InvoiceNow);
         return new DefaultInvoiceGenerationService(rateCardStore, usageStore, quotaStore, clock,
+            ledger ?? Substitute.For<ICreditLedgerStore>(),
             Options.Create(new PlatformLlmOptions
             {
                 CreditTokenRatio = creditTokenRatio,
                 InputCreditTokenRatio = inputRatio,
                 OutputCreditTokenRatio = outputRatio,
+                LedgerInvoiceReadEnabled = ledgerInvoiceReadEnabled,
             }));
     }
 
@@ -259,6 +264,129 @@ public class CreditLedgerCharacterizationTests
 
         var service = BuildInvoice(rateCardStore, usageStore, quotaStore, creditTokenRatio: 1000, inputRatio: 2000, outputRatio: 500);
         var invoice = await service.GenerateWithRateCardAsync(Tenant1, AiOnlyRateCard(0.25m), PeriodStart, PeriodEnd, CancellationToken.None);
+
+        var line = invoice.LineItems.Single(li => li.UsageType == UsageType.AiAnalysis);
+        line.Description.Should().Be("AiAnalysis (input/output pricing)");
+        line.Quantity.Should().Be(21m);
+        line.IncludedQuantity.Should().Be(10m);
+        line.OverageQuantity.Should().Be(11m);
+        line.UnitPrice.Should().Be(0.25m);
+        line.Amount.Should().Be(2.75m);
+        invoice.Total.Should().Be(2.75m);
+    }
+
+    // ─── BuildAiCreditLineItemAsync — ledger read path (LedgerInvoiceReadEnabled = true) ─────────────
+    //
+    // The cutover derives the customer-owed overage from the ledger (Σ|PostPaid debits| in the period) and
+    // reconstructs the display Quantity as max(0, allowance − balance) + overage. These tests seed a real
+    // InMemoryCreditLedgerStore (Subscription grant + a metered debit producing the covered/PostPaid split)
+    // and must reproduce the SAME numbers the flag-off characterization tests pin above — proving the cutover
+    // is value-equivalent at the invoice boundary. The seeded debits are stamped with the InMemory store's
+    // wall-clock CreatedAt, so the read window brackets "now" to keep GetPostPaidDebitsTotalAsync inclusive.
+
+    private static (DateTimeOffset Start, DateTimeOffset End) LedgerWindow()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return (now.AddDays(-1), now.AddDays(1));
+    }
+
+    private static CreditLedgerEntry SubscriptionGrant(decimal amount) => new()
+    {
+        EntryId = EntityId.New(),
+        TenantId = Tenant1,
+        EntryType = CreditEntryType.Grant,
+        Source = CreditSource.Subscription,
+        Amount = amount,
+        PeriodKey = "2026-03",
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
+
+    [Fact]
+    public async Task BuildAiCreditLineItem_ShouldMatchFlatOverage_WhenLedgerReadEnabled()
+    {
+        // grant 10, metered debit 12 ⇒ covered 10 + PostPaid 2, balance 0. allowance 10 ⇒ overage 2.
+        // consumed = max(0, 10 − 0) + 2 = 12. price 0.50 ⇒ amount 1.00. Mirrors the flag-off flat-overage case.
+        var rateCardStore = Substitute.For<IRateCardStore>();
+        var usageStore = Substitute.For<IUsageRecordStore>();
+        var quotaStore = Substitute.For<ITenantQuotaStore>();
+        var ledger = new InMemoryCreditLedgerStore();
+        var (start, end) = LedgerWindow();
+
+        usageStore.GetSummaryAsync(Tenant1, start, end, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>());
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10 });
+
+        await ledger.PostGrantAsync(SubscriptionGrant(10m), CancellationToken.None);
+        await ledger.PostMeteredDebitAsync(Tenant1, 12m, CreditSource.Subscription, usageRecordId: null, CancellationToken.None);
+
+        var service = BuildInvoice(rateCardStore, usageStore, quotaStore, creditTokenRatio: 1000, inputRatio: null, outputRatio: null,
+            ledger: ledger, ledgerInvoiceReadEnabled: true);
+        var invoice = await service.GenerateWithRateCardAsync(Tenant1, AiOnlyRateCard(0.50m), start, end, CancellationToken.None);
+
+        var line = invoice.LineItems.Single(li => li.UsageType == UsageType.AiAnalysis);
+        line.Description.Should().Be("AiAnalysis");
+        line.Quantity.Should().Be(12m);
+        line.IncludedQuantity.Should().Be(10m);
+        line.OverageQuantity.Should().Be(2m);
+        line.UnitPrice.Should().Be(0.50m);
+        line.Amount.Should().Be(1.00m);
+        invoice.Total.Should().Be(1.00m);
+    }
+
+    [Fact]
+    public async Task BuildAiCreditLineItem_ShouldMatchZeroAmount_WhenLedgerReadEnabled_AndUnderAllowance()
+    {
+        // grant 10, metered debit 8 ⇒ covered 8 + PostPaid 0, balance 2. allowance 10 ⇒ overage 0.
+        // consumed = max(0, 10 − 2) + 0 = 8. amount 0. Mirrors the flag-off under-allowance case.
+        var rateCardStore = Substitute.For<IRateCardStore>();
+        var usageStore = Substitute.For<IUsageRecordStore>();
+        var quotaStore = Substitute.For<ITenantQuotaStore>();
+        var ledger = new InMemoryCreditLedgerStore();
+        var (start, end) = LedgerWindow();
+
+        usageStore.GetSummaryAsync(Tenant1, start, end, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>());
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10 });
+
+        await ledger.PostGrantAsync(SubscriptionGrant(10m), CancellationToken.None);
+        await ledger.PostMeteredDebitAsync(Tenant1, 8m, CreditSource.Subscription, usageRecordId: null, CancellationToken.None);
+
+        var service = BuildInvoice(rateCardStore, usageStore, quotaStore, creditTokenRatio: 1000, inputRatio: null, outputRatio: null,
+            ledger: ledger, ledgerInvoiceReadEnabled: true);
+        var invoice = await service.GenerateWithRateCardAsync(Tenant1, AiOnlyRateCard(0.50m), start, end, CancellationToken.None);
+
+        var line = invoice.LineItems.Single(li => li.UsageType == UsageType.AiAnalysis);
+        line.Quantity.Should().Be(8m);
+        line.IncludedQuantity.Should().Be(10m);
+        line.OverageQuantity.Should().Be(0m);
+        line.Amount.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task BuildAiCreditLineItem_ShouldMatchPerDirectionOverage_WhenLedgerReadEnabled()
+    {
+        // grant 10, metered debit 21 ⇒ covered 10 + PostPaid 11, balance 0. allowance 10 ⇒ overage 11.
+        // consumed = max(0, 10 − 0) + 11 = 21. price 0.25 ⇒ amount 2.75. Mirrors the flag-off per-direction case.
+        // (per-direction ratios are set so DescribeRate still emits the input/output label — options-driven.)
+        var rateCardStore = Substitute.For<IRateCardStore>();
+        var usageStore = Substitute.For<IUsageRecordStore>();
+        var quotaStore = Substitute.For<ITenantQuotaStore>();
+        var ledger = new InMemoryCreditLedgerStore();
+        var (start, end) = LedgerWindow();
+
+        usageStore.GetSummaryAsync(Tenant1, start, end, Arg.Any<CancellationToken>())
+            .Returns(new List<UsageSummary>());
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10 });
+
+        await ledger.PostGrantAsync(SubscriptionGrant(10m), CancellationToken.None);
+        await ledger.PostMeteredDebitAsync(Tenant1, 21m, CreditSource.Subscription, usageRecordId: null, CancellationToken.None);
+
+        var service = BuildInvoice(rateCardStore, usageStore, quotaStore, creditTokenRatio: 1000, inputRatio: 2000, outputRatio: 500,
+            ledger: ledger, ledgerInvoiceReadEnabled: true);
+        var invoice = await service.GenerateWithRateCardAsync(Tenant1, AiOnlyRateCard(0.25m), start, end, CancellationToken.None);
 
         var line = invoice.LineItems.Single(li => li.UsageType == UsageType.AiAnalysis);
         line.Description.Should().Be("AiAnalysis (input/output pricing)");
