@@ -26,4 +26,13 @@ internal sealed class InMemoryTenantQuotaStore : ITenantQuotaStore
         _quotas.TryRemove(tenantId, out _);
         return Task.CompletedTask;
     }
+
+    public Task<IReadOnlyList<TenantQuota>> ListWithAiCreditsAsync(CancellationToken ct)
+    {
+        // Snapshot of every quota that carries an AI-credit allowance — the mint-worker work-list.
+        IReadOnlyList<TenantQuota> result = _quotas.Values
+            .Where(q => q.AiCreditsMonthly is not null)
+            .ToList();
+        return Task.FromResult(result);
+    }
 }

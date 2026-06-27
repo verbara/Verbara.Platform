@@ -64,6 +64,18 @@ internal sealed class PostgresTenantQuotaStore : ITenantQuotaStore
             ct);
     }
 
+    public async Task<IReadOnlyList<TenantQuota>> ListWithAiCreditsAsync(CancellationToken ct)
+    {
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT tenant_id, max_concurrent_channels, max_active_campaigns, " +
+            "max_monthly_voice_minutes, max_monthly_messages, max_storage_bytes, max_active_agents, quota_action, ai_credits_monthly " +
+            "FROM tenant_quotas WHERE ai_credits_monthly IS NOT NULL",
+            static p => { },
+            QuotaRow.Map, ct);
+
+        return rows.Select(r => r.ToQuota()).ToList();
+    }
+
     private sealed class QuotaRow
     {
         public string tenant_id { get; init; } = null!;

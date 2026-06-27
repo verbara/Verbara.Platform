@@ -550,6 +550,7 @@ builder.Services.Configure<DunningConfig>(o =>
 });
 builder.Services.AddHostedService<DunningService>();
 builder.Services.AddHostedService<OverageInvoiceIssuanceWorker>();
+builder.Services.AddHostedService<CreditGrantMintWorker>();
 
 // ─── ACD Distribution ───────────────────────────────────────────────────────
 builder.Services.Configure<DistributionOptions>(o =>
@@ -907,6 +908,9 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
     (_, _) => BuildHourlyWorkerPolicy());
 builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
     Verbara.Platform.Billing.OverageInvoiceIssuanceWorker.ResiliencePolicyKey,
+    (_, _) => BuildHourlyWorkerPolicy());
+builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
+    Verbara.Platform.Billing.CreditGrantMintWorker.ResiliencePolicyKey,
     (_, _) => BuildHourlyWorkerPolicy());
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
