@@ -324,13 +324,13 @@ internal static class ConversationEndpoints
         if (isPlatformManaged)
         {
             var q = await quota.CheckQuotaAsync(tenantId, UsageType.AiAnalysis, additionalQuantity: 1m, ct);
-            if (!q.Allowed)
+            switch (q.Outcome)
             {
-                // SoftBlock + HardBlock both set Allowed=false; map HardBlock to 402, SoftBlock to degrade.
-                var qq = await quota.GetQuotaStatusAsync(tenantId, ct);
-                if (qq.Quota?.QuotaAction == QuotaAction.HardBlock)
+                case QuotaOutcome.HardBlock:
                     return Results.Json(new ErrorResponse("AI credit allowance exhausted."), ApiJsonContext.Default.ErrorResponse, statusCode: 402);
-                return Results.Ok(EmptySuggestion);
+                case QuotaOutcome.SoftBlock:
+                    return Results.Ok(EmptySuggestion);
+                // Allow + Warn proceed (Warn overflows into PostPaid overage).
             }
         }
 

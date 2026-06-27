@@ -31,7 +31,8 @@ public class CreditLedgerCharacterizationTests
     {
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(QuotaNow);
-        return new DefaultQuotaEnforcementService(quotaStore, usageStore, clock,
+        var ledger = Substitute.For<ICreditLedgerStore>();
+        return new DefaultQuotaEnforcementService(quotaStore, usageStore, clock, ledger,
             Options.Create(new PlatformLlmOptions
             {
                 CreditTokenRatio = creditTokenRatio,

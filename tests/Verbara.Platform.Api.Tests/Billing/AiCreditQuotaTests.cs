@@ -20,7 +20,8 @@ public sealed class AiCreditQuotaTests
                 UsageType = UsageType.AiAnalysis, TotalQuantity = consumedTokens, RecordCount = 1, LastUpdatedAt = default });
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(new DateTimeOffset(2026, 6, 23, 0, 0, 0, TimeSpan.Zero));
-        return new DefaultQuotaEnforcementService(quotaStore, usageStore, clock,
+        var ledger = Substitute.For<ICreditLedgerStore>();
+        return new DefaultQuotaEnforcementService(quotaStore, usageStore, clock, ledger,
             Options.Create(new PlatformLlmOptions { CreditTokenRatio = 1000 }));
     }
 
