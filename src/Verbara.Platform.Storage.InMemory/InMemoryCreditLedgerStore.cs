@@ -11,9 +11,10 @@ namespace Verbara.Platform.Storage.InMemory;
 /// <c>period_key</c> for subscription or <c>external_ref</c> for top-up), and a guarded compare-and-decrement
 /// debit that can never drive the balance negative even under concurrency. Each tenant's
 /// <c>(balance, version)</c> projection cell is mutated under a per-tenant lock that stands in for the
-/// Postgres row-level <c>UPDATE … WHERE balance &gt;= @amount</c> guard. See ADR-0033 / the
-/// credit-ledger-substrate spec delta. This substrate is inert — nothing reads or writes the ledger at
-/// runtime yet.
+/// Postgres row-level <c>UPDATE … WHERE balance &gt;= @amount</c> guard. The metered debit
+/// (<see cref="PostMeteredDebitAsync"/>) mirrors the Postgres two-step covered-plus-PostPaid split
+/// (ADR-0033 addendum, Model C). See ADR-0033 / the credit-ledger-substrate spec delta. Change (b)
+/// (credit-ledger-cutover) wires the runtime call-sites onto this store behind default-off flags.
 /// </summary>
 internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
 {
@@ -57,7 +58,7 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         return Task.CompletedTask;
     }
 
-    public Task<CreditDebitResult> TryPostDebitAsync(TenantId tenantId, decimal amount, string? usageRecordId, CancellationToken ct)
+    public Task<CreditDebitResult> TryPostDebitAsync(TenantId tenantId, decimal amount, CreditSource source, string? usageRecordId, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
 
@@ -74,22 +75,61 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
             ledger.Balance -= amount;
             ledger.Version++;
 
-            // Append the negative-amount debit row in the same critical section as the projection update.
-            ledger.Entries.Add(new CreditLedgerEntry
-            {
-                EntryId = EntityId.New(),
-                TenantId = tenantId,
-                EntryType = CreditEntryType.Debit,
-                Source = CreditSource.PostPaid,
-                Amount = -amount,
-                PeriodKey = null,
-                ExternalRef = null,
-                ExpiresAt = null,
-                UsageRecordId = usageRecordId,
-                CreatedAt = now,
-            });
+            // Append the negative-amount debit row in the same critical section as the projection update. The
+            // row records the lot it drew from (source) — never hard-coded PostPaid.
+            AppendDebit(ledger, tenantId, source, -amount, usageRecordId, now);
 
             return Task.FromResult(CreditDebitResult.Posted(ledger.Balance));
+        }
+    }
+
+    public Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, CreditSource coveredSource, string? usageRecordId, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        var ledger = _ledgers.GetOrAdd(tenantId, _ => new TenantLedger());
+
+        lock (ledger.Gate)
+        {
+            // Two-step covered-plus-PostPaid split under the per-tenant lock — the InMemory twin of the
+            // Postgres single-transaction FOR UPDATE + guarded decrement + unconditional tail.
+            var covered = Math.Min(ledger.Balance, debit);
+            var tail = debit - covered;
+
+            if (covered > 0m)
+            {
+                // Draw covered from the prepaid stock; the projection floors at 0 (covered <= balance).
+                ledger.Balance -= covered;
+                ledger.Version++;
+                AppendDebit(ledger, tenantId, coveredSource, -covered, usageRecordId, now);
+            }
+
+            if (tail > 0m)
+            {
+                // Unconditional billable PostPaid tail — does NOT change the (floored) projection balance.
+                AppendDebit(ledger, tenantId, CreditSource.PostPaid, -tail, usageRecordId, now);
+            }
+
+            return Task.FromResult(new MeteredDebitResult(ledger.Balance, covered, tail));
+        }
+    }
+
+    public Task<decimal> GetPostPaidDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
+    {
+        if (!_ledgers.TryGetValue(tenantId, out var ledger))
+            return Task.FromResult(0m);
+
+        lock (ledger.Gate)
+        {
+            // PostPaid debit amounts are negative; negate to surface the positive customer-owed overage.
+            var total = ledger.Entries
+                .Where(e => e.EntryType == CreditEntryType.Debit
+                    && e.Source == CreditSource.PostPaid
+                    && e.CreatedAt >= periodStart
+                    && e.CreatedAt < periodEnd)
+                .Sum(e => -e.Amount);
+
+            return Task.FromResult(total);
         }
     }
 
@@ -111,6 +151,29 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
 
             return Task.FromResult(result);
         }
+    }
+
+    private static void AppendDebit(
+        TenantLedger ledger,
+        TenantId tenantId,
+        CreditSource source,
+        decimal signedAmount,
+        string? usageRecordId,
+        DateTimeOffset now)
+    {
+        ledger.Entries.Add(new CreditLedgerEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = tenantId,
+            EntryType = CreditEntryType.Debit,
+            Source = source,
+            Amount = signedAmount,
+            PeriodKey = null,
+            ExternalRef = null,
+            ExpiresAt = null,
+            UsageRecordId = usageRecordId,
+            CreatedAt = now,
+        });
     }
 
     private static string? ResolveGrantIdempotencyKey(CreditLedgerEntry grant)

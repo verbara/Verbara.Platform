@@ -13,9 +13,10 @@ namespace Verbara.Platform.Storage.Postgres.Stores;
 /// ledger. Grants apply unconditionally and are idempotent on <c>period_key</c> (subscription) or
 /// <c>external_ref</c> (top-up) via the partial unique indexes + <c>ON CONFLICT DO NOTHING</c>; debits are
 /// applied by a single guarded projection <c>UPDATE … WHERE balance &gt;= @amount</c> in the same
-/// transaction as the ledger row, so the balance can never go negative even under concurrency.
-/// See ADR-0033 / the credit-ledger-substrate spec delta. This substrate is inert — nothing reads or
-/// writes the ledger at runtime yet.
+/// transaction as the ledger row, so the balance can never go negative even under concurrency. The metered
+/// debit (<see cref="PostMeteredDebitAsync"/>) splits consumption into a covered prepaid draw plus a billable
+/// <c>PostPaid</c> tail (ADR-0033 addendum, Model C). See ADR-0033 / the credit-ledger-substrate spec delta.
+/// Change (b) (credit-ledger-cutover) wires the runtime call-sites onto this store behind default-off flags.
 /// </summary>
 internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
 {
@@ -84,7 +85,7 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         await tx.CommitAsync(ct);
     }
 
-    public async Task<CreditDebitResult> TryPostDebitAsync(TenantId tenantId, decimal amount, string? usageRecordId, CancellationToken ct)
+    public async Task<CreditDebitResult> TryPostDebitAsync(TenantId tenantId, decimal amount, CreditSource source, string? usageRecordId, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
 
@@ -112,7 +113,8 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
             return CreditDebitResult.RejectedInsufficientBalance;
         }
 
-        // Append the negative-amount ledger debit row in the SAME transaction as the projection update.
+        // Append the negative-amount ledger debit row in the SAME transaction as the projection update. The
+        // row records the lot it drew from (@Source) — never hard-coded PostPaid.
         await conn.ExecuteAsync(
             "INSERT INTO ai_credit_ledger " +
             "(entry_id, tenant_id, entry_type, source, amount, period_key, external_ref, expires_at, usage_record_id, created_at) " +
@@ -122,7 +124,7 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
                 p.Add(new NpgsqlParameter("EntryId", EntityId.New().Value));
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("EntryType", (short)CreditEntryType.Debit));
-                p.Add(new NpgsqlParameter("Source", (short)CreditSource.PostPaid));
+                p.Add(new NpgsqlParameter("Source", (short)source));
                 p.Add(new NpgsqlParameter("Amount", -amount));
                 p.Add(new NpgsqlParameter("UsageRecordId", NpgsqlDbType.Text) { Value = (object?)usageRecordId ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("CreatedAt", now));
@@ -134,6 +136,101 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
 
         await tx.CommitAsync(ct);
         return CreditDebitResult.Posted(newBalance);
+    }
+
+    public async Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, CreditSource coveredSource, string? usageRecordId, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // Lock the projection row (if any) for the duration of the transaction so a concurrent metered debit
+        // cannot read a stale balance and over-draw the prepaid lot. An absent row reads as balance 0.
+        var balance = await ReadBalanceForUpdateAsync(conn, tx, tenantId, ct);
+
+        var covered = Math.Min(balance, debit);
+        var tail = debit - covered;
+
+        if (covered > 0m)
+        {
+            // Guarded decrement of the prepaid stock. FOR UPDATE already serialises this; the WHERE guard is
+            // belt-and-suspenders so the projection can never go negative even if the lock were ever lost.
+            await conn.ExecuteAsync(
+                "UPDATE tenant_credit_balance SET " +
+                "balance = balance - @Covered, version = version + 1, updated_at = @Now " +
+                "WHERE tenant_id = @TenantId AND balance >= @Covered",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                    p.Add(new NpgsqlParameter("Covered", covered));
+                    p.Add(new NpgsqlParameter("Now", now));
+                },
+                tx, ct);
+
+            // Covered debit row records the lot it drew from (@CoveredSource), -covered amount.
+            await InsertDebitRowAsync(conn, tx, tenantId, coveredSource, -covered, usageRecordId, now, ct);
+        }
+
+        if (tail > 0m)
+        {
+            // Unconditional billable PostPaid tail — does NOT touch the projection (it stays floored at 0).
+            await InsertDebitRowAsync(conn, tx, tenantId, CreditSource.PostPaid, -tail, usageRecordId, now, ct);
+        }
+
+        // Re-read the post-debit projection balance within the transaction.
+        var newBalance = await ReadBalanceAsync(conn, tx, tenantId, ct);
+
+        await tx.CommitAsync(ct);
+        return new MeteredDebitResult(newBalance, covered, tail);
+    }
+
+    public async Task<decimal> GetPostPaidDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
+    {
+        // PostPaid debit amounts are negative; negate the SUM to surface the positive customer-owed overage.
+        return await _dataSource.ExecuteScalarAsync<decimal?>(
+            "SELECT COALESCE(-SUM(amount), 0) FROM ai_credit_ledger " +
+            "WHERE tenant_id = @TenantId AND source = @PostPaid AND entry_type = @Debit " +
+            "AND created_at >= @Start AND created_at < @End",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("PostPaid", NpgsqlDbType.Smallint) { Value = (short)CreditSource.PostPaid });
+                p.Add(new NpgsqlParameter("Debit", NpgsqlDbType.Smallint) { Value = (short)CreditEntryType.Debit });
+                p.Add(new NpgsqlParameter("Start", NpgsqlDbType.TimestampTz) { Value = periodStart });
+                p.Add(new NpgsqlParameter("End", NpgsqlDbType.TimestampTz) { Value = periodEnd });
+            },
+            ct) ?? 0m;
+    }
+
+    private static async Task InsertDebitRowAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        TenantId tenantId,
+        CreditSource source,
+        decimal signedAmount,
+        string? usageRecordId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        await conn.ExecuteAsync(
+            "INSERT INTO ai_credit_ledger " +
+            "(entry_id, tenant_id, entry_type, source, amount, period_key, external_ref, expires_at, usage_record_id, created_at) " +
+            "VALUES (@EntryId, @TenantId, @EntryType, @Source, @Amount, @PeriodKey, @ExternalRef, @ExpiresAt, @UsageRecordId, @CreatedAt)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("EntryId", NpgsqlDbType.Text) { Value = EntityId.New().Value });
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("EntryType", NpgsqlDbType.Smallint) { Value = (short)CreditEntryType.Debit });
+                p.Add(new NpgsqlParameter("Source", NpgsqlDbType.Smallint) { Value = (short)source });
+                p.Add(new NpgsqlParameter("Amount", NpgsqlDbType.Numeric) { Value = signedAmount });
+                p.Add(new NpgsqlParameter("PeriodKey", NpgsqlDbType.Text) { Value = DBNull.Value });
+                p.Add(new NpgsqlParameter("ExternalRef", NpgsqlDbType.Text) { Value = DBNull.Value });
+                p.Add(new NpgsqlParameter("ExpiresAt", NpgsqlDbType.TimestampTz) { Value = DBNull.Value });
+                p.Add(new NpgsqlParameter("UsageRecordId", NpgsqlDbType.Text) { Value = (object?)usageRecordId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedAt", NpgsqlDbType.TimestampTz) { Value = now });
+            },
+            tx, ct);
     }
 
     public async Task<IReadOnlyList<CreditLedgerEntry>> GetEntriesAsync(TenantId tenantId, int page, int pageSize, CancellationToken ct)
@@ -157,6 +254,17 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
     {
         await using var cmd = new NpgsqlCommand(
             "SELECT balance FROM tenant_credit_balance WHERE tenant_id = @TenantId", conn, tx);
+        cmd.Parameters.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is null or DBNull ? 0m : (decimal)result;
+    }
+
+    private static async Task<decimal> ReadBalanceForUpdateAsync(NpgsqlConnection conn, NpgsqlTransaction tx, TenantId tenantId, CancellationToken ct)
+    {
+        // FOR UPDATE row-locks the projection cell so a concurrent metered debit serialises behind this one.
+        // An absent projection row reads as balance 0 (and nothing to lock — the covered draw is then 0).
+        await using var cmd = new NpgsqlCommand(
+            "SELECT balance FROM tenant_credit_balance WHERE tenant_id = @TenantId FOR UPDATE", conn, tx);
         cmd.Parameters.Add(new NpgsqlParameter("TenantId", tenantId.Value));
         var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return result is null or DBNull ? 0m : (decimal)result;

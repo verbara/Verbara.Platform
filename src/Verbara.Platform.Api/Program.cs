@@ -219,6 +219,11 @@ builder.Services.AddPlatformLlm(
             p.InputCreditTokenRatio = inRatio;
         if (long.TryParse(plat["OutputCreditTokenRatio"], System.Globalization.CultureInfo.InvariantCulture, out var outRatio))
             p.OutputCreditTokenRatio = outRatio;
+        // credit-ledger-cutover (ADR-0033) — two default-off kill-switches gating the ledger read seams.
+        if (bool.TryParse(plat["LedgerEnforcementEnabled"], out var ledgerEnf))
+            p.LedgerEnforcementEnabled = ledgerEnf;
+        if (bool.TryParse(plat["LedgerInvoiceReadEnabled"], out var ledgerInv))
+            p.LedgerInvoiceReadEnabled = ledgerInv;
     });
 // Flow execution engine + node handlers (incl. collect_reason/set_variable for the P1
 // typification capture paths). Ships a default-disabled ILlmProvider so the engine and AI
