@@ -65,6 +65,17 @@ public sealed partial class CreditLedgerBackfillService : BackgroundService
     /// </summary>
     internal async Task RunBackfillAsync(CancellationToken ct)
     {
+        // Invariant (ADR-0033 addendum rollout order): the back-fill MUST precede enforcement. If enforcement is
+        // already on, the meter has been posting live ledger debits for classifies that are ALSO present in
+        // usage_records — re-deriving consumption from usage_records here would double-count them into a spurious
+        // PostPaid tail (over-billing). Refuse rather than silently double-charge; the operator runs the back-fill
+        // first (enforcement off), then flips enforcement on.
+        if (_options.LedgerEnforcementEnabled)
+        {
+            LogBackfillRefusedEnforcementOn(_logger);
+            return;
+        }
+
         using var scope = _scopeFactory.CreateScope();
         var sp = scope.ServiceProvider;
         var quotaStore = sp.GetRequiredService<ITenantQuotaStore>();
@@ -149,4 +160,9 @@ public sealed partial class CreditLedgerBackfillService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "AI-credit ledger back-fill pass failed")]
     private static partial void LogBackfillFailed(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "AI-credit ledger back-fill REFUSED — LedgerEnforcementEnabled is already on; the back-fill must "
+            + "precede enforcement (running now would double-count live debits). Run the back-fill with enforcement off.")]
+    private static partial void LogBackfillRefusedEnforcementOn(ILogger logger);
 }

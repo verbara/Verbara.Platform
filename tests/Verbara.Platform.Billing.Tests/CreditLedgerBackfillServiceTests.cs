@@ -127,6 +127,27 @@ public class CreditLedgerBackfillServiceTests
     }
 
     [Fact]
+    public async Task RunBackfill_ShouldSeedNothing_WhenLedgerEnforcementAlreadyOn()
+    {
+        // Invariant: back-fill MUST precede enforcement. With enforcement already on, re-deriving consumption from
+        // usage_records would double-count live debits — the service refuses and seeds nothing.
+        var (service, quotas, ledger, usage) = Build(
+            new PlatformLlmOptions { RunLedgerBackfill = true, LedgerEnforcementEnabled = true, CreditTokenRatio = 1000 });
+        var tenant = new TenantId("tenant-enf-on");
+        await quotas.UpsertAsync(Quota("tenant-enf-on", 10L), CancellationToken.None);
+        await SeedFlatUsageAsync(usage, "tenant-enf-on", 12000m);
+
+        await service.RunBackfillAsync(CancellationToken.None);
+
+        var balance = await ledger.GetBalanceAsync(tenant, CancellationToken.None);
+        balance.Should().Be(0m); // no grant minted, no debit posted
+
+        var postPaid = await ledger.GetPostPaidDebitsTotalAsync(
+            tenant, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, CancellationToken.None);
+        postPaid.Should().Be(0m);
+    }
+
+    [Fact]
     public async Task RunBackfill_ShouldBeNoOp_WhenRunTwiceInSamePeriod()
     {
         // A second pass must not double-grant, double-debit, or double-bill — idempotent on the backfill marker.
