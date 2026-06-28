@@ -14,8 +14,9 @@ namespace Verbara.Platform.Storage.Postgres.Stores;
 /// <c>external_ref</c> (top-up) via the partial unique indexes + <c>ON CONFLICT DO NOTHING</c>; debits are
 /// applied by a single guarded projection <c>UPDATE … WHERE balance &gt;= @amount</c> in the same
 /// transaction as the ledger row, so the balance can never go negative even under concurrency. The metered
-/// debit (<see cref="PostMeteredDebitAsync"/>) splits consumption into a covered prepaid draw plus a billable
-/// <c>PostPaid</c> tail (ADR-0033 addendum, Model C). See ADR-0033 / the credit-ledger-substrate spec delta.
+/// debit (<see cref="PostMeteredDebitAsync"/>) is a FIFO multi-source lot allocation (ADR-0033 / the
+/// 2026-06-28 (c2) addendum); the covered portion is drawn across open lots in priority order, the uncovered
+/// remainder is a single PostPaid tail. See ADR-0033 / the credit-ledger-substrate spec delta.
 /// Change (b) (credit-ledger-cutover) wires the runtime call-sites onto this store behind default-off flags.
 /// </summary>
 internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
@@ -209,23 +210,9 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
             if (draw <= 0m)
                 continue;
 
-            // Guarded per-lot decrement. FOR UPDATE already serialises this; the WHERE remaining >= @Draw guard
-            // is belt-and-suspenders so a lot can never be overdrawn even if the lock were ever lost. Asserting
-            // exactly one row is affected catches any drift between the locked snapshot and the live row.
-            var lotAffected = await conn.ExecuteAsync(
-                "UPDATE credit_lot SET remaining = remaining - @Draw WHERE lot_id = @LotId AND remaining >= @Draw",
-                p =>
-                {
-                    p.Add(new NpgsqlParameter("Draw", NpgsqlDbType.Numeric) { Value = draw });
-                    p.Add(new NpgsqlParameter("LotId", NpgsqlDbType.Text) { Value = lot.LotId });
-                },
-                tx, ct);
-
-            if (lotAffected != 1)
-                throw new InvalidOperationException(
-                    $"Guarded credit_lot decrement affected {lotAffected} rows for lot '{lot.LotId}' (expected 1 under FOR UPDATE).");
-
-            // One source-tagged covered debit row (the lot's OWN source) + its internal credit_allocation row.
+            // Guarded per-lot decrement (shared with the back-fill draw); then one source-tagged covered debit
+            // row (the lot's OWN source) + its internal credit_allocation row linked to that row's entry_id.
+            await DecrementLotGuardedAsync(conn, tx, lot.LotId, draw, ct);
             var debitEntryId = await InsertDebitRowAsync(conn, tx, tenantId, lot.Source, -draw, usageRecordId, now, ct);
             await InsertAllocationRowAsync(conn, tx, debitEntryId, lot.LotId, lot.Source, draw, now, ct);
 
@@ -296,6 +283,31 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         return lots;
     }
 
+    private static async Task DecrementLotGuardedAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        string lotId,
+        decimal draw,
+        CancellationToken ct)
+    {
+        // Guarded per-lot decrement shared by the metered-debit and back-fill FIFO walks. FOR UPDATE already
+        // serialises this; the WHERE remaining >= @Draw guard is belt-and-suspenders so a lot can never be
+        // overdrawn even if the lock were ever lost. Asserting exactly one row is affected catches any drift
+        // between the locked snapshot and the live row.
+        var affected = await conn.ExecuteAsync(
+            "UPDATE credit_lot SET remaining = remaining - @Draw WHERE lot_id = @LotId AND remaining >= @Draw",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("Draw", NpgsqlDbType.Numeric) { Value = draw });
+                p.Add(new NpgsqlParameter("LotId", NpgsqlDbType.Text) { Value = lotId });
+            },
+            tx, ct);
+
+        if (affected != 1)
+            throw new InvalidOperationException(
+                $"Guarded credit_lot decrement affected {affected} rows for lot '{lotId}' (expected 1 under FOR UPDATE).");
+    }
+
     public async Task PostBackfillConsumptionAsync(TenantId tenantId, decimal consumed, string periodKey, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(periodKey);
@@ -321,21 +333,48 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
 
         // The covered (Subscription) debit row carries the idempotency marker external_ref = "backfill:{periodKey}".
         // ON CONFLICT DO NOTHING against the migration-012 partial unique index (tenant_id, external_ref) is the
-        // arbiter: a second back-fill of the same period inserts 0 rows and the whole operation short-circuits.
+        // arbiter: a second back-fill of the same period inserts 0 rows and the whole operation short-circuits. The
+        // returned entry_id is the link target for the FIFO lot-draw's credit_allocation rows below.
         var externalRef = $"backfill:{periodKey}";
-        var inserted = await InsertBackfillCoveredRowAsync(conn, tx, tenantId, -covered, externalRef, now, ct);
+        var (inserted, markerEntryId) = await InsertBackfillCoveredRowAsync(conn, tx, tenantId, -covered, externalRef, now, ct);
 
         if (inserted == 0)
         {
-            // Already back-filled for this period — a complete no-op (no balance decrement, no PostPaid tail).
+            // Already back-filled for this period — a complete no-op (no balance decrement, no lot draw, no PostPaid tail).
             await tx.CommitAsync(ct);
             return;
         }
 
         if (covered > 0m)
         {
+            // Lot-aware covered draw (the (c2) addendum): draw `covered` from the open lots in the SAME total FIFO
+            // order as PostMeteredDebitAsync (priority → expires_at NULLS LAST → granted_at → lot_seq), decrementing
+            // each lot's remaining and writing one credit_allocation row per drawn lot ALL linked to the single
+            // marker covered row's entry_id (so Σ allocation.amount == covered and the lots move down by exactly the
+            // projection decrement). By the invariant Σ(open lot.remaining) == balance and covered = min(balance,
+            // consumed), the walk always fully covers. The marker stays a single Subscription-tagged row — only the
+            // projection-coupled lots + allocations are added (the lots are NOT split into per-lot debit rows).
+            var lots = await LockOpenLotsAsync(conn, tx, tenantId, now, ct);
+            var outstanding = covered;
+
+            foreach (var lot in lots)
+            {
+                if (outstanding <= 0m)
+                    break;
+
+                var draw = Math.Min(lot.Remaining, outstanding);
+                if (draw <= 0m)
+                    continue;
+
+                await DecrementLotGuardedAsync(conn, tx, lot.LotId, draw, ct);
+                await InsertAllocationRowAsync(conn, tx, markerEntryId, lot.LotId, lot.Source, draw, now, ct);
+
+                outstanding -= draw;
+            }
+
             // Guarded decrement of the prepaid stock drawn down by this period's covered consumption. FOR UPDATE
-            // already serialises this; the WHERE guard keeps the projection from ever going negative.
+            // already serialises this; the WHERE guard keeps the projection from ever going negative. Decrements by
+            // exactly Σ(lot draws) == covered, keeping Σ(open lot.remaining) == balance.
             await conn.ExecuteAsync(
                 "UPDATE tenant_credit_balance SET " +
                 "balance = balance - @Covered, version = version + 1, updated_at = @Now " +
@@ -483,7 +522,7 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
             tx, ct);
     }
 
-    private static async Task<int> InsertBackfillCoveredRowAsync(
+    private static async Task<(int Inserted, string EntryId)> InsertBackfillCoveredRowAsync(
         NpgsqlConnection conn,
         NpgsqlTransaction tx,
         TenantId tenantId,
@@ -495,14 +534,17 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         // Covered (Subscription) back-fill debit carrying the idempotency marker external_ref. ON CONFLICT
         // DO NOTHING against the partial unique index (tenant_id, external_ref) WHERE external_ref IS NOT NULL
         // (migration 012) makes a re-back-fill of the same period a 0-row no-op — the operation's idempotency arbiter.
-        return await conn.ExecuteAsync(
+        // Returns the rows-affected (0 ⇒ duplicate) AND the entry_id, so the caller can link the FIFO lot-draw's
+        // credit_allocation rows to this single marker row's entry_id.
+        var entryId = EntityId.New().Value;
+        var inserted = await conn.ExecuteAsync(
             "INSERT INTO ai_credit_ledger " +
             "(entry_id, tenant_id, entry_type, source, amount, period_key, external_ref, expires_at, usage_record_id, created_at) " +
             "VALUES (@EntryId, @TenantId, @EntryType, @Source, @Amount, NULL, @ExternalRef, NULL, NULL, @CreatedAt) " +
             "ON CONFLICT DO NOTHING",
             p =>
             {
-                p.Add(new NpgsqlParameter("EntryId", NpgsqlDbType.Text) { Value = EntityId.New().Value });
+                p.Add(new NpgsqlParameter("EntryId", NpgsqlDbType.Text) { Value = entryId });
                 p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
                 p.Add(new NpgsqlParameter("EntryType", NpgsqlDbType.Smallint) { Value = (short)CreditEntryType.Debit });
                 p.Add(new NpgsqlParameter("Source", NpgsqlDbType.Smallint) { Value = (short)CreditSource.Subscription });
@@ -511,6 +553,7 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
                 p.Add(new NpgsqlParameter("CreatedAt", NpgsqlDbType.TimestampTz) { Value = now });
             },
             tx, ct);
+        return (inserted, entryId);
     }
 
     public async Task<IReadOnlyList<CreditLedgerEntry>> GetEntriesAsync(TenantId tenantId, int page, int pageSize, CancellationToken ct)

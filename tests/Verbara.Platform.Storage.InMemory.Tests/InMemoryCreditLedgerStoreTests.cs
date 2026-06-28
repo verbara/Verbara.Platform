@@ -622,4 +622,46 @@ public sealed class InMemoryCreditLedgerStoreTests
         balance.Should().Be(1350m);
         bySource.Sum(s => s.Remaining).Should().Be(balance);
     }
+
+    // Group 3b: the lot-aware back-fill covered draw keeps Σ remaining == balance and decrements the lot by `covered`.
+    [Fact]
+    public async Task PostBackfillConsumptionAsync_ShouldKeepInvariant_WhenLotsExist()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        // One Subscription lot of 10 (balance 10); back-fill consumed 6 ⇒ covered 6 (partial), no PostPaid tail.
+        await store.PostGrantAsync(MakeGrant(amount: 10m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostBackfillConsumptionAsync(Tenant1, 6m, "2026-06", CancellationToken.None);
+
+        // Invariant Σ GetRemainingBySourceAsync == GetBalanceAsync after the lot-aware covered draw.
+        var balance = await store.GetBalanceAsync(Tenant1, CancellationToken.None);
+        balance.Should().Be(4m);
+        var bySource = await store.GetRemainingBySourceAsync(Tenant1, BaseTime, CancellationToken.None);
+        bySource.Sum(s => s.Remaining).Should().Be(balance);
+
+        // The lot's remaining dropped by exactly `covered` (10 − 6 = 4) — the projection and the lot move together,
+        // so Σ(allocation.Amount) == covered held (the allocation rows are what couple the marker to the lots).
+        var lots = await store.GetLotsAsync(Tenant1, CancellationToken.None);
+        lots.Should().ContainSingle();
+        lots[0].Remaining.Should().Be(4m);
+    }
+
+    // Group 3b: re-running the same period changes no lot and no balance (idempotency holds with the new lot logic).
+    [Fact]
+    public async Task PostBackfillConsumptionAsync_ShouldRemainNoOp_WhenReRunSamePeriod()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 10m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostBackfillConsumptionAsync(Tenant1, 6m, "2026-06", CancellationToken.None);
+        await store.PostBackfillConsumptionAsync(Tenant1, 6m, "2026-06", CancellationToken.None);
+
+        // Second run is a complete no-op: balance and the lot remaining are unchanged.
+        (await store.GetBalanceAsync(Tenant1, CancellationToken.None)).Should().Be(4m);
+        var lots = await store.GetLotsAsync(Tenant1, CancellationToken.None);
+        lots.Should().ContainSingle();
+        lots[0].Remaining.Should().Be(4m);
+        // One grant + one covered Subscription marker debit — no second marker, no PostPaid tail (consumed < balance).
+        (await store.GetEntriesCountAsync(Tenant1, CancellationToken.None)).Should().Be(2);
+    }
 }

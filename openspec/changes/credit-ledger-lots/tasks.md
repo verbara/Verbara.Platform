@@ -47,7 +47,7 @@
 - [x] 3.2 `PostMeteredDebitAsync` (InMemory): mirror byte-for-byte — same total ordering (`OrderBy` priority, then
   `expires_at` with nulls-last, then `granted_at`, then `lot_seq`), same per-lot draw + allocation list, single PostPaid
   tail. n=1 degenerates to the current covered+tail.
-- [ ] 3.3 Make `PostBackfillConsumptionAsync` **lot-aware** (both stores): the covered portion draws from lots via the
+- [x] 3.3 Make `PostBackfillConsumptionAsync` **lot-aware** (both stores): the covered portion draws from lots via the
   same FIFO so a back-fill can't drop the projection without decrementing a lot. (Keeps the `LedgerEnforcementEnabled`
   refusal guard.)
 - [x] 3.4 Tests: multi-lot span (promo→sub→PostPaid), n=1 byte-identity (re-run the (a)/(b) numbers), no-open-lots pure

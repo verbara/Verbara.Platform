@@ -447,6 +447,59 @@ public sealed class PostgresCreditLedgerStoreTests
         (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(1);
     }
 
+    // Scenario (Group 3b): the lot-aware back-fill covered draw keeps Σ remaining == balance and decrements lots.
+    [Fact]
+    public async Task PostBackfillConsumptionAsync_ShouldKeepInvariant_WhenLotsExist()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("backfill-lot-invariant");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        // One Subscription lot of 10 (balance 10); back-fill consumed 6 ⇒ covered 6 (partial), no PostPaid tail.
+        await store.PostGrantAsync(Grant(tenant, 10m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostBackfillConsumptionAsync(tenant, 6m, "2026-06", CancellationToken.None);
+
+        // Invariant Σ GetRemainingBySourceAsync == GetBalanceAsync after the lot-aware covered draw.
+        var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
+        balance.Should().Be(4m);
+        var bySource = await store.GetRemainingBySourceAsync(tenant, BaseTime, CancellationToken.None);
+        bySource.Sum(s => s.Remaining).Should().Be(balance);
+
+        // The lot's remaining dropped by exactly `covered` (10 − 6 = 4); Σ credit_allocation.amount == covered.
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().ContainSingle();
+        lots[0].Remaining.Should().Be(4m);
+        (await _fixture.AllocationAmountSumAsync(tenant.Value)).Should().Be(6m);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(1);
+    }
+
+    // Scenario (Group 3b): re-running the same period changes no lot, no balance, no allocation (idempotency holds).
+    [Fact]
+    public async Task PostBackfillConsumptionAsync_ShouldRemainNoOp_WhenReRunSamePeriod()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("backfill-lot-idem");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 10m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostBackfillConsumptionAsync(tenant, 6m, "2026-06", CancellationToken.None);
+        await store.PostBackfillConsumptionAsync(tenant, 6m, "2026-06", CancellationToken.None);
+
+        // Second run is a complete no-op: balance, the lot remaining, and the allocations are all unchanged.
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(4m);
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().ContainSingle();
+        lots[0].Remaining.Should().Be(4m);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(1);
+        (await _fixture.AllocationAmountSumAsync(tenant.Value)).Should().Be(6m);
+        // One grant + one covered Subscription marker debit — no second marker, no PostPaid tail (consumed < balance).
+        (await _fixture.LedgerRowCountAsync(tenant.Value)).Should().Be(2);
+    }
+
     // Scenario: a grant mints exactly one credit_lot mirroring it, and GetRemainingBySourceAsync reports it.
     [Fact]
     public async Task PostGrantAsync_ShouldMintLot_WhenGrantInserted()

@@ -84,7 +84,7 @@ internal sealed partial class BillingTypificationCreditMeter(
         };
         await _metering.RecordBatchAsync(new[] { record }, ct).ConfigureAwait(false);
 
-        // Best-effort ledger debit (Model C two-step covered + PostPaid tail) — independently fenced and
+        // Best-effort ledger debit (FIFO multi-source covered draw + single PostPaid tail) — independently fenced and
         // gated behind LedgerEnforcementEnabled. The usage_records audit row above is already written
         // unconditionally; a thrown/failed debit only logs and MUST NEVER break metering.
         if (_ledgerEnforcementEnabled)
