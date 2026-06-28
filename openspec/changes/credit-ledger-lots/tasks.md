@@ -6,7 +6,7 @@
 
 ## Group 1 — Lot substrate (migration + domain types), inert
 
-- [ ] 1.1 Migration `013_credit_lots.sql` (additive, `IF NOT EXISTS`): `credit_lot` (`lot_id` TEXT PK = grant
+- [x] 1.1 Migration `013_credit_lots.sql` (additive, `IF NOT EXISTS`): `credit_lot` (`lot_id` TEXT PK = grant
   `entry_id`, `tenant_id` TEXT, `source` SMALLINT, `original` NUMERIC(18,6), `remaining` NUMERIC(18,6)
   `CHECK (remaining >= 0)`, `expires_at` TIMESTAMPTZ NULL, `granted_at` TIMESTAMPTZ, `lot_seq` BIGINT) +
   `credit_allocation` (`allocation_id` TEXT PK, `debit_entry_id` TEXT, `lot_id` TEXT, `source` SMALLINT, `amount`
@@ -16,7 +16,7 @@
   `MAX(lot_seq)+1` under the projection lock — pick the lock-consistent one). **Back-fill block**: `INSERT INTO
   credit_lot SELECT … remaining = balance, source = 0 (Subscription), lot_seq = 0, expires_at = NULL FROM
   tenant_credit_balance WHERE balance > 0` so `Σ remaining == balance` from day one.
-- [ ] 1.2 Domain types (Billing): `CreditLot` (class, `{ get; init; }`, no Npgsql), `CreditAllocation`, the static
+- [x] 1.2 Domain types (Billing): `CreditLot` (class, `{ get; init; }`, no Npgsql), `CreditAllocation`, the static
   `BillablePriority` map (`Promo=0, Partner=1, Subscription=2, TopUp=2`), and a `SourceRemaining` readonly record for
   reporting. Add `enum`/const as needed. NO behavior wired yet → build stays green, ledger still inert.
 
