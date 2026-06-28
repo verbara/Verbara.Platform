@@ -343,6 +343,17 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         return rows.Select(r => r.ToEntry()).ToList();
     }
 
+    public async Task<int> GetEntriesCountAsync(TenantId tenantId, CancellationToken ct)
+    {
+        // COUNT(*) over the tenant's ledger rows — backs PagedResult.TotalCount. Covered by
+        // idx_ai_credit_ledger_tenant_created (tenant_id, created_at). COUNT boxes as bigint → long.
+        var count = await _dataSource.ExecuteScalarAsync<long?>(
+            "SELECT COUNT(*) FROM ai_credit_ledger WHERE tenant_id = @TenantId",
+            p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)),
+            ct) ?? 0L;
+        return (int)count;
+    }
+
     private static async Task<decimal> ReadBalanceAsync(NpgsqlConnection conn, NpgsqlTransaction tx, TenantId tenantId, CancellationToken ct)
     {
         await using var cmd = new NpgsqlCommand(

@@ -1312,6 +1312,13 @@ builder.Services.AddAuthorization(options =>
         Verbara.Platform.Api.Endpoints.Mfa.MfaAdminEndpoints.AuthorizationPolicy,
         p => p.AddRequirements(new PlatformAdminRequirement("security.mfa.admin")));
 
+    // c1 (credit-ledger-topups) — top-up mint double-lock: host/partner-tenant gate + the seeded
+    // billing:credits:grant permission, enforced against both management-key scopes and user JWT
+    // permissions (minting AI credits is money creation, so the permission must be a real gate).
+    options.AddPolicy(
+        Verbara.Platform.Api.Endpoints.CreditLedgerEndpoints.GrantPolicy,
+        p => p.AddRequirements(new PlatformAdminRequirement("billing:credits:grant")));
+
     // R5.2 PB.1 — audit log viewer + export. Two policies so the export surface
     // can be revoked independently of read access (compliance scenarios where
     // viewing in-app is fine but mass extract requires extra approval). Both
@@ -1703,6 +1710,9 @@ v1.MapTypificationEndpoints();
 v1.MapTenantLlmConfigEndpoints();
 // P2c.2 — tenant AI credit usage readout (GET /admin/ai/credits).
 v1.MapAiCreditsEndpoints();
+// c1 (credit-ledger-topups) — operator top-up (POST /management/credit-ledger/top-up) +
+// tenant balance/entries read API (GET /admin/credit-ledger/{balance,entries}).
+v1.MapCreditLedgerEndpoints();
 v1.MapReasonHintEndpoints();
 v1.MapScheduledReportEndpoints();
 v1.MapRealtimeEndpoints();

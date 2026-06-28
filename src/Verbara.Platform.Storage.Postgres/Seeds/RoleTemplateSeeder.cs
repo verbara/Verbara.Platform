@@ -318,9 +318,12 @@ public static class RoleTemplateSeeder
             ]);
 
         // ── Platform Admin ──
+        // c1 (credit-ledger-topups): platform_admin additionally gets billing:credits:grant
+        // (operator top-up minting). It is deliberately NOT in AllPermissions() so the admin /
+        // system_admin templates (AllPermissionsExcept) do not inherit the cross-tenant grant.
         yield return (
             new TemplateRow("platform_admin", "Platform Admin", "Full platform administration including cross-tenant operations"),
-            AllPermissions());
+            [.. AllPermissions(), "billing:credits:grant"]);
 
         // ── Partner Admin ──
         yield return (
@@ -410,6 +413,10 @@ public static class RoleTemplateSeeder
             // P2b A5 — typification AI gating
             "typification:ai:configure",
             "typification:ai:autonomous",
+            // c1 (credit-ledger-topups) — tenant admins may read their OWN AI-credit balance + ledger.
+            // NOTE: billing:credits:grant is intentionally absent here (platform_admin-only); adding it
+            // to AllPermissions() would leak the cross-tenant top-up grant to admin/system_admin.
+            "billing:credits:read",
         ];
     }
 

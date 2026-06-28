@@ -69,6 +69,11 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(Verbara.Platform.Llm.AiSource))]
 // C2 (P2c.2) — tenant AI credit usage readout (GET /admin/ai/credits).
 [JsonSerializable(typeof(AiCreditsResponse))]
+// c1 (credit-ledger-topups) — operator top-up + tenant balance/entries read API.
+[JsonSerializable(typeof(TopUpRequest))]
+[JsonSerializable(typeof(CreditBalanceResponse))]
+[JsonSerializable(typeof(CreditLedgerEntryDto))]
+[JsonSerializable(typeof(PagedResult<CreditLedgerEntryDto>))]
 // Typification — reason-hint admin DTOs (C10)
 [JsonSerializable(typeof(ReasonHintDto[]))]
 [JsonSerializable(typeof(ReasonHintDto))]

@@ -182,3 +182,50 @@ zero **and** overflow into billable overage. The PO decision (2026-06-27) is **p
   internal-only — no endpoint echoes it); the change-(a) characterization tests are **re-seeded against the
   ledger** to the same consumed values and assert the same outcomes (task "5.1 stays green unchanged" was
   impossible as written — the tests inject `usage_records` mocks and never seeded a balance).
+
+## Addendum (2026-06-27): change (c) splits into c1 (top-ups) + c2 (lots); full allocation substrate
+
+A judge-panel (3) + completeness-critic design study over 4 end-to-end models, grounded against the post-(b)
+code, resolved how change (c) `credit-ledger-sources` is built. **PO decisions (2026-06-27):**
+
+- **(c) decomposes into two sequenced changes** (so the sellable half ships first at low risk, isolated from
+  the money-path rewrite):
+  - **c1 `credit-ledger-topups`** — `TopUp` as a **fungible** grant source (reuses the shipped
+    `PostGrantAsync`; a top-up raises `balance`, is consumed as a covered draw, lowers the `PostPaid` tail, so
+    `GetPostPaidDebitsTotalAsync`/the invoice is already correct — **zero edit to `PostMeteredDebitAsync`, the
+    (b) characterization tests pass trivially**), plus the operator top-up endpoint + tenant balance/entries
+    read API (`Core.PagedResult<T>`, needs a new `GetEntriesCountAsync`) + RBAC (`billing:credits:grant`,
+    `billing:credits:read`). Ships sellable value immediately.
+  - **c2 `credit-ledger-lots`** — the lot-allocation machinery + the `Promo`/`Partner` grant sources.
+- **Full lot-allocation substrate chosen (not the lean Promo-lot+Partner-cell hybrid)** because per-source
+  remaining reporting ("200 promo + 800 top-up left") is on the near-term roadmap — pay the cost once now
+  rather than a later hot-migration over live balances. c2 adds: a mutable **`credit_lot`** projection
+  (one row per grant, `remaining` guarded-decremented, `expires_at` finally consulted) + a **`credit_allocation`**
+  table (one row per debit×lot, the debit→lot linkage). `PostMeteredDebitAsync` becomes a **FIFO walk** across
+  open, non-expired lots.
+- **Draw order (the static `billable_priority` map, re-priceable in code without a migration):**
+  **`Promo (expiring-soonest first) → Partner → Subscription/TopUp → PostPaid`.** Burns expiry-risk credits
+  first, then the partner gift (consumed-and-attributed before the customer's own prepaid), then the customer's
+  prepaid, then bills the uncovered tail. The **locking `SELECT … FOR UPDATE` ORDER BY must equal this
+  consumption order** (the deadlock-avoidance contract); the InMemory twin mirrors the same deterministic order.
+- **Invoice stays `I1` (`Σ |PostPaid debits|`)** — every non-billed draw is tagged its true source, only the
+  uncovered tail is `PostPaid`, so the (a)/(b) `Σ PostPaid` characterization invariant holds at n≥1 lots.
+
+**Three must-fixes the study surfaced (all verified in code), for c2:**
+1. **`PartnerRevenueRecord` is the wrong home for credit-only partner attribution** — it is **invoice-keyed**
+   (`required InvoiceId`, written once in `GenerateCustomerInvoice`), but a partner-funded tenant may have **no
+   customer invoice**. c2 adds a **non-invoice-keyed `partner_credit_allocation`** record keyed
+   `(partner_tenant_id, customer_tenant_id, period_key)`, written by a period-close step **independent of
+   invoice generation**, plus the durable derive-on-read `Σ |Partner debits|` query.
+2. **Partner identity has no `Type == TenantType.Partner` gate today** (`PartnerBillingEndpoints` does a raw
+   `ParentTenantId` string compare). c2's attribution must add the `parent.Type == Partner` check and reject
+   Customer-under-Customer.
+3. **RBAC scoping:** `billing:credits:read` may go in `RoleTemplateSeeder.AllPermissions()` (tenant admins read
+   their own balance — fine); **`billing:credits:grant` must NOT** (it would leak to tenant `admin`/`system_admin`)
+   — add it **only** to `platform_admin` + the hand-listed `partner_admin` array. Permission-count /
+   role-template-count test assertions WILL break and must be updated. `RbacReseed` reseeds only `platform_admin`
+   on existing tenants — partner tenants get new perms via fresh provisioning, not the CLI.
+
+**Also (both changes):** the InMemory `GetEntriesAsync` reverses insertion order while Postgres orders
+`created_at DESC, entry_id DESC` — same-instant multi-row debits can order differently across the twins; any
+order-asserting test needs a deterministic tiebreak defined in **both** stores.

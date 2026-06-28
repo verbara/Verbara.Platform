@@ -275,6 +275,12 @@ internal static class PermissionSeeder
         // ── security (R5.4 S5.9 — JWT signing-key rotation) ──
         yield return P("security.jwt.rotate", "security", "jwt", "rotate",
             "Rotate JWT signing keys (issues a new active key + keeps the prior key valid for the grace window)");
+
+        // ── billing:credits (c1 credit-ledger-topups — ADR-0033 (c) addendum) ──
+        yield return P("billing:credits:read", "billing", "credits", "read",
+            "Read own AI-credit balance and ledger entries");
+        yield return P("billing:credits:grant", "billing", "credits", "grant",
+            "Mint AI-credit top-up grants for a tenant (operator)");
     }
 
     private static PermissionRow P(string id, string category, string resource, string action,

@@ -197,16 +197,29 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
 
         lock (ledger.Gate)
         {
-            // Most recent first. Append order is insertion order; reverse to mirror the Postgres
-            // ORDER BY created_at DESC, entry_id DESC for entries appended within the same instant.
+            // Most recent first, with a deterministic tiebreak on EntryId so same-instant rows order
+            // identically to the Postgres ORDER BY created_at DESC, entry_id DESC. EntityId.Value is an
+            // ordinal hex string — Ordinal compare matches Postgres TEXT (C-locale) byte ordering.
             IReadOnlyList<CreditLedgerEntry> result = ledger.Entries
-                .AsEnumerable()
-                .Reverse()
+                .OrderByDescending(e => e.CreatedAt)
+                .ThenByDescending(e => e.EntryId.Value, StringComparer.Ordinal)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToList();
 
             return Task.FromResult(result);
+        }
+    }
+
+    public Task<int> GetEntriesCountAsync(TenantId tenantId, CancellationToken ct)
+    {
+        // Total ledger entry count — backs PagedResult.TotalCount. Absent tenant → 0 (no ledger).
+        if (!_ledgers.TryGetValue(tenantId, out var ledger))
+            return Task.FromResult(0);
+
+        lock (ledger.Gate)
+        {
+            return Task.FromResult(ledger.Entries.Count);
         }
     }
 
