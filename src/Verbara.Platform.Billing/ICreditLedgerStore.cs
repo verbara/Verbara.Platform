@@ -26,10 +26,15 @@ public interface ICreditLedgerStore
 
     /// <summary>
     /// Posts a grant (positive <see cref="CreditLedgerEntry.Amount"/>) atomically: appends the ledger row and,
-    /// only if it was actually inserted, increments the projection balance in the same transaction. Idempotent
-    /// — a grant carrying a <see cref="CreditLedgerEntry.PeriodKey"/> (subscription) or
-    /// <see cref="CreditLedgerEntry.ExternalRef"/> (top-up) that collides with an existing entry is a no-op
-    /// that neither double-inserts nor double-credits.
+    /// only if it was actually inserted, increments the projection balance <b>and mints one <c>credit_lot</c>
+    /// row mirroring the grant</b> (<see cref="CreditLot.Original"/> = <see cref="CreditLot.Remaining"/> =
+    /// <see cref="CreditLedgerEntry.Amount"/>, <see cref="CreditLot.Source"/>, <see cref="CreditLot.ExpiresAt"/>,
+    /// <see cref="CreditLot.GrantedAt"/> = <see cref="CreditLedgerEntry.CreatedAt"/>, and a monotonic per-tenant
+    /// <see cref="CreditLot.LotSeq"/>) in the same transaction. Idempotent — a grant carrying a
+    /// <see cref="CreditLedgerEntry.PeriodKey"/> (subscription) or <see cref="CreditLedgerEntry.ExternalRef"/>
+    /// (top-up) that collides with an existing entry is a no-op that neither double-inserts, double-credits, nor
+    /// mints a second lot. The minted lot preserves the invariant
+    /// <c>Σ(open non-expired lot.remaining) == tenant_credit_balance.balance</c> after every grant.
     /// </summary>
     Task PostGrantAsync(CreditLedgerEntry grant, CancellationToken ct);
 
@@ -77,6 +82,30 @@ public interface ICreditLedgerStore
     /// <c>PagedResult</c> over <see cref="GetEntriesAsync"/>. Returns <c>0</c> when the tenant has no ledger.
     /// </summary>
     Task<int> GetEntriesCountAsync(TenantId tenantId, CancellationToken ct);
+
+    /// <summary>
+    /// Returns the tenant's open (drawable) remaining credit summed per <see cref="CreditSource"/> from the
+    /// <c>credit_lot</c> projection, as of <paramref name="now"/>. <b>Excludes</b> any lot with
+    /// <c>remaining = 0</c> and any expired lot (a lot whose <c>expires_at</c> is non-null and
+    /// <c>&lt;= <paramref name="now"/></c> — i.e. only <c>expires_at IS NULL OR expires_at &gt; now</c> lots count),
+    /// which in practice removes lapsed Promo lots pending reclaim. <see cref="CreditSource.PostPaid"/> is never a
+    /// lot (the uncovered billable tail is posted directly as a debit row with no lot) so it never appears.
+    /// <para>
+    /// <b>Invariant:</b> the sum of <see cref="SourceRemaining.Remaining"/> across the returned sources equals
+    /// <see cref="GetBalanceAsync"/> for the same tenant — the lot projection re-derives the O(1) balance
+    /// projection (<c>Σ(open non-expired lot.remaining) == tenant_credit_balance.balance</c>, ADR-0033 / the
+    /// 2026-06-28 (c2) resolution addendum). Sources with no open remaining are omitted from the result.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<SourceRemaining>> GetRemainingBySourceAsync(TenantId tenantId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Returns all <see cref="CreditLot"/> rows for the tenant (including drawn-to-zero and expired lots) — a
+    /// test/diagnostic read of the raw <c>credit_lot</c> projection. Ordering is unspecified but stable. Use
+    /// <see cref="GetRemainingBySourceAsync"/> for the drawable per-source remaining (which applies the open /
+    /// non-expired filters).
+    /// </summary>
+    Task<IReadOnlyList<CreditLot>> GetLotsAsync(TenantId tenantId, CancellationToken ct);
 
     /// <summary>
     /// Idempotently seeds one period's already-realised AI-credit consumption onto the ledger for the cutover

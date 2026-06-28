@@ -50,7 +50,9 @@ public sealed class CreditLedgerStoreFixture : IAsyncLifetime
         await using var conn = new NpgsqlConnection(ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "TRUNCATE ai_credit_ledger, tenant_credit_balance RESTART IDENTITY CASCADE";
+        cmd.CommandText =
+            "TRUNCATE ai_credit_ledger, tenant_credit_balance, credit_lot, credit_allocation, credit_lot_seq " +
+            "RESTART IDENTITY CASCADE";
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -124,6 +126,40 @@ public sealed class CreditLedgerStoreFixture : IAsyncLifetime
             version    BIGINT NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL
         );
+
+        CREATE TABLE credit_lot (
+            lot_id      TEXT PRIMARY KEY,
+            tenant_id   TEXT NOT NULL,
+            source      SMALLINT NOT NULL,
+            original    NUMERIC(18,6) NOT NULL,
+            remaining   NUMERIC(18,6) NOT NULL CHECK (remaining >= 0),
+            expires_at  TIMESTAMPTZ,
+            granted_at  TIMESTAMPTZ NOT NULL,
+            lot_seq     BIGINT NOT NULL
+        );
+
+        CREATE TABLE credit_allocation (
+            allocation_id  TEXT PRIMARY KEY,
+            debit_entry_id TEXT NOT NULL,
+            lot_id         TEXT NOT NULL,
+            source         SMALLINT NOT NULL,
+            amount         NUMERIC(18,6) NOT NULL,
+            created_at     TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE TABLE credit_lot_seq (
+            tenant_id TEXT PRIMARY KEY,
+            next_seq  BIGINT NOT NULL
+        );
+
+        CREATE INDEX idx_credit_lot_fifo
+            ON credit_lot (tenant_id, source, expires_at, granted_at, lot_seq);
+
+        CREATE INDEX idx_credit_allocation_debit
+            ON credit_allocation (debit_entry_id);
+
+        CREATE INDEX idx_credit_allocation_lot
+            ON credit_allocation (lot_id);
         """;
 }
 

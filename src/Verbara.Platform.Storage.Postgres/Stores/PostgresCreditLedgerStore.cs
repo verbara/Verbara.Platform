@@ -80,9 +80,49 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
                     p.Add(new NpgsqlParameter("Now", grant.CreatedAt));
                 },
                 tx, ct);
+
+            // Mint one credit_lot row mirroring the grant (one lot per grant). The per-tenant lot_seq is the
+            // deterministic monotonic FIFO tiebreak — bumped in the SAME transaction so it serialises behind any
+            // concurrent grant for this tenant. A brand-new tenant's first lot = 0; a migration-013-seeded tenant
+            // (credit_lot_seq.next_seq was set to 1, the miglot has lot_seq 0) gets its first real lot >= 2 —
+            // strictly past the migration lot, keeping the total FIFO order intact. Only reached when inserted == 1
+            // so a deduplicated grant never mints a second lot.
+            var lotSeq = await NextLotSeqAsync(conn, tx, grant.TenantId, ct);
+
+            await conn.ExecuteAsync(
+                "INSERT INTO credit_lot " +
+                "(lot_id, tenant_id, source, original, remaining, expires_at, granted_at, lot_seq) " +
+                "VALUES (@LotId, @TenantId, @Source, @Original, @Remaining, @ExpiresAt, @GrantedAt, @LotSeq)",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("LotId", NpgsqlDbType.Text) { Value = grant.EntryId.Value });
+                    p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = grant.TenantId.Value });
+                    p.Add(new NpgsqlParameter("Source", NpgsqlDbType.Smallint) { Value = (short)grant.Source });
+                    p.Add(new NpgsqlParameter("Original", NpgsqlDbType.Numeric) { Value = grant.Amount });
+                    p.Add(new NpgsqlParameter("Remaining", NpgsqlDbType.Numeric) { Value = grant.Amount });
+                    p.Add(new NpgsqlParameter("ExpiresAt", NpgsqlDbType.TimestampTz) { Value = (object?)grant.ExpiresAt ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("GrantedAt", NpgsqlDbType.TimestampTz) { Value = grant.CreatedAt });
+                    p.Add(new NpgsqlParameter("LotSeq", NpgsqlDbType.Bigint) { Value = lotSeq });
+                },
+                tx, ct);
         }
 
         await tx.CommitAsync(ct);
+    }
+
+    private static async Task<long> NextLotSeqAsync(NpgsqlConnection conn, NpgsqlTransaction tx, TenantId tenantId, CancellationToken ct)
+    {
+        // Bump the per-tenant lot sequence in the SAME transaction and return the value to use as lot_seq. A
+        // brand-new tenant inserts next_seq = 0 (its first lot uses 0); an existing row is bumped by 1 and the
+        // post-increment value returned. RETURNING reads the value atomically with the bump.
+        await using var cmd = new NpgsqlCommand(
+            "INSERT INTO credit_lot_seq (tenant_id, next_seq) VALUES (@TenantId, 0) " +
+            "ON CONFLICT (tenant_id) DO UPDATE SET next_seq = credit_lot_seq.next_seq + 1 " +
+            "RETURNING next_seq",
+            conn, tx);
+        cmd.Parameters.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return (long)result!;
     }
 
     public async Task<CreditDebitResult> TryPostDebitAsync(TenantId tenantId, decimal amount, CreditSource source, string? usageRecordId, CancellationToken ct)
@@ -265,6 +305,51 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
             },
             ct) ?? 0m;
     }
+
+    public async Task<IReadOnlyList<SourceRemaining>> GetRemainingBySourceAsync(TenantId tenantId, DateTimeOffset now, CancellationToken ct)
+    {
+        // Sum open (remaining > 0), non-expired (expires_at IS NULL OR > @Now) lot remaining per source. PostPaid
+        // is never a lot so it never appears; expired Promo lots pending reclaim are excluded. The Σ over the
+        // returned rows equals GetBalanceAsync (Σ(open non-expired lot.remaining) == projection.balance).
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT source, SUM(remaining) AS remaining FROM credit_lot " +
+            "WHERE tenant_id = @TenantId AND remaining > 0 AND (expires_at IS NULL OR expires_at > @Now) " +
+            "GROUP BY source",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("Now", NpgsqlDbType.TimestampTz) { Value = now });
+            },
+            static r => new SourceRemaining((CreditSource)r.GetInt16("source"), r.GetDecimal("remaining")),
+            ct);
+
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<CreditLot>> GetLotsAsync(TenantId tenantId, CancellationToken ct)
+    {
+        // Test/diagnostic read of the raw lot projection (all lots, including drawn-to-zero and expired).
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT lot_id, tenant_id, source, original, remaining, expires_at, granted_at, lot_seq " +
+            "FROM credit_lot WHERE tenant_id = @TenantId",
+            p => p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value }),
+            MapLot,
+            ct);
+
+        return rows;
+    }
+
+    private static CreditLot MapLot(NpgsqlDataReader r) => new()
+    {
+        LotId = r.GetString("lot_id"),
+        TenantId = new TenantId(r.GetString("tenant_id")),
+        Source = (CreditSource)r.GetInt16("source"),
+        Original = r.GetDecimal("original"),
+        Remaining = r.GetDecimal("remaining"),
+        ExpiresAt = r.GetDateTimeOffsetOrNull("expires_at"),
+        GrantedAt = r.GetDateTimeOffset("granted_at"),
+        LotSeq = r.GetInt64("lot_seq"),
+    };
 
     private static async Task InsertDebitRowAsync(
         NpgsqlConnection conn,

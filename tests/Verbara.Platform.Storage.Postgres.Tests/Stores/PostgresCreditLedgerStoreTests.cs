@@ -446,4 +446,95 @@ public sealed class PostgresCreditLedgerStoreTests
         (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
         (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(1);
     }
+
+    // Scenario: a grant mints exactly one credit_lot mirroring it, and GetRemainingBySourceAsync reports it.
+    [Fact]
+    public async Task PostGrantAsync_ShouldMintLot_WhenGrantInserted()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("lot-mint");
+        var expiry = BaseTime.AddMonths(1);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-1", expiresAt: expiry), CancellationToken.None);
+
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().HaveCount(1);
+        var lot = lots[0];
+        lot.Source.Should().Be(CreditSource.Promo);
+        lot.Original.Should().Be(100m);
+        lot.Remaining.Should().Be(100m);
+        lot.ExpiresAt.Should().NotBeNull();
+        lot.LotSeq.Should().Be(0L); // brand-new tenant → first lot seq 0
+
+        var bySource = await store.GetRemainingBySourceAsync(tenant, BaseTime, CancellationToken.None);
+        bySource.Should().ContainSingle(s => s.Source == CreditSource.Promo && s.Remaining == 100m);
+    }
+
+    // Scenario: a deduplicated grant (same external_ref) mints no second lot; balance credited once.
+    [Fact]
+    public async Task PostGrantAsync_ShouldNotMintSecondLot_WhenGrantDeduped()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("lot-dedup");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.TopUp, externalRef: "topup-dup"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.TopUp, externalRef: "topup-dup"), CancellationToken.None);
+
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().HaveCount(1);
+        lots[0].Remaining.Should().Be(100m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(100m);
+    }
+
+    // Scenario: per-source remaining sums to the projection balance across multiple sources.
+    [Fact]
+    public async Task GetRemainingBySourceAsync_ShouldSumToBalance_WhenMultipleSources()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("lot-sum");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        await store.PostGrantAsync(Grant(tenant, 300m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.TopUp, externalRef: "top-1"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 50m, source: CreditSource.Promo, externalRef: "promo-x", expiresAt: BaseTime.AddMonths(1)), CancellationToken.None);
+
+        var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
+        balance.Should().Be(450m);
+
+        var bySource = await store.GetRemainingBySourceAsync(tenant, BaseTime, CancellationToken.None);
+        bySource.Sum(s => s.Remaining).Should().Be(balance);
+        bySource.Should().Contain(s => s.Source == CreditSource.Subscription && s.Remaining == 300m);
+        bySource.Should().Contain(s => s.Source == CreditSource.TopUp && s.Remaining == 100m);
+        bySource.Should().Contain(s => s.Source == CreditSource.Promo && s.Remaining == 50m);
+    }
+
+    // Scenario: an expired Promo lot is excluded from per-source remaining once `now` is past its expiry.
+    [Fact]
+    public async Task GetRemainingBySourceAsync_ShouldExcludeExpiredPromo_WhenNowPastExpiry()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("lot-expired");
+        var promoExpiry = BaseTime.AddDays(10);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        await store.PostGrantAsync(Grant(tenant, 300m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 50m, source: CreditSource.Promo, externalRef: "promo-exp", expiresAt: promoExpiry), CancellationToken.None);
+
+        var now = promoExpiry.AddSeconds(1);
+        var bySource = await store.GetRemainingBySourceAsync(tenant, now, CancellationToken.None);
+
+        bySource.Should().ContainSingle();
+        bySource[0].Source.Should().Be(CreditSource.Subscription);
+        bySource[0].Remaining.Should().Be(300m);
+    }
 }

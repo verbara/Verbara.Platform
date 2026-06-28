@@ -402,4 +402,84 @@ public sealed class InMemoryCreditLedgerStoreTests
 
         total.Should().Be(0m);
     }
+
+    [Fact]
+    public async Task PostGrantAsync_ShouldMintLot_WhenGrantInserted()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        var expiry = BaseTime.AddMonths(1);
+
+        await store.PostGrantAsync(
+            MakeGrant(amount: 100m, source: CreditSource.Promo, periodKey: null, externalRef: "promo-1", expiresAt: expiry),
+            CancellationToken.None);
+
+        var lots = await store.GetLotsAsync(Tenant1, CancellationToken.None);
+        lots.Should().HaveCount(1);
+        var lot = lots[0];
+        lot.Source.Should().Be(CreditSource.Promo);
+        lot.Original.Should().Be(100m);
+        lot.Remaining.Should().Be(100m);
+        lot.ExpiresAt.Should().Be(expiry);
+        lot.GrantedAt.Should().Be(BaseTime);
+        lot.LotSeq.Should().Be(0L);
+
+        // GetRemainingBySourceAsync reports Promo=100 (now is before the expiry).
+        var bySource = await store.GetRemainingBySourceAsync(Tenant1, BaseTime, CancellationToken.None);
+        bySource.Should().ContainSingle(s => s.Source == CreditSource.Promo && s.Remaining == 100m);
+    }
+
+    [Fact]
+    public async Task PostGrantAsync_ShouldNotMintSecondLot_WhenGrantDeduped()
+    {
+        var store = new InMemoryCreditLedgerStore();
+
+        await store.PostGrantAsync(
+            MakeGrant(amount: 100m, source: CreditSource.TopUp, periodKey: null, externalRef: "topup-dup"),
+            CancellationToken.None);
+        // Same external_ref → deduplicated grant: no second lot, balance credited once.
+        await store.PostGrantAsync(
+            MakeGrant(amount: 100m, source: CreditSource.TopUp, periodKey: null, externalRef: "topup-dup"),
+            CancellationToken.None);
+
+        var lots = await store.GetLotsAsync(Tenant1, CancellationToken.None);
+        lots.Should().HaveCount(1);
+        lots[0].Remaining.Should().Be(100m);
+        (await store.GetBalanceAsync(Tenant1, CancellationToken.None)).Should().Be(100m);
+    }
+
+    [Fact]
+    public async Task GetRemainingBySourceAsync_ShouldSumToBalance_WhenMultipleSources()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 300m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(MakeGrant(amount: 100m, source: CreditSource.TopUp, periodKey: null, externalRef: "top-1"), CancellationToken.None);
+        await store.PostGrantAsync(MakeGrant(amount: 50m, source: CreditSource.Promo, periodKey: null, externalRef: "promo-x", expiresAt: BaseTime.AddMonths(1)), CancellationToken.None);
+
+        var balance = await store.GetBalanceAsync(Tenant1, CancellationToken.None);
+        balance.Should().Be(450m);
+
+        var bySource = await store.GetRemainingBySourceAsync(Tenant1, BaseTime, CancellationToken.None);
+
+        bySource.Sum(s => s.Remaining).Should().Be(balance);
+        bySource.Should().Contain(s => s.Source == CreditSource.Subscription && s.Remaining == 300m);
+        bySource.Should().Contain(s => s.Source == CreditSource.TopUp && s.Remaining == 100m);
+        bySource.Should().Contain(s => s.Source == CreditSource.Promo && s.Remaining == 50m);
+    }
+
+    [Fact]
+    public async Task GetRemainingBySourceAsync_ShouldExcludeExpiredPromo_WhenNowPastExpiry()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        var promoExpiry = BaseTime.AddDays(10);
+        await store.PostGrantAsync(MakeGrant(amount: 300m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(MakeGrant(amount: 50m, source: CreditSource.Promo, periodKey: null, externalRef: "promo-exp", expiresAt: promoExpiry), CancellationToken.None);
+
+        // A `now` strictly after the promo expiry: the promo lot is excluded; only Subscription remains.
+        var now = promoExpiry.AddSeconds(1);
+        var bySource = await store.GetRemainingBySourceAsync(Tenant1, now, CancellationToken.None);
+
+        bySource.Should().ContainSingle();
+        bySource[0].Source.Should().Be(CreditSource.Subscription);
+        bySource[0].Remaining.Should().Be(300m);
+    }
 }

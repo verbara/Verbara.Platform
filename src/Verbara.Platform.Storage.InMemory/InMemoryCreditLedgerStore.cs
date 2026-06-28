@@ -53,6 +53,21 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
             ledger.Entries.Add(grant);
             ledger.Balance += grant.Amount;
             ledger.Version++;
+
+            // Mint one lot mirroring the grant (Original == Remaining == Amount), with the next monotonic
+            // per-tenant lot_seq under the same Gate. Reached only on the non-duplicate branch, so a deduplicated
+            // grant never mints a second lot. Keeps Σ(open non-expired lot.Remaining) == Balance after every grant.
+            ledger.Lots.Add(new CreditLot
+            {
+                LotId = grant.EntryId.Value,
+                TenantId = grant.TenantId,
+                Source = grant.Source,
+                Original = grant.Amount,
+                Remaining = grant.Amount,
+                ExpiresAt = grant.ExpiresAt,
+                GrantedAt = grant.CreatedAt,
+                LotSeq = ledger.NextLotSeq++,
+            });
         }
 
         return Task.CompletedTask;
@@ -130,6 +145,39 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
                 .Sum(e => -e.Amount);
 
             return Task.FromResult(total);
+        }
+    }
+
+    public Task<IReadOnlyList<SourceRemaining>> GetRemainingBySourceAsync(TenantId tenantId, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!_ledgers.TryGetValue(tenantId, out var ledger))
+            return Task.FromResult<IReadOnlyList<SourceRemaining>>([]);
+
+        lock (ledger.Gate)
+        {
+            // Mirror the Postgres GROUP BY: open (Remaining > 0), non-expired (ExpiresAt is null OR > now) lots,
+            // summed per source. PostPaid is never a lot so it never appears; expired Promo lots are excluded. The
+            // Σ over the returned rows equals Balance (Σ(open non-expired lot.Remaining) == projection.balance).
+            IReadOnlyList<SourceRemaining> result = ledger.Lots
+                .Where(l => l.Remaining > 0m && (l.ExpiresAt is null || l.ExpiresAt > now))
+                .GroupBy(l => l.Source)
+                .Select(g => new SourceRemaining(g.Key, g.Sum(l => l.Remaining)))
+                .ToList();
+
+            return Task.FromResult(result);
+        }
+    }
+
+    public Task<IReadOnlyList<CreditLot>> GetLotsAsync(TenantId tenantId, CancellationToken ct)
+    {
+        if (!_ledgers.TryGetValue(tenantId, out var ledger))
+            return Task.FromResult<IReadOnlyList<CreditLot>>([]);
+
+        lock (ledger.Gate)
+        {
+            // Test/diagnostic read of all lots (including drawn-to-zero and expired). Snapshot copy under Gate.
+            IReadOnlyList<CreditLot> result = ledger.Lots.ToList();
+            return Task.FromResult(result);
         }
     }
 
@@ -262,7 +310,12 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         public object Gate { get; } = new();
         public List<CreditLedgerEntry> Entries { get; } = [];
         public HashSet<string> GrantKeys { get; } = [];
+        public List<CreditLot> Lots { get; } = [];
         public decimal Balance { get; set; }
         public long Version { get; set; }
+
+        // The per-tenant monotonic lot_seq source — the InMemory twin of the credit_lot_seq table. Starts at 0
+        // (a brand-new tenant's first lot uses 0); post-incremented under Gate as each grant mints a lot.
+        public long NextLotSeq { get; set; }
     }
 }

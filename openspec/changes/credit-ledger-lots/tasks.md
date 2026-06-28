@@ -22,14 +22,17 @@
 
 ## Group 2 — Store contract + grant-time lot mint (both twins)
 
-- [ ] 2.1 `ICreditLedgerStore`: add `GetRemainingBySourceAsync(TenantId, ct)` →
-  `IReadOnlyList<SourceRemaining>`, `GetExpiredLotsAsync(TenantId?, DateTimeOffset now, ct)` (or a sweep cursor), and
-  `ReclaimExpiredLotAsync(TenantId, string lotId, DateTimeOffset now, ct)`. Document the FIFO order + lock order in the
-  XML doc.
-- [ ] 2.2 `PostGrantAsync` (both stores): in the `if (inserted == 1)` block, also insert the `credit_lot` row
+- [x] 2.1 `ICreditLedgerStore`: add `GetRemainingBySourceAsync(TenantId, DateTimeOffset now, ct)` →
+  `IReadOnlyList<SourceRemaining>` (open, non-expired remaining per source; excludes expired Promo + zero lots +
+  PostPaid; `Σ == GetBalanceAsync` documented as the invariant) and `GetLotsAsync(TenantId, ct)` (test/diagnostic
+  raw-lot read). The expiry-sweep contract (`GetExpiredLotsAsync` / `ReclaimExpiredLotAsync`) is **Group 4** (the
+  reclaim sweeper), not Group 2 — moved there.
+- [x] 2.2 `PostGrantAsync` (both stores): in the `if (inserted == 1)` block, also insert the `credit_lot` row
   (`remaining = original = grant.Amount`, `source = grant.Source`, `expires_at = grant.ExpiresAt`, `granted_at =
-  grant.CreatedAt`, `lot_seq = next per-tenant seq`). InMemory mirrors with a `List<CreditLot>` + per-tenant seq under
-  the existing `Gate`. **Invariant test**: after any grant, `Σ lot.remaining == balance` in both stores.
+  grant.CreatedAt`, `lot_seq = next per-tenant seq`). Postgres bumps `credit_lot_seq` (`INSERT … ON CONFLICT DO UPDATE
+  SET next_seq = next_seq + 1 RETURNING next_seq`) in the same tx; InMemory mirrors with a `List<CreditLot>` +
+  `NextLotSeq++` under the existing `Gate`. **Tests (both twins)**: lot minted on insert (`Σ per-source remaining ==
+  balance`), no second lot on a deduped grant, multi-source Σ==balance, expired-Promo exclusion.
 
 ## Group 3 — FIFO metered debit (the money-path rewrite)
 
