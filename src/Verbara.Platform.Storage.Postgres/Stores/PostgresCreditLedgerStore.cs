@@ -416,6 +416,26 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
             ct) ?? 0m;
     }
 
+    public async Task<decimal> GetPartnerSourceDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
+    {
+        // Partner debit amounts are negative; negate the SUM to surface the positive partner-funded consumption.
+        // Mirrors GetPostPaidDebitsTotalAsync exactly but source = @Partner — the per-customer leaf the owning
+        // partner's derive-on-read attribution aggregates over its Customer children.
+        return await _dataSource.ExecuteScalarAsync<decimal?>(
+            "SELECT COALESCE(-SUM(amount), 0) FROM ai_credit_ledger " +
+            "WHERE tenant_id = @TenantId AND source = @Partner AND entry_type = @Debit " +
+            "AND created_at >= @Start AND created_at < @End",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("Partner", NpgsqlDbType.Smallint) { Value = (short)CreditSource.Partner });
+                p.Add(new NpgsqlParameter("Debit", NpgsqlDbType.Smallint) { Value = (short)CreditEntryType.Debit });
+                p.Add(new NpgsqlParameter("Start", NpgsqlDbType.TimestampTz) { Value = periodStart });
+                p.Add(new NpgsqlParameter("End", NpgsqlDbType.TimestampTz) { Value = periodEnd });
+            },
+            ct) ?? 0m;
+    }
+
     public async Task<IReadOnlyList<SourceRemaining>> GetRemainingBySourceAsync(TenantId tenantId, DateTimeOffset now, CancellationToken ct)
     {
         // Sum open (remaining > 0), non-expired (expires_at IS NULL OR > @Now) lot remaining per source. PostPaid

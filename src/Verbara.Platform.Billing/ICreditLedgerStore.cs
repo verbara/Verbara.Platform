@@ -80,6 +80,17 @@ public interface ICreditLedgerStore
     /// </summary>
     Task<decimal> GetPostPaidDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct);
 
+    /// <summary>
+    /// Returns the tenant's partner-funded AiAnalysis consumption for a period: the sum of <c>|amount|</c> over the
+    /// tenant's <see cref="CreditSource.Partner"/> debit rows whose <c>created_at</c> falls in
+    /// <c>[<paramref name="periodStart"/>, <paramref name="periodEnd"/>)</c>. This is the per-customer leaf the
+    /// owning partner's derive-on-read attribution aggregates (ADR-0033 (c2) addendum) — partner-funded draws are
+    /// tagged <see cref="CreditSource.Partner"/> (never <see cref="CreditSource.PostPaid"/>) so they never enter the
+    /// customer-owed <c>Σ |PostPaid|</c> invoice, yet remain attributable to the partner with no materialized table.
+    /// Returns <c>0</c> when no Partner debits exist in the window.
+    /// </summary>
+    Task<decimal> GetPartnerSourceDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct);
+
     /// <summary>Returns the tenant's ledger entries, most recent first, paginated (1-based <paramref name="page"/>).</summary>
     Task<IReadOnlyList<CreditLedgerEntry>> GetEntriesAsync(TenantId tenantId, int page, int pageSize, CancellationToken ct);
 

@@ -207,6 +207,27 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         }
     }
 
+    public Task<decimal> GetPartnerSourceDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
+    {
+        if (!_ledgers.TryGetValue(tenantId, out var ledger))
+            return Task.FromResult(0m);
+
+        lock (ledger.Gate)
+        {
+            // Partner debit amounts are negative; negate to surface the positive partner-funded consumption. Mirrors
+            // GetPostPaidDebitsTotalAsync exactly but over Source == Partner — the per-customer leaf the owning
+            // partner's derive-on-read attribution sums, with the same half-open [periodStart, periodEnd) window.
+            var total = ledger.Entries
+                .Where(e => e.EntryType == CreditEntryType.Debit
+                    && e.Source == CreditSource.Partner
+                    && e.CreatedAt >= periodStart
+                    && e.CreatedAt < periodEnd)
+                .Sum(e => -e.Amount);
+
+            return Task.FromResult(total);
+        }
+    }
+
     public Task<IReadOnlyList<SourceRemaining>> GetRemainingBySourceAsync(TenantId tenantId, DateTimeOffset now, CancellationToken ct)
     {
         if (!_ledgers.TryGetValue(tenantId, out var ledger))

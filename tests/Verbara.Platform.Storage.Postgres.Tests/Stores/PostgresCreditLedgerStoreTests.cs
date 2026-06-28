@@ -403,6 +403,41 @@ public sealed class PostgresCreditLedgerStoreTests
         emptyTotal.Should().Be(0m);
     }
 
+    // Scenario: GetPartnerSourceDebitsTotalAsync sums only Partner-source debits within the period window.
+    [Fact]
+    public async Task GetPartnerSourceDebitsTotalAsync_ShouldSumPartnerDebits_InWindow()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("partner-total");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        // A Partner lot (drawn FIFO-first) and a Subscription lot so the per-source draws are tagged distinctly.
+        await store.PostGrantAsync(Grant(tenant, 1000m, CreditSource.Partner, externalRef: "partner-g"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 1000m, CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        // 600 draws entirely from the Partner lot (priority Partner < Subscription) → a Partner-tagged covered debit.
+        await store.PostMeteredDebitAsync(tenant, 600m, "u1", CancellationToken.None);
+        // A further 500 exhausts the remaining 400 Partner + 100 Subscription → +400 Partner, +100 Subscription.
+        await store.PostMeteredDebitAsync(tenant, 500m, "u2", CancellationToken.None);
+
+        var periodStart = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var total = await store.GetPartnerSourceDebitsTotalAsync(tenant, periodStart, periodEnd, CancellationToken.None);
+
+        // Partner draws 600 + 400 = 1000; the 100 Subscription draw is excluded.
+        total.Should().Be(1000m);
+
+        // A window that excludes the debits returns 0.
+        var emptyTotal = await store.GetPartnerSourceDebitsTotalAsync(
+            tenant,
+            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2020, 2, 1, 0, 0, 0, TimeSpan.Zero),
+            CancellationToken.None);
+        emptyTotal.Should().Be(0m);
+    }
+
     // Scenario: the cutover back-fill draws covered from the grant and bills the tail as PostPaid, floored at 0.
     [Fact]
     public async Task PostBackfillConsumptionAsync_ShouldDrawCoveredAndBillTail_WhenConsumedOverBalance()

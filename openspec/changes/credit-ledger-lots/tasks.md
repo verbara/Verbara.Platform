@@ -76,22 +76,22 @@
 
 ## Group 5 — Partner attribution (derive-on-read) + per-source reporting
 
-- [ ] 5.1 `GetPartnerAttributionAsync(partnerTenantId, periodStart, periodEnd, ct)` — resolve the partner's direct
+- [x] 5.1 `GetPartnerAttributionAsync(partnerTenantId, periodStart, periodEnd, ct)` — resolve the partner's direct
   `Customer` children via `ITenantStore.GetChildrenAsync`, sum `|Partner-source debits|` per child in the half-open
   window. Lives in Billing over `ICreditLedgerStore` + `ITenantStore`. Gate: assert `parent.Type == TenantType.Partner`
   (reuse the `ManagementTenantEndpoints.cs:104` pattern).
-- [ ] 5.2 `GetRemainingBySourceAsync` (both stores): per-source open `remaining`, exclude expired Promo + PostPaid;
+- [x] 5.2 `GetRemainingBySourceAsync` (both stores): per-source open `remaining`, exclude expired Promo + PostPaid;
   `Σ == balance` test.
 
 ## Group 6 — API endpoints + DTOs (AOT)
 
-- [ ] 6.1 `CreditLedgerEndpoints`: add `POST /management/credit-ledger/promo-grant` and `… /partner-grant` mirroring the
+- [x] 6.1 `CreditLedgerEndpoints`: add `POST /management/credit-ledger/promo-grant` and `… /partner-grant` mirroring the
   c1 top-up double-lock (`PlatformAdminOnly` group + `.RequireAuthorization(GrantPolicy)`), building `CreditLedgerEntry`
   with `Source = Promo|Partner`, `ExpiresAt` (promo), `ExternalRef = IdempotencyKey`; validate Amount>0, non-blank
   TenantId/key; Partner-grant validates the target tenant's parent is a Partner. Add `GET
   /admin/credit-ledger/remaining-by-source` (AdminOnly + `billing:credits:read`). New DTOs (`PromoGrantRequest`,
   `PartnerGrantRequest`, `SourceRemainingDto`, partner-attribution read DTO) registered in `ApiJsonContext`.
-- [ ] 6.2 Endpoint/handler tests + `ApiJsonContext` round-trip; confirm no reflection-based serialization.
+- [x] 6.2 Endpoint/handler tests + `ApiJsonContext` round-trip; confirm no reflection-based serialization.
 
 ## Group 7 — Verification + ship
 

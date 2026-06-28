@@ -846,4 +846,59 @@ public sealed class InMemoryCreditLedgerStoreTests
         var bySource = await store.GetRemainingBySourceAsync(Tenant1, now, CancellationToken.None);
         bySource.Sum(s => s.Remaining).Should().Be(balance);
     }
+
+    // ─── GetPartnerSourceDebitsTotalAsync (c2 derive-on-read attribution leaf) ──────
+
+    [Fact]
+    public async Task GetPartnerSourceDebitsTotalAsync_ShouldSumPartnerDebits_InWindow()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        // Fund both a Partner lot and a Subscription lot so the per-source debits can be tagged distinctly.
+        await store.PostGrantAsync(
+            MakeGrant(amount: 1000m, source: CreditSource.Partner, periodKey: null, externalRef: "partner-w1"),
+            CancellationToken.None);
+        await store.PostGrantAsync(
+            MakeGrant(amount: 1000m, source: CreditSource.Subscription, periodKey: "2026-06"),
+            CancellationToken.None);
+
+        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        await store.TryPostDebitAsync(Tenant1, 250m, CreditSource.Partner, "p1", CancellationToken.None);
+        await store.TryPostDebitAsync(Tenant1, 350m, CreditSource.Partner, "p2", CancellationToken.None);
+        // A non-Partner debit in the SAME window MUST be excluded.
+        await store.TryPostDebitAsync(Tenant1, 999m, CreditSource.Subscription, "s1", CancellationToken.None);
+        var after = DateTimeOffset.UtcNow.AddSeconds(1);
+
+        var total = await store.GetPartnerSourceDebitsTotalAsync(Tenant1, before, after, CancellationToken.None);
+
+        total.Should().Be(600m); // |−250| + |−350|, excludes the 999 Subscription debit.
+    }
+
+    [Fact]
+    public async Task GetPartnerSourceDebitsTotalAsync_ShouldExcludeOutOfWindowRows_WhenWindowDisjoint()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(
+            MakeGrant(amount: 1000m, source: CreditSource.Partner, periodKey: null, externalRef: "partner-w2"),
+            CancellationToken.None);
+        await store.TryPostDebitAsync(Tenant1, 400m, CreditSource.Partner, "p3", CancellationToken.None);
+
+        // A half-open window entirely in the past — the just-posted debit (stamped ~now) is out of window.
+        var windowStart = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var windowEnd = new DateTimeOffset(2020, 2, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var total = await store.GetPartnerSourceDebitsTotalAsync(Tenant1, windowStart, windowEnd, CancellationToken.None);
+
+        total.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task GetPartnerSourceDebitsTotalAsync_ShouldReturnZero_WhenNoLedger()
+    {
+        var store = new InMemoryCreditLedgerStore();
+
+        var total = await store.GetPartnerSourceDebitsTotalAsync(
+            Tenant1, BaseTime, BaseTime.AddMonths(1), CancellationToken.None);
+
+        total.Should().Be(0m);
+    }
 }
