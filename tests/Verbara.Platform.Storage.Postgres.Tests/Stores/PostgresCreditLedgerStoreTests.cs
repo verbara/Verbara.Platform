@@ -296,7 +296,7 @@ public sealed class PostgresCreditLedgerStoreTests
         var store = new PostgresCreditLedgerStore(dataSource);
         await store.PostGrantAsync(Grant(tenant, 10m, periodKey: "2026-06"), CancellationToken.None);
 
-        var result = await store.PostMeteredDebitAsync(tenant, 4m, CreditSource.Subscription, "usage-c", CancellationToken.None);
+        var result = await store.PostMeteredDebitAsync(tenant, 4m, "usage-c", CancellationToken.None);
 
         result.NewBalance.Should().Be(6m);
         result.CoveredAmount.Should().Be(4m);
@@ -318,7 +318,7 @@ public sealed class PostgresCreditLedgerStoreTests
         var store = new PostgresCreditLedgerStore(dataSource);
         await store.PostGrantAsync(Grant(tenant, 3m, periodKey: "2026-06"), CancellationToken.None);
 
-        var result = await store.PostMeteredDebitAsync(tenant, 5m, CreditSource.Subscription, "usage-o", CancellationToken.None);
+        var result = await store.PostMeteredDebitAsync(tenant, 5m, "usage-o", CancellationToken.None);
 
         result.NewBalance.Should().Be(0m);
         result.CoveredAmount.Should().Be(3m);
@@ -339,7 +339,7 @@ public sealed class PostgresCreditLedgerStoreTests
         await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
         var store = new PostgresCreditLedgerStore(dataSource);
 
-        var result = await store.PostMeteredDebitAsync(tenant, 7m, CreditSource.Subscription, "usage-z", CancellationToken.None);
+        var result = await store.PostMeteredDebitAsync(tenant, 7m, "usage-z", CancellationToken.None);
 
         result.NewBalance.Should().Be(0m);
         result.CoveredAmount.Should().Be(0m);
@@ -361,8 +361,8 @@ public sealed class PostgresCreditLedgerStoreTests
         await store.PostGrantAsync(Grant(tenant, 4m, periodKey: "2026-06"), CancellationToken.None);
 
         // Two concurrent metered debits of 3 against a balance of 4: covered totals exactly 4, tail totals 2.
-        var debitA = store.PostMeteredDebitAsync(tenant, 3m, CreditSource.Subscription, "a", CancellationToken.None);
-        var debitB = store.PostMeteredDebitAsync(tenant, 3m, CreditSource.Subscription, "b", CancellationToken.None);
+        var debitA = store.PostMeteredDebitAsync(tenant, 3m, "a", CancellationToken.None);
+        var debitB = store.PostMeteredDebitAsync(tenant, 3m, "b", CancellationToken.None);
         var results = await Task.WhenAll(debitA, debitB);
 
         var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
@@ -384,8 +384,8 @@ public sealed class PostgresCreditLedgerStoreTests
         await store.PostGrantAsync(Grant(tenant, 3m, periodKey: "2026-06"), CancellationToken.None);
 
         // Covered 3 + PostPaid tail 2, then a further pure PostPaid debit of 4 (balance already 0).
-        await store.PostMeteredDebitAsync(tenant, 5m, CreditSource.Subscription, "u1", CancellationToken.None);
-        await store.PostMeteredDebitAsync(tenant, 4m, CreditSource.Subscription, "u2", CancellationToken.None);
+        await store.PostMeteredDebitAsync(tenant, 5m, "u1", CancellationToken.None);
+        await store.PostMeteredDebitAsync(tenant, 4m, "u2", CancellationToken.None);
 
         var periodStart = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var periodEnd = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -536,5 +536,149 @@ public sealed class PostgresCreditLedgerStoreTests
         bySource.Should().ContainSingle();
         bySource[0].Source.Should().Be(CreditSource.Subscription);
         bySource[0].Remaining.Should().Be(300m);
+    }
+
+    // Scenario (Group 3a): a FIFO metered debit spans a Promo lot, a Subscription lot, and a PostPaid tail.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldDrawPromoThenSubscriptionThenPostPaid_WhenSpanning()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-span");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        // Promo 100 (never expires) + Subscription 1000. Balance 1100; debit 1150 ⇒ covered 1100 + tail 50.
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-span"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 1000m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        var result = await store.PostMeteredDebitAsync(tenant, 1150m, "usage-span", CancellationToken.None);
+
+        result.CoveredAmount.Should().Be(1100m);
+        result.PostPaidAmount.Should().Be(50m);
+        result.NewBalance.Should().Be(0m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+
+        // One Promo covered row, one Subscription covered row, one PostPaid tail row; two credit_allocation rows.
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Promo)).Should().Be(1);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(1);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(2);
+
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().OnlyContain(l => l.Remaining == 0m);
+    }
+
+    // Scenario (Group 3a): n=1 byte-identity — a single Subscription lot degenerates to the two-step covered draw.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldBeByteIdentical_WhenSingleSubscriptionLot()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-n1");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 10m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        var result = await store.PostMeteredDebitAsync(tenant, 4m, "usage-n1", CancellationToken.None);
+
+        result.NewBalance.Should().Be(6m);
+        result.CoveredAmount.Should().Be(4m);
+        result.PostPaidAmount.Should().Be(0m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(6m);
+        // Exactly one -4 Subscription debit row, zero PostPaid rows, one invisible credit_allocation row.
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(0);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(1);
+    }
+
+    // Scenario (Group 3a): no open lots ⇒ the whole debit is a single PostPaid tail, no allocation.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldBeAllPostPaid_WhenNoOpenLots()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-nolots");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        var result = await store.PostMeteredDebitAsync(tenant, 7m, "usage-nl", CancellationToken.None);
+
+        result.CoveredAmount.Should().Be(0m);
+        result.PostPaidAmount.Should().Be(7m);
+        result.NewBalance.Should().Be(0m);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(1);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(0);
+    }
+
+    // Scenario (Group 3a): concurrent debits against a single 4-credit lot never overdraw it.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldNeverOverdraw_WhenConcurrent()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-fifo-concurrent");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 4m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        const int concurrency = 8;
+        var debits = Enumerable.Range(0, concurrency)
+            .Select(i => store.PostMeteredDebitAsync(tenant, 3m, $"u{i}", CancellationToken.None));
+        var results = await Task.WhenAll(debits);
+
+        results.Sum(r => r.CoveredAmount).Should().Be(4m);
+        var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
+        balance.Should().Be(0m);
+        balance.Should().BeGreaterThanOrEqualTo(0m);
+
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Sum(l => l.Remaining).Should().Be(0m);
+        lots.Should().OnlyContain(l => l.Remaining >= 0m);
+    }
+
+    // Scenario (Group 3a): credit_allocation is internal — GetEntries(Count)Async return only ai_credit_ledger rows.
+    [Fact]
+    public async Task GetEntriesAsync_ShouldExcludeAllocations_WhenLotsDrawn()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-invisible");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-inv"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 1000m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostMeteredDebitAsync(tenant, 1150m, "usage-inv", CancellationToken.None);
+
+        // 2 grants + 3 debit rows = 5 ledger rows; the 2 allocations are invisible to GetEntries(Count)Async.
+        (await store.GetEntriesCountAsync(tenant, CancellationToken.None)).Should().Be(5);
+        var entries = await store.GetEntriesAsync(tenant, 1, 50, CancellationToken.None);
+        entries.Should().HaveCount(5);
+        entries.Should().OnlyContain(e => e.EntryType == CreditEntryType.Grant || e.EntryType == CreditEntryType.Debit);
+        // The allocation rows exist underneath but never surface through the ledger API.
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(2);
+    }
+
+    // Scenario (Group 3a): the lot invariant Σ GetRemainingBySourceAsync == GetBalanceAsync holds after the debit.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldKeepInvariant_AfterDebit()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-invariant");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-iv", expiresAt: BaseTime.AddMonths(1)), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 1000m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 500m, source: CreditSource.TopUp, externalRef: "top-iv"), CancellationToken.None);
+
+        // 1600 granted; draw 250 (100 Promo + 150 Subscription) ⇒ covered 250, balance 1350.
+        await store.PostMeteredDebitAsync(tenant, 250m, "usage-iv", CancellationToken.None);
+
+        var bySource = await store.GetRemainingBySourceAsync(tenant, BaseTime, CancellationToken.None);
+        var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
+
+        balance.Should().Be(1350m);
+        bySource.Sum(s => s.Remaining).Should().Be(balance);
     }
 }

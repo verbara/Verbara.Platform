@@ -94,7 +94,7 @@ internal sealed partial class BillingTypificationCreditMeter(
                 var credits = CreditsForRecord(promptTokens, completionTokens, totalTokens);
                 if (credits > 0m)
                 {
-                    _ = await _ledger.PostMeteredDebitAsync(tenantId, credits, CreditSource.Subscription, record.RecordId.Value, ct).ConfigureAwait(false);
+                    _ = await _ledger.PostMeteredDebitAsync(tenantId, credits, record.RecordId.Value, ct).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)

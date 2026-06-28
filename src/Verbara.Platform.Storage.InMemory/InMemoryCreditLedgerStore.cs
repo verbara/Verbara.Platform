@@ -98,7 +98,7 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         }
     }
 
-    public Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, CreditSource coveredSource, string? usageRecordId, CancellationToken ct)
+    public Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, string? usageRecordId, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
 
@@ -106,27 +106,85 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
 
         lock (ledger.Gate)
         {
-            // Two-step covered-plus-PostPaid split under the per-tenant lock — the InMemory twin of the
-            // Postgres single-transaction FOR UPDATE + guarded decrement + unconditional tail.
-            var covered = Math.Min(ledger.Balance, debit);
-            var tail = debit - covered;
+            // FIFO multi-source allocation under the per-tenant lock — the InMemory twin of the Postgres
+            // single-transaction FOR UPDATE walk. Order the open, non-expired lots by the EXACT total FIFO order
+            // (billable_priority ASC, expires_at ASC NULLS LAST, granted_at ASC, lot_seq ASC). NULLS LAST is
+            // modelled by sorting null ExpiresAt as DateTimeOffset.MaxValue.
+            var openLots = ledger.Lots
+                .Where(l => l.Remaining > 0m && (l.ExpiresAt is null || l.ExpiresAt > now))
+                .OrderBy(l => BillablePriority.Of(l.Source))
+                .ThenBy(l => l.ExpiresAt ?? DateTimeOffset.MaxValue)
+                .ThenBy(l => l.GrantedAt)
+                .ThenBy(l => l.LotSeq)
+                .ToList();
 
-            if (covered > 0m)
+            var outstanding = debit;
+            var coveredTotal = 0m;
+
+            foreach (var lot in openLots)
             {
-                // Draw covered from the prepaid stock; the projection floors at 0 (covered <= balance).
-                ledger.Balance -= covered;
-                ledger.Version++;
-                AppendDebit(ledger, tenantId, coveredSource, -covered, usageRecordId, now);
+                if (outstanding <= 0m)
+                    break;
+
+                var draw = Math.Min(lot.Remaining, outstanding);
+                if (draw <= 0m)
+                    continue;
+
+                // Replace the lot record with a decremented copy (CreditLot.Remaining is init-only). One covered
+                // debit row tagged the lot's OWN source + one internal allocation row.
+                DecrementLot(ledger, lot, draw);
+                var debitEntryId = AppendDebit(ledger, tenantId, lot.Source, -draw, usageRecordId, now);
+                ledger.Allocations.Add(new CreditAllocation
+                {
+                    AllocationId = EntityId.New().Value,
+                    DebitEntryId = debitEntryId,
+                    LotId = lot.LotId,
+                    Source = lot.Source,
+                    Amount = draw,
+                    CreatedAt = now,
+                });
+
+                outstanding -= draw;
+                coveredTotal += draw;
             }
+
+            if (coveredTotal > 0m)
+            {
+                // ONE projection decrement by the total covered; floors at 0 (coveredTotal <= balance by the
+                // Σ(open non-expired lot.Remaining) == Balance invariant).
+                ledger.Balance -= coveredTotal;
+                ledger.Version++;
+            }
+
+            var tail = debit - coveredTotal;
 
             if (tail > 0m)
             {
-                // Unconditional billable PostPaid tail — does NOT change the (floored) projection balance.
+                // Exactly ONE unconditional billable PostPaid tail — never a lot, never split, no allocation. Does
+                // NOT change the (floored) projection balance.
                 AppendDebit(ledger, tenantId, CreditSource.PostPaid, -tail, usageRecordId, now);
             }
 
-            return Task.FromResult(new MeteredDebitResult(ledger.Balance, covered, tail));
+            return Task.FromResult(new MeteredDebitResult(ledger.Balance, coveredTotal, tail));
         }
+    }
+
+    private static void DecrementLot(TenantLedger ledger, CreditLot lot, decimal draw)
+    {
+        // CreditLot is immutable ({ get; init; }); replace the list entry in place with a decremented copy so the
+        // lot projection mirrors the Postgres guarded UPDATE credit_lot SET remaining = remaining - @Draw.
+        var index = ledger.Lots.IndexOf(lot);
+        ledger.Lots[index] = new CreditLot
+        {
+            LotId = lot.LotId,
+            TenantId = lot.TenantId,
+            Source = lot.Source,
+            Original = lot.Original,
+            Remaining = lot.Remaining - draw,
+            ExpiresAt = lot.ExpiresAt,
+            GrantedAt = lot.GrantedAt,
+            LotSeq = lot.LotSeq,
+        };
     }
 
     public Task<decimal> GetPostPaidDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct)
@@ -271,7 +329,7 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         }
     }
 
-    private static void AppendDebit(
+    private static string AppendDebit(
         TenantLedger ledger,
         TenantId tenantId,
         CreditSource source,
@@ -279,9 +337,11 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         string? usageRecordId,
         DateTimeOffset now)
     {
+        // Generate the entry_id here and RETURN it so the FIFO walk can link the matching credit_allocation.
+        var entryId = EntityId.New();
         ledger.Entries.Add(new CreditLedgerEntry
         {
-            EntryId = EntityId.New(),
+            EntryId = entryId,
             TenantId = tenantId,
             EntryType = CreditEntryType.Debit,
             Source = source,
@@ -292,6 +352,7 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
             UsageRecordId = usageRecordId,
             CreatedAt = now,
         });
+        return entryId.Value;
     }
 
     private static string? ResolveGrantIdempotencyKey(CreditLedgerEntry grant)
@@ -311,6 +372,10 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         public List<CreditLedgerEntry> Entries { get; } = [];
         public HashSet<string> GrantKeys { get; } = [];
         public List<CreditLot> Lots { get; } = [];
+
+        // The internal debit→lot linkage rows (credit_allocation) — the InMemory twin of that table. Invisible to
+        // GetEntries(Count)Async (which stay scoped to Entries / ai_credit_ledger).
+        public List<CreditAllocation> Allocations { get; } = [];
         public decimal Balance { get; set; }
         public long Version { get; set; }
 

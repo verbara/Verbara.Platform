@@ -36,7 +36,7 @@
 
 ## Group 3 — FIFO metered debit (the money-path rewrite)
 
-- [ ] 3.1 `PostMeteredDebitAsync` (Postgres): inside the existing tx (projection row `FOR UPDATE` first), `SELECT …
+- [x] 3.1 `PostMeteredDebitAsync` (Postgres): inside the existing tx (projection row `FOR UPDATE` first), `SELECT …
   FROM credit_lot WHERE tenant_id=@T AND remaining > 0 AND (expires_at IS NULL OR expires_at > @Now) ORDER BY
   billable_priority(source) ASC, expires_at ASC NULLS LAST, granted_at ASC, lot_seq ASC FOR UPDATE`; walk lots,
   `draw = min(lot.remaining, outstanding)`, guarded `UPDATE credit_lot SET remaining = remaining - @Draw WHERE lot_id=@L
@@ -44,13 +44,13 @@
   projection by Σ draws; the uncovered remainder → exactly one `PostPaid` tail row (no lot, no allocation, projection
   untouched). Return `MeteredDebitResult(newBalance, Σcovered, tail)`. `billable_priority` is a SQL `CASE` or a joined
   static map — never `ORDER BY source`.
-- [ ] 3.2 `PostMeteredDebitAsync` (InMemory): mirror byte-for-byte — same total ordering (`OrderBy` priority, then
+- [x] 3.2 `PostMeteredDebitAsync` (InMemory): mirror byte-for-byte — same total ordering (`OrderBy` priority, then
   `expires_at` with nulls-last, then `granted_at`, then `lot_seq`), same per-lot draw + allocation list, single PostPaid
   tail. n=1 degenerates to the current covered+tail.
 - [ ] 3.3 Make `PostBackfillConsumptionAsync` **lot-aware** (both stores): the covered portion draws from lots via the
   same FIFO so a back-fill can't drop the projection without decrementing a lot. (Keeps the `LedgerEnforcementEnabled`
   refusal guard.)
-- [ ] 3.4 Tests: multi-lot span (promo→sub→PostPaid), n=1 byte-identity (re-run the (a)/(b) numbers), no-open-lots pure
+- [x] 3.4 Tests: multi-lot span (promo→sub→PostPaid), n=1 byte-identity (re-run the (a)/(b) numbers), no-open-lots pure
   tail, concurrent-no-overdraw, `credit_allocation` invisible to `GetEntries*`, invariant after every debit. Both twins.
 
 ## Group 4 — Promo expiry reclaim sweeper

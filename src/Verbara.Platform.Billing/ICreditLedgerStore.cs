@@ -53,17 +53,23 @@ public interface ICreditLedgerStore
     Task<CreditDebitResult> TryPostDebitAsync(TenantId tenantId, decimal amount, CreditSource source, string? usageRecordId, CancellationToken ct);
 
     /// <summary>
-    /// Posts a metered consumption debit as a two-step covered-plus-PostPaid split in a <b>single
-    /// transaction</b> (ADR-0033 addendum, Model C). The covered portion <c>covered = min(balance, debit)</c> is
-    /// drawn from the prepaid stock via the guarded projection <c>UPDATE … WHERE balance &gt;= @covered</c> (the
-    /// projection floors at 0 — the prepaid lot is never overdrawn) and recorded as a debit row tagged
-    /// <paramref name="coveredSource"/>. The uncovered remainder <c>tail = debit − covered</c> is posted as an
-    /// <b>unconditional</b> debit row tagged <see cref="CreditSource.PostPaid"/> that does <b>not</b> touch the
-    /// projection — the billable overage that lets a <c>Warn</c> tenant keep serving past a depleted balance.
-    /// Returns the post-debit balance and the covered / post-paid split. <paramref name="usageRecordId"/> is an
-    /// optional back-reference to the originating usage record.
+    /// Posts a metered consumption debit as a <b>FIFO multi-source allocation</b> in a <b>single transaction</b>
+    /// (ADR-0033 / the 2026-06-28 (c2) resolution addendum). The debit is drawn across the tenant's open,
+    /// non-expired <c>credit_lot</c> rows in the provably-total order
+    /// <c>billable_priority ASC, expires_at ASC NULLS LAST, granted_at ASC, lot_seq ASC</c> (the
+    /// <c>tenant_credit_balance</c> row is locked first, then the lots in that same order — the deadlock-avoidance
+    /// contract). Each drawn lot emits one source-tagged covered debit row (the lot's own
+    /// <see cref="CreditSource"/>) plus an internal <c>credit_allocation</c> row, and the projection is decremented
+    /// once by the total covered amount via the guarded <c>UPDATE … WHERE balance &gt;= @covered</c> (the
+    /// projection floors at 0 — no lot is ever overdrawn, even under concurrency). The uncovered remainder
+    /// <c>tail = debit − Σ covered</c> is posted as exactly <b>one</b> <see cref="CreditSource.PostPaid"/> debit
+    /// row — never a lot, never split per lot — that does <b>not</b> touch the projection: the billable overage
+    /// that lets a <c>Warn</c> tenant keep serving past a depleted balance. At <c>n = 1</c> (a single
+    /// <see cref="CreditSource.Subscription"/> lot) the path degenerates byte-for-byte to the prior two-step
+    /// covered-plus-PostPaid split. <see cref="MeteredDebitResult.CoveredAmount"/> is the sum of the per-lot draws.
+    /// <paramref name="usageRecordId"/> is an optional back-reference to the originating usage record.
     /// </summary>
-    Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, CreditSource coveredSource, string? usageRecordId, CancellationToken ct);
+    Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, string? usageRecordId, CancellationToken ct);
 
     /// <summary>
     /// Returns the customer-owed AiAnalysis overage for a period: the sum of <c>|amount|</c> over the tenant's

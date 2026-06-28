@@ -292,7 +292,7 @@ public sealed class InMemoryCreditLedgerStoreTests
         var store = new InMemoryCreditLedgerStore();
         await store.PostGrantAsync(MakeGrant(amount: 10m), CancellationToken.None);
 
-        var result = await store.PostMeteredDebitAsync(Tenant1, 4m, CreditSource.Subscription, "usage-c", CancellationToken.None);
+        var result = await store.PostMeteredDebitAsync(Tenant1, 4m, "usage-c", CancellationToken.None);
 
         result.NewBalance.Should().Be(6m);
         result.CoveredAmount.Should().Be(4m);
@@ -312,7 +312,7 @@ public sealed class InMemoryCreditLedgerStoreTests
         var store = new InMemoryCreditLedgerStore();
         await store.PostGrantAsync(MakeGrant(amount: 3m), CancellationToken.None);
 
-        var result = await store.PostMeteredDebitAsync(Tenant1, 5m, CreditSource.Subscription, "usage-o", CancellationToken.None);
+        var result = await store.PostMeteredDebitAsync(Tenant1, 5m, "usage-o", CancellationToken.None);
 
         result.NewBalance.Should().Be(0m);
         result.CoveredAmount.Should().Be(3m);
@@ -330,7 +330,7 @@ public sealed class InMemoryCreditLedgerStoreTests
     {
         var store = new InMemoryCreditLedgerStore();
 
-        var result = await store.PostMeteredDebitAsync(Tenant1, 7m, CreditSource.Subscription, "usage-z", CancellationToken.None);
+        var result = await store.PostMeteredDebitAsync(Tenant1, 7m, "usage-z", CancellationToken.None);
 
         result.NewBalance.Should().Be(0m);
         result.CoveredAmount.Should().Be(0m);
@@ -352,7 +352,7 @@ public sealed class InMemoryCreditLedgerStoreTests
 
         const int concurrency = 32;
         var tasks = Enumerable.Range(0, concurrency)
-            .Select(_ => Task.Run(() => store.PostMeteredDebitAsync(Tenant1, 3m, CreditSource.Subscription, null, CancellationToken.None)))
+            .Select(_ => Task.Run(() => store.PostMeteredDebitAsync(Tenant1, 3m, null, CancellationToken.None)))
             .ToArray();
 
         var results = await Task.WhenAll(tasks);
@@ -371,8 +371,8 @@ public sealed class InMemoryCreditLedgerStoreTests
         await store.PostGrantAsync(MakeGrant(amount: 3m), CancellationToken.None);
 
         // Covered 3 + PostPaid tail 2, then a pure PostPaid debit of 4 (balance already 0).
-        await store.PostMeteredDebitAsync(Tenant1, 5m, CreditSource.Subscription, "u1", CancellationToken.None);
-        await store.PostMeteredDebitAsync(Tenant1, 4m, CreditSource.Subscription, "u2", CancellationToken.None);
+        await store.PostMeteredDebitAsync(Tenant1, 5m, "u1", CancellationToken.None);
+        await store.PostMeteredDebitAsync(Tenant1, 4m, "u2", CancellationToken.None);
 
         var periodStart = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var periodEnd = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -481,5 +481,145 @@ public sealed class InMemoryCreditLedgerStoreTests
         bySource.Should().ContainSingle();
         bySource[0].Source.Should().Be(CreditSource.Subscription);
         bySource[0].Remaining.Should().Be(300m);
+    }
+
+    // FIFO metered debit (Group 3a) — the money-path rewrite. A debit spanning a Promo lot, a Subscription lot,
+    // and the uncovered tail. Promo (billable_priority 0) drains before Subscription (priority 2); the rest is
+    // a single PostPaid tail.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldDrawPromoThenSubscriptionThenPostPaid_WhenSpanning()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        // Promo 100 (never expires here) + Subscription 1000. Balance 1100; debit 1150 ⇒ covered 1100 + tail 50.
+        await store.PostGrantAsync(MakeGrant(amount: 100m, source: CreditSource.Promo, periodKey: null, externalRef: "promo-span"), CancellationToken.None);
+        await store.PostGrantAsync(MakeGrant(amount: 1000m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        var result = await store.PostMeteredDebitAsync(Tenant1, 1150m, "usage-span", CancellationToken.None);
+
+        result.CoveredAmount.Should().Be(1100m);
+        result.PostPaidAmount.Should().Be(50m);
+        result.NewBalance.Should().Be(0m);
+        (await store.GetBalanceAsync(Tenant1, CancellationToken.None)).Should().Be(0m);
+
+        var debits = (await store.GetEntriesAsync(Tenant1, 1, 50, CancellationToken.None))
+            .Where(e => e.EntryType == CreditEntryType.Debit).ToList();
+        // One -100 Promo covered row, one -1000 Subscription covered row, one -50 PostPaid tail row.
+        debits.Count(d => d.Source == CreditSource.Promo && d.Amount == -100m).Should().Be(1);
+        debits.Count(d => d.Source == CreditSource.Subscription && d.Amount == -1000m).Should().Be(1);
+        debits.Count(d => d.Source == CreditSource.PostPaid && d.Amount == -50m).Should().Be(1);
+        debits.Should().HaveCount(3);
+
+        // Both lots drained to zero.
+        var lots = await store.GetLotsAsync(Tenant1, CancellationToken.None);
+        lots.Should().OnlyContain(l => l.Remaining == 0m);
+    }
+
+    // n=1 byte-identity: a single Subscription lot degenerates to the prior two-step covered draw (the (a)/(b)
+    // characterization numbers) — one -4 Subscription debit, zero PostPaid rows.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldBeByteIdentical_WhenSingleSubscriptionLot()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 10m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        var result = await store.PostMeteredDebitAsync(Tenant1, 4m, "usage-n1", CancellationToken.None);
+
+        result.NewBalance.Should().Be(6m);
+        result.CoveredAmount.Should().Be(4m);
+        result.PostPaidAmount.Should().Be(0m);
+        (await store.GetBalanceAsync(Tenant1, CancellationToken.None)).Should().Be(6m);
+
+        var debits = (await store.GetEntriesAsync(Tenant1, 1, 50, CancellationToken.None))
+            .Where(e => e.EntryType == CreditEntryType.Debit).ToList();
+        debits.Should().ContainSingle();
+        debits[0].Source.Should().Be(CreditSource.Subscription);
+        debits[0].Amount.Should().Be(-4m);
+        debits.Count(d => d.Source == CreditSource.PostPaid).Should().Be(0);
+    }
+
+    // No open lots ⇒ the whole debit is a single PostPaid tail (the current depleted-tenant behaviour).
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldBeAllPostPaid_WhenNoOpenLots()
+    {
+        var store = new InMemoryCreditLedgerStore();
+
+        var result = await store.PostMeteredDebitAsync(Tenant1, 7m, "usage-nl", CancellationToken.None);
+
+        result.CoveredAmount.Should().Be(0m);
+        result.PostPaidAmount.Should().Be(7m);
+        result.NewBalance.Should().Be(0m);
+
+        var debits = (await store.GetEntriesAsync(Tenant1, 1, 50, CancellationToken.None))
+            .Where(e => e.EntryType == CreditEntryType.Debit).ToList();
+        debits.Should().ContainSingle();
+        debits[0].Source.Should().Be(CreditSource.PostPaid);
+        debits[0].Amount.Should().Be(-7m);
+    }
+
+    // Concurrency: one 4-credit lot, many concurrent debits of 3. Σ covered never exceeds 4, no lot goes
+    // negative, balance never negative.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldNeverOverdraw_WhenConcurrent()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 4m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        const int concurrency = 32;
+        var tasks = Enumerable.Range(0, concurrency)
+            .Select(_ => Task.Run(() => store.PostMeteredDebitAsync(Tenant1, 3m, null, CancellationToken.None)))
+            .ToArray();
+
+        var results = await Task.WhenAll(tasks);
+
+        results.Sum(r => r.CoveredAmount).Should().BeLessThanOrEqualTo(4m);
+        results.Sum(r => r.CoveredAmount).Should().Be(4m);
+        var balance = await store.GetBalanceAsync(Tenant1, CancellationToken.None);
+        balance.Should().Be(0m);
+        balance.Should().BeGreaterThanOrEqualTo(0m);
+
+        var lots = await store.GetLotsAsync(Tenant1, CancellationToken.None);
+        lots.Should().OnlyContain(l => l.Remaining >= 0m);
+        lots.Sum(l => l.Remaining).Should().Be(0m);
+    }
+
+    // credit_allocation is INTERNAL: after a multi-lot debit, GetEntriesAsync / GetEntriesCountAsync return only
+    // ai_credit_ledger rows (the allocation linkage is invisible).
+    [Fact]
+    public async Task GetEntriesAsync_ShouldExcludeAllocations_WhenLotsDrawn()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 100m, source: CreditSource.Promo, periodKey: null, externalRef: "promo-inv"), CancellationToken.None);
+        await store.PostGrantAsync(MakeGrant(amount: 1000m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        // Spanning debit ⇒ 2 covered allocations + 1 PostPaid tail. Ledger rows = 2 grants + 3 debits = 5.
+        await store.PostMeteredDebitAsync(Tenant1, 1150m, "usage-inv", CancellationToken.None);
+
+        var count = await store.GetEntriesCountAsync(Tenant1, CancellationToken.None);
+        count.Should().Be(5);
+
+        var entries = await store.GetEntriesAsync(Tenant1, 1, 50, CancellationToken.None);
+        entries.Should().HaveCount(5);
+        // Every visible row is a ledger grant or debit — no allocation leaks into the ledger view.
+        entries.Should().OnlyContain(e => e.EntryType == CreditEntryType.Grant || e.EntryType == CreditEntryType.Debit);
+    }
+
+    // Invariant: Σ GetRemainingBySourceAsync == GetBalanceAsync after the debit (drive `now` so nothing expired).
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldKeepInvariant_AfterDebit()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 100m, source: CreditSource.Promo, periodKey: null, externalRef: "promo-iv", expiresAt: BaseTime.AddMonths(1)), CancellationToken.None);
+        await store.PostGrantAsync(MakeGrant(amount: 1000m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(MakeGrant(amount: 500m, source: CreditSource.TopUp, periodKey: null, externalRef: "top-iv"), CancellationToken.None);
+
+        // 1600 granted; draw 250 (100 Promo + 150 Subscription) ⇒ covered 250, balance 1350.
+        await store.PostMeteredDebitAsync(Tenant1, 250m, "usage-iv", CancellationToken.None);
+
+        var now = BaseTime; // before the Promo expiry → nothing expired
+        var bySource = await store.GetRemainingBySourceAsync(Tenant1, now, CancellationToken.None);
+        var balance = await store.GetBalanceAsync(Tenant1, CancellationToken.None);
+
+        balance.Should().Be(1350m);
+        bySource.Sum(s => s.Remaining).Should().Be(balance);
     }
 }

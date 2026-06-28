@@ -196,7 +196,6 @@ public sealed class BillingTypificationCreditMeterTests
         await ledger.Received(1).PostMeteredDebitAsync(
             tenant,
             25m,
-            CreditSource.Subscription,
             recordedUsageId,
             Arg.Any<CancellationToken>());
     }
@@ -213,7 +212,7 @@ public sealed class BillingTypificationCreditMeterTests
         await sut.RecordAsync(tenant, "conv1", promptTokens: 100, completionTokens: 150, totalTokens: 250, "gpt-x", CancellationToken.None);
 
         await ledger.DidNotReceive().PostMeteredDebitAsync(
-            Arg.Any<TenantId>(), Arg.Any<decimal>(), Arg.Any<CreditSource>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+            Arg.Any<TenantId>(), Arg.Any<decimal>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -224,7 +223,7 @@ public sealed class BillingTypificationCreditMeterTests
         var sut = CreateSut(metering, out var usageStore, out var quotaStore, out _, out var ledger, LedgerOnOptions());
         StubQuota(quotaStore, tenant, null);
         StubPeriodTotal(usageStore, tenant, postRecordTotalTokens: 100);
-        ledger.PostMeteredDebitAsync(Arg.Any<TenantId>(), Arg.Any<decimal>(), Arg.Any<CreditSource>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        ledger.PostMeteredDebitAsync(Arg.Any<TenantId>(), Arg.Any<decimal>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns<Task<MeteredDebitResult>>(_ => throw new InvalidOperationException("ledger down"));
 
         var act = async () => await sut.RecordAsync(tenant, "conv1", promptTokens: 30, completionTokens: 70, totalTokens: 100, "gpt-x", CancellationToken.None);
@@ -243,6 +242,6 @@ public sealed class BillingTypificationCreditMeterTests
         await sut.RecordAsync(tenant, "conv1", 0, 0, 0, "gpt-x", CancellationToken.None);
 
         await ledger.DidNotReceive().PostMeteredDebitAsync(
-            Arg.Any<TenantId>(), Arg.Any<decimal>(), Arg.Any<CreditSource>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+            Arg.Any<TenantId>(), Arg.Any<decimal>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 }

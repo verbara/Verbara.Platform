@@ -178,24 +178,66 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         return CreditDebitResult.Posted(newBalance);
     }
 
-    public async Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, CreditSource coveredSource, string? usageRecordId, CancellationToken ct)
+    public async Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, string? usageRecordId, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
-        // Lock the projection row (if any) for the duration of the transaction so a concurrent metered debit
-        // cannot read a stale balance and over-draw the prepaid lot. An absent row reads as balance 0.
+        // LOCK ORDER (the deadlock-avoidance contract): the projection row FIRST, then the open lots in the
+        // total FIFO order. Locking the projection cell serialises any concurrent metered debit for this tenant
+        // behind this one; an absent row reads as balance 0 (and there are no lots to draw).
         var balance = await ReadBalanceForUpdateAsync(conn, tx, tenantId, ct);
 
-        var covered = Math.Min(balance, debit);
-        var tail = debit - covered;
+        // Select + lock the open, non-expired lots in the provably-total consumption order
+        // (billable_priority ASC, expires_at ASC NULLS LAST, granted_at ASC, lot_seq ASC). The CASE encodes
+        // BillablePriority.Of — Promo(source 2)→0, Partner(source 3)→1, else(Subscription 0/TopUp 1)→2 — NEVER
+        // ORDER BY source. Read every row into a local list BEFORE mutating (a reader can't outlive its own
+        // UPDATEs on the same connection).
+        var lots = await LockOpenLotsAsync(conn, tx, tenantId, now, ct);
 
-        if (covered > 0m)
+        var outstanding = debit;
+        var coveredTotal = 0m;
+
+        foreach (var lot in lots)
         {
-            // Guarded decrement of the prepaid stock. FOR UPDATE already serialises this; the WHERE guard is
-            // belt-and-suspenders so the projection can never go negative even if the lock were ever lost.
+            if (outstanding <= 0m)
+                break;
+
+            var draw = Math.Min(lot.Remaining, outstanding);
+            if (draw <= 0m)
+                continue;
+
+            // Guarded per-lot decrement. FOR UPDATE already serialises this; the WHERE remaining >= @Draw guard
+            // is belt-and-suspenders so a lot can never be overdrawn even if the lock were ever lost. Asserting
+            // exactly one row is affected catches any drift between the locked snapshot and the live row.
+            var lotAffected = await conn.ExecuteAsync(
+                "UPDATE credit_lot SET remaining = remaining - @Draw WHERE lot_id = @LotId AND remaining >= @Draw",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("Draw", NpgsqlDbType.Numeric) { Value = draw });
+                    p.Add(new NpgsqlParameter("LotId", NpgsqlDbType.Text) { Value = lot.LotId });
+                },
+                tx, ct);
+
+            if (lotAffected != 1)
+                throw new InvalidOperationException(
+                    $"Guarded credit_lot decrement affected {lotAffected} rows for lot '{lot.LotId}' (expected 1 under FOR UPDATE).");
+
+            // One source-tagged covered debit row (the lot's OWN source) + its internal credit_allocation row.
+            var debitEntryId = await InsertDebitRowAsync(conn, tx, tenantId, lot.Source, -draw, usageRecordId, now, ct);
+            await InsertAllocationRowAsync(conn, tx, debitEntryId, lot.LotId, lot.Source, draw, now, ct);
+
+            outstanding -= draw;
+            coveredTotal += draw;
+        }
+
+        if (coveredTotal > 0m)
+        {
+            // ONE guarded projection decrement by the total covered. By the invariant Σ(open lot.remaining) ==
+            // balance, coveredTotal == min(debit, balance) <= balance, so the WHERE balance >= @Covered guard
+            // always passes here.
             await conn.ExecuteAsync(
                 "UPDATE tenant_credit_balance SET " +
                 "balance = balance - @Covered, version = version + 1, updated_at = @Now " +
@@ -203,18 +245,18 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
                 p =>
                 {
                     p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
-                    p.Add(new NpgsqlParameter("Covered", covered));
+                    p.Add(new NpgsqlParameter("Covered", coveredTotal));
                     p.Add(new NpgsqlParameter("Now", now));
                 },
                 tx, ct);
-
-            // Covered debit row records the lot it drew from (@CoveredSource), -covered amount.
-            await InsertDebitRowAsync(conn, tx, tenantId, coveredSource, -covered, usageRecordId, now, ct);
         }
+
+        var tail = debit - coveredTotal;
 
         if (tail > 0m)
         {
-            // Unconditional billable PostPaid tail — does NOT touch the projection (it stays floored at 0).
+            // Exactly ONE unconditional billable PostPaid tail row — never a lot, never split, no allocation. Does
+            // NOT touch the projection (it stays floored at 0).
             await InsertDebitRowAsync(conn, tx, tenantId, CreditSource.PostPaid, -tail, usageRecordId, now, ct);
         }
 
@@ -222,7 +264,36 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         var newBalance = await ReadBalanceAsync(conn, tx, tenantId, ct);
 
         await tx.CommitAsync(ct);
-        return new MeteredDebitResult(newBalance, covered, tail);
+        return new MeteredDebitResult(newBalance, coveredTotal, tail);
+    }
+
+    private static async Task<IReadOnlyList<CreditLot>> LockOpenLotsAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        TenantId tenantId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        // SELECT … FOR UPDATE in the EXACT total FIFO/lock order. The CASE mirrors BillablePriority.Of (Promo
+        // source=2 → 0, Partner source=3 → 1, Subscription source=0 / TopUp source=1 → 2). Read every locked row
+        // into a list before the caller mutates any of them.
+        await using var cmd = new NpgsqlCommand(
+            "SELECT lot_id, tenant_id, source, original, remaining, expires_at, granted_at, lot_seq " +
+            "FROM credit_lot " +
+            "WHERE tenant_id = @TenantId AND remaining > 0 AND (expires_at IS NULL OR expires_at > @Now) " +
+            "ORDER BY (CASE source WHEN 2 THEN 0 WHEN 3 THEN 1 ELSE 2 END) ASC, " +
+            "expires_at ASC NULLS LAST, granted_at ASC, lot_seq ASC " +
+            "FOR UPDATE",
+            conn, tx);
+        cmd.Parameters.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("Now", NpgsqlDbType.TimestampTz) { Value = now });
+
+        var lots = new List<CreditLot>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            lots.Add(MapLot(reader));
+
+        return lots;
     }
 
     public async Task PostBackfillConsumptionAsync(TenantId tenantId, decimal consumed, string periodKey, CancellationToken ct)
@@ -351,7 +422,7 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         LotSeq = r.GetInt64("lot_seq"),
     };
 
-    private static async Task InsertDebitRowAsync(
+    private static async Task<string> InsertDebitRowAsync(
         NpgsqlConnection conn,
         NpgsqlTransaction tx,
         TenantId tenantId,
@@ -361,13 +432,15 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         DateTimeOffset now,
         CancellationToken ct)
     {
+        // Generate the entry_id here and RETURN it so the FIFO walk can link the matching credit_allocation row.
+        var entryId = EntityId.New().Value;
         await conn.ExecuteAsync(
             "INSERT INTO ai_credit_ledger " +
             "(entry_id, tenant_id, entry_type, source, amount, period_key, external_ref, expires_at, usage_record_id, created_at) " +
             "VALUES (@EntryId, @TenantId, @EntryType, @Source, @Amount, @PeriodKey, @ExternalRef, @ExpiresAt, @UsageRecordId, @CreatedAt)",
             p =>
             {
-                p.Add(new NpgsqlParameter("EntryId", NpgsqlDbType.Text) { Value = EntityId.New().Value });
+                p.Add(new NpgsqlParameter("EntryId", NpgsqlDbType.Text) { Value = entryId });
                 p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
                 p.Add(new NpgsqlParameter("EntryType", NpgsqlDbType.Smallint) { Value = (short)CreditEntryType.Debit });
                 p.Add(new NpgsqlParameter("Source", NpgsqlDbType.Smallint) { Value = (short)source });
@@ -376,6 +449,35 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
                 p.Add(new NpgsqlParameter("ExternalRef", NpgsqlDbType.Text) { Value = DBNull.Value });
                 p.Add(new NpgsqlParameter("ExpiresAt", NpgsqlDbType.TimestampTz) { Value = DBNull.Value });
                 p.Add(new NpgsqlParameter("UsageRecordId", NpgsqlDbType.Text) { Value = (object?)usageRecordId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CreatedAt", NpgsqlDbType.TimestampTz) { Value = now });
+            },
+            tx, ct);
+        return entryId;
+    }
+
+    private static async Task InsertAllocationRowAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        string debitEntryId,
+        string lotId,
+        CreditSource source,
+        decimal amount,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        // One internal credit_allocation row per (covered debit × drawn lot). Amount is positive (the draw). This
+        // table is invisible to GetEntries(Count)Async / GetPostPaidDebitsTotalAsync (scoped to ai_credit_ledger).
+        await conn.ExecuteAsync(
+            "INSERT INTO credit_allocation " +
+            "(allocation_id, debit_entry_id, lot_id, source, amount, created_at) " +
+            "VALUES (@AllocationId, @DebitEntryId, @LotId, @Source, @Amount, @CreatedAt)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("AllocationId", NpgsqlDbType.Text) { Value = EntityId.New().Value });
+                p.Add(new NpgsqlParameter("DebitEntryId", NpgsqlDbType.Text) { Value = debitEntryId });
+                p.Add(new NpgsqlParameter("LotId", NpgsqlDbType.Text) { Value = lotId });
+                p.Add(new NpgsqlParameter("Source", NpgsqlDbType.Smallint) { Value = (short)source });
+                p.Add(new NpgsqlParameter("Amount", NpgsqlDbType.Numeric) { Value = amount });
                 p.Add(new NpgsqlParameter("CreatedAt", NpgsqlDbType.TimestampTz) { Value = now });
             },
             tx, ct);

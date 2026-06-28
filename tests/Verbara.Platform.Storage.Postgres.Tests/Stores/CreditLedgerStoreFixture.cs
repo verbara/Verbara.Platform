@@ -94,6 +94,23 @@ public sealed class CreditLedgerStoreFixture : IAsyncLifetime
         return result is null or DBNull ? 0L : (long)result;
     }
 
+    /// <summary>
+    /// Returns the count of <c>credit_allocation</c> rows whose <c>debit_entry_id</c> belongs to one of the
+    /// tenant's ledger debit rows — the internal debit→lot linkage count for a tenant.
+    /// </summary>
+    public async Task<long> AllocationRowCountAsync(string tenantId)
+    {
+        await using var conn = new NpgsqlConnection(ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(*) FROM credit_allocation a " +
+            "WHERE a.debit_entry_id IN (SELECT entry_id FROM ai_credit_ledger WHERE tenant_id = @t)";
+        cmd.Parameters.Add(new NpgsqlParameter("t", tenantId));
+        var result = await cmd.ExecuteScalarAsync();
+        return result is null or DBNull ? 0L : (long)result;
+    }
+
     // DDL — mirrors ai_credit_ledger + tenant_credit_balance in 012_credit_ledger.sql VERBATIM.
     private const string SchemaSql = """
         CREATE TABLE ai_credit_ledger (
