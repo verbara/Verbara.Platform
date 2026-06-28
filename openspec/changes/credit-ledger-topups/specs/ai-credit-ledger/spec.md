@@ -1,8 +1,9 @@
 ## ADDED Requirements
 
 ### Requirement: Operator-minted top-up grants
-The system SHALL allow an operator or partner with permission `billing:credits:grant` to mint a `TopUp` grant
-for a tenant via `POST /api/v1/management/credit-ledger/top-up`. The grant SHALL be a positive-amount
+The system SHALL allow an operator (`PlatformAdminOnly`) with permission `billing:credits:grant` to mint a
+`TopUp` grant for a tenant via `POST /api/v1/management/credit-ledger/top-up`. (The partner-scoped top-up — with
+owning-child validation — is deferred to c2.) The grant SHALL be a positive-amount
 `CreditEntryType.Grant` with `CreditSource.TopUp`, idempotent on a caller-supplied idempotency key carried as
 `external_ref` (a repeated key SHALL NOT mint a second grant). A caller without `billing:credits:grant` SHALL
 receive HTTP 403 and no grant SHALL be created. A non-positive amount SHALL be rejected with HTTP 400.
@@ -53,10 +54,10 @@ most-recent-first and deterministic across the Postgres and InMemory stores (a s
 ### Requirement: Credit-grant and credit-read permissions
 The system SHALL define permissions `billing:credits:grant` and `billing:credits:read`. `billing:credits:read`
 SHALL be granted to the operator (`platform_admin`) and tenant-admin role templates (it permits reading one's
-own balance). `billing:credits:grant` SHALL be granted to operator (`platform_admin`) and partner
-(`partner_admin`) role templates **only** — it SHALL NOT be granted to tenant `admin`/`system_admin`. Existing
-tenants receive `:read` on `platform_admin` via the `RbacReseed` CLI; partner-role propagation to existing
-tenants is out of scope (fresh provisioning only).
+own balance). `billing:credits:grant` SHALL be granted to the operator (`platform_admin`) role template **only**
+in c1 — it SHALL NOT be granted to tenant `admin`/`system_admin` (so it must NOT be added to
+`AllPermissions()`); the `partner_admin` grant lands with the partner-scoped endpoint in c2. Existing tenants
+receive `:read` on `platform_admin` via the `RbacReseed` CLI.
 
 #### Scenario: Tenant admin cannot mint credits
 - **GIVEN** a tenant `admin` (not platform/partner) without `billing:credits:grant`

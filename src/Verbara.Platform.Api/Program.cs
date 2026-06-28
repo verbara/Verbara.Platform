@@ -1703,6 +1703,9 @@ v1.MapTypificationEndpoints();
 v1.MapTenantLlmConfigEndpoints();
 // P2c.2 — tenant AI credit usage readout (GET /admin/ai/credits).
 v1.MapAiCreditsEndpoints();
+// c1 (credit-ledger-topups) — operator top-up (POST /management/credit-ledger/top-up) +
+// tenant balance/entries read API (GET /admin/credit-ledger/{balance,entries}).
+v1.MapCreditLedgerEndpoints();
 v1.MapReasonHintEndpoints();
 v1.MapScheduledReportEndpoints();
 v1.MapRealtimeEndpoints();
