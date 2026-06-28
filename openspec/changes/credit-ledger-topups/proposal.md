@@ -33,9 +33,11 @@ separate, higher-risk **c2 `credit-ledger-lots`**.
 - **`GetEntriesCountAsync`** — new `ICreditLedgerStore` method (Postgres + InMemory) so the entries endpoint
   can populate `PagedResult<T>.TotalCount` (`GetEntriesAsync` returns no count today).
 - **RBAC** — add `billing:credits:read` (to `PermissionSeeder` + `RoleTemplateSeeder.AllPermissions()` — tenant
-  admins may read their own balance) and `billing:credits:grant` (to `PermissionSeeder` + **only**
-  `platform_admin` and the hand-listed `partner_admin` array — **NOT** `AllPermissions()`, which would leak it
-  to tenant `admin`/`system_admin`). Update the permission-count / role-template-count test assertions.
+  admins may read their own balance) and `billing:credits:grant` (to `PermissionSeeder` + **only** the
+  `platform_admin` template in c1 — **NOT** `AllPermissions()`, which would leak it to tenant
+  `admin`/`system_admin`; the `partner_admin` grant lands with the partner-scoped endpoint in c2). The top-up
+  route double-locks via `PlatformAdminRequirement("billing:credits:grant")` so the permission is enforced
+  against management-key scopes too (not just the role gate).
 - **DTOs** — `TopUpRequest`, `CreditBalanceResponse`, `CreditLedgerEntryDto`, and
   `PagedResult<CreditLedgerEntryDto>` registered in `ApiJsonContext` (no anonymous objects; domain
   `CreditLedgerEntry` is never serialized).

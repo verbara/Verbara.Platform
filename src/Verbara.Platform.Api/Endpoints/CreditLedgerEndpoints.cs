@@ -15,11 +15,22 @@ namespace Verbara.Platform.Api.Endpoints;
 /// </summary>
 internal static class CreditLedgerEndpoints
 {
+    /// <summary>
+    /// Double-lock policy for the top-up mint: the host/partner-tenant gate AND the seeded
+    /// <c>billing:credits:grant</c> permission, enforced against BOTH a management key's scopes and a
+    /// user JWT's resolved permissions (registered in <c>Program.cs</c> via
+    /// <c>PlatformAdminRequirement("billing:credits:grant")</c>). A bare
+    /// <c>.RequireAuthorization("billing:credits:grant")</c> would NOT enforce the scope on the
+    /// management-key path (the Admin-role shortcut auto-succeeds) — minting credits is money creation, so
+    /// the permission must be a real gate, mirroring MfaAdmin/AuditAdmin.
+    /// </summary>
+    public const string GrantPolicy = "CreditGrantGate";
+
     public static void MapCreditLedgerEndpoints(this IEndpointRouteBuilder app)
     {
         // ── Operator mint surface (cross-tenant; tenant carried in the body) ──
         var mg = app.MapGroup("/management/credit-ledger").RequireAuthorization("PlatformAdminOnly");
-        mg.MapPost("/top-up", TopUp).RequireAuthorization("billing:credits:grant");
+        mg.MapPost("/top-up", TopUp).RequireAuthorization(GrantPolicy);
 
         // ── Tenant-facing read surface (scoped to the resolved operational tenant) ──
         var tg = app.MapGroup("/admin/credit-ledger")
