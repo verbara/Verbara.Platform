@@ -233,9 +233,11 @@ internal static class CreditLedgerEndpoints
         [FromServices] IClock clock,
         CancellationToken ct)
     {
-        // The caller's Partner tenant id — set by the auth handlers into Items["TenantId"] (the X-Tenant-Id /
-        // JWT tid the PartnerAdminOnly handler verified is a TenantType.Partner), the same resolution GetBalance uses.
-        var partnerTenantId = GetTenantId(context);
+        // The caller's OWN Partner tenant id, read from the VERIFIED JWT claim — the exact source
+        // PartnerAdminAuthorizationHandler gated on. NOT Items["TenantId"]: TenantBoundaryValidationMiddleware
+        // permits a Partner to set X-Tenant-Id to another tenant, so reading the resolved tenant here would let a
+        // Partner aggregate another partner's attribution. The verified claim cannot be overridden.
+        var partnerTenantId = GetVerifiedPartnerTenantId(context);
 
         var now = clock.UtcNow;
         var periodStart = from ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
@@ -283,10 +285,35 @@ internal static class CreditLedgerEndpoints
 
     private static TenantId GetTenantId(HttpContext context)
     {
-        if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
-            return tid;
+        // The resolved operational tenant. TenantResolutionMiddleware writes Items["TenantId"] as a TenantId
+        // struct on the JWT path and as a string on the X-Tenant-Id-header / subdomain path — accept both
+        // (these read endpoints sit behind AdminOnly + RequireOperationalTenant; cross-tenant override is gated
+        // upstream by TenantBoundaryValidationMiddleware).
+        if (context.Items.TryGetValue("TenantId", out var val))
+        {
+            if (val is TenantId tid)
+                return tid;
+            if (val is string s && !string.IsNullOrEmpty(s))
+                return new TenantId(s);
+        }
 
         throw new InvalidOperationException("Tenant ID not resolved");
+    }
+
+    /// <summary>
+    /// The caller's OWN partner tenant id, read from the VERIFIED JWT claim (<c>tenant_id</c>/<c>tid</c>) — the
+    /// exact source <c>PartnerAdminAuthorizationHandler</c> gated on. This deliberately does NOT use the resolved
+    /// <c>Items["TenantId"]</c>: <c>TenantBoundaryValidationMiddleware</c> permits a Partner to set
+    /// <c>X-Tenant-Id</c> to another tenant, so reading the resolved tenant here would let a Partner aggregate
+    /// another partner's attribution. The verified claim cannot be overridden.
+    /// </summary>
+    private static TenantId GetVerifiedPartnerTenantId(HttpContext context)
+    {
+        var claim = context.User.FindFirst("tenant_id")?.Value
+            ?? context.User.FindFirst("tid")?.Value;
+        if (string.IsNullOrEmpty(claim))
+            throw new InvalidOperationException("Partner tenant claim not present");
+        return new TenantId(claim);
     }
 
     private static CreditLedgerEntryDto MapEntry(CreditLedgerEntry e) => new(

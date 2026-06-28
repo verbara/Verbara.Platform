@@ -240,6 +240,47 @@ public sealed class CreditLedgerGrantsEndpointTests
         postPaid.Should().Be(0m);
     }
 
+    [Fact]
+    public async Task GetPartnerAttribution_ShouldUseVerifiedClaim_WhenXTenantIdSpoofed()
+    {
+        // Security regression: the attribution partner id MUST come from the verified JWT claim, NOT the
+        // resolved Items["TenantId"] (which TenantBoundaryValidationMiddleware lets a Partner override via
+        // X-Tenant-Id). A partner spoofing X-Tenant-Id to its own customer must STILL read its OWN attribution
+        // (the partner's children), never the spoofed tenant's. If the endpoint read Items, GetChildrenAsync on
+        // the customer would return [] → total 0; the verified-claim path keeps it at the real 600.
+        using var factory = new PartnerApiFactory();
+        var customerId = PartnerApiFactory.CustomerTenantId;
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var ledger = scope.ServiceProvider.GetRequiredService<ICreditLedgerStore>();
+            await ledger.PostGrantAsync(new CreditLedgerEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = new TenantId(customerId),
+                EntryType = CreditEntryType.Grant,
+                Source = CreditSource.Partner,
+                Amount = 1000m,
+                ExternalRef = "attr-spoof-grant",
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+            await ledger.PostMeteredDebitAsync(new TenantId(customerId), 600m, "attr-spoof-usage", CancellationToken.None);
+        }
+
+        // Authenticate as the partner but spoof X-Tenant-Id to the customer tenant (which a Partner is permitted
+        // to set). The verified tenant_id claim stays PartnerTenantId.
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {PartnerApiFactory.TestPartnerApiKey}");
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", customerId);
+
+        var response = await client.GetAsync("/api/partner/credit-ledger/attribution");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        // Still the PARTNER's own attribution (600), proving the X-Tenant-Id override did not redirect it.
+        json!["total"]!.GetValue<decimal>().Should().Be(600m);
+    }
+
     // ─── helpers ──────────────────────────────────────────────────────────────────
 
     private static async Task<decimal> ReadBalanceAsync(WebApplicationFactory<Program> factory, string tenantId)
