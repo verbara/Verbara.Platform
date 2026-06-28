@@ -95,7 +95,7 @@
 
 ## Group 7 — Verification + ship
 
-- [ ] 7.1 Build 0 warnings (TreatWarningsAsErrors); full suite green (Billing + InMemory carry the behavioral matrix);
+- [x] 7.1 Build 0 warnings (TreatWarningsAsErrors); full suite green (Billing + InMemory carry the behavioral matrix);
   **AOT native publish** clean (0 IL2026/IL3050/IL207x, ELF, 0 managed Verbara DLLs); final adversarial review (SHIP);
   PR → enqueue (GraphQL) → merge → `openspec archive credit-ledger-lots`. Web per-source widget = separate Platform.Web
   PR (out of scope).
