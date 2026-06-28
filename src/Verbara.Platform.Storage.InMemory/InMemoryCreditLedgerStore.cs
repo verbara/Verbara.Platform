@@ -240,6 +240,90 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         }
     }
 
+    public Task<IReadOnlyList<CreditLot>> GetExpiredLotsAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        // The reclaim sweeper's cross-tenant work-list: every non-empty, actually-expired lot across all
+        // tenants. Mirrors the Postgres single SELECT … FROM credit_lot WHERE remaining > 0 AND
+        // expires_at IS NOT NULL AND expires_at <= @Now. Snapshot each tenant's lots under its own Gate.
+        var expired = new List<CreditLot>();
+        foreach (var ledger in _ledgers.Values)
+        {
+            lock (ledger.Gate)
+            {
+                expired.AddRange(ledger.Lots.Where(l =>
+                    l.Remaining > 0m && l.ExpiresAt is { } exp && exp <= now));
+            }
+        }
+
+        return Task.FromResult<IReadOnlyList<CreditLot>>(expired);
+    }
+
+    public Task<decimal> ReclaimExpiredLotAsync(TenantId tenantId, string lotId, DateTimeOffset now, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(lotId);
+
+        if (!_ledgers.TryGetValue(tenantId, out var ledger))
+            return Task.FromResult(0m);
+
+        lock (ledger.Gate)
+        {
+            // (1) The projection cell is locked first (the per-tenant Gate stands in for the
+            // tenant_credit_balance FOR UPDATE — the deadlock-avoidance lock order). (2) Re-read the lot under
+            // that lock. If it's gone, drained, or not actually expired (null OR > now), this is an empty no-op.
+            var lotIndex = ledger.Lots.FindIndex(l => l.LotId == lotId);
+            if (lotIndex < 0)
+                return Task.FromResult(0m);
+
+            var lot = ledger.Lots[lotIndex];
+            if (lot.Remaining <= 0m || lot.ExpiresAt is not { } exp || exp > now)
+                return Task.FromResult(0m);
+
+            // (3) Idempotency arbiter — the InMemory twin of the migration-012 partial unique index on
+            // (tenant_id, external_ref): an offsetting debit marker carrying external_ref = "lot-expiry:{lotId}".
+            // If it already exists the whole reclaim is a complete no-op (no second debit, no re-decrement, no
+            // re-zero) — mirrors ON CONFLICT DO NOTHING + the inserted == 0 short-circuit in Postgres.
+            var externalRef = $"lot-expiry:{lotId}";
+            if (ledger.Entries.Any(e => e.ExternalRef == externalRef))
+                return Task.FromResult(0m);
+
+            // Offset the LIVE remaining (never original) tagged the lot's OWN source — this is what enforces
+            // subscription no-carryover and promo expiry alike, and what makes the reclaim un-able to claw back
+            // already-consumed credits.
+            var reclaimed = lot.Remaining;
+            ledger.Entries.Add(new CreditLedgerEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenantId,
+                EntryType = CreditEntryType.Debit,
+                Source = lot.Source,
+                Amount = -reclaimed,
+                PeriodKey = null,
+                ExternalRef = externalRef,
+                ExpiresAt = null,
+                UsageRecordId = null,
+                CreatedAt = now,
+            });
+
+            // (4) Marker newly inserted ⇒ decrement the projection by `reclaimed` and zero the lot. By the
+            // invariant Σ(open non-expired lot.Remaining) == Balance the projection covers the offset.
+            ledger.Balance -= reclaimed;
+            ledger.Version++;
+            ledger.Lots[lotIndex] = new CreditLot
+            {
+                LotId = lot.LotId,
+                TenantId = lot.TenantId,
+                Source = lot.Source,
+                Original = lot.Original,
+                Remaining = 0m,
+                ExpiresAt = lot.ExpiresAt,
+                GrantedAt = lot.GrantedAt,
+                LotSeq = lot.LotSeq,
+            };
+
+            return Task.FromResult(reclaimed);
+        }
+    }
+
     public Task PostBackfillConsumptionAsync(TenantId tenantId, decimal consumed, string periodKey, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(periodKey);

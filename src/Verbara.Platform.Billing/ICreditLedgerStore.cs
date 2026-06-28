@@ -114,6 +114,39 @@ public interface ICreditLedgerStore
     Task<IReadOnlyList<CreditLot>> GetLotsAsync(TenantId tenantId, CancellationToken ct);
 
     /// <summary>
+    /// Returns every expired non-empty <see cref="CreditLot"/> across <b>all</b> tenants — the reclaim sweeper's
+    /// work-list (ADR-0033 / the 2026-06-28 (c2) resolution addendum, BLOCKER resolution 2). A lot is reclaimable
+    /// when <c>remaining &gt; 0 AND expires_at IS NOT NULL AND expires_at &lt;= <paramref name="now"/></c> — any
+    /// source with an operator-set or period-end expiry (Promo and the no-carryover Subscription lot alike). Lots
+    /// with no expiry (<c>expires_at IS NULL</c>) and already-drained lots (<c>remaining = 0</c>) are never
+    /// returned. The caller reclaims each via <see cref="ReclaimExpiredLotAsync"/>; the result is a stable snapshot
+    /// — each reclaim re-checks the lot under its own lock, so a lot drawn-to-zero between the sweep and the
+    /// reclaim is a safe no-op.
+    /// </summary>
+    Task<IReadOnlyList<CreditLot>> GetExpiredLotsAsync(DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Reclaims an expired lot's unconsumed credits idempotently, returning the reclaimed amount (<c>0</c> when
+    /// nothing was reclaimed). In one transaction with the <c>tenant_credit_balance</c> row locked first (the
+    /// deadlock-avoidance lock order), then the lot read <c>FOR UPDATE</c>: if the lot is missing, already drained
+    /// (<c>remaining = 0</c>), or not actually expired (<c>expires_at IS NULL OR expires_at &gt; <paramref name="now"/></c>)
+    /// the transaction commits empty and returns <c>0</c>. Otherwise it appends an offsetting debit tagged the
+    /// lot's <b>own</b> <see cref="CreditLot.Source"/> (read <c>FOR UPDATE</c>, equal to the live
+    /// <see cref="CreditLot.Remaining"/>, <b>not</b> <see cref="CreditLot.Original"/>) carrying
+    /// <c>external_ref = "lot-expiry:{lotId}"</c> via <c>ON CONFLICT DO NOTHING</c>; <b>only if that debit row was
+    /// actually inserted</b> it decrements the projection by that remaining (guarded
+    /// <c>WHERE balance &gt;= @Remaining</c>) and sets the lot's <c>remaining = 0</c>, returning the reclaimed
+    /// amount. If the offsetting debit already exists (a re-run) it is a <b>complete no-op</b> — it neither
+    /// re-decrements the projection nor re-zeroes the lot — and returns <c>0</c>. Because the offset is the live
+    /// <c>remaining</c> (never <c>original</c>) and the whole operation is gated on the insert, the reclaim can
+    /// never claw back already-consumed credits and can never run twice. This single mechanism enforces both
+    /// subscription no-carryover and promo expiry. The reclaimed lot is also FIFO-skipped by
+    /// <see cref="PostMeteredDebitAsync"/> (the <c>expires_at &gt; now</c> predicate), so a lot pending reclaim is
+    /// never drawn — keeping the invariant <c>Σ(open non-expired lot.remaining) == tenant_credit_balance.balance</c>.
+    /// </summary>
+    Task<decimal> ReclaimExpiredLotAsync(TenantId tenantId, string lotId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
     /// Idempotently seeds one period's already-realised AI-credit consumption onto the ledger for the cutover
     /// back-fill (ADR-0033 addendum, task B7). Splits <paramref name="consumed"/> exactly as the runtime metered
     /// debit would have: <c>covered = min(balance, consumed)</c> is drawn from the (already-minted) Subscription

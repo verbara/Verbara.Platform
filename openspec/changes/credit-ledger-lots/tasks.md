@@ -53,18 +53,26 @@
 - [x] 3.4 Tests: multi-lot span (promo→sub→PostPaid), n=1 byte-identity (re-run the (a)/(b) numbers), no-open-lots pure
   tail, concurrent-no-overdraw, `credit_allocation` invisible to `GetEntries*`, invariant after every debit. Both twins.
 
-## Group 4 — Promo expiry reclaim sweeper
+## Group 4 — Lot-expiry reclaim sweeper
 
-- [ ] 4.1 `ReclaimExpiredLotAsync` (both stores): one tx, projection row locked first; insert offsetting `Promo` debit
-  `= lot.remaining` (read `FOR UPDATE`) with `external_ref="promo-expiry:{lotId}"` `ON CONFLICT DO NOTHING`; only if
-  `inserted == 1` decrement projection by `remaining` + set lot `remaining = 0`. Idempotent + can't reclaim consumed.
-- [ ] 4.2 `PromoExpiryReclaimWorker : BackgroundService` (Billing) — copy the `CreditGrantMintWorker` shape exactly
+> Implemented as the GENERAL sweeper per ADR-0033 BLOCKER-2 + the spec "Lot expiry reclaims unconsumed credits
+> idempotently" requirement: it reclaims ANY expired lot (Promo operator-expiry AND the period-end Subscription
+> lot) and tags the offset with the lot's OWN source — enforcing subscription no-carryover and promo expiry in one
+> mechanism. Worker is `CreditLotExpiryReclaimWorker`, marker `external_ref="lot-expiry:{lotId}"` (the spec form),
+> superseding the earlier draft `PromoExpiryReclaimWorker`/`promo-expiry:` names.
+
+- [x] 4.1 `ReclaimExpiredLotAsync` (both stores): one tx, projection row locked first; insert offsetting debit tagged
+  the lot's own source `= lot.remaining` (read `FOR UPDATE`) with `external_ref="lot-expiry:{lotId}"`
+  `ON CONFLICT DO NOTHING`; only if `inserted == 1` decrement projection by `remaining` + set lot `remaining = 0`.
+  Idempotent + can't reclaim consumed. Plus `GetExpiredLotsAsync(now)` cross-tenant work-list (both stores).
+- [x] 4.2 `CreditLotExpiryReclaimWorker : BackgroundService` (Billing) — copies the `CreditGrantMintWorker` shape exactly
   (`ResiliencePolicyKey`, `IServiceScopeFactory`, `IClock`, `[LoggerMessage]`, catch ordering, `internal
   ProcessExpiryCycleAsync`); per cycle enumerate expired non-zero lots and reclaim each (per-lot try/catch skip).
-  Register one `AddHostedService<PromoExpiryReclaimWorker>()` (Program.cs ~557) + one keyed
-  `AddKeyedSingleton<ResiliencePolicy>(…BuildHourlyWorkerPolicy())` (~921).
-- [ ] 4.3 Tests: expiry reclaims only `remaining`, re-run is a no-op, expired lot is FIFO-skipped, partial-consume then
-  expire reclaims the rest. Drive `ProcessExpiryCycleAsync` directly with a `FakeClock`.
+  Registered one `AddHostedService<CreditLotExpiryReclaimWorker>()` (Program.cs:560) + one keyed
+  `AddKeyedSingleton<ResiliencePolicy>(…BuildHourlyWorkerPolicy())` (Program.cs:925-927).
+- [x] 4.3 Tests: expiry reclaims only `remaining`, re-run is a no-op, expired lot is FIFO-skipped, partial-consume then
+  expire reclaims the rest, no-carryover Subscription reclaim, cross-tenant sweep, Σ-by-source invariant.
+  `ProcessExpiryCycleAsync` driven directly with a fixed `IClock`. InMemory (7) + Billing worker (4) + Postgres (4).
 
 ## Group 5 — Partner attribution (derive-on-read) + per-source reporting
 

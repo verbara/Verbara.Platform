@@ -449,6 +449,119 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
         return rows;
     }
 
+    public async Task<IReadOnlyList<CreditLot>> GetExpiredLotsAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        // The reclaim sweeper's cross-tenant work-list — a single SELECT over every non-empty, actually-expired
+        // lot (any source carrying an expiry: Promo's operator expiry, the Subscription period-end no-carryover
+        // lot). No tenant filter; the sweeper reclaims each in its own transaction.
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT lot_id, tenant_id, source, original, remaining, expires_at, granted_at, lot_seq " +
+            "FROM credit_lot " +
+            "WHERE remaining > 0 AND expires_at IS NOT NULL AND expires_at <= @Now",
+            p => p.Add(new NpgsqlParameter("Now", NpgsqlDbType.TimestampTz) { Value = now }),
+            MapLot,
+            ct);
+
+        return rows;
+    }
+
+    public async Task<decimal> ReclaimExpiredLotAsync(TenantId tenantId, string lotId, DateTimeOffset now, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(lotId);
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // (1) LOCK ORDER (the deadlock-avoidance contract): the projection row FIRST (FOR UPDATE), exactly as the
+        // metered debit + back-fill. Then read the lot FOR UPDATE.
+        await ReadBalanceForUpdateAsync(conn, tx, tenantId, ct);
+
+        var lot = await ReadLotForUpdateAsync(conn, tx, lotId, ct);
+
+        // (2) If the lot is missing, already drained, or not actually expired (null OR > now), commit empty + 0.
+        if (lot is null
+            || lot.Remaining <= 0m
+            || lot.ExpiresAt is not { } exp
+            || exp > now)
+        {
+            await tx.CommitAsync(ct);
+            return 0m;
+        }
+
+        // (3) Offsetting debit tagged the lot's OWN source, amount = -live remaining (NOT original), carrying the
+        // idempotency marker external_ref = "lot-expiry:{lotId}". ON CONFLICT DO NOTHING against the migration-012
+        // partial unique index (tenant_id, external_ref) is the arbiter: a re-tick inserts 0 rows.
+        var reclaimed = lot.Remaining;
+        var externalRef = $"lot-expiry:{lotId}";
+        var inserted = await conn.ExecuteAsync(
+            "INSERT INTO ai_credit_ledger " +
+            "(entry_id, tenant_id, entry_type, source, amount, period_key, external_ref, expires_at, usage_record_id, created_at) " +
+            "VALUES (@EntryId, @TenantId, @EntryType, @Source, @Amount, NULL, @ExternalRef, NULL, NULL, @CreatedAt) " +
+            "ON CONFLICT DO NOTHING",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("EntryId", NpgsqlDbType.Text) { Value = EntityId.New().Value });
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("EntryType", NpgsqlDbType.Smallint) { Value = (short)CreditEntryType.Debit });
+                p.Add(new NpgsqlParameter("Source", NpgsqlDbType.Smallint) { Value = (short)lot.Source });
+                p.Add(new NpgsqlParameter("Amount", NpgsqlDbType.Numeric) { Value = -reclaimed });
+                p.Add(new NpgsqlParameter("ExternalRef", NpgsqlDbType.Text) { Value = externalRef });
+                p.Add(new NpgsqlParameter("CreatedAt", NpgsqlDbType.TimestampTz) { Value = now });
+            },
+            tx, ct);
+
+        // (5) Already reclaimed (inserted == 0): a complete no-op — does NOT re-decrement the projection or
+        // re-zero the lot. Commit + return 0.
+        if (inserted == 0)
+        {
+            await tx.CommitAsync(ct);
+            return 0m;
+        }
+
+        // (4) Marker newly inserted ⇒ guarded projection decrement by `reclaimed` + zero the lot, both in the same
+        // transaction. By the invariant Σ(open non-expired lot.remaining) == balance the WHERE balance >= @Remaining
+        // guard always passes.
+        await conn.ExecuteAsync(
+            "UPDATE tenant_credit_balance SET " +
+            "balance = balance - @Remaining, version = version + 1, updated_at = @Now " +
+            "WHERE tenant_id = @TenantId AND balance >= @Remaining",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("Remaining", reclaimed));
+                p.Add(new NpgsqlParameter("Now", now));
+            },
+            tx, ct);
+
+        await conn.ExecuteAsync(
+            "UPDATE credit_lot SET remaining = 0 WHERE lot_id = @LotId",
+            p => p.Add(new NpgsqlParameter("LotId", NpgsqlDbType.Text) { Value = lotId }),
+            tx, ct);
+
+        await tx.CommitAsync(ct);
+        return reclaimed;
+    }
+
+    private static async Task<CreditLot?> ReadLotForUpdateAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        string lotId,
+        CancellationToken ct)
+    {
+        // Row-lock the lot for the duration of the reclaim transaction so a concurrent metered debit / reclaim
+        // serialises behind this one. Returns null when the lot does not exist.
+        await using var cmd = new NpgsqlCommand(
+            "SELECT lot_id, tenant_id, source, original, remaining, expires_at, granted_at, lot_seq " +
+            "FROM credit_lot WHERE lot_id = @LotId FOR UPDATE",
+            conn, tx);
+        cmd.Parameters.Add(new NpgsqlParameter("LotId", NpgsqlDbType.Text) { Value = lotId });
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            return null;
+        return MapLot(reader);
+    }
+
     private static CreditLot MapLot(NpgsqlDataReader r) => new()
     {
         LotId = r.GetString("lot_id"),

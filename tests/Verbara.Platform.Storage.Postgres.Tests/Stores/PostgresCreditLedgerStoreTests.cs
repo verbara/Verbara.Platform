@@ -734,4 +734,120 @@ public sealed class PostgresCreditLedgerStoreTests
         balance.Should().Be(1350m);
         bySource.Sum(s => s.Remaining).Should().Be(balance);
     }
+
+    // Scenario (Group 4): a partially-consumed expired Promo lot reclaims only its live remaining, Promo-tagged.
+    [Fact]
+    public async Task ReclaimExpiredLotAsync_ShouldReclaimRemainingOnly_WhenPartiallyConsumed()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("reclaim-partial");
+        var expiry = BaseTime.AddDays(15);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-pc", expiresAt: expiry), CancellationToken.None);
+
+        // Model a prior 30-credit draw against the lot: drop the balance to 70 (a guarded debit, expiry-agnostic)
+        // and decrement the lot's remaining to 70 directly so the live lot remaining mirrors the projection.
+        await store.TryPostDebitAsync(tenant, 30m, CreditSource.Promo, "usage-pc", CancellationToken.None);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(70m);
+        var lotId = (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().LotId;
+        await DecrementLotDirectAsync(30m, lotId);
+        (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().Remaining.Should().Be(70m);
+
+        var now = expiry.AddSeconds(1);
+        var reclaimed = await store.ReclaimExpiredLotAsync(tenant, lotId, now, CancellationToken.None);
+
+        // Reclaims the LIVE remaining (70), not the original 100.
+        reclaimed.Should().Be(70m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+        (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().Remaining.Should().Be(0m);
+        // Two Promo-tagged debit rows: the -30 prior draw + the -70 offsetting reclaim.
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Promo)).Should().Be(2);
+    }
+
+    // Scenario (Group 4): a second reclaim of the same lot is a complete no-op.
+    [Fact]
+    public async Task ReclaimExpiredLotAsync_ShouldBeNoOp_WhenReRun()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("reclaim-rerun");
+        var expiry = BaseTime.AddDays(15);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-rr", expiresAt: expiry), CancellationToken.None);
+
+        var lotId = (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().LotId;
+        var now = expiry.AddSeconds(1);
+
+        var first = await store.ReclaimExpiredLotAsync(tenant, lotId, now, CancellationToken.None);
+        var second = await store.ReclaimExpiredLotAsync(tenant, lotId, now, CancellationToken.None);
+
+        first.Should().Be(100m);
+        second.Should().Be(0m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+        // 1 grant + exactly 1 reclaim debit = 2 ledger rows (no second reclaim debit).
+        (await _fixture.LedgerRowCountAsync(tenant.Value)).Should().Be(2);
+        (await _fixture.LedgerSumAsync(tenant.Value)).Should().Be(0m);
+    }
+
+    // Scenario (Group 4): an unconsumed Subscription lot expiring at period end enforces no-carryover on reclaim.
+    [Fact]
+    public async Task ReclaimExpiredLotAsync_ShouldEnforceNoCarryover_WhenSubscriptionExpires()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("reclaim-no-carryover");
+        var periodEnd = BaseTime.AddMonths(1);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 400m, source: CreditSource.Subscription, periodKey: "2026-06", expiresAt: periodEnd), CancellationToken.None);
+
+        var lotId = (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().LotId;
+        var now = periodEnd.AddSeconds(1);
+
+        var reclaimed = await store.ReclaimExpiredLotAsync(tenant, lotId, now, CancellationToken.None);
+
+        reclaimed.Should().Be(400m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
+        (await _fixture.LedgerSumAsync(tenant.Value)).Should().Be(0m);
+    }
+
+    // Scenario (Group 4): GetExpiredLotsAsync returns only actually-expired non-empty lots across all tenants.
+    [Fact]
+    public async Task GetExpiredLotsAsync_ShouldReturnOnlyExpiredNonEmptyLots_AcrossTenants()
+    {
+        await _fixture.ResetAsync();
+        var t1 = new TenantId("expired-1");
+        var t2 = new TenantId("expired-2");
+        var expiry = BaseTime.AddDays(5);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(t1, 100m, source: CreditSource.Promo, externalRef: "exp-1", expiresAt: expiry), CancellationToken.None);
+        await store.PostGrantAsync(Grant(t1, 200m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(t2, 50m, source: CreditSource.Subscription, periodKey: "2026-06", expiresAt: expiry), CancellationToken.None);
+
+        var now = expiry.AddSeconds(1);
+        var expired = await store.GetExpiredLotsAsync(now, CancellationToken.None);
+
+        expired.Should().HaveCount(2);
+        expired.Should().Contain(l => l.TenantId == t1 && l.Source == CreditSource.Promo);
+        expired.Should().Contain(l => l.TenantId == t2 && l.Source == CreditSource.Subscription);
+        expired.Should().NotContain(l => l.TenantId == t1 && l.Source == CreditSource.Subscription);
+    }
+
+    // Decrements a lot's remaining directly (test helper that mimics a prior FIFO draw against the lot).
+    private async Task DecrementLotDirectAsync(decimal by, string lotId)
+    {
+        await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE credit_lot SET remaining = remaining - @By WHERE lot_id = @LotId";
+        cmd.Parameters.Add(new NpgsqlParameter("By", by));
+        cmd.Parameters.Add(new NpgsqlParameter("LotId", lotId));
+        await cmd.ExecuteNonQueryAsync();
+    }
 }
