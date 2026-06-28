@@ -50,7 +50,9 @@ public sealed class CreditLedgerStoreFixture : IAsyncLifetime
         await using var conn = new NpgsqlConnection(ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "TRUNCATE ai_credit_ledger, tenant_credit_balance RESTART IDENTITY CASCADE";
+        cmd.CommandText =
+            "TRUNCATE ai_credit_ledger, tenant_credit_balance, credit_lot, credit_allocation, credit_lot_seq " +
+            "RESTART IDENTITY CASCADE";
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -92,6 +94,40 @@ public sealed class CreditLedgerStoreFixture : IAsyncLifetime
         return result is null or DBNull ? 0L : (long)result;
     }
 
+    /// <summary>
+    /// Returns the count of <c>credit_allocation</c> rows whose <c>debit_entry_id</c> belongs to one of the
+    /// tenant's ledger debit rows — the internal debit→lot linkage count for a tenant.
+    /// </summary>
+    public async Task<long> AllocationRowCountAsync(string tenantId)
+    {
+        await using var conn = new NpgsqlConnection(ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(*) FROM credit_allocation a " +
+            "WHERE a.debit_entry_id IN (SELECT entry_id FROM ai_credit_ledger WHERE tenant_id = @t)";
+        cmd.Parameters.Add(new NpgsqlParameter("t", tenantId));
+        var result = await cmd.ExecuteScalarAsync();
+        return result is null or DBNull ? 0L : (long)result;
+    }
+
+    /// <summary>
+    /// Returns SUM(amount) over the <c>credit_allocation</c> rows whose <c>debit_entry_id</c> belongs to one of
+    /// the tenant's ledger debit rows (0 when none) — the internal debit→lot draw total for a tenant.
+    /// </summary>
+    public async Task<decimal> AllocationAmountSumAsync(string tenantId)
+    {
+        await using var conn = new NpgsqlConnection(ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT COALESCE(SUM(a.amount), 0) FROM credit_allocation a " +
+            "WHERE a.debit_entry_id IN (SELECT entry_id FROM ai_credit_ledger WHERE tenant_id = @t)";
+        cmd.Parameters.Add(new NpgsqlParameter("t", tenantId));
+        var result = await cmd.ExecuteScalarAsync();
+        return result is null or DBNull ? 0m : (decimal)result;
+    }
+
     // DDL — mirrors ai_credit_ledger + tenant_credit_balance in 012_credit_ledger.sql VERBATIM.
     private const string SchemaSql = """
         CREATE TABLE ai_credit_ledger (
@@ -124,6 +160,40 @@ public sealed class CreditLedgerStoreFixture : IAsyncLifetime
             version    BIGINT NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL
         );
+
+        CREATE TABLE credit_lot (
+            lot_id      TEXT PRIMARY KEY,
+            tenant_id   TEXT NOT NULL,
+            source      SMALLINT NOT NULL,
+            original    NUMERIC(18,6) NOT NULL,
+            remaining   NUMERIC(18,6) NOT NULL CHECK (remaining >= 0),
+            expires_at  TIMESTAMPTZ,
+            granted_at  TIMESTAMPTZ NOT NULL,
+            lot_seq     BIGINT NOT NULL
+        );
+
+        CREATE TABLE credit_allocation (
+            allocation_id  TEXT PRIMARY KEY,
+            debit_entry_id TEXT NOT NULL,
+            lot_id         TEXT NOT NULL,
+            source         SMALLINT NOT NULL,
+            amount         NUMERIC(18,6) NOT NULL,
+            created_at     TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE TABLE credit_lot_seq (
+            tenant_id TEXT PRIMARY KEY,
+            next_seq  BIGINT NOT NULL
+        );
+
+        CREATE INDEX idx_credit_lot_fifo
+            ON credit_lot (tenant_id, source, expires_at, granted_at, lot_seq);
+
+        CREATE INDEX idx_credit_allocation_debit
+            ON credit_allocation (debit_entry_id);
+
+        CREATE INDEX idx_credit_allocation_lot
+            ON credit_allocation (lot_id);
         """;
 }
 

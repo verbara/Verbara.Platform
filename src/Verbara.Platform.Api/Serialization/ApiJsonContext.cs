@@ -74,6 +74,13 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(CreditBalanceResponse))]
 [JsonSerializable(typeof(CreditLedgerEntryDto))]
 [JsonSerializable(typeof(PagedResult<CreditLedgerEntryDto>))]
+// c2 (credit-ledger-lots) — Promo/Partner grants, per-source remaining + derive-on-read partner attribution.
+[JsonSerializable(typeof(PromoGrantRequest))]
+[JsonSerializable(typeof(PartnerGrantRequest))]
+[JsonSerializable(typeof(SourceRemainingDto))]
+[JsonSerializable(typeof(SourceRemainingResponse))]
+[JsonSerializable(typeof(PartnerAttributionLineDto))]
+[JsonSerializable(typeof(PartnerAttributionResponse))]
 // Typification — reason-hint admin DTOs (C10)
 [JsonSerializable(typeof(ReasonHintDto[]))]
 [JsonSerializable(typeof(ReasonHintDto))]

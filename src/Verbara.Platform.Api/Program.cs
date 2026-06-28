@@ -555,6 +555,9 @@ builder.Services.Configure<DunningConfig>(o =>
 builder.Services.AddHostedService<DunningService>();
 builder.Services.AddHostedService<OverageInvoiceIssuanceWorker>();
 builder.Services.AddHostedService<CreditGrantMintWorker>();
+// credit-ledger-lots (ADR-0033 (c2), Group 4) — hourly lot-expiry reclaim sweeper: reclaims expired
+// non-empty lots idempotently (subscription no-carryover + promo expiry), tagging the offset the lot's own source.
+builder.Services.AddHostedService<CreditLotExpiryReclaimWorker>();
 // credit-ledger-cutover (ADR-0033, task B7) — one-time current-period back-fill seed, gated by
 // Llm:Platform:RunLedgerBackfill (default off); runs once and logs completion, idempotent on re-run.
 builder.Services.AddHostedService<CreditLedgerBackfillService>();
@@ -918,6 +921,9 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
     (_, _) => BuildHourlyWorkerPolicy());
 builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
     Verbara.Platform.Billing.CreditGrantMintWorker.ResiliencePolicyKey,
+    (_, _) => BuildHourlyWorkerPolicy());
+builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
+    Verbara.Platform.Billing.CreditLotExpiryReclaimWorker.ResiliencePolicyKey,
     (_, _) => BuildHourlyWorkerPolicy());
 
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────

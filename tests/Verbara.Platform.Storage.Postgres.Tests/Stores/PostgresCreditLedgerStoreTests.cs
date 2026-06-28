@@ -296,7 +296,7 @@ public sealed class PostgresCreditLedgerStoreTests
         var store = new PostgresCreditLedgerStore(dataSource);
         await store.PostGrantAsync(Grant(tenant, 10m, periodKey: "2026-06"), CancellationToken.None);
 
-        var result = await store.PostMeteredDebitAsync(tenant, 4m, CreditSource.Subscription, "usage-c", CancellationToken.None);
+        var result = await store.PostMeteredDebitAsync(tenant, 4m, "usage-c", CancellationToken.None);
 
         result.NewBalance.Should().Be(6m);
         result.CoveredAmount.Should().Be(4m);
@@ -318,7 +318,7 @@ public sealed class PostgresCreditLedgerStoreTests
         var store = new PostgresCreditLedgerStore(dataSource);
         await store.PostGrantAsync(Grant(tenant, 3m, periodKey: "2026-06"), CancellationToken.None);
 
-        var result = await store.PostMeteredDebitAsync(tenant, 5m, CreditSource.Subscription, "usage-o", CancellationToken.None);
+        var result = await store.PostMeteredDebitAsync(tenant, 5m, "usage-o", CancellationToken.None);
 
         result.NewBalance.Should().Be(0m);
         result.CoveredAmount.Should().Be(3m);
@@ -339,7 +339,7 @@ public sealed class PostgresCreditLedgerStoreTests
         await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
         var store = new PostgresCreditLedgerStore(dataSource);
 
-        var result = await store.PostMeteredDebitAsync(tenant, 7m, CreditSource.Subscription, "usage-z", CancellationToken.None);
+        var result = await store.PostMeteredDebitAsync(tenant, 7m, "usage-z", CancellationToken.None);
 
         result.NewBalance.Should().Be(0m);
         result.CoveredAmount.Should().Be(0m);
@@ -361,8 +361,8 @@ public sealed class PostgresCreditLedgerStoreTests
         await store.PostGrantAsync(Grant(tenant, 4m, periodKey: "2026-06"), CancellationToken.None);
 
         // Two concurrent metered debits of 3 against a balance of 4: covered totals exactly 4, tail totals 2.
-        var debitA = store.PostMeteredDebitAsync(tenant, 3m, CreditSource.Subscription, "a", CancellationToken.None);
-        var debitB = store.PostMeteredDebitAsync(tenant, 3m, CreditSource.Subscription, "b", CancellationToken.None);
+        var debitA = store.PostMeteredDebitAsync(tenant, 3m, "a", CancellationToken.None);
+        var debitB = store.PostMeteredDebitAsync(tenant, 3m, "b", CancellationToken.None);
         var results = await Task.WhenAll(debitA, debitB);
 
         var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
@@ -384,8 +384,8 @@ public sealed class PostgresCreditLedgerStoreTests
         await store.PostGrantAsync(Grant(tenant, 3m, periodKey: "2026-06"), CancellationToken.None);
 
         // Covered 3 + PostPaid tail 2, then a further pure PostPaid debit of 4 (balance already 0).
-        await store.PostMeteredDebitAsync(tenant, 5m, CreditSource.Subscription, "u1", CancellationToken.None);
-        await store.PostMeteredDebitAsync(tenant, 4m, CreditSource.Subscription, "u2", CancellationToken.None);
+        await store.PostMeteredDebitAsync(tenant, 5m, "u1", CancellationToken.None);
+        await store.PostMeteredDebitAsync(tenant, 4m, "u2", CancellationToken.None);
 
         var periodStart = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var periodEnd = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -396,6 +396,41 @@ public sealed class PostgresCreditLedgerStoreTests
 
         // A window that excludes the debits returns 0.
         var emptyTotal = await store.GetPostPaidDebitsTotalAsync(
+            tenant,
+            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2020, 2, 1, 0, 0, 0, TimeSpan.Zero),
+            CancellationToken.None);
+        emptyTotal.Should().Be(0m);
+    }
+
+    // Scenario: GetPartnerSourceDebitsTotalAsync sums only Partner-source debits within the period window.
+    [Fact]
+    public async Task GetPartnerSourceDebitsTotalAsync_ShouldSumPartnerDebits_InWindow()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("partner-total");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        // A Partner lot (drawn FIFO-first) and a Subscription lot so the per-source draws are tagged distinctly.
+        await store.PostGrantAsync(Grant(tenant, 1000m, CreditSource.Partner, externalRef: "partner-g"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 1000m, CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        // 600 draws entirely from the Partner lot (priority Partner < Subscription) → a Partner-tagged covered debit.
+        await store.PostMeteredDebitAsync(tenant, 600m, "u1", CancellationToken.None);
+        // A further 500 exhausts the remaining 400 Partner + 100 Subscription → +400 Partner, +100 Subscription.
+        await store.PostMeteredDebitAsync(tenant, 500m, "u2", CancellationToken.None);
+
+        var periodStart = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var total = await store.GetPartnerSourceDebitsTotalAsync(tenant, periodStart, periodEnd, CancellationToken.None);
+
+        // Partner draws 600 + 400 = 1000; the 100 Subscription draw is excluded.
+        total.Should().Be(1000m);
+
+        // A window that excludes the debits returns 0.
+        var emptyTotal = await store.GetPartnerSourceDebitsTotalAsync(
             tenant,
             new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2020, 2, 1, 0, 0, 0, TimeSpan.Zero),
@@ -445,5 +480,409 @@ public sealed class PostgresCreditLedgerStoreTests
         (await _fixture.LedgerRowCountAsync(tenant.Value)).Should().Be(3);
         (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
         (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(1);
+    }
+
+    // Scenario (Group 3b): the lot-aware back-fill covered draw keeps Σ remaining == balance and decrements lots.
+    [Fact]
+    public async Task PostBackfillConsumptionAsync_ShouldKeepInvariant_WhenLotsExist()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("backfill-lot-invariant");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        // One Subscription lot of 10 (balance 10); back-fill consumed 6 ⇒ covered 6 (partial), no PostPaid tail.
+        await store.PostGrantAsync(Grant(tenant, 10m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostBackfillConsumptionAsync(tenant, 6m, "2026-06", CancellationToken.None);
+
+        // Invariant Σ GetRemainingBySourceAsync == GetBalanceAsync after the lot-aware covered draw.
+        var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
+        balance.Should().Be(4m);
+        var bySource = await store.GetRemainingBySourceAsync(tenant, BaseTime, CancellationToken.None);
+        bySource.Sum(s => s.Remaining).Should().Be(balance);
+
+        // The lot's remaining dropped by exactly `covered` (10 − 6 = 4); Σ credit_allocation.amount == covered.
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().ContainSingle();
+        lots[0].Remaining.Should().Be(4m);
+        (await _fixture.AllocationAmountSumAsync(tenant.Value)).Should().Be(6m);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(1);
+    }
+
+    // Scenario (Group 3b): re-running the same period changes no lot, no balance, no allocation (idempotency holds).
+    [Fact]
+    public async Task PostBackfillConsumptionAsync_ShouldRemainNoOp_WhenReRunSamePeriod()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("backfill-lot-idem");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 10m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostBackfillConsumptionAsync(tenant, 6m, "2026-06", CancellationToken.None);
+        await store.PostBackfillConsumptionAsync(tenant, 6m, "2026-06", CancellationToken.None);
+
+        // Second run is a complete no-op: balance, the lot remaining, and the allocations are all unchanged.
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(4m);
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().ContainSingle();
+        lots[0].Remaining.Should().Be(4m);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(1);
+        (await _fixture.AllocationAmountSumAsync(tenant.Value)).Should().Be(6m);
+        // One grant + one covered Subscription marker debit — no second marker, no PostPaid tail (consumed < balance).
+        (await _fixture.LedgerRowCountAsync(tenant.Value)).Should().Be(2);
+    }
+
+    // Scenario: a grant mints exactly one credit_lot mirroring it, and GetRemainingBySourceAsync reports it.
+    [Fact]
+    public async Task PostGrantAsync_ShouldMintLot_WhenGrantInserted()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("lot-mint");
+        var expiry = BaseTime.AddMonths(1);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-1", expiresAt: expiry), CancellationToken.None);
+
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().HaveCount(1);
+        var lot = lots[0];
+        lot.Source.Should().Be(CreditSource.Promo);
+        lot.Original.Should().Be(100m);
+        lot.Remaining.Should().Be(100m);
+        lot.ExpiresAt.Should().NotBeNull();
+        lot.LotSeq.Should().Be(0L); // brand-new tenant → first lot seq 0
+
+        var bySource = await store.GetRemainingBySourceAsync(tenant, BaseTime, CancellationToken.None);
+        bySource.Should().ContainSingle(s => s.Source == CreditSource.Promo && s.Remaining == 100m);
+    }
+
+    // Scenario: a deduplicated grant (same external_ref) mints no second lot; balance credited once.
+    [Fact]
+    public async Task PostGrantAsync_ShouldNotMintSecondLot_WhenGrantDeduped()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("lot-dedup");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.TopUp, externalRef: "topup-dup"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.TopUp, externalRef: "topup-dup"), CancellationToken.None);
+
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().HaveCount(1);
+        lots[0].Remaining.Should().Be(100m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(100m);
+    }
+
+    // Scenario: per-source remaining sums to the projection balance across multiple sources.
+    [Fact]
+    public async Task GetRemainingBySourceAsync_ShouldSumToBalance_WhenMultipleSources()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("lot-sum");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        await store.PostGrantAsync(Grant(tenant, 300m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.TopUp, externalRef: "top-1"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 50m, source: CreditSource.Promo, externalRef: "promo-x", expiresAt: BaseTime.AddMonths(1)), CancellationToken.None);
+
+        var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
+        balance.Should().Be(450m);
+
+        var bySource = await store.GetRemainingBySourceAsync(tenant, BaseTime, CancellationToken.None);
+        bySource.Sum(s => s.Remaining).Should().Be(balance);
+        bySource.Should().Contain(s => s.Source == CreditSource.Subscription && s.Remaining == 300m);
+        bySource.Should().Contain(s => s.Source == CreditSource.TopUp && s.Remaining == 100m);
+        bySource.Should().Contain(s => s.Source == CreditSource.Promo && s.Remaining == 50m);
+    }
+
+    // Scenario: an expired Promo lot is excluded from per-source remaining once `now` is past its expiry.
+    [Fact]
+    public async Task GetRemainingBySourceAsync_ShouldExcludeExpiredPromo_WhenNowPastExpiry()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("lot-expired");
+        var promoExpiry = BaseTime.AddDays(10);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        await store.PostGrantAsync(Grant(tenant, 300m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 50m, source: CreditSource.Promo, externalRef: "promo-exp", expiresAt: promoExpiry), CancellationToken.None);
+
+        var now = promoExpiry.AddSeconds(1);
+        var bySource = await store.GetRemainingBySourceAsync(tenant, now, CancellationToken.None);
+
+        bySource.Should().ContainSingle();
+        bySource[0].Source.Should().Be(CreditSource.Subscription);
+        bySource[0].Remaining.Should().Be(300m);
+    }
+
+    // Scenario (Group 3a): a FIFO metered debit spans a Promo lot, a Subscription lot, and a PostPaid tail.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldDrawPromoThenSubscriptionThenPostPaid_WhenSpanning()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-span");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        // Promo 100 (never expires) + Subscription 1000. Balance 1100; debit 1150 ⇒ covered 1100 + tail 50.
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-span"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 1000m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        var result = await store.PostMeteredDebitAsync(tenant, 1150m, "usage-span", CancellationToken.None);
+
+        result.CoveredAmount.Should().Be(1100m);
+        result.PostPaidAmount.Should().Be(50m);
+        result.NewBalance.Should().Be(0m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+
+        // One Promo covered row, one Subscription covered row, one PostPaid tail row; two credit_allocation rows.
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Promo)).Should().Be(1);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(1);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(2);
+
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Should().OnlyContain(l => l.Remaining == 0m);
+    }
+
+    // Scenario (Group 3a): n=1 byte-identity — a single Subscription lot degenerates to the two-step covered draw.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldBeByteIdentical_WhenSingleSubscriptionLot()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-n1");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 10m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        var result = await store.PostMeteredDebitAsync(tenant, 4m, "usage-n1", CancellationToken.None);
+
+        result.NewBalance.Should().Be(6m);
+        result.CoveredAmount.Should().Be(4m);
+        result.PostPaidAmount.Should().Be(0m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(6m);
+        // Exactly one -4 Subscription debit row, zero PostPaid rows, one invisible credit_allocation row.
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(0);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(1);
+    }
+
+    // Scenario (Group 3a): no open lots ⇒ the whole debit is a single PostPaid tail, no allocation.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldBeAllPostPaid_WhenNoOpenLots()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-nolots");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        var result = await store.PostMeteredDebitAsync(tenant, 7m, "usage-nl", CancellationToken.None);
+
+        result.CoveredAmount.Should().Be(0m);
+        result.PostPaidAmount.Should().Be(7m);
+        result.NewBalance.Should().Be(0m);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.PostPaid)).Should().Be(1);
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(0);
+    }
+
+    // Scenario (Group 3a): concurrent debits against a single 4-credit lot never overdraw it.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldNeverOverdraw_WhenConcurrent()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-fifo-concurrent");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 4m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        const int concurrency = 8;
+        var debits = Enumerable.Range(0, concurrency)
+            .Select(i => store.PostMeteredDebitAsync(tenant, 3m, $"u{i}", CancellationToken.None));
+        var results = await Task.WhenAll(debits);
+
+        results.Sum(r => r.CoveredAmount).Should().Be(4m);
+        var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
+        balance.Should().Be(0m);
+        balance.Should().BeGreaterThanOrEqualTo(0m);
+
+        var lots = await store.GetLotsAsync(tenant, CancellationToken.None);
+        lots.Sum(l => l.Remaining).Should().Be(0m);
+        lots.Should().OnlyContain(l => l.Remaining >= 0m);
+    }
+
+    // Scenario (Group 3a): credit_allocation is internal — GetEntries(Count)Async return only ai_credit_ledger rows.
+    [Fact]
+    public async Task GetEntriesAsync_ShouldExcludeAllocations_WhenLotsDrawn()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-invisible");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-inv"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 1000m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+
+        await store.PostMeteredDebitAsync(tenant, 1150m, "usage-inv", CancellationToken.None);
+
+        // 2 grants + 3 debit rows = 5 ledger rows; the 2 allocations are invisible to GetEntries(Count)Async.
+        (await store.GetEntriesCountAsync(tenant, CancellationToken.None)).Should().Be(5);
+        var entries = await store.GetEntriesAsync(tenant, 1, 50, CancellationToken.None);
+        entries.Should().HaveCount(5);
+        entries.Should().OnlyContain(e => e.EntryType == CreditEntryType.Grant || e.EntryType == CreditEntryType.Debit);
+        // The allocation rows exist underneath but never surface through the ledger API.
+        (await _fixture.AllocationRowCountAsync(tenant.Value)).Should().Be(2);
+    }
+
+    // Scenario (Group 3a): the lot invariant Σ GetRemainingBySourceAsync == GetBalanceAsync holds after the debit.
+    [Fact]
+    public async Task PostMeteredDebitAsync_ShouldKeepInvariant_AfterDebit()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("metered-invariant");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-iv", expiresAt: BaseTime.AddMonths(1)), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 1000m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(tenant, 500m, source: CreditSource.TopUp, externalRef: "top-iv"), CancellationToken.None);
+
+        // 1600 granted; draw 250 (100 Promo + 150 Subscription) ⇒ covered 250, balance 1350.
+        await store.PostMeteredDebitAsync(tenant, 250m, "usage-iv", CancellationToken.None);
+
+        var bySource = await store.GetRemainingBySourceAsync(tenant, BaseTime, CancellationToken.None);
+        var balance = await store.GetBalanceAsync(tenant, CancellationToken.None);
+
+        balance.Should().Be(1350m);
+        bySource.Sum(s => s.Remaining).Should().Be(balance);
+    }
+
+    // Scenario (Group 4): a partially-consumed expired Promo lot reclaims only its live remaining, Promo-tagged.
+    [Fact]
+    public async Task ReclaimExpiredLotAsync_ShouldReclaimRemainingOnly_WhenPartiallyConsumed()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("reclaim-partial");
+        var expiry = BaseTime.AddDays(15);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-pc", expiresAt: expiry), CancellationToken.None);
+
+        // Model a prior 30-credit draw against the lot: drop the balance to 70 (a guarded debit, expiry-agnostic)
+        // and decrement the lot's remaining to 70 directly so the live lot remaining mirrors the projection.
+        await store.TryPostDebitAsync(tenant, 30m, CreditSource.Promo, "usage-pc", CancellationToken.None);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(70m);
+        var lotId = (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().LotId;
+        await DecrementLotDirectAsync(30m, lotId);
+        (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().Remaining.Should().Be(70m);
+
+        var now = expiry.AddSeconds(1);
+        var reclaimed = await store.ReclaimExpiredLotAsync(tenant, lotId, now, CancellationToken.None);
+
+        // Reclaims the LIVE remaining (70), not the original 100.
+        reclaimed.Should().Be(70m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+        (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().Remaining.Should().Be(0m);
+        // Two Promo-tagged debit rows: the -30 prior draw + the -70 offsetting reclaim.
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Promo)).Should().Be(2);
+    }
+
+    // Scenario (Group 4): a second reclaim of the same lot is a complete no-op.
+    [Fact]
+    public async Task ReclaimExpiredLotAsync_ShouldBeNoOp_WhenReRun()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("reclaim-rerun");
+        var expiry = BaseTime.AddDays(15);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 100m, source: CreditSource.Promo, externalRef: "promo-rr", expiresAt: expiry), CancellationToken.None);
+
+        var lotId = (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().LotId;
+        var now = expiry.AddSeconds(1);
+
+        var first = await store.ReclaimExpiredLotAsync(tenant, lotId, now, CancellationToken.None);
+        var second = await store.ReclaimExpiredLotAsync(tenant, lotId, now, CancellationToken.None);
+
+        first.Should().Be(100m);
+        second.Should().Be(0m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+        // 1 grant + exactly 1 reclaim debit = 2 ledger rows (no second reclaim debit).
+        (await _fixture.LedgerRowCountAsync(tenant.Value)).Should().Be(2);
+        (await _fixture.LedgerSumAsync(tenant.Value)).Should().Be(0m);
+    }
+
+    // Scenario (Group 4): an unconsumed Subscription lot expiring at period end enforces no-carryover on reclaim.
+    [Fact]
+    public async Task ReclaimExpiredLotAsync_ShouldEnforceNoCarryover_WhenSubscriptionExpires()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("reclaim-no-carryover");
+        var periodEnd = BaseTime.AddMonths(1);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 400m, source: CreditSource.Subscription, periodKey: "2026-06", expiresAt: periodEnd), CancellationToken.None);
+
+        var lotId = (await store.GetLotsAsync(tenant, CancellationToken.None)).Single().LotId;
+        var now = periodEnd.AddSeconds(1);
+
+        var reclaimed = await store.ReclaimExpiredLotAsync(tenant, lotId, now, CancellationToken.None);
+
+        reclaimed.Should().Be(400m);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(0m);
+        (await _fixture.DebitRowCountBySourceAsync(tenant.Value, (short)CreditSource.Subscription)).Should().Be(1);
+        (await _fixture.LedgerSumAsync(tenant.Value)).Should().Be(0m);
+    }
+
+    // Scenario (Group 4): GetExpiredLotsAsync returns only actually-expired non-empty lots across all tenants.
+    [Fact]
+    public async Task GetExpiredLotsAsync_ShouldReturnOnlyExpiredNonEmptyLots_AcrossTenants()
+    {
+        await _fixture.ResetAsync();
+        var t1 = new TenantId("expired-1");
+        var t2 = new TenantId("expired-2");
+        var expiry = BaseTime.AddDays(5);
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(t1, 100m, source: CreditSource.Promo, externalRef: "exp-1", expiresAt: expiry), CancellationToken.None);
+        await store.PostGrantAsync(Grant(t1, 200m, source: CreditSource.Subscription, periodKey: "2026-06"), CancellationToken.None);
+        await store.PostGrantAsync(Grant(t2, 50m, source: CreditSource.Subscription, periodKey: "2026-06", expiresAt: expiry), CancellationToken.None);
+
+        var now = expiry.AddSeconds(1);
+        var expired = await store.GetExpiredLotsAsync(now, CancellationToken.None);
+
+        expired.Should().HaveCount(2);
+        expired.Should().Contain(l => l.TenantId == t1 && l.Source == CreditSource.Promo);
+        expired.Should().Contain(l => l.TenantId == t2 && l.Source == CreditSource.Subscription);
+        expired.Should().NotContain(l => l.TenantId == t1 && l.Source == CreditSource.Subscription);
+    }
+
+    // Decrements a lot's remaining directly (test helper that mimics a prior FIFO draw against the lot).
+    private async Task DecrementLotDirectAsync(decimal by, string lotId)
+    {
+        await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE credit_lot SET remaining = remaining - @By WHERE lot_id = @LotId";
+        cmd.Parameters.Add(new NpgsqlParameter("By", by));
+        cmd.Parameters.Add(new NpgsqlParameter("LotId", lotId));
+        await cmd.ExecuteNonQueryAsync();
     }
 }

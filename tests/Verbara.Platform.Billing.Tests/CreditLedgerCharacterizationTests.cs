@@ -318,7 +318,7 @@ public class CreditLedgerCharacterizationTests
             .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10 });
 
         await ledger.PostGrantAsync(SubscriptionGrant(10m), CancellationToken.None);
-        await ledger.PostMeteredDebitAsync(Tenant1, 12m, CreditSource.Subscription, usageRecordId: null, CancellationToken.None);
+        await ledger.PostMeteredDebitAsync(Tenant1, 12m, usageRecordId: null, CancellationToken.None);
 
         var service = BuildInvoice(rateCardStore, usageStore, quotaStore, creditTokenRatio: 1000, inputRatio: null, outputRatio: null,
             ledger: ledger, ledgerInvoiceReadEnabled: true);
@@ -351,7 +351,7 @@ public class CreditLedgerCharacterizationTests
             .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10 });
 
         await ledger.PostGrantAsync(SubscriptionGrant(10m), CancellationToken.None);
-        await ledger.PostMeteredDebitAsync(Tenant1, 8m, CreditSource.Subscription, usageRecordId: null, CancellationToken.None);
+        await ledger.PostMeteredDebitAsync(Tenant1, 8m, usageRecordId: null, CancellationToken.None);
 
         var service = BuildInvoice(rateCardStore, usageStore, quotaStore, creditTokenRatio: 1000, inputRatio: null, outputRatio: null,
             ledger: ledger, ledgerInvoiceReadEnabled: true);
@@ -382,7 +382,7 @@ public class CreditLedgerCharacterizationTests
             .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 10 });
 
         await ledger.PostGrantAsync(SubscriptionGrant(10m), CancellationToken.None);
-        await ledger.PostMeteredDebitAsync(Tenant1, 21m, CreditSource.Subscription, usageRecordId: null, CancellationToken.None);
+        await ledger.PostMeteredDebitAsync(Tenant1, 21m, usageRecordId: null, CancellationToken.None);
 
         var service = BuildInvoice(rateCardStore, usageStore, quotaStore, creditTokenRatio: 1000, inputRatio: 2000, outputRatio: 500,
             ledger: ledger, ledgerInvoiceReadEnabled: true);

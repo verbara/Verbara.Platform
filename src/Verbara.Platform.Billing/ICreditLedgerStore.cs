@@ -26,10 +26,15 @@ public interface ICreditLedgerStore
 
     /// <summary>
     /// Posts a grant (positive <see cref="CreditLedgerEntry.Amount"/>) atomically: appends the ledger row and,
-    /// only if it was actually inserted, increments the projection balance in the same transaction. Idempotent
-    /// — a grant carrying a <see cref="CreditLedgerEntry.PeriodKey"/> (subscription) or
-    /// <see cref="CreditLedgerEntry.ExternalRef"/> (top-up) that collides with an existing entry is a no-op
-    /// that neither double-inserts nor double-credits.
+    /// only if it was actually inserted, increments the projection balance <b>and mints one <c>credit_lot</c>
+    /// row mirroring the grant</b> (<see cref="CreditLot.Original"/> = <see cref="CreditLot.Remaining"/> =
+    /// <see cref="CreditLedgerEntry.Amount"/>, <see cref="CreditLot.Source"/>, <see cref="CreditLot.ExpiresAt"/>,
+    /// <see cref="CreditLot.GrantedAt"/> = <see cref="CreditLedgerEntry.CreatedAt"/>, and a monotonic per-tenant
+    /// <see cref="CreditLot.LotSeq"/>) in the same transaction. Idempotent — a grant carrying a
+    /// <see cref="CreditLedgerEntry.PeriodKey"/> (subscription) or <see cref="CreditLedgerEntry.ExternalRef"/>
+    /// (top-up) that collides with an existing entry is a no-op that neither double-inserts, double-credits, nor
+    /// mints a second lot. The minted lot preserves the invariant
+    /// <c>Σ(open non-expired lot.remaining) == tenant_credit_balance.balance</c> after every grant.
     /// </summary>
     Task PostGrantAsync(CreditLedgerEntry grant, CancellationToken ct);
 
@@ -48,17 +53,23 @@ public interface ICreditLedgerStore
     Task<CreditDebitResult> TryPostDebitAsync(TenantId tenantId, decimal amount, CreditSource source, string? usageRecordId, CancellationToken ct);
 
     /// <summary>
-    /// Posts a metered consumption debit as a two-step covered-plus-PostPaid split in a <b>single
-    /// transaction</b> (ADR-0033 addendum, Model C). The covered portion <c>covered = min(balance, debit)</c> is
-    /// drawn from the prepaid stock via the guarded projection <c>UPDATE … WHERE balance &gt;= @covered</c> (the
-    /// projection floors at 0 — the prepaid lot is never overdrawn) and recorded as a debit row tagged
-    /// <paramref name="coveredSource"/>. The uncovered remainder <c>tail = debit − covered</c> is posted as an
-    /// <b>unconditional</b> debit row tagged <see cref="CreditSource.PostPaid"/> that does <b>not</b> touch the
-    /// projection — the billable overage that lets a <c>Warn</c> tenant keep serving past a depleted balance.
-    /// Returns the post-debit balance and the covered / post-paid split. <paramref name="usageRecordId"/> is an
-    /// optional back-reference to the originating usage record.
+    /// Posts a metered consumption debit as a <b>FIFO multi-source allocation</b> in a <b>single transaction</b>
+    /// (ADR-0033 / the 2026-06-28 (c2) resolution addendum). The debit is drawn across the tenant's open,
+    /// non-expired <c>credit_lot</c> rows in the provably-total order
+    /// <c>billable_priority ASC, expires_at ASC NULLS LAST, granted_at ASC, lot_seq ASC</c> (the
+    /// <c>tenant_credit_balance</c> row is locked first, then the lots in that same order — the deadlock-avoidance
+    /// contract). Each drawn lot emits one source-tagged covered debit row (the lot's own
+    /// <see cref="CreditSource"/>) plus an internal <c>credit_allocation</c> row, and the projection is decremented
+    /// once by the total covered amount via the guarded <c>UPDATE … WHERE balance &gt;= @covered</c> (the
+    /// projection floors at 0 — no lot is ever overdrawn, even under concurrency). The uncovered remainder
+    /// <c>tail = debit − Σ covered</c> is posted as exactly <b>one</b> <see cref="CreditSource.PostPaid"/> debit
+    /// row — never a lot, never split per lot — that does <b>not</b> touch the projection: the billable overage
+    /// that lets a <c>Warn</c> tenant keep serving past a depleted balance. At <c>n = 1</c> (a single
+    /// <see cref="CreditSource.Subscription"/> lot) the path degenerates byte-for-byte to the prior two-step
+    /// covered-plus-PostPaid split. <see cref="MeteredDebitResult.CoveredAmount"/> is the sum of the per-lot draws.
+    /// <paramref name="usageRecordId"/> is an optional back-reference to the originating usage record.
     /// </summary>
-    Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, CreditSource coveredSource, string? usageRecordId, CancellationToken ct);
+    Task<MeteredDebitResult> PostMeteredDebitAsync(TenantId tenantId, decimal debit, string? usageRecordId, CancellationToken ct);
 
     /// <summary>
     /// Returns the customer-owed AiAnalysis overage for a period: the sum of <c>|amount|</c> over the tenant's
@@ -69,6 +80,17 @@ public interface ICreditLedgerStore
     /// </summary>
     Task<decimal> GetPostPaidDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct);
 
+    /// <summary>
+    /// Returns the tenant's partner-funded AiAnalysis consumption for a period: the sum of <c>|amount|</c> over the
+    /// tenant's <see cref="CreditSource.Partner"/> debit rows whose <c>created_at</c> falls in
+    /// <c>[<paramref name="periodStart"/>, <paramref name="periodEnd"/>)</c>. This is the per-customer leaf the
+    /// owning partner's derive-on-read attribution aggregates (ADR-0033 (c2) addendum) — partner-funded draws are
+    /// tagged <see cref="CreditSource.Partner"/> (never <see cref="CreditSource.PostPaid"/>) so they never enter the
+    /// customer-owed <c>Σ |PostPaid|</c> invoice, yet remain attributable to the partner with no materialized table.
+    /// Returns <c>0</c> when no Partner debits exist in the window.
+    /// </summary>
+    Task<decimal> GetPartnerSourceDebitsTotalAsync(TenantId tenantId, DateTimeOffset periodStart, DateTimeOffset periodEnd, CancellationToken ct);
+
     /// <summary>Returns the tenant's ledger entries, most recent first, paginated (1-based <paramref name="page"/>).</summary>
     Task<IReadOnlyList<CreditLedgerEntry>> GetEntriesAsync(TenantId tenantId, int page, int pageSize, CancellationToken ct);
 
@@ -77,6 +99,63 @@ public interface ICreditLedgerStore
     /// <c>PagedResult</c> over <see cref="GetEntriesAsync"/>. Returns <c>0</c> when the tenant has no ledger.
     /// </summary>
     Task<int> GetEntriesCountAsync(TenantId tenantId, CancellationToken ct);
+
+    /// <summary>
+    /// Returns the tenant's open (drawable) remaining credit summed per <see cref="CreditSource"/> from the
+    /// <c>credit_lot</c> projection, as of <paramref name="now"/>. <b>Excludes</b> any lot with
+    /// <c>remaining = 0</c> and any expired lot (a lot whose <c>expires_at</c> is non-null and
+    /// <c>&lt;= <paramref name="now"/></c> — i.e. only <c>expires_at IS NULL OR expires_at &gt; now</c> lots count),
+    /// which in practice removes lapsed Promo lots pending reclaim. <see cref="CreditSource.PostPaid"/> is never a
+    /// lot (the uncovered billable tail is posted directly as a debit row with no lot) so it never appears.
+    /// <para>
+    /// <b>Invariant:</b> the sum of <see cref="SourceRemaining.Remaining"/> across the returned sources equals
+    /// <see cref="GetBalanceAsync"/> for the same tenant — the lot projection re-derives the O(1) balance
+    /// projection (<c>Σ(open non-expired lot.remaining) == tenant_credit_balance.balance</c>, ADR-0033 / the
+    /// 2026-06-28 (c2) resolution addendum). Sources with no open remaining are omitted from the result.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<SourceRemaining>> GetRemainingBySourceAsync(TenantId tenantId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Returns all <see cref="CreditLot"/> rows for the tenant (including drawn-to-zero and expired lots) — a
+    /// test/diagnostic read of the raw <c>credit_lot</c> projection. Ordering is unspecified but stable. Use
+    /// <see cref="GetRemainingBySourceAsync"/> for the drawable per-source remaining (which applies the open /
+    /// non-expired filters).
+    /// </summary>
+    Task<IReadOnlyList<CreditLot>> GetLotsAsync(TenantId tenantId, CancellationToken ct);
+
+    /// <summary>
+    /// Returns every expired non-empty <see cref="CreditLot"/> across <b>all</b> tenants — the reclaim sweeper's
+    /// work-list (ADR-0033 / the 2026-06-28 (c2) resolution addendum, BLOCKER resolution 2). A lot is reclaimable
+    /// when <c>remaining &gt; 0 AND expires_at IS NOT NULL AND expires_at &lt;= <paramref name="now"/></c> — any
+    /// source with an operator-set or period-end expiry (Promo and the no-carryover Subscription lot alike). Lots
+    /// with no expiry (<c>expires_at IS NULL</c>) and already-drained lots (<c>remaining = 0</c>) are never
+    /// returned. The caller reclaims each via <see cref="ReclaimExpiredLotAsync"/>; the result is a stable snapshot
+    /// — each reclaim re-checks the lot under its own lock, so a lot drawn-to-zero between the sweep and the
+    /// reclaim is a safe no-op.
+    /// </summary>
+    Task<IReadOnlyList<CreditLot>> GetExpiredLotsAsync(DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Reclaims an expired lot's unconsumed credits idempotently, returning the reclaimed amount (<c>0</c> when
+    /// nothing was reclaimed). In one transaction with the <c>tenant_credit_balance</c> row locked first (the
+    /// deadlock-avoidance lock order), then the lot read <c>FOR UPDATE</c>: if the lot is missing, already drained
+    /// (<c>remaining = 0</c>), or not actually expired (<c>expires_at IS NULL OR expires_at &gt; <paramref name="now"/></c>)
+    /// the transaction commits empty and returns <c>0</c>. Otherwise it appends an offsetting debit tagged the
+    /// lot's <b>own</b> <see cref="CreditLot.Source"/> (read <c>FOR UPDATE</c>, equal to the live
+    /// <see cref="CreditLot.Remaining"/>, <b>not</b> <see cref="CreditLot.Original"/>) carrying
+    /// <c>external_ref = "lot-expiry:{lotId}"</c> via <c>ON CONFLICT DO NOTHING</c>; <b>only if that debit row was
+    /// actually inserted</b> it decrements the projection by that remaining (guarded
+    /// <c>WHERE balance &gt;= @Remaining</c>) and sets the lot's <c>remaining = 0</c>, returning the reclaimed
+    /// amount. If the offsetting debit already exists (a re-run) it is a <b>complete no-op</b> — it neither
+    /// re-decrements the projection nor re-zeroes the lot — and returns <c>0</c>. Because the offset is the live
+    /// <c>remaining</c> (never <c>original</c>) and the whole operation is gated on the insert, the reclaim can
+    /// never claw back already-consumed credits and can never run twice. This single mechanism enforces both
+    /// subscription no-carryover and promo expiry. The reclaimed lot is also FIFO-skipped by
+    /// <see cref="PostMeteredDebitAsync"/> (the <c>expires_at &gt; now</c> predicate), so a lot pending reclaim is
+    /// never drawn — keeping the invariant <c>Σ(open non-expired lot.remaining) == tenant_credit_balance.balance</c>.
+    /// </summary>
+    Task<decimal> ReclaimExpiredLotAsync(TenantId tenantId, string lotId, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
     /// Idempotently seeds one period's already-realised AI-credit consumption onto the ledger for the cutover
