@@ -265,6 +265,26 @@ public sealed class PostgresCreditLedgerStoreTests
         entries[1].ExpiresAt.Should().NotBeNull();
     }
 
+    // Scenario: GetEntriesCountAsync returns the total ledger row count (backs PagedResult.TotalCount).
+    [Fact]
+    public async Task GetEntriesCountAsync_ShouldReturnTotalRowCount_WhenEntriesPosted()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("ledger-count");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        // Unknown tenant → 0 (no rows).
+        (await store.GetEntriesCountAsync(tenant, CancellationToken.None)).Should().Be(0);
+
+        await store.PostGrantAsync(Grant(tenant, 300m, periodKey: "2026-06"), CancellationToken.None);
+        await store.TryPostDebitAsync(tenant, 100m, CreditSource.Subscription, "usage-1", CancellationToken.None);
+
+        // 1 grant + 1 debit row = 2, regardless of any page window.
+        (await store.GetEntriesCountAsync(tenant, CancellationToken.None)).Should().Be(2);
+    }
+
     // Scenario: a metered debit fully covered by the prepaid balance draws entirely from the covered lot.
     [Fact]
     public async Task PostMeteredDebitAsync_ShouldDrawFromCoveredLotAndDecrementProjection_WhenFullyCovered()

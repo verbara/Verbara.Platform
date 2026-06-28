@@ -73,6 +73,12 @@ public interface ICreditLedgerStore
     Task<IReadOnlyList<CreditLedgerEntry>> GetEntriesAsync(TenantId tenantId, int page, int pageSize, CancellationToken ct);
 
     /// <summary>
+    /// Returns the total count of the tenant's ledger entries — the <c>TotalCount</c> backing a
+    /// <c>PagedResult</c> over <see cref="GetEntriesAsync"/>. Returns <c>0</c> when the tenant has no ledger.
+    /// </summary>
+    Task<int> GetEntriesCountAsync(TenantId tenantId, CancellationToken ct);
+
+    /// <summary>
     /// Idempotently seeds one period's already-realised AI-credit consumption onto the ledger for the cutover
     /// back-fill (ADR-0033 addendum, task B7). Splits <paramref name="consumed"/> exactly as the runtime metered
     /// debit would have: <c>covered = min(balance, consumed)</c> is drawn from the (already-minted) Subscription

@@ -36,6 +36,22 @@ public sealed class InMemoryCreditLedgerStoreTests
         CreatedAt = BaseTime,
     };
 
+    // A grant with an explicit EntryId and CreatedAt (and a distinct external_ref so it always inserts) —
+    // lets the deterministic-tiebreak test pin the (CreatedAt DESC, EntryId DESC) ordering at a same instant.
+    private static CreditLedgerEntry SameInstantGrant(string entryId, DateTimeOffset createdAt, string externalRef) => new()
+    {
+        EntryId = EntityId.From(entryId),
+        TenantId = Tenant1,
+        EntryType = CreditEntryType.Grant,
+        Source = CreditSource.TopUp,
+        Amount = 1m,
+        PeriodKey = null,
+        ExternalRef = externalRef,
+        ExpiresAt = null,
+        UsageRecordId = null,
+        CreatedAt = createdAt,
+    };
+
     [Fact]
     public async Task GetBalanceAsync_ShouldReturnZero_WhenNoLedger()
     {
@@ -202,6 +218,60 @@ public sealed class InMemoryCreditLedgerStoreTests
         var page2 = await store.GetEntriesAsync(Tenant1, 2, 2, CancellationToken.None);
         page2.Should().HaveCount(1);
         page2[0].EntryType.Should().Be(CreditEntryType.Grant);
+    }
+
+    [Fact]
+    public async Task GetEntriesAsync_ShouldOrderByEntryIdTiebreak_WhenSameInstant()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        var sameInstant = BaseTime;
+
+        // Three same-instant grants inserted out of EntryId order. Distinct external_refs keep all three
+        // inserting (no dedupe). Most-recent-first with the (CreatedAt DESC, EntryId DESC) tiebreak MUST
+        // sort them by EntryId descending — "ccc", "bbb", "aaa" — regardless of insertion order.
+        await store.PostGrantAsync(SameInstantGrant("bbb", sameInstant, "ref-b"), CancellationToken.None);
+        await store.PostGrantAsync(SameInstantGrant("aaa", sameInstant, "ref-a"), CancellationToken.None);
+        await store.PostGrantAsync(SameInstantGrant("ccc", sameInstant, "ref-c"), CancellationToken.None);
+
+        var entries = await store.GetEntriesAsync(Tenant1, 1, 10, CancellationToken.None);
+
+        entries.Should().HaveCount(3);
+        entries.Select(e => e.EntryId.Value).Should().ContainInOrder("ccc", "bbb", "aaa");
+    }
+
+    [Fact]
+    public async Task GetEntriesCountAsync_ShouldReturnZero_WhenNoLedger()
+    {
+        var store = new InMemoryCreditLedgerStore();
+
+        var count = await store.GetEntriesCountAsync(Tenant1, CancellationToken.None);
+
+        count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetEntriesCountAsync_ShouldReturnEntryCount_WhenGrantsAndDebitsPosted()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 1000m), CancellationToken.None);
+        await store.TryPostDebitAsync(Tenant1, 10m, CreditSource.Subscription, "u1", CancellationToken.None);
+        await store.TryPostDebitAsync(Tenant1, 20m, CreditSource.Subscription, "u2", CancellationToken.None);
+
+        // 1 grant + 2 debit rows = 3, independent of the page window.
+        var count = await store.GetEntriesCountAsync(Tenant1, CancellationToken.None);
+
+        count.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task GetEntriesCountAsync_ShouldNotCountDeduplicatedGrants_WhenDuplicatePeriodKey()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(amount: 300m, periodKey: "2026-06"), CancellationToken.None);
+        // Duplicate (tenant, period_key, entry_type) is a no-op — no second row appended.
+        await store.PostGrantAsync(MakeGrant(amount: 300m, periodKey: "2026-06"), CancellationToken.None);
+
+        (await store.GetEntriesCountAsync(Tenant1, CancellationToken.None)).Should().Be(1);
     }
 
     [Fact]
