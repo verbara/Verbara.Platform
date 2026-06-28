@@ -47,18 +47,26 @@ the customer's purchased credits and burning the free expiring allowance first.
 - **THEN** 1000 is drawn from the Subscription lot and 200 from the TopUp lot, leaving the TopUp with 300 (the
   Subscription, which would expire anyway, is spent first)
 
-### Requirement: Promo expiry reclaims unconsumed credits idempotently
-`Promo` grants MAY carry `expires_at`. Expired lots SHALL NOT be FIFO-selected. A reclaim sweeper SHALL, in one
-transaction with the projection row locked first, post an offsetting `Promo` debit equal to the lot's live `remaining`
-(read `FOR UPDATE`, not `original`) carrying `external_ref = "promo-expiry:{lotId}"`, and **only if that debit row was
-actually inserted** decrement the projection by that `remaining` and set the lot's `remaining` to 0. The reclaim SHALL
-be a complete no-op on re-run and SHALL never reclaim already-consumed credits.
+### Requirement: Lot expiry reclaims unconsumed credits idempotently
+Expired lots SHALL NOT be FIFO-selected — any lot MAY carry `expires_at` (operator-set on `Promo`, period-end on
+`Subscription`, which has no carryover per ADR-0033). A reclaim sweeper SHALL, in one
+transaction with the projection row locked first, post an offsetting debit **tagged the lot's own source** equal to the
+lot's live `remaining` (read `FOR UPDATE`, not `original`) carrying `external_ref = "lot-expiry:{lotId}"`, and **only if
+that debit row was actually inserted** decrement the projection by that `remaining` and set the lot's `remaining` to 0.
+The reclaim SHALL be a complete no-op on re-run and SHALL never reclaim already-consumed credits. This single mechanism
+enforces both subscription no-carryover and promo expiry.
 
 #### Scenario: Unconsumed promo expires
 - **GIVEN** a 100-credit Promo lot expiring on day 15, with 30 consumed before expiry
 - **WHEN** the reclaim runs after day 15
-- **THEN** the remaining 70 is removed from the balance via an offsetting `Promo` debit, the lot `remaining` is 0, and a
-  second reclaim run changes nothing
+- **THEN** the remaining 70 is removed from the balance via an offsetting `Promo`-tagged debit, the lot `remaining` is 0,
+  and a second reclaim run changes nothing
+
+#### Scenario: Unused subscription does not carry over
+- **GIVEN** a Subscription lot expiring at period end with 400 credits unconsumed
+- **WHEN** the reclaim runs after the period boundary
+- **THEN** the 400 is removed via an offsetting `Subscription`-tagged debit, so the next period starts from the
+  freshly-minted subscription grant alone (no carryover)
 
 ### Requirement: Partner-funded credits are drawable, never customer-billed, and attributed on read
 `Partner` grants SHALL create a drawable lot drawn before `Subscription`/`TopUp`. `Partner` draws SHALL be tagged
