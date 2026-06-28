@@ -229,3 +229,91 @@ code, resolved how change (c) `credit-ledger-sources` is built. **PO decisions (
 **Also (both changes):** the InMemory `GetEntriesAsync` reverses insertion order while Postgres orders
 `created_at DESC, entry_id DESC` — same-instant multi-row debits can order differently across the twins; any
 order-asserting test needs a deterministic tiebreak defined in **both** stores.
+
+## Addendum (2026-06-28): change (c2) resolution — grounding corrected the (c)-addendum must-fixes; partner attribution is derive-on-read, not a materialized table
+
+Before writing the c2 spec, an 8-reader grounding workflow + an adversarial design critic (over the *real* post-c1
+code), then a 3-judge panel + a false-trichotomy framing critic on the one load-bearing decision, **corrected the
+three must-fixes the 2026-06-27 (c) addendum asserted from memory**. The corrections are authoritative; where this
+addendum and the (c) addendum disagree, **this one wins for c2**.
+
+**Correction to must-fix #2 — the partner-identity gate ALREADY exists (the (c) addendum was wrong).** `TenantType`
+(`Verbara.Sdk.Pro.MultiTenant`) has `Partner = 1`; `Tenant.ParentTenantId` + `Tenant.Type` give the full
+`Platform → Partner → Customer` chain (max depth 3); `ITenantStore.GetAsync(id)` + `GetChildrenAsync(parentId)`
+traverse both directions; the exact gate "load customer → follow `ParentTenantId` → assert `parent.Type == Partner`"
+is **already coded** (`ManagementTenantEndpoints.cs:104/107`), and `PartnerAdminOnly` + `partner_admin`/`partner_billing`/
+`partner_viewer` templates ship today. **c2 reuses this with ZERO `Tenant`-model change** (the `Tenant` entity lives
+in closed-source `Sdk.Pro` — touching it would cross the open-core boundary and force a re-pack). Single-hop
+`GetAsync(customer.ParentTenantId)` is the resolver; **no recursive owning-partner walk exists or is needed**.
+
+**Correction to must-fix #1 — partner attribution is DERIVE-ON-READ; the materialized `partner_credit_allocation`
+table is DEFERRED (PO decision, 2026-06-28).** The (c) addendum prescribed a `partner_credit_allocation` table
+written by a *"period-close step independent of invoice generation."* Grounding found **there is no period-boundary
+scheduler anywhere** — invoice/period generation fires only from two *manual* HTTP endpoints, so that "period-close
+step" has no trigger. A 3-judge panel (correctness / YAGNI / evolvability) ranked the options **unanimously A2**, and
+a false-trichotomy critic showed the framing itself was wrong: **the attribution facts are already materialized at
+draw time** — every `Partner`-funded draw writes a `credit_allocation(source = Partner)` row, and the consuming
+customer's `tenant_id` is on the debit row. A separate `partner_credit_allocation` table would store **no fact the
+ledger + `credit_allocation` don't already hold**; it is a denormalized rollup whose only justification is read-perf
+for a **consumer that does not exist yet** (no partner settlement/payout feature reads it). **Decision: c2 attributes
+partner consumption by deriving on read** — `GetPartnerAttributionAsync(partnerTenantId, periodStart, periodEnd)` =
+`Σ |Partner-source debits|` over the partner's `GetChildrenAsync` customers in the half-open window. It **cannot drift**
+(single source of truth) and **cannot double-count** (one fact, one place). The materialized table + its trigger are a
+named fast-follow, designed against a real consumer when partner-billing/settlement lands. Partner credits are still a
+**fully drawable, never-customer-billed lot** in c2 — attribution recording is orthogonal to both draw-down and
+billing (a `Partner` debit is never tagged `PostPaid`, so the `Σ PostPaid` invoice already excludes it).
+
+**Correction to must-fix #3 — RBAC: NO new seeding in c2.** Promo/Partner grants are **operator-minted**, reusing the
+shipped `billing:credits:grant` permission + the c1 `CreditGrantGate` double-lock (`PlatformAdminRequirement("billing:credits:grant")`
+— a bare `.RequireAuthorization(perm)` does **not** gate the management-key path). Partner self-serve grants are **out
+of c2** (would need `partner_admin` seeding, and `ReseedExistingTenantsAsync` only realigns `platform_admin`, so
+existing partner tenants wouldn't pick it up without bespoke migration tooling — not worth it before there's a partner
+self-serve UX). **No permission-count / role-template-count test churn** — the perms already exist from c1.
+
+**The three BLOCKERs the critic surfaced in the drafted c2, and their resolutions (all engineering, now specced):**
+
+1. **Total order = lock order (deadlock contract).** The FIFO `SELECT … FOR UPDATE ORDER BY` must be a **provably total**
+   order, identical in both stores, equal to the consumption order, and obeyed by *every* writer. It is
+   **`billable_priority ASC, expires_at ASC NULLS LAST, granted_at ASC, lot_seq ASC`**, where `lot_seq` is an explicit
+   **monotonic per-tenant `BIGINT` sequence** on `credit_lot` (NOT the random `EntityId` — `Guid("N")` is non-monotonic
+   and would make the order non-total → opposite-order locking → `40P01` deadlock → the best-effort meter silently
+   drops the debit → under-billing). `billable_priority` is a **static draw-priority map** (`Promo=0, Partner=1,
+   Subscription=2, TopUp=2, PostPaid=last`), **distinct from** the persistence `CreditSource` ordinal — never
+   `ORDER BY source`. **Lock acquisition order is fixed: the `tenant_credit_balance` row FIRST** (the existing
+   `ReadBalanceForUpdateAsync` `FOR UPDATE` stays the first lock), **then lots in the total order** — the metered debit,
+   the backfill, and the promo sweeper all obey this single global order.
+
+2. **Promo expiry reclaim — projection-decrementing and `inserted == 1`-gated.** A reclaim sweeper (an hourly
+   `BackgroundService`, the `CreditGrantMintWorker` pattern; `IClock`, resilience-keyed, `[LoggerMessage]`) finds
+   expired non-zero lots and, **in one tx with the projection row locked first**: (i) inserts an offsetting `Promo`
+   **debit** of `lot.remaining` (read `FOR UPDATE`, NOT `original`) carrying `external_ref = "promo-expiry:{lotId}"`
+   `ON CONFLICT DO NOTHING`; (ii) **only if `inserted == 1`** decrements the projection by that `remaining` and sets
+   `lot.remaining = 0`. The whole reclaim is gated on `inserted == 1` (mirroring `PostGrantAsync`), so a re-tick is a
+   complete no-op — it cannot reclaim already-consumed credits (offsets live `remaining`, not `original`) and cannot
+   run twice. Expired lots are **also** skipped by the FIFO predicate (`expires_at IS NULL OR expires_at > now`), so a
+   lot pending reclaim is never drawn. Expiry comparison is UTC-normalized so the `DateTimeOffset.UtcNow` (metered path)
+   vs `IClock.UtcNow` (sweeper) sources can't flip a lot across the boundary.
+
+3. **n=1 byte-identity + multi-row debit.** A metered consumption now emits **K covered rows (one per drawn lot) + at
+   most ONE `PostPaid` tail row** (the tail is **not** a lot and is **never** split per lot). `credit_allocation` is an
+   **internal** table — `GetEntriesAsync`/`GetEntriesCountAsync` stay scoped to `ai_credit_ledger`, so c1's
+   balance/entries API and ordering are unchanged. `GetPostPaidDebitsTotalAsync` is unaffected (still `Σ` over the lone
+   `PostPaid` rows). `MeteredDebitResult` keeps its `(NewBalance, CoveredAmount, PostPaidAmount)` shape (`CoveredAmount`
+   = Σ per-lot draws); no `List<>` on the hot-path struct (AOT). At **n=1** (a single `Subscription` lot) the FIFO path
+   degenerates **byte-for-byte** to the current two-step: one `-covered` `Subscription` row + one `-tail` `PostPaid`
+   row + the same projection, plus one *invisible* `credit_allocation` row. The (a)/(b) characterization corpus is the
+   regression guard; since **CI does not run the Postgres suite**, the InMemory twin MUST carry the n=1 *and* the new
+   multi-lot/expiry tests or the money-path rewrite merges unguarded.
+
+**Existing-balance → lots migration (013).** When 013 runs, existing tenants have grants + a `tenant_credit_balance`
+projection but **no lots**. The append-only ledger cannot reconstruct per-grant `remaining` (pre-c2 debits aren't
+lot-linked). So 013 seeds **one synthetic `Subscription`-priority migration lot per tenant with `remaining = current
+projection.balance`, `expires_at = NULL`, `lot_seq = 0`** — preserving the load-bearing invariant **`Σ(open
+non-expired lot.remaining) == projection.balance`** without inventing per-grant history. (In practice the ledger is
+still inert in prod, so most tenants have balance 0 → no lot; the migration is correct either way.) The `backfill`
+covered-draw (`PostBackfillConsumptionAsync`) is made **lot-aware** (draws covered from lots via the same FIFO) so a
+post-c2 back-fill can't drop the projection without decrementing a lot (which would let the next FIFO walk double-spend).
+
+**Invariant tests (both stores, every mutation):** `Σ(open non-expired lot.remaining) == projection.balance` after
+every grant / metered debit / expiry reclaim / backfill, and `GetRemainingBySourceAsync` excludes expired Promo lots
+and PostPaid (which has no lot) with `Σ per-source == projection.balance`.
