@@ -53,8 +53,20 @@ internal static class SyncFenceScanner
 
         var tree = CSharpSyntaxTree.ParseText(source);
         var root = tree.GetRoot();
-        var lines = SplitLines(source);
         var violations = new List<FenceViolation>();
+
+        // Valid allow-markers are REAL single-line comment trivia (never string/XML-doc text).
+        // We collect their 0-based start lines so a marker only excuses a call on its own line
+        // span or the single immediately-preceding physical line.
+        var markerLines = new HashSet<int>();
+        foreach (var trivia in root.DescendantTrivia())
+        {
+            if (trivia.IsKind(SyntaxKind.SingleLineCommentTrivia)
+                && AllowMarker.IsMatch(trivia.ToString()))
+            {
+                markerLines.Add(trivia.GetLocation().GetLineSpan().StartLinePosition.Line);
+            }
+        }
 
         // (a) Banned invocations.
         foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
@@ -70,7 +82,7 @@ internal static class SyncFenceScanner
             if (!IsBanned(receiver, method))
                 continue;
 
-            if (IsAllowed(invocation, lines))
+            if (IsAllowed(invocation, markerLines))
                 continue;
 
             var line = LineSpan(invocation).StartLinePosition.Line + 1;
@@ -81,38 +93,46 @@ internal static class SyncFenceScanner
                 $"wall-clock barrier '{receiver}.{method}(...)' — replace with a causal signal (FakeTimeProvider / WaitForXAsync) or annotate."));
         }
 
-        // (b) Best-effort Stopwatch spin-loop (while / do).
-        foreach (var node in root.DescendantNodes())
+        // (b) Best-effort Stopwatch spin-loop (while / do). Gate the heuristic on a Stopwatch
+        // actually being present in the file (pure-syntax identifier-token probe; comments and
+        // string literals are not identifier tokens) so an unrelated `.Elapsed` member on some
+        // other type cannot trip a false positive.
+        var hasStopwatch = root.DescendantTokens()
+            .Any(t => t.IsKind(SyntaxKind.IdentifierToken) && t.Text == "Stopwatch");
+        if (hasStopwatch)
         {
-            ExpressionSyntax? condition = node switch
+            foreach (var node in root.DescendantNodes())
             {
-                WhileStatementSyntax @while => @while.Condition,
-                DoStatementSyntax @do => @do.Condition,
-                _ => null,
-            };
-            if (condition is null)
-                continue;
+                ExpressionSyntax? condition = node switch
+                {
+                    WhileStatementSyntax @while => @while.Condition,
+                    DoStatementSyntax @do => @do.Condition,
+                    _ => null,
+                };
+                if (condition is null)
+                    continue;
 
-            var hasStopwatchMember = condition
-                .DescendantNodesAndSelf()
-                .OfType<MemberAccessExpressionSyntax>()
-                .Any(m => StopwatchSpinMembers.Contains(m.Name.Identifier.Text));
-            if (!hasStopwatchMember)
-                continue;
+                var hasStopwatchMember = condition
+                    .DescendantNodesAndSelf()
+                    .OfType<MemberAccessExpressionSyntax>()
+                    .Any(m => StopwatchSpinMembers.Contains(m.Name.Identifier.Text));
+                if (!hasStopwatchMember)
+                    continue;
 
-            if (IsAllowed(node, lines))
-                continue;
+                if (IsAllowed(node, markerLines))
+                    continue;
 
-            // Line = the loop keyword's line.
-            var keyword = node is WhileStatementSyntax w
-                ? w.WhileKeyword
-                : ((DoStatementSyntax)node).DoKeyword;
-            var line = keyword.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-            violations.Add(new FenceViolation(
-                path,
-                line,
-                "Stopwatch.spin",
-                "best-effort: loop condition reads Stopwatch.Elapsed* — wall-clock spin barrier; replace with a causal signal or annotate."));
+                // Line = the loop keyword's line.
+                var keyword = node is WhileStatementSyntax w
+                    ? w.WhileKeyword
+                    : ((DoStatementSyntax)node).DoKeyword;
+                var line = keyword.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+                violations.Add(new FenceViolation(
+                    path,
+                    line,
+                    "Stopwatch.spin",
+                    "best-effort: loop condition reads Stopwatch.Elapsed* — wall-clock spin barrier; replace with a causal signal or annotate."));
+            }
         }
 
         // (c) Threading-alias proxy (never marker-excused).
@@ -172,10 +192,11 @@ internal static class SyncFenceScanner
         node.GetLocation().GetLineSpan();
 
     /// <summary>
-    /// A flagged node is allowed iff a valid marker appears on any line it spans, or on the
-    /// immediately-preceding non-blank line (scanning upward past whitespace-only lines).
+    /// A flagged node is allowed iff a valid marker comment appears on any line the node spans,
+    /// or on the single IMMEDIATELY-preceding physical line. Blank lines are not skipped: a marker
+    /// above a blank line does not excuse a call below that blank line.
     /// </summary>
-    private static bool IsAllowed(SyntaxNode node, List<string> lines)
+    private static bool IsAllowed(SyntaxNode node, HashSet<int> markerLines)
     {
         var span = LineSpan(node);
         var startLine = span.StartLinePosition.Line;
@@ -183,33 +204,10 @@ internal static class SyncFenceScanner
 
         for (var i = startLine; i <= endLine; i++)
         {
-            if (LineHasMarker(lines, i))
+            if (markerLines.Contains(i))
                 return true;
         }
 
-        // Immediately-preceding non-blank line.
-        for (var i = startLine - 1; i >= 0; i--)
-        {
-            if (i >= lines.Count)
-                continue;
-            if (string.IsNullOrWhiteSpace(lines[i]))
-                continue;
-            return LineHasMarker(lines, i);
-        }
-
-        return false;
-    }
-
-    private static bool LineHasMarker(List<string> lines, int index) =>
-        index >= 0 && index < lines.Count && AllowMarker.IsMatch(lines[index]);
-
-    private static List<string> SplitLines(string source)
-    {
-        var raw = source.Split('\n');
-        var result = new List<string>(raw.Length);
-        foreach (var line in raw)
-            result.Add(line.EndsWith('\r') ? line[..^1] : line);
-
-        return result;
+        return markerLines.Contains(startLine - 1);
     }
 }

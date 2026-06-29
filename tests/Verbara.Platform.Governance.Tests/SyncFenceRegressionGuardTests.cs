@@ -183,6 +183,49 @@ public sealed class SyncFenceRegressionGuardTests
     }
 
     [Fact]
+    public void Scan_ShouldFlag_WhenUnmarkedCallFollowsMarkerAcrossBlankLine()
+    {
+        const string source =
+            "class C { async System.Threading.Tasks.Task M() {\n" +
+            "    await Task.Delay(5); // fence-allow: SETTLE — legit\n" +
+            "\n" +
+            "    await Task.Delay(9);\n" +
+            "} }";
+
+        var violations = SyncFenceScanner.Scan(source, "x.cs");
+
+        // The marker excuses only the first call; the blank line breaks the immediately-preceding
+        // adjacency, so the second (unmarked) call is flagged. Its line is the 4th physical line.
+        violations.Should().ContainSingle().Which.Line.Should().Be(4);
+    }
+
+    [Fact]
+    public void Scan_ShouldFlag_WhenMarkerTextIsInsideStringLiteral()
+    {
+        const string source =
+            "class C { void M() {\n" +
+            "    var s = \"// fence-allow: SETTLE — fake\"; Thread.Sleep(1);\n" +
+            "} }";
+
+        var violations = SyncFenceScanner.Scan(source, "x.cs");
+
+        violations.Should().ContainSingle().Which.Api.Should().Be("Thread.Sleep");
+    }
+
+    [Fact]
+    public void Scan_ShouldIgnore_WhenElapsedLoopHasNoStopwatch()
+    {
+        const string source =
+            "class C { void M(SomeFsm fsm) {\n" +
+            "    while (!fsm.Elapsed) { }\n" +
+            "} }";
+
+        var violations = SyncFenceScanner.Scan(source, "x.cs");
+
+        violations.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Scan_ShouldFlag_WhenStaticThreadImport()
     {
         const string source =
