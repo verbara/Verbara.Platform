@@ -21,5 +21,5 @@
 
 - [x] 4.1 `openspec validate sync-fence-regression-guard --strict` passes
 - [x] 4.2 Two-stage review (spec compliance + adversarial code quality) = SHIP-WITH-NITS → hardened I-1 (marker blank-line leak), I-2 (string-literal marker), N-1 (Stopwatch gate); re-verified
-- [ ] 4.3 PR → CI green (Build + Unit Tests + Analyze + Dependency Review + Coverage Ratchet + CodeQL) → enqueue → merge
-- [ ] 4.4 `openspec archive sync-fence-regression-guard` via its own `docs(openspec):` PR (check 4.3/4.4 first)
+- [x] 4.3 PR #104 → CI green (Build + Unit Tests + Analyze + Dependency Review + Coverage Ratchet + CodeQL all SUCCESS) → enqueued (pos.1) → merged to main as `b1215ad2` (squash)
+- [x] 4.4 `openspec archive sync-fence-regression-guard` via this `docs(openspec):` PR
