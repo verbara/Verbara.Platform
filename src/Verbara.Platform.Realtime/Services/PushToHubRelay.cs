@@ -78,6 +78,12 @@ internal sealed class PushToHubRelay : IHostedService
     private IDisposable? _coreConversationSubscription;
     private IDisposable? _coreAgentSubscription;
 
+    // Test-only seam: records the most recently started fire-and-forget send Task.
+    // The bus OnNext is synchronous, so this field is assigned during Emit and the
+    // SendXAsync continuation (which records its own outcome) runs detached after the
+    // first await. Production semantics are unchanged — the send still fires-and-forgets.
+    private Task? _lastSend;
+
     public PushToHubRelay(
         IPushEventBus bus,
         IHubContext<PlatformHub, IPlatformHubClient> hubContext,
@@ -153,7 +159,7 @@ internal sealed class PushToHubRelay : IHostedService
             ChangedAt: evt.ChangedAt,
             TenantId: tenantId);
 
-        _ = SendConversationAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType, leaderSnapshot);
+        _lastSend = SendConversationAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType, leaderSnapshot);
     }
 
     private void ForwardAgent(AgentStateChangedEvent evt)
@@ -183,7 +189,7 @@ internal sealed class PushToHubRelay : IHostedService
             ChangedAt: evt.ChangedAt,
             TenantId: tenantId);
 
-        _ = SendAgentAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType, leaderSnapshot);
+        _lastSend = SendAgentAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType, leaderSnapshot);
     }
 
     private void ForwardClusterNode(ClusterNodeStateChangedEvent evt)
@@ -210,7 +216,7 @@ internal sealed class PushToHubRelay : IHostedService
             NewState: evt.NewState,
             ChangedAt: evt.ChangedAt);
 
-        _ = SendClusterAsync(payload, evt.NodeId, evt.EventType, leaderSnapshot);
+        _lastSend = SendClusterAsync(payload, evt.NodeId, evt.EventType, leaderSnapshot);
     }
 
     private async Task SendConversationAsync(
@@ -313,7 +319,7 @@ internal sealed class PushToHubRelay : IHostedService
             ChangedAt: evt.Timestamp,
             TenantId: tenantId);
 
-        _ = SendConversationAsync($"tenant:{tenantId}", payload, tenantId, eventType, leaderSnapshot);
+        _lastSend = SendConversationAsync($"tenant:{tenantId}", payload, tenantId, eventType, leaderSnapshot);
     }
 
     private void ForwardCoreAgent(CoreEvents.AgentStateChangedEvent evt)
@@ -344,8 +350,23 @@ internal sealed class PushToHubRelay : IHostedService
             ChangedAt: evt.Timestamp,
             TenantId: tenantId);
 
-        _ = SendAgentAsync($"tenant:{tenantId}", payload, tenantId, eventType, leaderSnapshot);
+        _lastSend = SendAgentAsync($"tenant:{tenantId}", payload, tenantId, eventType, leaderSnapshot);
     }
+
+    /// <summary>
+    /// The most recently started fire-and-forget send Task. Test-only seam: lets tests
+    /// await the detached SendXAsync continuation deterministically instead of sleeping.
+    /// SendXAsync swallows its own faults (Forwarded / ForwardError), so this Task
+    /// completes normally even when the SignalR send throws.
+    /// </summary>
+    internal Task? LastDispatch => _lastSend;
+
+    /// <summary>
+    /// Test-only seam: awaits the most recent send (or a completed Task if none has run)
+    /// against the caller's bounded timeout token. Production never calls this.
+    /// </summary>
+    internal Task WaitForDispatchAsync(CancellationToken cancellationToken) =>
+        (_lastSend ?? Task.CompletedTask).WaitAsync(cancellationToken);
 
     private LeaderSnapshot SnapshotLeader() => new(
         Resource: _fanoutLeader.Resource,
