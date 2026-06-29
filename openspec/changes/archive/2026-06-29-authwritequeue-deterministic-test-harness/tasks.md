@@ -23,4 +23,4 @@
 - [x] 4.1 Full `Api.Tests` (1474/1474) + `Realtime.Tests` (50/50) green, 0 warnings; full solution build 0 warnings (`TreatWarningsAsErrors`, `WarningLevel=9999`)
 - [x] 4.2 AOT publish smoke on the Api host — native ELF, 0 managed Verbara DLLs, 0 IL2026/IL3050/IL207x (covers the Api/Identity seams)
 - [x] 4.3 In-CI suite (Api.Tests + Realtime.Tests migrated classes) run 10× under 24-core CPU contention — zero flake across all migrated tests
-- [ ] 4.4 Confirm CI green (build + Unit Tests Release + Analyze + Coverage Ratchet + CodeQL); then `openspec archive` on merge
+- [x] 4.4 CI green on PR #102 (Build + Unit Tests Release + Analyze (C#) + Dependency Review + Coverage Ratchet + CodeQL all SUCCESS); merged to main as `b02b84b7` (#102); archived via this `docs(openspec)` PR
