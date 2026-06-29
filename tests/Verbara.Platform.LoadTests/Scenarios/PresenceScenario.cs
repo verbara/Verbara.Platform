@@ -57,7 +57,7 @@ internal static class PresenceScenario
                 {
                     try
                     {
-                        await Task.Delay(TimeSpan.FromMinutes(12));
+                        await Task.Delay(TimeSpan.FromMinutes(12)); // fence-allow: LOOP-DRIVER — background token-refresh pacing during the long soak run
                         var body = $$"""{"email":"{{refreshUser}}","password":"{{refreshPass}}"}""";
                         var loginReq = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/login")
                         {

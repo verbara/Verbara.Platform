@@ -161,7 +161,7 @@ public sealed class HttpRequestNodeHandlerTests
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            await Task.Delay(delay, ct).ConfigureAwait(false);
+            await Task.Delay(delay, ct).ConfigureAwait(false); // fence-allow: SIMULATED-WORK — simulated latency inside the fake SlowHttpMessageHandler
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("late") };
         }
     }

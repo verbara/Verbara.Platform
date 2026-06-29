@@ -73,7 +73,7 @@ public sealed class RedisJwtKeyStoreTests
         // Sanity: still present immediately.
         (await store.GetActiveAsync(CancellationToken.None)).Should().NotBeNull();
 
-        await Task.Delay(TimeSpan.FromMilliseconds(2500));
+        await Task.Delay(TimeSpan.FromMilliseconds(2500)); // fence-allow: SETTLE — wait for real Redis TTL expiry (integration, CI-excluded)
 
         var afterTtl = await store.GetActiveAsync(CancellationToken.None);
         afterTtl.Should().BeNull(because: "Redis TTL must evict the entry once ExpiresAt has passed");

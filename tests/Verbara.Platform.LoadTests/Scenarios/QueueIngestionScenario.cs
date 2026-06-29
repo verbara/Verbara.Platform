@@ -58,7 +58,7 @@ internal static class QueueIngestionScenario
                 {
                     try
                     {
-                        await Task.Delay(TimeSpan.FromMinutes(12));
+                        await Task.Delay(TimeSpan.FromMinutes(12)); // fence-allow: LOOP-DRIVER — background token-refresh pacing during the long soak run
                         // Hand-rolled JSON to keep the harness AOT/trim-safe (no
                         // JsonContent.Create reflection). Credentials are loadtest-
                         // only and pre-escaped via env validation.

@@ -75,7 +75,7 @@ public sealed class RedisJtiRevocationCacheTests
         (await cache.IsRevokedAsync(jti, CancellationToken.None))
             .Should().BeTrue(because: "entry should be live before TTL elapses");
 
-        await Task.Delay(TimeSpan.FromMilliseconds(750));
+        await Task.Delay(TimeSpan.FromMilliseconds(750)); // fence-allow: SETTLE — wait for real Redis TTL expiry (integration, CI-excluded)
 
         var revokedAfterTtl = await cache.IsRevokedAsync(jti, CancellationToken.None);
         revokedAfterTtl.Should().BeFalse(because: "Redis TTL must evict the entry once ExpiresAt has passed");
