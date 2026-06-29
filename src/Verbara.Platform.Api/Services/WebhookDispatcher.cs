@@ -18,6 +18,7 @@ internal sealed partial class WebhookDispatcher : IDisposable
     private readonly ILogger<WebhookDispatcher> _logger;
     private readonly Channel<WebhookDelivery> _channel;
     private IDisposable? _subscription;
+    private Task? _lastDispatch;
 
     public WebhookDispatcher(
         PlatformEventBus eventBus,
@@ -44,7 +45,26 @@ internal sealed partial class WebhookDispatcher : IDisposable
     /// </summary>
     public ChannelReader<WebhookDelivery> DeliveryReader => _channel.Reader;
 
-    private async void OnEvent(PlatformEvent evt)
+    /// <summary>
+    /// The most recently started dispatch Task. Test-only seam: lets tests await the
+    /// detached SaveAsync+channel-write continuation deterministically instead of sleeping.
+    /// HandleEventAsync swallows its own faults, so this Task completes normally even on error.
+    /// </summary>
+    internal Task? LastDispatch => _lastDispatch;
+
+    /// <summary>
+    /// Test-only seam: awaits the most recent dispatch (or a completed Task if none has run)
+    /// against the caller's bounded timeout token. Production never calls this.
+    /// </summary>
+    internal Task WaitForDispatchAsync(CancellationToken cancellationToken) =>
+        (_lastDispatch ?? Task.CompletedTask).WaitAsync(cancellationToken);
+
+    // Fire-and-forget shim: Subject.OnNext is synchronous, so the field is assigned during
+    // OnNext and the SaveAsync+channel-write continuation runs detached after the first await.
+    // Production semantics are unchanged; only the started Task is now recorded for tests.
+    private void OnEvent(PlatformEvent evt) => _lastDispatch = HandleEventAsync(evt);
+
+    private async Task HandleEventAsync(PlatformEvent evt)
     {
         try
         {
