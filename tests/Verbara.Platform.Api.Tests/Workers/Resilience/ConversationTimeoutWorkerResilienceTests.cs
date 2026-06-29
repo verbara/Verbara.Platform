@@ -19,7 +19,21 @@ namespace Verbara.Platform.Api.Tests.Workers.Resilience;
 /// </summary>
 public sealed class ConversationTimeoutWorkerResilienceTests
 {
-    private static ConversationTimeoutWorker BuildWorker(IServiceHeartbeat? heartbeat = null)
+    /// <summary>
+    /// Fast-loop options for the resilience tests: tiny startup delay + sweep interval so the
+    /// real <c>ExecuteAsync</c> loop ticks in ~milliseconds (the genuine outer-fatal contract is
+    /// still driven by the real loop, just without the 5s+5s production cadence). All other fields
+    /// keep their <see cref="DistributionOptions"/> defaults. C3 — NO FakeTimeProvider/Advance.
+    /// </summary>
+    private static DistributionOptions FastLoopOptions() => new()
+    {
+        ConversationTimeoutStartupDelayMs = 5,
+        ConversationTimeoutSweepIntervalMs = 5,
+    };
+
+    private static ConversationTimeoutWorker BuildWorker(
+        IServiceHeartbeat? heartbeat = null,
+        DistributionOptions? options = null)
     {
         var eventBus = new PlatformEventBus();
         var clock = Substitute.For<IClock>();
@@ -32,7 +46,7 @@ public sealed class ConversationTimeoutWorkerResilienceTests
             eventBus,
             clock,
             heartbeat ?? new ServiceHeartbeat(),
-            Options.Create(new DistributionOptions()),
+            Options.Create(options ?? new DistributionOptions()),
             NullLogger<ConversationTimeoutWorker>.Instance);
     }
 
@@ -43,14 +57,15 @@ public sealed class ConversationTimeoutWorkerResilienceTests
         heartbeat.When(h => h.RecordTick(Arg.Any<string>(), Arg.Any<TimeSpan>()))
             .Do(_ => throw new InvalidOperationException("conversation timeout fatal"));
 
-        var sut = BuildWorker(heartbeat: heartbeat);
+        var sut = BuildWorker(heartbeat: heartbeat, options: FastLoopOptions());
 
         await sut.StartAsync(CancellationToken.None);
 
-        // First tick is ~5s into ExecuteAsync (initial Task.Delay) + the 5s periodic timer
-        // — give a generous window for the heartbeat call to run + propagate.
+        // First tick is a few ms into ExecuteAsync (FastLoopOptions startup delay) + the few-ms
+        // periodic timer — the throwing RecordTick fires OUTSIDE the inner try-catch and surfaces
+        // on ExecuteTask. The 2s cap is only a hang-guard; the test completes causally on the fault.
         var fault = await WorkerResilienceTestHelpers.AwaitExecuteFaultAsync(
-            sut, TimeSpan.FromSeconds(15));
+            sut, TimeSpan.FromSeconds(2));
 
         fault.Should().BeOfType<InvalidOperationException>()
             .Which.Message.Should().Be("conversation timeout fatal");
@@ -65,12 +80,13 @@ public sealed class ConversationTimeoutWorkerResilienceTests
         var thrown = new InvalidOperationException("simulated outer crash");
         heartbeat.When(h => h.RecordTick(Arg.Any<string>(), Arg.Any<TimeSpan>())).Do(_ => throw thrown);
 
-        var sut = BuildWorker(heartbeat: heartbeat);
+        var sut = BuildWorker(heartbeat: heartbeat, options: FastLoopOptions());
 
         await sut.StartAsync(CancellationToken.None);
 
+        // 2s cap is the hang-guard only; the fault surfaces causally once the fast loop ticks.
         var fault = await WorkerResilienceTestHelpers.AwaitExecuteFaultAsync(
-            sut, TimeSpan.FromSeconds(15));
+            sut, TimeSpan.FromSeconds(2));
         fault.Should().BeSameAs(thrown);
 
         await sut.StopAsync(CancellationToken.None);

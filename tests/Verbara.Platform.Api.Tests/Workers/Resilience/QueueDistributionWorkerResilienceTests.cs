@@ -36,7 +36,10 @@ public sealed class QueueDistributionWorkerResilienceTests
             eventBus,
             clock,
             heartbeat ?? new ServiceHeartbeat(),
-            Options.Create(options ?? new DistributionOptions { PollIntervalMs = 50 }),
+            // PollIntervalMs = 50 keeps the per-tick cadence short; QueueDistributionStartupDelayMs = 0
+            // drops the 3s production warm-up so the real ExecuteAsync loop ticks in ~ms. The
+            // outer-fatal contract is still driven by the real loop. C3 — NO FakeTimeProvider/Advance.
+            Options.Create(options ?? new DistributionOptions { PollIntervalMs = 50, QueueDistributionStartupDelayMs = 0 }),
             NullLogger<QueueDistributionWorker>.Instance);
     }
 
@@ -51,11 +54,13 @@ public sealed class QueueDistributionWorkerResilienceTests
 
         var sut = BuildWorker(heartbeat: heartbeat);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // 2s caps are the hang-guards only; the throwing RecordTick (outside the inner catch)
+        // surfaces on ExecuteTask causally once the fast loop ticks.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await sut.StartAsync(cts.Token);
 
         var fault = await WorkerResilienceTestHelpers.AwaitExecuteFaultAsync(
-            sut, TimeSpan.FromSeconds(10));
+            sut, TimeSpan.FromSeconds(2));
 
         fault.Should().BeOfType<InvalidOperationException>()
             .Which.Message.Should().Be("simulated fatal");
@@ -78,8 +83,9 @@ public sealed class QueueDistributionWorkerResilienceTests
 
         await sut.StartAsync(CancellationToken.None);
 
+        // 2s cap is the hang-guard only; the fault surfaces causally once the fast loop ticks.
         var fault = await WorkerResilienceTestHelpers.AwaitExecuteFaultAsync(
-            sut, TimeSpan.FromSeconds(10));
+            sut, TimeSpan.FromSeconds(2));
 
         fault.Should().BeSameAs(thrown);
 

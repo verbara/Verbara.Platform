@@ -57,7 +57,7 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(_options.QueueDistributionStartupDelayMs), stoppingToken);
 
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_options.PollIntervalMs));
 

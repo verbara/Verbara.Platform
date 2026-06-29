@@ -54,13 +54,14 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(_options.ConversationTimeoutStartupDelayMs), stoppingToken);
 
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+            var sweepInterval = TimeSpan.FromMilliseconds(_options.ConversationTimeoutSweepIntervalMs);
+            using var timer = new PeriodicTimer(sweepInterval);
 
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                _heartbeat.RecordTick(nameof(ConversationTimeoutWorker), TimeSpan.FromSeconds(5));
+                _heartbeat.RecordTick(nameof(ConversationTimeoutWorker), sweepInterval);
                 try
                 {
                     await _policy.ExecuteAsync(
