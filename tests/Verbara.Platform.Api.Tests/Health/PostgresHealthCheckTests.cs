@@ -37,7 +37,7 @@ public class PostgresHealthCheckTests
         var check = new PostgresHealthCheck(
             probe: async innerCt =>
             {
-                try { await Task.Delay(TimeSpan.FromSeconds(1), innerCt); }
+                try { await Task.Delay(TimeSpan.FromSeconds(1), innerCt); } // fence-allow: SIMULATED-WORK — simulate a slow probe to exercise the health-check timeout
                 catch (OperationCanceledException) { throw; }
             },
             observer, options, policy);

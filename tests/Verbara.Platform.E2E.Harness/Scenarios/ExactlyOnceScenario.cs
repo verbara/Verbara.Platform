@@ -56,7 +56,7 @@ internal static class ExactlyOnceScenario
         await using var hubPool = new SignalRClientPool(config.RealtimeHubUrl, agentToken);
         await hubPool.ConnectAsync(config.ClientCount, ct).ConfigureAwait(false);
         Log($"All {hubPool.Count} clients connected. Waiting 2s for tenant-group join to settle.");
-        await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
+        await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false); // fence-allow: SETTLE — let the SignalR tenant-group join settle against the live hub
 
         // 3. Baseline cursor — small back-shift so we don't lose an edge race
         var baselineTs = DateTimeOffset.UtcNow.AddMilliseconds(-500);
@@ -69,7 +69,7 @@ internal static class ExactlyOnceScenario
         Log($"All {triggerTimestamps.Count} events emitted. Settling for {config.SettleDelay.TotalSeconds:F1}s before reading audit.");
 
         // 5. Wait for fanout to settle
-        await Task.Delay(config.SettleDelay, ct).ConfigureAwait(false);
+        await Task.Delay(config.SettleDelay, ct).ConfigureAwait(false); // fence-allow: SETTLE — settle before reading the audit on the live resource
 
         // 6. Per-pod audit fetch (parallel)
         Log($"Fetching audit pages from {config.AuditBaseUrls.Count} pod(s)...");

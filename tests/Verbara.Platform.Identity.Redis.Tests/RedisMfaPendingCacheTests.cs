@@ -85,7 +85,7 @@ public sealed class RedisMfaPendingCacheTests
         };
 
         await cache.StoreAsync("token-ttl", entry, CancellationToken.None);
-        await Task.Delay(TimeSpan.FromMilliseconds(750));
+        await Task.Delay(TimeSpan.FromMilliseconds(750)); // fence-allow: SETTLE — wait for real Redis TTL expiry (integration, CI-excluded)
         var result = await cache.TakeAsync("token-ttl", CancellationToken.None);
 
         result.Should().BeNull(because: "Redis TTL must evict the entry once ExpiresAt has passed");

@@ -27,7 +27,7 @@ internal static class WorkerResilienceTestHelpers
             return null;
 
         // GUARD, not a sync fence: this is the fault-or-timeout race — the Task.Delay is a hard cap so a hung worker can't stall the suite. Do NOT migrate it to a causal signal.
-        var winner = await Task.WhenAny(executeTask, Task.Delay(timeout));
+        var winner = await Task.WhenAny(executeTask, Task.Delay(timeout)); // fence-allow: GUARD-TIMEOUT — wall-clock cap on a hung worker (fault-or-timeout race), not a sync fence; do not migrate
         if (winner != executeTask)
             return null;
 
