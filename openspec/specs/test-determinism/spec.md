@@ -1,5 +1,8 @@
-## ADDED Requirements
+# test-determinism Specification
 
+## Purpose
+TBD - created by archiving change authwritequeue-deterministic-test-harness. Update Purpose after archive.
+## Requirements
 ### Requirement: Deterministic time source for clock/TTL test fences
 Time-dependent test fences SHALL be driven from an advanceable fake time source
 (`Microsoft.Extensions.TimeProvider.Testing.FakeTimeProvider`), never from wall-clock
@@ -79,15 +82,3 @@ them.
 - **WHEN** the migration runs
 - **THEN** these sites SHALL be left unchanged and documented as non-goals, not converted to a fake clock
 
-### Architectural Risk
-- **Level:** MEDIUM (raised from LOW). One hot-path production seam (`PushToHubRelay`, in the
-  non-AOT Realtime microservice); all other production seams are additive, behaviour-
-  preserving, and individually LOW (each with an in-tree precedent).
-- **Affected:** `src/` (Api, Identity, Realtime — additive seams only) + `tests/` (Api.Tests,
-  Realtime.Tests). No API contracts, DTOs, endpoints, DB schemas, or DI registrations change.
-- **Mitigation:** every seam is additive/visibility-elevating with a byte-identical production
-  path; the `PushToHubRelay` quiescence seam only *records* the already-fire-and-forget Task
-  (no dispatch-ordering change). `FakeTimeProvider` is adopted in a leaf test csproj and
-  build-verified before fan-out (Platform test projects set `EnableAotAnalyzer=false`/`NoWarn
-  AD0001` due to a pre-existing `WebApplicationFactory` analyzer crash — the package itself is
-  reflection-free and test-only). AOT smoke on the Api host covers the Api/Identity seams.
