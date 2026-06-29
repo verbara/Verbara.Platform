@@ -55,28 +55,31 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
         return Task.CompletedTask;
     }
 
-    private async void OnEvent(PlatformEvent evt)
+    // Synchronous, never-throwing OnNext: dispatches the fully-guarded async handler fire-and-forget.
+    private void OnEvent(PlatformEvent evt) => _ = HandleEventAsync(evt);
+
+    internal Task HandleEventAsync(PlatformEvent evt)
     {
         switch (evt)
         {
             case AgentStateChangedEvent e:
-                await ApplyPauseAsync(
+                return ApplyPauseAsync(
                     e.TenantId,
                     e.AgentId,
                     !AgentStateMachine.IsRoutable(Enum.Parse<AgentState>(e.NewState)),
                     e.NewState,
                     CancellationToken.None);
-                break;
             case AgentPendingStateChangedEvent p:
                 // SET (pending != null) => pause now (block new; active call/chat continues).
                 // CANCEL (pending == null) => unpause (State is routable on cancel).
-                await ApplyPauseAsync(
+                return ApplyPauseAsync(
                     p.TenantId,
                     p.AgentId,
                     shouldPause: p.PendingState is not null,
                     reason: p.PendingState ?? "pause_cancelled",
                     CancellationToken.None);
-                break;
+            default:
+                return Task.CompletedTask;
         }
     }
 

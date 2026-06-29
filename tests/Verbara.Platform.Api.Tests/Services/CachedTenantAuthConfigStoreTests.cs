@@ -1,6 +1,8 @@
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Identity;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Internal;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 
 namespace Verbara.Platform.Api.Tests.Services;
@@ -62,15 +64,23 @@ public sealed class CachedTenantAuthConfigStoreTests : IDisposable
     [Fact]
     public async Task GetAsync_ShouldRespectTtl_WhenItemExpires()
     {
+        var fakeTimeProvider = new FakeTimeProvider();
+        // Drive the MemoryCache's expiry scanning off the same fake time source so advancing
+        // virtual time evicts the entry deterministically — no wall-clock sleep.
+        using var clockedCache = new MemoryCache(new MemoryCacheOptions
+        {
+            Clock = new FakeTimeProviderSystemClock(fakeTimeProvider),
+        });
         var inner = Substitute.For<ITenantAuthConfigStore>();
         inner.GetAsync("t1", Arg.Any<CancellationToken>())
             .Returns(MakeConfig("t1"), MakeConfig("t1"));
-        var sut = new CachedTenantAuthConfigStore(inner, _cache, ttl: TimeSpan.FromMilliseconds(50));
+        var sut = new CachedTenantAuthConfigStore(inner, clockedCache, ttl: TimeSpan.FromMilliseconds(50));
 
         await sut.GetAsync("t1", CancellationToken.None);
-        await Task.Delay(120);
+        fakeTimeProvider.Advance(TimeSpan.FromMilliseconds(120));
         await sut.GetAsync("t1", CancellationToken.None);
 
+        // The 2nd inner hit proves the 50ms TTL entry was actually evicted after advancing time.
         await inner.Received(2).GetAsync("t1", Arg.Any<CancellationToken>());
     }
 
@@ -92,6 +102,20 @@ public sealed class CachedTenantAuthConfigStoreTests : IDisposable
     }
 
     public void Dispose() => _cache.Dispose();
+
+    /// <summary>
+    /// Adapts the modern <see cref="TimeProvider"/> to the legacy
+    /// <see cref="ISystemClock"/> that <see cref="MemoryCacheOptions.Clock"/> consumes,
+    /// so a single <see cref="FakeTimeProvider"/> drives MemoryCache expiry scanning.
+    /// </summary>
+    private sealed class FakeTimeProviderSystemClock : ISystemClock
+    {
+        private readonly TimeProvider _timeProvider;
+
+        public FakeTimeProviderSystemClock(TimeProvider timeProvider) => _timeProvider = timeProvider;
+
+        public DateTimeOffset UtcNow => _timeProvider.GetUtcNow();
+    }
 
     private static TenantAuthConfig MakeConfig(string tenantId, int lockout = 10) => new()
     {

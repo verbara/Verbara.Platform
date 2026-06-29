@@ -26,11 +26,10 @@ public class BackgroundServiceHealthCheckTests
     public async Task CheckHealthAsync_ShouldReturnUnhealthy_WhenHeartbeatStale()
     {
         var heartbeat = new ServiceHeartbeat();
-        // Force stale: 1ms expected, last tick ~2s ago relative to test execution.
-        // We use reflection-free test by recording with a tiny interval and then waiting.
-        // Simpler: manipulate via two ticks where the second doesn't happen.
-        heartbeat.RecordTick("Worker1", TimeSpan.FromMilliseconds(1));
-        await Task.Delay(50);
+        // Force stale deterministically: record a tick 2h in the past with a 1ms expected
+        // interval. IsHealthy reads real UtcNow, so elapsed (~2h) far exceeds 1ms * 3 → stale,
+        // with no wall-clock sleep.
+        heartbeat.RecordTickAt("Worker1", TimeSpan.FromMilliseconds(1), DateTimeOffset.UtcNow - TimeSpan.FromHours(2));
         var observer = new ResilienceStateObserver();
         var options = Options.Create(new PlatformHealthCheckOptions());
 
@@ -86,8 +85,8 @@ public class BackgroundServiceHealthCheckTests
     public async Task CheckHealthAsync_ShouldPreferHeartbeatUnhealthy_OverCircuitDegraded()
     {
         var heartbeat = new ServiceHeartbeat();
-        heartbeat.RecordTick("StaleWorker", TimeSpan.FromMilliseconds(1));
-        await Task.Delay(50);
+        // Force stale deterministically (see CheckHealthAsync_ShouldReturnUnhealthy_WhenHeartbeatStale).
+        heartbeat.RecordTickAt("StaleWorker", TimeSpan.FromMilliseconds(1), DateTimeOffset.UtcNow - TimeSpan.FromHours(2));
         var observer = new ResilienceStateObserver();
         observer.SetForTest(
             "webhook.delivery",

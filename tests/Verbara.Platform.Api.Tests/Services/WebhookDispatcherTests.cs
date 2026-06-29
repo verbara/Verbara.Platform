@@ -35,8 +35,8 @@ public class WebhookDispatcherTests : IDisposable
 
         _eventBus.Publish(new ConversationMessageEvent("t1", "c1", "m1", "user", "hello"));
 
-        // Allow async subscription to process
-        await Task.Delay(200);
+        // Deterministically await the detached dispatch continuation (no wall-clock sleep).
+        await _dispatcher.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
 
         await _deliveryStore.Received(1).SaveAsync(
             Arg.Is<WebhookDelivery>(d =>
@@ -54,7 +54,11 @@ public class WebhookDispatcherTests : IDisposable
 
         _eventBus.Publish(new ConversationMessageEvent("t1", "c1", "m1", "user", "hello"));
 
-        await Task.Delay(200);
+        // Negative assertion: gate on the dispatch-completion seam, NOT a channel drain.
+        // The handler early-returns on the no-match branch, so the recorded Task completes
+        // after that return — by the time it does, SaveAsync provably was not called.
+        // Do NOT "harmonize" this to wait on the channel; nothing is ever written here.
+        await _dispatcher.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
 
         await _deliveryStore.DidNotReceive().SaveAsync(
             Arg.Any<WebhookDelivery>(), Arg.Any<CancellationToken>());
@@ -75,7 +79,8 @@ public class WebhookDispatcherTests : IDisposable
 
         _eventBus.Publish(new ConversationMessageEvent("t1", "c1", "m1", "user", "hello"));
 
-        await Task.Delay(200);
+        // Deterministically await the detached dispatch continuation (no wall-clock sleep).
+        await _dispatcher.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
 
         await _deliveryStore.Received(2).SaveAsync(
             Arg.Any<WebhookDelivery>(), Arg.Any<CancellationToken>());

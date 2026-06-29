@@ -17,6 +17,17 @@ internal sealed class ServiceHeartbeat : IServiceHeartbeat
         _ticks[serviceName] = (DateTimeOffset.UtcNow, expectedInterval);
     }
 
+    /// <summary>
+    /// Test-only seam: records a tick with an explicit <paramref name="at"/> timestamp,
+    /// writing the same tuple shape as <see cref="RecordTick"/>. Lets tests deterministically
+    /// force a stale heartbeat (e.g. <c>at = UtcNow - 2h</c>) without sleeping on wall-clock,
+    /// while production keeps reading real time via <see cref="RecordTick"/>.
+    /// </summary>
+    internal void RecordTickAt(string serviceName, TimeSpan expectedInterval, DateTimeOffset at)
+    {
+        _ticks[serviceName] = (at, expectedInterval);
+    }
+
     public bool IsHealthy(string serviceName)
     {
         if (!_ticks.TryGetValue(serviceName, out var info))

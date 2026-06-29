@@ -26,6 +26,7 @@ internal static class WorkerResilienceTestHelpers
         if (executeTask is null)
             return null;
 
+        // GUARD, not a sync fence: this is the fault-or-timeout race — the Task.Delay is a hard cap so a hung worker can't stall the suite. Do NOT migrate it to a causal signal.
         var winner = await Task.WhenAny(executeTask, Task.Delay(timeout));
         if (winner != executeTask)
             return null;

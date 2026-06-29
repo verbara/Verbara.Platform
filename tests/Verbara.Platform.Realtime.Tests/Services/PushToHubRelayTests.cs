@@ -117,6 +117,12 @@ public sealed class PushToHubRelayTests
     private static PushEventMetadata MakeMetadata(string tenantId) =>
         new(TenantId: tenantId, UserId: null, OccurredAt: DateTimeOffset.UtcNow, CorrelationId: null);
 
+    // Deterministic replacement for wall-clock sync fences: awaits the relay's most
+    // recently started fire-and-forget send (or a completed Task for synchronous skip
+    // outcomes) under a bounded timeout, instead of Task.Delay.
+    private static Task WaitForDispatch(PushToHubRelay relay) =>
+        relay.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+
     [Fact]
     public async Task StartAsync_ShouldForwardToTenantGroup_WhenConversationStateChangedEventIsPublished()
     {
@@ -133,7 +139,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         mocks.HubClients.Received(1).Group("tenant:acme");
         await mocks.GroupClient.Received(1).OnConversationStateChanged(
@@ -163,7 +169,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         mocks.HubClients.Received(1).Group("tenant:acme");
         await mocks.GroupClient.Received(1).OnAgentStateChanged(
@@ -193,7 +199,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
 
@@ -217,7 +223,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         await mocks.GroupClient.DidNotReceive().OnAgentStateChanged(Arg.Any<AgentStatePayload>());
 
@@ -241,7 +247,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
     }
@@ -261,7 +267,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         mocks.HubClients.Received(1).Group("admins:platform");
         await mocks.GroupClient.Received(1).OnClusterNodeStateChanged(
@@ -288,7 +294,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         await mocks.GroupClient.DidNotReceive().OnClusterNodeStateChanged(Arg.Any<ClusterNodeStatePayload>());
 
@@ -315,7 +321,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         mocks.HubClients.DidNotReceive().Group(Arg.Any<string>());
         await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
@@ -339,7 +345,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         mocks.HubClients.Received(1).Group("tenant:acme");
         await mocks.GroupClient.Received(1).OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
@@ -364,19 +370,19 @@ public sealed class PushToHubRelayTests
 
         // 1) not-leader → must not invoke
         bus.Emit(template);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
         await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
 
         // 2) leadership regained → must invoke exactly once
         leader.IsLeader = true;
         bus.Emit(template);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
         await mocks.GroupClient.Received(1).OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
 
         // 3) leadership lost again → no additional invocation
         leader.IsLeader = false;
         bus.Emit(template);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
         await mocks.GroupClient.Received(1).OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
 
         await relay.StopAsync(CancellationToken.None);
@@ -400,7 +406,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         // RealtimeLog.SkippedForwardNotLeader logs at Trace level with EventId 3001
         // and includes the resource in the formatted message. The event-type string
@@ -436,7 +442,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(150);
+        await WaitForDispatch(relay);
 
         var page = sink.Snapshot(since: null, limit: 100);
         page.PodInstanceId.Should().Be("test-pod");
@@ -467,7 +473,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         var page = sink.Snapshot(since: null, limit: 100);
         page.Entries.Should().ContainSingle(e =>
@@ -496,7 +502,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         var page = sink.Snapshot(since: null, limit: 100);
         page.Entries.Should().ContainSingle(e =>
@@ -523,7 +529,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(100);
+        await WaitForDispatch(relay);
 
         var page = sink.Snapshot(since: null, limit: 100);
         page.Entries.Should().ContainSingle(e =>
@@ -550,7 +556,7 @@ public sealed class PushToHubRelayTests
         };
 
         bus.Emit(evt);
-        await Task.Delay(150);
+        await WaitForDispatch(relay);
 
         var page = sink.Snapshot(since: null, limit: 100);
         page.Entries.Should().ContainSingle(e =>
