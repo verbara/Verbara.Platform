@@ -41,10 +41,10 @@ completion Task never faults unobserved.
 - **WHEN** the test awaits the dispatch-completion seam (which completes after the early return)
 - **THEN** the negative assertion SHALL be deterministic — a channel-drain gate is structurally invalid here because nothing is written
 
-#### Scenario: Hot-path fanout quiescence
-- **GIVEN** `PushToHubRelay` whose `Forward*` handlers fire-and-forget `_ = SendXAsync(...)`
-- **WHEN** the test awaits the relay quiescence seam after emitting events
-- **THEN** every in-flight send SHALL have completed (and `RecordOutcome` written) before the assertion, with production fire-and-forget semantics preserved
+#### Scenario: Hot-path send completion
+- **GIVEN** `PushToHubRelay` whose `Forward*` handlers fire-and-forget `_ = SendXAsync(...)` (recorded as the most-recently-started send)
+- **WHEN** the test awaits the relay send-completion seam after each emit (the bus `OnNext` is synchronous and each event triggers exactly one send, so "most recent" equals "the one just started")
+- **THEN** that send SHALL have completed (and `RecordOutcome` written) before the assertion, with production fire-and-forget semantics preserved
 
 ### Requirement: Spurious delays removed outright
 Test delays that guard work which already completes synchronously SHALL be deleted rather

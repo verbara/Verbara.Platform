@@ -46,15 +46,12 @@ internal sealed partial class WebhookDispatcher : IDisposable
     public ChannelReader<WebhookDelivery> DeliveryReader => _channel.Reader;
 
     /// <summary>
-    /// The most recently started dispatch Task. Test-only seam: lets tests await the
-    /// detached SaveAsync+channel-write continuation deterministically instead of sleeping.
-    /// HandleEventAsync swallows its own faults, so this Task completes normally even on error.
-    /// </summary>
-    internal Task? LastDispatch => _lastDispatch;
-
-    /// <summary>
-    /// Test-only seam: awaits the most recent dispatch (or a completed Task if none has run)
-    /// against the caller's bounded timeout token. Production never calls this.
+    /// Test-only seam: awaits the most recently started dispatch (or a completed Task if none
+    /// has run) against the caller's bounded timeout token. Production never calls this.
+    /// Single-field tracking is sufficient because <c>Subject.OnNext</c> is synchronous and
+    /// each publish triggers exactly one dispatch, and tests await once per published event —
+    /// so "most recent" always equals "the one just started". HandleEventAsync swallows its
+    /// own faults, so the recorded Task completes normally even on error.
     /// </summary>
     internal Task WaitForDispatchAsync(CancellationToken cancellationToken) =>
         (_lastDispatch ?? Task.CompletedTask).WaitAsync(cancellationToken);

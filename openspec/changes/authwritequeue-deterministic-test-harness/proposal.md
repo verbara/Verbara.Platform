@@ -59,10 +59,13 @@ Grouped **by seam class** (not by test project), because the fences are heteroge
 - `RealtimeStateBridge` (1 helper × 11 tests): `async void OnEvent` → `void OnEvent => _ =
   HandleEventAsync(evt)` + `internal Task HandleEventAsync`. Keep one `Publish`/`OnNext`
   wiring test for Rx-path coverage.
-- `PushToHubRelay` (**HOT PATH**, 18 `PushToHubRelayTests` sites): the `Forward*` handlers
-  fire-and-forget `_ = SendXAsync(...)`. Add a **quiescence seam** (track in-flight sends;
-  expose an awaitable) so tests await fanout completion deterministically. **Behaviour-
-  preserving** — production still fires-and-forgets; the seam only records the in-flight Task.
+- `PushToHubRelay` (**HOT PATH**, 18 `PushToHubRelayTests` sites): the 5 `Forward*` handlers
+  (3 Pro-typed + 2 Core-typed) fire-and-forget `_ = SendXAsync(...)`. Add a **send-completion
+  seam** — record the most-recently-started send in a single field and expose
+  `internal WaitForDispatchAsync` — so tests await completion deterministically (single-field
+  is sufficient: the bus `OnNext` is synchronous and one event triggers one send; tests await
+  per emit). **Behaviour-preserving** — production still fires-and-forgets; only a field
+  reference is kept (no list/lock/counter on the hot path).
 - `RemoteEventDispatcher` (6 sites): the work already completes synchronously
   (`pending.AsTask().GetAwaiter().GetResult()` at `:163`, inside the synchronous `OnNext`)
   → **delete the 6 spurious delays outright** (no seam needed; the cheapest possible win).

@@ -354,16 +354,13 @@ internal sealed class PushToHubRelay : IHostedService
     }
 
     /// <summary>
-    /// The most recently started fire-and-forget send Task. Test-only seam: lets tests
-    /// await the detached SendXAsync continuation deterministically instead of sleeping.
-    /// SendXAsync swallows its own faults (Forwarded / ForwardError), so this Task
+    /// Test-only seam: awaits the most recently started fire-and-forget send (or a completed
+    /// Task if none has run) against the caller's bounded timeout token. Production never calls
+    /// this. Single-field tracking is sufficient because the bus <c>OnNext</c> is synchronous
+    /// and each event triggers exactly one send, and tests await once per emit (the multi-emit
+    /// test awaits after each) — so "most recent" always equals "the one just started".
+    /// SendXAsync swallows its own faults (Forwarded / ForwardError), so the recorded Task
     /// completes normally even when the SignalR send throws.
-    /// </summary>
-    internal Task? LastDispatch => _lastSend;
-
-    /// <summary>
-    /// Test-only seam: awaits the most recent send (or a completed Task if none has run)
-    /// against the caller's bounded timeout token. Production never calls this.
     /// </summary>
     internal Task WaitForDispatchAsync(CancellationToken cancellationToken) =>
         (_lastSend ?? Task.CompletedTask).WaitAsync(cancellationToken);
