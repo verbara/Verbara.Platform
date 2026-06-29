@@ -54,27 +54,42 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         _serverPool.AddExistingServer("primary", server);
     }
 
-    private async Task PublishAndWaitAsync(PlatformEvent evt, int delayMs = 50)
-    {
-        _eventBus.Publish(evt);
-        await Task.Delay(delayMs); // allow async void OnEvent to complete
-    }
+    // Deterministic fence: await the bridge's awaitable handler seam directly, so the call returns
+    // only after the DB sync + AMI QueuePause side-effects have run. The Rx subscription wiring
+    // (Events.Subscribe(OnEvent) -> HandleEventAsync) is covered separately by the OnEvent_…_When
+    // PublishedThroughEventBus test below, which drives the real _eventBus dispatch path.
+    private static Task PublishAndWaitAsync(RealtimeStateBridge bridge, PlatformEvent evt) =>
+        bridge.HandleEventAsync(evt);
 
     // ─── State helpers ────────────────────────────────────────────────────────
 
     private static AgentStateChangedEvent MakeEvent(string newState, string agentId = "a1", string tenantId = "t1") =>
         new(tenantId, agentId, "Agent One", "Available", newState);
 
-    // ─── Test 1: Available → unpause ──────────────────────────────────────────
+    // ─── Test 1: Rx wiring — publish through the real event bus ──────────────
+    // Retained as the one test that exercises the actual Rx dispatch path
+    // (_eventBus.Events.Subscribe(OnEvent) -> HandleEventAsync). Deterministic via a
+    // TaskCompletionSource the substituted _syncService stub pulses when invoked, so we never
+    // sleep on a wall clock — we await the causal signal that OnEvent routed to the handler.
 
     [Fact]
-    public async Task OnAgentStateChanged_Available_ShouldSyncUnpausedAndSendQueuePause_Unpaused()
+    public async Task OnEvent_ShouldRouteToHandlerAndSyncUnpaused_WhenPublishedThroughEventBus()
     {
+        var synced = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+        _syncService.SyncAgentPausedAsync("t1", "a1", false)
+            .Returns(_ => { synced.TrySetResult(); return ValueTask.CompletedTask; });
+#pragma warning restore CA2012
+
         AddPrimaryServer();
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
-        await PublishAndWaitAsync(MakeEvent("Available"));
+        // Publish through the real _eventBus — the subscription's synchronous OnNext (OnEvent)
+        // must route to HandleEventAsync fire-and-forget.
+        _eventBus.Publish(MakeEvent("Available"));
+
+        await synced.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", false);
         await _ami.Received(1).SendActionAsync(
@@ -90,7 +105,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
-        await PublishAndWaitAsync(MakeEvent("Break"));
+        await PublishAndWaitAsync(bridge, MakeEvent("Break"));
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
         await _ami.Received(1).SendActionAsync(
@@ -114,7 +129,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
-        await PublishAndWaitAsync(MakeEvent(state));
+        await PublishAndWaitAsync(bridge, MakeEvent(state));
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", expectedPaused);
         await _ami.Received(1).SendActionAsync(
@@ -135,7 +150,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
-        await PublishAndWaitAsync(MakeEvent("Break"));
+        await PublishAndWaitAsync(bridge, MakeEvent("Break"));
 
         // AMI still receives the action despite DB failure
         await _ami.Received(1).SendActionAsync(Arg.Any<QueuePauseAction>());
@@ -154,7 +169,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         await bridge.StartAsync(CancellationToken.None);
 
         // Should not throw
-        var exception = await Record.ExceptionAsync(() => PublishAndWaitAsync(MakeEvent("Available")));
+        var exception = await Record.ExceptionAsync(() => PublishAndWaitAsync(bridge, MakeEvent("Available")));
 
         exception.Should().BeNull();
         // DB sync still happened
@@ -171,7 +186,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         await bridge.StartAsync(CancellationToken.None);
 
         var otherEvent = new ConversationAssignedEvent("t1", "conv-1", "a1", "support", "voice", "Customer");
-        await PublishAndWaitAsync(otherEvent);
+        await PublishAndWaitAsync(bridge, otherEvent);
 
         await _syncService.DidNotReceive().SyncAgentPausedAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>());
         await _ami.DidNotReceive().SendActionAsync(Arg.Any<QueuePauseAction>());
@@ -186,7 +201,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
-        var exception = await Record.ExceptionAsync(() => PublishAndWaitAsync(MakeEvent("Break")));
+        var exception = await Record.ExceptionAsync(() => PublishAndWaitAsync(bridge, MakeEvent("Break")));
 
         exception.Should().BeNull();
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
@@ -203,7 +218,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
-        await PublishAndWaitAsync(new AgentPendingStateChangedEvent("t1", "a1", "Agent One", "Break"));
+        await PublishAndWaitAsync(bridge, new AgentPendingStateChangedEvent("t1", "a1", "Agent One", "Break"));
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
         await _ami.Received(1).SendActionAsync(
@@ -217,7 +232,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
-        await PublishAndWaitAsync(new AgentPendingStateChangedEvent("t1", "a1", "Agent One", PendingState: null));
+        await PublishAndWaitAsync(bridge, new AgentPendingStateChangedEvent("t1", "a1", "Agent One", PendingState: null));
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", false);
         await _ami.Received(1).SendActionAsync(
@@ -231,7 +246,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
-        await PublishAndWaitAsync(MakeEvent("Break"));
+        await PublishAndWaitAsync(bridge, MakeEvent("Break"));
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
         await _ami.Received(1).SendActionAsync(
@@ -245,7 +260,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         var bridge = CreateBridge();
         await bridge.StartAsync(CancellationToken.None);
 
-        await PublishAndWaitAsync(MakeEvent("Available"));
+        await PublishAndWaitAsync(bridge, MakeEvent("Available"));
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", false);
         await _ami.Received(1).SendActionAsync(
