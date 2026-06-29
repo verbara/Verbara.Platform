@@ -80,7 +80,6 @@ public sealed class RemoteEventDispatcherTests
         var envelope = MakeAgentEnvelope(typed);
 
         bus.Emit(envelope);
-        await Task.Delay(100);
 
         bus.Published.Should().ContainSingle(e => e.GetType() == typeof(AgentStateChangedEvent));
         var decoded = bus.Published.OfType<AgentStateChangedEvent>().Single();
@@ -104,7 +103,6 @@ public sealed class RemoteEventDispatcherTests
         var envelope = MakeConversationEnvelope(typed);
 
         bus.Emit(envelope);
-        await Task.Delay(100);
 
         bus.Published.Should().ContainSingle(e => e.GetType() == typeof(ConversationStateChangedEvent));
         var decoded = bus.Published.OfType<ConversationStateChangedEvent>().Single();
@@ -128,7 +126,6 @@ public sealed class RemoteEventDispatcherTests
         var envelope = MakeTypificationEnvelope(typed);
 
         bus.Emit(envelope);
-        await Task.Delay(100);
 
         bus.Published.Should().ContainSingle(e => e.GetType() == typeof(TypificationSubmittedEvent));
         var decoded = bus.Published.OfType<TypificationSubmittedEvent>().Single();
@@ -155,7 +152,6 @@ public sealed class RemoteEventDispatcherTests
             RawPayload: Encoding.UTF8.GetBytes("{}"));
 
         bus.Emit(envelope);
-        await Task.Delay(50);
 
         // The envelope itself counts as a publish on Emit (from FakePushEventBus.Emit) —
         // no typed re-publish.
@@ -177,7 +173,6 @@ public sealed class RemoteEventDispatcherTests
             RawPayload: Array.Empty<byte>());
 
         bus.Emit(envelope);
-        await Task.Delay(50);
 
         bus.Published.Should().NotContain(e => e.GetType() == typeof(AgentStateChangedEvent));
 
@@ -195,7 +190,6 @@ public sealed class RemoteEventDispatcherTests
         var envelope = MakeAgentEnvelope(typed);
 
         bus.Emit(envelope);
-        await Task.Delay(100);
 
         var decoded = bus.Published.OfType<AgentStateChangedEvent>().Single();
         decoded.Metadata.Should().NotBeNull();
