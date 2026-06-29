@@ -1,5 +1,6 @@
 using Verbara.Platform.Identity.Auth;
 using FluentAssertions;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Verbara.Platform.Api.Tests.Auth;
 
@@ -17,11 +18,12 @@ public class InMemoryJtiRevocationCacheTests
     [Fact]
     public async Task IsRevokedAsync_ShouldPruneEntry_WhenExpiresAtBecomesPast()
     {
-        var cache = new InMemoryJtiRevocationCache();
-        await cache.RevokeAsync("jti-1", DateTimeOffset.UtcNow.AddMilliseconds(200), CancellationToken.None);
+        var fakeTimeProvider = new FakeTimeProvider();
+        var cache = new InMemoryJtiRevocationCache(fakeTimeProvider);
+        await cache.RevokeAsync("jti-1", fakeTimeProvider.GetUtcNow().AddMilliseconds(200), CancellationToken.None);
 
         (await cache.IsRevokedAsync("jti-1", CancellationToken.None)).Should().BeTrue();
-        await Task.Delay(250);
+        fakeTimeProvider.Advance(TimeSpan.FromMilliseconds(250));
         (await cache.IsRevokedAsync("jti-1", CancellationToken.None)).Should().BeFalse();
     }
 
