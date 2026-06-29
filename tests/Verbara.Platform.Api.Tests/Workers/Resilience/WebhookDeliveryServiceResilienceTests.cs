@@ -81,16 +81,21 @@ public sealed class WebhookDeliveryServiceResilienceTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ShouldLogCriticalAndRethrow_WhenOuterException()
+    public async Task ProcessPendingRetriesOnceAsync_ShouldSwallowAndLog_WhenNonCancellationThrows()
     {
-        // The most realistic outer-fatal source is the channel reader's await foreach
-        // raising a non-OperationCanceled exception. The production channel never throws
-        // outside cancellation; we assert the contract by injecting an IWebhookDeliveryStore
-        // that throws on its first usage during shutdown drain — which is inside the inner
-        // catch and therefore swallowed. So this test pivots to verifying that
-        // WebhookDeliveryService correctly distinguishes fatal vs recoverable: when the
-        // poll loop encounters InvalidOperationException it stays inside the inner catch
-        // and continues — fault should remain null.
+        // Recoverable-inner contract of the DB poll loop: when ListPendingRetriesAsync raises a
+        // non-cancellation exception, the inner catch in ProcessPendingRetriesOnceAsync logs +
+        // swallows it so the worker keeps spinning (no rethrow, no fault on ExecuteTask).
+        //
+        // Previously this was driven through the real 30s RetryPollInterval loop (≈35s wall-clock)
+        // only to observe a null fault. We now exercise the same swallow contract via a DIRECT call
+        // to the internal ProcessPendingRetriesOnceAsync — the single poll iteration — in ~0s.
+        //
+        // The dual-loop OUTER fatal rethrow (PollPendingRetriesAsync / ProcessChannelAsync catch →
+        // LogWorkerCrash + throw) is structurally unreachable from unit scope: the only inner work
+        // a unit can inject (ListPendingRetriesAsync / DeliverAsync) is itself wrapped by the inner
+        // catch, and the channel reader never throws outside cancellation in production. This is
+        // recorded in the OpenSpec change for C3.
         var deliveryStore = Substitute.For<IWebhookDeliveryStore>();
         deliveryStore.ListPendingRetriesAsync(
                 Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
@@ -98,19 +103,11 @@ public sealed class WebhookDeliveryServiceResilienceTests
 
         var sut = BuildWorker(deliveryStore: deliveryStore);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(35));
-        await sut.StartAsync(cts.Token);
+        var act = async () => await sut.ProcessPendingRetriesOnceAsync(CancellationToken.None);
 
-        // Wait for at least one poll iteration (30s Task.Delay) plus margin.
-        // Inner catch logs + continues; ExecuteTask should not fault.
-        var fault = await WorkerResilienceTestHelpers.AwaitExecuteFaultAsync(
-            sut, TimeSpan.FromSeconds(40));
-
-        await sut.StopAsync(CancellationToken.None);
-
-        // Recoverable: inner catch swallows; fault must be null.
-        fault.Should().BeNull(
-            "poll loop's inner catch logs InvalidOperationException and continues");
+        // Inner catch logs + swallows the non-cancellation throw — the call must NOT throw.
+        await act.Should().NotThrowAsync(
+            "the poll iteration's inner catch logs InvalidOperationException and continues");
     }
 
     [Fact]

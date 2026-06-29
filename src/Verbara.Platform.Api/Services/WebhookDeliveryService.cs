@@ -87,27 +87,8 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
         {
             while (!ct.IsCancellationRequested)
             {
-                try
-                {
-                    await Task.Delay(RetryPollInterval, ct);
-
-                    var pending = await _deliveryStore.ListPendingRetriesAsync(
-                        _clock.UtcNow, batchSize: 100, ct);
-
-                    foreach (var delivery in pending)
-                    {
-                        if (ct.IsCancellationRequested) break;
-                        await DeliverAsync(delivery, ct);
-                    }
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    LogPollError(_logger, ex);
-                }
+                await Task.Delay(RetryPollInterval, ct);
+                await ProcessPendingRetriesOnceAsync(ct);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -118,6 +99,39 @@ internal sealed partial class WebhookDeliveryService : BackgroundService
         {
             LogWorkerCrash(_logger, nameof(WebhookDeliveryService) + ".PollPendingRetriesAsync", fatalEx.Message, fatalEx);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Runs one poll iteration of the pending-retry sweep: lists deliveries due for retry and
+    /// re-delivers each. Reproduces the inner try/catch contract of <see cref="PollPendingRetriesAsync"/>
+    /// exactly — cancellation propagates (so the loop can break), but any other exception is logged
+    /// and swallowed so the worker keeps spinning (inner-recoverable contract). Exposed
+    /// <c>internal</c> for the API test assembly (<c>InternalsVisibleTo</c>) so a single poll
+    /// iteration can be exercised deterministically without the 30s <see cref="RetryPollInterval"/>
+    /// delay (C3).
+    /// </summary>
+    internal async Task ProcessPendingRetriesOnceAsync(CancellationToken ct)
+    {
+        try
+        {
+            var pending = await _deliveryStore.ListPendingRetriesAsync(
+                _clock.UtcNow, batchSize: 100, ct);
+
+            foreach (var delivery in pending)
+            {
+                if (ct.IsCancellationRequested) break;
+                await DeliverAsync(delivery, ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Cancellation bubbles to the caller's loop, which breaks out of polling.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogPollError(_logger, ex);
         }
     }
 
