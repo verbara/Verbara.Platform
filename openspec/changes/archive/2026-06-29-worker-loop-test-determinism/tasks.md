@@ -21,5 +21,5 @@
 
 - [x] 4.1 `openspec validate worker-loop-test-determinism --strict` passes
 - [x] 4.2 Two-stage review = SHIP (no blockers): reviewer ran 20/20 under full CPU saturation (no flake), confirmed causal fault (timeout → loud FAIL not false-pass), behaviour-preserving Webhook extraction, defaults locked, recorded gap honest
-- [ ] 4.3 PR → CI green → enqueue → merge
-- [ ] 4.4 `openspec archive worker-loop-test-determinism` via its own `docs(openspec):` PR (check 4.3/4.4 first)
+- [x] 4.3 PR #106 → CI green (Build+Unit Tests, Analyze, Dependency Review, Coverage Ratchet, CodeQL all SUCCESS) → enqueued (pos.1) → merged to main as `5048852f` (squash)
+- [x] 4.4 `openspec archive worker-loop-test-determinism` via this `docs(openspec):` PR
