@@ -103,6 +103,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IReasonHintStore, InMemoryReasonHintStore>();
         services.AddSingleton<IAiSuggestionStore, InMemoryAiSuggestionStore>();
         services.AddSingleton<ITenantLlmConfigStore, InMemoryTenantLlmConfigStore>();
+        services.AddSingleton<ITenantAutonomousDispositionStore, InMemoryTenantAutonomousDispositionStore>();
 
         // Automation
         services.AddSingleton<ITimerStore, InMemoryTimerStore>();

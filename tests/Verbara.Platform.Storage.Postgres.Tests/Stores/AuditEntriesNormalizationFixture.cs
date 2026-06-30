@@ -43,7 +43,7 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
         await using var conn = new NpgsqlConnection(ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = SchemaSql + MigrationV021Sql + MigrationV034Sql;
+        cmd.CommandText = SchemaSql + MigrationV021Sql + MigrationV034Sql + MigrationV014Sql;
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -154,6 +154,12 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
                                 'impersonation', 'retention', 'data', 'rbac',
                                 'data_access', 'admin', 'conversations', 'queues',
                                 'reports', 'operational', 'license'));
+        """;
+
+    // migration 014 (ADR-0034): per-record retention floor honoured by the blanket purge.
+    private const string MigrationV014Sql = """
+
+        ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS retain_until TIMESTAMPTZ NULL;
         """;
 }
 

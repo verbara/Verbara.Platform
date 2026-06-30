@@ -39,6 +39,42 @@ public sealed class InMemoryAuditStoreTests
     }
 
     [Fact]
+    public async Task SaveAsync_ShouldRoundTripRetainUntil_WhenSet()
+    {
+        var store = new InMemoryAuditStore();
+        var retainUntil = new DateTimeOffset(2026, 7, 30, 0, 0, 0, TimeSpan.Zero);
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "typification.autonomous.commit",
+            TargetType = "Conversation",
+            TargetId = "conv-retain",
+            OccurredAt = DateTimeOffset.UtcNow,
+            RetainUntil = retainUntil,
+        };
+
+        await store.SaveAsync(entry, CancellationToken.None);
+
+        var result = await store.GetByEntityAsync(Tenant1, entry.TargetType!, entry.TargetId!, CancellationToken.None);
+        result.Should().ContainSingle();
+        result[0].RetainUntil.Should().Be(retainUntil);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldLeaveRetainUntilNull_WhenNotSet()
+    {
+        var store = new InMemoryAuditStore();
+        var entry = MakeEntry();
+
+        await store.SaveAsync(entry, CancellationToken.None);
+
+        var result = await store.GetByEntityAsync(Tenant1, entry.TargetType!, entry.TargetId!, CancellationToken.None);
+        result.Should().ContainSingle();
+        result[0].RetainUntil.Should().BeNull();
+    }
+
+    [Fact]
     public async Task GetByEntityAsync_ShouldReturnEmpty_WhenNoEntries()
     {
         var store = new InMemoryAuditStore();

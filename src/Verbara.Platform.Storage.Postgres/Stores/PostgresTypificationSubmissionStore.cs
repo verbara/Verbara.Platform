@@ -13,7 +13,8 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
     private const string SelectColumns =
         "tenant_id, conversation_id, agent_id, schema_id, schema_version, selected_node_path, leaf_node_id, " +
         "field_values, notes, ai_suggested, ai_confidence, ai_accepted, source, duration_ms, completed_at, " +
-        "suggested_leaf_node_id, suggested_node_path";
+        "suggested_leaf_node_id, suggested_node_path, " +
+        "autonomous_actor_id, correction_state, corrected_at, corrects_conversation_id";
 
     private readonly NpgsqlDataSource _dataSource;
 
@@ -33,10 +34,12 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
             "INSERT INTO typification_submissions " +
             "(tenant_id, conversation_id, agent_id, schema_id, schema_version, selected_node_path, leaf_node_id, " +
             " field_values, notes, ai_suggested, ai_confidence, ai_accepted, source, duration_ms, completed_at, " +
-            " suggested_leaf_node_id, suggested_node_path) " +
+            " suggested_leaf_node_id, suggested_node_path, " +
+            " autonomous_actor_id, correction_state, corrected_at, corrects_conversation_id) " +
             "VALUES (@TenantId, @ConversationId, @AgentId, @SchemaId, @SchemaVersion, @SelectedNodePath::jsonb, @LeafNodeId, " +
             " @FieldValues::jsonb, @Notes, @AiSuggested, @AiConfidence, @AiAccepted, @Source, @DurationMs, @CompletedAt, " +
-            " @SuggestedLeafNodeId, @SuggestedNodePath::jsonb) " +
+            " @SuggestedLeafNodeId, @SuggestedNodePath::jsonb, " +
+            " @AutonomousActorId, @CorrectionState, @CorrectedAt, @CorrectsConversationId) " +
             "ON CONFLICT (tenant_id, conversation_id) DO UPDATE SET " +
             "  agent_id = EXCLUDED.agent_id, schema_id = EXCLUDED.schema_id, schema_version = EXCLUDED.schema_version, " +
             "  selected_node_path = EXCLUDED.selected_node_path, leaf_node_id = EXCLUDED.leaf_node_id, " +
@@ -44,7 +47,9 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
             "  ai_confidence = EXCLUDED.ai_confidence, ai_accepted = EXCLUDED.ai_accepted, source = EXCLUDED.source, " +
             "  duration_ms = EXCLUDED.duration_ms, completed_at = EXCLUDED.completed_at, " +
             "  suggested_leaf_node_id = EXCLUDED.suggested_leaf_node_id, " +
-            "  suggested_node_path = EXCLUDED.suggested_node_path",
+            "  suggested_node_path = EXCLUDED.suggested_node_path, " +
+            "  autonomous_actor_id = EXCLUDED.autonomous_actor_id, correction_state = EXCLUDED.correction_state, " +
+            "  corrected_at = EXCLUDED.corrected_at, corrects_conversation_id = EXCLUDED.corrects_conversation_id",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", submission.TenantId.Value));
@@ -64,6 +69,10 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
                 p.Add(new NpgsqlParameter("CompletedAt", submission.CompletedAt.UtcDateTime));
                 p.Add(new NpgsqlParameter("SuggestedLeafNodeId", NpgsqlDbType.Text) { Value = (object?)submission.SuggestedLeafNodeId?.Value ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("SuggestedNodePath", NpgsqlDbType.Text) { Value = (object?)suggestedNodePathJson ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("AutonomousActorId", NpgsqlDbType.Text) { Value = (object?)submission.AutonomousActorId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CorrectionState", NpgsqlDbType.Smallint) { Value = (short)submission.CorrectionState });
+                p.Add(new NpgsqlParameter("CorrectedAt", NpgsqlDbType.TimestampTz) { Value = (object?)submission.CorrectedAt?.UtcDateTime ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CorrectsConversationId", NpgsqlDbType.Text) { Value = (object?)submission.CorrectsConversationId?.Value ?? DBNull.Value });
             },
             ct);
     }
@@ -101,6 +110,10 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
         public DateTime completed_at { get; init; }
         public string? suggested_leaf_node_id { get; init; }
         public string? suggested_node_path { get; init; }
+        public string? autonomous_actor_id { get; init; }
+        public short correction_state { get; init; }
+        public DateTime? corrected_at { get; init; }
+        public string? corrects_conversation_id { get; init; }
 
         public static SubmissionRow Map(NpgsqlDataReader r) => new()
         {
@@ -121,6 +134,10 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
             completed_at = r.GetDateTime("completed_at"),
             suggested_leaf_node_id = r.GetStringOrNull("suggested_leaf_node_id"),
             suggested_node_path = r.GetStringOrNull("suggested_node_path"),
+            autonomous_actor_id = r.GetStringOrNull("autonomous_actor_id"),
+            correction_state = r.GetInt16("correction_state"),
+            corrected_at = r.GetDateTimeOrNull("corrected_at"),
+            corrects_conversation_id = r.GetStringOrNull("corrects_conversation_id"),
         };
 
         public TypificationSubmission ToSubmission()
@@ -153,6 +170,10 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
                 CompletedAt = new DateTimeOffset(completed_at, TimeSpan.Zero),
                 SuggestedLeafNodeId = suggested_leaf_node_id is not null ? EntityId.From(suggested_leaf_node_id) : null,
                 SuggestedNodePath = suggestedPath,
+                AutonomousActorId = autonomous_actor_id,
+                CorrectionState = (CorrectionState)correction_state,
+                CorrectedAt = corrected_at is not null ? new DateTimeOffset(corrected_at.Value, TimeSpan.Zero) : null,
+                CorrectsConversationId = corrects_conversation_id is not null ? EntityId.From(corrects_conversation_id) : null,
             };
         }
     }
