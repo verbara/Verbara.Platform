@@ -22,9 +22,9 @@
 
 ## 3. Phase B — Domain policy (focused)
 
-- [ ] 3.1 Implement `IAutonomousDispositionPolicy.EvaluateAsync(conversation, suggestion, ct)`: checks activation gate (`ITenantAutonomousDispositionStore`), license (`AdvancedTypification`+`TypificationAi`), confidence ≥ `AutonomousThreshold`, conversation still `WrapUp`, node still a valid leaf in the active schema; returns a result discriminating `Commit` vs `Skip(reason)` where reason ∈ {`NoSuggestion`,`BelowThreshold`,`LicenseMissing`,`GateDisabled`,`SchemaMutation`,`NotWrapUp`}
-- [ ] 3.2 Unit tests for `IAutonomousDispositionPolicy` — one per gating path (gate off, unlicensed, below threshold, no suggestion, schema mutation, not-wrapup, happy path)
-- [ ] 3.3 Run `dotnet test` — policy tests green; zero warnings
+- [x] 3.1 Implement `IAutonomousDispositionPolicy.EvaluateAsync(conversation, suggestion, ct)`: checks activation gate (`ITenantAutonomousDispositionStore`), license (`AdvancedTypification`+`TypificationAi`), confidence ≥ `AutonomousThreshold`, conversation still `WrapUp`, node still a valid leaf in the active schema; returns a result discriminating `Commit` vs `Skip(reason)` where reason ∈ {`NoSuggestion`,`BelowThreshold`,`LicenseMissing`,`GateDisabled`,`SchemaMutation`,`NotWrapUp`}
+- [x] 3.2 Unit tests for `IAutonomousDispositionPolicy` — one per gating path (gate off, unlicensed, below threshold, no suggestion, schema mutation, not-wrapup, happy path)
+- [x] 3.3 Run `dotnet test` — policy tests green; zero warnings
 
 ## 4. Phase B — Close-path enrichment in ConversationTimeoutWorker (focused)
 

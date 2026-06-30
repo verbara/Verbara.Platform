@@ -47,6 +47,12 @@ public static class ServiceCollectionExtensions
         // B4a — calibration gate: determines per-schema readiness for AutoFill / autonomous mode.
         services.AddSingleton<ITypificationCalibration, DefaultTypificationCalibration>();
 
+        // ADR-0034 — autonomous disposition policy: the pure commit-or-skip decision the
+        // abandoned-wrap-up close path consults (gate + license + confidence + verification).
+        // Depends on ITenantAutonomousDispositionStore (registered in the storage extensions) and
+        // ILicenseStatus (registered by the Pro AddProLicensing() in the host composition root).
+        services.AddSingleton<IAutonomousDispositionPolicy, DefaultAutonomousDispositionPolicy>();
+
         // E3 — per-tenant daily LLM token budget (fail-closed). SINGLETON: the accumulator is an
         // in-process running per-(tenant, UTC-day) token sum, so a single shared instance is the
         // whole point (a transient would reset the count every request). Single-instance accurate;
