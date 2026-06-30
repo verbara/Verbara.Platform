@@ -106,6 +106,7 @@ public sealed class PendingPauseDrainWorkerTests
                 m["applied_state"] == "Break"
                 && int.Parse(m["stuck_active_work_count"], System.Globalization.CultureInfo.InvariantCulture) > 0
                 && m["pending_since"].Length > 0),
+            Arg.Any<DateTimeOffset?>(),
             Arg.Any<CancellationToken>());
     }
 

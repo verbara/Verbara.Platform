@@ -122,6 +122,7 @@ public sealed class SessionTimeoutServiceTests
                 m["actor_tenant_id"] == ActorTenant
                 && m["target_tenant_id"] == TargetTenant
                 && m["timeout_minutes"] == "60"),
+            Arg.Any<DateTimeOffset?>(),
             Arg.Any<CancellationToken>());
     }
 

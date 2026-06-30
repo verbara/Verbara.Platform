@@ -35,6 +35,7 @@ public sealed class DefaultAuditService : IAuditService
         Guid? correlationId = null,
         AuditChanges? changes = null,
         IReadOnlyDictionary<string, string>? metadata = null,
+        DateTimeOffset? retainUntil = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(category);
@@ -60,6 +61,7 @@ public sealed class DefaultAuditService : IAuditService
             Changes = changes,
             Metadata = metadata,
             OccurredAt = occurredAt,
+            RetainUntil = retainUntil,
             IntegrityHash = ComputeIntegrityHash(tenantId, actorType, actorId, action, targetType, targetId, occurredAt, metadata),
         };
 

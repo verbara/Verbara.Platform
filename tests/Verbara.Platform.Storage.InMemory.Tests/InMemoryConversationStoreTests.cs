@@ -577,6 +577,57 @@ public sealed class InMemoryConversationStoreTests
         result.Select(c => c.ConversationId).Should().BeEquivalentTo(new[] { own.ConversationId });
     }
 
+    // ─── TryConditionalCloseWrapUpAsync — state-based CAS (ADR-0034 Decision 6) ──────────
+
+    [Fact]
+    public async Task TryConditionalCloseWrapUpAsync_ShouldCloseAndReturnTrue_WhenStillWrapUp()
+    {
+        var store = new InMemoryConversationStore();
+        var conv = MakeConversation(Tenant1, ConversationState.WrapUp);
+        await store.SaveAsync(conv, CancellationToken.None);
+        var now = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
+
+        var won = await store.TryConditionalCloseWrapUpAsync(Tenant1, conv.ConversationId, now, CancellationToken.None);
+
+        won.Should().BeTrue("the conversation was still in WrapUp so this caller wins the CAS");
+        var refreshed = await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None);
+        refreshed!.State.Should().Be(ConversationState.Closed);
+        refreshed.ClosedAt.Should().Be(now);
+        refreshed.UpdatedAt.Should().Be(now);
+    }
+
+    [Fact]
+    public async Task TryConditionalCloseWrapUpAsync_ShouldReturnFalseAndNotMutate_WhenHumanAlreadyMovedOutOfWrapUp()
+    {
+        // The concurrent-human-close proof: a human typify transitioned the conversation Closed
+        // before the worker's conditional close ran ⇒ the predicate (state = WrapUp) no longer holds
+        // ⇒ 0 rows affected ⇒ false, and the existing (human) state stands untouched.
+        var store = new InMemoryConversationStore();
+        var conv = MakeConversation(Tenant1, ConversationState.Closed);
+        var humanClosedAt = new DateTimeOffset(2026, 6, 30, 11, 0, 0, TimeSpan.Zero);
+        conv.ClosedAt = humanClosedAt;
+        await store.SaveAsync(conv, CancellationToken.None);
+        var workerNow = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
+
+        var won = await store.TryConditionalCloseWrapUpAsync(Tenant1, conv.ConversationId, workerNow, CancellationToken.None);
+
+        won.Should().BeFalse("a human already moved it out of WrapUp, so the conditional close affects 0 rows");
+        var refreshed = await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None);
+        refreshed!.State.Should().Be(ConversationState.Closed);
+        refreshed.ClosedAt.Should().Be(humanClosedAt, "the human's close timestamp must not be overwritten");
+    }
+
+    [Fact]
+    public async Task TryConditionalCloseWrapUpAsync_ShouldReturnFalse_WhenConversationMissing()
+    {
+        var store = new InMemoryConversationStore();
+        var now = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
+
+        var won = await store.TryConditionalCloseWrapUpAsync(Tenant1, EntityId.New(), now, CancellationToken.None);
+
+        won.Should().BeFalse();
+    }
+
     private static Conversation MakeCallbackStuck(TenantId tenantId, ConversationState state, string? marker = "true")
     {
         var conv = new Conversation

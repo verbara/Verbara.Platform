@@ -571,6 +571,12 @@ builder.Services.Configure<DistributionOptions>(o =>
     if (int.TryParse(s["DefaultQueueTimeoutSeconds"], out var dqts)) o.DefaultQueueTimeoutSeconds = dqts;
     if (int.TryParse(s["DefaultWrapUpTimeoutSeconds"], out var dwuts)) o.DefaultWrapUpTimeoutSeconds = dwuts;
     if (int.TryParse(s["MaxConversationsPerCycle"], out var mcpc)) o.MaxConversationsPerCycle = mcpc;
+    // Autonomous AI disposition (ADR-0034) — global breaker default OFF (byte-identical close path);
+    // cap + correction window govern blast radius and the audit retention floor. Kill-switches, not
+    // production cadence (see DistributionOptions XML docs).
+    if (bool.TryParse(s["AutonomousDispositionEnabled"], out var ade)) o.AutonomousDispositionEnabled = ade;
+    if (int.TryParse(s["AutonomousDispositionPerCycleCap"], out var adpcc)) o.AutonomousDispositionPerCycleCap = adpcc;
+    if (int.TryParse(s["AutonomousCorrectionWindowDays"], out var acwd)) o.AutonomousCorrectionWindowDays = acwd;
 });
 builder.Services.AddHostedService<QueueDistributionWorker>();
 builder.Services.AddHostedService<ConversationTimeoutWorker>();

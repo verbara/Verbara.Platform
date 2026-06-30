@@ -373,6 +373,10 @@ public sealed class CollectReasonNodeHandlerTests
             TenantId tenantId, ConversationState state, int limit, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<Conversation>>([]);
 
+        public Task<bool> TryConditionalCloseWrapUpAsync(
+            TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct) =>
+            Task.FromResult(false);
+
         public Task<int> CountActiveWorkAsync(TenantId tenantId, EntityId agentId, CancellationToken ct) =>
             Task.FromResult(0);
 

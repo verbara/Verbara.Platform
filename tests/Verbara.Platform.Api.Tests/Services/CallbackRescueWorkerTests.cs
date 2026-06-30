@@ -345,6 +345,7 @@ public sealed class CallbackRescueWorkerTests
                 Arg.Any<Guid?>(),
                 Arg.Any<AuditChanges?>(),
                 Arg.Is<IReadOnlyDictionary<string, string>>(m => m["reason"] == reason),
+                Arg.Any<DateTimeOffset?>(),
                 Arg.Any<CancellationToken>());
 
         public async Task AssertFailedAsync(Conversation conv, int attempt) =>
@@ -361,6 +362,7 @@ public sealed class CallbackRescueWorkerTests
                 Arg.Any<AuditChanges?>(),
                 Arg.Is<IReadOnlyDictionary<string, string>>(m =>
                     m["attempt"] == attempt.ToString(CultureInfo.InvariantCulture)),
+                Arg.Any<DateTimeOffset?>(),
                 Arg.Any<CancellationToken>());
     }
 

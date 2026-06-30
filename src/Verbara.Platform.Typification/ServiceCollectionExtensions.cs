@@ -53,6 +53,12 @@ public static class ServiceCollectionExtensions
         // ILicenseStatus (registered by the Pro AddProLicensing() in the host composition root).
         services.AddSingleton<IAutonomousDispositionPolicy, DefaultAutonomousDispositionPolicy>();
 
+        // ADR-0034 — autonomous disposition metrics (singleton; owns its Meter lifetime). Emits
+        // autonomous_commits_total / autonomous_skipped_total{reason} (close path) and
+        // autonomous_corrections_total (correction endpoint, task group 6).
+        services.AddSingleton<AutonomousDispositionMetrics>(
+            sp => new AutonomousDispositionMetrics(sp.GetService<IMeterFactory>()));
+
         // E3 — per-tenant daily LLM token budget (fail-closed). SINGLETON: the accumulator is an
         // in-process running per-(tenant, UTC-day) token sum, so a single shared instance is the
         // whole point (a transient would reset the count every request). Single-instance accurate;

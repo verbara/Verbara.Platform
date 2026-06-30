@@ -42,6 +42,24 @@ public interface IConversationStore
     Task<IReadOnlyList<Conversation>> ListByStateAsync(TenantId tenantId, ConversationState state, int limit, CancellationToken ct);
 
     /// <summary>
+    /// State-based compare-and-set close used by the autonomous AI disposition path (ADR-0034
+    /// Decision 6): atomically transitions <paramref name="conversationId"/> to
+    /// <see cref="ConversationState.Closed"/> <b>only if it is still in
+    /// <see cref="ConversationState.WrapUp"/></b>, stamping <c>updated_at</c> = <c>closed_at</c> =
+    /// <paramref name="now"/>. Returns <see langword="true"/> when the row was transitioned
+    /// (this caller won the race), <see langword="false"/> when zero rows matched (a human already
+    /// typified/closed it concurrently, so the caller MUST NOT stamp a disposition).
+    /// </summary>
+    /// <remarks>
+    /// This is the CAS gate that lets a concurrent human typify win: the conditional predicate is
+    /// <c>WHERE conversation_id = @id AND tenant_id = @t AND state = WrapUp</c>. The autonomous
+    /// submission insert follows only on a <see langword="true"/> result; it is intentionally NOT in
+    /// the same DB transaction (a crash between the two leaves a blank Closed = today's behaviour).
+    /// </remarks>
+    Task<bool> TryConditionalCloseWrapUpAsync(
+        TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
     /// W4 — count of conversations the agent actively OWNS in engaged states
     /// (ConversationStateMachine.ActiveWorkStates). Excludes parked/pre-accept/terminal.
     /// Covers voice + digital. Used by the deferred-pause drain to decide when a
