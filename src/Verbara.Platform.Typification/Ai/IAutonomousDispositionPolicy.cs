@@ -43,6 +43,15 @@ public interface IAutonomousDispositionPolicy
     /// every gate passes, otherwise a skipping decision carrying the first failing gate's
     /// <see cref="AutonomousSkipReason"/>.
     /// </returns>
+    /// <remarks>
+    /// <b>Invariant:</b> a returned decision with
+    /// <see cref="AutonomousDispositionDecision.ShouldCommit"/> == <see langword="true"/> GUARANTEES
+    /// that the <paramref name="suggestion"/> argument was non-null (the <c>NoSuggestion</c> gate
+    /// precedes any commit) AND that the decision's <see cref="AutonomousDispositionDecision.LeafNodeId"/>
+    /// and <see cref="AutonomousDispositionDecision.NodePath"/> are non-null (they are copied from the
+    /// validated suggestion). Consumers may therefore treat the suggestion + leaf/path as present on a
+    /// commit — though the worker still guards defensively before dereferencing (defence in depth).
+    /// </remarks>
     Task<AutonomousDispositionDecision> EvaluateAsync(
         Conversation conversation,
         AiSuggestionRecord? suggestion,

@@ -291,6 +291,212 @@ public sealed class AuditEntriesNormalizationTests
         }
     }
 
+    // ─── Retention floor (ADR-0034 Decision 4) — live DB ────────────────────────────
+
+    [Fact]
+    public async Task DeleteOlderThanAsync_ShouldPreserveRecord_WhenRetainUntilInFuture()
+    {
+        // Locks the now()-vs-@Cutoff SQL on the real DB: a record whose OccurredAt predates the
+        // cutoff but whose retain_until is still in the future MUST survive (retain_until compared
+        // to now(), NOT to the past @Cutoff).
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenant = new TenantId("tenant-floor-a");
+            var inWindow = new AuditEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenant,
+                Action = AutonomousAuditRedaction.AutonomousCommitAction,
+                Category = "conversations",
+                Severity = "info",
+                ActorId = "verbara:ai:autonomous-worker",
+                ActorType = "ai",
+                TargetType = "Conversation",
+                TargetId = "conv-in-window",
+                OccurredAt = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero), // long before cutoff
+                RetainUntil = DateTimeOffset.UtcNow.AddYears(1),                     // floor not yet elapsed
+            };
+            await store.SaveAsync(inWindow, CancellationToken.None);
+
+            var deleted = await store.DeleteOlderThanAsync(
+                tenant, DateTimeOffset.UtcNow.AddMonths(-1), CancellationToken.None);
+
+            deleted.Should().Be(0);
+            var remaining = await store.GetByEntityAsync(tenant, "Conversation", "conv-in-window", CancellationToken.None);
+            remaining.Should().ContainSingle();
+        }
+    }
+
+    [Fact]
+    public async Task DeleteOlderThanAsync_ShouldPurgeRecord_WhenRetainUntilElapsedOrNull()
+    {
+        // Two rows past the cutoff: one with an elapsed floor, one with no floor — both purge.
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenant = new TenantId("tenant-floor-b");
+
+            var pastFloor = new AuditEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenant,
+                Action = AutonomousAuditRedaction.AutonomousCommitAction,
+                Category = "conversations",
+                Severity = "info",
+                ActorId = "verbara:ai:autonomous-worker",
+                ActorType = "ai",
+                TargetType = "Conversation",
+                TargetId = "conv-past-floor",
+                OccurredAt = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                RetainUntil = DateTimeOffset.UtcNow.AddDays(-1), // floor already elapsed
+            };
+            var noFloor = new AuditEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenant,
+                Action = "conversation.created",
+                Category = "conversations",
+                Severity = "info",
+                ActorId = "system",
+                ActorType = "system",
+                TargetType = "Conversation",
+                TargetId = "conv-no-floor",
+                OccurredAt = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero), // RetainUntil null
+            };
+            await store.SaveAsync(pastFloor, CancellationToken.None);
+            await store.SaveAsync(noFloor, CancellationToken.None);
+
+            var deleted = await store.DeleteOlderThanAsync(
+                tenant, DateTimeOffset.UtcNow.AddMonths(-1), CancellationToken.None);
+
+            deleted.Should().Be(2);
+            (await store.GetByEntityAsync(tenant, "Conversation", "conv-past-floor", CancellationToken.None))
+                .Should().BeEmpty();
+            (await store.GetByEntityAsync(tenant, "Conversation", "conv-no-floor", CancellationToken.None))
+                .Should().BeEmpty();
+        }
+    }
+
+    // ─── Art. 17 redaction (ADR-0034 Decision 4) — live DB ──────────────────────────
+
+    [Fact]
+    public async Task RedactContactLinkageAsync_ShouldNullLinkageButRetainDecisionFact_WhenAutonomousRecord()
+    {
+        // Locks the entity_id = ANY(@ConversationIds) match, the entity_id → NULL update (requires
+        // the migration-014 NOT NULL drop), the jsonb metadata tombstone, and the hash round-trip on
+        // the real DB. A non-autonomous record with the same conversation id must be untouched.
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenant = new TenantId("tenant-erase");
+
+            var autonomous = new AuditEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenant,
+                Action = AutonomousAuditRedaction.AutonomousCommitAction,
+                Category = "conversations",
+                Severity = "info",
+                ActorId = "verbara:ai:autonomous-worker",
+                ActorType = "ai",
+                TargetType = "Conversation",
+                TargetId = "conv-erase",
+                OccurredAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
+                RetainUntil = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
+                Metadata = new Dictionary<string, string>
+                {
+                    ["node_path"] = "Sales > Upgrade > Completed",
+                    ["leaf_node_id"] = "leaf-1",
+                    ["confidence"] = "0.9800",
+                    ["tenant"] = tenant.Value,
+                    ["conversation"] = "conv-erase",
+                },
+            };
+            // A non-autonomous record referencing the SAME conversation id must be left untouched.
+            var nonAutonomous = new AuditEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenant,
+                Action = "conversation.created",
+                Category = "conversations",
+                Severity = "info",
+                ActorId = "system",
+                ActorType = "system",
+                TargetType = "Conversation",
+                TargetId = "conv-erase",
+                OccurredAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
+            };
+            await store.SaveAsync(autonomous, CancellationToken.None);
+            await store.SaveAsync(nonAutonomous, CancellationToken.None);
+
+            var redacted = await store.RedactContactLinkageAsync(
+                tenant, ["conv-erase"], CancellationToken.None);
+
+            redacted.Should().Be(1);
+
+            // The decision fact survives, queryable by node path / confidence; the contact linkage is gone.
+            var commits = await store.SearchAsync(
+                tenant, new AuditQuery(Action: AutonomousAuditRedaction.AutonomousCommitAction), CancellationToken.None);
+            commits.Items.Should().ContainSingle();
+            var result = commits.Items[0];
+            result.TargetId.Should().BeNull("the contact-identifying conversation linkage is redacted");
+            result.Metadata!["conversation"].Should().Be("[redacted]");
+            result.Metadata!["redacted"].Should().Be("true");
+            result.Metadata!["node_path"].Should().Be("Sales > Upgrade > Completed", "the decision fact is retained");
+            result.Metadata!["confidence"].Should().Be("0.9800");
+            result.ActorType.Should().Be("ai");
+            result.OccurredAt.Should().Be(autonomous.OccurredAt);
+            result.RetainUntil.Should().Be(autonomous.RetainUntil);
+            result.IntegrityHash.Should().NotBeNullOrEmpty();
+
+            // The non-autonomous record with the same conversation id is untouched.
+            var created = await store.SearchAsync(
+                tenant, new AuditQuery(Action: "conversation.created"), CancellationToken.None);
+            created.Items.Should().ContainSingle();
+            created.Items[0].TargetId.Should().Be("conv-erase", "non-autonomous records are untouched");
+        }
+    }
+
+    [Fact]
+    public async Task RedactContactLinkageAsync_ShouldBeIdempotent_WhenRunTwice()
+    {
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenant = new TenantId("tenant-erase-idem");
+            var entry = new AuditEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenant,
+                Action = AutonomousAuditRedaction.AutonomousCommitAction,
+                Category = "conversations",
+                Severity = "info",
+                ActorId = "verbara:ai:autonomous-worker",
+                ActorType = "ai",
+                TargetType = "Conversation",
+                TargetId = "conv-erase",
+                OccurredAt = DateTimeOffset.UtcNow,
+                Metadata = new Dictionary<string, string> { ["conversation"] = "conv-erase" },
+            };
+            await store.SaveAsync(entry, CancellationToken.None);
+
+            var first = await store.RedactContactLinkageAsync(tenant, ["conv-erase"], CancellationToken.None);
+            var second = await store.RedactContactLinkageAsync(tenant, ["conv-erase"], CancellationToken.None);
+
+            first.Should().Be(1);
+            second.Should().Be(0, "an already-redacted record (TargetId already null) is not redacted again");
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────

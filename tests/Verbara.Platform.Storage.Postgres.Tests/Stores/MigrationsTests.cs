@@ -31,7 +31,6 @@ public class MigrationsTests : IClassFixture<MigrationsFixture>
         (await _fixture.ColumnExistsAsync("typification_submissions", "autonomous_actor_id")).Should().BeTrue();
         (await _fixture.ColumnExistsAsync("typification_submissions", "correction_state")).Should().BeTrue();
         (await _fixture.ColumnExistsAsync("typification_submissions", "corrected_at")).Should().BeTrue();
-        (await _fixture.ColumnExistsAsync("typification_submissions", "corrects_conversation_id")).Should().BeTrue();
     }
 
     [Fact]

@@ -88,7 +88,8 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
     };
 
     private ConversationTimeoutWorker CreateWorker(
-        bool autonomousEnabled, int perCycleCap = 50, int correctionWindowDays = 30)
+        bool autonomousEnabled, int perCycleCap = 50, int correctionWindowDays = 30,
+        ITenantAutonomousDispositionStore? gateStore = null)
     {
         var options = Options.Create(new DistributionOptions
         {
@@ -111,7 +112,8 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
             suggestionStore: _suggestionStore,
             submissionStore: _submissionStore,
             auditService: _audit,
-            autonomousMetrics: new AutonomousDispositionMetrics());
+            autonomousMetrics: new AutonomousDispositionMetrics(),
+            gateStore: gateStore);
     }
 
     private void SeedWrapUp(params Conversation[] convs) =>
@@ -323,6 +325,73 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
         await _audit.DidNotReceiveWithAnyArgs().RecordAsync(
             default, default!, default!, default!, default!, default!,
             default, default, default, default, default, default, default);
+    }
+
+    [Fact]
+    public async Task ProcessTimeoutsAsync_ShouldNotQuerySuggestionStore_WhenGateStoreReportsInactive()
+    {
+        // Gate-first short-circuit: when the tenant activation gate is inactive, the worker closes
+        // blank WITHOUT reading the suggestion store or evaluating the policy (avoids N reads per
+        // non-opted-in tenant per cycle). Behaviour is byte-identical to the GateDisabled path.
+        var conv = MakeExpiredWrapUp();
+        SeedWrapUp(conv);
+
+        var gateStore = Substitute.For<ITenantAutonomousDispositionStore>();
+        gateStore.GetAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns((TenantAutonomousDisposition?)null); // never opted in → inactive
+
+        var sut = CreateWorker(autonomousEnabled: true, gateStore: gateStore);
+
+        await sut.ProcessTimeoutsAsync(CancellationToken.None);
+
+        // Closed blank, and the expensive reads never happened.
+        conv.State.Should().Be(ConversationState.Closed);
+        await _conversationStore.Received(1).SaveAsync(conv, Arg.Any<CancellationToken>());
+        await _suggestionStore.DidNotReceiveWithAnyArgs().GetLatestForConversationAsync(
+            default!, default!, default);
+        await _policy.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default, default);
+        await _submissionStore.DidNotReceive().SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
+        // No audit at all for a non-opted-in tenant — byte-identical to the gate-OFF path.
+        await _audit.DidNotReceiveWithAnyArgs().RecordAsync(
+            default, default!, default!, default!, default!, default!,
+            default, default, default, default, default, default, default);
+    }
+
+    [Fact]
+    public async Task ProcessTimeoutsAsync_ShouldQuerySuggestionStore_WhenGateStoreReportsActive()
+    {
+        // When the gate IS active the short-circuit does not fire — the suggestion read + policy
+        // evaluation proceed exactly as before.
+        var conv = MakeExpiredWrapUp();
+        var suggestion = MakeSuggestion(conv.ConversationId);
+        SeedWrapUp(conv);
+
+        var gateStore = Substitute.For<ITenantAutonomousDispositionStore>();
+        gateStore.GetAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(new TenantAutonomousDisposition
+            {
+                TenantId = new TenantId(TestTenantId),
+                AttestedByUserId = "admin-1",
+                AttestedAt = _now.AddDays(-1),
+            }); // active (not revoked)
+
+        _suggestionStore.GetLatestForConversationAsync(
+                Arg.Any<EntityId>(), conv.ConversationId, Arg.Any<CancellationToken>())
+            .Returns(suggestion);
+        _policy.EvaluateAsync(conv, suggestion, Arg.Any<CancellationToken>())
+            .Returns(AutonomousDispositionDecision.Commit(
+                EntityId.From("leaf-9"), ["root", "sales", "completed"], 0.97));
+        _conversationStore.TryConditionalCloseWrapUpAsync(
+                Arg.Any<TenantId>(), conv.ConversationId, _now, Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var sut = CreateWorker(autonomousEnabled: true, gateStore: gateStore);
+
+        await sut.ProcessTimeoutsAsync(CancellationToken.None);
+
+        await _suggestionStore.Received(1).GetLatestForConversationAsync(
+            Arg.Any<EntityId>(), conv.ConversationId, Arg.Any<CancellationToken>());
+        await _submissionStore.Received(1).SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

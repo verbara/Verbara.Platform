@@ -92,11 +92,10 @@ public sealed class TypificationStoreFixture : IAsyncLifetime
             completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             -- migration 005: server-side AI provenance (suggested-vs-committed correction signal)
             suggested_leaf_node_id TEXT NULL, suggested_node_path JSONB NULL,
-            -- migration 014: autonomous disposition (ADR-0034) — autonomous actor + append-only correction
+            -- migration 014: autonomous disposition (ADR-0034) — autonomous actor + correction state
             autonomous_actor_id TEXT NULL,
             correction_state SMALLINT NOT NULL DEFAULT 0,
             corrected_at TIMESTAMPTZ NULL,
-            corrects_conversation_id TEXT NULL,
             PRIMARY KEY (tenant_id, conversation_id)
         );
         CREATE INDEX idx_typification_submissions_leaf ON typification_submissions (tenant_id, leaf_node_id, completed_at DESC);

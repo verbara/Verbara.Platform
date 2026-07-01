@@ -494,14 +494,12 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         loaded.AutonomousActorId.Should().BeNull();
         loaded.CorrectionState.Should().Be(CorrectionState.None);
         loaded.CorrectedAt.Should().BeNull();
-        loaded.CorrectsConversationId.Should().BeNull();
     }
 
     [Fact]
     public async Task SubmissionStore_ShouldRoundTripAutonomousFields_WhenAutoAiStamped()
     {
         var conversationId = EntityId.New();
-        var correctsConv = EntityId.New();
         var correctedAt = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
         var submission = new TypificationSubmission
         {
@@ -517,7 +515,6 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
             AutonomousActorId = "verbara:ai:autonomous-worker",
             CorrectionState = CorrectionState.Corrected,
             CorrectedAt = correctedAt,
-            CorrectsConversationId = correctsConv,
             Duration = TimeSpan.Zero,
             CompletedAt = DateTimeOffset.UtcNow,
         };
@@ -530,6 +527,5 @@ public class PostgresTypificationStoresTests : IClassFixture<TypificationStoreFi
         loaded.AutonomousActorId.Should().Be("verbara:ai:autonomous-worker");
         loaded.CorrectionState.Should().Be(CorrectionState.Corrected);
         loaded.CorrectedAt.Should().Be(correctedAt);
-        loaded.CorrectsConversationId.Should().Be(correctsConv);
     }
 }

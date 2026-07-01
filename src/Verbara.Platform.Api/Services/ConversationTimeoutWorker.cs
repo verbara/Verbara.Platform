@@ -44,6 +44,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     private readonly ITypificationSubmissionStore? _submissionStore;
     private readonly IAuditService? _auditService;
     private readonly AutonomousDispositionMetrics? _autonomousMetrics;
+    private readonly ITenantAutonomousDispositionStore? _gateStore;
 
     public ConversationTimeoutWorker(
         IConversationStore conversationStore,
@@ -59,7 +60,8 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         IAiSuggestionStore? suggestionStore = null,
         ITypificationSubmissionStore? submissionStore = null,
         IAuditService? auditService = null,
-        AutonomousDispositionMetrics? autonomousMetrics = null)
+        AutonomousDispositionMetrics? autonomousMetrics = null,
+        ITenantAutonomousDispositionStore? gateStore = null)
     {
         _conversationStore = conversationStore;
         _tenantStore = tenantStore;
@@ -75,6 +77,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         _submissionStore = submissionStore;
         _auditService = auditService;
         _autonomousMetrics = autonomousMetrics;
+        _gateStore = gateStore;
     }
 
     /// <summary>
@@ -282,6 +285,23 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     private async Task<bool> ProcessAutonomousWrapUpAsync(
         Conversation conv, TenantId tid, string tenantId, DateTimeOffset now, bool capReached, CancellationToken ct)
     {
+        // Gate-first short-circuit (efficiency during gradual rollout): the activation gate is the
+        // cheapest gate and the common miss while most tenants are NOT opted in. Checking it here —
+        // BEFORE the suggestion-store read + the full policy evaluation — avoids N suggestion reads
+        // per non-opted-in tenant per cycle. Behaviour is unchanged: a non-opted-in tenant still
+        // closes blank with NO audit/metric (byte-identical to the GateDisabled fall-through below,
+        // which is byte-identical to the gate-OFF fast path). The policy keeps its own gate check
+        // (defence in depth) for when this store isn't injected.
+        if (_gateStore is not null)
+        {
+            var gate = await _gateStore.GetAsync(conv.TenantId, ct);
+            if (gate is not { IsActive: true })
+            {
+                await CloseWrapUpBlankAsync(conv, tenantId, now, ct);
+                return false;
+            }
+        }
+
         var tenantEntityId = EntityId.From(conv.TenantId.Value);
         var suggestion = await _suggestionStore!.GetLatestForConversationAsync(
             tenantEntityId, conv.ConversationId, ct);
@@ -317,6 +337,16 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             return false;
         }
 
+        // Defence in depth: the policy's contract guarantees a commit decision implies a non-null
+        // suggestion (the NoSuggestion gate precedes commit), but a mis-implemented policy could
+        // violate it. Guard the dereference: if commit somehow arrived with a null suggestion, skip
+        // + log rather than throw (a worker crash would abort the whole tenant sweep).
+        if (suggestion is null)
+        {
+            LogAutonomousCommitNullSuggestion(conv.ConversationId.Value);
+            return false;
+        }
+
         // State-based CAS: close ONLY if still WrapUp. A concurrent human typify wins (0 rows).
         var won = await _conversationStore.TryConditionalCloseWrapUpAsync(tid, conv.ConversationId, now, ct);
         if (!won)
@@ -326,8 +356,11 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             return false;
         }
 
-        // We won the CAS. Reflect the close on the in-memory entity, publish the same state-change
-        // event the blank path emits, then stamp the AutoAi submission + AutonomousCommit audit.
+        // We won the CAS. The authoritative WrapUp→Closed transition already happened atomically in
+        // the store's conditional UPDATE (TryConditionalCloseWrapUpAsync), so we set State/ClosedAt
+        // directly to mirror it on the in-memory entity — do NOT re-route through conv.TransitionTo
+        // (that would re-run guard logic / fire a second transition over a close the DB already owns).
+        // Then publish the same state-change event the blank path emits and stamp the submission + audit.
         conv.State = ConversationState.Closed;
         conv.ClosedAt ??= now;
         conv.UpdatedAt = now;
@@ -338,7 +371,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             nameof(ConversationState.WrapUp),
             nameof(ConversationState.Closed)));
 
-        await StampAutonomousDispositionAsync(conv, suggestion!, decision, now, ct);
+        await StampAutonomousDispositionAsync(conv, suggestion, decision, now, ct);
 
         _autonomousMetrics!.RecordCommit(tenantId);
         LogAutonomousCommit(conv.ConversationId.Value, decision.Confidence);
@@ -448,6 +481,10 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Autonomous disposition CAS lost for conversation {ConversationId} — a human typified concurrently")]
     private partial void LogAutonomousRaceLost(string conversationId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Autonomous commit decision for conversation {ConversationId} had a null suggestion — skipping (policy invariant violated)")]
+    private partial void LogAutonomousCommitNullSuggestion(string conversationId);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Conversation timeout cycle failed")]
     private partial void LogTimeoutCycleError(Exception ex);

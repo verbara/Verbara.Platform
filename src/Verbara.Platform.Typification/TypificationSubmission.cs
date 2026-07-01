@@ -65,10 +65,4 @@ public sealed record TypificationSubmission : ITenantScoped
 
     /// <summary>UTC timestamp at which this submission was corrected (null while uncorrected).</summary>
     public DateTimeOffset? CorrectedAt { get; init; }
-
-    /// <summary>
-    /// When this submission is itself a corrective one, the conversation whose original autonomous
-    /// disposition it corrects (the immutable original this references). Null for non-corrective submissions.
-    /// </summary>
-    public EntityId? CorrectsConversationId { get; init; }
 }

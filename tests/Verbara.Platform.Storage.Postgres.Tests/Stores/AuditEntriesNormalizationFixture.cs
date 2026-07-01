@@ -43,7 +43,7 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
         await using var conn = new NpgsqlConnection(ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = SchemaSql + MigrationV021Sql + MigrationV034Sql + MigrationV014Sql;
+        cmd.CommandText = SchemaSql + MigrationV021Sql + MigrationV006Sql + MigrationV034Sql + MigrationV014Sql;
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -143,6 +143,17 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
         COMMIT;
         """;
 
+    // Migration 006: extend audit_entries actor_type CHECK to include 'ai' (folded into
+    // 001_Baseline.sql). The autonomous-disposition commit/skipped audits are written with
+    // actor_type='ai', so the fixture must apply this widening to mirror the real schema.
+    private const string MigrationV006Sql = """
+
+        ALTER TABLE audit_entries DROP CONSTRAINT IF EXISTS audit_entries_actor_type_check;
+        ALTER TABLE audit_entries
+            ADD CONSTRAINT audit_entries_actor_type_check
+            CHECK (actor_type IN ('user', 'system', 'impersonator', 'service-account', 'api_key', 'ai'));
+        """;
+
     // The widened audit_entries_category_check (union of categories the application
     // code actually emits), as folded into 001_Baseline.sql (formerly migration 034).
     private const string MigrationV034Sql = """
@@ -156,10 +167,12 @@ public sealed class AuditEntriesNormalizationFixture : IAsyncLifetime
                                 'reports', 'operational', 'license'));
         """;
 
-    // migration 014 (ADR-0034): per-record retention floor honoured by the blanket purge.
+    // migration 014 (ADR-0034): per-record retention floor honoured by the blanket purge, plus the
+    // entity_id NOT NULL drop that lets the Art.17 contact-linkage redaction null the linkage.
     private const string MigrationV014Sql = """
 
         ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS retain_until TIMESTAMPTZ NULL;
+        ALTER TABLE audit_entries ALTER COLUMN entity_id DROP NOT NULL;
         """;
 }
 

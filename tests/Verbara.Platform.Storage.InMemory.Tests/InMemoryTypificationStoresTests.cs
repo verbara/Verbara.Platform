@@ -339,7 +339,6 @@ public sealed class InMemoryTypificationStoresTests
         var store = new InMemoryTypificationSubmissionStore();
         var conversationId = EntityId.New();
         var correctedAt = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
-        var correctsConv = EntityId.New();
 
         var submission = new TypificationSubmission
         {
@@ -355,7 +354,6 @@ public sealed class InMemoryTypificationStoresTests
             AutonomousActorId = "verbara:ai:autonomous-worker",
             CorrectionState = CorrectionState.Corrected,
             CorrectedAt = correctedAt,
-            CorrectsConversationId = correctsConv,
             Duration = TimeSpan.Zero,
             CompletedAt = DateTimeOffset.UtcNow,
         };
@@ -368,7 +366,6 @@ public sealed class InMemoryTypificationStoresTests
         loaded.AutonomousActorId.Should().Be("verbara:ai:autonomous-worker");
         loaded.CorrectionState.Should().Be(CorrectionState.Corrected);
         loaded.CorrectedAt.Should().Be(correctedAt);
-        loaded.CorrectsConversationId.Should().Be(correctsConv);
     }
 
     [Fact]
@@ -399,6 +396,5 @@ public sealed class InMemoryTypificationStoresTests
         loaded!.CorrectionState.Should().Be(CorrectionState.None);
         loaded.AutonomousActorId.Should().BeNull();
         loaded.CorrectedAt.Should().BeNull();
-        loaded.CorrectsConversationId.Should().BeNull();
     }
 }

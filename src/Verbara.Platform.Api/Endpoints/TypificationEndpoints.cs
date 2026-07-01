@@ -966,13 +966,6 @@ internal sealed record CalibrationStatusDto(
 // ─── ADR-0034 — autonomous-disposition activation-gate DTOs ────────────────────
 
 /// <summary>
-/// Request body for POST /admin/typification/autonomous-disposition. The activation is a marker:
-/// the attesting user id is taken from the caller's credentials, not the body, so no fields are
-/// required. Present for a typed, forward-compatible request shape (AOT source-gen).
-/// </summary>
-internal sealed record AutonomousDispositionGateRequest();
-
-/// <summary>
 /// Response describing the per-tenant autonomous-disposition activation gate (ADR-0034 Decision 3):
 /// whether it is currently active and the controller-instruction attestation/revocation metadata.
 /// </summary>

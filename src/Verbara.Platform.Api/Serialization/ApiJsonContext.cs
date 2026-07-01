@@ -93,7 +93,6 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(IReadOnlyDictionary<string, string>))]
 [JsonSerializable(typeof(TypifyErrorResponse))]
 // ADR-0034 — autonomous-disposition activation gate + supervisor correction DTOs.
-[JsonSerializable(typeof(AutonomousDispositionGateRequest))]
 [JsonSerializable(typeof(AutonomousDispositionGateResponse))]
 [JsonSerializable(typeof(TypificationCorrectionRequest))]
 [JsonSerializable(typeof(TypificationCorrectionResponse))]
