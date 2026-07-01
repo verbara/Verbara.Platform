@@ -42,10 +42,12 @@ it SHALL disable stamping for subsequent close cycles immediately.
 ### Requirement: Verification pass and conditional commit
 Before stamping an autonomous disposition the system SHALL re-verify, at commit time, that the target node
 is still a valid leaf in the active schema, the conversation is still in the `WrapUp` state, and the
-suggestion confidence still meets or exceeds `AutonomousThreshold`. The commit SHALL be a single conditional
-write predicated on the observed conversation state and version (compare-and-set), so that a concurrent
-human typification that lands first causes the autonomous write to affect zero rows and abort without error.
-The activation gate SHALL be re-checked within the same atomic write.
+suggestion confidence still meets or exceeds `AutonomousThreshold`. The close SHALL be a conditional
+state-based write (`UPDATE … WHERE state = 'WrapUp'`, compare-and-set on the terminal state itself — no
+separate version column), so that a concurrent human typification that lands first moves the conversation
+out of `WrapUp`, causes the autonomous write to affect zero rows, and aborts without error or stamping. The
+per-tenant activation gate SHALL be re-read each cycle (gate-read-then-CAS); because the gate is a coarse,
+rarely-changing tenant switch, a revocation lands on the next cycle rather than mid-write.
 
 #### Scenario: A concurrent human typification wins the race
 - **GIVEN** the close path has selected a candidate and passed verification
@@ -130,9 +132,11 @@ gate. When the deployment lacks these features, an opted-in tenant's close path 
 ### Requirement: Dark rollout with circuit breaker, rate cap, and poison-candidate handling
 Autonomous disposition stamping SHALL be controllable independently of code deployment: a per-tenant flag
 defaulting OFF, a global circuit breaker the operator can flip via configuration without redeploy, and a
-per-tenant cap on autonomous commits per cycle. A candidate that repeatedly fails verification SHALL be
-moved to a terminal skipped state and SHALL emit `AutonomousSkipped` once rather than every cycle.
-Autonomous commits SHALL be idempotent on `(conversation_id, version)` so a retry cannot double-stamp.
+per-tenant cap on autonomous commits per cycle. A candidate that fails a non-gate verification check SHALL
+be blank-closed in the same cycle it is evaluated (today's behaviour) and SHALL emit `AutonomousSkipped`
+exactly once — because it thereby leaves the `WrapUp` candidate set, it is never re-processed, so no
+terminal-skipped state or attempt counter is required. Idempotency is inherent in the state-based CAS
+close: a retry finds the conversation no longer in `WrapUp` and stamps nothing.
 
 #### Scenario: Global circuit breaker halts stamping without redeploy
 - **GIVEN** the global autonomous circuit breaker is tripped via configuration
