@@ -138,6 +138,28 @@ internal sealed class PostgresConversationStore : IConversationStore
         }
     }
 
+    public async Task<bool> TryConditionalCloseWrapUpAsync(
+        TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct)
+    {
+        // State-based compare-and-set (ADR-0034 Decision 6): close ONLY if still WrapUp. A concurrent
+        // human typify that lands first transitions the row out of WrapUp (20), so the predicate
+        // matches 0 rows and the autonomous caller skips stamping. Ordinals are bound as parameters
+        // (no string interpolation of values); WrapUp = 20, Closed = 50 (ConversationState).
+        var affected = await _dataSource.ExecuteAsync(
+            "UPDATE conversations SET state = @ClosedState, updated_at = @Now, closed_at = @Now " +
+            "WHERE conversation_id = @ConversationId AND tenant_id = @TenantId AND state = @WrapUpState",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("ConversationId", conversationId.Value));
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("ClosedState", (int)ConversationState.Closed));
+                p.Add(new NpgsqlParameter("WrapUpState", (int)ConversationState.WrapUp));
+                p.Add(new NpgsqlParameter("Now", NpgsqlDbType.TimestampTz) { Value = now.UtcDateTime });
+            },
+            ct);
+        return affected == 1;
+    }
+
     public async Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
     {
         // Terminal states: Closed = 3, Abandoned = 4 (check ConversationStateMachine)

@@ -100,9 +100,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITypificationSchemaStore, InMemoryTypificationSchemaStore>();
         services.AddSingleton<ISchemaBindingStore, InMemorySchemaBindingStore>();
         services.AddSingleton<ITypificationSubmissionStore, InMemoryTypificationSubmissionStore>();
+        services.AddSingleton<ITypificationSubmissionCorrectionStore, InMemoryTypificationSubmissionCorrectionStore>();
         services.AddSingleton<IReasonHintStore, InMemoryReasonHintStore>();
         services.AddSingleton<IAiSuggestionStore, InMemoryAiSuggestionStore>();
         services.AddSingleton<ITenantLlmConfigStore, InMemoryTenantLlmConfigStore>();
+        services.AddSingleton<ITenantAutonomousDispositionStore, InMemoryTenantAutonomousDispositionStore>();
 
         // Automation
         services.AddSingleton<ITimerStore, InMemoryTimerStore>();

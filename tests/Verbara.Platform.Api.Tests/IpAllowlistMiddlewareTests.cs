@@ -209,6 +209,7 @@ public class IpAllowlistMiddlewareTests
             string actorId, string actorType, string? targetId = null, string? targetType = null,
             Guid? correlationId = null, AuditChanges? changes = null,
             IReadOnlyDictionary<string, string>? metadata = null,
+            DateTimeOffset? retainUntil = null,
             CancellationToken ct = default) => Task.CompletedTask;
 
 #pragma warning disable CS0618

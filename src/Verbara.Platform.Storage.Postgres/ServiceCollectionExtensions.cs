@@ -152,9 +152,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITypificationSchemaStore, PostgresTypificationSchemaStore>();
         services.AddSingleton<ISchemaBindingStore, PostgresSchemaBindingStore>();
         services.AddSingleton<ITypificationSubmissionStore, PostgresTypificationSubmissionStore>();
+        services.AddSingleton<ITypificationSubmissionCorrectionStore, PostgresTypificationSubmissionCorrectionStore>();
         services.AddSingleton<IReasonHintStore, PostgresReasonHintStore>();
         services.AddSingleton<IAiSuggestionStore, PostgresAiSuggestionStore>();
         services.AddSingleton<ITenantLlmConfigStore, PostgresTenantLlmConfigStore>();
+        services.AddSingleton<ITenantAutonomousDispositionStore, PostgresTenantAutonomousDispositionStore>();
 
         // Audit
         services.AddSingleton<IAuditStore, PostgresAuditStore>();

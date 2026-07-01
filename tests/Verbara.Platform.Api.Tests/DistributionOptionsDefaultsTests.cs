@@ -40,4 +40,32 @@ public sealed class DistributionOptionsDefaultsTests
         TimeSpan.FromMilliseconds(options.QueueDistributionStartupDelayMs)
             .Should().Be(TimeSpan.FromSeconds(3));
     }
+
+    // ─── Autonomous AI disposition (ADR-0034) — defaults are load-bearing safety ──────
+    // AutonomousDispositionEnabled MUST default false (the global breaker / byte-identical
+    // close path); the cap and correction window lock the documented production defaults.
+
+    [Fact]
+    public void AutonomousDispositionEnabled_ShouldDefaultToFalse_WhenUnset()
+    {
+        var options = new DistributionOptions();
+
+        options.AutonomousDispositionEnabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AutonomousDispositionPerCycleCap_ShouldDefaultTo50_WhenUnset()
+    {
+        var options = new DistributionOptions();
+
+        options.AutonomousDispositionPerCycleCap.Should().Be(50);
+    }
+
+    [Fact]
+    public void AutonomousCorrectionWindowDays_ShouldDefaultTo30_WhenUnset()
+    {
+        var options = new DistributionOptions();
+
+        options.AutonomousCorrectionWindowDays.Should().Be(30);
+    }
 }

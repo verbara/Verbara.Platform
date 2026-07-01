@@ -10,6 +10,13 @@ public interface IAuditService
     /// <summary>
     /// Records an auditable action using the full structured model.
     /// </summary>
+    /// <remarks>
+    /// The optional <c>retainUntil</c> sets a per-record retention floor (ADR-0034 Decision 4): when
+    /// set, the blanket time-based purge in <c>AuditRetentionService</c> MUST NOT delete this record
+    /// before that UTC instant — e.g. an autonomous-disposition AI-actor event carries
+    /// <c>now + correction window</c> so the sweep cannot destroy a decision still inside its
+    /// correction window. Null (the default) leaves the record subject to the normal blanket purge.
+    /// </remarks>
     Task RecordAsync(
         TenantId tenantId,
         string category,
@@ -22,6 +29,7 @@ public interface IAuditService
         Guid? correlationId = null,
         AuditChanges? changes = null,
         IReadOnlyDictionary<string, string>? metadata = null,
+        DateTimeOffset? retainUntil = null,
         CancellationToken ct = default);
 
     /// <summary>

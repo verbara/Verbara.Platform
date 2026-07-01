@@ -130,6 +130,7 @@ public sealed class AgentLivenessReaperTests
             Arg.Is<IReadOnlyDictionary<string, string>>(m =>
                 m["old_state"] == "Available"
                 && m["reason"] == "missing_presence_key"),
+            Arg.Any<DateTimeOffset?>(),
             Arg.Any<CancellationToken>());
     }
 

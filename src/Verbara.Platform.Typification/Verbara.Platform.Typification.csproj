@@ -19,6 +19,9 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
+    <!-- ILicenseStatus + LicenseFeature: the per-deployment Pro license snapshot the autonomous
+         disposition policy gates on (the same abstraction LicenseGateMiddleware reads; ADR-0034). -->
+    <PackageReference Include="Verbara.Sdk.Pro.Licensing" />
   </ItemGroup>
 
 </Project>

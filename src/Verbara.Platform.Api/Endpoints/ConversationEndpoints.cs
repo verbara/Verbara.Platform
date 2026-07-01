@@ -1,7 +1,10 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Serialization;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Conversations;
@@ -50,6 +53,12 @@ internal static class ConversationEndpoints
         group.MapPost("/{id}/hold", HoldConversation);
         group.MapPost("/{id}/unhold", UnholdConversation);
         group.MapPost("/", CreateConversation);
+        // ADR-0034 — supervisor correction of an autonomously stamped disposition. Gated by the
+        // dedicated `typification:correct-autonomous` permission (NOT AdminOnly — a supervisor is
+        // the realistic actor). The `Permission:` prefix forces the PermissionPolicyProvider to
+        // build a PermissionRequirement even though the permission id carries only one colon.
+        group.MapPost("/{id}/typification-correction", CorrectTypification)
+            .RequireAuthorization("Permission:typification:correct-autonomous");
     }
 
     private static async Task<IResult> ListConversations(
@@ -810,6 +819,140 @@ internal static class ConversationEndpoints
             : Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot unhold conversation"));
     }
 
+    // ADR-0034 — POST /conversations/{id}/typification-correction. A supervisor holding the
+    // `typification:correct-autonomous` permission (enforced on the route) corrects an autonomously
+    // stamped disposition. The original AutoAi submission stays byte-identical: the human path is
+    // written to a SEPARATE append-only correction record; only the submission's CorrectionState /
+    // CorrectedAt (status pointers) are flipped. The conversation is NOT reopened. All three guards
+    // return 409 with a machine-readable code BEFORE any write.
+    private static async Task<IResult> CorrectTypification(
+        string id,
+        HttpContext context,
+        [FromServices] ITypificationSubmissionStore submissionStore,
+        [FromServices] ITypificationSubmissionCorrectionStore correctionStore,
+        [FromServices] IAuditService auditService,
+        [FromServices] AutonomousDispositionMetrics metrics,
+        [FromServices] IOptions<DistributionOptions> options,
+        [FromBody] TypificationCorrectionRequest body,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var conversationId = EntityId.From(id);
+        var callerUserId = GetCorrectingUserId(context);
+
+        // Body validation (BadRequest, not a 409 guard): a corrected leaf/path is required.
+        if (body.CorrectedNodePath is not { Count: > 0 })
+            return Results.BadRequest(new ErrorResponse("correctedNodePath must be a non-empty root→leaf path"));
+
+        var submission = await submissionStore.GetByConversationIdAsync(tenantId, conversationId, ct);
+        if (submission is null)
+            return Results.NotFound();
+
+        // ── Guards (all BEFORE any write; each returns 409 + a machine-readable code) ──
+
+        // 1. Only an autonomously stamped (AutoAi) disposition is correctable via this path.
+        if (submission.Source != SubmissionSource.AutoAi)
+            return Conflict(TypificationCorrectionErrorCodes.NotAutonomous,
+                "Only an autonomously stamped (AutoAi) disposition can be corrected here.");
+
+        // 2. The correction window must not have elapsed (CompletedAt + window ≥ now).
+        var windowEnd = submission.CompletedAt.AddDays(options.Value.AutonomousCorrectionWindowDays);
+        if (clock.UtcNow > windowEnd)
+            return Conflict(TypificationCorrectionErrorCodes.CorrectionWindowExpired,
+                "The correction window for this autonomous disposition has expired.");
+
+        // 3. A conversation is correctable at most once.
+        if (submission.CorrectionState != CorrectionState.None)
+            return Conflict(TypificationCorrectionErrorCodes.AlreadyCorrected,
+                "This autonomous disposition has already been corrected.");
+
+        // ── Effect (all guards passed) ──
+
+        var now = clock.UtcNow;
+        var correctedPath = body.CorrectedNodePath.Select(EntityId.From).ToList();
+        var correctedLeaf = correctedPath[^1];
+
+        // (a) INSERT the SEPARATE append-only correction record (the human path).
+        await correctionStore.InsertAsync(
+            new TypificationSubmissionCorrection
+            {
+                TenantId = tenantId,
+                ConversationId = conversationId,
+                CorrectedLeafNodeId = correctedLeaf,
+                CorrectedNodePath = correctedPath,
+                CorrectedByUserId = callerUserId,
+                CorrectedAt = now,
+            },
+            ct);
+
+        // (b) Flip ONLY the submission's status pointers via load→with→SaveAsync. The AI leaf,
+        //     path, confidence, and Source stay byte-identical — the recorded AI decision is
+        //     immutable; CorrectionState/CorrectedAt only mark it superseded.
+        var corrected = submission with
+        {
+            CorrectionState = CorrectionState.Corrected,
+            CorrectedAt = now,
+        };
+        await submissionStore.SaveAsync(corrected, ct);
+
+        // The conversation stays Closed — NO reopen (ADR-0034 Decision 5).
+
+        // (c) Emit the DispositionCorrected audit (actor = supervisor user), recording the original
+        //     AI path and the corrected path, with Confirmed = (original == corrected). Retention
+        //     floor mirrors the commit's: now + correction window.
+        var originalPathStr = string.Join(" > ", submission.SelectedNodePath.Select(n => n.Value));
+        var correctedPathStr = string.Join(" > ", correctedPath.Select(n => n.Value));
+        var confirmed = string.Equals(originalPathStr, correctedPathStr, StringComparison.Ordinal);
+        var retainUntil = now.AddDays(options.Value.AutonomousCorrectionWindowDays);
+
+        await auditService.RecordAsync(
+            tenantId,
+            category: "conversations",
+            action: "typification.autonomous.corrected",
+            severity: "info",
+            actorId: callerUserId,
+            actorType: "user",
+            targetId: conversationId.Value,
+            targetType: "Conversation",
+            metadata: new Dictionary<string, string>
+            {
+                ["original_node_path"] = originalPathStr,
+                ["corrected_node_path"] = correctedPathStr,
+                ["confirmed"] = confirmed ? "true" : "false",
+                ["tenant"] = tenantId.Value,
+                ["conversation"] = conversationId.Value,
+            },
+            retainUntil: retainUntil,
+            ct: ct);
+
+        // (d) Metric (tenant-dimensioned).
+        metrics.RecordCorrection(tenantId.Value);
+
+        return Results.Ok(new TypificationCorrectionResponse(
+            ConversationId: conversationId.Value,
+            CorrectedNodePath: correctedPath.Select(n => n.Value).ToArray(),
+            CorrectedLeafNodeId: correctedLeaf.Value,
+            CorrectedByUserId: callerUserId,
+            CorrectedAt: now,
+            Confirmed: confirmed));
+    }
+
+    // Machine-readable 409 for the correction guards.
+    private static IResult Conflict(string code, string message) =>
+        Results.Json(
+            new TypificationCorrectionErrorResponse(code, message),
+            ApiJsonContext.Default.TypificationCorrectionErrorResponse,
+            statusCode: StatusCodes.Status409Conflict);
+
+    // The correcting supervisor's user id (same canonical order as the permission handler:
+    // user_id ?? NameIdentifier ?? sub). Falls back to "system" so the audit records an actor.
+    private static string GetCorrectingUserId(HttpContext context) =>
+        context.User.FindFirstValue("user_id")
+        ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? context.User.FindFirstValue("sub")
+        ?? "system";
+
     private static TenantId GetTenantId(HttpContext context)
     {
         if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
@@ -898,3 +1041,44 @@ internal sealed record CreateConversationRequest(
     string ContactId,
     string Channel,
     string? InitialMessage = null);
+
+// ─── ADR-0034 — supervisor correction of an autonomous disposition ─────────────
+
+/// <summary>
+/// Request body for POST /conversations/{id}/typification-correction: the supervisor's corrected
+/// root→leaf node-id path. The last element is the corrected leaf. The correcting user id is taken
+/// from the caller's credentials, not the body.
+/// </summary>
+internal sealed record TypificationCorrectionRequest(
+    IReadOnlyList<string> CorrectedNodePath);
+
+/// <summary>
+/// 200 payload for a successful correction: echoes the persisted (separate, append-only) correction
+/// record and whether the human path merely CONFIRMED the AI path (<c>original == corrected</c>).
+/// </summary>
+internal sealed record TypificationCorrectionResponse(
+    string ConversationId,
+    IReadOnlyList<string> CorrectedNodePath,
+    string CorrectedLeafNodeId,
+    string CorrectedByUserId,
+    DateTimeOffset CorrectedAt,
+    bool Confirmed);
+
+/// <summary>
+/// 409 payload for a rejected correction. <see cref="Code"/> is machine-readable
+/// (see <see cref="TypificationCorrectionErrorCodes"/>).
+/// </summary>
+internal sealed record TypificationCorrectionErrorResponse(string Code, string Message);
+
+/// <summary>Machine-readable 409 error codes for the correction endpoint (ADR-0034).</summary>
+internal static class TypificationCorrectionErrorCodes
+{
+    /// <summary>The submission is not an autonomously stamped (AutoAi) disposition.</summary>
+    internal const string NotAutonomous = "NotAutonomous";
+
+    /// <summary>The bounded correction window has elapsed.</summary>
+    internal const string CorrectionWindowExpired = "CorrectionWindowExpired";
+
+    /// <summary>The disposition has already been corrected once.</summary>
+    internal const string AlreadyCorrected = "AlreadyCorrected";
+}

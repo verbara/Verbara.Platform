@@ -332,4 +332,69 @@ public sealed class InMemoryTypificationStoresTests
         loaded.Should().NotBeNull();
         loaded!.Notes.Should().Be("second");
     }
+
+    [Fact]
+    public async Task SubmissionStore_ShouldRoundTripAutonomousFields_WhenAutoAiStamped()
+    {
+        var store = new InMemoryTypificationSubmissionStore();
+        var conversationId = EntityId.New();
+        var correctedAt = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
+
+        var submission = new TypificationSubmission
+        {
+            TenantId = Tenant,
+            ConversationId = conversationId,
+            AgentId = EntityId.New(),
+            SchemaId = EntityId.New(),
+            SchemaVersion = 1,
+            SelectedNodePath = [EntityId.New()],
+            LeafNodeId = EntityId.New(),
+            FieldValues = new Dictionary<string, string>(),
+            Source = SubmissionSource.AutoAi,
+            AutonomousActorId = "verbara:ai:autonomous-worker",
+            CorrectionState = CorrectionState.Corrected,
+            CorrectedAt = correctedAt,
+            Duration = TimeSpan.Zero,
+            CompletedAt = DateTimeOffset.UtcNow,
+        };
+
+        await store.SaveAsync(submission, CancellationToken.None);
+
+        var loaded = await store.GetByConversationIdAsync(Tenant, conversationId, CancellationToken.None);
+        loaded.Should().NotBeNull();
+        loaded!.Source.Should().Be(SubmissionSource.AutoAi);
+        loaded.AutonomousActorId.Should().Be("verbara:ai:autonomous-worker");
+        loaded.CorrectionState.Should().Be(CorrectionState.Corrected);
+        loaded.CorrectedAt.Should().Be(correctedAt);
+    }
+
+    [Fact]
+    public async Task SubmissionStore_ShouldDefaultCorrectionStateToNone_WhenNotSet()
+    {
+        var store = new InMemoryTypificationSubmissionStore();
+        var conversationId = EntityId.New();
+
+        var submission = new TypificationSubmission
+        {
+            TenantId = Tenant,
+            ConversationId = conversationId,
+            AgentId = EntityId.New(),
+            SchemaId = EntityId.New(),
+            SchemaVersion = 1,
+            SelectedNodePath = [EntityId.New()],
+            LeafNodeId = EntityId.New(),
+            FieldValues = new Dictionary<string, string>(),
+            Source = SubmissionSource.Manual,
+            Duration = TimeSpan.Zero,
+            CompletedAt = DateTimeOffset.UtcNow,
+        };
+
+        await store.SaveAsync(submission, CancellationToken.None);
+
+        var loaded = await store.GetByConversationIdAsync(Tenant, conversationId, CancellationToken.None);
+        loaded.Should().NotBeNull();
+        loaded!.CorrectionState.Should().Be(CorrectionState.None);
+        loaded.AutonomousActorId.Should().BeNull();
+        loaded.CorrectedAt.Should().BeNull();
+    }
 }

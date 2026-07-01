@@ -88,6 +88,15 @@ public sealed class AuditEntry : ITenantScoped
     /// <summary>When the action occurred.</summary>
     public required DateTimeOffset OccurredAt { get; init; }
 
+    /// <summary>
+    /// Per-record retention floor (ADR-0034 Decision 4). When set, the blanket time-based purge in
+    /// <c>AuditRetentionService</c> MUST NOT delete this record before this UTC instant, so a record
+    /// still inside its window (e.g. an autonomous-disposition decision within the correction window)
+    /// survives an older cutoff. Null (the default) means the record is subject to the normal blanket
+    /// purge with no floor. Purge-logic enforcement lands in a later phase.
+    /// </summary>
+    public DateTimeOffset? RetainUntil { get; init; }
+
     // ─── Backward-compatible aliases ──────────────────────────────────────────
 
     /// <summary>

@@ -35,6 +35,7 @@ public sealed class DefaultAuditService : IAuditService
         Guid? correlationId = null,
         AuditChanges? changes = null,
         IReadOnlyDictionary<string, string>? metadata = null,
+        DateTimeOffset? retainUntil = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(category);
@@ -60,6 +61,7 @@ public sealed class DefaultAuditService : IAuditService
             Changes = changes,
             Metadata = metadata,
             OccurredAt = occurredAt,
+            RetainUntil = retainUntil,
             IntegrityHash = ComputeIntegrityHash(tenantId, actorType, actorId, action, targetType, targetId, occurredAt, metadata),
         };
 
@@ -100,8 +102,10 @@ public sealed class DefaultAuditService : IAuditService
     /// identifying fields. Metadata keys are sorted alphabetically (Ordinal) so the hash is
     /// stable regardless of insertion order. If a field is null it contributes an empty
     /// segment so the canonical form never collides across field positions.
+    /// Exposed for stores that re-derive the hash after an Art. 17 redaction
+    /// (ADR-0034 Decision 4) so a redacted record stays tamper-evident in its redacted state.
     /// </summary>
-    private static string ComputeIntegrityHash(
+    public static string ComputeIntegrityHash(
         TenantId tenantId,
         string actorType,
         string actorId,

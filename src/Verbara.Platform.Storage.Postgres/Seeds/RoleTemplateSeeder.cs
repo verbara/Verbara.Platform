@@ -231,6 +231,8 @@ public static class RoleTemplateSeeder
                 "analytics:cdr:view",
                 "analytics:interval:view",
                 "agentassist:session:view",
+                // ADR-0034 — a supervisor may correct an autonomously stamped disposition.
+                "typification:correct-autonomous",
             ]);
 
         // ── Quality Analyst ──
@@ -413,6 +415,9 @@ public static class RoleTemplateSeeder
             // P2b A5 — typification AI gating
             "typification:ai:configure",
             "typification:ai:autonomous",
+            // ADR-0034 — supervisor correction of an autonomous disposition (also granted to
+            // admin/system_admin via AllPermissions; supervisor gets it explicitly above).
+            "typification:correct-autonomous",
             // c1 (credit-ledger-topups) — tenant admins may read their OWN AI-credit balance + ledger.
             // NOTE: billing:credits:grant is intentionally absent here (platform_admin-only); adding it
             // to AllPermissions() would leak the cross-tenant top-up grant to admin/system_admin.

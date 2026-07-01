@@ -1,3 +1,4 @@
+using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
@@ -13,6 +14,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
     private readonly IAuthEventStore _authEventStore;
     private readonly IUserStore _userStore;
     private readonly IPurgeLogStore _purgeLogStore;
+    private readonly IAuditStore _auditStore;
 
     public GdprPurgeService(
         IContactStore contactStore,
@@ -20,7 +22,8 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         IMessageStore messageStore,
         IAuthEventStore authEventStore,
         IUserStore userStore,
-        IPurgeLogStore purgeLogStore)
+        IPurgeLogStore purgeLogStore,
+        IAuditStore auditStore)
     {
         _contactStore = contactStore;
         _conversationStore = conversationStore;
@@ -28,6 +31,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         _authEventStore = authEventStore;
         _userStore = userStore;
         _purgeLogStore = purgeLogStore;
+        _auditStore = auditStore;
     }
 
 
@@ -51,12 +55,26 @@ internal sealed class GdprPurgeService : IGdprPurgeService
                 entitiesDeleted["messages"] = messagesDeleted;
         }
 
-        // 3. Delete conversations
+        // 3. Art. 17 redaction of autonomous-disposition audit records (ADR-0034 Decision 4).
+        //    These AI-actor records reference the contact's conversations. We redact the
+        //    contact-identifying linkage (conversation ID) while RETAINING the decision-fact
+        //    (node path, confidence, timestamp, AI actor) under the Art. 17(3) legal-defence
+        //    exemption — they are anonymised in place, NOT deleted. Done before the conversations
+        //    are deleted, while we still hold their IDs.
+        if (conversationIds.Count > 0)
+        {
+            var auditRedacted = await _auditStore.RedactContactLinkageAsync(
+                tid, conversationIds.Select(c => c.Value).ToList(), ct);
+            if (auditRedacted > 0)
+                entitiesDeleted["auditRecordsRedacted"] = auditRedacted;
+        }
+
+        // 4. Delete conversations
         var conversationsDeleted = await _conversationStore.DeleteByContactAsync(tid, cid, ct);
         if (conversationsDeleted > 0)
             entitiesDeleted["conversations"] = conversationsDeleted;
 
-        // 4. Delete auth events for linked user (if any)
+        // 5. Delete auth events for linked user (if any)
         var contact = await _contactStore.GetByIdAsync(tid, cid, ct);
         if (contact is not null)
         {
@@ -73,11 +91,11 @@ internal sealed class GdprPurgeService : IGdprPurgeService
             }
         }
 
-        // 5. Delete contact itself
+        // 6. Delete contact itself
         await _contactStore.DeleteAsync(tid, cid, ct);
         entitiesDeleted["contact"] = 1;
 
-        // 6. Write tombstone (NO PII -- only metadata)
+        // 7. Write tombstone (NO PII -- only metadata)
         var purgeId = Guid.NewGuid().ToString("N");
         var purgedAt = DateTimeOffset.UtcNow;
         var purgeEntry = new PurgeEntry

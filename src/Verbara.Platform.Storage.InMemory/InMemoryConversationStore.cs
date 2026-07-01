@@ -136,6 +136,27 @@ internal sealed class InMemoryConversationStore : IConversationStore
         return Task.FromResult(result);
     }
 
+    public Task<bool> TryConditionalCloseWrapUpAsync(
+        TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct)
+    {
+        // Mirror the Postgres UPDATE ... WHERE state = WrapUp single-row CAS: lock on the stored
+        // entity so a concurrent human typify (which transitions it out of WrapUp) and this close
+        // cannot interleave. Returns false (0 rows) when the conversation is missing or already
+        // left WrapUp — the autonomous caller then skips stamping (ADR-0034 Decision 2).
+        if (!_items.TryGetValue((tenantId, conversationId), out var conv))
+            return Task.FromResult(false);
+
+        lock (conv)
+        {
+            if (conv.State != ConversationState.WrapUp)
+                return Task.FromResult(false);
+
+            conv.TransitionTo(ConversationState.Closed, now);
+            conv.UpdatedAt = now;
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<int> CountActiveWorkAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
     {
         var count = _items.Values.Count(c =>

@@ -47,4 +47,22 @@ public sealed record TypificationSubmission : ITenantScoped
     public TimeSpan Duration { get; init; }
 
     public DateTimeOffset CompletedAt { get; init; }
+
+    // ─── Autonomous disposition (ADR-0034) ────────────────────────────────────
+
+    /// <summary>
+    /// Identifier of the AI actor that autonomously stamped this disposition (e.g.
+    /// <c>verbara:ai:autonomous-worker</c>), set only when <see cref="Source"/> is
+    /// <see cref="SubmissionSource.AutoAi"/> on the abandoned-wrap-up close path. Null otherwise.
+    /// </summary>
+    public string? AutonomousActorId { get; init; }
+
+    /// <summary>
+    /// Append-only correction state. An autonomously stamped submission is immutable; a supervisor
+    /// correction creates a new corrective submission and marks the original <see cref="CorrectionState.Corrected"/>.
+    /// </summary>
+    public CorrectionState CorrectionState { get; init; } = CorrectionState.None;
+
+    /// <summary>UTC timestamp at which this submission was corrected (null while uncorrected).</summary>
+    public DateTimeOffset? CorrectedAt { get; init; }
 }
