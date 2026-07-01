@@ -43,7 +43,85 @@ internal static class TypificationEndpoints
         group.MapPost("/bindings", CreateBinding);
         group.MapPut("/bindings/{id}", UpdateBinding);
         group.MapDelete("/bindings/{id}", DeleteBinding);
+
+        // ── Autonomous-disposition activation gate (ADR-0034 Decision 3) ──────
+        // A per-tenant CONTROLLER INSTRUCTION + config gate under the DPA — NOT the data
+        // subject's consent. POST records the activation instruction (attesting admin id);
+        // DELETE soft-revokes it. AdminOnly + AdvancedTypification (inherited from the group).
+        group.MapPost("/autonomous-disposition", ActivateAutonomousDisposition);
+        group.MapDelete("/autonomous-disposition", RevokeAutonomousDisposition);
     }
+
+    // ─── Autonomous-disposition activation-gate handlers (ADR-0034) ───────────
+
+    // POST /admin/typification/autonomous-disposition — record the activation instruction.
+    // The attesting user id is the caller's (resolved in the canonical user_id ?? NameIdentifier
+    // ?? sub order). On RE-activation we construct a FRESH, non-revoked record (B1 review): the
+    // Upsert's EXCLUDED set copies revoked_at/revoked_by from the incoming record, so a stale
+    // revoked record would leave a prior revocation in place. A fresh record clears it.
+    private static async Task<IResult> ActivateAutonomousDisposition(
+        HttpContext context,
+        [FromServices] ITenantAutonomousDispositionStore store,
+        [FromServices] IAuditService audit,
+        IClock clock,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var callerUserId = GetCallerUserId(context);
+
+        var record = new TenantAutonomousDisposition
+        {
+            TenantId = tenantId,
+            AttestedByUserId = callerUserId,
+            AttestedAt = clock.UtcNow,
+            // FRESH record: revocation fields explicitly null so a prior revocation is cleared.
+            RevokedAt = null,
+            RevokedByUserId = null,
+        };
+
+        await store.UpsertAsync(record, ct);
+
+        await RecordAudit(context, audit, tenantId, "typification.autonomous.gate_activated",
+            targetId: tenantId.Value, before: null,
+            after: new { AttestedByUserId = callerUserId }, ct);
+
+        return Results.Created(
+            "/admin/typification/autonomous-disposition",
+            new AutonomousDispositionGateResponse(
+                Active: true,
+                AttestedByUserId: callerUserId,
+                AttestedAt: record.AttestedAt,
+                RevokedAt: null,
+                RevokedByUserId: null));
+    }
+
+    // DELETE /admin/typification/autonomous-disposition — soft-revoke the gate.
+    private static async Task<IResult> RevokeAutonomousDisposition(
+        HttpContext context,
+        [FromServices] ITenantAutonomousDispositionStore store,
+        [FromServices] IAuditService audit,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var callerUserId = GetCallerUserId(context);
+
+        await store.RevokeAsync(tenantId, EntityId.From(callerUserId), ct);
+
+        await RecordAudit(context, audit, tenantId, "typification.autonomous.gate_revoked",
+            targetId: tenantId.Value, before: null,
+            after: new { RevokedByUserId = callerUserId }, ct);
+
+        return Results.NoContent();
+    }
+
+    // Caller user id in the canonical order used by the permission handlers:
+    // user_id (API-key owning user) ?? NameIdentifier ?? sub (JWT). Falls back to "system"
+    // so the attestation always records a non-empty actor.
+    private static string GetCallerUserId(HttpContext context) =>
+        context.User.FindFirstValue("user_id")
+        ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? context.User.FindFirstValue("sub")
+        ?? "system";
 
     // ─── Schema handlers ─────────────────────────────────────────────────────
 
@@ -884,3 +962,23 @@ internal sealed record CalibrationStatusDto(
     double Accuracy,
     bool AutoFillReady,
     bool AutonomousReady);
+
+// ─── ADR-0034 — autonomous-disposition activation-gate DTOs ────────────────────
+
+/// <summary>
+/// Request body for POST /admin/typification/autonomous-disposition. The activation is a marker:
+/// the attesting user id is taken from the caller's credentials, not the body, so no fields are
+/// required. Present for a typed, forward-compatible request shape (AOT source-gen).
+/// </summary>
+internal sealed record AutonomousDispositionGateRequest();
+
+/// <summary>
+/// Response describing the per-tenant autonomous-disposition activation gate (ADR-0034 Decision 3):
+/// whether it is currently active and the controller-instruction attestation/revocation metadata.
+/// </summary>
+internal sealed record AutonomousDispositionGateResponse(
+    bool Active,
+    string AttestedByUserId,
+    DateTimeOffset AttestedAt,
+    DateTimeOffset? RevokedAt,
+    string? RevokedByUserId);

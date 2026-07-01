@@ -195,6 +195,9 @@ internal static class PermissionSeeder
             "Enable AI classification, AutoFill, and configure thresholds for typification");
         yield return P("typification:ai:autonomous", "typification", "ai", "autonomous",
             "Allow autonomous (no-human) typification commits via AI classification");
+        // ── typification:correct (1) — ADR-0034 supervisor correction ──
+        yield return P("typification:correct-autonomous", "typification", "correct-autonomous", "correct",
+            "Correct an autonomously stamped (AutoAi) typification disposition within the correction window");
 
         // ── system (6) ──
         yield return P("system:tenant:configure", "system", "tenant", "configure",
