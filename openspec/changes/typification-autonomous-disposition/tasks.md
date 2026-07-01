@@ -37,10 +37,10 @@
 
 ## 5. Phase B — AuditRetentionService retention floor (focused)
 
-- [ ] 5.1 Update `IAuditStore.DeleteOlderThanAsync` (or its query) so the purge predicate respects `retain_until` (delete only where `retain_until IS NULL OR retain_until < now`); Postgres + InMemory
-- [ ] 5.2 Add Art. 17 redaction path: on contact erasure, NULL/scrub contact-identifying columns on autonomous audit records while retaining the decision-fact (coordinate with `IGdprPurgeService`)
-- [ ] 5.3 Regression test: a record within its `retain_until` survives a blanket purge against an older cutoff; a record past its floor is purged (InMemory store — CI has no live-DB purge test)
-- [ ] 5.4 Run `dotnet test` — retention tests green; zero warnings
+- [x] 5.1 Update `IAuditStore.DeleteOlderThanAsync` (or its query) so the purge predicate respects `retain_until` (delete only where `retain_until IS NULL OR retain_until < now`); Postgres + InMemory
+- [x] 5.2 Add Art. 17 redaction path: on contact erasure, NULL/scrub contact-identifying columns on autonomous audit records while retaining the decision-fact (coordinate with `IGdprPurgeService`)
+- [x] 5.3 Regression test: a record within its `retain_until` survives a blanket purge against an older cutoff; a record past its floor is purged (InMemory store — CI has no live-DB purge test)
+- [x] 5.4 Run `dotnet test` — retention tests green; zero warnings
 
 ## 6. Phase B — API endpoints + DTOs + RBAC (focused)
 

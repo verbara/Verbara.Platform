@@ -160,6 +160,170 @@ public sealed class InMemoryAuditStoreTests
         page1.TotalCount.Should().Be(5);
     }
 
+    // ─── Retention floor (ADR-0034 Decision 4) ─────────────────────────────────────
+
+    [Fact]
+    public async Task DeleteOlderThanAsync_ShouldPreserveRecord_WhenRetainUntilInFuture()
+    {
+        // Regression: an autonomous-disposition decision still inside its correction window must
+        // survive a blanket purge whose cutoff is newer than the record's OccurredAt. CI has no
+        // live-DB purge test, so this locks the InMemory store's floor honouring.
+        var store = new InMemoryAuditStore();
+        var occurredAt = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero); // long before cutoff
+        var inWindow = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "typification.autonomous.commit",
+            TargetType = "Conversation",
+            TargetId = "conv-in-window",
+            OccurredAt = occurredAt,
+            RetainUntil = DateTimeOffset.UtcNow.AddYears(1), // floor not yet elapsed
+        };
+        await store.SaveAsync(inWindow, CancellationToken.None);
+
+        // Cutoff is newer than OccurredAt (so the blanket predicate alone would delete it)
+        // but the retention floor is still in the future, so the record must be preserved.
+        var deleted = await store.DeleteOlderThanAsync(
+            Tenant1, DateTimeOffset.UtcNow.AddMonths(-1), CancellationToken.None);
+
+        deleted.Should().Be(0);
+        var remaining = await store.GetByEntityAsync(Tenant1, "Conversation", "conv-in-window", CancellationToken.None);
+        remaining.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task DeleteOlderThanAsync_ShouldPurgeRecord_WhenRetainUntilElapsed()
+    {
+        var store = new InMemoryAuditStore();
+        var pastFloor = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "typification.autonomous.commit",
+            TargetType = "Conversation",
+            TargetId = "conv-past-floor",
+            OccurredAt = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            RetainUntil = DateTimeOffset.UtcNow.AddDays(-1), // floor already elapsed
+        };
+        await store.SaveAsync(pastFloor, CancellationToken.None);
+
+        var deleted = await store.DeleteOlderThanAsync(
+            Tenant1, DateTimeOffset.UtcNow.AddMonths(-1), CancellationToken.None);
+
+        deleted.Should().Be(1);
+        var remaining = await store.GetByEntityAsync(Tenant1, "Conversation", "conv-past-floor", CancellationToken.None);
+        remaining.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteOlderThanAsync_ShouldPurgeRecord_WhenRetainUntilNullAndOlderThanCutoff()
+    {
+        var store = new InMemoryAuditStore();
+        var noFloor = MakeEntry(
+            targetId: "conv-no-floor",
+            occurredAt: new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero)); // RetainUntil null by default
+        await store.SaveAsync(noFloor, CancellationToken.None);
+
+        var deleted = await store.DeleteOlderThanAsync(
+            Tenant1, DateTimeOffset.UtcNow.AddMonths(-1), CancellationToken.None);
+
+        deleted.Should().Be(1);
+        var remaining = await store.GetByEntityAsync(Tenant1, "Conversation", "conv-no-floor", CancellationToken.None);
+        remaining.Should().BeEmpty();
+    }
+
+    // ─── Art. 17 redaction (ADR-0034 Decision 4) ────────────────────────────────────
+
+    [Fact]
+    public async Task RedactContactLinkageAsync_ShouldNullLinkageButRetainDecisionFact_WhenAutonomousRecord()
+    {
+        var store = new InMemoryAuditStore();
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "typification.autonomous.commit",
+            Category = "conversations",
+            Severity = "info",
+            ActorId = "verbara:ai:autonomous-worker",
+            ActorType = "ai",
+            TargetType = "Conversation",
+            TargetId = "conv-erase",
+            OccurredAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
+            RetainUntil = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
+            Metadata = new Dictionary<string, string>
+            {
+                ["node_path"] = "Sales > Upgrade > Completed",
+                ["leaf_node_id"] = "leaf-1",
+                ["confidence"] = "0.9800",
+                ["tenant"] = Tenant1.Value,
+                ["conversation"] = "conv-erase",
+            },
+        };
+        await store.SaveAsync(entry, CancellationToken.None);
+
+        var redacted = await store.RedactContactLinkageAsync(
+            Tenant1, ["conv-erase"], CancellationToken.None);
+
+        redacted.Should().Be(1);
+
+        // The decision fact survives, queryable by node path / confidence; the contact linkage is gone.
+        var all = await store.SearchAsync(Tenant1, new AuditQuery(Action: "typification.autonomous.commit"), CancellationToken.None);
+        all.Items.Should().ContainSingle();
+        var result = all.Items[0];
+        result.TargetId.Should().BeNull("the contact-identifying conversation linkage is redacted");
+        result.Metadata!["conversation"].Should().Be("[redacted]");
+        result.Metadata!["redacted"].Should().Be("true");
+        result.Metadata!["node_path"].Should().Be("Sales > Upgrade > Completed", "the decision fact is retained");
+        result.Metadata!["confidence"].Should().Be("0.9800");
+        result.ActorType.Should().Be("ai");
+        result.OccurredAt.Should().Be(entry.OccurredAt);
+        result.RetainUntil.Should().Be(entry.RetainUntil);
+        // Hash recomputed over the redacted canonical fields → record stays tamper-evident.
+        result.IntegrityHash.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task RedactContactLinkageAsync_ShouldNotTouchNonAutonomousRecords()
+    {
+        var store = new InMemoryAuditStore();
+        var other = MakeEntry(action: "conversation.created", targetId: "conv-erase");
+        await store.SaveAsync(other, CancellationToken.None);
+
+        var redacted = await store.RedactContactLinkageAsync(
+            Tenant1, ["conv-erase"], CancellationToken.None);
+
+        redacted.Should().Be(0);
+        var remaining = await store.GetByEntityAsync(Tenant1, "Conversation", "conv-erase", CancellationToken.None);
+        remaining.Should().ContainSingle();
+        remaining[0].TargetId.Should().Be("conv-erase", "non-autonomous records are untouched");
+    }
+
+    [Fact]
+    public async Task RedactContactLinkageAsync_ShouldBeIdempotent_WhenRunTwice()
+    {
+        var store = new InMemoryAuditStore();
+        var entry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = Tenant1,
+            Action = "typification.autonomous.commit",
+            ActorType = "ai",
+            TargetType = "Conversation",
+            TargetId = "conv-erase",
+            OccurredAt = DateTimeOffset.UtcNow,
+            Metadata = new Dictionary<string, string> { ["conversation"] = "conv-erase" },
+        };
+        await store.SaveAsync(entry, CancellationToken.None);
+
+        var first = await store.RedactContactLinkageAsync(Tenant1, ["conv-erase"], CancellationToken.None);
+        var second = await store.RedactContactLinkageAsync(Tenant1, ["conv-erase"], CancellationToken.None);
+
+        first.Should().Be(1);
+        second.Should().Be(0, "an already-redacted record is not redacted again");
+    }
+
     [Fact]
     public async Task SearchAsync_ShouldIsolateTenants()
     {

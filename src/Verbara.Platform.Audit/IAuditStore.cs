@@ -30,6 +30,26 @@ public interface IAuditStore
     /// </remarks>
     IAsyncEnumerable<AuditEntry> StreamAsync(TenantId tenantId, AuditQuery query, CancellationToken ct);
 
-    /// <summary>Deletes audit entries older than cutoff and returns the count deleted (retention policy).</summary>
+    /// <summary>
+    /// Deletes audit entries older than <paramref name="cutoff"/> and returns the count deleted
+    /// (retention policy). Implementations MUST honour the per-record retention floor
+    /// (<see cref="AuditEntry.RetainUntil"/>, ADR-0034 Decision 4): an entry is deleted only when it is
+    /// both older than the cutoff AND its retention floor is null or already elapsed (compared to the
+    /// CURRENT time, not the cutoff — the cutoff is in the past). A record still inside its window
+    /// (e.g. an autonomous-disposition decision within the correction window) is preserved.
+    /// </summary>
     Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct);
+
+    /// <summary>
+    /// GDPR Art. 17 redaction (ADR-0034 Decision 4): for the supplied conversation IDs, redacts the
+    /// contact-identifying linkage on autonomous-disposition AI-actor audit records
+    /// (<c>action = "typification.autonomous.commit"</c>) — nulling <see cref="AuditEntry.TargetId"/>
+    /// and the <c>conversation</c> metadata key — while RETAINING the decision-fact (node path, leaf
+    /// node, confidence, timestamp, AI actor) under the Art. 17(3) legal-defence exemption. The record
+    /// is NOT deleted. The integrity hash is recomputed over the redacted canonical fields and a
+    /// <c>redacted</c> marker is stamped so the record stays tamper-evident in its redacted state.
+    /// Returns the number of audit records redacted.
+    /// </summary>
+    Task<int> RedactContactLinkageAsync(
+        TenantId tenantId, IReadOnlyCollection<string> conversationIds, CancellationToken ct);
 }

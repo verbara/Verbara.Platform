@@ -260,14 +260,76 @@ internal sealed class PostgresAuditStore : IAuditStore
 
     public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
+        // ADR-0034 Decision 4: honour the per-record retention floor. Delete only rows that are both
+        // older than the cutoff AND past their floor. retain_until is compared to now() — the
+        // authoritative DB clock, the CURRENT time — NOT to @Cutoff (which is `now - retention months`,
+        // i.e. in the past); comparing against @Cutoff would preserve far too much. A row still inside
+        // its window (retain_until >= now()) survives even though occurred_at < @Cutoff.
         return await _dataSource.ExecuteAsync(
-            "DELETE FROM audit_entries WHERE tenant_id = @TenantId AND occurred_at < @Cutoff",
+            "DELETE FROM audit_entries WHERE tenant_id = @TenantId AND occurred_at < @Cutoff " +
+            "AND (retain_until IS NULL OR retain_until < now())",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("Cutoff", cutoff));
             },
             ct);
+    }
+
+    public async Task<int> RedactContactLinkageAsync(
+        TenantId tenantId, IReadOnlyCollection<string> conversationIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(conversationIds);
+
+        if (conversationIds.Count == 0)
+            return 0;
+
+        var ids = conversationIds.Distinct(StringComparer.Ordinal).ToArray();
+
+        // ADR-0034 Decision 4 (GDPR Art. 17): redact the contact linkage on autonomous-disposition
+        // audit records, retaining the decision-fact. We SELECT the matching rows, compute the redacted
+        // form (linkage nulled, hash recomputed) in managed code via AutonomousAuditRedaction.Redact,
+        // then UPDATE each row in place. Rows are NOT deleted (legal-defence exemption).
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT entry_id, tenant_id, action, entity_type, entity_id, performed_by, details, occurred_at, impersonator_id, " +
+            "category, severity, actor_type, before_json, after_json, integrity_hash, retain_until " +
+            "FROM audit_entries WHERE tenant_id = @TenantId AND action = @Action AND entity_id = ANY(@ConversationIds)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("Action", AutonomousAuditRedaction.AutonomousCommitAction));
+                p.Add(new NpgsqlParameter("ConversationIds", ids) { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+            },
+            AuditRow.Map, ct);
+
+        var redacted = 0;
+        foreach (var row in rows)
+        {
+            var redactedEntry = AutonomousAuditRedaction.Redact(row.ToEntry());
+            // Redact() returns the same instance when nothing changed (already-redacted / non-target);
+            // a fresh instance with a nulled TargetId means a redaction is due.
+            if (redactedEntry.TargetId is not null)
+                continue;
+
+            var metadataJson = redactedEntry.Metadata != null
+                ? JsonSerializer.Serialize(redactedEntry.Metadata, PostgresJson.Ctx.IReadOnlyDictionaryStringString)
+                : null;
+
+            var affected = await _dataSource.ExecuteAsync(
+                "UPDATE audit_entries SET entity_id = NULL, details = @Details::jsonb, integrity_hash = @IntegrityHash " +
+                "WHERE entry_id = @EntryId AND tenant_id = @TenantId",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("EntryId", row.entry_id));
+                    p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                    p.Add(new NpgsqlParameter("Details", (object?)metadataJson ?? DBNull.Value));
+                    p.Add(new NpgsqlParameter("IntegrityHash", NpgsqlDbType.Text) { Value = (object?)redactedEntry.IntegrityHash ?? DBNull.Value });
+                },
+                ct);
+            redacted += affected;
+        }
+
+        return redacted;
     }
 
     /// <summary>
