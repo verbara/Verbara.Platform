@@ -9,7 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+- **Typification autonomous disposition (E5, reframed — ADR-0034).** When the existing wrap-up-timeout worker auto-closes an abandoned conversation, opted-in + licensed tenants may have the pending high-confidence (≥ `AutonomousThreshold`) AI suggestion **stamped** as the disposition (`Source=AutoAi`) via a state-based CAS close (a concurrent human typify always wins). **Dark by default** (`AutonomousDispositionEnabled` OFF; per-tenant activation gate + global circuit breaker + per-cycle cap). Per-tenant activation gate endpoints (`/admin/typification/autonomous-disposition`, `AdminOnly`) = documented controller instruction, **not** GDPR Art. 22 consent (Art. 22 does not apply to internal call-coding). Append-only supervisor **correction** (`POST /conversations/{id}/typification-correction`, new `typification:correct-autonomous` permission) — a separate correction record; the original AI submission stays immutable; no conversation reopen. AI-actor audit (`actor_type=ai`) with a time-bounded `retain_until` floor + Art. 17 redaction. PR #110 (`407fd101`), archived #111. Not yet released.
+
+### Database
+- Migration **014** (`typification_submissions` autonomous/correction columns; `tenant_autonomous_disposition`; `audit_entries.retain_until` + `entity_id` made nullable for Art. 17 redaction) + migration **015** (`typification_submission_corrections`).
+
+### Security
+- Transitive-pin **Microsoft.OpenApi 2.9.0** to clear `GHSA-v5pm-xwqc-g5wc` (NU1903) — the .NET 10 OpenAPI stack pulled the vulnerable 2.0.0 transitively (pre-existing on `main`).
 
 ---
 
