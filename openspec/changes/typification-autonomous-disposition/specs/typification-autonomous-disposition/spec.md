@@ -87,29 +87,43 @@ be retained indefinitely.
 
 ### Requirement: Append-only operator correction without conversation reopen
 A supervisor holding the correction permission SHALL be able to correct an autonomously stamped disposition
-within a bounded correction window by submitting a new corrective `TypificationSubmission` that references
-the original; the original autonomous submission SHALL remain immutable. The conversation SHALL NOT be
-transitioned from `Closed` back to `WrapUp`. There SHALL be no data-subject-facing dispute endpoint. A
-correction request outside the window SHALL be rejected.
+within a bounded correction window. The original autonomous `TypificationSubmission` (its leaf, node path,
+confidence, and `Source = AutoAi`) SHALL remain immutable — the human-chosen disposition SHALL be persisted
+as a SEPARATE append-only correction record referencing that conversation (the submission's `CorrectionState`
+is flipped to `Corrected` as a status pointer only, never altering the recorded AI decision). The
+conversation SHALL NOT be transitioned from `Closed` back to `WrapUp`. There SHALL be no data-subject-facing
+dispute endpoint. A correction request outside the window SHALL be rejected, and a conversation SHALL be
+correctable at most once.
 
 #### Scenario: Supervisor corrects an auto-stamped disposition
-- **GIVEN** conversation `C` has an autonomous disposition within the correction window
+- **GIVEN** conversation `C` has an autonomous disposition (`Source = AutoAi`) within the correction window
 - **WHEN** a supervisor submits a corrective reclassification with a different node path
-- **THEN** the system SHALL persist a new corrective submission (`Source = Manual`) referencing the original, leave the original immutable, keep the conversation `Closed`, and emit a `DispositionCorrected` audit event recording the original and corrected node paths
+- **THEN** the system SHALL persist a separate correction record (corrected node path + supervisor user id + UTC), leave the original submission's disposition unchanged, set its `CorrectionState = Corrected`, keep the conversation `Closed`, and emit a `DispositionCorrected` audit event recording the original AI node path and the corrected node path
+
+#### Scenario: Correction on a non-autonomous disposition is rejected
+- **GIVEN** conversation `C` has a manual disposition (`Source = Manual`)
+- **WHEN** a supervisor attempts to correct it
+- **THEN** the system SHALL return HTTP 409 with error code `NotAutonomous`
 
 #### Scenario: Correction after the window is rejected
 - **GIVEN** conversation `C`'s autonomous disposition is older than the correction window
 - **WHEN** a supervisor attempts to correct it
 - **THEN** the system SHALL return HTTP 409 with error code `CorrectionWindowExpired`
 
-### Requirement: License and entitlement gating
-Autonomous disposition stamping SHALL occur only when the tenant holds both the `AdvancedTypification` and
-`TypificationAi` `LicenseFeature` entitlements, in addition to the activation gate. An unlicensed tenant
-with the gate enabled SHALL have the close path skip stamping and emit `AutonomousSkipped` with reason
-`LicenseMissing`.
+#### Scenario: Re-correcting an already-corrected disposition is rejected
+- **GIVEN** conversation `C`'s autonomous disposition has already been corrected once
+- **WHEN** a supervisor attempts to correct it again
+- **THEN** the system SHALL return HTTP 409 with error code `AlreadyCorrected`
 
-#### Scenario: Unlicensed tenant is not stamped
-- **GIVEN** a tenant lacks `TypificationAi` but has the activation gate enabled
+### Requirement: License and entitlement gating
+Autonomous disposition stamping SHALL occur only when the deployment holds both the `AdvancedTypification`
+and `TypificationAi` `LicenseFeature` entitlements (the Pro license is per-deployment, resolved via the same
+`ILicenseStatus` the endpoint pipeline uses — not `PlanFeature`), in addition to the per-tenant activation
+gate. When the deployment lacks these features, an opted-in tenant's close path SHALL skip stamping and emit
+`AutonomousSkipped` with reason `LicenseMissing`.
+
+#### Scenario: Unlicensed deployment does not stamp
+- **GIVEN** the deployment lacks `TypificationAi` but a tenant has the activation gate enabled
 - **WHEN** an abandoned wrap-up is auto-closed
 - **THEN** no disposition SHALL be stamped and the system SHALL emit `AutonomousSkipped` with reason `LicenseMissing`
 
