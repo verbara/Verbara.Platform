@@ -54,9 +54,9 @@
 
 ## 7. Phase C — Integration + AOT validation (batch)
 
-- [ ] 7.1 `dotnet build Verbara.Platform.slnx` — zero warnings (TreatWarningsAsErrors)
-- [ ] 7.2 Native AOT publish `dotnet publish src/Verbara.Platform.Api -c Release -r linux-x64` — zero `IL2026`/`IL3050`/`IL207x`; confirm new DTOs are in `ApiJsonContext`
-- [ ] 7.3 Full `dotnet test Verbara.Platform.slnx` — all green
-- [ ] 7.4 Manual/E2E smoke: gate OFF → close unchanged (no submission); gate ON + licensed + high-confidence → `AutoAi` stamped + `AutonomousCommit` audit with `retain_until`; supervisor correction within window → corrective submission + conversation stays Closed; correction after window → 409
-- [ ] 7.5 Verify retention purge preserves an in-window autonomous audit record (regression test green in CI)
-- [ ] 7.6 CI green (Build+Unit Tests, Analyze, Dependency Review, Coverage Ratchet, CodeQL); coverage not regressed
+- [x] 7.1 `dotnet build Verbara.Platform.slnx` — zero warnings (TreatWarningsAsErrors)
+- [x] 7.2 Native AOT publish `dotnet publish src/Verbara.Platform.Api -c Release -r linux-x64` — zero `IL2026`/`IL3050`/`IL207x`; confirm new DTOs are in `ApiJsonContext`
+- [x] 7.3 Full `dotnet test Verbara.Platform.slnx` — all green
+- [x] 7.4 Manual/E2E smoke: gate OFF → close unchanged (no submission); gate ON + licensed + high-confidence → `AutoAi` stamped + `AutonomousCommit` audit with `retain_until`; supervisor correction within window → corrective submission + conversation stays Closed; correction after window → 409
+- [x] 7.5 Verify retention purge preserves an in-window autonomous audit record (regression test green in CI)
+- [x] 7.6 CI green (Build+Unit Tests, Analyze, Dependency Review, Coverage Ratchet, CodeQL); coverage not regressed
