@@ -114,6 +114,12 @@
          2.5.301 is the patched release. SignalR does not enable LZ4 by default so real
          exposure is low, but NuGet audit (NU1903) correctly flags the vulnerable version. -->
     <PackageVersion Include="MessagePack" Version="2.5.301" />
+    <!-- Transitive-pin override (CentralPackageTransitivePinningEnabled=true): the .NET 10
+         OpenAPI stack (Microsoft.AspNetCore.OpenApi 10.0.5) pulls Microsoft.OpenApi 2.0.0
+         transitively. 2.0.0 carries GHSA-v5pm-xwqc-g5wc — a HIGH-severity advisory that NuGet
+         audit (NU1903) flags as an error. 2.9.0 is the patched release (same major, API-compatible
+         floor for AspNetCore.OpenApi). Pre-existing on main; pinned here to unblock the build. -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.9.0" />
   </ItemGroup>
 
   <ItemGroup>
