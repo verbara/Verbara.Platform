@@ -8,7 +8,7 @@
 
 - [x] 1.1 ADR-0034 accepted (Art. 22 non-applicability; reuse existing close path; corrections)
 - [x] 1.2 Proposal + delta spec re-scoped to ADR-0034 Decisions 2–7
-- [ ] 1.3 Author a DPIA-lite note in `docs/research/` recording the processing, the data subject (end contact), and the Art. 22 non-applicability argument; link it from ADR-0034
+- [x] 1.3 Author a DPIA-lite note in `docs/research/` recording the processing, the data subject (end contact), and the Art. 22 non-applicability argument; link it from ADR-0034
 
 ## 2. Phase A — Storage foundation (batch)
 

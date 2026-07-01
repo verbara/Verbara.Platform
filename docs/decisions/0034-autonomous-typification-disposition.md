@@ -120,9 +120,9 @@ Three corollaries:
 
 7. **Kill the "obtain legal sign-off" task.** It is intractable for a solo operator and would either block
    forever or be rubber-stamped (the shortcut the team forbids). Replace it with **this ADR + a DPIA-lite**
-   (`docs/research/` or alongside this ADR) recording the processing, the data subject, and the Art. 22
-   non-applicability argument, plus a kill-switch. The Art. 22 exposure, if any, is the **controller's**;
-   Verbara provides tooling and documents it.
+   ([`docs/research/2026-07-01-dpia-lite-autonomous-typification-disposition.md`](../research/2026-07-01-dpia-lite-autonomous-typification-disposition.md))
+   recording the processing, the data subject, and the Art. 22 non-applicability argument, plus a kill-switch.
+   The Art. 22 exposure, if any, is the **controller's**; Verbara provides tooling and documents it.
 
 8. **EU AI Act note (not GDPR Art. 22).** An AI system that classifies contact-center interactions is
    plausibly **limited/minimal-risk** under the EU AI Act, not a prohibited or high-risk system (it is not
