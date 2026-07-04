@@ -3,7 +3,7 @@ tier: GRANDE
 owner: maintainer
 approver: maintainer
 stakeholder: Platform team
-roadmap_ref: verbara-meta/docs/roadmap.md#typification-p2c
+decision_ref: Platform/ADR-0032
 ---
 
 # Typification Platform-Managed LLM
@@ -301,24 +301,16 @@ After `PlanFeature.PlatformLlm` is revoked for a `PlatformManaged` tenant, `ITyp
 
 ## Architectural Risk
 
-**Level:** MEDIUM
+**Level:** MEDIUM — this capability sits on the classify hot path and feeds the money path.
 
-**Affected:** `Verbara.Platform.Llm` (AiSource discriminator + platform provider resolution branch),
-`Verbara.Platform.Core` (`PlanFeature.PlatformLlm` + FeatureGate cache), `Verbara.Platform.Typification`
-(credit-meter hook in the classify path), `Verbara.Platform.Billing` (`UsageUnit.Tokens`, `AiAnalysis`
-metering, `TenantQuota.AiCreditsMonthly`, quota enforcement AI branch, rate card), and
-`Verbara.Platform.Api` (admin opt-in field, `GET /admin/ai/credits`, DTOs in `ApiJsonContext`). The
-classify hot path (`ConversationEndpoints`) gains a quota pre-check and a post-classify metering write.
-Cross-repo: `Verbara.Platform.Web` adds a minimal BYO/PlatformManaged radio + credit readout (separate
-PR); **no Pro SDK release** is required (the gate is a `Platform.Core` `PlanFeature`; the Pro license
-flag `TypificationAi` already ships). No impact on `Verbara.Sdk` or `Verbara.Sdk.Pro` public surface.
+**Affected:** `Verbara.Platform.Llm` (AiSource + platform provider resolution), `Verbara.Platform.Core`
+(`PlanFeature.PlatformLlm` + FeatureGate cache), `Verbara.Platform.Typification` (credit-meter hook),
+`Verbara.Platform.Billing` (AiAnalysis metering, allowance, quota AI branch), `Verbara.Platform.Api`
+(admin opt-in + `GET /admin/ai/credits` DTOs), and the Web readout (see `ai-credits-readout`).
 
-**Mitigation:** AI is strictly opt-in and fail-closed — every "cannot serve" state degrades to the
-empty suggestion, so a misconfigured operator switch or resolution failure never breaks the agent flow
-(the lone HardBlock 402 is tenant-opted-in). BYO is fully bypassed by the metering/quota hooks, so the
-existing BYO path is unaffected. Credit conversion is aggregate-only (Σtokens ÷ ratio), avoiding
-per-call over-billing. Quota consumption is summed from durable Postgres `UsageRecord`s, so enforcement
-is exact across AOT replicas (closing the in-memory single-instance gap of the P2b daily token budget).
-The operator key is host-bound (`PlatformLlmOptions`) and never persisted, returned, or logged. All new
-DTOs are registered in `ApiJsonContext` (reflection-free AOT); Postgres access uses the
-`Verbara.Sdk.Data.Npgsql` facade (no Dapper) under the `BanDapperPackageReferences` guard.
+**Mitigation:** strictly opt-in and fail-closed — every "cannot serve" state degrades to the empty
+suggestion (the lone tenant-opted-in HardBlock 402 excepted); BYO fully bypasses metering/quota;
+credits are aggregate-derived (never per-call round-up); the operator key is host-bound and never
+persisted, returned, or logged; enforcement is exact across AOT replicas (durable Postgres usage
+records on the legacy path, the ledger projection once the enforcement flag is ON — see
+`ai-credit-ledger`).

@@ -1,7 +1,11 @@
 # ai-credit-metering Specification
 
 ## Purpose
-TBD - created by archiving change typification-llm-inout-pricing. Update Purpose after archive.
+The pricing basis that turns platform-managed LLM token usage into AI credits: optional
+input/output-differentiated credit ratios with a flat fallback, the aggregated per-direction token
+breakdown query, and the invoice line-item pricing marker. Feeds the legacy quota path
+(`typification-platform-llm`) and the ledger meter (`ai-credit-ledger`) on the same
+`PerDirectionActive` basis; owns how usage is priced, never the enforcement outcome.
 ## Requirements
 ### Requirement: Per-direction credit ratio configuration
 `PlatformLlmOptions` SHALL expose two optional per-direction ratio properties — `InputCreditTokenRatio` and `OutputCreditTokenRatio` (both `long?`) — alongside the existing `CreditTokenRatio` (`long`, default 1000). Per-direction pricing is ACTIVE only when BOTH per-direction ratios are non-null and greater than zero; otherwise the system falls back to the flat `CreditTokenRatio`. Both keys are read from the `Llm:Platform` config section in `Program.cs` via the existing AOT-safe per-key `long.TryParse` pattern (no `IConfiguration.Bind`).

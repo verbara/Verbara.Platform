@@ -1,7 +1,13 @@
 # ai-credit-ledger Specification
 
 ## Purpose
-TBD - created by archiving change credit-ledger-substrate. Update Purpose after archive.
+The authoritative accounting substrate for AI credits: an append-only signed ledger with an O(1)
+balance projection and per-grant FIFO lots that — behind the cutover flags — own the AiAnalysis
+quota decision and the customer-owed overage computation (`Σ |PostPaid debits|`). Covers idempotent
+grant/debit posting, the recurring subscription mint, operator-minted TopUp/Promo/Partner grants,
+lot expiry (no-carryover + promo), partner attribution on read, and the tenant balance/entries read
+API. Shipped across the credit-ledger train (substrate → cutover → top-ups → lots), Platform
+v2.16.0; authoritative decisions in Platform/ADR-0033 and its addenda.
 ## Requirements
 ### Requirement: Append-only signed credit ledger
 The system SHALL persist AI credits as an append-only `ai_credit_ledger` of immutable signed entries. Each

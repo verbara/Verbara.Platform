@@ -1,7 +1,10 @@
 # ai-credit-billing Specification
 
 ## Purpose
-TBD - created by archiving change typification-credit-overage-dunning. Update Purpose after archive.
+Turns AI-credit consumption into money movement: the allowance-based AiAnalysis overage line item,
+invoice due-date/payment-status persistence (the fix that made dunning operative under Postgres),
+grace-gated overage invoice issuance, dunning escalation over overage invoices, and stateless
+straddle-detected threshold notifications (80 % warning / 100 % exceeded).
 ## Requirements
 ### Requirement: Allowance-based AI-credit overage line item
 For the `AiAnalysis` rate, `DefaultInvoiceGenerationService` SHALL compute the overage against the
