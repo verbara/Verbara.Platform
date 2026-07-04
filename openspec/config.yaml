@@ -39,5 +39,5 @@ rules:
     - "Record any durable architectural decision as an ADR in docs/decisions/, not only in this design."
   tasks:
     - "When the change spans repos, spell out the cross-repo sequence: edit Sdk/Pro -> dotnet pack to local-nuget-feed -> clear NuGet cache -> dotnet restore the consumer."
-    - "Verification tasks MUST include `dotnet test` green and CI green, with zero warnings (TreatWarningsAsErrors)."
+    - "Verification tasks MUST include `dotnet test` green and CI green, with zero warnings (TreatWarningsAsErrors). EXCEPTION — frontend-only changes hosted here under the hub rule (verbara-meta/ADR-0005): verification is the Web gate set instead (`npm run build`, `npx vitest run`, `npx eslint .`, i18n parity green)."
     - "Use Subagent-Driven Development with FCM batching: Phase A foundation (batch) -> Phase B critical components (focused) -> Phase C integration (batch)."
