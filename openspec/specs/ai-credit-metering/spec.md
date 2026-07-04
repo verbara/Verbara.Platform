@@ -32,6 +32,12 @@ breakdown query, and the invoice line-item pricing marker. Feeds the legacy quot
 ### Requirement: Input/output-differentiated credit aggregation in quota enforcement
 When per-direction ratios are active, the quota enforcement service SHALL compute the AI-Credit equivalent for `UsageType.AiAnalysis` in CREDITS (not tokens): current usage credits = `InputTokens/InputCreditTokenRatio + OutputTokens/OutputCreditTokenRatio + UnsplitTokens/CreditTokenRatio` from the breakdown query, compared against the limit `TenantQuota.AiCreditsMonthly` (in credits, NOT multiplied by a ratio). The `additionalQuantity` parameter (nominal tokens) is converted to credits via the flat `CreditTokenRatio` for the projection. When per-direction ratios are NOT active, the existing flat path (`limit = AiCreditsMonthly × CreditTokenRatio` tokens, compared to summed `TotalQuantity` tokens) is used UNCHANGED.
 
+This computation is the **pricing basis** (tokens → credits), not the enforcement outcome owner: it
+feeds the legacy quota path in `typification-platform-llm` while the credit-ledger enforcement flag is
+OFF, and the same `PerDirectionActive` basis is used by the `ai-credit-ledger` meter and back-fill
+(ratio-frozen across the cutover window) when the flag is ON. The enforcement outcome itself is owned
+by `ai-credit-ledger` once its flag is ON.
+
 #### Scenario: Split record contributes per-direction credits
 - **GIVEN** a breakdown of `InputTokens = 300`, `OutputTokens = 100`, `UnsplitTokens = 0`, with `InputCreditTokenRatio = 2000`, `OutputCreditTokenRatio = 500`
 - **WHEN** the quota service computes current usage credits
@@ -56,6 +62,11 @@ When per-direction ratios are active, the quota enforcement service SHALL comput
 - **GIVEN** only `CreditTokenRatio = 1000` is set (per-direction ratios null)
 - **WHEN** `CheckQuotaAsync` is called for `UsageType.AiAnalysis`
 - **THEN** the service uses the existing summary-based token comparison (`AiCreditsMonthly × CreditTokenRatio` vs summed `TotalQuantity`), byte-identical to current behavior — no breakdown query is issued
+
+#### Scenario: Ledger path prices on the same per-direction basis
+- **GIVEN** the credit-ledger enforcement flag is ON and per-direction ratios are active
+- **WHEN** the ledger meter converts a classify's tokens to a credit debit
+- **THEN** it uses this same differentiated basis (`PerDirectionActive`), so a given usage prices identically on the legacy and ledger paths
 
 ### Requirement: Invoice line-item reflects differentiated pricing
 When per-direction ratios are configured, the `AiAnalysis` invoice line-item description MUST indicate that input/output differentiated pricing applies (e.g. `"AiAnalysis (input/output pricing)"`); otherwise the description is the unchanged enum name (`"AiAnalysis"`). The line-item AMOUNT is unchanged — it remains rate-card-driven (`overage × UnitPrice` on metered `TotalQuantity`), because the rate card prices tokens; differentiated credit pricing governs the AI-Credit allowance (quota), not the token rate card. `DefaultInvoiceGenerationService` gains `IOptions<PlatformLlmOptions>` to detect active per-direction ratios.

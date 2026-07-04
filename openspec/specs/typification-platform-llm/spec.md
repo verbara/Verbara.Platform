@@ -150,9 +150,17 @@ for BYO.
 A monthly AI-credit allowance SHALL be expressed as `TenantQuota.AiCreditsMonthly` (nullable; `null`
 means unlimited / pay-as-you-go). For `PlatformManaged` tenants only, the system MUST run an
 `IQuotaEnforcementService.CheckQuotaAsync(tenant, UsageType.AiAnalysis, ...)` pre-check BEFORE invoking
-`ClassifyAsync`. The service derives consumption by summing the period's `UsageRecord` tokens from
-Postgres (exact across AOT replicas) and comparing against the token-equivalent threshold
-`AiCreditsMonthly × CreditTokenRatio`. The check maps to a `QuotaAction`:
+`ClassifyAsync`.
+
+This requirement specifies the **legacy consumption account**, which applies only while the
+credit-ledger **enforcement flag is OFF**: the service derives consumption by summing the period's
+`UsageRecord` tokens from Postgres (exact across AOT replicas) and comparing against the
+token-equivalent threshold `AiCreditsMonthly × CreditTokenRatio` (or the differentiated-credit basis
+per `ai-credit-metering` when per-direction ratios are active). When the enforcement flag is **ON**,
+the quota decision is owned by the `ai-credit-ledger` capability (O(1) projection balance +
+`QuotaOutcome`) and this `UsageRecord`-sum account SHALL NOT decide the outcome.
+
+The check maps to a `QuotaAction`:
 
 - **Warn** — the check is `Allowed`; the classify proceeds (a metric/audit MAY be emitted).
 - **SoftBlock** (default at/over limit) — the check is not `Allowed`; the classify is degraded to the
@@ -189,6 +197,12 @@ An unlimited allowance (`null`) MUST always permit the classify.
 - **WHEN** an AI-suggestion classify is requested
 - **THEN** the quota pre-check reports `Allowed` regardless of accumulated consumption
 - **AND** the classify proceeds and is metered as usual
+
+#### Scenario: Enforcement flag ON defers the decision to the credit ledger
+
+- **GIVEN** the credit-ledger enforcement flag is ON for a `PlatformManaged` tenant
+- **WHEN** the AiAnalysis quota pre-check runs
+- **THEN** the outcome is produced per the `ai-credit-ledger` capability (projection balance + `QuotaOutcome`) and the `UsageRecord` token sum of this requirement does not decide it
 
 ### Requirement: AI remains strictly opt-in and never errors the agent
 
