@@ -20,6 +20,12 @@ when both `PlatformLlmOptions` direction ratios are set and `> 0`, otherwise fla
 generic rate-card-`IncludedQuantity` overage so the two never double-count. Computation SHALL use only
 usage records whose timestamps fall within `[periodStart, periodEnd)`.
 
+This usage-record account applies while the credit-ledger **invoice-read flag is OFF** (the
+shadow-reconciliation window). When the invoice-read flag is **ON**, `BuildAiCreditLineItemAsync`
+SHALL derive `OverageQuantity` as `Σ |PostPaid debits|` per the `ai-credit-ledger` capability and
+SHALL stop reading `usage_records` for that amount; at flip time the two computations are equal per
+the ledger's shadow-gate requirement, so the line-item shape and amount are unchanged.
+
 #### Scenario: Tenant within allowance produces no overage amount
 - **GIVEN** a tenant with `AiCreditsMonthly = 1000` and 800 credits consumed in the period
 - **WHEN** invoice generation runs for that period and the rate card has an `AiAnalysis` `RateEntry`
@@ -39,6 +45,11 @@ usage records whose timestamps fall within `[periodStart, periodEnd)`.
 - **GIVEN** a rate card with no `RateEntry` whose `UsageType = AiAnalysis`
 - **WHEN** invoice generation runs
 - **THEN** the invoice SHALL contain no `AiAnalysis` line item, regardless of consumption
+
+#### Scenario: Invoice-read flag ON derives overage from PostPaid debits
+- **GIVEN** the credit-ledger invoice-read flag is ON for a tenant seeded into the ledger with `AiCreditsMonthly = 1000` and 1350 credits consumed
+- **WHEN** invoice generation runs for the period
+- **THEN** the `AiAnalysis` line item's `OverageQuantity = Σ |PostPaid debits| = 350`, equal to this requirement's usage-record computation for the same inputs
 
 ### Requirement: Invoice due-date and payment-status persistence
 The `invoices` storage schema SHALL persist `due_date` (nullable timestamptz) and `payment_status`
