@@ -317,3 +317,17 @@ post-c2 back-fill can't drop the projection without decrementing a lot (which wo
 **Invariant tests (both stores, every mutation):** `Σ(open non-expired lot.remaining) == projection.balance` after
 every grant / metered debit / expiry reclaim / backfill, and `GetRemainingBySourceAsync` excludes expired Promo lots
 and PostPaid (which has no lot) with `Σ per-source == projection.balance`.
+
+## Addendum (2026-07-04): lazy-mint-on-read is a named deferred fast-follow
+
+The `CreditGrantMintWorker` doc-comment has cited an "ADR-0033 addendum" for the month-rollover
+window fast-follow since the c-train ship, but the "Deferred fast-follows (named, not dropped)"
+list above omitted it — the reference dangled (found by the 2026-07-04 OpenSpec ecosystem audit).
+Recording it here so the citation is true:
+
+**lazy-mint-on-read** — a tenant that first consumes after a UTC month boundary but before the
+mint worker's next tick (≤ one `DunningConfig.CheckIntervalHours` interval) has no current-period
+`Subscription` grant yet, so its balance read returns prior carry-over only. The fast-follow mints
+the current-period grant inline on the first balance read of a new period, reusing the existing
+idempotent posting (`(tenant_id, period_key, entry_type)` `ON CONFLICT DO NOTHING`), the worker
+remaining the steady-state mint. Tracked as OpenSpec change `credit-grant-lazy-mint-rollover`.
