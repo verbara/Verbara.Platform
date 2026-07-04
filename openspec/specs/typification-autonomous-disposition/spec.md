@@ -1,7 +1,11 @@
 # typification-autonomous-disposition Specification
 
 ## Purpose
-TBD - created by archiving change typification-autonomous-disposition. Update Purpose after archive.
+AI disposition enrichment of the **existing** `ConversationTimeoutWorker` abandoned-wrap-up
+auto-close (no new worker): for opted-in tenants, the close additionally records a confidence-gated
+`TypificationSubmission` with a durable audit trail and GDPR Art. 17 redaction support. Dark/OFF by
+default. Authoritative decision and GDPR framing (Art. 22 does not apply to internal call-coding):
+Platform/ADR-0034.
 ## Requirements
 ### Requirement: Autonomous AI disposition enrichment of the existing abandoned-wrap-up close
 The existing `ConversationTimeoutWorker` wrap-up-timeout path SHALL, when it auto-closes an abandoned

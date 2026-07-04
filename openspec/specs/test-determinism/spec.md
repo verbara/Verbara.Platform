@@ -1,7 +1,11 @@
 # test-determinism Specification
 
 ## Purpose
-TBD - created by archiving change authwritequeue-deterministic-test-harness. Update Purpose after archive.
+Determinism fences for async/worker tests so suites never depend on wall-clock races: advanceable
+fake time sources instead of `Task.Delay`, causal sync fences (completion signals) instead of
+sleeps, options-overridable worker loop intervals so tests drive cycles directly, and regression
+guards that keep the fences from eroding. Established by the deterministic-test-fences program
+C1→C3 (C4, the ecosystem-wide convergence decision, is verbara-meta ADR-0004).
 ## Requirements
 ### Requirement: Deterministic time source for clock/TTL test fences
 Time-dependent test fences SHALL be driven from an advanceable fake time source

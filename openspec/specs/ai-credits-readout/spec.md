@@ -1,7 +1,10 @@
 # ai-credits-readout Specification
 
 ## Purpose
-TBD - created by archiving change typification-credit-exhaustion-ui. Update Purpose after archive.
+The tenant-facing Web readout of the monthly AI-credit position (`ai-credits-readout.tsx` in
+Verbara.Platform.Web, specified here per the Platform-hub convention): the `actionOnExhaustion`
+policy badge, the near-exhaustion warning band (≥ 80 %, finite allowance only), and trilingual
+i18n parity (EN-US / ES-419 / PT-BR) for all exhaustion strings.
 ## Requirements
 ### Requirement: Display actionOnExhaustion policy
 The AI credits readout component (`ai-credits-readout.tsx`) SHALL render the server-reported `AiCreditsResponse.actionOnExhaustion` value as a visually distinct badge so tenants know what will happen when credits are exhausted. The server emits the `QuotaAction` enum name as a bare string — one of `Warn`, `SoftBlock`, `HardBlock` (default `Warn`). The badge SHALL map each known value to an i18n-keyed label under `typification.aiCredits.actionOnExhaustion.*`, and SHALL degrade gracefully (render the raw value, no crash) for any unrecognised string.
