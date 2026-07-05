@@ -7,6 +7,11 @@ name: CI
 # ~40 projects. Full Native AOT publish stays in release.yml (slow, tag-triggered);
 # this gate is the fast feedback loop.
 #
+# 4 jobs: build-and-test (Build + Unit Tests, Release) · live-db-tests (Postgres/Redis
+# Testcontainers, report-only pending promotion — see docs/decisions and the
+# live-postgres-ci-lane change) · coverage (blocking line-coverage ratchet) ·
+# openspec (OpenSpec Validate, strict).
+#
 # NOTE (private Pro packages): Verbara.Sdk.Pro.* live on the private GitHub Packages
 # NuGet feed (source `github` in NuGet.Config). Restore authenticates with the
 # PACKAGES_PAT Actions secret (the same one release.yml already uses). Same-repo

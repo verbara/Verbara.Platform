@@ -23,14 +23,15 @@ echo "  OK"
 # 2. Copy local NuGet feed for Docker build (Pro packages)
 echo "[2/11] Copiando NuGet feed local..."
 PLATFORM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-NUGET_FEED="/media/Data/Source/IPcom/local-nuget-feed"
-if [ -d "$NUGET_FEED" ]; then
-    mkdir -p "$PLATFORM_ROOT/local-nuget-feed"
-    cp -r "$NUGET_FEED/"*.nupkg "$PLATFORM_ROOT/local-nuget-feed/" 2>/dev/null || true
-    echo "  OK ($(ls "$PLATFORM_ROOT/local-nuget-feed/"*.nupkg 2>/dev/null | wc -l) packages)"
-else
-    echo "  SKIP (no local feed found at $NUGET_FEED)"
+NUGET_FEED="$(cd "$PLATFORM_ROOT/../local-nuget-feed" 2>/dev/null && pwd || true)"
+if [ -z "$NUGET_FEED" ] || [ ! -d "$NUGET_FEED" ]; then
+    echo "  ERROR: local NuGet feed not found at $PLATFORM_ROOT/../local-nuget-feed" >&2
+    echo "  Expected sibling 'local-nuget-feed/' next to the Verbara repos (see workspace CLAUDE.md)." >&2
+    exit 1
 fi
+mkdir -p "$PLATFORM_ROOT/local-nuget-feed"
+cp -r "$NUGET_FEED/"*.nupkg "$PLATFORM_ROOT/local-nuget-feed/" 2>/dev/null || true
+echo "  OK ($(ls "$PLATFORM_ROOT/local-nuget-feed/"*.nupkg 2>/dev/null | wc -l) packages)"
 
 # 3. Build images (if needed)
 echo "[3/11] Construyendo imagenes..."

@@ -1,5 +1,7 @@
 # Typification P2c.2 — Platform-managed metered LLM — Implementation Plan
 
+> **SHIPPED.** Backend: PR #80 (`c3960745`), released as **Platform v2.15.0** (2026-06-24). Web (Task C5): `Verbara.Platform.Web` PR #132, released as **Web v3.11.0-web**. All checkboxes below are ticked to match shipped reality.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let an entitled tenant switch its Typification AI provider from BYO to a Verbara-operated LLM, metered in tokens (commercialized as AI Credits), gated by a new `PlanFeature`, and capped by a monthly credit allowance enforced through the existing Billing package — AI stays strictly opt-in; BYO is unaffected and never metered.
@@ -48,7 +50,7 @@ Tests live in `tests/Verbara.Platform.Api.Tests/` (endpoint + meter + quota + re
 - Create: `src/Verbara.Platform.Llm/AiSource.cs`
 - Modify: `src/Verbara.Platform.Llm/TenantLlmConfig.cs` (add property after `Enabled`, L75)
 
-- [ ] **Step 1 — Create the enum**
+- [x] **Step 1 — Create the enum**
 
 `src/Verbara.Platform.Llm/AiSource.cs`:
 ```csharp
@@ -70,7 +72,7 @@ public enum AiSource
 }
 ```
 
-- [ ] **Step 2 — Add the property to `TenantLlmConfig`**
+- [x] **Step 2 — Add the property to `TenantLlmConfig`**
 
 In `src/Verbara.Platform.Llm/TenantLlmConfig.cs`, after `public bool Enabled { get; init; }` (L75) add:
 ```csharp
@@ -79,12 +81,12 @@ In `src/Verbara.Platform.Llm/TenantLlmConfig.cs`, after `public bool Enabled { g
 ```
 (Default `Byo` = 0 — preserves every existing call site, which omits it.)
 
-- [ ] **Step 3 — Build to verify it compiles**
+- [x] **Step 3 — Build to verify it compiles**
 
 Run: `dotnet build src/Verbara.Platform.Llm/Verbara.Platform.Llm.csproj -c Release`
 Expected: Build succeeded, 0 warnings.
 
-- [ ] **Step 4 — Commit**
+- [x] **Step 4 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Llm/AiSource.cs src/Verbara.Platform.Llm/TenantLlmConfig.cs
@@ -97,7 +99,7 @@ git commit -m "feat(llm): add AiSource discriminator to TenantLlmConfig"
 - Create: `src/Verbara.Platform.Llm/PlatformLlmOptions.cs`
 - Modify: `src/Verbara.Platform.Llm/ServiceCollectionExtensions.cs` (`AddPlatformLlm`, L37)
 
-- [ ] **Step 1 — Create the options type**
+- [x] **Step 1 — Create the options type**
 
 `src/Verbara.Platform.Llm/PlatformLlmOptions.cs`:
 ```csharp
@@ -125,7 +127,7 @@ public sealed class PlatformLlmOptions
 }
 ```
 
-- [ ] **Step 2 — Register it in `AddPlatformLlm`**
+- [x] **Step 2 — Register it in `AddPlatformLlm`**
 
 In `src/Verbara.Platform.Llm/ServiceCollectionExtensions.cs`, change the signature (L37-39) to add a second optional configurator and register the options unconditionally (right after the existing `TryAddSingleton<ILlmProviderResolver, DefaultLlmProviderResolver>()` at L63):
 ```csharp
@@ -142,12 +144,12 @@ public static IServiceCollection AddPlatformLlm(
 ```
 (Registered ALWAYS so the resolver + quota service can depend on `IOptions<PlatformLlmOptions>`; `Enabled` defaults false.)
 
-- [ ] **Step 3 — Build**
+- [x] **Step 3 — Build**
 
 Run: `dotnet build src/Verbara.Platform.Llm/Verbara.Platform.Llm.csproj -c Release`
 Expected: Build succeeded, 0 warnings.
 
-- [ ] **Step 4 — Commit**
+- [x] **Step 4 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Llm/PlatformLlmOptions.cs src/Verbara.Platform.Llm/ServiceCollectionExtensions.cs
@@ -160,7 +162,7 @@ git commit -m "feat(llm): add PlatformLlmOptions (operator-managed LLM config)"
 - Modify: `src/Verbara.Platform.Billing/UsageUnit.cs` (append member, L14)
 - Modify: `src/Verbara.Platform.Billing/TenantQuota.cs` (add property after `MaxActiveAgents`, L16)
 
-- [ ] **Step 1 — Add `Tokens` to `UsageUnit`**
+- [x] **Step 1 — Add `Tokens` to `UsageUnit`**
 
 Append to the enum (after `Hours = 5`):
 ```csharp
@@ -168,7 +170,7 @@ Append to the enum (after `Hours = 5`):
     Tokens = 6,
 ```
 
-- [ ] **Step 2 — Add `AiCreditsMonthly` to `TenantQuota`**
+- [x] **Step 2 — Add `AiCreditsMonthly` to `TenantQuota`**
 
 After `public int? MaxActiveAgents { get; set; }` (L16) add:
 ```csharp
@@ -177,12 +179,12 @@ After `public int? MaxActiveAgents { get; set; }` (L16) add:
 ```
 (Mirrors the `long? { get; set; }` shape of `MaxMonthlyMessages`.)
 
-- [ ] **Step 3 — Build**
+- [x] **Step 3 — Build**
 
 Run: `dotnet build src/Verbara.Platform.Billing/Verbara.Platform.Billing.csproj -c Release`
 Expected: Build succeeded, 0 warnings.
 
-- [ ] **Step 4 — Commit**
+- [x] **Step 4 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Billing/UsageUnit.cs src/Verbara.Platform.Billing/TenantQuota.cs
@@ -193,7 +195,7 @@ git commit -m "feat(billing): add UsageUnit.Tokens and TenantQuota.AiCreditsMont
 
 **Files:** Modify `src/Verbara.Platform.Core/PlanFeature.cs` (append member after `IpAllowlist`, L18).
 
-- [ ] **Step 1 — Append the member**
+- [x] **Step 1 — Append the member**
 
 ```csharp
     /// <summary>Entitlement to use Verbara's platform-managed Typification LLM (metered in AI Credits).</summary>
@@ -201,12 +203,12 @@ git commit -m "feat(billing): add UsageUnit.Tokens and TenantQuota.AiCreditsMont
 ```
 (Implicit value 14 — append-only, preserves existing ordinals.)
 
-- [ ] **Step 2 — Build**
+- [x] **Step 2 — Build**
 
 Run: `dotnet build src/Verbara.Platform.Core/Verbara.Platform.Core.csproj -c Release`
 Expected: Build succeeded.
 
-- [ ] **Step 3 — Commit**
+- [x] **Step 3 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Core/PlanFeature.cs
@@ -217,7 +219,7 @@ git commit -m "feat(core): add PlanFeature.PlatformLlm entitlement"
 
 **Files:** Create `src/Verbara.Platform.Storage.Postgres/Migrations/010_platform_llm_credits.sql` (auto-embedded by the `Migrations\*.sql` glob; no csproj edit).
 
-- [ ] **Step 1 — Write the migration**
+- [x] **Step 1 — Write the migration**
 
 ```sql
 -- =============================================================================
@@ -238,14 +240,14 @@ ALTER TABLE tenant_quotas
     ADD COLUMN IF NOT EXISTS ai_credits_monthly BIGINT;
 ```
 
-- [ ] **Step 2 — Verify it is embedded + ordered after 009**
+- [x] **Step 2 — Verify it is embedded + ordered after 009**
 
 Run: `dotnet build src/Verbara.Platform.Storage.Postgres/Verbara.Platform.Storage.Postgres.csproj -c Release`
 Then confirm the resource is embedded:
 Run: `grep -rl "010_platform_llm_credits" src/Verbara.Platform.Storage.Postgres/obj/ || echo "check glob"`
 Expected: Build succeeded; the `.sql` is picked up by the existing `<EmbeddedResource Include="Migrations\*.sql" />` glob and sorts after `009_` by ordinal name.
 
-- [ ] **Step 3 — Commit**
+- [x] **Step 3 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Storage.Postgres/Migrations/010_platform_llm_credits.sql
@@ -259,7 +261,7 @@ git commit -m "feat(storage): migration 010 — ai_source + ai_credits_monthly"
 - Modify: `src/Verbara.Platform.Storage.Postgres/Stores/PostgresTenantQuotaStore.cs`
 - Test: `tests/Verbara.Platform.Storage.Postgres.Tests/...` are container-backed (excluded from the ratchet); the round-trip is asserted via the InMemory store at the endpoint layer in Phase C. Here, verify build + the existing Postgres-store tests still pass when containers are available.
 
-- [ ] **Step 1 — `PostgresTenantLlmConfigStore`: add `ai_source` to SELECT, UPSERT, Row, ToConfig**
+- [x] **Step 1 — `PostgresTenantLlmConfigStore`: add `ai_source` to SELECT, UPSERT, Row, ToConfig**
 
 `SelectColumns` (L28-30) — append `ai_source`:
 ```csharp
@@ -271,7 +273,7 @@ private const string SelectColumns =
 `UpsertAsync` SQL (L88-107): add `ai_source` to the INSERT column list + `@AiSource` to VALUES + `ai_source = EXCLUDED.ai_source,` to the `DO UPDATE SET`. Param binding (next to `Enabled`, L116): `p.Add(new NpgsqlParameter("AiSource", config.AiSource.ToString()));` (enum→TEXT name, mirroring `ProviderType`).
 `Row.ToConfig` (L156): add `AiSource = Enum.TryParse<AiSource>(ai_source, ignoreCase: true, out var src) ? src : AiSource.Byo,` to the `new TenantLlmConfig { ... }`.
 
-- [ ] **Step 2 — `PostgresTenantQuotaStore`: add `ai_credits_monthly`**
+- [x] **Step 2 — `PostgresTenantQuotaStore`: add `ai_credits_monthly`**
 
 `GetAsync` SELECT (L18-19): append `, ai_credits_monthly`.
 `UpsertAsync` (L29-53): add `ai_credits_monthly` to INSERT columns + `@AiCreditsMonthly` to VALUES + `ai_credits_monthly = EXCLUDED.ai_credits_monthly` to `DO UPDATE SET`. Param (mirror `MaxMonthlyMessages`, L44-51):
@@ -282,12 +284,12 @@ p.Add(new NpgsqlParameter("AiCreditsMonthly", NpgsqlDbType.Bigint)
 `QuotaRow` (L64): add `public long? ai_credits_monthly { get; init; }` + in `Map`: `ai_credits_monthly = r.GetInt64OrNull("ai_credits_monthly"),`.
 `ToQuota()` (L87): add `AiCreditsMonthly = ai_credits_monthly,`.
 
-- [ ] **Step 3 — Build both projects**
+- [x] **Step 3 — Build both projects**
 
 Run: `dotnet build src/Verbara.Platform.Storage.Postgres/Verbara.Platform.Storage.Postgres.csproj -c Release`
 Expected: Build succeeded, 0 warnings.
 
-- [ ] **Step 4 — Commit**
+- [x] **Step 4 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Storage.Postgres/Stores/PostgresTenantLlmConfigStore.cs src/Verbara.Platform.Storage.Postgres/Stores/PostgresTenantQuotaStore.cs
@@ -308,7 +310,7 @@ git commit -m "feat(storage): persist ai_source + ai_credits_monthly"
 
 The resolver ctor gains `IOptions<PlatformLlmOptions>`; `ResolveAsync` bypasses the BYO key-guard for `PlatformManaged` and requires `PlatformLlmOptions.Enabled`; `BuildWithPolicy` builds an OpenAI-compatible provider from the platform options; `ComputeFingerprint` includes `AiSource` + a platform-options token.
 
-- [ ] **Step 1 — Write failing tests**
+- [x] **Step 1 — Write failing tests**
 
 `tests/Verbara.Platform.Api.Tests/Llm/DefaultLlmProviderResolverPlatformTests.cs`:
 ```csharp
@@ -379,16 +381,16 @@ public sealed class DefaultLlmProviderResolverPlatformTests
 }
 ```
 
-- [ ] **Step 2 — Run; verify they fail to compile (ctor param + behavior not present)**
+- [x] **Step 2 — Run; verify they fail to compile (ctor param + behavior not present)**
 
 Run: `dotnet test tests/Verbara.Platform.Api.Tests/ --filter "FullyQualifiedName~DefaultLlmProviderResolverPlatformTests" -c Release`
 Expected: FAIL — ctor has no `platformOptions` parameter.
 
-- [ ] **Step 3 — Add the ctor param + field**
+- [x] **Step 3 — Add the ctor param + field**
 
 In `DefaultLlmProviderResolver.cs` add a field `private readonly PlatformLlmOptions _platform;` and extend the ctor (L37) with `IOptions<PlatformLlmOptions>? platformOptions = null` (last param), assigning `_platform = platformOptions?.Value ?? new PlatformLlmOptions();`.
 
-- [ ] **Step 4 — Add the PlatformManaged branch to `ResolveAsync`**
+- [x] **Step 4 — Add the PlatformManaged branch to `ResolveAsync`**
 
 Replace the fail-closed guard (L59, currently `if (config is null || !config.Enabled || string.IsNullOrEmpty(config.ApiKey))`) with source-aware logic:
 ```csharp
@@ -405,7 +407,7 @@ if (unusable)
 }
 ```
 
-- [ ] **Step 5 — Build the platform provider in `BuildWithPolicy`**
+- [x] **Step 5 — Build the platform provider in `BuildWithPolicy`**
 
 At the top of `BuildWithPolicy` (L107), branch before the existing `effective`/`switch`:
 ```csharp
@@ -432,7 +434,7 @@ private ResolvedLlmProvider Build(TenantLlmConfig config) =>
         config.AiSource == AiSource.PlatformManaged ? _platform.Model : config.Model);
 ```
 
-- [ ] **Step 6 — Fingerprint includes `AiSource` + platform version**
+- [x] **Step 6 — Fingerprint includes `AiSource` + platform version**
 
 In `ComputeFingerprint` (L153), make it an instance method (it needs `_platform`) OR pass a platform token. Minimal: change the signature to `private string ComputeFingerprint(TenantLlmConfig config)` (drop `static`) and append two segments to the `string.Join`:
 ```csharp
@@ -443,17 +445,17 @@ In `ComputeFingerprint` (L153), make it an instance method (it needs `_platform`
 ```
 (So an operator key/model rotation evicts platform-managed entries.)
 
-- [ ] **Step 7 — Run the tests; verify pass**
+- [x] **Step 7 — Run the tests; verify pass**
 
 Run: `dotnet test tests/Verbara.Platform.Api.Tests/ --filter "FullyQualifiedName~DefaultLlmProviderResolverPlatformTests" -c Release`
 Expected: PASS (3/3).
 
-- [ ] **Step 8 — Run the existing resolver/BYO tests to confirm no regression**
+- [x] **Step 8 — Run the existing resolver/BYO tests to confirm no regression**
 
 Run: `dotnet test tests/Verbara.Platform.Api.Tests/ --filter "FullyQualifiedName~LlmProviderResolver" -c Release`
 Expected: PASS (BYO behavior unchanged — `AiSource.Byo` default preserves the key-guard).
 
-- [ ] **Step 9 — Commit**
+- [x] **Step 9 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Llm/DefaultLlmProviderResolver.cs tests/Verbara.Platform.Api.Tests/Llm/DefaultLlmProviderResolverPlatformTests.cs
@@ -468,7 +470,7 @@ git commit -m "feat(llm): platform-managed resolution branch (operator key, fail
 
 The service learns the credit→token ratio from `IOptions<PlatformLlmOptions>` and maps `UsageType.AiAnalysis` to a token-equivalent limit `AiCreditsMonthly × ratio`. (`PlatformLlmOptions` lives in `Verbara.Platform.Llm`; Billing already has no dep on Llm — add a project reference `Verbara.Platform.Billing → Verbara.Platform.Llm`, which is acyclic since Llm does not reference Billing.)
 
-- [ ] **Step 1 — Write failing tests**
+- [x] **Step 1 — Write failing tests**
 
 `tests/Verbara.Platform.Api.Tests/Billing/AiCreditQuotaTests.cs`:
 ```csharp
@@ -524,17 +526,17 @@ public sealed class AiCreditQuotaTests
 }
 ```
 
-- [ ] **Step 2 — Run; verify fail**
+- [x] **Step 2 — Run; verify fail**
 
 Run: `dotnet test tests/Verbara.Platform.Api.Tests/ --filter "FullyQualifiedName~AiCreditQuotaTests" -c Release`
 Expected: FAIL — ctor has no options param; AiAnalysis limit is null (unlimited) so the SoftBlock test fails.
 
-- [ ] **Step 3 — Add the project reference (if absent)**
+- [x] **Step 3 — Add the project reference (if absent)**
 
 Run: `dotnet add src/Verbara.Platform.Billing/Verbara.Platform.Billing.csproj reference src/Verbara.Platform.Llm/Verbara.Platform.Llm.csproj`
 (Acyclic: Llm has no Billing reference. If it already exists, this is a no-op.)
 
-- [ ] **Step 4 — Extend the service ctor + `GetLimitForType`**
+- [x] **Step 4 — Extend the service ctor + `GetLimitForType`**
 
 Add `using Verbara.Platform.Llm;` and `using Microsoft.Extensions.Options;`. Ctor (L11) gains `IOptions<PlatformLlmOptions> platformOptions`; store `private readonly long _creditTokenRatio = Math.Max(1, platformOptions.Value.CreditTokenRatio);`. Change `GetLimitForType` (L67) to take the ratio and map AiAnalysis:
 ```csharp
@@ -552,12 +554,12 @@ private long? GetLimitForType(TenantQuota quota, UsageType type) => type switch
 ```
 (Drop `static` since it now reads `_creditTokenRatio`. The `CheckQuotaAsync` flow is otherwise unchanged — it sums `UsageType.AiAnalysis` tokens from `UsageRecord`s and compares against the token-equivalent limit, so SoftBlock/HardBlock/Warn map exactly as for other types.)
 
-- [ ] **Step 5 — Run; verify pass**
+- [x] **Step 5 — Run; verify pass**
 
 Run: `dotnet test tests/Verbara.Platform.Api.Tests/ --filter "FullyQualifiedName~AiCreditQuotaTests" -c Release`
 Expected: PASS (3/3).
 
-- [ ] **Step 6 — Commit**
+- [x] **Step 6 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Billing/ tests/Verbara.Platform.Api.Tests/Billing/AiCreditQuotaTests.cs
@@ -573,7 +575,7 @@ git commit -m "feat(billing): AiAnalysis monthly credit allowance (token-equival
 
 The meter records ONE `UsageRecord` (`UsageType.AiAnalysis`, `UsageUnit.Tokens`, quantity = total tokens) with `inputTokens`/`outputTokens`/`model` in `Metadata`, via `IMeteringService.RecordBatchAsync` (the only metering API that carries `Metadata`). It is a no-op when total tokens ≤ 0.
 
-- [ ] **Step 1 — Write the interface**
+- [x] **Step 1 — Write the interface**
 
 `src/Verbara.Platform.Typification/Ai/ITypificationCreditMeter.cs`:
 ```csharp
@@ -593,7 +595,7 @@ public interface ITypificationCreditMeter
 }
 ```
 
-- [ ] **Step 2 — Write the failing impl test**
+- [x] **Step 2 — Write the failing impl test**
 
 `tests/Verbara.Platform.Api.Tests/Services/BillingTypificationCreditMeterTests.cs`:
 ```csharp
@@ -641,12 +643,12 @@ public sealed class BillingTypificationCreditMeterTests
 }
 ```
 
-- [ ] **Step 3 — Run; verify fail**
+- [x] **Step 3 — Run; verify fail**
 
 Run: `dotnet test tests/Verbara.Platform.Api.Tests/ --filter "FullyQualifiedName~BillingTypificationCreditMeterTests" -c Release`
 Expected: FAIL — `BillingTypificationCreditMeter` does not exist.
 
-- [ ] **Step 4 — Write the impl**
+- [x] **Step 4 — Write the impl**
 
 `src/Verbara.Platform.Api/Services/BillingTypificationCreditMeter.cs`:
 ```csharp
@@ -696,12 +698,12 @@ internal sealed class BillingTypificationCreditMeter(IMeteringService metering, 
 ```
 (Update the test ctor to pass an `IClock` substitute — `new BillingTypificationCreditMeter(metering, Substitute.For<IClock>())` — or keep the meter clock-free and stamp `RecordedAt` via the metering service; chosen: meter takes `IClock` for an explicit, testable timestamp. Adjust the Step-2 test ctor calls accordingly.)
 
-- [ ] **Step 5 — Run; verify pass**
+- [x] **Step 5 — Run; verify pass**
 
 Run: `dotnet test tests/Verbara.Platform.Api.Tests/ --filter "FullyQualifiedName~BillingTypificationCreditMeterTests" -c Release`
 Expected: PASS (2/2).
 
-- [ ] **Step 6 — Commit**
+- [x] **Step 6 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Typification/Ai/ITypificationCreditMeter.cs src/Verbara.Platform.Api/Services/BillingTypificationCreditMeter.cs tests/Verbara.Platform.Api.Tests/Services/BillingTypificationCreditMeterTests.cs
@@ -722,11 +724,11 @@ git commit -m "feat(typification): credit meter — record platform LLM tokens +
 - Modify: `src/Verbara.Platform.Api/Serialization/ApiJsonContext.cs` (no new types — the existing DTOs gain fields)
 - Test: `tests/Verbara.Platform.Api.Tests/Endpoints/TenantLlmConfigPlatformOptInTests.cs` *(create — use the existing endpoint test harness/`WebApplicationFactory` pattern already used for the BYO llm-config endpoints)*
 
-- [ ] **Step 1 — Extend the DTOs**
+- [x] **Step 1 — Extend the DTOs**
 
 In `TenantLlmConfigResponse.cs`, add to the `TenantLlmConfigResponse` record (after `Enabled`): `AiSource AiSource,` and `bool PlatformLlmAvailable,` (keep positional order; update `FromConfig` to pass `AiSource: config.AiSource` and accept `platformLlmAvailable` as a param). Add to `UpsertLlmConfigRequest` (after `Enabled`): `AiSource AiSource = AiSource.Byo` (defaulted so existing BYO callers are source-compatible). Add `using Verbara.Platform.Llm;` (already present).
 
-- [ ] **Step 2 — Write the failing test**
+- [x] **Step 2 — Write the failing test**
 
 `tests/Verbara.Platform.Api.Tests/Endpoints/TenantLlmConfigPlatformOptInTests.cs` (sketch — mirror the existing BYO llm-config endpoint test factory; assert: PUT `aiSource=PlatformManaged` returns 403 when the tenant lacks `PlanFeature.PlatformLlm`, and 200 when the `FeatureGateCache` grants it; GET echoes `aiSource` + `platformLlmAvailable`):
 ```csharp
@@ -741,12 +743,12 @@ public async Task Get_ShouldEchoAiSourceAndAvailability() { /* assert response.A
 ```
 (Use the same `data-*`-free API-level assertions and the existing test fixture that seeds `FeatureGateCache` via `ResolvedFeatures`.)
 
-- [ ] **Step 3 — Run; verify fail**
+- [x] **Step 3 — Run; verify fail**
 
 Run: `dotnet test tests/Verbara.Platform.Api.Tests/ --filter "FullyQualifiedName~TenantLlmConfigPlatformOptInTests" -c Release`
 Expected: FAIL.
 
-- [ ] **Step 4 — Gate the PUT + map the GET**
+- [x] **Step 4 — Gate the PUT + map the GET**
 
 In `UpsertConfig` (L65), inject `[FromServices] IFeatureGateService featureGate`. After the existing `EnsureConfigurePermissionAsync` check and before building the config, add:
 ```csharp
@@ -761,12 +763,12 @@ if (body.AiSource == AiSource.PlatformManaged &&
 Set `AiSource = body.AiSource` on the `new TenantLlmConfig { ... }`. When `PlatformManaged`, do NOT require/rotate a BYO key (the existing key-preservation block already tolerates an absent key).
 In `GetConfig` (L44), inject `[FromServices] IFeatureGateService featureGate`; compute `var available = featureGate.IsFeatureEnabled(tenantId.Value, PlanFeature.PlatformLlm);` and pass it: `TenantLlmConfigResponse.FromConfig(config, platformLlmAvailable: available)` (and for the empty case keep `EmptyLlmConfigResponse`, but include availability — extend `EmptyLlmConfigResponse(bool Configured, bool PlatformLlmAvailable)` and register nothing new since it's an existing serializable type with an added member).
 
-- [ ] **Step 5 — Run; verify pass**
+- [x] **Step 5 — Run; verify pass**
 
 Run: `dotnet test tests/Verbara.Platform.Api.Tests/ --filter "FullyQualifiedName~TenantLlmConfigPlatformOptInTests" -c Release`
 Expected: PASS.
 
-- [ ] **Step 6 — Commit**
+- [x] **Step 6 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Api/Endpoints/TenantLlmConfig*.cs tests/Verbara.Platform.Api.Tests/Endpoints/TenantLlmConfigPlatformOptInTests.cs
@@ -871,11 +873,11 @@ git commit -m "feat(api): GET /admin/ai/credits tenant usage endpoint"
 
 Inject `IQuotaEnforcementService`, `ITypificationCreditMeter`, `ITenantLlmConfigStore` (to read `AiSource`) into the handler. **Only when the resolved config is `PlatformManaged`:** (a) pre-check quota before `ClassifyAsync` (SoftBlock→empty, HardBlock→402), (b) record credits after a successful classify.
 
-- [ ] **Step 1 — Failing test:** platform-managed tenant over its `AiCreditsMonthly` (SoftBlock) → suggestion endpoint returns the empty payload AND `ITypificationCreditMeter.RecordAsync` is NOT called; under allowance → classify proceeds and `RecordAsync` IS called once with the classification's token counts. A BYO tenant → meter NOT called (BYO never metered). (Mirror the existing `GetTypificationSuggestion` test fixture; substitute the quota service + meter.)
+- [x] **Step 1 — Failing test:** platform-managed tenant over its `AiCreditsMonthly` (SoftBlock) → suggestion endpoint returns the empty payload AND `ITypificationCreditMeter.RecordAsync` is NOT called; under allowance → classify proceeds and `RecordAsync` IS called once with the classification's token counts. A BYO tenant → meter NOT called (BYO never metered). (Mirror the existing `GetTypificationSuggestion` test fixture; substitute the quota service + meter.)
 
-- [ ] **Step 2 — Run; verify fail.** → FAIL (handler has no quota/meter params).
+- [x] **Step 2 — Run; verify fail.** → FAIL (handler has no quota/meter params).
 
-- [ ] **Step 3 — Add params + the platform-managed branch.** Add to the handler signature (L227): `[FromServices] IQuotaEnforcementService quota,` `[FromServices] ITypificationCreditMeter creditMeter,` `[FromServices] ITenantLlmConfigStore llmConfigStore,`. After resolving `resolved` and before the existing budget block (L279), read the source once:
+- [x] **Step 3 — Add params + the platform-managed branch.** Add to the handler signature (L227): `[FromServices] IQuotaEnforcementService quota,` `[FromServices] ITypificationCreditMeter creditMeter,` `[FromServices] ITenantLlmConfigStore llmConfigStore,`. After resolving `resolved` and before the existing budget block (L279), read the source once:
 ```csharp
 var llmConfig = await llmConfigStore.GetAsync(EntityId.From(tenantId.Value), ct);
 var isPlatformManaged = llmConfig is { AiSource: AiSource.PlatformManaged };
@@ -905,9 +907,9 @@ if (isPlatformManaged && classification.Usage is { } usage)
 ```
 (`classification` is non-null here — the `classification is null` early-return at L310-311 already ran. `EmptySuggestion`, `tenantId`, `conversationId` are in scope per the harvest.)
 
-- [ ] **Step 4 — Run; verify pass.** `dotnet test ... --filter "FullyQualifiedName~TypificationSuggestionMeteringTests" -c Release` → PASS.
+- [x] **Step 4 — Run; verify pass.** `dotnet test ... --filter "FullyQualifiedName~TypificationSuggestionMeteringTests" -c Release` → PASS.
 
-- [ ] **Step 5 — Commit**
+- [x] **Step 5 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Api/Endpoints/ConversationEndpoints.cs tests/Verbara.Platform.Api.Tests/Endpoints/TypificationSuggestionMeteringTests.cs
@@ -918,7 +920,7 @@ git commit -m "feat(api): meter + quota-gate platform-managed typification class
 
 **Files:** Modify `src/Verbara.Platform.Api/Program.cs`.
 
-- [ ] **Step 1 — Bind `PlatformLlmOptions` + register the meter.** At the `AddPlatformLlm(...)` call site, pass the platform configurator (bound from configuration section `Llm:Platform`):
+- [x] **Step 1 — Bind `PlatformLlmOptions` + register the meter.** At the `AddPlatformLlm(...)` call site, pass the platform configurator (bound from configuration section `Llm:Platform`):
 ```csharp
 builder.Services.AddPlatformLlm(
     configure: o => builder.Configuration.GetSection("Llm").Bind(o),
@@ -926,9 +928,9 @@ builder.Services.AddPlatformLlm(
 ```
 Register the meter (singleton, like the other Api services): `builder.Services.AddSingleton<ITypificationCreditMeter, BillingTypificationCreditMeter>();`
 
-- [ ] **Step 2 — Build the Api host.** `dotnet build src/Verbara.Platform.Api/Verbara.Platform.Api.csproj -c Release` → succeeded, 0 warnings.
+- [x] **Step 2 — Build the Api host.** `dotnet build src/Verbara.Platform.Api/Verbara.Platform.Api.csproj -c Release` → succeeded, 0 warnings.
 
-- [ ] **Step 3 — Commit**
+- [x] **Step 3 — Commit**
 
 ```bash
 git add src/Verbara.Platform.Api/Program.cs
@@ -943,10 +945,10 @@ git commit -m "chore(api): wire PlatformLlmOptions + credit meter into the compo
 - Add i18n keys to **EN-US, ES-419, PT-BR** (CI parity enforced).
 - Update the typed API hook (`use-typification-llm`) for the `aiSource` field + a new `useAiCredits` query.
 
-- [ ] **Step 1 — Failing vitest** for the hook + the radio behavior (PlatformManaged hides the key field; disabled when not available). `npx vitest run src/.../use-typification-llm.test.ts`.
-- [ ] **Step 2 — Implement** the radio + readout + i18n + hook.
-- [ ] **Step 3 — Verify:** `npm run build` (type-check), `npx vitest run`, `npm run test:i18n` (locale parity), `npx eslint .` — all green.
-- [ ] **Step 4 — Commit** (separate Web PR): `feat(web): platform-managed AI opt-in + credit usage readout`.
+- [x] **Step 1 — Failing vitest** for the hook + the radio behavior (PlatformManaged hides the key field; disabled when not available). `npx vitest run src/.../use-typification-llm.test.ts`.
+- [x] **Step 2 — Implement** the radio + readout + i18n + hook.
+- [x] **Step 3 — Verify:** `npm run build` (type-check), `npx vitest run`, `npm run test:i18n` (locale parity), `npx eslint .` — all green.
+- [x] **Step 4 — Commit** (separate Web PR): `feat(web): platform-managed AI opt-in + credit usage readout`.
 
 > Web ships as its own PR (cross-repo), after the Platform API PR merges and the SDK/Pro feed is unchanged.
 
@@ -954,10 +956,10 @@ git commit -m "chore(api): wire PlatformLlmOptions + credit meter into the compo
 
 ## Final verification (before PR)
 
-- [ ] `dotnet build Verbara.Platform.slnx -c Release` — 0 warnings (TreatWarningsAsErrors).
-- [ ] `dotnet test tests/Verbara.Platform.Api.Tests/ -c Release` — all green (incl. the new resolver/quota/meter/endpoint tests).
-- [ ] AOT publish gate: `dotnet publish src/Verbara.Platform.Api/Verbara.Platform.Api.csproj -c Release -r linux-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -o /tmp/aot-p2c2` → native ELF, 0 `IL2026/IL3050/IL207x`, 0 managed Verbara DLLs (every new DTO is in `ApiJsonContext`).
-- [ ] Migration 010 applies idempotently against a fresh + an existing DB (Storage.Postgres container tests, when available).
+- [x] `dotnet build Verbara.Platform.slnx -c Release` — 0 warnings (TreatWarningsAsErrors).
+- [x] `dotnet test tests/Verbara.Platform.Api.Tests/ -c Release` — all green (incl. the new resolver/quota/meter/endpoint tests).
+- [x] AOT publish gate: `dotnet publish src/Verbara.Platform.Api/Verbara.Platform.Api.csproj -c Release -r linux-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -o /tmp/aot-p2c2` → native ELF, 0 `IL2026/IL3050/IL207x`, 0 managed Verbara DLLs (every new DTO is in `ApiJsonContext`).
+- [x] Migration 010 applies idempotently against a fresh + an existing DB (Storage.Postgres container tests, when available).
 
 ---
 

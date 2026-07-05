@@ -5,7 +5,7 @@
 - **Owners:** Harold Reina
 - **Scope:** cross-repo (`Verbara.Sdk` MIT · `Verbara.Sdk.Pro` commercial · `Verbara.Platform` + `Verbara.Platform.Web` host)
 - **Related:**
-  - Análisis técnico de alineación (plan file): `/home/orion75/.claude/plans/antes-de-continuar-quiero-quizzical-gizmo.md`
+  - Análisis técnico de alineación (plan file): `~/.claude/plans/antes-de-continuar-quiero-quizzical-gizmo.md` (maintainer-local — not tracked in this repo)
   - Re-auditoría v1.13.0: mismo plan file §13
   - ADR-0001 (Pro 1.11 adoption): `Verbara.Sdk.Pro/docs/decisions/0001-sdk-1.11-adoption.md`
   - ADR-0002 (Pro hardening baseline): `Verbara.Sdk.Pro/docs/decisions/0002-production-hardening-baseline.md`

@@ -118,7 +118,7 @@ This PRR signs off the platform against the **as-validated** envelope and explic
 
 | Item | Status | Evidence |
 |---|---|---|
-| Prometheus metrics catalog | ✅ | 17 meters across Pro packages + `verbara.platform.*` meters (jwt, http_server_request_duration, etc.) |
+| Prometheus metrics catalog | ✅ | 16 meters across Pro packages + `verbara.platform.*` meters (jwt, http_server_request_duration, etc.) |
 | Grafana dashboards | ✅ | [`grafana-dashboards/`](grafana-dashboards/) — Platform.Api overview + Pro packages + K8s cluster |
 | Loki log aggregation | ✅ | K8s lab via promtail; Docker via JSON-file driver |
 | Distributed tracing | ✅ | ActivitySource catalog (11 sources, OTel-exported) — exercised in chaos runs |

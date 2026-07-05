@@ -155,10 +155,12 @@ close: a retry finds the conversation no longer in `WrapUp` and stamps nothing.
 - **WHEN** more than `N` candidates qualify in one cycle
 - **THEN** at most `N` SHALL be stamped in that cycle and the remainder SHALL be deferred to the next
 
-#### Scenario: Chronically failing candidate is skipped once
-- **GIVEN** a candidate that fails verification on every cycle
-- **WHEN** it has failed a bounded number of times
-- **THEN** it SHALL be moved to a terminal skipped state and `AutonomousSkipped` SHALL be emitted once, not repeatedly
+#### Scenario: A candidate that keeps failing verification is skipped exactly once per cycle
+- **GIVEN** a candidate that fails a non-gate verification check every cycle it is evaluated
+- **WHEN** it is blank-closed in the cycle it is evaluated
+- **THEN** `AutonomousSkipped` SHALL be emitted exactly once for that close, and — because a blank-close
+  moves the conversation out of `WrapUp` — the candidate is never re-evaluated, so no terminal-skipped
+  state or attempt counter exists or is needed
 
 ### Requirement: Observability metrics for autonomous disposition
 The system SHALL emit metrics for autonomous disposition activity: total autonomous commits, total skips by

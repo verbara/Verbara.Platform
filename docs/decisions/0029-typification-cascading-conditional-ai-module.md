@@ -5,7 +5,7 @@
 - **Deciders:** Verbara maintainer (Harol A. Reina H.)
 - **Related:**
   - Spec: [`docs/specs/2026-06-07-typification-cascading-conditional-ai.md`](../specs/2026-06-07-typification-cascading-conditional-ai.md)
-  - Supersedes the flat `Disposition` domain in [`src/Verbara.Platform.Conversations/Disposition.cs`](../../src/Verbara.Platform.Conversations/Disposition.cs) + [`WrapUpRecord.cs`](../../src/Verbara.Platform.Conversations/WrapUpRecord.cs) + [`DispositionEndpoints.cs`](../../src/Verbara.Platform.Api/Endpoints/DispositionEndpoints.cs)
+  - Supersedes the flat `Disposition` domain (removed in the clean-break; successor: [`src/Verbara.Platform.Typification/TypificationSubmission.cs`](../../src/Verbara.Platform.Typification/TypificationSubmission.cs) + [`TypificationEndpoints.cs`](../../src/Verbara.Platform.Api/Endpoints/TypificationEndpoints.cs) + [`ConversationEndpoints.cs`](../../src/Verbara.Platform.Api/Endpoints/ConversationEndpoints.cs) wrap-up handlers)
   - Reuses: Flow engine `http_request` node (data-dips), the Pro AI stack (`CallAnalyticsEngine`, `AgentAssistSession`), `ChannelType`/queue/campaign context at wrap-up, `TagSource.AutoAi`
   - Related ADRs: [`0020`](0020-csat-brownfield-survey-domain-extension.md) (brownfield-first domain extension discipline), [`0022`](0022-platform-api-aot-shipping-path.md) (Native AOT constraint)
 
@@ -15,7 +15,7 @@
 
 Verbara ships a **flat, dual-layer disposition model**:
 
-- **Platform tenant-scoped** — [`Disposition`](../../src/Verbara.Platform.Conversations/Disposition.cs) (`DispositionId`, `TenantId`, `Name`, `Category ∈ {Success, Failure, FollowUp}`, `IsActive`). Applied at wrap-up to **any** conversation (voice inbound/outbound + all digital channels) via [`WrapUpRecord`](../../src/Verbara.Platform.Conversations/WrapUpRecord.cs) (a single `DispositionId` + free-text `Notes`). Tables `dispositions` + `wrap_up_records` in [`001_InitialSchema.sql:444-456`](../../src/Verbara.Platform.Storage.Postgres/Migrations/001_InitialSchema.sql).
+- **Platform tenant-scoped** — `Disposition` (`DispositionId`, `TenantId`, `Name`, `Category ∈ {Success, Failure, FollowUp}`, `IsActive`; historical — removed in the post-P0 clean-break, see `001_Baseline.sql` header). Applied at wrap-up to **any** conversation (voice inbound/outbound + all digital channels) via `WrapUpRecord` (a single `DispositionId` + free-text `Notes`; also removed). Tables `dispositions` + `wrap_up_records` existed pre-clean-break; both are now dropped (superseded by `typification_submissions` — see [`src/Verbara.Platform.Typification/TypificationSubmission.cs`](../../src/Verbara.Platform.Typification/TypificationSubmission.cs)).
 - **Pro Dialer campaign-scoped** — `Verbara.Sdk.Pro.Dialer.Models.DispositionCode` (`Code`, `Label`, `Category ∈ {Success, Failure, Retry, SystemResult}`, `TriggerRetry`/`RetryDelayMinutes`, `TriggerCallback`, `SortOrder`) for outbound campaigns, applied to `call_attempts`, driving retry/callback automation.
 
 Both are **flat single-select lists**. The agent UI ([`wrap-up-dialog.tsx`](https://github.com/verbara/Verbara.Platform.Web/blob/main/src/agent/conversation/wrap-up-dialog.tsx)) is one select + a notes textarea + a conditionally-revealed callback date/phone (the **only** dependent-field behavior, gated by `triggerCallback`). Admin CRUD is `/admin/dispositions` (GET/POST/DELETE — **no update**) gated by `LicenseFeature.Dialer`.
@@ -157,7 +157,7 @@ The accuracy/quality **dashboard** (visualizing the calibration/feedback signal 
 
 - Spec: [`docs/specs/2026-06-07-typification-cascading-conditional-ai.md`](../specs/2026-06-07-typification-cascading-conditional-ai.md)
 - P1 spec: [`docs/specs/2026-06-08-typification-p1-shared-capture.md`](../specs/2026-06-08-typification-p1-shared-capture.md)
-- Current domain being superseded: [`src/Verbara.Platform.Conversations/Disposition.cs`](../../src/Verbara.Platform.Conversations/Disposition.cs), [`WrapUpRecord.cs`](../../src/Verbara.Platform.Conversations/WrapUpRecord.cs), [`DispositionEndpoints.cs`](../../src/Verbara.Platform.Api/Endpoints/DispositionEndpoints.cs)
+- Domain superseded (removed in the clean-break): flat `Disposition` + `WrapUpRecord` + `DispositionEndpoints.cs` — successor is [`src/Verbara.Platform.Typification/TypificationSubmission.cs`](../../src/Verbara.Platform.Typification/TypificationSubmission.cs), [`TypificationEndpoints.cs`](../../src/Verbara.Platform.Api/Endpoints/TypificationEndpoints.cs), [`ConversationEndpoints.cs`](../../src/Verbara.Platform.Api/Endpoints/ConversationEndpoints.cs) wrap-up handlers
 - Reused engine: [`src/Verbara.Platform.Flows/Nodes/HttpRequestNodeHandler.cs`](../../src/Verbara.Platform.Flows/Nodes/HttpRequestNodeHandler.cs)
 - Reused AI stack (Pro): `Verbara.Sdk.Pro.CallAnalytics/Engine/CallAnalyticsEngine.cs`, `Verbara.Sdk.Pro.CallAnalytics/Domain/CallSummary.cs` (`DispositionCode`), `Verbara.Sdk.Pro.AgentAssist/Engine/AgentAssistSession.cs`
 - Precedent: [`ADR-0020`](0020-csat-brownfield-survey-domain-extension.md) (brownfield-first, license-feature-additive), [`ADR-0022`](0022-platform-api-aot-shipping-path.md) (AOT)

@@ -12,7 +12,7 @@
 **Tech Stack:** .NET 10 Native AOT · ASP.NET Core minimal APIs · Postgres 17 (Npgsql) · Redis 8 (`Asterisk.Platform.Identity.Redis`) · DataProtection DB-backed via `PlatformDataProtectionDbContext` (ADR-0003) · BenchmarkDotNet (test-side JIT only) · dotnet-trace · NBomber 6.1 (`tests/Asterisk.Platform.LoadTests/`) · Argon2id (library locked by Phase 0).
 
 **Provenance:**
-- Plan approved 2026-04-27 in dedicated planning session (system path `/home/orion75/.claude/plans/silly-strolling-fiddle.md`).
+- Plan approved 2026-04-27 in dedicated planning session (system path `~/.claude/plans/silly-strolling-fiddle.md`, maintainer-local — not tracked in this repo).
 - R5.5 evidence: `docs/operations/load-test-baseline.md` (B-L #4 sweep) + `docs/operations/slos.md` + `docs/operations/capacity-planning.md` (v1 partial-measured).
 - Roadmap pointer: `Asterisk.Sdk.Pro/docs/roadmap.md` "Known-debt v1.13.x patches" → JWT-001 (this plan corrects the diagnosis and broadens scope).
 

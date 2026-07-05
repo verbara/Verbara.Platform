@@ -282,7 +282,7 @@ namespace Verbara.Sdk.Dapper.Stubs.Tests;
 public sealed class PublicApiSurfaceTests
 {
     private const string RealDapperPath =
-        "/home/orion75/.nuget/packages/dapper/2.1.72/lib/net8.0/Dapper.dll";
+        "~/.nuget/packages/dapper/2.1.72/lib/net8.0/Dapper.dll";
 
     private static Assembly LoadRealDapper() => Assembly.LoadFrom(RealDapperPath);
 
