@@ -20,4 +20,12 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- live-postgres-ci-lane grounding: same rationale as
+         Storage.Postgres.Tests.csproj — multiple Testcontainers-backed Redis
+         fixture classes starting concurrently under xUnit's default test-collection
+         parallelism can race under host contention. Serialize for determinism. -->
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

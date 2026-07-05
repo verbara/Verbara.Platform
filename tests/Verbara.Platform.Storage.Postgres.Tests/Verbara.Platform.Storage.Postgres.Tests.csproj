@@ -17,4 +17,16 @@
     <PackageReference Include="Verbara.Sdk.Data.Npgsql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- live-postgres-ci-lane grounding: ~13 fixture classes each start their own
+         Testcontainers Postgres container. xUnit parallelizes test collections
+         (one per class) by default, so all containers start concurrently — under
+         host contention (constrained CI runners, or a busy shared dev box) this
+         intermittently surfaces as Npgsql "Connection reset by peer" during the
+         post-pg_isready SSL handshake, a container-startup race rather than a
+         test-logic bug. Serializing collections bounds concurrent container starts
+         at the cost of wall-clock time; see design.md's Grounding-resolution note. -->
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
