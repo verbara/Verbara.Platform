@@ -55,6 +55,55 @@ public sealed class PostgresCreditLedgerStoreTests
         balance.Should().Be(0m);
     }
 
+    // credit-grant-lazy-mint-rollover — the indexed grant-existence lookup the lazy minter gates on.
+
+    // Scenario: no grant exists yet for the period — the indexed existence check reads false.
+    [Fact]
+    public async Task HasCurrentPeriodGrantAsync_ShouldReturnFalse_WhenNoGrantPostedForPeriod()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("ledger-grant-miss");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        var exists = await store.HasCurrentPeriodGrantAsync(tenant, "2026-06", CancellationToken.None);
+
+        exists.Should().BeFalse();
+    }
+
+    // Scenario: a different period's grant does not satisfy the current period's existence check.
+    [Fact]
+    public async Task HasCurrentPeriodGrantAsync_ShouldReturnFalse_WhenOnlyADifferentPeriodGrantExists()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("ledger-grant-other-period");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 300m, periodKey: "2026-05"), CancellationToken.None);
+
+        var exists = await store.HasCurrentPeriodGrantAsync(tenant, "2026-06", CancellationToken.None);
+
+        exists.Should().BeFalse();
+    }
+
+    // Scenario: after PostGrantAsync for the period, the existence check reads true.
+    [Fact]
+    public async Task HasCurrentPeriodGrantAsync_ShouldReturnTrue_WhenGrantAlreadyPostedForPeriod()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("ledger-grant-hit");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+        await store.PostGrantAsync(Grant(tenant, 300m, periodKey: "2026-06"), CancellationToken.None);
+
+        var exists = await store.HasCurrentPeriodGrantAsync(tenant, "2026-06", CancellationToken.None);
+
+        exists.Should().BeTrue();
+    }
+
     // Scenario: a grant raises the projection and the ledger SUM equals the projection balance.
     [Fact]
     public async Task PostGrantAsync_ShouldCreditProjection_WhenGrantPosted()
@@ -153,6 +202,37 @@ public sealed class PostgresCreditLedgerStoreTests
         (await _fixture.LedgerRowCountAsync(tenant.Value)).Should().Be(1);
         (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(300m);
         (await _fixture.LedgerSumAsync(tenant.Value)).Should().Be(300m);
+    }
+
+    // credit-grant-lazy-mint-rollover — concurrent first reads in the rollover window must mint exactly once
+    // (the ON CONFLICT DO NOTHING race between two lazy-mint attempts racing the SAME period_key), mirroring
+    // the worker/lazy-mint safety the (b)/(c) trains already proved for PostGrantAsync itself.
+    [Fact]
+    public async Task PostGrantAsync_ShouldMintExactlyOnce_WhenConcurrentLazyMintAttemptsRaceSamePeriod()
+    {
+        await _fixture.ResetAsync();
+        var tenant = new TenantId("ledger-lazy-mint-race");
+
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var store = new PostgresCreditLedgerStore(dataSource);
+
+        // Two concurrent "first reads" of the same rollover-window period, each having already observed a
+        // grant-existence miss (the lazy minter's indexed check) before racing to post the SAME period grant —
+        // the exact race credit-grant-lazy-mint-rollover closes.
+        var attemptA = store.PostGrantAsync(Grant(tenant, 1000m, periodKey: "2026-06"), CancellationToken.None);
+        var attemptB = store.PostGrantAsync(Grant(tenant, 1000m, periodKey: "2026-06"), CancellationToken.None);
+        await Task.WhenAll(attemptA, attemptB);
+
+        // Exactly one grant row exists for the period and the projection is credited exactly once.
+        (await _fixture.LedgerRowCountAsync(tenant.Value)).Should().Be(1);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(1000m);
+        (await _fixture.LedgerSumAsync(tenant.Value)).Should().Be(1000m);
+
+        // A worker tick after the race is a no-op too (idempotent posting) — neither double-inserts nor
+        // double-credits.
+        await store.PostGrantAsync(Grant(tenant, 1000m, periodKey: "2026-06"), CancellationToken.None);
+        (await _fixture.LedgerRowCountAsync(tenant.Value)).Should().Be(1);
+        (await store.GetBalanceAsync(tenant, CancellationToken.None)).Should().Be(1000m);
     }
 
     // Scenario: a duplicate top-up for the same external_ref is a no-op.

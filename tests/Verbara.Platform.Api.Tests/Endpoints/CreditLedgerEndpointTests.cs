@@ -171,6 +171,47 @@ public sealed class CreditLedgerEndpointTests
         json["pageSize"]!.GetValue<int>().Should().Be(200); // >200 → 200
     }
 
+    // ─── credit-grant-lazy-mint-rollover — the readout balance path's inline mint-on-read ─────────────────
+
+    [Fact]
+    public async Task GetBalance_ShouldLazyMintCurrentPeriodGrant_WhenAiCreditsMonthlyConfigured_AndNoGrantYet()
+    {
+        using var factory = new AuthenticatedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+        var tenantId = new TenantId(AuthenticatedPlatformApiFactory.TestTenantId);
+
+        await SeedQuotaAsync(factory, tenantId, aiCreditsMonthly: 750L);
+
+        var response = await client.GetAsync("/api/admin/credit-ledger/balance");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        // No current-period grant existed before this read; the lazy mint posts it inline so the FIRST read
+        // already observes the allowance (the credit-grant-lazy-mint-rollover fast-follow).
+        json!["balance"]!.GetValue<decimal>().Should().Be(750m);
+
+        // Steady state: a second read must NOT double-mint (idempotent on period_key) — balance stays 750.
+        var second = await client.GetAsync("/api/admin/credit-ledger/balance");
+        var secondJson = JsonNode.Parse(await second.Content.ReadAsStringAsync());
+        secondJson!["balance"]!.GetValue<decimal>().Should().Be(750m);
+    }
+
+    [Fact]
+    public async Task GetBalance_ShouldNotMint_WhenAiCreditsMonthlyIsNull()
+    {
+        using var factory = new AuthenticatedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+        var tenantId = new TenantId(AuthenticatedPlatformApiFactory.TestTenantId);
+
+        await SeedQuotaAsync(factory, tenantId, aiCreditsMonthly: null);
+
+        var response = await client.GetAsync("/api/admin/credit-ledger/balance");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!["balance"]!.GetValue<decimal>().Should().Be(0m);
+    }
+
     // ─── helpers ──────────────────────────────────────────────────────────────────
 
     private static async Task<decimal> ReadBalanceAsync(WebApplicationFactory<Program> factory, string tenantId)
@@ -178,6 +219,18 @@ public sealed class CreditLedgerEndpointTests
         using var scope = factory.Services.CreateScope();
         var ledger = scope.ServiceProvider.GetRequiredService<ICreditLedgerStore>();
         return await ledger.GetBalanceAsync(new TenantId(tenantId), CancellationToken.None);
+    }
+
+    private static async Task SeedQuotaAsync(WebApplicationFactory<Program> factory, TenantId tenantId, long? aiCreditsMonthly)
+    {
+        using var scope = factory.Services.CreateScope();
+        var quotaStore = scope.ServiceProvider.GetRequiredService<ITenantQuotaStore>();
+        await quotaStore.UpsertAsync(new TenantQuota
+        {
+            TenantId = tenantId,
+            AiCreditsMonthly = aiCreditsMonthly,
+            QuotaAction = QuotaAction.Warn,
+        }, CancellationToken.None);
     }
 
     private static async Task SeedGrantAsync(
