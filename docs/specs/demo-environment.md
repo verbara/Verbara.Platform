@@ -1,7 +1,17 @@
 # Demo Environment — Verbara Platform
 
-> **Last updated:** 2026-05-26
+> **Last updated:** 2026-07-05
 > **IMPORTANT:** This document MUST be updated whenever any file under `docker/demo/` is modified.
+>
+> **2026-07-05:** Fixed a latent bug (found by `openspec/changes/released-image-smoke`'s first
+> real run against a released image, not just a signature check): `platform-api`'s
+> `ConnectionStrings__*` were hard-coded to `Database=verbara`, while `.env.demo` sets
+> `POSTGRES_DB=platform` (the value this doc's own Environment Variables table already
+> documented) and `demo-reset.sh` seeds via `psql -d platform`. A truly fresh `demo-reset.sh`
+> run (which always does `down -v` first) would create a `platform` database that platform-api
+> never connected to, crashing on `DatabaseMigrationService` with `3D000: database "verbara"
+> does not exist`. Connection strings now read `Database=${POSTGRES_DB:-platform}` so the two
+> can never drift again.
 
 ## Overview
 
@@ -488,3 +498,17 @@ docker/demo/
 | Auth credentials | In .env.demo | In .env | From .env.production |
 | Multi-tenant seed | Platform + Demo tenants | No | No |
 | Purpose | Development, demos, testing | Minimal dev | Production deployment |
+
+---
+
+## Related: post-release functional smoke
+
+`docker/verbara-smoke-released.sh` (openspec/changes/released-image-smoke) reuses this compose
+file as its substrate, re-pinned to a released image's cosign-verified digest via
+`docker/smoke/docker-compose.smoke-override.yml` — a minimal `postgres` + `redis` + `platform-api`
+subset (no Asterisk/pstn-emulator/realtime/web/nginx-gateway/prometheus/grafana; the
+`AsteriskAmiHealthCheck` reports Healthy in "digital-only" mode when `Asterisk:Ami:Hostname` is
+unset). It is NOT part of the demo environment itself — it verifies a **released** GHCR image
+actually boots and completes one real journey (`POST /api/v1/setup` → `POST /api/v1/auth/login`),
+as a functional follow-up to `docker/verbara-verify-image.sh`'s signature-only check. See that
+script's own header comment for usage.
