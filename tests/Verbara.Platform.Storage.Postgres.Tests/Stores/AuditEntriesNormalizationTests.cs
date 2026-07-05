@@ -291,6 +291,216 @@ public sealed class AuditEntriesNormalizationTests
         }
     }
 
+    // ─── Integrity hash versioning (audit-trail-integrity-fixes, fix 4) — live DB ───
+
+    [Fact]
+    public async Task SaveAsync_ShouldRoundTripV2Hash_CoveringRetainUntil()
+    {
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenant = new TenantId("tenant-hash-v2-live");
+            var occurredAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+            var retainUntil = occurredAt.AddDays(90);
+
+            var entry = new AuditEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenant,
+                Action = "typification.autonomous.corrected",
+                Category = "conversations",
+                Severity = "info",
+                ActorId = "supervisor-1",
+                ActorType = "user",
+                TargetId = "conv-hash-v2",
+                TargetType = "Conversation",
+                OccurredAt = occurredAt,
+                RetainUntil = retainUntil,
+                IntegrityHash = DefaultAuditService.ComputeIntegrityHashV2(
+                    tenant, "user", "supervisor-1", "typification.autonomous.corrected",
+                    "Conversation", "conv-hash-v2", occurredAt, retainUntil, metadata: null),
+            };
+
+            await store.SaveAsync(entry, CancellationToken.None);
+
+            var rehydrated = await store.GetByEntityAsync(tenant, "Conversation", "conv-hash-v2", CancellationToken.None);
+            rehydrated.Should().ContainSingle();
+            var got = rehydrated[0];
+
+            got.IntegrityHash.Should().StartWith(DefaultAuditService.HashSchemeV2Prefix);
+            got.RetainUntil.Should().Be(retainUntil);
+            DefaultAuditService.VerifyIntegrity(got).Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task VerifyIntegrity_ShouldFail_WhenRetainUntilMutatedDirectlyInStorage()
+    {
+        // GIVEN an audit entry written under the new hash scheme
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenant = new TenantId("tenant-hash-v2-tamper");
+            var occurredAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+            var originalRetainUntil = occurredAt.AddDays(90);
+
+            var entry = new AuditEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenant,
+                Action = "typification.autonomous.corrected",
+                Category = "conversations",
+                Severity = "info",
+                ActorId = "supervisor-1",
+                ActorType = "user",
+                TargetId = "conv-hash-tamper",
+                TargetType = "Conversation",
+                OccurredAt = occurredAt,
+                RetainUntil = originalRetainUntil,
+                IntegrityHash = DefaultAuditService.ComputeIntegrityHashV2(
+                    tenant, "user", "supervisor-1", "typification.autonomous.corrected",
+                    "Conversation", "conv-hash-tamper", occurredAt, originalRetainUntil, metadata: null),
+            };
+            await store.SaveAsync(entry, CancellationToken.None);
+
+            // WHEN its retain_until column is mutated directly in storage (bypassing the app —
+            // the hash is NOT recomputed, exactly mirroring an out-of-band tamper).
+            await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand(
+                "UPDATE audit_entries SET retain_until = @NewRetainUntil WHERE entry_id = @EntryId", conn);
+            cmd.Parameters.Add(new NpgsqlParameter("NewRetainUntil", occurredAt.AddDays(9999).UtcDateTime));
+            cmd.Parameters.Add(new NpgsqlParameter("EntryId", entry.EntryId.Value));
+            await cmd.ExecuteNonQueryAsync();
+
+            var rehydrated = await store.GetByEntityAsync(tenant, "Conversation", "conv-hash-tamper", CancellationToken.None);
+            rehydrated.Should().ContainSingle();
+
+            // THEN hash verification for that entry fails
+            DefaultAuditService.VerifyIntegrity(rehydrated[0]).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task VerifyIntegrity_ShouldStillVerify_WhenPreExistingV1RowReadFromRealDb()
+    {
+        // Characterization (audit-trail-integrity-fixes, fix 4): a row written the way
+        // DefaultAuditService wrote entries BEFORE the v2 scheme existed (bare-hex v1 hash, no
+        // RetainUntil coverage) must still verify after the scheme change — read back from a REAL
+        // Postgres round-trip, not just in-memory.
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenant = new TenantId("tenant-hash-v1-legacy");
+            var occurredAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+            var legacyV1Hash = DefaultAuditService.ComputeIntegrityHash(
+                tenant, "user", "user-legacy", "conversation.created",
+                "Conversation", "conv-legacy", occurredAt, metadata: null);
+
+            var legacyEntry = new AuditEntry
+            {
+                EntryId = EntityId.New(),
+                TenantId = tenant,
+                Action = "conversation.created",
+                Category = "conversations",
+                Severity = "info",
+                ActorId = "user-legacy",
+                ActorType = "user",
+                TargetId = "conv-legacy",
+                TargetType = "Conversation",
+                OccurredAt = occurredAt,
+                RetainUntil = null, // pre-existing rows predating fix 4 typically have none set
+                IntegrityHash = legacyV1Hash,
+            };
+            await store.SaveAsync(legacyEntry, CancellationToken.None);
+
+            var rehydrated = await store.GetByEntityAsync(tenant, "Conversation", "conv-legacy", CancellationToken.None);
+            rehydrated.Should().ContainSingle();
+            var got = rehydrated[0];
+
+            got.IntegrityHash.Should().NotStartWith(DefaultAuditService.HashSchemeV2Prefix);
+            DefaultAuditService.VerifyIntegrity(got).Should().BeTrue("pre-existing v1 rows must verify unchanged — no mass invalidation");
+        }
+    }
+
+    // ─── CountByActorAsync (audit-trail-integrity-fixes, fix 2) — live DB ───────────
+
+    [Fact]
+    public async Task CountByActorAsync_ShouldReturnExactCount_WhenActorHasMultipleRows()
+    {
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenant = new TenantId("tenant-count-actor");
+
+            for (var i = 0; i < 3; i++)
+            {
+                await store.SaveAsync(
+                    NewEntry(tenantId: tenant.Value, category: "config", severity: "info",
+                        actorType: "user", actorId: "user-count-me"),
+                    CancellationToken.None);
+            }
+            // A different actor's rows must not be counted.
+            await store.SaveAsync(
+                NewEntry(tenantId: tenant.Value, category: "config", severity: "info",
+                    actorType: "user", actorId: "someone-else"),
+                CancellationToken.None);
+
+            var count = await store.CountByActorAsync(tenant, "user-count-me", CancellationToken.None);
+
+            count.Should().Be(3);
+        }
+    }
+
+    [Fact]
+    public async Task CountByActorAsync_ShouldReturnZero_WhenActorHasNoRows()
+    {
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenant = new TenantId("tenant-count-actor-empty");
+
+            var count = await store.CountByActorAsync(tenant, "no-such-actor", CancellationToken.None);
+
+            count.Should().Be(0);
+        }
+    }
+
+    [Fact]
+    public async Task CountByActorAsync_ShouldScopeByTenant_WhenSameActorExistsInAnotherTenant()
+    {
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var tenantA = new TenantId("tenant-count-a");
+            var tenantB = new TenantId("tenant-count-b");
+
+            await store.SaveAsync(
+                NewEntry(tenantId: tenantA.Value, category: "config", severity: "info", actorType: "user", actorId: "shared-actor"),
+                CancellationToken.None);
+            await store.SaveAsync(
+                NewEntry(tenantId: tenantB.Value, category: "config", severity: "info", actorType: "user", actorId: "shared-actor"),
+                CancellationToken.None);
+
+            var count = await store.CountByActorAsync(tenantA, "shared-actor", CancellationToken.None);
+
+            count.Should().Be(1);
+        }
+    }
+
     // ─── Retention floor (ADR-0034 Decision 4) — live DB ────────────────────────────
 
     [Fact]

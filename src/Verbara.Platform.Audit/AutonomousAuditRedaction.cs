@@ -58,6 +58,22 @@ public static class AutonomousAuditRedaction
             };
         }
 
+        // audit-trail-integrity-fixes (fix 4): re-derive the hash under WHICHEVER scheme the
+        // original entry used — a v2-scheme record (stored hash prefixed with
+        // DefaultAuditService.HashSchemeV2Prefix) stays v2 (still covering RetainUntil) after
+        // redaction; a pre-existing v1-scheme record stays v1. Redaction must never upgrade a
+        // record's scheme — it only re-derives the hash over the now-redacted fields.
+        var isV2 = entry.IntegrityHash is { } hash
+            && hash.StartsWith(DefaultAuditService.HashSchemeV2Prefix, StringComparison.Ordinal);
+
+        var redactedHash = isV2
+            ? DefaultAuditService.ComputeIntegrityHashV2(
+                entry.TenantId, entry.ActorType, entry.ActorId, entry.Action,
+                entry.TargetType, targetId: null, entry.OccurredAt, entry.RetainUntil, redactedMetadata)
+            : DefaultAuditService.ComputeIntegrityHash(
+                entry.TenantId, entry.ActorType, entry.ActorId, entry.Action,
+                entry.TargetType, targetId: null, entry.OccurredAt, redactedMetadata);
+
         return new AuditEntry
         {
             EntryId = entry.EntryId,
@@ -76,9 +92,7 @@ public static class AutonomousAuditRedaction
             OccurredAt = entry.OccurredAt,
             ImpersonatorId = entry.ImpersonatorId,
             RetainUntil = entry.RetainUntil,
-            IntegrityHash = DefaultAuditService.ComputeIntegrityHash(
-                entry.TenantId, entry.ActorType, entry.ActorId, entry.Action,
-                entry.TargetType, targetId: null, entry.OccurredAt, redactedMetadata),
+            IntegrityHash = redactedHash,
         };
     }
 }
