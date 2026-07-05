@@ -13,6 +13,9 @@
     <ProjectReference Include="..\Verbara.Platform.Core\Verbara.Platform.Core.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Conversations\Verbara.Platform.Conversations.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Llm\Verbara.Platform.Llm.csproj" />
+    <!-- ITypificationCorrectionAuditWriter (audit-trail-integrity-fixes, fix 1) atomically writes
+         the correction record and its AuditEntry — needs the Audit domain model. -->
+    <ProjectReference Include="..\Verbara.Platform.Audit\Verbara.Platform.Audit.csproj" />
   </ItemGroup>
 
   <ItemGroup>

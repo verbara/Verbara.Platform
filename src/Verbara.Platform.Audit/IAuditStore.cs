@@ -11,6 +11,14 @@ public interface IAuditStore
     Task SaveAsync(AuditEntry entry, CancellationToken ct);
 
     /// <summary>
+    /// Returns the number of audit-trail rows attributed to the given actor within the tenant
+    /// (<see cref="AuditEntry.ActorId"/> match) — the real count backing
+    /// <c>GdprPurgeService.PreviewUserPurgeAsync</c>'s <c>AuditTrailCount</c> (audit-trail-integrity-fixes,
+    /// fix 2). Not zero-padded or estimated: an exact <c>COUNT(*)</c>.
+    /// </summary>
+    Task<long> CountByActorAsync(TenantId tenantId, string actorId, CancellationToken ct);
+
+    /// <summary>
     /// Returns all audit entries for a specific entity, ordered by <see cref="AuditEntry.OccurredAt"/> ascending.
     /// </summary>
     Task<IReadOnlyList<AuditEntry>> GetByEntityAsync(TenantId tenantId, string entityType, string entityId, CancellationToken ct);

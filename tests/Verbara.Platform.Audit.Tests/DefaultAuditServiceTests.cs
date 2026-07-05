@@ -587,9 +587,11 @@ public class DefaultAuditServiceIntegrityHashTests
 
         captured.Should().ContainSingle();
         captured[0].IntegrityHash.Should().NotBeNull();
-        // Lowercase hex SHA-256 is always 64 characters.
-        captured[0].IntegrityHash!.Length.Should().Be(64);
-        captured[0].IntegrityHash.Should().MatchRegex("^[0-9a-f]{64}$");
+        // audit-trail-integrity-fixes (fix 4): every newly written entry uses the v2 scheme —
+        // "v2:" + lowercase hex SHA-256 (64 chars) — so RetainUntil is covered by the hash.
+        captured[0].IntegrityHash!.Should().StartWith(DefaultAuditService.HashSchemeV2Prefix);
+        captured[0].IntegrityHash!.Should().MatchRegex("^v2:[0-9a-f]{64}$");
+        DefaultAuditService.VerifyIntegrity(captured[0]).Should().BeTrue();
     }
 
     [Fact]

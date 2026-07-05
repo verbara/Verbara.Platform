@@ -1,5 +1,5 @@
 using System.Collections.Frozen;
-using System.Security.Claims;
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
@@ -114,14 +114,11 @@ internal static class TypificationEndpoints
         return Results.NoContent();
     }
 
-    // Caller user id in the canonical order used by the permission handlers:
+    // Caller user id via the shared canonical resolver (audit-trail-integrity-fixes, fix 3):
     // user_id (API-key owning user) ?? NameIdentifier ?? sub (JWT). Falls back to "system"
     // so the attestation always records a non-empty actor.
     private static string GetCallerUserId(HttpContext context) =>
-        context.User.FindFirstValue("user_id")
-        ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-        ?? context.User.FindFirstValue("sub")
-        ?? "system";
+        CallerIdentity.ResolveUserIdOrSystem(context.User);
 
     // ─── Schema handlers ─────────────────────────────────────────────────────
 
@@ -738,6 +735,11 @@ internal static class TypificationEndpoints
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
+    // audit-trail-integrity-fixes (fix 3): actorId is resolved via the shared canonical
+    // resolver (user_id ?? NameIdentifier ?? sub), NOT a `sub`-only lookup. A `sub`-only lookup
+    // records API-key callers (no `sub` claim) as "system" and impersonated sessions as the
+    // impersonated subject rather than the resolved caller — the same claim-order bug class
+    // fixed for rate limiting / impersonation in v2.14.1.
     private static Task RecordAudit(
         HttpContext context,
         IAuditService audit,
@@ -749,7 +751,7 @@ internal static class TypificationEndpoints
         CancellationToken ct) =>
         audit.RecordAsync(
             tenantId, category: "config", action: action, severity: "info",
-            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            actorId: CallerIdentity.ResolveUserIdOrSystem(context.User), actorType: "user",
             targetId: targetId, targetType: "typification",
             changes: new AuditChanges(Before: before, After: after),
             metadata: new Dictionary<string, string>
@@ -780,9 +782,7 @@ internal static class TypificationEndpoints
         TenantId tenantId,
         CancellationToken ct)
     {
-        var callerUserId = context.User.FindFirstValue("user_id")
-            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? context.User.FindFirstValue("sub");
+        var callerUserId = CallerIdentity.ResolveUserId(context.User);
 
         if (string.IsNullOrEmpty(callerUserId))
             return new HashSet<string>(StringComparer.Ordinal);

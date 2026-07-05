@@ -74,11 +74,17 @@ internal static class ManagementImpersonationEndpoints
     /// would feed the key id into per-tenant permission / audit lookups — failing
     /// the impersonate check closed for management keys and mis-attributing audit.
     /// </para>
+    ///
+    /// <para>
+    /// audit-trail-integrity-fixes (fix 3): delegates to the shared
+    /// <see cref="CallerIdentity.ResolveUserId"/> so every caller-identity resolution in the Api
+    /// project shares ONE precedence instead of independently re-declaring it (this method is kept
+    /// as a thin wrapper — not inlined at call-sites — because it is part of this class's tested
+    /// public surface, see <c>ManagementImpersonationCallerResolutionTests</c>).
+    /// </para>
     /// </summary>
     internal static string? ResolveCallerUserId(ClaimsPrincipal user)
-        => user.FindFirstValue("user_id")
-            ?? user.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? user.FindFirstValue("sub");
+        => CallerIdentity.ResolveUserId(user);
 
     public static void MapManagementImpersonationEndpoints(this IEndpointRouteBuilder app)
     {

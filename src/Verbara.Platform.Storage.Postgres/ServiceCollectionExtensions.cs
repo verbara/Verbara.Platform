@@ -153,6 +153,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISchemaBindingStore, PostgresSchemaBindingStore>();
         services.AddSingleton<ITypificationSubmissionStore, PostgresTypificationSubmissionStore>();
         services.AddSingleton<ITypificationSubmissionCorrectionStore, PostgresTypificationSubmissionCorrectionStore>();
+        // audit-trail-integrity-fixes (fix 1) — atomic correction+submission+audit write
+        // (single Postgres transaction; shares the same NpgsqlDataSource as every other store here).
+        services.AddSingleton<ITypificationCorrectionAuditWriter, PostgresTypificationCorrectionAuditWriter>();
         services.AddSingleton<IReasonHintStore, PostgresReasonHintStore>();
         services.AddSingleton<IAiSuggestionStore, PostgresAiSuggestionStore>();
         services.AddSingleton<ITenantLlmConfigStore, PostgresTenantLlmConfigStore>();

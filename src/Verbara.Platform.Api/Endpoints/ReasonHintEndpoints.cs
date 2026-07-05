@@ -229,6 +229,9 @@ internal static class ReasonHintEndpoints
         return true;
     }
 
+    // audit-trail-integrity-fixes (fix 3): actorId is resolved via the shared canonical
+    // resolver (user_id ?? NameIdentifier ?? sub), matching TypificationEndpoints.RecordAudit —
+    // NOT a `sub`-only lookup, which mis-attributes API-key/impersonated callers.
     private static Task RecordAudit(
         HttpContext context,
         IAuditService audit,
@@ -240,7 +243,7 @@ internal static class ReasonHintEndpoints
         CancellationToken ct) =>
         audit.RecordAsync(
             tenantId, category: "config", action: action, severity: "info",
-            actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
+            actorId: CallerIdentity.ResolveUserIdOrSystem(context.User), actorType: "user",
             targetId: targetId, targetType: "reason_hint",
             changes: new AuditChanges(Before: before, After: after),
             metadata: new Dictionary<string, string>

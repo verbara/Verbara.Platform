@@ -101,6 +101,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISchemaBindingStore, InMemorySchemaBindingStore>();
         services.AddSingleton<ITypificationSubmissionStore, InMemoryTypificationSubmissionStore>();
         services.AddSingleton<ITypificationSubmissionCorrectionStore, InMemoryTypificationSubmissionCorrectionStore>();
+        // audit-trail-integrity-fixes (fix 1) — atomic correction+submission+audit write.
+        services.AddSingleton<ITypificationCorrectionAuditWriter, InMemoryTypificationCorrectionAuditWriter>();
         services.AddSingleton<IReasonHintStore, InMemoryReasonHintStore>();
         services.AddSingleton<IAiSuggestionStore, InMemoryAiSuggestionStore>();
         services.AddSingleton<ITenantLlmConfigStore, InMemoryTenantLlmConfigStore>();
