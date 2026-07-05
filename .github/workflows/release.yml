@@ -113,7 +113,7 @@ jobs:
       - name: Build and push final image
         if: steps.retro.outputs.skip != 'true'
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           file: ${{ matrix.dockerfile }}
