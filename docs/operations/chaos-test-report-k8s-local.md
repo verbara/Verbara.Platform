@@ -372,7 +372,7 @@ Tier-1 was the only material code change between v2.5.2 and v2.5.3, so the 100% 
 
 ## Process gotchas captured
 
-1. **`docker manifest inspect` returns config-digest, NOT manifest-list digest.** The correct command for image-binding (ADR-0011) is `crane digest <ref:tag>` (or `skopeo inspect ... | jq .Digest`). Used the wrong one initially; ImagePullBackOff with `unexpected media type application/octet-stream`.
+1. **`docker manifest inspect` returns config-digest, NOT manifest-list digest.** The correct command for image-binding (Pro/ADR-0011) is `crane digest <ref:tag>` (or `skopeo inspect ... | jq .Digest`). Used the wrong one initially; ImagePullBackOff with `unexpected media type application/octet-stream`.
 2. **`/metrics` is exposed publicly via Cilium Gateway** (`http://api.r55.local/metrics`). No ServiceMonitor for platform-api, so Prometheus doesn't auto-scrape. Use direct curl OR add a ServiceMonitor (filed as observability hardening).
 3. **Native AOT image has no `wget` / `curl`** — `kubectl exec ... wget` fails. Use port-forward + host curl, OR use Cilium Gateway external route.
 4. **Pro `license_image_unauthorized_total` counter showed 1** — the lab license hadn't been re-issued to include the v2.5.3 digest. Pro degraded Dialer feature but JWT path is NOT license-gated, so the validation proceeded successfully. License re-issue is normally automatic after `digest-reconciliation.yml` daily run; for forward-only validations like this we accept the lab license drift.

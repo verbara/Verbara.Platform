@@ -5,7 +5,7 @@
 > **Status:** PROPOSED — maintainer-executed migration. Subagent describes; maintainer runs.
 > **Repos touched:** [`Verbara.Platform`](../../../) (Realtime `Program.cs`, `Directory.Build.props`, helm `Chart.yaml`), [`verbara-website`](../../../../verbara-website/) (amend pending commit `01c455f`).
 > **Image releases produced:** `ghcr.io/verbara/platform/{api,realtime,renderer,mail}:v2.4.3` (cosign-signed), local-registry mirror at `192.168.122.1:5050/verbara-platform/{api,realtime,renderer,mail}:v2.4.3`.
-> **Source ADRs:** [ADR-0011 image-digest binding](../../decisions/0011-image-digest-binding.md) · [ADR-0022 AOT shipping path](../../decisions/0022-platform-api-aot-shipping-path.md) · [ADR-0023 publishing non-AOT microservices](../../decisions/0023-publishing-non-aot-microservices.md).
+> **Source ADRs:** [Pro/ADR-0011 image-digest binding](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0011-image-digest-binding-in-license-keys.md) · [ADR-0022 AOT shipping path](../../decisions/0022-platform-api-aot-shipping-path.md) · [ADR-0023 publishing non-AOT microservices](../../decisions/0023-publishing-non-aot-microservices.md).
 
 ## 1. Goal & non-goals
 
@@ -466,7 +466,7 @@ helm upgrade --install platform infra/k8s/helm/platform \
 - `-n default` matches the release's actual namespace (NOT `r55-platform` — that's the workload namespace).
 - `--reuse-values` preserves the historical `api.image.repository` + `web.image.repository` lab overrides while only changing image tags.
 - `--set realtime.replicas=4` forces the multi-pod target immediately rather than waiting for HPA scale-up. The chart's HPA still owns the dynamic adjustment between 1 and 4 post-deploy; the `--set` only seeds the initial replica count.
-- `digest` overrides are critical for ADR-0011 image-binding to validate against the v2.4.3 entry in `authorized-digests.json`. Without them the pods report 12002 startup warning but continue.
+- `digest` overrides are critical for Pro/ADR-0011 image-binding to validate against the v2.4.3 entry in `authorized-digests.json`. Without them the pods report 12002 startup warning but continue.
 - `--wait` blocks until all Deployments report `Available=True`. 10 min ceiling handles slow first-time image pulls into the local registry blob cache.
 
 **Pass gate:**

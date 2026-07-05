@@ -497,7 +497,7 @@ Canonical execution plan: `~/.claude/plans/si-refactored-pascal.md`. Platform-si
 
 ---
 
-## [2.1.0] — 2026-05-10 — Image-binding (ADR-0011 + ADR-0018 Trigger 5 machinery) + Pro 2.3.0-pro cascade
+## [2.1.0] — 2026-05-10 — Image-binding (Pro/ADR-0011 + ADR-0018 Trigger 5 machinery) + Pro 2.3.0-pro cascade
 
 Minor bump because this release introduces operator-visible new surface: Helm chart values default to `ghcr.io/verbara/platform/{api,web}` (was local KVM registry), new admission-policy template, new docker-compose verification toolkit, new CI workflow that publishes signed OCI images to GitHub Container Registry, and the consumed Pro v2.3.0-pro adds `LicenseValidator.UnauthorizedImage` semantics. Coordinated cross-repo with **Pro 2.3.0-pro** + **verbara-website Worker integration** that ships license-issuance with `AuthorizedImageDigests` claims.
 

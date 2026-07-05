@@ -56,7 +56,7 @@ Mantenemos `docs/manuales/smb/` actual (escrito a mano) intacto durante las prim
 
 Objetivo: probar el pipeline end-to-end con el manual más trivial posible.
 
-- Crear `tests/manuales/` directory en `/media/Data/Source/Verbara/Verbara.Platform.Web/`
+- Crear `tests/manuales/` directory en `Verbara.Platform.Web/`
 - `playwright.docs.config.ts`: project `manuales` con `video: 'on'`, `trace: 'on'`, `screenshot: 'on'`, retención de artifacts garantizada
 - Instalar `allure-playwright` reporter (npm devDep)
 - Primer template `personas/smb-owner/00-smoke.md.tpl` con frontmatter (persona, journey, version, idioma) + 2 placeholders
@@ -169,7 +169,7 @@ Objetivo: ES canonical + EN + PT-BR; versionado por release.
 
 **Fase 0 (smoke):**
 ```bash
-cd /media/Data/Source/Verbara/Verbara.Platform.Web
+cd ../Verbara.Platform.Web
 npx playwright test --project=manuales tests/manuales/personas/smb-owner/00-smoke.spec.ts
 node tests/manuales/manual-renderer/render.ts --input allure-results/ --template tests/manuales/personas/smb-owner/00-smoke.md.tpl --output docs/manuales/auto/v2.5.4/es/smb-owner/00-smoke.md
 cat docs/manuales/auto/v2.5.4/es/smb-owner/00-smoke.md

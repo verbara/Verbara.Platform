@@ -7,14 +7,14 @@ api:
   # non-blocking). The K8s lab sets IMAGE_DIGEST below, so 12002 will NOT fire.
   aspnetcoreEnvironment: Production
   image:
-    # Canonical published registry per ADR-0011 (Pro v2.3.x image-binding).
+    # Canonical published registry per Pro/ADR-0011 (Pro v2.3.x image-binding).
     # Override to the local KVM dev cluster registry when validating against
     # the maintainer's k3s/Talos lab:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
     tag: "v2.6.0"
     # Manifest-list digest of the `repository:tag` image, used for Layer-C
-    # in-process image verification (ADR-0011, Pro v2.3.x). When set, the
+    # in-process image verification (Pro/ADR-0011, Pro v2.3.x). When set, the
     # Deployment template injects IMAGE_DIGEST env var that
     # ContainerImageDigest.ReadFromEnvironment() reads + compares against the
     # license's AuthorizedImageDigests claim. Source: the corresponding entry
@@ -113,7 +113,7 @@ api:
 
 web:
   image:
-    # Canonical published registry per ADR-0011 (Pro v2.3.x image-binding).
+    # Canonical published registry per Pro/ADR-0011 (Pro v2.3.x image-binding).
     # Override to the local KVM dev cluster registry when validating against
     # the maintainer's k3s/Talos lab:
     #   --set web.image.repository=192.168.122.1:5050/verbara-platform/web
@@ -135,7 +135,7 @@ ingress:
   hostnameWeb: r55.local
   tlsEnabled: false
 
-# Cosign-based image verification (Pro v2.3.x Layer B, ADR-0011).
+# Cosign-based image verification (Pro v2.3.x Layer B, Pro/ADR-0011).
 # Renders a Kyverno ClusterPolicy that requires every Pod admitted to the
 # release namespace whose image matches ghcr.io/verbara/platform/* to carry a
 # valid cosign signature from the Verbara cosign keypair. Default disabled
@@ -166,12 +166,12 @@ imageVerification:
 realtime:
   aspnetcoreEnvironment: Production
   image:
-    # Canonical published registry per ADR-0011. Override to the local KVM dev
+    # Canonical published registry per Pro/ADR-0011. Override to the local KVM dev
     # registry when validating against the maintainer's k3s/Talos lab:
     #   --set realtime.image.repository=192.168.122.1:5050/verbara-platform/realtime
     repository: ghcr.io/verbara/platform/realtime
     tag: "v2.6.0"
-    # Image-digest binding (ADR-0011 Layer C) — Pro license verification
+    # Image-digest binding (Pro/ADR-0011 Layer C) — Pro license verification
     # extends to the Realtime image via the AuthorizedImageDigests claim.
     # Leave empty for tag-only references (dev / local registry).
     #

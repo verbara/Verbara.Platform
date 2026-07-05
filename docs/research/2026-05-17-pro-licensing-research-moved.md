@@ -11,7 +11,7 @@
 
 1. **Research-next-to-code:** el 95% del impacto técnico es en Pro repo (`LicenseOptions`, `LicenseGuard`, `LicenseValidator`, `AddPro*()` extensions, `ContainerImageDigest`). El research debe vivir donde vive el código.
 2. **Competitive intel:** el threat model documentado (TA-Disabled-Loophole) describe un vector de "Pro free sin pagar". Pro es repo privado — preserva el incentivo legítimo (license trial gratis vía verbara-website).
-3. **Precedente establecido:** `Verbara.Sdk.Pro/docs/research/2026-05-09-pro-image-binding-research.md` (que produjo ADR-0011) ya estaba en Pro. La regla es "research de Licensing va en Pro".
+3. **Precedente establecido:** `Verbara.Sdk.Pro/docs/research/2026-05-09-pro-image-binding-research.md` (que produjo Pro/ADR-0011) ya estaba en Pro. La regla es "research de Licensing va en Pro".
 4. **ADR-0016 transparency preservada:** cuando Pro v2.4.0-pro shipee, se creará un Platform-side plan en `Verbara.Platform/docs/plans/active/2026-XX-XX-platform-v24x-pro-licensing-migration.md` (público) que documente la consumer migration. Eso es lo que el operator final ve, sin exposer el threat model interno.
 
 ## Para leer la decisión canónica (cuando esté disponible)

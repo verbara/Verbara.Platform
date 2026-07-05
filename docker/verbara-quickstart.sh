@@ -1,6 +1,6 @@
 #!/bin/sh
 # verbara-quickstart.sh — one-command verified Verbara Platform deploy for
-# docker-compose customers (Pro v2.3.x Layer B convenience wrapper, ADR-0011).
+# docker-compose customers (Pro v2.3.x Layer B convenience wrapper, Pro/ADR-0011).
 #
 # Workflow:
 #   1. Look up the requested Platform version's manifest-list digest from
@@ -50,7 +50,7 @@ echo "Fetching authorized digests from ${REGISTRY_URL} ..."
 REGISTRY_JSON="$(curl -fsS "$REGISTRY_URL")"
 
 # Find the entry matching the requested version. For now the registry only
-# carries the API image (web image-binding is a v2.4 follow-up — see ADR-0011).
+# carries the API image (web image-binding is a v2.4 follow-up — see Pro/ADR-0011).
 API_DIGEST="$(echo "$REGISTRY_JSON" \
   | jq -r --arg v "$VERSION" '.current[] | select(.platform_version == $v) | .manifest_list_digest' \
   | head -n 1)"
@@ -85,7 +85,7 @@ echo "Generating ${GENERATED} ..."
 # Substitute the resolved digest. Use a sed alternative that handles the `/`
 # in the digest cleanly by anchoring on the literal sentinel. THREE substitutions:
 #   1. image: line for the API service (digest-pinned image reference)
-#   2. IMAGE_DIGEST env var (Layer C in-process check, ADR-0011 Pro v2.3.x;
+#   2. IMAGE_DIGEST env var (Layer C in-process check, Pro/ADR-0011 Pro v2.3.x;
 #      Pro can't self-discover the running image's digest from inside the
 #      container — operator-side env var is the canonical wiring)
 #   3. image: line for the Web service (still tag-pinned per

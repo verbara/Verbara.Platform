@@ -172,7 +172,7 @@ services:
       # trial / upgrade URLs). Acquire a free Tier 0.5 developer license at
       # https://verbara.io/developer-license
       Licensing__FilePath: ${LICENSE_PATH:-}
-      # Pro Layer C image-binding (ADR-0011). Required only when running a
+      # Pro Layer C image-binding (Pro/ADR-0011). Required only when running a
       # commercial Pro license that has authorized digests. Leave empty for
       # the community/OSS path.
       IMAGE_DIGEST: ${IMAGE_DIGEST:-}

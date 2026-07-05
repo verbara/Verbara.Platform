@@ -15,7 +15,7 @@
   - `BanCrownJewelProInNonAotMicroservices` build guard present + active in [Directory.Build.props:67-80](../../Directory.Build.props#L67) — fires only for `Verbara.Platform.{Realtime,Renderer,Mail}` projects, blocks Dialer/Analytics/CallAnalytics/AgentAssist/EventStore/Routing PackageReferences.
   - API Native AOT publish output verified: 0 managed Verbara DLLs in `publish/`, native ELF 67 MB stripped (matches `file Verbara.Platform.Api` → "ELF 64-bit LSB pie executable, x86-64, ..., stripped").
   - Phase A.5 (shipped same day in `v2.4.2` train) added new code to `Verbara.Sdk.Pro.Cluster` (`IClusterLeader` + `LeaderElectionService` + `PostgresDistributedLock`-via-IDistributedLock) — all non-crown-jewel per this ADR's classification; guard remains green; no IP-exposure regression.
-  - Counter-arguments validated and rejected (private-for-IP-protection: zero IP gain, real friction cost; ECDSA-public-key-as-IL: cryptographically safe by Kerckhoffs; tampered binary: defeated by ADR-0011 Layer C digest binding; CI/CD friction tax: real, would harm ADR-0016 funnel economics).
+  - Counter-arguments validated and rejected (private-for-IP-protection: zero IP gain, real friction cost; ECDSA-public-key-as-IL: cryptographically safe by Kerckhoffs; tampered binary: defeated by Pro/ADR-0011 Layer C digest binding; CI/CD friction tax: real, would harm ADR-0016 funnel economics).
 
 ## Context
 
@@ -39,7 +39,7 @@ Key measured facts (see evidence doc):
   `EventStore`). Those live only in the AOT API.
 - `Pro.Licensing` validates licenses with **ECDSA-P256 signatures** (public key embedded,
   private signing key never ships). Decompiling it cannot forge licenses (Kerckhoffs).
-  Tampering is defended by cosign + digest binding (ADR-0011), independent of IL-vs-AOT.
+  Tampering is defended by cosign + digest binding (Pro/ADR-0011), independent of IL-vs-AOT.
 - The **API image is already PUBLIC** and the product **runs without a license** (freemium;
   Pro features gate at runtime). IP protection lives in **AOT (crown jewels) + runtime
   license gate + cosign**, not in registry access control.

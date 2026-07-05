@@ -363,7 +363,7 @@ spec:
             severity: P0
             service: licensing
           annotations:
-            summary: "ADR-0011 Layer C breach — license rejects current IMAGE_DIGEST"
+            summary: "Pro/ADR-0011 Layer C breach — license rejects current IMAGE_DIGEST"
             description: |
               `license.image_unauthorized` counter incremented in last 5min. The running container's
               manifest digest is NOT in the license's AuthorizedImageDigests claim. Either:

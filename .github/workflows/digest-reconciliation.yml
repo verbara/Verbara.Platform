@@ -1,7 +1,7 @@
 # Authorized-digest ↔ registry reconciliation monitor.
 #
 # `verbara-website/data/authorized-digests.json` is the source of truth for
-# image-digest binding (ADR-0011 Layer C — Pro licensing image binding).
+# image-digest binding (Pro/ADR-0011 Layer C — Pro licensing image binding).
 # Every entry (current + deprecated) MUST satisfy three properties:
 #   1. The `image_ref` resolves in ghcr.io (anonymous pull).
 #   2. The current registry digest matches the recorded `manifest_list_digest`
@@ -141,7 +141,7 @@ jobs:
           # visibility-monitor.yml — every continuation line stays within the
           # run-block's 10-space indentation or the YAML literal block scalar
           # terminates early and the whole workflow fails to parse.
-          title="digest-reconciliation: authorized-digests.json drift detected (ADR-0011 Layer C)"
+          title="digest-reconciliation: authorized-digests.json drift detected (Pro/ADR-0011 Layer C)"
           existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq 'length')
           if [ "$existing" -gt 0 ]; then
             echo "open issue already exists; not duplicating"
@@ -150,7 +150,7 @@ jobs:
           body=$(cat <<EOF
           The daily authorized-digest reconciliation workflow detected drift between \`verbara-website/data/authorized-digests.json\` and ghcr.io reality. Check failed in run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
 
-          This breaks ADR-0011 Layer C (Pro licensing image-digest binding). Customers running a Pro image whose digest matches an entry in \`current[]\` or \`deprecated[]\` expect that entry to remain valid; drift means a customer with the older digest in their pull-cache may suddenly fail license validation (or worse, validate against a different binary than the one originally authorized).
+          This breaks Pro/ADR-0011 Layer C (Pro licensing image-digest binding). Customers running a Pro image whose digest matches an entry in \`current[]\` or \`deprecated[]\` expect that entry to remain valid; drift means a customer with the older digest in their pull-cache may suddenly fail license validation (or worse, validate against a different binary than the one originally authorized).
 
           The run log identifies which dimension drifted per entry:
           - "ghcr.io does not resolve" → entry should be REMOVED from \`authorized-digests.json\` (the tag was deleted or overwritten; the digest is a ghost).
@@ -163,7 +163,7 @@ jobs:
           3. PR against \`verbara-website/data/authorized-digests.json\` if revoking.
           4. Re-run this workflow to confirm.
 
-          Cross-references: [ADR-0011 Layer C — image-digest binding](docs/decisions/0011-auth-write-deferral.md), [ADR-0023 — non-AOT microservice publishing](docs/decisions/0023-publishing-non-aot-microservices.md), [ADR-0024 — v2.4.2 anomaly + process hardening](docs/decisions/0024-v242-shipping-anomaly-and-process-hardening.md).
+          Cross-references: [Pro/ADR-0011 Layer C — image-digest binding](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0011-image-digest-binding-in-license-keys.md), [ADR-0023 — non-AOT microservice publishing](docs/decisions/0023-publishing-non-aot-microservices.md), [ADR-0024 — v2.4.2 anomaly + process hardening](docs/decisions/0024-v242-shipping-anomaly-and-process-hardening.md).
           EOF
           )
           gh issue create \

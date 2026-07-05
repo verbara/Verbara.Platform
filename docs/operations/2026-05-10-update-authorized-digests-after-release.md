@@ -47,7 +47,7 @@ docker buildx imagetools inspect ghcr.io/verbara/platform/api:vX.Y.Z \
 
 All three approaches return the same `sha256:...` value: the OCI
 manifest-list digest. **This is the digest you will record** — NOT a
-per-arch digest (per-arch digests are explicitly rejected; see ADR-0011
+per-arch digest (per-arch digests are explicitly rejected; see Pro/ADR-0011
 § "Multi-arch + manifest-list digest semantics").
 
 ## Step 2 — PR the new entry into `verbara-website`
@@ -83,7 +83,7 @@ Validation rules enforced by the schema (see
 - `released_at` MUST be ISO-8601 UTC (`Z` suffix)
 
 The Worker only embeds the **last 6 entries** from `current` in newly
-issued licenses (rotation cadence per ADR-0011 § "Issuer rotation
+issued licenses (rotation cadence per Pro/ADR-0011 § "Issuer rotation
 cadence"). After 6 future releases, the older entries become eligible
 to move to `deprecated` — that is a separate operator decision, not
 required for each release.
@@ -155,6 +155,6 @@ is tracked separately:
   with stale digests until the runbook is run.
 
 For a customer who upgrades past the 6-patch rotation window without
-re-fetching their license, see the ADR-0011 § "Issuer rotation cadence"
+re-fetching their license, see the Pro/ADR-0011 § "Issuer rotation cadence"
 discussion of the `/api/developer-license/refresh` endpoint (TBD; not
 implemented yet).

@@ -16,7 +16,7 @@ Pro Licensing exposes three instruments through the `Verbara.Sdk.Pro.Licensing.G
 | Pro instrument | Prometheus metric | Type | Tags | Purpose |
 |---|---|---|---|---|
 | `license.guard.blocked` | `license_guard_blocked_total` | Counter | `feature`, `reason` | Each `LicenseGuard.CanExecute(...)` call that returns Allowed=false |
-| `license.image_unauthorized` | `license_image_unauthorized_total` | Counter | `running_digest` (truncated to 16 chars), `authorized_count` | Image-digest mismatch detected by `LicenseValidator.Validate` (ADR-0011 Layer C breach) |
+| `license.image_unauthorized` | `license_image_unauthorized_total` | Counter | `running_digest` (truncated to 16 chars), `authorized_count` | Image-digest mismatch detected by `LicenseValidator.Validate` (Pro/ADR-0011 Layer C breach) |
 | `license.guard.grace_remaining_seconds` | `license_guard_grace_remaining_seconds` | Observable Gauge | `feature` | Seconds remaining in the configured grace window per feature |
 
 The dashboard ALSO uses:
@@ -33,7 +33,7 @@ The dashboard ships with 9 panels organized in 4 visual bands:
 
 ### Top row — single-value health indicators (24h windows)
 
-1. **License image-unauthorized count (24h)** — non-zero = ADR-0011 Layer C breach detected (image digest mismatch). Stat panel; green at 0, red ≥ 1.
+1. **License image-unauthorized count (24h)** — non-zero = Pro/ADR-0011 Layer C breach detected (image digest mismatch). Stat panel; green at 0, red ≥ 1.
 2. **License blocks (24h, total)** — counts ALL blocked `CanExecute` calls regardless of feature. Yellow ≥ 1, orange ≥ 100.
 3. **Platform-api replicas Up** — indirect health signal: if license validation crashes the host (Enforce mode default for v2.4.x without override), pods crashloop + this drops to 0.
 4. **Worker crash count (24h)** — Loki count of `WorkerCrash` log lines (ADR-0021 worker-resilience signal). Expected: 0.

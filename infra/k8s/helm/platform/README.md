@@ -13,7 +13,7 @@ helm install platform infra/k8s/helm/platform/ \
 
 The chart defaults `api.image.repository` and `web.image.repository` to
 `ghcr.io/verbara/platform/api` and `ghcr.io/verbara/platform/web` per
-ADR-0011. These are the canonical published images signed by the Verbara
+Pro/ADR-0011. These are the canonical published images signed by the Verbara
 cosign keypair.
 
 ## Local KVM dev cluster override
@@ -82,7 +82,7 @@ workflow signs with `--tlog-upload=false` (offline-verifiable signature,
 matches the `.well-known/cosign.pub` flow used by the docker-compose
 `verbara-verify-image.sh` script).
 
-## Defense-in-depth model (ADR-0011)
+## Defense-in-depth model (Pro/ADR-0011)
 
 | Layer | Where it runs | What it catches |
 |-------|---------------|-----------------|
