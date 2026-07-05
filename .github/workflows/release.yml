@@ -50,7 +50,7 @@ jobs:
             dockerfile: src/Verbara.Platform.Mail/Dockerfile.mail
     steps:
       - name: Checkout source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # fetch-depth: 0 so we can read the annotated tag message in the
           # retroactive-tag guard below. Default depth=1 has no tag annotations.
@@ -250,7 +250,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v4.1.2
