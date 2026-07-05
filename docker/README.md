@@ -73,6 +73,7 @@ docker-compose equivalent.
 | File | Purpose |
 |------|---------|
 | `verbara-verify-image.sh` | Pre-flight cosign verify for a single image ref. |
+| `verbara-smoke-released.sh` | Post-release FUNCTIONAL smoke: composes the released (digest-pinned) images and runs one end-to-end journey (`/health/ready` binary polling + setup→login). `--local` builds the demo images instead — dev-only, does NOT verify the actually-released artifact. |
 | `verbara-quickstart.sh` | End-to-end wrapper: lookup -> verify -> generate -> pull -> up. |
 | `docker-compose.verified.yml` | Template — operators substitute their resolved digest. |
 | `docker-compose.full.yml` | Existing dev/demo full-stack compose (Asterisk + API + Web + storage). |

@@ -214,3 +214,50 @@ jobs:
           echo "manifest_list_digest=${{ steps.build.outputs.digest }}"
           echo "(see docs/operations/2026-05-10-update-authorized-digests-after-release.md)"
           echo "Operator deploy: Helm --set api.image.digest=${{ steps.build.outputs.digest }}  |  Compose IMAGE_DIGEST=..."
+
+  # Post-release FUNCTIONAL smoke (openspec/changes/released-image-smoke).
+  # verbara-verify-image.sh / the "Verify cosign signature" step above prove
+  # PROVENANCE only. This job is the next gate: it boots the just-released
+  # api image (re-resolved by tag straight from ghcr.io — no matrix-output
+  # plumbing needed since `release` is a matrix job) and runs ONE real
+  # end-to-end journey against Postgres via docker/verbara-smoke-released.sh.
+  #
+  # `needs: release` waits for ALL 4 matrix legs (api/realtime/renderer/mail)
+  # to finish, even though the smoke journey only exercises the api image —
+  # a release isn't "done" until every image in the matrix has pushed, and a
+  # smoke run against a half-published release would be misleading.
+  #
+  # REPORT-ONLY (continue-on-error: true), not gating: this is a new,
+  # walking-skeleton-scope infra stage (LOW architectural risk per
+  # proposal.md — "blast radius of a flaky new stage small"). Images are
+  # already pushed+signed to ghcr.io by the time this job runs (the `release`
+  # job doesn't wait on it, and nothing else in this workflow depends on
+  # `smoke` either) — there is no later step this failure could protect, so
+  # gating would only turn a still-earning-trust stage into workflow-red
+  # noise on the release commit without stopping anything. Promote to
+  # gating (drop continue-on-error, and/or make another step `needs: smoke`)
+  # once it has a track record.
+  smoke:
+    name: Post-release functional smoke (report-only)
+    needs: release
+    if: always() && needs.release.result == 'success'
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: 'v3.0.6'
+
+      - name: Run released-image smoke journey
+        run: |
+          chmod +x docker/verbara-smoke-released.sh
+          ./docker/verbara-smoke-released.sh --tag "${GITHUB_REF_NAME}"

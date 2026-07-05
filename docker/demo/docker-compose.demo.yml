@@ -5,7 +5,7 @@ services:
       - pgdata:/var/lib/postgresql
       - ./sql:/demo-sql:ro
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-verbara}
+      POSTGRES_DB: ${POSTGRES_DB:-platform}
       POSTGRES_USER: ${POSTGRES_USER:-platform}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_demo}
     healthcheck:
@@ -93,10 +93,10 @@ services:
       # / OSS mode → Pro endpoints return HTTP 402 + ProblemDetails, free
       # endpoints unaffected. Set Licensing__LicenseFilePath to /etc/verbara/license.lic
       # + mount the .lic via secret to unlock Pro features.
-      ConnectionStrings__Postgres: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
-      ConnectionStrings__Cluster: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
-      ConnectionStrings__Analytics: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
-      ConnectionStrings__Dialer: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
+      ConnectionStrings__Postgres: Host=postgres;Database=${POSTGRES_DB:-platform};Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
+      ConnectionStrings__Cluster: Host=postgres;Database=${POSTGRES_DB:-platform};Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
+      ConnectionStrings__Analytics: Host=postgres;Database=${POSTGRES_DB:-platform};Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
+      ConnectionStrings__Dialer: Host=postgres;Database=${POSTGRES_DB:-platform};Username=platform;Password=${POSTGRES_PASSWORD:-platform_demo}
       Asterisk__Ami__Hostname: asterisk
       Asterisk__Ami__Port: "5038"
       Asterisk__Ami__Username: platform

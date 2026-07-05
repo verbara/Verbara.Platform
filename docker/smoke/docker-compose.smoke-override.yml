@@ -1,0 +1,61 @@
+# docker-compose.smoke-override.yml — pins platform-api to a released, cosign-
+# verified GHCR digest for the post-release functional smoke check
+# (openspec/changes/released-image-smoke). Applied ON TOP of
+# docker/demo/docker-compose.demo.yml via `docker compose -f ... -f ...`.
+#
+# Why an override file (not a new compose file):
+#   docker-compose.demo.yml is the substrate (postgres, redis, and the
+#   platform-api env wiring are already correct there) — this file only
+#   replaces the `build:` directive with a digest-pinned `image:` so the
+#   smoke check runs the ACTUAL released artifact, not a local rebuild.
+#   Mirrors the digest-pinning pattern already used by
+#   docker/docker-compose.verified.yml (that file targets operators
+#   deploying to production; this one targets CI/local smoke runs).
+#
+# Walking-skeleton scope: only platform-api is re-pinned. The smoke journey
+# (POST /setup -> POST /auth/login) never touches Asterisk, Realtime, the
+# web SPA, nginx-gateway, Prometheus, or Grafana, so those services are
+# simply never started (verbara-smoke-released.sh passes an explicit
+# service list to `up`) rather than pinned or excluded here — no `asterisk`/
+# `pstn-emulator`/etc. section is needed in this override.
+#
+# PLATFORM_API_IMAGE is exported by docker/verbara-smoke-released.sh after
+# resolving the release's manifest-list digest (falls back to the demo
+# compose's own locally-built image under --local, see script for details).
+services:
+  platform-api:
+    build: !reset []
+    image: ${PLATFORM_API_IMAGE:?PLATFORM_API_IMAGE must be set by verbara-smoke-released.sh}
+    # !override — compose MERGES map keys across files by default, so a plain
+    # `depends_on: {postgres, redis}` here would UNION with (not replace) the
+    # base file's `{asterisk, postgres, redis}` and still pull Asterisk into
+    # `up`'s dependency graph (confirmed empirically: `!reset` paired with a
+    # non-empty map silently drops the key instead of replacing it — `!reset`
+    # is for clearing a field to empty/null, `!override` is for "replace
+    # wholesale with this value").
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # No Asterisk in the smoke substrate: Asterisk:Ami:Hostname stays unset,
+    # so AsteriskAmiHealthCheck reports Healthy ("digital-only deployment",
+    # src/Verbara.Platform.Api/Health/AsteriskAmiHealthCheck.cs) and
+    # /health/ready is reachable without booting the Asterisk/pstn-emulator
+    # services at all.
+    environment:
+      Asterisk__Ami__Hostname: ""
+      Asterisk__Ari__BaseUrl: ""
+    # Binary readiness (ADR-0004 determinism fences): the demo compose's own
+    # healthcheck is liveness-flavored (`|| true` never fails). The smoke
+    # runner polls this same /health/ready endpoint itself (see
+    # verbara-smoke-released.sh) so compose's healthcheck here only needs to
+    # agree with that signal for `depends_on: condition: service_healthy`
+    # consumers (none in this walking-skeleton cut, but keeps the override
+    # honest / reusable if a dependent service is added later).
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
