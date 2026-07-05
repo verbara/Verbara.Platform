@@ -3,7 +3,7 @@
 **Status:** Approved
 **Date:** 2026-05-30
 **Scope:** Backend (`Verbara.Platform.Api`) + Web wizard (`Verbara.Platform.Web`)
-**Related:** [ADR-0027 tenant-type operational gate](../decisions/0027-tenant-type-operational-gate.md), [ADR-0026 Phase A.6](../decisions/0026-queue-membership-executive-routing.md), [project_tenant_architecture memory](../../../.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/project_tenant_architecture.md)
+**Related:** [ADR-0027 tenant-type operational gate](../decisions/0027-tenant-type-operational-gate.md), [ADR-0026 Phase A.6](../decisions/0026-queue-membership-executive-routing.md), `project_tenant_architecture` memory (maintainer session memory, not a repo artifact)
 
 ---
 

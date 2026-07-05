@@ -128,7 +128,7 @@ Per the compressed timeline plan ([roadmap](../roadmap.md)):
 |---|---|---|
 | Days 0-2 post-deploy | Boot validation cleanup — `image_unauthorized_total` = 0, `blocks_total` initial baseline, license validation succeeds at every revalidation interval (6h default) | Steady state for ≥48 h |
 | Days 3-7 | Hot-reload via FileSystemWatcher exercised (rotate the Secret + watch the LicenseRevalidationService re-validate without pod restart) | `License re-validation started` event appears within 500 ms debounce + no pod restart |
-| Days 7-N (until v2.5.0-pro tag) | Scenario B/C/E rehearsal in `EnforcementMode=WarnOnly` preview namespace | All scenarios PASS per [`compressed-validation-report.md`](compressed-validation-report.md) when completed |
+| Days 7-N (until v2.5.0-pro tag) | Scenario B/C/E rehearsal in `EnforcementMode=WarnOnly` preview namespace | All scenarios PASS per [`compressed-validation-report-v250pro.md`](compressed-validation-report-v250pro.md) when completed |
 
 When all gates pass, the maintainer can amend ADR-0012 pre-condition #1 with evidence-based shortened window justification + execute Pro v2.5.0-pro train.
 

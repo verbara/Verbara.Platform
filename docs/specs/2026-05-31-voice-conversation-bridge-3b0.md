@@ -4,9 +4,9 @@
 **Date:** 2026-05-31
 **Scope:** Backend (`Verbara.Platform.Api`, `Verbara.Platform.Conversations`, `Verbara.Platform.Storage.Postgres`); lab verification. No Web changes (that is 3B.1).
 **Related:**
-- Plan: [`docs/plans/active/2026-05-31-voice-tracked-conversation-3b.md`](../plans/active/2026-05-31-voice-tracked-conversation-3b.md) (sub-phase 3B.0)
-- Epic memory: [`project_inbound_delivery_epic`](../../../.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/project_inbound_delivery_epic.md)
-- Phase 2 blueprint: [`reference_phase2_voice_blueprint`](../../../.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/reference_phase2_voice_blueprint.md)
+- Plan: [`docs/plans/completed/2026-05-31-voice-tracked-conversation-3b.md`](../plans/completed/2026-05-31-voice-tracked-conversation-3b.md) (sub-phase 3B.0)
+- Epic memory: `project_inbound_delivery_epic` (maintainer session memory, not a repo artifact)
+- Phase 2 blueprint: `reference_phase2_voice_blueprint` (maintainer session memory, not a repo artifact)
 - Predecessor leader-gate pattern: [`StasisInboundConsumer`](../../src/Verbara.Platform.Api/Services/StasisInboundConsumer.cs) + [`VoiceLeaderResources`](../../src/Verbara.Platform.Api/Services/VoiceLeaderResources.cs)
 - ADR to be filed by this work: **ADR-00XX — Single-owner of the live AMI side-effect plane** (covers the latent multi-pod duplicate-CDR; see §8)
 

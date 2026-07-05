@@ -89,4 +89,4 @@ Pro owns:
 - Platform spec: [`docs/specs/2026-05-18-platform-240-csat-consumer.md`](../specs/2026-05-18-platform-240-csat-consumer.md)
 - Existing Survey domain: [`src/Verbara.Platform.Surveys/`](../../src/Verbara.Platform.Surveys/)
 - Pro pipeline template (mirror): [`Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.CallAnalytics/Engine/CallAnalyticsEngine.cs`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/src/Verbara.Sdk.Pro.CallAnalytics/Engine/CallAnalyticsEngine.cs)
-- Related ADR: [`0012`](0012-eliminate-enforcement-mode-for-license-required-model.md) — same 2-release deprecation pattern applied to `GetByQueueAsync` here.
+- Related ADR: [`Verbara.Sdk.Pro 0012`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md) — same 2-release deprecation pattern applied to `GetByQueueAsync` here.

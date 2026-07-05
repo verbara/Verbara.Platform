@@ -25,7 +25,7 @@ ONE scenario: `exactly-once`. ONE topology: `talos`.
 
 The full framework with source-generated scenario registry, Spectre.Console.Cli,
 Aspire dev-loop topology, and CI cascade lands in subsequent PRs — see
-[`docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md`](../../docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md).
+[`docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md`](../../docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md).
 
 ## Prereqs
 

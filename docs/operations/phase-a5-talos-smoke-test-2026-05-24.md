@@ -1,6 +1,6 @@
 # Phase A.5 Talos lab smoke test — 2026-05-24
 
-> **Plan:** [docs/plans/active/2026-05-23-phase-a5-talos-smoke-test.md](../plans/active/2026-05-23-phase-a5-talos-smoke-test.md)
+> **Plan:** [docs/plans/completed/2026-05-23-phase-a5-talos-smoke-test.md](../plans/completed/2026-05-23-phase-a5-talos-smoke-test.md)
 > **Predecessor:** Plan C ([docs/plans/completed/2026-05-23-lab-migration-v2.3.1-to-v2.4.3.md](../plans/completed/2026-05-23-lab-migration-v2.3.1-to-v2.4.3.md)) ✅ CLOSED
 > **Cluster:** Talos `admin@asterisk-platform`, helm release `platform` rev 18 (chart 0.2.2 / appVersion 2.4.3)
 > **Executor:** Maintainer (kubectl operations) + Claude (observation/measurement/aggregation)
@@ -84,7 +84,7 @@ The 1.85 s ungraceful result is significantly better than the 30-40 s prediction
 
 - [ADR-0024](../decisions/0024-v242-shipping-anomaly-and-process-hardening.md) — the hardening sweep that made this deploy possible
 - [Plan C closure](../plans/completed/2026-05-23-lab-migration-v2.3.1-to-v2.4.3.md)
-- [Plan B](../plans/active/2026-05-23-phase-a5-talos-smoke-test.md)
+- [Plan B](../plans/completed/2026-05-23-phase-a5-talos-smoke-test.md)
 - [Option A docker-compose predecessor smoke test (PASS 2026-05-23)](phase-a5-smoke-test-2026-05-23.md)
 - [lab v2.3.1 baseline inventory (Plan C C.2)](lab-v2.3.1-baseline-inventory-2026-05-24.txt)
 
@@ -92,7 +92,7 @@ The 1.85 s ungraceful result is significantly better than the 30-40 s prediction
 
 ## Appendix — Test 5 escalation chain (2026-05-24, post-closure session)
 
-Plan [`docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md`](../plans/active/2026-05-24-e2e-harness-realtime-signalr.md) was opened to close Test 5 PARTIAL via a dedicated `Verbara.Platform.E2E.Harness` walking-skeleton. The harness shipped + ran end-to-end against the Talos lab, but the run **uncovered a 5-layer latent gap stack** in the SignalR fanout pipeline that was masked by Plan B's "zero clients connected" precondition:
+Plan [`docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md`](../plans/completed/2026-05-24-e2e-harness-realtime-signalr.md) was opened to close Test 5 PARTIAL via a dedicated `Verbara.Platform.E2E.Harness` walking-skeleton. The harness shipped + ran end-to-end against the Talos lab, but the run **uncovered a 5-layer latent gap stack** in the SignalR fanout pipeline that was masked by Plan B's "zero clients connected" precondition:
 
 | # | Defect | Surfaced via | Closure |
 |---|---|---|---|
@@ -157,7 +157,7 @@ Exit code:               0 ✅
 - `Verbara.Platform.Realtime/Endpoints/AdminRealtimeAuditEndpoint.cs` (PR #18) — single source of truth for harness assertions
 - `Verbara.Platform.E2E.Harness/*` (PR #19) — reusable walking-skeleton harness for current + future SignalR/cluster scenarios
 
-The plan [docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md](../../docs/plans/active/2026-05-24-e2e-harness-realtime-signalr.md) closes with this run and moves to `docs/plans/completed/` in this same commit.
+The plan [docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md](../../docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md) closes with this run and moved to `docs/plans/completed/` in this same commit.
 
 ### What this session DID validate
 

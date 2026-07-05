@@ -35,11 +35,11 @@ Un mismo agente:
 
 Si el operador agrega al agente a la queue para que reciba llamadas pero no le configura skills, recibe llamadas pero no chats. Si le configura skills sin agregarlo a la queue, recibe chats pero no llamadas. **Una configuración, dos comportamientos.** Esto es inaceptable en cualquier CCaaS serio.
 
-Adicionalmente surfaceado por living-docs (ver [`docs/manuales/auto/v2.5.4/es-419/smb-owner/01-day1-setup-and-webchat.md`](../manuales/auto/v2.5.4/es-419/smb-owner/01-day1-setup-and-webchat.md)) durante Fase 1 del plan [2026-05-27-living-docs-from-e2e-tests.md](../plans/active/2026-05-27-living-docs-from-e2e-tests.md): el setup wizard del Day 1 crea queue + agente pero **no los asocia**. El agente queda huérfano del modelo Voz (no recibe llamadas) pero operativo en el modelo Digital si por casualidad tiene skills coincidentes.
+Adicionalmente surfaceado por living-docs (ver [`docs/manuales/smb/03-setup-inicial.md`](../manuales/smb/03-setup-inicial.md) + [`04-canal-webchat.md`](../manuales/smb/04-canal-webchat.md)) durante Fase 1 del plan [2026-05-27-living-docs-from-e2e-tests.md](../plans/active/2026-05-27-living-docs-from-e2e-tests.md): el setup wizard del Day 1 crea queue + agente pero **no los asocia**. El agente queda huérfano del modelo Voz (no recibe llamadas) pero operativo en el modelo Digital si por casualidad tiene skills coincidentes.
 
 ### Ventana óptima
 
-No hay clientes pagando todavía (pivot estratégico 2026-05-25 — ver [`session_20260525_phase0c_deferred_smb_pivot`](../../../../.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/session_20260525_phase0c_deferred_smb_pivot.md)). Cambios de semántica de routing son hoy reversibles sin impacto comercial. Posponer la corrección es regalar deuda permanente al primer cliente que la encuentre.
+No hay clientes pagando todavía (pivot estratégico 2026-05-25 — ver `session_20260525_phase0c_deferred_smb_pivot`, maintainer session memory, not a repo artifact). Cambios de semántica de routing son hoy reversibles sin impacto comercial. Posponer la corrección es regalar deuda permanente al primer cliente que la encuentre.
 
 ## Decision
 
@@ -98,7 +98,7 @@ Se introduce `MembershipGateMiddleware` en el [`InboundRouter`](../../src/Verbar
 
 ### Excepciones explícitas (documentadas)
 
-- **Sticky / last-agent**: [`LastAgentMiddleware`](../../src/Verbara.Platform.Routing.Inbound/LastAgentMiddleware.cs) honra `PreferredAgentId` si el agente es member de **alguna** queue activa del tenant (no necesariamente la queue actual) y cumple `IsRoutable + HasCapacity`. CSAT prima sobre membership estricta.
+- **Sticky / last-agent**: [`LastAgentMiddleware`](../../src/Verbara.Platform.Routing.Inbound/Middlewares/LastAgentMiddleware.cs) honra `PreferredAgentId` si el agente es member de **alguna** queue activa del tenant (no necesariamente la queue actual) y cumple `IsRoutable + HasCapacity`. CSAT prima sobre membership estricta.
 - **Direct-to-agent (flow/transfer)**: [`ConversationSwitchboard.OfferToAgentAsync`](../../src/Verbara.Platform.Switchboard/ConversationSwitchboard.cs) / `TransferToAgentAsync` bypassean la queue completa y **también la membership**. Asignación humana o por flow es siempre prioritaria sobre routing automático.
 - **Outbound (Pro.Dialer)**: el dialer despacha a agentes específicos vía AMI Originate. La membership se usa como input para campañas (qué agentes elegibles dispatchar) pero el dispatch en sí no es gated por membership — un admin puede forzar.
 
@@ -197,8 +197,8 @@ Permanent artifacts shipped (Phase B):
 
 ## References
 
-- Plan de implementación: [`docs/plans/active/2026-05-28-membership-executive-routing.md`](../plans/active/2026-05-28-membership-executive-routing.md)
-- Living-docs Day 1 manual (drift surfaceado): [`docs/manuales/auto/v2.5.4/es-419/smb-owner/01-day1-setup-and-webchat.md`](../manuales/auto/v2.5.4/es-419/smb-owner/01-day1-setup-and-webchat.md)
+- Plan de implementación: [`docs/plans/completed/2026-05-28-membership-executive-routing.md`](../plans/completed/2026-05-28-membership-executive-routing.md)
+- Living-docs Day 1 manual (drift surfaceado): [`docs/manuales/smb/03-setup-inicial.md`](../manuales/smb/03-setup-inicial.md) + [`04-canal-webchat.md`](../manuales/smb/04-canal-webchat.md)
 - SDK Pro Realtime sync: [`Verbara.Sdk.Pro.Realtime`](../../../Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Realtime/)
 - SDK Pro Realtime verifier: [`IRealtimeVerifier.cs`](../../../Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Realtime/IRealtimeVerifier.cs)
 - Asterisk app_queue model: https://docs.asterisk.org/Configuration/Applications/queue/

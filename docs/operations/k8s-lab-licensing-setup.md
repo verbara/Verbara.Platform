@@ -8,7 +8,7 @@
 
 This guide documents the **end-to-end reproducible procedure** to deploy `ghcr.io/verbara/platform/api:vX.Y.Z` to a K8s cluster with a real signed Pro license + image-digest binding active. The procedure was validated on 2026-05-18 against the maintainer's Talos lab (1 CP + 3 workers, Cilium eBPF, CNPG Postgres, kube-prometheus-stack).
 
-For SMB single-host docker-compose deployment, see [`docs/manuales/smb/01-instalacion.md`](../manuales/smb/01-instalacion.md). For the licensing semantics rationale see [Pro ADR-0012](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md).
+For SMB single-host docker-compose deployment, see [`docs/manuales/smb/01-instalacion-docker.md`](../manuales/smb/01-instalacion-docker.md). For the licensing semantics rationale see [Pro ADR-0012](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md).
 
 ---
 

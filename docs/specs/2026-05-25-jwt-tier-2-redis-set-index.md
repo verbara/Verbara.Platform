@@ -1,7 +1,7 @@
 # Spec — JWT key store SET-index migration (Tier-2 hardening)
 
 **Date:** 2026-05-25
-**Status:** Draft — ready for execution after Tier-1 lab validation (see [`docs/plans/active/2026-05-25-jwt-tier1-lab-validation.md`](../plans/active/2026-05-25-jwt-tier1-lab-validation.md))
+**Status:** Draft — ready for execution after Tier-1 lab validation (see [`docs/plans/completed/2026-05-25-jwt-tier1-lab-validation.md`](../plans/completed/2026-05-25-jwt-tier1-lab-validation.md))
 **Owner:** Platform team
 **Estimated effort:** 3-5 days
 **Target version:** v2.5.4 (ship within 2 weeks of Tier-1 lab validation)
@@ -225,7 +225,7 @@ The flag would be set via Helm `values.yaml` env injection; pods pick up on next
 ## Cross-references
 
 - [Tier-1 commit `a6927f3a`](../../) — predecessor stale-cache fallback + TTL bump
-- [Tier-1 lab validation plan](../plans/active/2026-05-25-jwt-tier1-lab-validation.md)
+- [Tier-1 lab validation plan](../plans/completed/2026-05-25-jwt-tier1-lab-validation.md)
 - [JTI investigation 2026-05-24](../research/2026-05-24-jti-investigation-presence-vu1500.md) § "Tier 2"
 - [C-LK chaos report](../operations/chaos-test-report-k8s-local.md) § "v2.5.2 rerun" findings #3
 - ADR-0012 — JWT rotation pool architecture

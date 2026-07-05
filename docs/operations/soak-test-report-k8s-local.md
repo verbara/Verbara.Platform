@@ -16,7 +16,7 @@
 
 **Driver:** NBomber 6.1.0 `queue_ingestion` scenario against `GET /api/v1/admin/queues?pageSize=20` via Cilium Gateway `http://api.r55.local` (192.168.122.192 host route).
 
-**Methodological note:** lab corre el baseline equivalente al Docker D-L (2026-04-30 PASS). Mismatch en image versions vs current released v2.1.0 fue intencional — preserva el comparativo paridad Docker/K8s. Re-validación contra v2.1.0 corresponde al **upgrade-lab-to-current-image** track separate (deferred per [Sprint A analysis 2026-05-18](../research/?)).
+**Methodological note:** lab corre el baseline equivalente al Docker D-L (2026-04-30 PASS). Mismatch en image versions vs current released v2.1.0 fue intencional — preserva el comparativo paridad Docker/K8s. Re-validación contra v2.1.0 corresponde al **upgrade-lab-to-current-image** track separate (deferred per [Sprint A analysis 2026-05-18](../../chaos-reports/dlk-oom-analysis-20260518.md)).
 
 ---
 

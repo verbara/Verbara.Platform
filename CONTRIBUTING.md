@@ -29,7 +29,7 @@ cd docker
 docker compose -f docker-compose.full.yml up
 ```
 
-See [`CLAUDE.md`](CLAUDE.md) for the full architecture overview, package layers, and conventions. See [`docs/getting-started.md`](docs/getting-started.md) for a 10-minute walkthrough from clone to running tenant.
+See `CLAUDE.md` (local-only, gitignored — not shipped in this public repo) for the full architecture overview, package layers, and conventions. See [`docs/getting-started.md`](docs/getting-started.md) for a 10-minute walkthrough from clone to running tenant.
 
 ## Reporting bugs
 
@@ -41,7 +41,7 @@ Use [GitHub Issues](https://github.com/verbara/verbara-platform/issues) for non-
 - .NET SDK version (`dotnet --info`), OS, Verbara Platform version (in `Directory.Build.props`).
 - Relevant log excerpts (please redact PII / tenant data).
 
-For **security vulnerabilities**, do not open a public issue. Email `security@verbara.io` with details. We aim to acknowledge within 72 hours. See [`SECURITY.md`](SECURITY.md) when published, or follow [RFC 9116](https://www.rfc-editor.org/rfc/rfc9116) conventions in the meantime.
+For **security vulnerabilities**, do not open a public issue. See [`SECURITY.md`](SECURITY.md) for the disclosure process (GitHub private vulnerability reporting), or follow [RFC 9116](https://www.rfc-editor.org/rfc/rfc9116) conventions in the meantime.
 
 ## Suggesting features
 

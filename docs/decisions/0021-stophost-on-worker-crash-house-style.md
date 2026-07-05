@@ -6,7 +6,7 @@
 - **Related:**
   - [Verbara.Sdk.Pro ADR-0013 `StopHost` on Worker Crash — Verbara House-Style](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0013-stophost-on-worker-crash-house-style.md) — Pro-side counterpart that hardens the 13 Pro `BackgroundService` implementations and shipped as v2.4.1-pro on 2026-05-18.
   - Canonical spec: [`docs/specs/2026-05-18-worker-resilience-pattern-hardening.md`](../specs/2026-05-18-worker-resilience-pattern-hardening.md)
-  - Active plan: [`docs/plans/active/2026-05-18-platform-v230-worker-resilience.md`](../plans/active/2026-05-18-platform-v230-worker-resilience.md) (this train)
+  - Plan: [`docs/plans/completed/2026-05-18-platform-v230-worker-resilience.md`](../plans/completed/2026-05-18-platform-v230-worker-resilience.md) (this train, shipped)
   - Forensics: [`chaos-reports/dlk-oom-analysis-20260518.md`](../../chaos-reports/dlk-oom-analysis-20260518.md)
   - Soak report: [`docs/operations/soak-test-report-k8s-local.md`](../operations/soak-test-report-k8s-local.md)
   - ADR-0014 K8s liveness-probe baseline (the orchestrator policy this ADR pairs with)
