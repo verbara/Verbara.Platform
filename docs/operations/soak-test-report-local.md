@@ -123,7 +123,7 @@ This is operationally acceptable as defense-in-depth, but Layer 3 (architectural
 
 - Plan task spec: `docs/plans/active/2026-04-27-r5.5-execution-plan.md` § Phase D-L (lines 4215-4295).
 - Disk-fill unblock saga: `docs/operations/alerts-runbook.md` § NodeDiskSpaceLow (commits `8042d7d` + `6146534`).
-- Phase 2 architecture: `docs/decisions/0015-postgres-pool-sprawl-mitigation.md` Phase 2 + Pro `docs/decisions/0008-shared-npgsqldatasource-overload.md`.
+- Phase 2 architecture: `docs/decisions/0015-npgsql-datasource-sharing-strategy.md` Phase 2 + Pro `docs/decisions/0008-shared-npgsqldatasource-overload.md`.
 - Phase C-L baseline (Phase 2 SMB tier): `docs/operations/load-test-baseline.md` § "Phase C-L SMB tier post-Phase-2".
 - Driver script: `scripts/scenario-sweep.sh` + scenario `tests/Verbara.Platform.LoadTests/Scenarios/PresenceBroadcastScenarios.cs`.
 - Operational guards: `scripts/soak-log-watchdog.sh` + `scripts/soak-drift-snapshot.sh`.

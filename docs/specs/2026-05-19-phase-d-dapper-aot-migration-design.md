@@ -1,6 +1,6 @@
 # Phase D — Dapper AOT-Shipping Path (Technical Design)
 
-**Status:** Approach pivoted 2026-05-19 (same day) — see Pivot Notice below · **Companion plan:** [`docs/plans/active/2026-05-19-phase-d-dapper-aot.md`](../plans/active/2026-05-19-phase-d-dapper-aot.md) (authoritative, post-pivot) · **Day 1 evidence:** [`docs/operations/phase-d-validation/2026-05-19-day-1-findings.md`](../operations/phase-d-validation/2026-05-19-day-1-findings.md) · **Drives:** [ADR-0022](../decisions/0022-platform-api-aot-shipping-path.md) Amendment §7 closure + new Amendment §8 (Phase D execution report, written post-ship)
+**Status:** Approach pivoted 2026-05-19 (same day) — see Pivot Notice below · **Companion plan:** [`docs/plans/completed/2026-05-19-phase-d-dapper-aot.md`](../plans/completed/2026-05-19-phase-d-dapper-aot.md) (authoritative, post-pivot) · **Day 1 evidence:** [`docs/operations/phase-d-validation/2026-05-19-day-1-findings.md`](../operations/phase-d-validation/2026-05-19-day-1-findings.md) · **Drives:** [ADR-0022](../decisions/0022-platform-api-aot-shipping-path.md) Amendment §7 closure + new Amendment §8 (Phase D execution report, written post-ship)
 
 ---
 
@@ -33,7 +33,7 @@ User decision 2026-05-19: build **`Verbara.Sdk.Dapper.Stubs`** — the solution 
 - Bypasses R11 because the buggy CT-in-params pattern isn't needed (sites that need mid-query CT use NpgsqlCommand raw instead)
 - Bounded scope: Dapper public API is stable (last public-breaking change pre-2020); stubs assembly is ~10 types
 
-**The authoritative execution plan is the COMPANION PLAN file** ([`docs/plans/active/2026-05-19-phase-d-dapper-aot.md`](../plans/active/2026-05-19-phase-d-dapper-aot.md), amended same day). Sections 1-11 below are PRESERVED AS HISTORICAL ARTIFACT of the initial design and the reasoning that led to the pivot.
+**The authoritative execution plan is the COMPANION PLAN file** ([`docs/plans/completed/2026-05-19-phase-d-dapper-aot.md`](../plans/completed/2026-05-19-phase-d-dapper-aot.md), amended same day). Sections 1-11 below are PRESERVED AS HISTORICAL ARTIFACT of the initial design and the reasoning that led to the pivot.
 
 A NEW design spec for the `Verbara.Sdk.Dapper.Stubs` assembly itself will be authored as part of Phase D.1 kickoff (fresh-context brainstorming session) and committed alongside the implementation.
 
@@ -316,7 +316,7 @@ Phase E (image cutover) starts only after the above is true.
 
 ## 11. References
 
-- [Companion plan](../plans/active/2026-05-19-phase-d-dapper-aot.md)
+- [Companion plan](../plans/completed/2026-05-19-phase-d-dapper-aot.md)
 - [ADR-0022](../decisions/0022-platform-api-aot-shipping-path.md) (Amendment §7 → unmask Dapper; future Amendment §8 → Phase D report)
 - [Dapper.AOT canonical docs](https://aot.dapperlib.dev/) (via Context7 lookup 2026-05-19, library ID `/dapperlib/dapperaot`)
 - `~/.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/reference_dapper_consumers_inventory.md` — cross-repo inventory (verified 2026-05-19)

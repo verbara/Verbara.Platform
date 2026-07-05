@@ -21,7 +21,7 @@ delta = 0** across the 60-second peak-load window.
 3. Snapshot T1 — capture restart counts post-burst.
 4. Delta = T1 - T0. Expected 0.
 
-Reusable harness: [`/tmp/rerun-blk-validation.sh`](/tmp/rerun-blk-validation.sh).
+Reusable harness: [`scripts/rerun-blk-validation.sh`](../../../../scripts/rerun-blk-validation.sh).
 Steps T0 → sweep → T1 → events scrape → archive copy.
 
 ## Results
@@ -90,7 +90,7 @@ past the failureThreshold=5 safety net. Filed as future work in ADR-0025
 
 ## Cross-implications for the JTI investigation
 
-[`docs/research/2026-05-24-jti-investigation-presence-vu1500.md`](../../research/2026-05-24-jti-investigation-presence-vu1500.md)
+[`docs/research/2026-05-24-jti-investigation-presence-vu1500.md`](../../../research/2026-05-24-jti-investigation-presence-vu1500.md)
 identified `sync-over-async + SCAN+N×GET` in `JwtTokenService.GetCachedValidationKeys`
 + `RedisJwtKeyStore.GetAllAsync` as the likely root cause of 1,000
 Unauthorized at v2.5.1 VU=1500. **That hypothesis remains technically valid

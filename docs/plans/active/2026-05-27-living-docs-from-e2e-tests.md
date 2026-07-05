@@ -2,7 +2,7 @@
 
 ## Contexto
 
-**Por qué este plan ahora.** Tras el cierre de R5.5 (PRR firmada 2026-05-26) y el pivot estratégico 2026-05-25 ("no cloud hasta primer cliente pagando"), el track primario de Verbara.Platform es **SMB Docker product polish** — el camino para conseguir el primer cliente real. Hoy los manuales SMB se escriben a mano (12 archivos en [`docs/manuales/smb/`](../../../media/Data/Source/Verbara/Verbara.Platform/docs/manuales/smb/)) y cada release requiere re-sync manual (PR #37 lo hizo para v2.5.4: 28 referencias de versión + 12 comandos cosign actualizados a mano). El producto se mueve rápido (22 días v2.0 → v2.5.4); el costo recurrente de mantener docs a mano es deuda que crece con cada release.
+**Por qué este plan ahora.** Tras el cierre de R5.5 (PRR firmada 2026-05-26) y el pivot estratégico 2026-05-25 ("no cloud hasta primer cliente pagando"), el track primario de Verbara.Platform es **SMB Docker product polish** — el camino para conseguir el primer cliente real. Hoy los manuales SMB se escriben a mano (12 archivos en [`docs/manuales/smb/`](../../manuales/smb/)) y cada release requiere re-sync manual (PR #37 lo hizo para v2.5.4: 28 referencias de versión + 12 comandos cosign actualizados a mano). El producto se mueve rápido (22 días v2.0 → v2.5.4); el costo recurrente de mantener docs a mano es deuda que crece con cada release.
 
 **Qué se logra.** Una infraestructura de **documentación viva**: los manuales se regeneran automáticamente desde tests E2E reales contra el demo stack. Cada test cumple dos funciones simultáneas — valida que el producto funciona y produce el manual paso a paso. Si la UI cambia y el test falla, el operador sabe que hay un problema antes de que el cliente lo encuentre.
 
@@ -85,7 +85,7 @@ Objetivo: el manual existe en 3 formatos consumibles.
 
 - Setup MkDocs Material en `docs-site/`: nav por persona/journey, search, theme corporate
 - Pipeline: `npm run docs:build` (en Platform.Web) corre tests manuales + renderer + `mkdocs build` → genera site estático en `docs-site/site/`
-- Extender [`src/Verbara.Platform.Renderer/`](../../../media/Data/Source/Verbara/Verbara.Platform/src/Verbara.Platform.Renderer/) con endpoint `POST /render/manual` que recibe path a un `.md` + array de screenshots y produce PDF via QuestPDF (consistencia stack, AOT-compatible, evita Pandoc)
+- Extender [`src/Verbara.Platform.Renderer/`](../../../src/Verbara.Platform.Renderer/) con endpoint `POST /render/manual` que recibe path a un `.md` + array de screenshots y produce PDF via QuestPDF (consistencia stack, AOT-compatible, evita Pandoc)
 - Sample PDF descargable desde el site
 - README de la infra: cómo correr local + cómo regenerar tras un cambio
 
@@ -146,21 +146,21 @@ Objetivo: ES canonical + EN + PT-BR; versionado por release.
 ## Critical files
 
 **A crear (Fase 0-1):**
-- [tests/manuales/](../../../media/Data/Source/Verbara/Verbara.Platform.Web/tests/manuales/) — nuevo árbol
+- [tests/manuales/](../../../../Verbara.Platform.Web/tests/manuales/) — nuevo árbol
 - `tests/manuales/playwright.docs.config.ts`
 - `tests/manuales/manual-renderer/render.ts` + `allure-adapter.ts` + `template-engine.ts`
 - `tests/manuales/personas/smb-owner/01-day1-setup-and-webchat.md.tpl`
 - `tests/manuales/personas/smb-owner/01-day1-setup-and-webchat.spec.ts`
 
 **A modificar (Fase 2):**
-- [src/Verbara.Platform.Renderer/](../../../media/Data/Source/Verbara/Verbara.Platform/src/Verbara.Platform.Renderer/) — agregar endpoint `/render/manual` (consume MD + screenshots, produce PDF via QuestPDF). Patrón existente: ver endpoints de reports analíticos actuales.
+- [src/Verbara.Platform.Renderer/](../../../src/Verbara.Platform.Renderer/) — agregar endpoint `/render/manual` (consume MD + screenshots, produce PDF via QuestPDF). Patrón existente: ver endpoints de reports analíticos actuales.
 - `package.json` del frontend — agregar `allure-playwright` devDep + scripts `docs:test`, `docs:render`, `docs:build`
 
 **A reusar (referencia, NO modificar inicialmente):**
-- [tests/e2e/helpers/credentials.ts](../../../media/Data/Source/Verbara/Verbara.Platform.Web/tests/e2e/helpers/credentials.ts) — fixtures de auth
-- [tests/e2e/fixtures/api.fixture.ts](../../../media/Data/Source/Verbara/Verbara.Platform.Web/tests/e2e/fixtures/api.fixture.ts) — ApiHelper para setup vía API
-- [tests/e2e/tests/reference-deployment.spec.ts](../../../media/Data/Source/Verbara/Verbara.Platform.Web/tests/e2e/tests/reference-deployment.spec.ts) — referencia del @reference-deployment style
-- [docs/manuales/smb/01-instalacion-docker.md](../../../media/Data/Source/Verbara/Verbara.Platform/docs/manuales/smb/01-instalacion-docker.md) + [04-canal-webchat.md](../../../media/Data/Source/Verbara/Verbara.Platform/docs/manuales/smb/04-canal-webchat.md) — target de calidad pedagógica para Fase 1
+- [tests/e2e/helpers/credentials.ts](../../../../Verbara.Platform.Web/tests/e2e/helpers/credentials.ts) — fixtures de auth
+- [tests/e2e/fixtures/api.fixture.ts](../../../../Verbara.Platform.Web/tests/e2e/fixtures/api.fixture.ts) — ApiHelper para setup vía API
+- [tests/e2e/tests/reference-deployment.spec.ts](../../../../Verbara.Platform.Web/tests/e2e/tests/reference-deployment.spec.ts) — referencia del @reference-deployment style
+- [docs/manuales/smb/01-instalacion-docker.md](../../manuales/smb/01-instalacion-docker.md) + [04-canal-webchat.md](../../manuales/smb/04-canal-webchat.md) — target de calidad pedagógica para Fase 1
 
 **Output (creado automáticamente, no commit hasta Fase 3 — antes solo local):**
 - `docs/manuales/auto/v2.5.4/es/smb-owner/*.md` + `*/step-*.png`

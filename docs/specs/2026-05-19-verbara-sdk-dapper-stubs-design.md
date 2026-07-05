@@ -1,6 +1,6 @@
 # `Verbara.Sdk.Dapper.Stubs` — AOT-clean drop-in replacement for `Dapper.dll`
 
-**Status:** Approved 2026-05-19 (post-brainstorm) · **Owner:** Maintainer · **Target ship:** sub-deliverable D.1 of [ADR-0022 Phase D](../plans/active/2026-05-19-phase-d-dapper-aot.md) · **Resolves upstream:** [DapperLib/DapperAOT#168](https://github.com/DapperLib/DapperAOT/issues/168) (filed by maintainer 2026-03-16, 0 comments since) · **Lives in:** Verbara.Sdk repo (`src/Verbara.Sdk.Dapper.Stubs/`)
+**Status:** Approved 2026-05-19 (post-brainstorm) · **Owner:** Maintainer · **Target ship:** sub-deliverable D.1 of [ADR-0022 Phase D](../plans/completed/2026-05-19-phase-d-dapper-aot.md) · **Resolves upstream:** [DapperLib/DapperAOT#168](https://github.com/DapperLib/DapperAOT/issues/168) (filed by maintainer 2026-03-16, 0 comments since) · **Lives in:** Verbara.Sdk repo (`src/Verbara.Sdk.Dapper.Stubs/`)
 
 ## 1. Problem statement
 
@@ -367,7 +367,7 @@ Stubs project itself (D.1 gates):
 4. **G-stubs-4: dogfood canary** — pack stubs → restore in `Verbara.Sdk.Sessions.Postgres` → build + tests verde + `Verbara.Sdk.Sessions.Postgres.Tests` (Testcontainers Postgres) pass
 5. **G-stubs-5: AOT publish smoke on Platform.Api** — with Sessions.Postgres using stubs + Dapper.AOT interceptors → diagnostic count drops by the # attributable to Sessions surface (verifies stubs design works end-to-end before sweep)
 
-Full Phase D triple gate (after D.2 + D.3 sweep) still applies per [the amended Phase D plan](../plans/active/2026-05-19-phase-d-dapper-aot.md).
+Full Phase D triple gate (after D.2 + D.3 sweep) still applies per [the amended Phase D plan](../plans/completed/2026-05-19-phase-d-dapper-aot.md).
 
 ## 10. Risks
 
@@ -402,7 +402,7 @@ Sequence:
 ## 13. References
 
 - [ADR-0022](../decisions/0022-platform-api-aot-shipping-path.md) (Amendment §7 unmasks Dapper; future Amendment §8 reports Phase D + Stubs outcome)
-- [Phase D plan](../plans/active/2026-05-19-phase-d-dapper-aot.md) — companion execution plan
+- [Phase D plan](../plans/completed/2026-05-19-phase-d-dapper-aot.md) — companion execution plan
 - [Day 1 findings](../operations/phase-d-validation/2026-05-19-day-1-findings.md) — empirical inventory + R10/R11/R12 confirmation
 - [Day 0 baseline](../operations/phase-d-validation/2026-05-19-baseline-aot-publish.log) — 50 diagnostics from `Dapper.dll`
 - [DapperLib/DapperAOT#168](https://github.com/DapperLib/DapperAOT/issues/168) — maintainer's own prior proposal (this spec's parent design)

@@ -112,5 +112,5 @@ With the strategic pivot recorded 2026-05-25 (commit `204aa7c9` — no cloud unt
 - PR #32 K8s health contract fix (v2.5.2 closure): [`docs/operations/r55-blk-evidence/2026-05-25-v252-pr32-validation/`](../2026-05-25-v252-pr32-validation/)
 - C-LK v2.5.2 chaos suite closure: [`docs/operations/r55-blk-evidence/2026-05-25-c-lk-v252/`](../2026-05-25-c-lk-v252/)
 - JWT Tier-1 causality (v2.5.4 measurement): [`docs/operations/r55-blk-evidence/2026-05-25-jwt-tier1-causality/`](../2026-05-25-jwt-tier1-causality/)
-- ADRs validated: [`docs/decisions/0025-health-liveness-readiness-contract.md`](../../../decisions/0025-health-liveness-readiness-contract.md), [`docs/decisions/0015-postgres-pool-sprawl-mitigation.md`](../../../decisions/0015-postgres-pool-sprawl-mitigation.md)
+- ADRs validated: [`docs/decisions/0025-health-liveness-readiness-contract.md`](../../../decisions/0025-health-liveness-readiness-contract.md), [`docs/decisions/0015-npgsql-datasource-sharing-strategy.md`](../../../decisions/0015-npgsql-datasource-sharing-strategy.md)
 - Predecessor D-L Docker 24h soak: [`docs/operations/soak-test-report-local.md`](../../soak-test-report-local.md)

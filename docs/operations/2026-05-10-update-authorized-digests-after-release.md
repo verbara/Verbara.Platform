@@ -3,7 +3,7 @@
 **Created:** 2026-05-10
 **Owner:** Verbara maintainer
 **Related:**
-- [Pro v2.3.x execution plan §3.4](../../../Verbara.Sdk.Pro/docs/plans/active/2026-05-09-pro-v23x-image-binding-execution.md)
+- [Pro v2.3.x execution plan §3.4](../../../Verbara.Sdk.Pro/docs/plans/completed/2026-05-09-pro-v23x-image-binding-execution.md)
 - [ADR-0011 Image-digest binding in license keys](../../../Verbara.Sdk.Pro/docs/decisions/0011-image-digest-binding-in-license-keys.md)
 - [Verbara.Platform `.github/workflows/release.yml`](../../.github/workflows/release.yml)
 - [Verbara website registry: `data/authorized-digests.json`](https://github.com/verbara/verbara-website) (private)

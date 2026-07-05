@@ -95,7 +95,7 @@ For each STRIDE category, the salient threat scenarios with current mitigation s
 | TA1 forges a JWT with `alg:none` or HMAC-with-public-key trick | A2 | Algorithm pinned via `JwtBearerOptions.ValidAlgorithms`; `ValidateIssuerSigningKey=true`; asymmetric RS256/ES256 | ✅ Verified | Audit Scope 3.1 |
 | TA1 replays a stolen JWT after logout | A2, A6 | `IJtiRevocationCache` enforces `jti` denylist on every request | ⚠️ In-process default; durable Redis variant ships in `Verbara.Platform.Identity.Redis` (R5.1) — operators on multi-pod **must** opt in | Audit Scope 3.2; finding [MFA-007](internal-audit-2026-04.md#audit-2026-04-mfa-007--mfa-pending-cache--jti-revocation-are-in-process-by-default-in-identity-p2-scope-3) |
 | TA1 connects to SignalR hub with another tenant's JWT | A8 | `PlatformHub.OnConnectedAsync` validates tenant claim via `IAgentTenantResolver`; `IHubAuditSink` records every join | ✅ Verified | Audit Scope 2.3, [ADR-0005](../decisions/0005-cross-tenant-signalr-subscription-validation.md) |
-| TA7 (Asterisk-side) injects events claiming to be from another tenant | A1, A8 | Asterisk integration is single-tenant per deployment; tenant stamping happens at ingress in Platform, not at Asterisk | ✅ By-design | [ADR-0002](../decisions/0002-canonical-tenant-stamping.md) |
+| TA7 (Asterisk-side) injects events claiming to be from another tenant | A1, A8 | Asterisk integration is single-tenant per deployment; tenant stamping happens at ingress in Platform, not at Asterisk | ✅ By-design | [ADR-0002](../decisions/0002-tenant-stamping-pipeline-end-to-end.md) |
 
 ### 6.2 Tampering (T)
 
@@ -121,7 +121,7 @@ For each STRIDE category, the salient threat scenarios with current mitigation s
 | Threat | Asset | Mitigation | Status | Reference |
 |---|---|---|---|---|
 | TA1 retrieves stored OAuth refresh tokens or webhook keys via SQL injection | A4 | All queries parameterized via Dapper `@param` or EF `FromSql`; no string-concat SQL on user input | ✅ Verified by grep | Audit Scope 1.5 |
-| TA1 reads plaintext secrets from DB after stealing a backup | A4 | Every secret column wrapped via `IDataProtectionProvider`; keyring backed by DB per [ADR-0003](../decisions/0003-data-protection-keyring-storage.md) | ✅ Verified | Audit Scope 5.1–5.2 |
+| TA1 reads plaintext secrets from DB after stealing a backup | A4 | Every secret column wrapped via `IDataProtectionProvider`; keyring backed by DB per [ADR-0003](../decisions/0003-dataprotection-key-persistence-strategy.md) | ✅ Verified | Audit Scope 5.1–5.2 |
 | TA2 reads another tenant's audit log | A3 | Tenant-scoped query filters by `WHERE tenant_id`; cross-tenant query gated by `PlatformAdmin` policy | ✅ Verified | Audit Scope 2.4, 4.5 |
 | TA1 reads dev-default credentials from shipped `appsettings.Development.json` | A4 | Development file ships with `admin:admin` placeholder + `platform_internal_secret` `ServiceKey`; **fix pending** in v2.0.x | 🟡 Tracked | Finding [CFG-003](internal-audit-2026-04.md#audit-2026-04-cfg-003--plaintext-placeholder-credentials-in-appsettingsdevelopmentjson-p2-owasp-a05--scope-5) |
 | TA1 captures a JWT from server access logs because it was passed in `?token=` | A2 | Bearer-only acceptance enforced; SignalR `?access_token=` accepted only on `/hubs/*` (fix pending) | 🟡 Tracked | Finding [AUTH-002](internal-audit-2026-04.md#audit-2026-04-auth-002--token-query-string-accepted-globally-instead-of-scoped-to-hubs-p2-owasp-a02--a07) |
@@ -133,8 +133,8 @@ For each STRIDE category, the salient threat scenarios with current mitigation s
 | Threat | Asset | Mitigation | Status | Reference |
 |---|---|---|---|---|
 | TA1 brute-forces login endpoint | A2 | `/api/auth/login` rate-limited per IP + per username; lockout after N failures; emits `auth.login.failed` audit | ✅ Verified | Audit Scope 1.9 |
-| TA1 floods SignalR hub with connections | A8 | Connection cap per-pod; backpressure via SignalR hub options; horizontal scale via Redis backplane (when configured per [ADR-0006](../decisions/0006-signalr-redis-backplane.md)) | ✅ By-design | — |
-| TA1 exhausts connection pool with slow requests | A9 | Npgsql pool tuning per [ADR-0015](../decisions/0015-npgsql-pool-sharding-strategy.md) (sharded pools, R5.5 v1.14.5+) | ✅ By-design | — |
+| TA1 floods SignalR hub with connections | A8 | Connection cap per-pod; backpressure via SignalR hub options; horizontal scale via Redis backplane (implementation detail, no dedicated ADR) | ✅ By-design | — |
+| TA1 exhausts connection pool with slow requests | A9 | Npgsql pool tuning per [ADR-0015](../decisions/0015-npgsql-datasource-sharing-strategy.md) (sharded pools, R5.5 v1.14.5+) | ✅ By-design | — |
 | TA6 (supply chain) ships a NuGet update with a runtime hang | All | Dependabot + `dependency-review` + version pin in `Directory.Packages.props`; explicit upgrade gate before merge | ✅ Process | — |
 
 ### 6.6 Elevation of privilege (E)
@@ -153,9 +153,9 @@ These mitigations cover multiple threats and are not bound to a single STRIDE ro
 
 | Control | Coverage | Where |
 |---|---|---|
-| `IDataProtectionProvider` keyring backed by DB | A2, A4, A9 | `Program.cs` data-protection wiring, [ADR-0003](../decisions/0003-data-protection-keyring-storage.md) |
+| `IDataProtectionProvider` keyring backed by DB | A2, A4, A9 | `Program.cs` data-protection wiring, [ADR-0003](../decisions/0003-dataprotection-key-persistence-strategy.md) |
 | Append-only `audit_entries` (no app UPDATE/DELETE) | A3, repudiation | Audit Scope 4.1 |
-| Tenant-scoping at every read/write boundary | A1, A8 | Audit Scope 2.1–2.5; [ADR-0002](../decisions/0002-canonical-tenant-stamping.md), [ADR-0005](../decisions/0005-cross-tenant-signalr-subscription-validation.md) |
+| Tenant-scoping at every read/write boundary | A1, A8 | Audit Scope 2.1–2.5; [ADR-0002](../decisions/0002-tenant-stamping-pipeline-end-to-end.md), [ADR-0005](../decisions/0005-cross-tenant-signalr-subscription-validation.md) |
 | `dotnet list package --vulnerable` clean cross-repo | TA6 | R5.4 ship gate; v1.14.x patch train confirmed clean |
 | Branch protection + commit signing on `main` | TA4, TA6 | To be configured pre-flip (visibility plan Phase 2.2) |
 | Public security disclosure channel | All | `security@verbara.io`; `SECURITY.md` to be added pre-flip |

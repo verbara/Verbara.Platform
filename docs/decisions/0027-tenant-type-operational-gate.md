@@ -20,7 +20,7 @@ The platform recognizes 3 tenant types ([`TenantType` enum](../../../Verbara.Sdk
 
 The hierarchy invariants are enforced today:
 
-- `platform` is DB-enforced unique root (`ix_tenants_platform_unique WHERE type=0` in migration [`007_TenantsAndScheduledReports.sql:21`](../../src/Verbara.Platform.Storage.Postgres/Migrations/007_TenantsAndScheduledReports.sql#L21)).
+- `platform` is DB-enforced unique root (`ix_tenants_platform_unique WHERE type=0` in migration [`001_Baseline.sql:772`](../../src/Verbara.Platform.Storage.Postgres/Migrations/001_Baseline.sql#L772)).
 - `Partner` must be a child of `Platform`, `Customer` must be a child of `Platform` or `Partner` ([`ManagementTenantEndpoints.cs:104-108`](../../src/Verbara.Platform.Api/Endpoints/ManagementTenantEndpoints.cs#L104)).
 - `platform` cannot be suspended, deleted, or impersonated.
 - Max depth 3 (no sub-customers) enforced in [`PostgresTenantStore.cs:49-65`](../../src/Verbara.Platform.Storage.Postgres/Stores/PostgresTenantStore.cs#L49).
@@ -80,7 +80,7 @@ The gate applies to endpoints where the resource lives **inside** a Customer ten
 | `/operations/*` (live wallboard, supervisor controls) | `/management/*` (already Platform/Partner-only by design) |
 | `/admin/recordings`, `/admin/media` | `/partner/*` (already Partner-only by policy) |
 
-The complete list is enumerated in the plan ([`docs/plans/active/2026-05-28-tenant-type-operational-gate.md`](../plans/active/2026-05-28-tenant-type-operational-gate.md)) §Application sites.
+The complete list is enumerated in the plan ([`docs/plans/completed/2026-05-28-tenant-type-operational-gate.md`](../plans/completed/2026-05-28-tenant-type-operational-gate.md)) §Application sites.
 
 ### Behavior under impersonation
 
@@ -199,7 +199,7 @@ This is what Management endpoints partially do today. Extending to a full system
 
 ## References
 
-- Plan: [`docs/plans/active/2026-05-28-tenant-type-operational-gate.md`](../plans/active/2026-05-28-tenant-type-operational-gate.md)
+- Plan: [`docs/plans/completed/2026-05-28-tenant-type-operational-gate.md`](../plans/completed/2026-05-28-tenant-type-operational-gate.md)
 - Tenant model: [`Tenant.cs`](../../../Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.MultiTenant/Tenant.cs), [`TenantType.cs`](../../../Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.MultiTenant/TenantType.cs)
 - Hierarchy enforcement: [`PostgresTenantStore.cs`](../../src/Verbara.Platform.Storage.Postgres/Stores/PostgresTenantStore.cs)
 - Cross-tenant override middleware: [`TenantBoundaryValidationMiddleware.cs`](../../src/Verbara.Platform.Api/Middleware/TenantBoundaryValidationMiddleware.cs)

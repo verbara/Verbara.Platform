@@ -6,7 +6,7 @@
 | **Date**     | 2026-05-18 |
 | **Deciders** | Maintainer |
 | **Supersedes** | — |
-| **Related**  | [ADR-0011](0011-image-digest-binding.md), [ADR-0012 (Pro)](../../../Verbara.Sdk.Pro/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md), [ADR-0018](0018-visibility-decision-3-private-now-public-on-trigger.md) |
+| **Related**  | [ADR-0011 (Pro, image-digest binding)](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0011-image-digest-binding-in-license-keys.md), [ADR-0012 (Pro)](../../../Verbara.Sdk.Pro/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md), [ADR-0018](0018-visibility-decision-3-private-now-public-on-trigger.md) |
 
 ## Context
 

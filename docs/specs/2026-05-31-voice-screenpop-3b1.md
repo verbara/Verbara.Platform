@@ -3,7 +3,7 @@
 **Status:** Approved (2026-05-31). **D1 = new `VoiceScreenPopEvent`** (correlation keys + contactId for canonical hydration + display hints; deep analysis rejected event-enrichment of `state_changed` and refetch-and-pick-most-recent as racy/invasive). **D2 = auto-navigate to the canonical conversation-panel on answer** (deep analysis rejected click-to-open as defeating screen-pop, and a call-card-hosted panel as duplicating the canonical render). **D3 = INCLUDE agent-assist per-conversation binding now** (scope expanded — see §4.4).
 **Date:** 2026-05-31
 **Scope:** Backend (`Verbara.Platform.Api`) + React frontend (`Verbara.Platform.Web`). Cross-repo.
-**Related:** [3B.0 spec](2026-05-31-voice-conversation-bridge-3b0.md) · [3B plan](../plans/active/2026-05-31-voice-tracked-conversation-3b.md) · epic memory `project_inbound_delivery_epic`
+**Related:** [3B.0 spec](2026-05-31-voice-conversation-bridge-3b0.md) · [3B plan](../plans/completed/2026-05-31-voice-tracked-conversation-3b.md) · epic memory `project_inbound_delivery_epic`
 
 ---
 

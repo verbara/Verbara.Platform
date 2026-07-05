@@ -71,7 +71,7 @@ warn: HealthChecks[103]
 
 #### `PresenceFanoutService.ExecuteAsync` — event-driven, NOT polling
 
-[`Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push.SignalR/Presence/PresenceFanoutService.cs:100`](../../../Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push.SignalR/Presence/PresenceFanoutService.cs)
+[`Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push.SignalR/Presence/PresenceFanoutService.cs:100`](../../Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push.SignalR/Presence/PresenceFanoutService.cs)
 
 ```csharp
 protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -287,5 +287,5 @@ public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, Canc
 - Soak run artifacts: [`tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260518-042455/`](../tests/Verbara.Platform.LoadTests/soak-reports/k8s-dlk/run-20260518-042455/)
 - Source files audited:
   - [`Verbara.Platform/src/Verbara.Platform.Api/Services/QueueDistributionWorker.cs`](../src/Verbara.Platform.Api/Services/QueueDistributionWorker.cs)
-  - [`Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push.SignalR/Presence/PresenceFanoutService.cs`](../../../Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push.SignalR/Presence/PresenceFanoutService.cs)
+  - [`Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push.SignalR/Presence/PresenceFanoutService.cs`](../../Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.Push.SignalR/Presence/PresenceFanoutService.cs)
 - Yesterday's PASS-with-findings narrative (now superseded by this document for the root cause interpretation): direct conversation 2026-05-18 05:00 local.

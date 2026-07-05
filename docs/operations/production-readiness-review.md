@@ -7,7 +7,7 @@
 
 ## Context
 
-R5.5 was scoped as "Production Validation con datos reales" — replace `v1 provisional` SLOs / capacity / alerts with empirically measured baselines across three environments (docker-compose local + K8s local Talos lab + cloud single-region). After the **strategic pivot recorded 2026-05-25** ([commit `204aa7c9`](https://github.com/verbara/Verbara.Platform/commit/204aa7c9), [memory `session-20260525-phase0c-deferred-smb-pivot`](../../../../.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/session_20260525_phase0c_deferred_smb_pivot.md)), cloud spend is gated behind first paying customer; R5.5 closes against two empirical datasets (docker + K8s-local) instead of three.
+R5.5 was scoped as "Production Validation con datos reales" — replace `v1 provisional` SLOs / capacity / alerts with empirically measured baselines across three environments (docker-compose local + K8s local Talos lab + cloud single-region). After the **strategic pivot recorded 2026-05-25** ([commit `204aa7c9`](https://github.com/verbara/Verbara.Platform/commit/204aa7c9), memory `session-20260525-phase0c-deferred-smb-pivot` (maintainer session memory, not a repo artifact)), cloud spend is gated behind first paying customer; R5.5 closes against two empirical datasets (docker + K8s-local) instead of three.
 
 This PRR signs off the platform against the **as-validated** envelope and explicitly flags the unvalidated envelopes as deferred, not denied. The cadence is: ship to SMB customers behind the SMB Docker reference deployment; sell Enterprise K8s as "validated on-prem on a 3-worker Talos lab"; re-open cloud validation against real customer traffic once one signs.
 
@@ -46,7 +46,7 @@ This PRR signs off the platform against the **as-validated** envelope and explic
 
 1. ✅ **Application correctness under sustained load** — 958 M req (D-L docker) + 1.9 M req (D-LK K8s) without functional regression.
 2. ✅ **K8s liveness/readiness contract correctness** — [ADR-0025](../decisions/0025-health-liveness-readiness-contract.md) `/health` no-op + `/health/ready` full-check split + chart defensive probe tuning (`failureThreshold:5 + timeoutSeconds:3`) eliminate the pod-restart cascade observed on v2.5.1 (4 restarts) → 0 restarts on v2.5.4 across B-LK + C-LK + D-LK.
-3. ✅ **Single-pool DB invariant under 24h+** — [ADR-0015 Phase 2](../decisions/0015-postgres-pool-sprawl-mitigation.md) one-`NpgsqlDataSource`-per-DSN held at 12-13 Postgres connections through D-L 24h soak; no leak signature.
+3. ✅ **Single-pool DB invariant under 24h+** — [ADR-0015 Phase 2](../decisions/0015-npgsql-datasource-sharing-strategy.md) one-`NpgsqlDataSource`-per-DSN held at 12-13 Postgres connections through D-L 24h soak; no leak signature.
 4. ✅ **Native AOT correctness under multi-day runtime** — D-L docker + D-LK K8s both ran the Native AOT image (Phase D shipped 2026-05-20 per [ADR-0022](../decisions/0022-platform-api-aot-shipping-path.md)); no AOT-specific regressions surfaced.
 5. ✅ **Chaos resilience: kill-pod / kill-network / kill-pg / kill-redis / kill-asterisk / kill-kamailio / CPU stress / memory stress / CNPG primary failover** — all PASS on K8s; equivalents PASS on docker except netem (workaround documented).
 6. ✅ **CNPG primary failover under VU=1500 load** — application contract held with `/health` stable, `/health/ready` correctly transitioning 503 → 200, 0 platform-api restarts. ~16 s total failover time including 4 s blip.
@@ -174,9 +174,9 @@ R5.5 is **shipped against the two empirical envelopes that exist** (SMB Docker s
 
 Eight permanent architectural artifacts shipped during the R5.5 train (all in repo HEAD as of 2026-05-26):
 
-1. [ADR-0015](../decisions/0015-postgres-pool-sprawl-mitigation.md) — single shared `NpgsqlDataSource` per DSN (Phase 1 + Phase 2 shipped v1.14.5 / v1.14.6).
+1. [ADR-0015](../decisions/0015-npgsql-datasource-sharing-strategy.md) — single shared `NpgsqlDataSource` per DSN (Phase 1 + Phase 2 shipped v1.14.5 / v1.14.6).
 2. [ADR-0022](../decisions/0022-platform-api-aot-shipping-path.md) — Native AOT shipping path; Phase A (SignalR extraction) + B (DataProtection → Npgsql) + C (Dapper-as-blocker analysis) + D (total Dapper removal cross-repo).
-3. [ADR-0023](../decisions/0023-cosign-signed-release-images.md) — 4 cosign-signed images per release on ghcr.io.
+3. ADR-0023 (cosign-signed images per release on ghcr.io) — superseded by [ADR-0030](../decisions/0030-cosign-v3-release-signing-posture.md) (cosign v3 signing posture); the ADR-0023 slot was later reused for [ADR-0023 Publishing non-AOT microservices](../decisions/0023-publishing-non-aot-microservices.md).
 4. ADR-0024 — release process hardening after v2.4.2 anomaly (filed as draft, sweep across 7 PRs covers the controls).
 5. [ADR-0025](../decisions/0025-health-liveness-readiness-contract.md) — `/health` no-op liveness + `/health/ready` full readiness split.
 6. v2.5.3 JWT Tier-1 hardening (TTL bump + stale-cache fallback) + v2.5.4 OTel meter exposure.
@@ -187,7 +187,7 @@ Eight permanent architectural artifacts shipped during the R5.5 train (all in re
 
 ## Next work
 
-1. **SMB Docker product polish track** (primary, 6 sub-tracks documented in [memory `project_roadmap`](../../../../.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/project_roadmap.md)) — manuales completion, onboarding feedback loop, first paying customer pursuit.
+1. **SMB Docker product polish track** (primary, 6 sub-tracks documented in memory `project_roadmap` (maintainer session memory, not a repo artifact)) — manuales completion, onboarding feedback loop, first paying customer pursuit.
 2. **K8s local manuales (Phase 2)** — mirror the SMB manuales for K8s on-prem; gated on customer demand.
 3. ~~Phase E-LK doc~~ — **Closed 2026-05-27 housekeeping** — refreshed [`docs/operations/synthetic-monitoring.md`](synthetic-monitoring.md) with D-LK passive-verification PASS + cold-clone smoke procedure. Induce-failure smoke remains unscheduled (on-demand when lab is next up); AlertManager receiver wiring still gated on customer-side endpoint provisioning.
 4. **R5.5 findings remediation** — FIND-007/008 closed 2026-05-27 (see findings table); FIND-009 watch-only; FIND-010/011 are conditional defense-in-depth.
@@ -197,6 +197,6 @@ Eight permanent architectural artifacts shipped during the R5.5 train (all in re
 
 - R5.5 spec (canonical): [`docs/plans/completed/2026-04-27-r5.5-production-validation-data.md`](../plans/completed/2026-04-27-r5.5-production-validation-data.md) (moved from `active/` 2026-05-26)
 - R5.5 execution plan: [`docs/plans/completed/2026-04-27-r5.5-execution-plan.md`](../plans/completed/2026-04-27-r5.5-execution-plan.md) (moved from `active/` 2026-05-26)
-- Strategic pivot rationale: [memory `session-20260525-phase0c-deferred-smb-pivot`](../../../../.claude/projects/-media-Data-Source-Verbara-Verbara-Platform/memory/session_20260525_phase0c_deferred_smb_pivot.md)
+- Strategic pivot rationale: memory `session-20260525-phase0c-deferred-smb-pivot` (maintainer session memory, not a repo artifact)
 - All R5.5 evidence packs: [`docs/operations/r55-blk-evidence/`](r55-blk-evidence/)
-- ADRs validated by R5.5: [`docs/decisions/0015`](../decisions/0015-postgres-pool-sprawl-mitigation.md) · [`0022`](../decisions/0022-platform-api-aot-shipping-path.md) · [`0025`](../decisions/0025-health-liveness-readiness-contract.md)
+- ADRs validated by R5.5: [`docs/decisions/0015`](../decisions/0015-npgsql-datasource-sharing-strategy.md) · [`0022`](../decisions/0022-platform-api-aot-shipping-path.md) · [`0025`](../decisions/0025-health-liveness-readiness-contract.md)

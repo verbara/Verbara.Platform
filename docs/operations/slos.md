@@ -189,7 +189,7 @@ clusters):
 
 Hardware + scale assumptions for v2: ≥ 3 cluster nodes (8 vCPU / 32 GB RAM each),
 Postgres 17 with streaming replication + 2 read replicas, Redis Sentinel quorum
-of 3, dedicated NVMe storage class. Documented in [`capacity.md`](capacity.md)
+of 3, dedicated NVMe storage class. Documented in [`capacity-planning.md`](capacity-planning.md)
 once S5.7 ships.
 
 ---
