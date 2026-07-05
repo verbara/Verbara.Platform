@@ -83,6 +83,84 @@ jobs:
           --filter "FullyQualifiedName!~Storage.Postgres.Tests&FullyQualifiedName!~Identity.Redis.Tests"
           --logger "console;verbosity=normal"
 
+  # live-postgres-ci-lane: runs the two genuinely container-backed test projects
+  # build-and-test excludes above (Storage.Postgres.Tests, Identity.Redis.Tests)
+  # against real Postgres/Redis Testcontainers. Own job (not a filter flip on
+  # build-and-test) so the fast unit lane stays fast and this lane's container
+  # startup cost is isolated and easy to size independently.
+  #
+  # REPORT-ONLY, not a required check (see the change's design.md
+  # Grounding-resolution note, openspec/changes/live-postgres-ci-lane/design.md):
+  # `continue-on-error: true` on both test steps means a red run does NOT block
+  # merge. This is a deliberate, evidence-based call, not a placeholder — local
+  # grounding reproduced a REAL, repeatable flake in Storage.Postgres.Tests, root-
+  # caused to the official postgres:16-alpine image's bootstrap-then-restart
+  # entrypoint sequence: pg_isready (checked over the container's internal Unix
+  # socket) can report "accepting connections" a moment before the container's
+  # published TCP port (what the host-side Npgsql client actually dials) is
+  # reliably reachable, surfacing as "Connection reset by peer" on the fixture's
+  # first NpgsqlConnection.OpenAsync() — inside InitializeAsync(), never mid-test.
+  # xunit.runner.json (parallelizeTestCollections:false, added to both projects)
+  # reduces concurrent-container pressure (each of the ~13/~8 fixture classes owns
+  # its own container; xUnit parallelizes collections by default) and the two
+  # projects run as separate sequential steps below rather than one combined
+  # invocation — but serialization alone did NOT eliminate the race in repeated
+  # local runs (it is a per-container timing issue, not purely contention), so
+  # promoting this to required now would intermittently block unrelated PRs.
+  # Identity.Redis.Tests was 100% clean in every local configuration (Redis's
+  # image has no analogous restart cycle). Promotion trigger: a fixture-level fix
+  # (bounded connect-retry, or adopting the Testcontainers.PostgreSql module's
+  # log-based double-ready wait strategy) across the ~13 Postgres fixtures,
+  # tracked as an OpenSpec follow-up once this lane ships.
+  live-db-tests:
+    name: Live-DB Tests (Postgres)
+    runs-on: ubuntu-latest
+    # Sized from local grounding: Storage.Postgres.Tests alone (~13 sequential
+    # Testcontainers Postgres containers with parallelizeTestCollections:false)
+    # ran in ~60-70s; Identity.Redis.Tests (~8 sequential Redis containers) in
+    # ~7-10s. 15 minutes leaves generous headroom for CI-runner variance (slower
+    # image pulls, noisier neighbors) without masking a real hang.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5.3.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Authenticate private NuGet feed (Verbara.Sdk.Pro.*)
+        env:
+          PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
+        run: |
+          set -euo pipefail
+          dotnet nuget remove source local 2>/dev/null || true
+          dotnet nuget update source github \
+            --username verbara \
+            --password "$PACKAGES_PAT" \
+            --store-password-in-clear-text
+
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build Verbara.Platform.slnx -c Release
+
+      - name: Live-DB tests — Storage.Postgres.Tests
+        # Run as its own step/project (not combined with Identity.Redis.Tests
+        # below) — see the job-level grounding note: combining both projects into
+        # one dotnet test/vstest invocation reintroduces cross-project container
+        # concurrency that per-project collection-serialization alone doesn't
+        # cover, and reproduced real "Connection reset by peer" flake locally.
+        continue-on-error: true
+        run: >-
+          dotnet test tests/Verbara.Platform.Storage.Postgres.Tests/Verbara.Platform.Storage.Postgres.Tests.csproj
+          --no-build -c Release --logger "console;verbosity=normal"
+
+      - name: Live-DB tests — Identity.Redis.Tests
+        continue-on-error: true
+        run: >-
+          dotnet test tests/Verbara.Platform.Identity.Redis.Tests/Verbara.Platform.Identity.Redis.Tests.csproj
+          --no-build -c Release --logger "console;verbosity=normal"
+
   coverage:
     name: Coverage Ratchet
     runs-on: ubuntu-latest
