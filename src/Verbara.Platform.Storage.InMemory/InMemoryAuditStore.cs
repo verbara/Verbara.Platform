@@ -22,6 +22,15 @@ internal sealed class InMemoryAuditStore : IAuditStore
         return Task.CompletedTask;
     }
 
+    public Task<long> CountByActorAsync(TenantId tenantId, string actorId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actorId);
+
+        var count = GetTenantEntries(tenantId)
+            .LongCount(e => string.Equals(e.ActorId, actorId, StringComparison.Ordinal));
+        return Task.FromResult(count);
+    }
+
     public Task<IReadOnlyList<AuditEntry>> GetByEntityAsync(TenantId tenantId, string entityType, string entityId, CancellationToken ct)
     {
         IReadOnlyList<AuditEntry> result = GetTenantEntries(tenantId)

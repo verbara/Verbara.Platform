@@ -155,11 +155,17 @@ internal sealed class GdprPurgeService : IGdprPurgeService
     {
         var authEvents = await _authEventStore.ListAllByUserAsync(tenantId, userId, ct);
 
+        // audit-trail-integrity-fixes (fix 2): the real count of audit-trail rows attributable to
+        // this user — rows whose actor_id is the user (the linkage a user purge would affect;
+        // PurgeUserDataAsync itself does not currently delete audit rows for the user, but the
+        // preview must report the true count regardless, not a hard-coded 0).
+        var auditTrailCount = await _auditStore.CountByActorAsync(new TenantId(tenantId), userId, ct);
+
         return new UserPurgePreview(
             UserId: userId,
             TenantId: tenantId,
             AuthEventCount: authEvents.Count,
-            AuditTrailCount: 0,
+            AuditTrailCount: checked((int)auditTrailCount),
             PreviewedAt: DateTimeOffset.UtcNow);
     }
 }

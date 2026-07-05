@@ -52,6 +52,24 @@ internal sealed class PostgresAuditStore : IAuditStore
             ct);
     }
 
+    public async Task<long> CountByActorAsync(TenantId tenantId, string actorId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actorId);
+
+        // audit-trail-integrity-fixes (fix 2): exact COUNT(*) over performed_by (the actor_id
+        // column's underlying name — see SaveAsync) so PreviewUserPurgeAsync reports the real
+        // number of audit rows a user purge would affect. Workspace convention:
+        // ExecuteScalarAsync<long?>(...) ?? 0L.
+        return await _dataSource.ExecuteScalarAsync<long?>(
+            "SELECT COUNT(*) FROM audit_entries WHERE tenant_id = @TenantId AND performed_by = @ActorId",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("ActorId", actorId));
+            },
+            ct) ?? 0L;
+    }
+
     public async Task<IReadOnlyList<AuditEntry>> GetByEntityAsync(
         TenantId tenantId, string entityType, string entityId, CancellationToken ct)
     {
