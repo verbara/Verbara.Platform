@@ -11,7 +11,7 @@
 #   P2 = review weekly (5 rules)
 #
 # Meter / instrument names track the canonical Pro catalog
-# (Verbara.Sdk.Pro/docs/architecture.md § "Meter catalog (post-R5.1 Task G — 17 meters)").
+# (Verbara.Sdk.Pro/docs/architecture.md § "Meter catalog (16 meters)").
 # Prometheus exporter normalises dots to underscores; histograms expose
 # *_bucket / *_sum / *_count series.
 #

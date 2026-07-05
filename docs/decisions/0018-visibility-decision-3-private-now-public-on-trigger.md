@@ -170,6 +170,8 @@ This repository remains **private** until ALL trigger conditions below are met. 
   ```
   Visibility flip is now gated **only** by Trigger 5 execution (~5 days work, planned in `Verbara.Sdk.Pro/docs/plans/active/2026-05-09-pro-v23x-image-binding-execution.md`).
 
+- **2026-07-05 (confirmed-public, doc-drift remediation):** Re-verified live against GitHub (`gh repo view --json visibility` → `PUBLIC`) during a cross-repo docs-drift audit. `README.md`'s visibility banner had drifted back to citing the pre-flip 2026-05-08 "currently private" status despite the flip executed 2026-05-10 (recorded above) — corrected to reflect the confirmed-public state. No change to the trigger checklist or decision content; this is a status-freshness note only.
+
 ## References
 
 - ADR-0016 (this repo) — license decision (Apache 2.0) and rebrand to Verbara

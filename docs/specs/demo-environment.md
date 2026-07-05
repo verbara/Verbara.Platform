@@ -90,7 +90,7 @@ chmod +x demo-reset.sh
 | **redis** | redis:8-alpine | 6379 (internal) | Session/cache store + SignalR backplane for realtime + IdentityRedis (JWT rotation, MFA throttle) |
 | **asterisk** | Custom (Dockerfile.asterisk) | 5038, 5060/udp, 8088, 8089, 8180, 20000-20050/udp | Main PBX — AMI, ARI, SIP, WSS, RTP |
 | **pstn-emulator** | Custom (Dockerfile.demo-pstn) | Internal only | Simulated PSTN gateway with 10 test scenarios |
-| **platform-api** | Custom (Dockerfile, Native AOT) | 5000 | .NET 10 API — 31 src packages + 16 Pro packages, 70 endpoint groups |
+| **platform-api** | Custom (Dockerfile, Native AOT) | 5000 | .NET 10 API — 34 src packages + 20 Pro packages, 77 endpoint groups |
 | **realtime** | Custom (Dockerfile.realtime) | Internal only (5030) | SignalR Hub microservice (ADR-0022 Phase A); presence + Hub broadcast over Redis backplane |
 | **web** | Custom (Platform.Web Dockerfile) | Internal only (80) | React 19 frontend, `VITE_DEFAULT_TENANT_ID=demo` |
 | **nginx-gateway** | nginx:1.27-alpine | 80 | Single ingress fronting web + platform-api + realtime (mirrors K8s Cilium HTTPRoute) |
@@ -159,7 +159,7 @@ chmod +x demo-reset.sh
 | Step | Action | Details |
 |------|--------|---------|
 | 1 | Clean up | `docker compose down -v --remove-orphans` |
-| 2 | Copy NuGet feed | Pro packages from `/media/Data/Source/Verbara/local-nuget-feed/` |
+| 2 | Copy NuGet feed | Pro packages from the sibling `local-nuget-feed/` (resolved relative to the repo root; fails loud if missing) |
 | 3 | Build images | `docker compose build --quiet` |
 | 4 | Start Postgres | Wait for `pg_isready` |
 | 5 | Start all services | `docker compose up -d` (Pro tables created by `EnsureSchemaAsync` during API DI) |
