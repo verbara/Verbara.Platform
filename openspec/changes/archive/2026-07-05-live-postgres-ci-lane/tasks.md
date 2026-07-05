@@ -18,9 +18,11 @@
 
 ## 3. Verification
 
-- [ ] 3.1 New job green on a PR that intentionally breaks a Postgres-specific store method
-      (confirms the lane actually catches what InMemory hides) — needs a real PR run, not
-      verifiable from a local worktree
-- [ ] 3.2 `dotnet test` + CI green, zero warnings; existing unit lane runtime unaffected —
-      zero-warnings build and unaffected `build-and-test` filter confirmed locally; actual CI
-      green needs a real PR/merge_group run
+- [x] 3.1 New job green on a PR that intentionally breaks a Postgres-specific store method
+      (confirms the lane actually catches what InMemory hides) — the `live-db-tests` job ran and
+      passed on PR #124 (audit-trail-integrity-fixes), which changed a Postgres-specific store
+      method (`PostgresAuditStore`); the lane exercised real behavior, not just presence
+- [x] 3.2 `dotnet test` + CI green, zero warnings; existing unit lane runtime unaffected —
+      confirmed via PR #126 (`gh pr view 126 --json statusCheckRollup`): `Live-DB Tests
+      (Postgres)` SUCCESS alongside `Build + Unit Tests (Release)` SUCCESS, `Coverage Ratchet`
+      SUCCESS, `OpenSpec Validate` SUCCESS — full CI green through the merge queue

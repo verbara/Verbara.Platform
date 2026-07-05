@@ -19,4 +19,7 @@
 - [x] 3.1 Smoke check passes against a known-good release
 - [x] 3.2 Smoke check fails against a deliberately broken image (proves it actually verifies
       function, not just signature)
-- [ ] 3.3 CI green, zero warnings
+- [ ] 3.3 CI green, zero warnings — N/A to verify from the PR: the smoke job (`release.yml`)
+      only runs `needs: release` off a real release tag, which the PR/merge_group build does not
+      cut; PR #127's own CI (build/analyze/coverage/OpenSpec Validate) was green, but the smoke
+      job itself awaits the next tagged release to report
