@@ -825,12 +825,17 @@ internal static class ConversationEndpoints
     // written to a SEPARATE append-only correction record; only the submission's CorrectionState /
     // CorrectedAt (status pointers) are flipped. The conversation is NOT reopened. All three guards
     // return 409 with a machine-readable code BEFORE any write.
+    //
+    // audit-trail-integrity-fixes (fix 1) — the correction record, the submission's flipped status
+    // pointers, and the audit record are committed ATOMICALLY via ITypificationCorrectionAuditWriter
+    // (a single Postgres transaction / lock-scoped InMemory compound), closing the previous 2-write
+    // window where a fault between the correction write and the audit write could leave a
+    // correction with no audit trail (or vice versa).
     private static async Task<IResult> CorrectTypification(
         string id,
         HttpContext context,
         [FromServices] ITypificationSubmissionStore submissionStore,
-        [FromServices] ITypificationSubmissionCorrectionStore correctionStore,
-        [FromServices] IAuditService auditService,
+        [FromServices] ITypificationCorrectionAuditWriter correctionAuditWriter,
         [FromServices] AutonomousDispositionMetrics metrics,
         [FromServices] IOptions<DistributionOptions> options,
         [FromBody] TypificationCorrectionRequest body,
@@ -873,60 +878,70 @@ internal static class ConversationEndpoints
         var correctedPath = body.CorrectedNodePath.Select(EntityId.From).ToList();
         var correctedLeaf = correctedPath[^1];
 
-        // (a) INSERT the SEPARATE append-only correction record (the human path).
-        await correctionStore.InsertAsync(
-            new TypificationSubmissionCorrection
-            {
-                TenantId = tenantId,
-                ConversationId = conversationId,
-                CorrectedLeafNodeId = correctedLeaf,
-                CorrectedNodePath = correctedPath,
-                CorrectedByUserId = callerUserId,
-                CorrectedAt = now,
-            },
-            ct);
+        // (a) The SEPARATE append-only correction record (the human path).
+        var correction = new TypificationSubmissionCorrection
+        {
+            TenantId = tenantId,
+            ConversationId = conversationId,
+            CorrectedLeafNodeId = correctedLeaf,
+            CorrectedNodePath = correctedPath,
+            CorrectedByUserId = callerUserId,
+            CorrectedAt = now,
+        };
 
-        // (b) Flip ONLY the submission's status pointers via load→with→SaveAsync. The AI leaf,
-        //     path, confidence, and Source stay byte-identical — the recorded AI decision is
-        //     immutable; CorrectionState/CorrectedAt only mark it superseded.
+        // (b) Flip ONLY the submission's status pointers. The AI leaf, path, confidence, and
+        //     Source stay byte-identical — the recorded AI decision is immutable;
+        //     CorrectionState/CorrectedAt only mark it superseded.
         var corrected = submission with
         {
             CorrectionState = CorrectionState.Corrected,
             CorrectedAt = now,
         };
-        await submissionStore.SaveAsync(corrected, ct);
 
         // The conversation stays Closed — NO reopen (ADR-0034 Decision 5).
 
-        // (c) Emit the DispositionCorrected audit (actor = supervisor user), recording the original
-        //     AI path and the corrected path, with Confirmed = (original == corrected). Retention
-        //     floor mirrors the commit's: now + correction window.
+        // (c) The DispositionCorrected audit entry (actor = supervisor user), recording the
+        //     original AI path and the corrected path, with Confirmed = (original == corrected).
+        //     Retention floor mirrors the commit's: now + correction window. Built directly (not
+        //     via IAuditService.RecordAsync) — including the v2 integrity hash covering
+        //     RetainUntil (audit-trail-integrity-fixes, fix 4) — so it can be persisted inside the
+        //     SAME transaction as the correction + submission writes.
         var originalPathStr = string.Join(" > ", submission.SelectedNodePath.Select(n => n.Value));
         var correctedPathStr = string.Join(" > ", correctedPath.Select(n => n.Value));
         var confirmed = string.Equals(originalPathStr, correctedPathStr, StringComparison.Ordinal);
         var retainUntil = now.AddDays(options.Value.AutonomousCorrectionWindowDays);
+        var auditMetadata = new Dictionary<string, string>
+        {
+            ["original_node_path"] = originalPathStr,
+            ["corrected_node_path"] = correctedPathStr,
+            ["confirmed"] = confirmed ? "true" : "false",
+            ["tenant"] = tenantId.Value,
+            ["conversation"] = conversationId.Value,
+        };
+        var auditEntry = new AuditEntry
+        {
+            EntryId = EntityId.New(),
+            TenantId = tenantId,
+            Action = "typification.autonomous.corrected",
+            Category = "conversations",
+            Severity = "info",
+            ActorId = callerUserId,
+            ActorType = "user",
+            TargetId = conversationId.Value,
+            TargetType = "Conversation",
+            Metadata = auditMetadata,
+            OccurredAt = now,
+            RetainUntil = retainUntil,
+            IntegrityHash = DefaultAuditService.ComputeIntegrityHashV2(
+                tenantId, actorType: "user", actorId: callerUserId, action: "typification.autonomous.corrected",
+                targetType: "Conversation", targetId: conversationId.Value, occurredAt: now,
+                retainUntil: retainUntil, metadata: auditMetadata),
+        };
 
-        await auditService.RecordAsync(
-            tenantId,
-            category: "conversations",
-            action: "typification.autonomous.corrected",
-            severity: "info",
-            actorId: callerUserId,
-            actorType: "user",
-            targetId: conversationId.Value,
-            targetType: "Conversation",
-            metadata: new Dictionary<string, string>
-            {
-                ["original_node_path"] = originalPathStr,
-                ["corrected_node_path"] = correctedPathStr,
-                ["confirmed"] = confirmed ? "true" : "false",
-                ["tenant"] = tenantId.Value,
-                ["conversation"] = conversationId.Value,
-            },
-            retainUntil: retainUntil,
-            ct: ct);
+        // (d) Commit correction + submission + audit as ONE atomic unit.
+        await correctionAuditWriter.CommitAsync(correction, corrected, auditEntry, ct);
 
-        // (d) Metric (tenant-dimensioned).
+        // (e) Metric (tenant-dimensioned).
         metrics.RecordCorrection(tenantId.Value);
 
         return Results.Ok(new TypificationCorrectionResponse(
@@ -945,13 +960,11 @@ internal static class ConversationEndpoints
             ApiJsonContext.Default.TypificationCorrectionErrorResponse,
             statusCode: StatusCodes.Status409Conflict);
 
-    // The correcting supervisor's user id (same canonical order as the permission handler:
-    // user_id ?? NameIdentifier ?? sub). Falls back to "system" so the audit records an actor.
+    // The correcting supervisor's user id via the shared canonical resolver (same order as the
+    // permission handler: user_id ?? NameIdentifier ?? sub). Falls back to "system" so the audit
+    // records an actor.
     private static string GetCorrectingUserId(HttpContext context) =>
-        context.User.FindFirstValue("user_id")
-        ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-        ?? context.User.FindFirstValue("sub")
-        ?? "system";
+        CallerIdentity.ResolveUserIdOrSystem(context.User);
 
     private static TenantId GetTenantId(HttpContext context)
     {
