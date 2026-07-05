@@ -25,6 +25,16 @@ public interface ICreditLedgerStore
     Task<decimal> GetBalanceAsync(TenantId tenantId, CancellationToken ct);
 
     /// <summary>
+    /// Returns whether a <see cref="CreditSource.Subscription"/> grant already exists for the tenant and
+    /// <paramref name="periodKey"/> — an indexed lookup of the <c>uq_ai_credit_ledger_period</c> partial unique
+    /// index on <c>(tenant_id, period_key, entry_type)</c> (migration 012), the same arbiter
+    /// <see cref="PostGrantAsync"/>'s <c>ON CONFLICT DO NOTHING</c> resolves against. Used by the lazy-mint-on-read
+    /// fast-follow (credit-grant-lazy-mint-rollover) to gate the mint so a steady-state balance read — the common
+    /// case, once the scheduled <c>CreditGrantMintWorker</c> has ticked for the period — performs no write.
+    /// </summary>
+    Task<bool> HasCurrentPeriodGrantAsync(TenantId tenantId, string periodKey, CancellationToken ct);
+
+    /// <summary>
     /// Posts a grant (positive <see cref="CreditLedgerEntry.Amount"/>) atomically: appends the ledger row and,
     /// only if it was actually inserted, increments the projection balance <b>and mints one <c>credit_lot</c>
     /// row mirroring the grant</b> (<see cref="CreditLot.Original"/> = <see cref="CreditLot.Remaining"/> =

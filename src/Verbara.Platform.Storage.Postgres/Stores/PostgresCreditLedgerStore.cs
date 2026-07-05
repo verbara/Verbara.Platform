@@ -34,6 +34,24 @@ internal sealed class PostgresCreditLedgerStore : ICreditLedgerStore
             ct);
     }
 
+    public async Task<bool> HasCurrentPeriodGrantAsync(TenantId tenantId, string periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKey);
+
+        // Indexed existence check against uq_ai_credit_ledger_period (tenant_id, period_key, entry_type) — the
+        // same partial unique index PostGrantAsync's ON CONFLICT DO NOTHING arbitrates against. EXISTS short-
+        // circuits on the first matching row; no table scan.
+        return await _dataSource.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS(SELECT 1 FROM ai_credit_ledger WHERE tenant_id = @TenantId AND period_key = @PeriodKey AND entry_type = @EntryType)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("PeriodKey", periodKey));
+                p.Add(new NpgsqlParameter("EntryType", NpgsqlDbType.Smallint) { Value = (short)CreditEntryType.Grant });
+            },
+            ct);
+    }
+
     public async Task PostGrantAsync(CreditLedgerEntry grant, CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);

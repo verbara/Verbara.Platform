@@ -33,6 +33,23 @@ internal sealed class InMemoryCreditLedgerStore : ICreditLedgerStore
         }
     }
 
+    public Task<bool> HasCurrentPeriodGrantAsync(TenantId tenantId, string periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKey);
+
+        // Mirrors the Postgres uq_ai_credit_ledger_period existence check: does a Subscription-period grant
+        // already exist for this tenant/period? Uses the SAME GrantKeys idempotency set PostGrantAsync
+        // consults, so the two never disagree.
+        if (!_ledgers.TryGetValue(tenantId, out var ledger))
+            return Task.FromResult(false);
+
+        var key = $"period:{(int)CreditEntryType.Grant}:{periodKey}";
+        lock (ledger.Gate)
+        {
+            return Task.FromResult(ledger.GrantKeys.Contains(key));
+        }
+    }
+
     public Task PostGrantAsync(CreditLedgerEntry grant, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(grant);

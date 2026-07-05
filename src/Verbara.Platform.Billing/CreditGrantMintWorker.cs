@@ -20,9 +20,13 @@ namespace Verbara.Platform.Billing;
 /// <para>
 /// <b>Known month-rollover window (ADR-0033 addendum):</b> a tenant that first consumes after a UTC month
 /// boundary but before this worker's next tick (≤ one <see cref="DunningConfig.CheckIntervalHours"/>
-/// interval) sees no current-period grant yet — its balance read returns the prior carry-over only. The named
-/// fast-follow is <i>lazy-mint-on-read</i> (mint the current-period grant inline on the first balance read of a
-/// new period); it is a deferred ADR-0033 follow-up, not part of this change.
+/// interval) would see no current-period grant yet — its balance read would return the prior carry-over
+/// only. The named fast-follow, <i>lazy-mint-on-read</i>, <b>SHIPPED</b> as
+/// <c>credit-grant-lazy-mint-rollover</c>: <see cref="CreditGrantLazyMinter"/> mints the current-period grant
+/// inline (reusing this worker's exact <see cref="ICreditLedgerStore.PostGrantAsync"/> posting) on the
+/// enforcement (<c>DefaultQuotaEnforcementService</c>) and readout (<c>CreditLedgerEndpoints</c>)
+/// balance-read paths, gated by an indexed grant-existence check so steady-state reads stay write-free. This
+/// worker remains the steady-state mint; the lazy mint only closes the rollover window.
 /// </para>
 /// </summary>
 public sealed partial class CreditGrantMintWorker : BackgroundService

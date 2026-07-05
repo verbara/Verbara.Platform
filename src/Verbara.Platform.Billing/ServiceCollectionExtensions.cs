@@ -14,6 +14,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMeteringService, DefaultMeteringService>();
         services.AddSingleton<IQuotaEnforcementService, DefaultQuotaEnforcementService>();
         services.AddSingleton<IInvoiceGenerationService, DefaultInvoiceGenerationService>();
+        // credit-grant-lazy-mint-rollover: shared by the enforcement path (DefaultQuotaEnforcementService) and
+        // the credits-readout endpoints (CreditLedgerEndpoints), both resolved from DI.
+        services.AddSingleton<CreditGrantLazyMinter>();
         return services;
     }
 }
