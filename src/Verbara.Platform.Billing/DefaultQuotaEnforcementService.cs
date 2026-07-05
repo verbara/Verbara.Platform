@@ -10,6 +10,7 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
     private readonly IUsageRecordStore _usageStore;
     private readonly IClock _clock;
     private readonly ICreditLedgerStore _ledger;
+    private readonly CreditGrantLazyMinter _lazyMinter;
     private readonly long _creditTokenRatio;
     private readonly long? _inputRatio;
     private readonly long? _outputRatio;
@@ -26,6 +27,7 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
         _usageStore = usageStore;
         _clock = clock;
         _ledger = ledger;
+        _lazyMinter = new CreditGrantLazyMinter(ledger, clock);
         _creditTokenRatio = Math.Max(1, platformOptions.Value.CreditTokenRatio);
         _inputRatio = platformOptions.Value.InputCreditTokenRatio;
         _outputRatio = platformOptions.Value.OutputCreditTokenRatio;
@@ -88,6 +90,12 @@ public sealed class DefaultQuotaEnforcementService : IQuotaEnforcementService
             return new QuotaCheckResult(true, null, 0, QuotaOutcome.Allow); // null = unlimited / pay-as-you-go — never blocks
 
         var limit = (decimal)allowanceLong;
+
+        // credit-grant-lazy-mint-rollover: mint the current-period Subscription grant inline on a rollover-
+        // window miss, BEFORE the balance is read, so a first read after the UTC month boundary observes it.
+        // No-op (one indexed existence check, no write) once the scheduled worker has minted the period.
+        await _lazyMinter.EnsureCurrentPeriodGrantAsync(quota, ct);
+
         var balance = await _ledger.GetBalanceAsync(tenantId, ct);
         var additionalCredits = additionalQuantity / _creditTokenRatio;
         var consumed = Math.Max(0m, limit - balance);

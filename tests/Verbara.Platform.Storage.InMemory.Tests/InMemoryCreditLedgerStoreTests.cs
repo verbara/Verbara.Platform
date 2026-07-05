@@ -62,6 +62,40 @@ public sealed class InMemoryCreditLedgerStoreTests
         balance.Should().Be(0m);
     }
 
+    // credit-grant-lazy-mint-rollover — the grant-existence lookup the lazy minter gates on.
+
+    [Fact]
+    public async Task HasCurrentPeriodGrantAsync_ShouldReturnFalse_WhenNoLedgerExists()
+    {
+        var store = new InMemoryCreditLedgerStore();
+
+        var exists = await store.HasCurrentPeriodGrantAsync(Tenant1, "2026-06", CancellationToken.None);
+
+        exists.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task HasCurrentPeriodGrantAsync_ShouldReturnFalse_WhenTenantHasOnlyADifferentPeriod()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(periodKey: "2026-05"), CancellationToken.None);
+
+        var exists = await store.HasCurrentPeriodGrantAsync(Tenant1, "2026-06", CancellationToken.None);
+
+        exists.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task HasCurrentPeriodGrantAsync_ShouldReturnTrue_WhenGrantAlreadyPostedForPeriod()
+    {
+        var store = new InMemoryCreditLedgerStore();
+        await store.PostGrantAsync(MakeGrant(periodKey: "2026-06"), CancellationToken.None);
+
+        var exists = await store.HasCurrentPeriodGrantAsync(Tenant1, "2026-06", CancellationToken.None);
+
+        exists.Should().BeTrue();
+    }
+
     [Fact]
     public async Task PostGrantAsync_ShouldIncreaseBalance_WhenApplied()
     {

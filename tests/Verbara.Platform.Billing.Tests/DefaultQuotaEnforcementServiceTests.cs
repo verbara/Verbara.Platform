@@ -449,6 +449,61 @@ public class DefaultQuotaEnforcementServiceTests
         result.Reason.Should().BeNull();
     }
 
+    // ─── credit-grant-lazy-mint-rollover — the enforcement path's inline mint-on-read ────────────────────
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldMintCurrentPeriodGrant_WhenLedgerEnabled_AndNoCurrentPeriodGrantExists()
+    {
+        var (service, quotaStore, ledger) = BuildLedger();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 1000, QuotaAction = QuotaAction.Warn });
+        ledger.HasCurrentPeriodGrantAsync(Tenant1, "2026-03", Arg.Any<CancellationToken>()).Returns(false);
+        ledger.GetBalanceAsync(Tenant1, Arg.Any<CancellationToken>()).Returns(0m);
+
+        await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        // The rollover-window miss falls through to the mint, reusing PostGrantAsync, BEFORE the balance read.
+        await ledger.Received(1).PostGrantAsync(
+            Arg.Is<CreditLedgerEntry>(e =>
+                e.TenantId == Tenant1
+                && e.Source == CreditSource.Subscription
+                && e.PeriodKey == "2026-03"
+                && e.Amount == 1000m),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldNotWriteAnything_WhenLedgerEnabled_AndCurrentPeriodGrantAlreadyExists()
+    {
+        // Steady-state: once the worker (or an earlier lazy mint) has minted the period, the enforcement path's
+        // balance read must stay write-free — only the indexed existence check + the balance read happen.
+        var (service, quotaStore, ledger) = BuildLedger();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = 1000, QuotaAction = QuotaAction.Warn });
+        ledger.HasCurrentPeriodGrantAsync(Tenant1, "2026-03", Arg.Any<CancellationToken>()).Returns(true);
+        ledger.GetBalanceAsync(Tenant1, Arg.Any<CancellationToken>()).Returns(500m);
+
+        var result = await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        result.Allowed.Should().BeTrue();
+        await ledger.Received(1).HasCurrentPeriodGrantAsync(Tenant1, "2026-03", Arg.Any<CancellationToken>());
+        await ledger.DidNotReceive().PostGrantAsync(Arg.Any<CreditLedgerEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CheckQuotaAsync_ShouldNotConsultLazyMint_WhenLedgerEnabled_AndAllowanceNull()
+    {
+        // null allowance (unlimited / pay-as-you-go) short-circuits before the lazy minter is ever consulted.
+        var (service, quotaStore, ledger) = BuildLedger();
+        quotaStore.GetAsync(Tenant1, Arg.Any<CancellationToken>())
+            .Returns(new TenantQuota { TenantId = Tenant1, AiCreditsMonthly = null, QuotaAction = QuotaAction.HardBlock });
+
+        await service.CheckQuotaAsync(Tenant1, UsageType.AiAnalysis, 1000m, CancellationToken.None);
+
+        await ledger.DidNotReceive().HasCurrentPeriodGrantAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await ledger.DidNotReceive().PostGrantAsync(Arg.Any<CreditLedgerEntry>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task CheckQuotaAsync_ShouldSetHardBlockOutcome_WhenLedgerDisabled_AndFlatPathExceeded()
     {

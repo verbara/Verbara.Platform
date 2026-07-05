@@ -172,9 +172,17 @@ internal static class CreditLedgerEndpoints
     private static async Task<IResult> GetBalance(
         HttpContext context,
         [FromServices] ICreditLedgerStore ledger,
+        [FromServices] ITenantQuotaStore quotaStore,
+        [FromServices] CreditGrantLazyMinter lazyMinter,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+
+        // credit-grant-lazy-mint-rollover: close the rollover window on the credits-readout balance path too
+        // (mirrors the enforcement path in DefaultQuotaEnforcementService). No-op once the worker has minted.
+        var quota = await quotaStore.GetAsync(tenantId, ct);
+        await lazyMinter.EnsureCurrentPeriodGrantAsync(quota, ct);
+
         var balance = await ledger.GetBalanceAsync(tenantId, ct);
         return Results.Ok(new CreditBalanceResponse(balance));
     }
@@ -207,10 +215,18 @@ internal static class CreditLedgerEndpoints
     private static async Task<IResult> GetRemainingBySource(
         HttpContext context,
         [FromServices] ICreditLedgerStore ledger,
+        [FromServices] ITenantQuotaStore quotaStore,
+        [FromServices] CreditGrantLazyMinter lazyMinter,
         [FromServices] IClock clock,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+
+        // credit-grant-lazy-mint-rollover: the per-source breakdown re-derives the balance (Σ == GetBalanceAsync),
+        // so it needs the same rollover-window mint before reading.
+        var quota = await quotaStore.GetAsync(tenantId, ct);
+        await lazyMinter.EnsureCurrentPeriodGrantAsync(quota, ct);
+
         var rows = await ledger.GetRemainingBySourceAsync(tenantId, clock.UtcNow, ct);
 
         // Surface the CreditSource enum as its name (mirrors MapEntry). Σ Remaining == GetBalanceAsync (the
