@@ -116,7 +116,7 @@ These are the work items that, when all complete, allow the visibility flip. Mos
 - [x] **Verbara.Platform v2.1.0 tagged** — first signed image at `ghcr.io/verbara/platform/api@sha256:f82a9041dc7f26018f6b6b11addf3ddbda6a7833827434f6b8d5ca2486349902`. CI workflow run 25636962512 (2m 15s).
 - [x] **First digest registered** in `verbara-website/data/authorized-digests.json` (commit `2e41314`).
 
-**Trigger 5 status: ✅ GREEN as of v2.1.0 (2026-05-10).** Pivote arquitectural durante rc1-rc4 cycle: file-based `/etc/verbara-image-digest` baking abandonado (chicken-and-egg flaw) → operator-side `IMAGE_DIGEST` env var (Helm chart `api.image.digest` value + docker-compose `environment:` block + dev-mode null-permissive fallback). Pro source code unchanged (env var path was Phase-1 fallback, now canonical). Documented in [Pro ADR-0011 Status update](../../../Verbara.Sdk.Pro/docs/decisions/0011-image-digest-binding-in-license-keys.md#status-update) + ADR-0018 Status update of even date.
+**Trigger 5 status: ✅ GREEN as of v2.1.0 (2026-05-10).** Pivote arquitectural durante rc1-rc4 cycle: file-based `/etc/verbara-image-digest` baking abandonado (chicken-and-egg flaw) → operator-side `IMAGE_DIGEST` env var (Helm chart `api.image.digest` value + docker-compose `environment:` block + dev-mode null-permissive fallback). Pro source code unchanged (env var path was Phase-1 fallback, now canonical). Documented in [Pro/ADR-0011 Status update](../../../Verbara.Sdk.Pro/docs/decisions/0011-image-digest-binding-in-license-keys.md#status-update) + ADR-0018 Status update of even date.
 
 ### Trigger 6 — verbara.io brand setup (owner: separate track)
 

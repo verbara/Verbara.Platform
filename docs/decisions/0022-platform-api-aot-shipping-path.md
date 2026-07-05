@@ -127,7 +127,7 @@ no longer acceptable.
      - The new AOT image has a fresh digest. Regenerate
        `verbara-website/data/authorized-digests.json` with the new digest
        added to the AuthorizedImageDigests claim of every active license.
-     - Image-binding (ADR-0011 Layer C) continues to work unchanged.
+     - Image-binding (Pro/ADR-0011 Layer C) continues to work unchanged.
 
    - **Phase E — Public image cutover** (1 day):
      - Tag + push v2.4.0 (Platform consumer of Pro v2.5.0-pro) + v2.5.0-pro
@@ -319,7 +319,7 @@ Every store on both repos uses Dapper as the SQL ↔ object mapper. There is no 
 
 Until Phase D ships, the IP-leak surface persists at the same level as today. Mitigations stay where the §3 plan left them:
 
-- ADR-0011 image-binding stays in force (`AuthorizedImageDigests` claim binds Pro features to specific tags so a leaked image cannot be repackaged under a different digest and continue to function).
+- Pro/ADR-0011 image-binding stays in force (`AuthorizedImageDigests` claim binds Pro features to specific tags so a leaked image cannot be repackaged under a different digest and continue to function).
 - Pro repo stays PRIVATE.
 - The Platform.Api `Dockerfile` carries the IP-leak warning header added in commit `5e89f1e2`.
 

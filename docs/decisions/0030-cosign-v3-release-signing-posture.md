@@ -4,7 +4,7 @@
 - **Date:** 2026-06-24
 - **Deciders:** Verbara maintainer (Harol A. Reina H.)
 - **Extends:** [ADR-0024 §Layer 4c](0024-v242-shipping-anomaly-and-process-hardening.md) — promotes the inline `--signing-config` fix from a one-off Platform `release.yml` repair into a **cross-repo signing-posture invariant** that every image-signing `release.yml` MUST follow.
-- **Cross-references:** [ADR-0011 (image-digest binding Layer C)](0011-auth-write-deferral.md), [ADR-0022 (Native AOT shipping path)](0022-platform-api-aot-shipping-path.md), `.github/workflows/release.yml` (Sign step), `.github/cosign.pub`, `verbara-website/public/keys/cosign.pub`
+- **Cross-references:** [Pro/ADR-0011 (image-digest binding Layer C)](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0011-image-digest-binding-in-license-keys.md), [ADR-0022 (Native AOT shipping path)](0022-platform-api-aot-shipping-path.md), `.github/workflows/release.yml` (Sign step), `.github/cosign.pub`, `verbara-website/public/keys/cosign.pub`
 
 ## Context
 

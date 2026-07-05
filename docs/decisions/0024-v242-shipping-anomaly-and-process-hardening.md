@@ -4,7 +4,7 @@
 - **Date:** 2026-05-23 (proposed) → 2026-05-23 (accepted, same-day)
 - **Supersedes:** none
 - **Superseded by:** none
-- **Cross-references:** [ADR-0011 (image-digest binding Layer C)](0011-auth-write-deferral.md), [ADR-0023 (publishing non-AOT microservices)](0023-publishing-non-aot-microservices.md), [Research — IP-exposure deep analysis](../research/2026-05-23-pro-ip-exposure-deep-analysis.md), [Phase A.5 smoke test](../operations/phase-a5-smoke-test-2026-05-23.md)
+- **Cross-references:** [Pro/ADR-0011 (image-digest binding Layer C)](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0011-image-digest-binding-in-license-keys.md), [ADR-0023 (publishing non-AOT microservices)](0023-publishing-non-aot-microservices.md), [Research — IP-exposure deep analysis](../research/2026-05-23-pro-ip-exposure-deep-analysis.md), [Phase A.5 smoke test](../operations/phase-a5-smoke-test-2026-05-23.md)
 
 ## Context
 
@@ -27,7 +27,7 @@ Forensic confirmed the binary origin: the maintainer (`hreina`) ran `docker buil
 
 ### Why the simple fix is wrong
 
-The temptation is "tag retroactively, re-run `release.yml`, get the institutional artifacts back, done." But that path **destroys ADR-0011 Layer C image-binding** for every customer that had already pulled `:v2.4.2` (the digest changes when re-built, and customers' license validation tools compare the runtime digest against `authorized-digests.json` — a mismatch is treated as image tampering).
+The temptation is "tag retroactively, re-run `release.yml`, get the institutional artifacts back, done." But that path **destroys Pro/ADR-0011 Layer C image-binding** for every customer that had already pulled `:v2.4.2` (the digest changes when re-built, and customers' license validation tools compare the runtime digest against `authorized-digests.json` — a mismatch is treated as image tampering).
 
 Detail: `docker push` to an existing tag overwrites the digest pointer, but the original digest blob remains addressable via `ghcr.io/.../api@sha256:<old>` until a registry GC pass. Until that GC, customers with a cached pull are unaffected; after GC, their next pull fails. A re-publish forces every authorized customer to either re-pull (losing the original digest) or fail validation. Either outcome is worse than the original anomaly.
 
@@ -98,7 +98,7 @@ We discovered this empirically: pushing `v2.4.2 → ae41ee6e` (a commit pre-PR #
 ### Customer-facing impact (positive)
 
 - Customer-facing `cosign verify --key https://verbara.io/keys/cosign.pub ...` now works for the first time since the manuales were written (gap closed by Layer 1).
-- ADR-0011 Layer C image-binding for the api image is fully preserved across v2.4.2 (digest unchanged → authorized entry still resolves).
+- Pro/ADR-0011 Layer C image-binding for the api image is fully preserved across v2.4.2 (digest unchanged → authorized entry still resolves).
 - v2.4.3 onward gets full institutional trazability automatically.
 
 ### Customer-facing impact (negative)
@@ -116,7 +116,7 @@ We discovered this empirically: pushing `v2.4.2 → ae41ee6e` (a commit pre-PR #
 
 | # | Option | Rejected because |
 |---|---|---|
-| A | Tag `v2.4.2` from `ae41ee6e` + force `release.yml` rebuild + accept new digests + update website to match | Destroys ADR-0011 Layer C binding for every customer with cached v2.4.2 pulls. Splits the customer base into "pre-rebuild digest" vs "post-rebuild digest" with no migration path. |
+| A | Tag `v2.4.2` from `ae41ee6e` + force `release.yml` rebuild + accept new digests + update website to match | Destroys Pro/ADR-0011 Layer C binding for every customer with cached v2.4.2 pulls. Splits the customer base into "pre-rebuild digest" vs "post-rebuild digest" with no migration path. |
 | C | Delete the 4 v2.4.2 images from ghcr.io entirely + retag fresh from `ae41ee6e` | Same Layer C destruction as A, plus requires `packages:delete` org-admin scope the maintainer lacks. |
 | D | Tag retroactively WITHOUT re-running pipeline, document v2.4.2 as "shipped pre-Actions-run" forever | Acceptable technically but leaves the narrative weak ("the current release lacks an Actions audit trail"). Adopted partially as Layer 5. |
 | F (chosen) | D + adelantar v2.4.3 oficial inmediato | Preserves all customer state, restores institutional trazability for the new baseline within hours, and uses the recovery as the occasion to permanently close the process gaps. |

@@ -35,7 +35,7 @@ rules:
     - "Call out cross-repo impact explicitly along the chain Sdk -> Sdk.Pro -> Platform <- Platform.Web."
     - "Include an Architectural Risk section as an H2 heading ('## Architectural Risk', a sibling of the delta sections — NEVER a '###' header inside requirements: openspec archive rebuilds every '###' as a requirement and aborts): Level (LOW/MEDIUM/HIGH), Affected (areas/repos that can break), Mitigation. Keep SHALL/MUST on the first line of each '### Requirement:'."
   design:
-    - "Reference existing ADRs when relevant using the repo/ADR-NNNN format (e.g. Platform/ADR-0022)."
+    - "Reference existing ADRs when relevant using the repo/ADR-NNNN format (e.g. Platform/ADR-0022). This applies everywhere an ADR is cited across the repo, not only openspec artifacts: a bare ADR-NNNN refers only to THIS repo's docs/decisions/; a cross-repo citation (e.g. Pro/ADR-0011, Sdk/ADR-0011, verbara-meta/ADR-0006) MUST be repo-qualified — required because ADR numbers collide across repos (operator decision 2026-07-05, verbara-meta/ADR-0011)."
     - "Honor the AOT constraint: no reflection, [JsonSerializable] source-gen for every DTO, NO Dapper — use Verbara.Sdk.Data.Npgsql."
     - "Record any durable architectural decision as an ADR in docs/decisions/, not only in this design."
   tasks:

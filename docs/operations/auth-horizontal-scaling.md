@@ -21,7 +21,7 @@ Before flipping the deployment to N>1 replicas:
 - [ ] `ConnectionStrings:Postgres` includes pool sizing (see §"Postgres pool tuning")
 - [ ] DataProtection wired to `PlatformDataProtectionDbContext` (ADR-0003)
 - [ ] All Identity Redis caches registered: `IJwtKeyStore`, `IJtiRevocationCache`,
-      `IMfaPendingCache`, `IPasswordResetCache` (verified by `AddAsteriskPlatformIdentityRedis`)
+      `IMfaPendingCache`, `IPasswordResetCache` (verified by `AddVerbaraPlatformIdentityRedis`)
 - [ ] `RedisAuthCacheInvalidator` listening on `asterisk:auth:invalidate` (ADR-0010)
 - [ ] AuthWriteQueue registered as `IHostedService` (ADR-0011)
 - [ ] Server GC enabled in `Verbara.Platform.Api.csproj`:
@@ -181,7 +181,7 @@ the connection string — Npgsql reads the standard parameters:
 Example connection string for a 4-replica deployment:
 
 ```
-Host=postgres;Database=asterisk;Username=app;Password=…;\
+Host=postgres;Database=verbara;Username=app;Password=…;\
 Maximum Pool Size=50;Minimum Pool Size=10;Connection Idle Lifetime=300;\
 Pooling=true
 ```

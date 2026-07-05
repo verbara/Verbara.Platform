@@ -39,7 +39,6 @@
 
 **Repro (pre-fix):**
 ```bash
-cd /media/Data/Source/Verbara/Verbara.Platform
 dotnet list package --vulnerable --include-transitive 2>&1 | grep -A 3 "MailKit\|MimeKit"
 # Project `Verbara.Platform.Mail` has the following vulnerable packages
 #    [net10.0]:

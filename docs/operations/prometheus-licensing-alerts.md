@@ -28,7 +28,7 @@ The following three alerts require LogQL syntax that PromQL does not parse. Defe
 |---|---|---|---|
 | `LicenseValidationFailedAtBoot` | **P0** | `sum(count_over_time({pod=~"platform-api-.*"} \|~ "LicenseException" [10m])) > 0` | `PlatformApiContainerErrorTermination` — pins it to license-specific failures |
 | `WorkerCrashDetected` | **P1** | `sum(count_over_time({pod=~"platform-api-.*"} \|~ "WorkerCrash" [15m])) > 0` | `PlatformApiContainerErrorTermination` — pins it to ADR-0021 worker silent deaths |
-| `ProductionWithoutImageDigest` | **P3** | `sum(count_over_time({pod=~"platform-api-.*"} \|~ "event.id=12002" [15m])) > 0` | Catches ADR-0011 Layer C opt-out (event-id 12002) |
+| `ProductionWithoutImageDigest` | **P3** | `sum(count_over_time({pod=~"platform-api-.*"} \|~ "event.id=12002" [15m])) > 0` | Catches Pro/ADR-0011 Layer C opt-out (event-id 12002) |
 
 Until Loki Ruler is configured, the Prometheus-native `PlatformApiContainerErrorTermination` covers the cluster-visible signal (Reason=Error); operators distinguish license-vs-worker-vs-other via Loki panel 7 in the Grafana dashboard.
 
@@ -70,7 +70,7 @@ After apply, alerts appear in Prometheus UI under `/alerts` filterable by group 
 sum(increase(license_image_unauthorized_total[5m])) > 0
 ```
 
-**Why P0**: ADR-0011 Layer C image-binding is the defense-in-depth axis against unauthorized image distribution. ANY hit means either an operational mistake (wrong image deployed) or a security event (piracy attempt). Both require immediate triage.
+**Why P0**: Pro/ADR-0011 Layer C image-binding is the defense-in-depth axis against unauthorized image distribution. ANY hit means either an operational mistake (wrong image deployed) or a security event (piracy attempt). Both require immediate triage.
 
 **Tuning**: this should be ALWAYS-ZERO in correctly-deployed Verbara installations. Do not silence with a higher threshold without understanding why the counter is incrementing.
 
@@ -135,7 +135,7 @@ min(license_guard_grace_remaining_seconds) > 0
 sum(count_over_time({pod=~"platform-api-.*"} |~ "event.id=12002" [15m])) > 0
 ```
 
-**Why P3**: documented opt-out — Pro emits the warning but app continues. Persistent firing means operator chose to skip ADR-0011 Layer C (image-binding) for the deployment. Acceptable for OSS users; review with licensed customers.
+**Why P3**: documented opt-out — Pro emits the warning but app continues. Persistent firing means operator chose to skip Pro/ADR-0011 Layer C (image-binding) for the deployment. Acceptable for OSS users; review with licensed customers.
 
 **Tuning**: silence if your deployment intentionally doesn't pin the digest (some K8s lab patterns). Don't silence in commercial customer environments.
 
@@ -164,4 +164,4 @@ These induce-tests are deferred to a follow-up validation pass; the dashboard + 
 - [`grafana-licensing-panels.md`](grafana-licensing-panels.md) — paired dashboard
 - [`k8s-lab-licensing-setup.md`](k8s-lab-licensing-setup.md) — deploy procedure these alerts observe
 - [`infra/k8s/manifests/prometheusrules-r55.yaml`](../../infra/k8s/manifests/prometheusrules-r55.yaml) — rule manifest (full file)
-- ADR-0011, ADR-0012, ADR-0021 — architectural decisions that produce the signals these alerts page on
+- Pro/ADR-0011, ADR-0012, ADR-0021 — architectural decisions that produce the signals these alerts page on

@@ -41,7 +41,7 @@ $ dc logs --tail 50 platform-api
 | `Unable to bind to 'http://+:5000'` | Puerto 5000 ya ocupado en el host | `sudo ss -tlnp '( sport = :5000 )'` + matar el ofensor o cambiar `API_PORT` en `.env` |
 | `Could not parse JWT_SIGNING_KEY` | Valor del secret no tiene 32+ chars | Regenerar con `openssl rand -base64 64` |
 | `Failed to load license` | `LICENSE_PATH` apunta a un archivo inexistente o corrupto | Dejar `LICENSE_PATH=` vacío (modo OSS — Pro endpoints retornan HTTP 402 con upgrade URL); o adquirir Tier 0.5 gratis en https://verbara.io/developer-license y mountear el `.lic` |
-| `IMAGE_DIGEST mismatch` | Pro digest binding falla (ADR-0011) | `IMAGE_DIGEST` debe matchear `docker inspect ghcr.io/verbara/platform/api:v2.6.0` `RepoDigests` |
+| `IMAGE_DIGEST mismatch` | Pro digest binding falla (Pro/ADR-0011) | `IMAGE_DIGEST` debe matchear `docker inspect ghcr.io/verbara/platform/api:v2.6.0` `RepoDigests` |
 
 ### Reiniciar uno solo
 ```bash

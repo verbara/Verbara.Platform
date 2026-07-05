@@ -122,7 +122,7 @@ This plan is the empirical loop closing on the JWT Tier-1 work shipped 2026-05-2
 - Tier-1 spec evidence: [JTI investigation 2026-05-24](../research/2026-05-24-jti-investigation-presence-vu1500.md) § Tier 1
 - Tier-2 spec: [JWT key store SET-index migration](../specs/2026-05-25-jwt-tier-2-redis-set-index.md)
 - Phase C-LK baseline measurement: [Chaos test report K8s local](../operations/chaos-test-report-k8s-local.md) § "v2.5.2 rerun"
-- ADR-0011 image-digest binding (governs Phase 1 ceremony)
+- Pro/ADR-0011 image-digest binding (governs Phase 1 ceremony)
 - ADR-0023 4-image release model (governs release.yml workflow)
 - ADR-0024 retroactive-tag guard (don't use; this is a forward release)
 

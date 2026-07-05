@@ -5,7 +5,7 @@
 # operator runs `docker compose up`. This is the docker-compose equivalent of the
 # Kyverno admission policy shipped in infra/k8s/helm/platform/templates/cosign-
 # admission-policy.yaml — Layer B of the Pro v2.3.x F+B+C defense stack
-# (ADR-0011, Verbara.Sdk.Pro repo).
+# (Pro/ADR-0011).
 #
 # Layer C (the in-process digest check inside Verbara.Sdk.Pro.Licensing) catches
 # the same class of tampering at Pro startup. Running this script before

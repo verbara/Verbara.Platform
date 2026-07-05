@@ -8,7 +8,7 @@ and observability sidecars (`docker-compose.observability.yml`).
 
 ## Verifying image signature (Docker Compose)
 
-Pro v2.3.x ships image-binding (ADR-0011 in the Verbara.Sdk.Pro repo)
+Pro v2.3.x ships image-binding (Pro/ADR-0011)
 that detects unauthorised Verbara Platform images at runtime via Layer C
 (in-process digest check). The docker-compose tooling here adds Layer B
 (pre-flight cosign signature verification) so customers catch a tampered
@@ -60,7 +60,7 @@ enforces the equivalent guarantee — a tampered image is rejected at Pod
 admission, before kubelet pulls the layers. This script provides the
 docker-compose equivalent.
 
-### Defense-in-depth (ADR-0011)
+### Defense-in-depth (Pro/ADR-0011)
 
 | Layer | Where it runs | What it catches |
 |-------|---------------|-----------------|

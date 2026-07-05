@@ -5,7 +5,7 @@
 {{- end -}}
 # Kyverno ClusterPolicy — requires every Pod admitted to the release namespace
 # whose image matches ghcr.io/verbara/platform/* to carry a valid cosign
-# signature from the Verbara cosign keypair (Pro v2.3.x Layer B, ADR-0011).
+# signature from the Verbara cosign keypair (Pro v2.3.x Layer B, Pro/ADR-0011).
 #
 # Layer C (in-process check inside Verbara.Sdk.Pro.Licensing) catches the same
 # class of tampering at runtime; this admission policy catches it AT POD

@@ -62,7 +62,7 @@ Identity__Redis__KeyPrefix=asterisk:identity:
 ```
 
 The Platform bootstrap checks `ConnectionStrings:IdentityRedis` on startup. If
-present it calls `AddAsteriskPlatformIdentityRedis(...)` which replaces both
+present it calls `AddVerbaraPlatformIdentityRedis(...)` which replaces both
 in-memory cache registrations with Redis-backed ones. If absent, the in-memory
 defaults remain — zero behavioral change.
 
@@ -94,8 +94,8 @@ expired entry.
 ## Sharing a multiplexer
 
 If the Platform process already registers an `IConnectionMultiplexer` (for
-example through `AddAsteriskClusterRedis(...)` from
-`Verbara.Sdk.Pro.Cluster.Redis`), `AddAsteriskPlatformIdentityRedis` reuses
+example through `AddVerbaraClusterRedis(...)` from
+`Verbara.Sdk.Pro.Cluster.Redis`), `AddVerbaraPlatformIdentityRedis` reuses
 it instead of opening a second connection pool. Just make sure both
 registrations point at the same endpoint.
 

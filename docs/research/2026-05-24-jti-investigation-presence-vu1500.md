@@ -259,4 +259,4 @@ Tier-2 (SCAN+N×GET → SMEMBERS+MGET) reduces the cold-window from 1-5s → 20-
 - ADR-0010 (Argon2id + AuthWriteQueue) — historical context on auth path
 - ADR-0012 (JWT rotation pool) — multi-replica key store contract
 - ADR-0025 (K8s liveness/readiness contract) — sibling investigation from the same B-LK
-- Pro ADR-0011 (image-digest binding) — orthogonal but referenced by JwtKeyRotation comments
+- Pro/ADR-0011 (image-digest binding) — orthogonal but referenced by JwtKeyRotation comments

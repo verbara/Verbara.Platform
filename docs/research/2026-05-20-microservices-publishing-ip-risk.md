@@ -53,7 +53,7 @@ it lives in Verbara's issuer (the website Worker).
   the key, not code secrecy). Client-side validators are unhiddable in **any** language —
   even Native AOT can be patched.
 - Tampering (patching the validator to always-pass) is defended by **cosign image signature +
-  digest binding (ADR-0011)**, independent of IL-vs-AOT: a patched image fails signature
+  digest binding (Pro/ADR-0011)**, independent of IL-vs-AOT: a patched image fails signature
   verification and is rejected by the admission policy (Layer B).
 
 ## Public vs Private — and why Realtime should be PUBLIC

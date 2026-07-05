@@ -10,7 +10,7 @@
 # Layer-C authorized-digests allow-list (image-binding is API-only).
 #
 # Single-pass build (since v2.1.0-rc4): an OCI image cannot self-reference its own
-# manifest digest, so digest injection is operator-side (ADR-0011 Status update 2026-05-10).
+# manifest digest, so digest injection is operator-side (Pro/ADR-0011 Status update 2026-05-10).
 # Layer-B verification (cosign signature): docker/verbara-verify-image.sh
 # Layer-C verification (Pro reads IMAGE_DIGEST env at runtime):
 #   Verbara.Sdk.Pro.Licensing.ContainerImageDigest.ReadFromEnvironment() -> compares against

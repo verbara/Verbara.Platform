@@ -19,7 +19,7 @@ so a token is consumed exactly once across the cluster.
 var identityRedisConn = builder.Configuration.GetConnectionString("IdentityRedis");
 if (!string.IsNullOrEmpty(identityRedisConn))
 {
-    builder.Services.AddAsteriskPlatformIdentityRedis(o =>
+    builder.Services.AddVerbaraPlatformIdentityRedis(o =>
     {
         o.ConnectionString = identityRedisConn;
         o.KeyPrefix = "asterisk:identity:";
@@ -28,7 +28,7 @@ if (!string.IsNullOrEmpty(identityRedisConn))
 // else: the in-memory caches registered earlier continue to serve traffic.
 ```
 
-The `AddAsteriskPlatformIdentityRedis` extension is an opt-in override — it
+The `AddVerbaraPlatformIdentityRedis` extension is an opt-in override — it
 replaces any existing `IMfaPendingCache` + `IPasswordResetCache` registrations
 and registers a singleton `IConnectionMultiplexer` if one is not already
 present (so it shares the pool with other Redis-backed packages such as

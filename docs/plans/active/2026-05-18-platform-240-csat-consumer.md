@@ -246,7 +246,7 @@ Ship Platform `2.4.0` with:
 ```bash
 # Pre-flight
 dotnet nuget locals all --clear && rm -rf ~/.nuget/packages/verbara.sdk.pro*/
-cd /media/Data/Source/Verbara/Verbara.Platform && dotnet restore Verbara.Platform.slnx
+dotnet restore Verbara.Platform.slnx
 
 # Phase F acceptance
 dotnet build Verbara.Platform.slnx -c Release /warnaserror
@@ -256,7 +256,7 @@ dotnet build tests/Verbara.Platform.Api.Aot.Probe -c Release
 
 # Migration smoke against test Postgres
 psql -h localhost -U postgres -d verbara_test \
-     -f /media/Data/Source/Verbara/Verbara.Platform/src/Verbara.Platform.Storage.Postgres/Migrations/0XX_SurveyCsatExtensions.sql
+     -f src/Verbara.Platform.Storage.Postgres/Migrations/0XX_SurveyCsatExtensions.sql
 
 # Phase H
 git add -A && git commit -m "feat: v2.4.0 — CSAT consumer migration"

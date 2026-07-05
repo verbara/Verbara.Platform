@@ -73,7 +73,7 @@ spec:
               echo "Postgres pooler DNS resolved"
       containers:
         - name: api
-          # Pin by digest when set (ADR-0011 Layer B: kubelet pulls byte-exact
+          # Pin by digest when set (Pro/ADR-0011 Layer B: kubelet pulls byte-exact
           # signed image, ignores tag float). Falls back to tag-only reference
           # when api.image.digest is empty (dev / local KVM cluster scenarios).
           image: "{{ .Values.api.image.repository }}{{ if .Values.api.image.digest }}@{{ .Values.api.image.digest }}{{ else }}:{{ .Values.api.image.tag }}{{ end }}"
@@ -97,7 +97,7 @@ spec:
               value: {{ .Values.api.aspnetcoreEnvironment | quote }}
             {{- end }}
             {{- if .Values.api.image.digest }}
-            # Layer C in-process image-binding check (ADR-0011, Pro v2.3.x).
+            # Layer C in-process image-binding check (Pro/ADR-0011, Pro v2.3.x).
             # Pro's ContainerImageDigest.ReadFromEnvironment() reads this env
             # var + compares against LicenseKey.AuthorizedImageDigests claims.
             # Operator sets api.image.digest in values.yaml (or via --set);

@@ -78,7 +78,7 @@ Additional setup state inherited from Plan C (no action needed if Plan C complet
 
 | Component | Image | Replicas | HPA |
 |-----------|-------|----------|-----|
-| `platform-api` | `ghcr.io/verbara/platform/api:v2.4.3` (digest-pinned per ADR-0011) | 2 | min=1, max=2 |
+| `platform-api` | `ghcr.io/verbara/platform/api:v2.4.3` (digest-pinned per Pro/ADR-0011) | 2 | min=1, max=2 |
 | `platform-realtime` | `ghcr.io/verbara/platform/realtime:v2.4.3` (digest-pinned) | **4** | min=1, max=4 ([values.yaml lines 176–186](../../../infra/k8s/helm/platform/values.yaml)) |
 | `platform-renderer` | `ghcr.io/verbara/platform/renderer:v2.4.3` | 1 | n/a |
 | `platform-mail` | `ghcr.io/verbara/platform/mail:v2.4.3` | 1 | n/a |

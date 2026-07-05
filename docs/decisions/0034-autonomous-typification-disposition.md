@@ -178,3 +178,32 @@ proposal/spec/tasks re-scoped to Decisions 2–7 (extend the existing worker; at
 verification; time-bounded retention + purge fix + regression test; append-only operator correction; dark
 rollout). The Art. 22 contest/reopen requirements are removed; the deferred items above are listed as
 out-of-scope follow-ons. This ADR is referenced from the change's `proposal.md`.
+
+## Addendum (2026-07-05): audit-trail-integrity-fixes — 4 defects spawned at ship, now closed
+
+Grounding the `typification-autonomous-disposition` ship (2026-07-01) against the shipped audit
+substrate surfaced four integrity defects, tracked as their own OpenSpec change
+(`audit-trail-integrity-fixes`, decision_ref Platform/ADR-0034) and shipped `e8d4a7b9` (PR#124,
+archived). All four are closed:
+
+1. **Correction-endpoint write atomicity** — `POST /{id}/typification-correction` persisted the
+   correction, the submission upsert, and the audit record as **three** separate non-atomic writes
+   (grounding found three, not the two originally assumed) — a crash mid-sequence could leave a
+   correction with no audit trail. Fixed: all three now commit inside one Npgsql transaction.
+2. **GDPR purge preview under-reporting** — `GdprPurgeService.PreviewUserPurgeAsync` hard-coded
+   `AuditTrailCount: 0`, so the Art. 17 purge preview always claimed zero audit rows would be
+   affected. Fixed: a real count via the new `IAuditStore.CountByActorAsync`.
+3. **Actor attribution recurrence of the claim-order bug class** — `RecordAudit` in
+   `TypificationEndpoints.cs` and `ReasonHintEndpoints.cs` resolved `actorId` via a `sub`-only
+   lookup, mis-attributing API-key callers and impersonated sessions to `"system"` (the same bug
+   class as the v2.14.1 rate-limiter fix, `reference_typification_discovered_bugs`). Fixed: both
+   call-sites now route through the shared `CallerIdentity` resolver (`Endpoints/Shared/`)
+   alongside every other call-site that already used the correct precedence.
+4. **`RetainUntil` outside the integrity hash** — `DefaultAuditService.ComputeIntegrityHash` did not
+   cover `RetainUntil`, so a retention-date mutation was undetectable by hash verification. Fixed: a
+   `v2:`-prefixed versioned hash scheme covers `RetainUntil` for newly written entries; existing rows
+   continue to verify under the original (`v1`) scheme — no backfill, no invalidation.
+
+Verified live-DB (Postgres Testcontainers, not just InMemory — the ADR-0034 lesson that InMemory hid
+the Art. 17 redaction inertness applies here too): 186/186 Storage.Postgres tests green, plus
+1511+55+272+126 unit tests across Api/Audit/Storage.InMemory/Typification, zero warnings.

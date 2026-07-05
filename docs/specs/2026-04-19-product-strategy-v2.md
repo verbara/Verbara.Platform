@@ -81,7 +81,7 @@ Sin este documento, decisiones individuales se toman con información parcial y 
 
 39 hallazgos específicos verificados post-v1.13.0:
 
-- **Cerrados por v1.12/v1.13 (5):** NATS inbound shipped (`NatsBridgeOptions.Subscribe` + `INatsSubscriber` + loop prevention); JetStream fuera de MIT por ADR-0011; `RemotePushEvent` envelope en SDK.
+- **Cerrados por v1.12/v1.13 (5):** NATS inbound shipped (`NatsBridgeOptions.Subscribe` + `INatsSubscriber` + loop prevention); JetStream fuera de MIT por Sdk/ADR-0011; `RemotePushEvent` envelope en SDK.
 - **Parciales (5):** `NodeId` existe **solo** en `NatsBridgeOptions` + `RemotePushEvent` (no en `PushEventMetadata` general); `AsteriskSemanticConventions` catalog (54 consts) shipped pero `PushActivitySource`/`PushMetrics` no lo adoptan; benchmarks micro existen pero no Push/NATS throughput ni VoiceAi E2E latency.
 - **Intactos (29):** Event Fabric core (EventId, SchemaVersion, SequenceNumber, DedupeKey ausentes); Sessions event-sourcing (snapshot-per-mutation, no append log); Resilience en SDK (open-coded en AmiConnection/AriLoggingHandler/WebhookDeliveryService); Cluster primitives MIT (INodeRegistry/IMembershipProvider/IClusterTransport ausentes); Naming (RxPushEventBus ya no usa Rx pero el prefijo está API-locked; doble `AudioSocketServer` en Ari + VoiceAi; `ISessionHandler` (VoiceAi) vs `CallSession` (Sessions) homónimos); VoiceAi positioning (30% del repo, conventions cementadas en core); Boundary leaks (Sessions.csproj con `InternalsVisibleTo Pro.Cluster`); Hosting god-package; Observability business correlation (spans sin `tenant.id`/`call.id`/`event.id`); Load/latency sin harness; README identity.
 
@@ -107,7 +107,7 @@ Sin este documento, decisiones individuales se toman con información parcial y 
 
 Post-v1.13.0 hay ADRs en SDK que limitan ciertas opciones:
 
-- **ADR-0011 SDK** — "Push bus in-memory non-durable". Durability queda en Pro (Pro.EventStore, eventual Pro.Push.JetStream).
+- **Sdk/ADR-0011** — "Push bus in-memory non-durable". Durability queda en Pro (Pro.EventStore, eventual Pro.Push.JetStream).
 - **ADR-0025 SDK** — rechaza explícitamente `[JsonPolymorphic]` en `PushEvent` y rechaza reflection-based subtype round-trip. `RemotePushEvent` es envelope opaco con `OriginalEventType` + `RawPayload`. **Cualquier futuro `EventId`/`SchemaVersion` en SDK debe ir en el envelope, no via polymorphic discriminator.**
 - **ADR-0023 SDK** — política `PublicApiAnalyzers` en todos los `src/*` + `PackageValidation` + `BannedApiAnalyzers`. Introducir nuevo paquete cuesta 4-5 archivos extra (csproj + PublicAPI.Shipped.txt + PublicAPI.Unshipped.txt + icon + release-notes).
 
@@ -214,7 +214,7 @@ Extracción VoiceAI a repo propio **deferred**. Razones:
 | Retention windows por dominio + DryRun default | Pro | **Pro** | compliance | Mantener specific policies. |
 | `INodeRegistry` + `IMembershipProvider` + `IClusterTransport` | ausente | **SDK** | ninguno | **Crear.** Consul/etcd/Redis cluster primitives son OSS. |
 | NATS bridge (pub/sub outbound + inbound) | SDK v1.13 ✅ | **SDK** | — | Shipped. |
-| JetStream durable consumer | ausente | **Pro** | scale + durability | ADR-0011 confirmado. |
+| JetStream durable consumer | ausente | **Pro** | scale + durability | Sdk/ADR-0011 confirmado. |
 | `FailoverCoordinator` (Raft-like quorum) | Pro | **Pro** | scale + cross-DR | Mantener. |
 | `ICallSessionManager` + CallSession | SDK | **SDK** | ninguno | Mantener. |
 | Sessions persistence Redis/Postgres | SDK | **SDK** | ninguno | Mantener. (Single-tenant single-cluster primitive.) |
@@ -388,7 +388,7 @@ HashiCorp BSL + Redis SSPL generaron forks (OpenTofu, Valkey) que capturaron clo
 | Tier | Delivery | Durability | Cluster | Isolation | Compliance |
 |---|---|---|---|---|---|
 | **SDK (Runtime, MIT)** | At-most-once (in-memory) + opt-in at-least-once via EventStore base | In-memory + optional single-cluster Postgres/Redis via Sessions stores | Single-cluster, best-effort NATS fan-out (bidirectional post-v1.13) | Single-tenant | None |
-| **Pro (Enterprise Runtime)** | At-least-once con EventStore + idempotency via EventId + JetStream durable consumer (ADR-0011) | Durable Postgres event log + retention w/ audit | Multi-cluster failover coordinator + cross-region replication + quorum (Raft) | Multi-tenant via `ITenantContext` + WHERE-clause isolation + tested (v1.8.1-pro IT) | PCI redaction + audit trail (commit-audit-phase2) |
+| **Pro (Enterprise Runtime)** | At-least-once con EventStore + idempotency via EventId + JetStream durable consumer (Sdk/ADR-0011) | Durable Postgres event log + retention w/ audit | Multi-cluster failover coordinator + cross-region replication + quorum (Raft) | Multi-tenant via `ITenantContext` + WHERE-clause isolation + tested (v1.8.1-pro IT) | PCI redaction + audit trail (commit-audit-phase2) |
 | **Platform (SaaS)** | Delivered via Pro | Delivered via Pro + Platform.Storage | Delivered via Pro | Delivered via Pro | SOC2 track (aspirational post-v2.0 Platform) |
 
 ### 7.2 SLOs públicos (post-v2.0)
@@ -551,7 +551,7 @@ Para sustentar claims publicados:
 
 El PSD opera dentro de estas decisiones ya tomadas:
 
-1. **ADR-0011:** Push bus in-memory non-durable. JetStream durable consumer es Pro-territory permanente.
+1. **Sdk/ADR-0011:** Push bus in-memory non-durable. JetStream durable consumer es Pro-territory permanente.
 2. **ADR-0025:** Anti-polymorphic en PushEvent. Cualquier event identity layer (EventId/SchemaVersion/SequenceNumber) debe ir en envelope metadata, no vía `[JsonPolymorphic]`.
 3. **ADR-0023:** `PublicApiAnalyzers` + `PackageValidation` + `BannedApiAnalyzers` en todos los `src/*` de SDK. Introducir nuevo paquete requiere csproj + PublicAPI.Shipped.txt + PublicAPI.Unshipped.txt + icon + release-notes (fricción real).
 4. **VoiceAi cementado en v1.13:** `AsteriskSemanticConventions.VoiceAi` en core MIT. Opción D (split VoiceAi) requiere trabajo extra de mover conventions + renombrar namespace.

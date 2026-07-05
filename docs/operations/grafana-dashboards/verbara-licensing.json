@@ -42,7 +42,7 @@
       "id": 1,
       "type": "stat",
       "title": "License image-unauthorized count (24h)",
-      "description": "license.image_unauthorized counter sum over 24h. NON-ZERO means an operator deployed an image whose manifest digest is NOT in the license's AuthorizedImageDigests claim (ADR-0011 Layer C breach). Expected value: 0.",
+      "description": "license.image_unauthorized counter sum over 24h. NON-ZERO means an operator deployed an image whose manifest digest is NOT in the license's AuthorizedImageDigests claim (Pro/ADR-0011 Layer C breach). Expected value: 0.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
       "fieldConfig": {

@@ -18,7 +18,7 @@
 
 > **Authoritative source** — por decisión 2026-04-19, este repo es el workstream autoritativo para todo lo que cruza API + Web. Plans, specs, ADRs y research viven aquí. `Verbara.Platform.Web` sigue siendo repo separado para código frontend, pero su planning se origina en este árbol `docs/`.
 
-Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `/media/Data/Source/Verbara/Verbara.Sdk.Pro/docs/roadmap.md`.
+Para el roadmap **downstream** (SDK y SDK.Pro) que alimenta este stack: `Verbara.Sdk.Pro/docs/roadmap.md`.
 
 ---
 
@@ -184,7 +184,7 @@ Cuando se reanudó B-LK.1 el 2026-05-16, primer `curl -X POST /api/v1/setup` con
 - `scripts/k8s-up.sh` necesita rama "warm-restart": pasos 5 (apply-config --insecure) y 6 (bootstrap) fallan si los nodos ya están provisionados. Hoy hubo que ejecutar manualmente `talosctl kubeconfig --force` para saltarlos. Parche idempotente a `net-start default` ya aplicado en working tree (no committeado).
 - Imagen deployada es `asterisk-platform/api:1.14.6` + `asterisk-platform/web:1.15.5` (pre-rebrand, namespace OCI `asterisk-platform/*`) — esto es **metodológicamente correcto** para Phase B-LK ya que matchea la baseline Docker B-L también v1.14.6 (D-L 24h soak PASS 2026-04-30 fue en esta versión). NO actualizar a v2.1.0 antes de B-LK o el comparativo K8s vs Docker pierde validez. SDK pin transitivo ~1.15.x, Pro pin transitivo 1.16.0-pro.
 - **Registry host `192.168.122.1:5050` DOWN** — los pods corren porque las imágenes están cacheadas en `containerd` de cada nodo. `helm upgrade` con `imagePullPolicy: IfNotPresent` (chart default, verificar) funciona; si fuera `Always` fallaría. **Antes de Phase C-LK chaos** (que mata pods intencionalmente) el registry debe estar arriba. Para B-LK.1 baseline es safe diferirlo.
-- **Licensing no se necesita para B-LK** — chart hardcodea `licensing.enforcementMode: Disabled`. `LicenseGateMiddleware` pasa todo sin validar. Mantiene paridad con Docker B-L baseline (también sin license). Modos disponibles: `Disabled` (actual), `WarnOnly` (staging), `Enforce` (production — requeriría license key con `AuthorizedImageDigests` si fuera v2.1.0 por ADR-0011, o solo expiry check si es v1.14.6). Medir overhead de `LicenseGateMiddleware` con Enforce + license válido sería un Phase B-LK.6 opcional separado.
+- **Licensing no se necesita para B-LK** — chart hardcodea `licensing.enforcementMode: Disabled`. `LicenseGateMiddleware` pasa todo sin validar. Mantiene paridad con Docker B-L baseline (también sin license). Modos disponibles: `Disabled` (actual), `WarnOnly` (staging), `Enforce` (production — requeriría license key con `AuthorizedImageDigests` si fuera v2.1.0 por Pro/ADR-0011, o solo expiry check si es v1.14.6). Medir overhead de `LicenseGateMiddleware` con Enforce + license válido sería un Phase B-LK.6 opcional separado.
 
 ### Post-flip follow-ups (no version-gated)
 

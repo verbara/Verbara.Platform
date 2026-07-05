@@ -3,7 +3,7 @@
 **Authored:** 2026-05-18 (post Platform v2.3.1 deploy)
 **Audience:** Maintainers deploying Verbara Platform to internal K8s labs OR customers running on-premise K8s with image-binding enforcement.
 **Pro consumer pin:** v2.4.1-pro (with [LicenseTrustAnchor DI race fix v2.3.1](../../CHANGELOG.md#231-—-2026-05-18))
-**Image-binding axis:** ADR-0011 Layer C (in-process IMAGE_DIGEST check)
+**Image-binding axis:** Pro/ADR-0011 Layer C (in-process IMAGE_DIGEST check)
 **Licensing mode:** Pro v2.4.0-pro canonical (`Licensing__FilePath`, no `EnforcementMode`)
 
 This guide documents the **end-to-end reproducible procedure** to deploy `ghcr.io/verbara/platform/api:vX.Y.Z` to a K8s cluster with a real signed Pro license + image-digest binding active. The procedure was validated on 2026-05-18 against the maintainer's Talos lab (1 CP + 3 workers, Cilium eBPF, CNPG Postgres, kube-prometheus-stack).
@@ -30,7 +30,7 @@ For SMB single-host docker-compose deployment, see [`docs/manuales/smb/01-instal
 - CNPG cluster running with a `platform` user + the canonical database name (`verbara` post-rebrand; legacy K8s deployments still use `asterisk_platform` — see [DB rename train](#db-rename-train) section below)
 - Redis 8 StatefulSet reachable from the namespace (typically `redis-0.redis.r55-data.svc.cluster.local:6379`)
 - kube-prometheus-stack Grafana + Prometheus running for observability (see [`docs/operations/grafana-licensing-panels.md`](grafana-licensing-panels.md))
-- Container image registry reachable from cluster nodes (per ADR-0011 + ADR-0018, canonical is `ghcr.io/verbara/platform/api`; KVM labs mirror to `192.168.122.1:5050/verbara-platform/api` via `crane copy`)
+- Container image registry reachable from cluster nodes (per Pro/ADR-0011 + ADR-0018, canonical is `ghcr.io/verbara/platform/api`; KVM labs mirror to `192.168.122.1:5050/verbara-platform/api` via `crane copy`)
 
 ### License signing key
 
@@ -151,7 +151,7 @@ kubectl logs -n r55-platform -l app.kubernetes.io/name=platform-api --tail=10 -f
 
 ### Step 5 — Apply Helm chart with image override (KVM lab only)
 
-The chart's `values.yaml` defaults to `ghcr.io/verbara/platform/api` (per ADR-0011). The KVM lab override + (if applicable) the legacy DB-name override go via `--set`:
+The chart's `values.yaml` defaults to `ghcr.io/verbara/platform/api` (per Pro/ADR-0011). The KVM lab override + (if applicable) the legacy DB-name override go via `--set`:
 
 ```bash
 cd /path/to/Verbara.Platform
@@ -213,7 +213,7 @@ kubectl logs $POD -n r55-platform --tail=400 | grep -c 'WorkerCrash'
 kubectl exec $POD -n r55-platform -- curl -s http://localhost:5000/health/ready | head -c 100
 # Expected: JSON beginning with {"status":"...
 
-# 6. IMAGE_DIGEST env matches license claim (proves ADR-0011 wired correctly)
+# 6. IMAGE_DIGEST env matches license claim (proves Pro/ADR-0011 wired correctly)
 kubectl exec $POD -n r55-platform -- sh -c 'echo "$IMAGE_DIGEST"'
 # Expected: $DIGEST (same as Step 1)
 
@@ -234,7 +234,7 @@ The end-to-end procedure exercises **every defense layer** in Verbara's open-cor
 |---|---|---|
 | **A — Apache 2.0 OSS gate** | Pro features wrapped in `LicenseGuard.CanExecute(LicenseFeature)` | Pro feature endpoints accessible when license valid; HTTP 402 RFC 9457 when not |
 | **B — Cosign signed images** | All v2.x images signed via Sigstore keyless OIDC in GitHub Actions | Image pulled by digest from `verbara-website/data/authorized-digests.json` |
-| **C — In-process IMAGE_DIGEST binding** | ADR-0011 — `LicenseValidator` rejects licenses whose `AuthorizedImageDigests` claim doesn't include the running container's manifest digest | License rejected at runtime if IMAGE_DIGEST mismatches |
+| **C — In-process IMAGE_DIGEST binding** | Pro/ADR-0011 — `LicenseValidator` rejects licenses whose `AuthorizedImageDigests` claim doesn't include the running container's manifest digest | License rejected at runtime if IMAGE_DIGEST mismatches |
 | **D — ECDSA license signature** | License signed by maintainer's private key, verified against `LicenseTrustAnchor.OfficialPublicKey` baked in Pro | Validated at boot + every 6h via `LicenseRevalidationService` |
 | **E — Worker resilience** | ADR-0021 + Pro v2.4.1-pro — every BackgroundService outer-try-catch + `BackgroundServiceExceptionBehavior.StopHost` wired | Any silent worker death surfaces as pod restart + Critical log |
 

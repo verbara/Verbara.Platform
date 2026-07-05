@@ -1,6 +1,6 @@
 # docker-compose.verified.yml — TEMPLATE for digest-pinned, cosign-verified Verbara
 # Platform deploys (Pro v2.3.x Layer B equivalent for docker-compose customers,
-# ADR-0011, Verbara.Sdk.Pro repo).
+# Pro/ADR-0011).
 #
 # This file is intentionally a TEMPLATE — the digest below is a placeholder.
 # Operators copy + edit this file with the manifest-list digest of the Verbara
@@ -43,7 +43,7 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_URLS: http://+:5000
-      # Layer C in-process image-binding check (ADR-0011, Pro v2.3.x).
+      # Layer C in-process image-binding check (Pro/ADR-0011, Pro v2.3.x).
       # Pro's ContainerImageDigest.ReadFromEnvironment() reads IMAGE_DIGEST +
       # compares against LicenseKey.AuthorizedImageDigests claims at startup.
       # MUST match the @sha256 digest in the `image:` line above. (Pro can't

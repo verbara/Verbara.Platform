@@ -248,7 +248,7 @@ Strict order (dependency chain enforces):
 3. **Platform v2.4.2** — bump version in `Directory.Build.props`, restore against new Pro, full test suite green, build native AOT publish
 4. **Re-build & re-sign 4 ghcr.io images** at `v2.4.2`: api / realtime / renderer / mail. Use the same cosign signing workflow that produced v2.4.1.
 5. **Push images** to `ghcr.io/verbara/platform/*:v2.4.2`. Verify signatures with `cosign verify ...`
-6. **Update verbara-website digest authorization** for v2.4.2 (image-digest binding per ADR-0011)
+6. **Update verbara-website digest authorization** for v2.4.2 (image-digest binding per Pro/ADR-0011)
 7. **Tag releases**:
    - `Verbara.Sdk` → `v2.2.1`
    - `Verbara.Sdk.Pro` → `v2.5.1-pro`
