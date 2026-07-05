@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
@@ -73,9 +74,9 @@ internal sealed class PlatformAdminAuthorizationHandler : AuthorizationHandler<P
         // If a specific permission is required, check it
         if (requirement.Permission is not null)
         {
-            var userIdClaim = context.User.FindFirst("user_id")?.Value
-                ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                ?? context.User.FindFirst("sub")?.Value;
+            // audit-trail-integrity-fixes (fix 3): shared canonical resolver — the same
+            // user_id ?? NameIdentifier ?? sub precedence used everywhere else in the Api project.
+            var userIdClaim = CallerIdentity.ResolveUserId(context.User);
 
             if (string.IsNullOrEmpty(userIdClaim))
                 return;

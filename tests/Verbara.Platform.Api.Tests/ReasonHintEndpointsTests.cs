@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Verbara.Platform.Audit;
+using Verbara.Platform.Core;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -16,6 +19,7 @@ public sealed class ReasonHintEndpointsTests :
     IClassFixture<AuthenticatedPlatformApiFactory>,
     IClassFixture<NonAdminAuthenticatedApiFactory>
 {
+    private readonly AuthenticatedPlatformApiFactory _adminFactory;
     private readonly HttpClient _admin;
     private readonly HttpClient _nonAdmin;
 
@@ -23,6 +27,7 @@ public sealed class ReasonHintEndpointsTests :
         AuthenticatedPlatformApiFactory adminFactory,
         NonAdminAuthenticatedApiFactory nonAdminFactory)
     {
+        _adminFactory = adminFactory;
         _admin = adminFactory.CreateAuthenticatedClient();
         _nonAdmin = nonAdminFactory.CreateAuthenticatedClient();
     }
@@ -55,6 +60,32 @@ public sealed class ReasonHintEndpointsTests :
         dto!["reasonPath"]!.GetValue<string>().Should().Be("[\"CITAS\",\"REPROG\"]");
         dto!["priority"]!.GetValue<int>().Should().Be(10);
         dto!["isActive"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateReasonHint_ShouldAttributeAuditToOwningUser_NotSystem()
+    {
+        // audit-trail-integrity-fixes (fix 3): same regression as
+        // TypificationEndpointTests.CreateSchema_ShouldAttributeAuditToOwningUser_NotSystem — the
+        // API-key test caller has NO `sub` claim, so RecordAudit's pre-fix `sub`-only lookup
+        // recorded actorId="system" for every reason-hint mutation.
+        var response = await _admin.PostAsJsonAsync(
+            "/api/v1/admin/reason-hints", ValidBody(UniqueScopeRef()));
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var id = created!["id"]!.GetValue<string>();
+
+        using var scope = _adminFactory.Services.CreateScope();
+        var auditStore = scope.ServiceProvider.GetRequiredService<IAuditStore>();
+        var hits = await auditStore.SearchAsync(
+            new TenantId(AuthenticatedPlatformApiFactory.TestTenantId),
+            new AuditQuery(Action: "reason_hint.created", Page: 1, PageSize: 100),
+            CancellationToken.None);
+
+        hits.Items.Should().Contain(e =>
+            e.TargetId == id
+            && e.ActorId == AuthenticatedPlatformApiFactory.TestUserId
+            && e.ActorId != "system");
     }
 
     [Fact]

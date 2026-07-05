@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Pro.MultiTenant;
@@ -113,6 +114,29 @@ public sealed class TypificationEndpointTests : IDisposable
         getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var schema = JsonNode.Parse(await getResponse.Content.ReadAsStringAsync());
         schema!["isPublished"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateSchema_ShouldAttributeAuditToOwningUser_NotSystem()
+    {
+        // audit-trail-integrity-fixes (fix 3): AuthenticatedPlatformApiFactory authenticates via
+        // an API key (ApiKeyAuthenticationHandler sets `user_id` = the owning user, NameIdentifier
+        // = the key id, and NO `sub` claim at all). Before the fix, RecordAudit's `sub`-only lookup
+        // recorded every admin-surface mutation as actorId="system" for every API-key caller —
+        // this locks the regression: the audit MUST attribute the owning user.
+        var id = await CreateSchemaAsync(_client, ValidSchemaBody("Actor Attribution"));
+
+        using var scope = _factory.Services.CreateScope();
+        var auditStore = scope.ServiceProvider.GetRequiredService<IAuditStore>();
+        var hits = await auditStore.SearchAsync(
+            new TenantId(AuthenticatedPlatformApiFactory.TestTenantId),
+            new AuditQuery(Action: "typification.schema.created", Page: 1, PageSize: 100),
+            CancellationToken.None);
+
+        hits.Items.Should().Contain(e =>
+            e.TargetId == id
+            && e.ActorId == AuthenticatedPlatformApiFactory.TestUserId
+            && e.ActorId != "system");
     }
 
     [Fact]
