@@ -1,0 +1,12 @@
+{
+  "_comment": "Golden wire shape for POST /api/v1/csat/responses/webchat — the capture payload a visitor submits from the embed iframe. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate). Maps 1:1 onto the SurveyResponse extension (Verbara.Platform.Surveys/SurveyResponse.cs) + SurveyQuestionIds.CsatRating.",
+  "responseToken": "v1.eyJ0aWQiOiJ0ZW4tNDIiLCJzdmkiOiJzcnYtY3NhdC12MSIsInEiOiJzdXBwb3J0LXRpZXIxIiwiY2giOiJ3ZWJjaGF0In0.hmac-sha256-7d-ttl",
+  "surveyId": "srv-csat-v1",
+  "questionId": "csat-rating-v1",
+  "channel": "webchat",
+  "queueName": "support-tier1",
+  "rating": 5,
+  "comment": "Fast and friendly, thanks!",
+  "capturedAt": "2026-07-07T09:15:00Z",
+  "conversationId": "conv-8f2a1c4e"
+}
