@@ -14,7 +14,10 @@
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Verbara.Sdk.Resilience" />
+    <PackageReference Include="Verbara.Sdk.Pro.CsatRunner" />
     <PackageReference Include="MailKit" />
+    <!-- csat-runner Phase C — Testcontainers MailHog for the email reply end-to-end. -->
+    <PackageReference Include="Testcontainers" />
   </ItemGroup>
 
 </Project>

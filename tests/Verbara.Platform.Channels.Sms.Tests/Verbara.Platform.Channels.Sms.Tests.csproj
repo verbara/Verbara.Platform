@@ -12,6 +12,18 @@
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="coverlet.collector" />
+    <!-- csat-runner Phase D — Testcontainers Postgres for CsatSmsCorrelator window/collision coverage. -->
+    <PackageReference Include="Testcontainers" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Verbara.Sdk.Data.Npgsql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- csat-runner Phase D — the CsatSmsCorrelator fixture starts a Testcontainers Postgres
+         container; serialize test collections so concurrent container starts do not race the
+         post-pg_isready SSL handshake ("Connection reset by peer"), matching the mitigation in
+         Verbara.Platform.Storage.Postgres.Tests. -->
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

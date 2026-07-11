@@ -26,4 +26,5 @@ namespace Verbara.Platform.Mail;
 [JsonSerializable(typeof(IReadOnlyList<MailMessageDto>))]
 [JsonSerializable(typeof(IReadOnlyList<MailAttachmentDto>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(CsatEmailCapturePayload))]
 internal sealed partial class MailJsonContext : JsonSerializerContext;
