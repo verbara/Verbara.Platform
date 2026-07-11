@@ -18,13 +18,13 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
 
 ## 2. CSAT response endpoints + DTOs + Hub (Phase B)
 
-- [ ] 2.1 `src/Verbara.Platform.Api/Endpoints/CsatResponseEndpoints.cs` (NEW) — `POST /api/v1/csat/responses/{webchat,email,sms}` + `GET /api/v1/analytics/csat/queues/{queueId}`; bind the frozen wire shape (`responseToken`, `surveyId`, `questionId`, `channel`, `queueName`, `rating`, `comment`, `capturedAt`, `conversationId`)
-- [ ] 2.2 Each endpoint persists `SurveyResponse` via `ISurveyResponseStore.SaveAsync`, publishes `CsatResponseRecordedEvent` via `IPushEventBus`, writes an audit row via `IAuditService.RecordAsync(category="csat")`
-- [ ] 2.3 License gate — consume Pro's `LicenseFeature.CsatRunner` decision; return HTTP 402 + RFC 9457 ProblemDetails when absent
-- [ ] 2.4 `src/Verbara.Platform.Api/Dtos/` — `CsatResponseRequest`, `CsatResponseDto`, `QueueCsatConfigDto`, `CsatTemplateDto` (typed sealed records)
-- [ ] 2.5 `src/Verbara.Platform.Api/Serialization/ApiJsonContext.cs` — register all 5 DTOs (+ `CsatResponseRecordedEvent`) for AOT source-gen
-- [ ] 2.6 `src/Verbara.Platform.Api/Hubs/IPlatformHubClient.cs` — add `OnCsatResponseRecorded(CsatResponseRecordedEvent)`; `PushToHubRelay.cs` — new event branch to `supervisor:{tenantId}`
-- [ ] 2.7 Register endpoints in `Program.cs`; `tests/Verbara.Platform.Api.Tests/CsatResponseEndpointsTests.cs` — 4 contracts + 402 gate + audit-row assertion + token-validation cases
+- [x] 2.1 `src/Verbara.Platform.Api/Endpoints/CsatResponseEndpoints.cs` (NEW) — `POST /api/v1/csat/responses/{webchat,email,sms}` + `GET /api/v1/analytics/csat/queues/{queueId}`; binds the frozen wire shape (`responseToken`, `surveyId`, `questionId`, `channel`, `queueName`, `rating`, `comment`, `capturedAt`, `conversationId`) via `CsatResponseRequest`. Webchat is anonymous + session-token-verified; email/sms are internal (`X-Service-Key`); analytics is `SupervisorPlus`.
+- [x] 2.2 Each endpoint persists `SurveyResponse` via `ISurveyResponseStore.SaveAsync`, publishes `CsatResponseRecordedEvent` via `PlatformEventBus.Publish` (which forwards to `IPushEventBus`), writes an audit row via `IAuditService.RecordAsync(category="csat")`
+- [x] 2.3 License gate — reuses the established declarative `.RequireLicenseFeature(LicenseFeature.CsatRunner)` + `LicenseGateMiddleware` (Program.cs) which emits HTTP 402 + RFC 9457 ProblemDetails via `ApiJsonContext.Default.ProblemDetails` when absent (no new gate invented)
+- [x] 2.4 `src/Verbara.Platform.Api/Dtos/` — `CsatResponseRequest`, `CsatResponseDto`, `QueueCsatConfigDto`, `CsatTemplateDto` (typed sealed records, `namespace Verbara.Platform.Api.Dtos`)
+- [x] 2.5 `src/Verbara.Platform.Api/Serialization/ApiJsonContext.cs` — registered the 4 DTOs + `CsatResponseRecordedEvent` (in `Verbara.Platform.Core`) for AOT source-gen
+- [x] 2.6 `PushToHubRelay.cs` (in `Verbara.Platform.Realtime`) — new `CsatResponseRecordedEvent` branch to `supervisor:{tenantId}` via `OnCsatResponseRecorded` + a `CsatResponseRecordedPayload` in `Realtime.Contracts`. **Boundary note:** `IPlatformHubClient` is a Pro nupkg type (`Verbara.Sdk.Pro.Push.SignalR.Hubs`, 2.9.0-pro has NO `OnCsatResponseRecorded`), NOT a Platform file — adding the typed method requires a Pro edit + repack (out of Phase B scope / `dotnet pack` banned). The relay therefore fans out over the untyped `IHubContext<PlatformHub>` using the `"OnCsatResponseRecorded"` client-method name (identical wire contract); the typed-interface addition is a Pro-side follow-up (like the 5b.x seams).
+- [x] 2.7 Registered endpoints in `Program.cs` (`v1.MapCsatResponseEndpoints(...)`); `tests/Verbara.Platform.Api.Tests/CsatResponseEndpointsTests.cs` — 4 endpoint contracts + 402 gate (webchat + analytics) + `csat`-category audit-row assertion + `responseToken` validation cases (missing / malformed / expired / tampered-sig / signed-queue mismatch / rating out of range)
 
 ## 3. Email IMAP gap-fill (Phase C)
 

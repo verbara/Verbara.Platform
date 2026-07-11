@@ -41,6 +41,14 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ScheduledReportDto))]
 [JsonSerializable(typeof(SurveyDto[]))]
 [JsonSerializable(typeof(SurveyDto))]
+// CSAT (csat-runner Phase B) — capture request/response DTOs, per-queue config,
+// template projection, and the real-time recorded event. All source-gen registered
+// for the no-reflection AOT contract (JsonSerializerIsReflectionEnabledByDefault=false).
+[JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatResponseRequest))]
+[JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatResponseDto))]
+[JsonSerializable(typeof(Verbara.Platform.Api.Dtos.QueueCsatConfigDto))]
+[JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatTemplateDto))]
+[JsonSerializable(typeof(CsatResponseRecordedEvent))]
 // Typification — response DTOs
 [JsonSerializable(typeof(TypificationSchemaDto[]))]
 [JsonSerializable(typeof(TypificationSchemaDto))]

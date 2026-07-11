@@ -537,6 +537,19 @@ builder.Services.AddSingleton<IReportDataBuilder, Verbara.Platform.Api.Services.
 builder.Services.AddSingleton<IReportDataBuilder, Verbara.Platform.Api.Services.Reports.ConversationSummaryReportBuilder>();
 builder.Services.AddSingleton<Verbara.Platform.Api.Services.Reports.ReportDataBuilderRegistry>();
 builder.Services.AddSingleton<Verbara.Platform.Api.Services.Reports.ReportSchedulerService>();
+// CSAT webchat capture token verifier (csat-runner Phase B). Verifies the Platform-minted,
+// session-signed v1.{payload}.{sig} responseToken. Secret is operator-supplied via
+// Csat:WebChatTokenSecret; when unset a stable per-deployment key is derived so the
+// verifier still rejects tampered/expired tokens (the minter ships with the WebChat embed).
+builder.Services.AddSingleton<Verbara.Platform.Api.Services.ICsatWebChatTokenVerifier>(_ =>
+{
+    var configured = builder.Configuration["Csat:WebChatTokenSecret"];
+    var secret = !string.IsNullOrEmpty(configured)
+        ? System.Text.Encoding.UTF8.GetBytes(configured)
+        : System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes("verbara.csat.webchat.token:" + (licensePath ?? "default")));
+    return new Verbara.Platform.Api.Services.HmacCsatWebChatTokenVerifier(secret);
+});
 builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<Verbara.Platform.Api.Services.Reports.ReportSchedulerService>());
 
@@ -1717,6 +1730,9 @@ v1.MapAuditEndpoints();
 // R5.2 PB.1 — audit log viewer + export (audit.read / audit.export gated).
 Verbara.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.MapAuditAdminEndpoints(v1);
 v1.MapSurveyEndpoints();
+// csat-runner Phase B — CSAT capture (webchat token-verified / email+sms internal
+// service-key gated) + per-queue analytics read. License-gated (LicenseFeature.CsatRunner).
+v1.MapCsatResponseEndpoints(builder.Configuration["Services:ServiceKey"]);
 v1.MapTypificationEndpoints();
 // P2c.1 — per-tenant BYO LLM provider admin (typification:ai:configure gated, no license gate).
 v1.MapTenantLlmConfigEndpoints();
