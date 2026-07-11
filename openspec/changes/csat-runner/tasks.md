@@ -52,10 +52,12 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
 > hosts the engine. The frozen 2026-05-18 plan predates this; this section records the accepted
 > boundary expansion (operator decision 2026-07-11, "accept & extend Platform").
 
-- [ ] 5b.0 Advance the Pro pin: `Directory.Packages.props` `Verbara.Sdk.Pro.*` → `2.9.0-pro` (already on
+- [x] 5b.0 Advance the Pro pin: `Directory.Packages.props` `Verbara.Sdk.Pro.*` → `2.9.0-pro` (already on
       the local feed from stage 1); add a `Verbara.Sdk.Pro.CsatRunner` `PackageReference` to
       `Verbara.Platform.Api` (and any project hosting a seam impl); clear cache + `dotnet restore`.
       **Pre-req for Phase B (2.3 license) and Phase E (5.2 ICsatTemplateProvider) — pull forward from 8.1.**
+      ✅ Done 2026-07-11 (pulled forward): all Pro pins → 2.9.0-pro, CsatRunner pkg added to Api;
+      Platform builds 0-warning against Pro 2.9.0-pro.
 - [ ] 5b.1 `CsatConversationSignalAdapter : ICsatConversationSignal` — bridges to `IConversationService.SendMessageAsync` (webchat `csat_requested` system message).
 - [ ] 5b.2 `CsatEmailDispatcherAdapter : ICsatEmailDispatcher` — bridges to `IEmailService.SendAsync` (Reply-To via Platform `MailMessage` headers).
 - [ ] 5b.3 `CsatSmsDispatcherAdapter : ICsatSmsDispatcher` — bridges to `ISmsProvider.SendAsync`; writes the `csat_pending_dispatches` row the Phase-D SMS correlator consumes.
