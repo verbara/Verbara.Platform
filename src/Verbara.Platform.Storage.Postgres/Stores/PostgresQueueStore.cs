@@ -19,7 +19,8 @@ internal sealed class PostgresQueueStore : IQueueStore
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
-            "required_skills, auto_answer_default, created_at, updated_at, created_by, updated_by " +
+            "required_skills, auto_answer_default, csat_enabled, csat_channel, csat_prompt_id, csat_sampling_rate, " +
+            "created_at, updated_at, created_by, updated_by " +
             "FROM queue_configs WHERE tenant_id = @TenantId AND queue_id = @QueueId",
             p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("QueueId", queueId.Value)); },
             QueueRow.Map, ct);
@@ -33,7 +34,8 @@ internal sealed class PostgresQueueStore : IQueueStore
             p => p.Add(new NpgsqlParameter("TenantId", tenantId.Value)), ct) ?? 0L);
         var rows = await _dataSource.QueryListAsync(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
-            "required_skills, auto_answer_default, created_at, updated_at, created_by, updated_by " +
+            "required_skills, auto_answer_default, csat_enabled, csat_channel, csat_prompt_id, csat_sampling_rate, " +
+            "created_at, updated_at, created_by, updated_by " +
             "FROM queue_configs WHERE tenant_id = @TenantId ORDER BY name LIMIT @Limit OFFSET @Offset",
             p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Limit", query.PageSize)); p.Add(new NpgsqlParameter("Offset", query.Offset)); },
             QueueRow.Map, ct);
@@ -59,14 +61,19 @@ internal sealed class PostgresQueueStore : IQueueStore
         {
             await _dataSource.ExecuteAsync(
                 "INSERT INTO queue_configs (queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
-                "required_skills, auto_answer_default, created_at, updated_at, created_by, updated_by) " +
+                "required_skills, auto_answer_default, csat_enabled, csat_channel, csat_prompt_id, csat_sampling_rate, " +
+                "created_at, updated_at, created_by, updated_by) " +
                 "VALUES (@QueueId, @TenantId, @Name, @IsActive, @MaxWaiting, @SlaTargets::jsonb, @OverflowRule::jsonb, " +
-                "@Hours::jsonb, @WrapUp::jsonb, @RequiredSkills::jsonb, @AutoAnswerDefault, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
+                "@Hours::jsonb, @WrapUp::jsonb, @RequiredSkills::jsonb, @AutoAnswerDefault, " +
+                "@CsatEnabled, @CsatChannel, @CsatPromptId, @CsatSamplingRate, " +
+                "@CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
                 "ON CONFLICT (tenant_id, queue_id) DO UPDATE SET " +
                 "  name = EXCLUDED.name, is_active = EXCLUDED.is_active, max_waiting = EXCLUDED.max_waiting, " +
                 "  sla_targets = EXCLUDED.sla_targets, overflow_rule = EXCLUDED.overflow_rule, hours = EXCLUDED.hours, " +
                 "  wrap_up = EXCLUDED.wrap_up, required_skills = EXCLUDED.required_skills, " +
                 "  auto_answer_default = EXCLUDED.auto_answer_default, " +
+                "  csat_enabled = EXCLUDED.csat_enabled, csat_channel = EXCLUDED.csat_channel, " +
+                "  csat_prompt_id = EXCLUDED.csat_prompt_id, csat_sampling_rate = EXCLUDED.csat_sampling_rate, " +
                 "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
                 p =>
                 {
@@ -81,6 +88,13 @@ internal sealed class PostgresQueueStore : IQueueStore
                     p.Add(new NpgsqlParameter("WrapUp", wrapUpJson));
                     p.Add(new NpgsqlParameter("RequiredSkills", skillsJson));
                     p.Add(new NpgsqlParameter("AutoAnswerDefault", queue.AutoAnswerDefault));
+                    // CSAT config (csat-runner Phase A). csat_enabled is NOT NULL
+                    // (default false); the other three are nullable — explicit
+                    // NpgsqlDbType on each so a DBNull.Value bind cannot throw 42P08.
+                    p.Add(new NpgsqlParameter("CsatEnabled", queue.Csat?.Enabled ?? false));
+                    p.Add(new NpgsqlParameter("CsatChannel", NpgsqlDbType.Text) { Value = (object?)queue.Csat?.PreferredChannel ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("CsatPromptId", NpgsqlDbType.Text) { Value = (object?)queue.Csat?.PromptTemplateId?.Value ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("CsatSamplingRate", NpgsqlDbType.Integer) { Value = (object?)queue.Csat?.SamplingRatePercent ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("CreatedAt", queue.CreatedAt));
                     p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)queue.UpdatedAt ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)queue.CreatedBy ?? DBNull.Value });
@@ -124,6 +138,10 @@ internal sealed class PostgresQueueStore : IQueueStore
         public string? wrap_up { get; init; }
         public string required_skills { get; init; } = null!;
         public bool auto_answer_default { get; init; }
+        public bool csat_enabled { get; init; }
+        public string? csat_channel { get; init; }
+        public string? csat_prompt_id { get; init; }
+        public int? csat_sampling_rate { get; init; }
         public DateTime created_at { get; init; }
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
@@ -142,6 +160,10 @@ internal sealed class PostgresQueueStore : IQueueStore
             wrap_up = r.GetStringOrNull("wrap_up"),
             required_skills = r.GetString("required_skills"),
             auto_answer_default = r.GetBoolean("auto_answer_default"),
+            csat_enabled = r.GetBoolean("csat_enabled"),
+            csat_channel = r.GetStringOrNull("csat_channel"),
+            csat_prompt_id = r.GetStringOrNull("csat_prompt_id"),
+            csat_sampling_rate = r.GetInt32OrNull("csat_sampling_rate"),
             created_at = r.GetDateTime("created_at"),
             updated_at = r.GetDateTimeOrNull("updated_at"),
             created_by = r.GetStringOrNull("created_by"),
@@ -170,6 +192,16 @@ internal sealed class PostgresQueueStore : IQueueStore
             RequiredSkills = JsonSerializer.Deserialize(required_skills, PostgresJson.Ctx.IReadOnlyListString)
                              ?? (IReadOnlyList<string>)[],
             AutoAnswerDefault = auto_answer_default,
+            // Hydrate Csat only when the row carries CSAT signal, so pre-existing
+            // rows (csat_enabled=false, others null — the migration defaults) load
+            // with Csat == null and round-trip unchanged (back-compat).
+            Csat = (csat_enabled || csat_channel != null || csat_prompt_id != null || csat_sampling_rate != null)
+                ? new CsatConfig(
+                    csat_enabled,
+                    csat_channel,
+                    csat_prompt_id != null ? EntityId.From(csat_prompt_id) : null,
+                    csat_sampling_rate ?? 0)
+                : null,
             CreatedAt = created_at,
             UpdatedAt = updated_at,
             CreatedBy = created_by,

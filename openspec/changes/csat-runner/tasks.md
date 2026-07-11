@@ -6,15 +6,15 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
 
 ## 1. Survey domain extension + Postgres migration (Phase A)
 
-- [ ] 1.1 `src/Verbara.Platform.Surveys/SurveyResponse.cs` — append 6 nullable init-only properties (`Channel`, `QueueName`, `Rating`, `Comment`, `CapturedAt`, `CallId`)
-- [ ] 1.2 `src/Verbara.Platform.Surveys/SurveyQuestionIds.cs` (NEW) — `CsatRating = "csat-rating-v1"`
-- [ ] 1.3 `src/Verbara.Platform.Surveys/ISurveyAnalytics.cs` — add `GetByQueueAndChannelAsync` overload; mark `GetByQueueAsync` `[Obsolete]` (removed one minor later)
-- [ ] 1.4 `src/Verbara.Platform.Surveys/InMemorySurveyAnalytics.cs` — implement the new overload; extend `InMemorySurveyAnalyticsTests.cs` with channel-filter cases
-- [ ] 1.5 `src/Verbara.Platform.Storage.Postgres/Migrations/0XX_SurveyCsatExtensions.sql` (NEW) — extend `survey_responses` (6 nullable columns + 2 CHECK constraints + 2 partial indexes `WHERE channel IS NOT NULL`), create `csat_pending_dispatches`, extend `queues` (4 CSAT columns), create `csat_templates`
-- [ ] 1.6 `src/Verbara.Platform.Storage.Postgres/Stores/PostgresSurveyResponseStore.cs` — extend SELECT/INSERT + `static Map` for the 6 new columns (Verbara.Sdk.Data.Npgsql, explicit NpgsqlDbType on nullable params; no Dapper); update `PostgresSurveyResponseStoreTests.cs`
-- [ ] 1.7 `src/Verbara.Platform.Storage.Postgres/Stores/PostgresSurveyAnalytics.cs` — implement `GetByQueueAndChannelAsync` over the new partial indexes
-- [ ] 1.8 `src/Verbara.Platform.Queues/CsatConfig.cs` (NEW) + `Queue.cs` — nested `CsatConfig?` record + property; `PostgresQueueStore.cs` hydrate/persist the 4 CSAT columns; queue round-trip test
-- [ ] 1.9 Verify migration applies cleanly to fresh + existing Postgres; back-compat (existing rows load with new columns null)
+- [x] 1.1 `src/Verbara.Platform.Surveys/SurveyResponse.cs` — append 6 nullable init-only properties (`Channel`, `QueueName`, `Rating`, `Comment`, `CapturedAt`, `CallId`)
+- [x] 1.2 `src/Verbara.Platform.Surveys/SurveyQuestionIds.cs` (NEW) — `CsatRating = "csat-rating-v1"`
+- [x] 1.3 `src/Verbara.Platform.Surveys/ISurveyAnalytics.cs` — add `GetByQueueAndChannelAsync` overload; mark `GetByQueueAsync` `[Obsolete]` (removed one minor later)
+- [x] 1.4 `src/Verbara.Platform.Surveys/InMemorySurveyAnalytics.cs` — implement the new overload; channel-filter cases in `QueueChannelAnalyticsTests.cs` (no `InMemorySurveyAnalyticsTests.cs` existed — analytics tests are split per-concern; new file matches the convention)
+- [x] 1.5 `src/Verbara.Platform.Storage.Postgres/Migrations/016_SurveyCsatExtensions.sql` (NEW) — extend `survey_responses` (6 nullable columns + 2 CHECK constraints + 2 partial indexes `WHERE channel IS NOT NULL`), create `csat_pending_dispatches`, extend `queue_configs` (the real table; spec says "queues") (4 CSAT columns + repair pre-existing missing `wrap_up`), create `csat_templates`
+- [x] 1.6 `src/Verbara.Platform.Storage.Postgres/Stores/PostgresSurveyResponseStore.cs` — extend SELECT/INSERT + `static Map` for the 6 new columns (Verbara.Sdk.Data.Npgsql, explicit NpgsqlDbType on nullable params; no Dapper); `PostgresSurveyResponseStoreTests.cs` (NEW)
+- [x] 1.7 `src/Verbara.Platform.Storage.Postgres/Stores/PostgresSurveyAnalytics.cs` (NEW) — implement `GetByQueueAndChannelAsync` (DB-side COUNT/AVG) over the new partial indexes; registered to override the in-memory analytics under Postgres storage
+- [x] 1.8 `src/Verbara.Platform.Queues/CsatConfig.cs` (NEW) + `Queue.cs` — nested `CsatConfig?` record + property; `PostgresQueueStore.cs` hydrate/persist the 4 CSAT columns; queue round-trip tests (domain `QueueTests.cs` + integration `PostgresQueueStoreCsatTests.cs`)
+- [x] 1.9 Verify migration applies cleanly to fresh + existing Postgres; back-compat (existing rows load with new columns null) — MigrationsTests + null-column round-trip test
 
 ## 2. CSAT response endpoints + DTOs + Hub (Phase B)
 

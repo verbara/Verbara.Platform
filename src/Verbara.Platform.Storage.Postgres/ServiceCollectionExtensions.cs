@@ -147,6 +147,10 @@ public static class ServiceCollectionExtensions
         // Surveys
         services.AddSingleton<ISurveyStore, PostgresSurveyStore>();
         services.AddSingleton<ISurveyResponseStore, PostgresSurveyResponseStore>();
+        // csat-runner Phase A: override the in-memory analytics (registered by
+        // AddPlatformSurveys, which runs earlier in the composition root) so the
+        // per-queue CSAT aggregate runs DB-side over idx_survey_resp_queue_captured.
+        services.AddSingleton<ISurveyAnalytics, PostgresSurveyAnalytics>();
 
         // Typification
         services.AddSingleton<ITypificationSchemaStore, PostgresTypificationSchemaStore>();

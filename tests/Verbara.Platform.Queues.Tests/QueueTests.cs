@@ -43,4 +43,41 @@ public class QueueTests
 
         queue.SlaTargets!.AnswerWithinSeconds.Should().Be(30);
     }
+
+    [Fact]
+    public void Csat_ShouldBeNull_WhenNotConfigured()
+    {
+        var queue = new Queue
+        {
+            QueueId = EntityId.From("q-001"),
+            TenantId = new TenantId("t1"),
+            Name = "Support",
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        queue.Csat.Should().BeNull();
+    }
+
+    [Fact]
+    public void Csat_ShouldRoundTripConfig_WhenAssigned()
+    {
+        var queue = new Queue
+        {
+            QueueId = EntityId.From("q-001"),
+            TenantId = new TenantId("t1"),
+            Name = "Support",
+            CreatedAt = DateTimeOffset.UtcNow,
+            Csat = new CsatConfig(
+                Enabled: true,
+                PreferredChannel: "webchat",
+                PromptTemplateId: EntityId.From("tpl-1"),
+                SamplingRatePercent: 20),
+        };
+
+        queue.Csat.Should().NotBeNull();
+        queue.Csat!.Enabled.Should().BeTrue();
+        queue.Csat.PreferredChannel.Should().Be("webchat");
+        queue.Csat.PromptTemplateId.Should().Be(EntityId.From("tpl-1"));
+        queue.Csat.SamplingRatePercent.Should().Be(20);
+    }
 }
