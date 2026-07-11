@@ -129,14 +129,37 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
 
 ## 7. Docs + CHANGELOG (Phase G)
 
-- [ ] 7.1 `CHANGELOG.md` — `[2.18.0]` CSAT consumer section (Added / Changed / Deprecated / Cross-repo coordination)
-- [ ] 7.2 `docs/operations/csat-runbook.md` (NEW) — enable CSAT per queue, configure templates, troubleshoot IMAP / SMS correlation, `CREATE INDEX CONCURRENTLY` guidance
-- [ ] 7.3 `docs/roadmap.md` — bump Pro pin; add the Platform CSAT row to the Shipped table
+- [x] 7.1 `CHANGELOG.md` — `[2.18.0]` CSAT consumer section (Added / Changed / Deprecated / Cross-repo coordination)
+      ✅ `CHANGELOG.md` — new `[2.18.0]` — 2026-07-11 section. Covers the survey-domain extension
+      (`survey_responses` +6 CSAT cols + migration `016`), the CSAT capture/analytics endpoints +
+      `LicenseFeature.CsatRunner` 402 gate, email IMAP gap-fill + SMS correlator, the template store +
+      `ICsatTemplateProvider`, **hosting Pro's orchestrator via the 5 dependency-inverted seams**, the
+      `GetByQueueAsync` `[Obsolete]` (Deprecated → v2.19.0), and Cross-repo coordination (Pro `2.9.0-pro`
+      + Platform `2.18.0` + Web `3.13.0-web`, ADR-0020; voice/TTS + typed-Hub relay deferred to Pro Path-A).
+- [x] 7.2 `docs/operations/csat-runbook.md` (NEW) — enable CSAT per queue, configure templates, troubleshoot IMAP / SMS correlation, `CREATE INDEX CONCURRENTLY` guidance
+      ✅ `docs/operations/csat-runbook.md` (NEW) — §1 enable per queue (the 4 `queue_configs` CSAT
+      columns + sampling), §2 templates (admin CRUD routes + fallback chain + 501 preview-voice), §3 IMAP
+      troubleshooting (`ImapPollerOptions` + symptom→cause→fix), §4 SMS correlator (24h-window predicate +
+      most-recent-wins + non-rating fall-through), §5 `CREATE INDEX CONCURRENTLY` out-of-band guidance for
+      the two `survey_responses` partial indexes on large tables (+ INVALID-index repair).
+- [x] 7.3 `docs/roadmap.md` — bump Pro pin; add the Platform CSAT row to the Shipped table
+      ✅ `docs/roadmap.md` — baseline header notes the CSAT train (Pro `2.9.0-pro`); new Shipped rows for
+      `v2.17.0` (backfilled) and `v2.18.0 + Web v3.13.0-web` (digital-first, voice deferred, the 5 seams,
+      `[Obsolete]` removal at v2.19.0, untyped-Hub follow-up).
 - [ ] 7.4 `git mv docs/plans/active/2026-05-18-platform-240-csat-consumer.md docs/plans/completed/` on ship
+      ⏭️ Release/archive stage — OUT OF SCOPE for this task (done at ship, alongside 8.3/8.4).
 
 ## 8. Pack + tag + ship (Phase H)
 
-- [ ] 8.1 `Directory.Build.props` `<PackageVersion>` → `2.18.0`; `Directory.Packages.props` — advance the Pro pin to the CSAT engine package
-- [ ] 8.2 Clear NuGet cache + `dotnet restore Verbara.Platform.slnx` + `dotnet build /warnaserror` + `dotnet test` green
+- [x] 8.1 `Directory.Build.props` `<PackageVersion>` → `2.18.0`; `Directory.Packages.props` — advance the Pro pin to the CSAT engine package
+      ✅ `Directory.Build.props` `<PackageVersion>2.18.0</PackageVersion>`. The Pro pin
+      (`Directory.Packages.props` → `2.9.0-pro` + `Verbara.Sdk.Pro.CsatRunner` on `Api`) was already
+      advanced in 5b.0 (pulled forward) — verified `2.9.0-pro`, not re-touched.
+- [x] 8.2 Clear NuGet cache + `dotnet restore Verbara.Platform.slnx` + `dotnet build /warnaserror` + `dotnet test` green
+      ✅ NuGet cache clear NOT needed (feed unchanged since 5b.0's restore). Full `dotnet build
+      Verbara.Platform.slnx -c Release` (rebuild from the version change) → 0 warnings / 0 errors; fast/unit
+      suite (`Category!=Integration&FullyQualifiedName!~Postgres`) green. Evidence in the change report.
 - [ ] 8.3 Commit + push + `git tag -a v2.18.0` + push tag; CI (`release.yml`) publishes the signed AOT image to `ghcr.io/verbara/platform/api`
+      ⏭️ Release/archive stage — OUT OF SCOPE for this task (no tag/push/publish/`dotnet pack` here).
 - [ ] 8.4 Archive this OpenSpec change (sync → archive) and update roadmap / project memory per the closing routine
+      ⏭️ Release/archive stage — OUT OF SCOPE for this task.
