@@ -44,6 +44,25 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
 - [ ] 5.3 `TenantProvisioningService.cs` — seed default CSAT templates on tenant create
 - [ ] 5.4 `src/Verbara.Platform.Api/Endpoints/CsatTemplateAdminEndpoints.cs` (NEW) — `GET`/`PUT`/`DELETE /api/v1/admin/csat/templates/{id}` + `POST …/{id}/preview-voice` (Pro TTS synth), all `AdminOnly` + audit; `tests/…/CsatTemplateAdminEndpointsTests.cs`
 
+## 5b. Pro engine hosting + dispatch/trigger seams (Phase E2)
+
+> Added 2026-07-11 reconciling Pro's `csat-runner` apply. Pro (upstream) cannot reference Platform
+> (downstream), so its apply used dependency-inversion and introduced **4 Pro-owned seams beyond
+> `ICsatTemplateProvider`** plus an `IHostedService` orchestrator. Platform implements the seams and
+> hosts the engine. The frozen 2026-05-18 plan predates this; this section records the accepted
+> boundary expansion (operator decision 2026-07-11, "accept & extend Platform").
+
+- [ ] 5b.0 Advance the Pro pin: `Directory.Packages.props` `Verbara.Sdk.Pro.*` → `2.9.0-pro` (already on
+      the local feed from stage 1); add a `Verbara.Sdk.Pro.CsatRunner` `PackageReference` to
+      `Verbara.Platform.Api` (and any project hosting a seam impl); clear cache + `dotnet restore`.
+      **Pre-req for Phase B (2.3 license) and Phase E (5.2 ICsatTemplateProvider) — pull forward from 8.1.**
+- [ ] 5b.1 `CsatConversationSignalAdapter : ICsatConversationSignal` — bridges to `IConversationService.SendMessageAsync` (webchat `csat_requested` system message).
+- [ ] 5b.2 `CsatEmailDispatcherAdapter : ICsatEmailDispatcher` — bridges to `IEmailService.SendAsync` (Reply-To via Platform `MailMessage` headers).
+- [ ] 5b.3 `CsatSmsDispatcherAdapter : ICsatSmsDispatcher` — bridges to `ISmsProvider.SendAsync`; writes the `csat_pending_dispatches` row the Phase-D SMS correlator consumes.
+- [ ] 5b.4 `CsatConversationEndSource : ICsatConversationEndSource` — hot `IObservable<CsatConversationEndedSignal>` driven from Platform's conversation-end lifecycle + per-queue CSAT config snapshot (Enabled / PreferredChannel / SamplingRatePercent).
+- [ ] 5b.5 Composition root (`Program.cs`): `AddProCsatRunner(...)` + register all 5 seam impls; the Pro orchestrator runs as a hosted service, gated by `LicenseFeature.CsatRunner`.
+- [ ] 5b.6 Tests: each seam adapter bridges correctly; end-to-end wiring (conversation-end → orchestrator → adapter → Platform service) with fakes.
+
 ## 6. AOT validation + cross-package tests (Phase F)
 
 - [ ] 6.1 Full `dotnet test Verbara.Platform.slnx --filter "Category!=Integration&FullyQualifiedName!~Postgres"` green
