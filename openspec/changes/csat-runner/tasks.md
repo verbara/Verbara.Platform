@@ -101,9 +101,31 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
 
 ## 6. AOT validation + cross-package tests (Phase F)
 
-- [ ] 6.1 Full `dotnet test Verbara.Platform.slnx --filter "Category!=Integration&FullyQualifiedName!~Postgres"` green
-- [ ] 6.2 Integration tests (Testcontainers Postgres + MailHog) — end-to-end migration + IMAP gap-fill against the real Pro CSAT nupkg (not a stub)
-- [ ] 6.3 AOT publish `src/Verbara.Platform.Api -c Release -r linux-x64 /p:PublishAot=true` → 0 trim/AOT warnings; all 5 DTOs serialize via source-gen
+- [x] 6.1 Full `dotnet test Verbara.Platform.slnx --filter "Category!=Integration&FullyQualifiedName!~Postgres"` green.
+      ✅ 2026-07-11: **32 assemblies · 3368 passed · 0 failed · 0 skipped** (`-c Release --no-build`).
+      One real regression surfaced + fixed: the `SyncFenceRegressionGuardTests` governance guard flagged 4
+      un-annotated `Task.Delay` wall-clock barriers added by this change's test files
+      (`CsatRunnerWiringTests.cs:160` SETTLE + `:199` LOOP-DRIVER, `CsatSmsCorrelatorFixture.cs:56`
+      GUARD-TIMEOUT, `CsatReplyMailHandlerMailHogTests.cs:86` LOOP-DRIVER) — each annotated with the
+      sanctioned `// fence-allow: CATEGORY — reason` marker (no test-logic change); guard now green.
+- [x] 6.2 Integration tests (Testcontainers Postgres + MailHog) — end-to-end migration + IMAP gap-fill against the real Pro CSAT nupkg (not a stub).
+      ✅ 2026-07-11: **41/41 CSAT integration tests green** against real Pro CsatRunner **2.9.0-pro** (feed +
+      cache), run single-threaded (`xUnit.MaxParallelThreads=1`, `parallelizeTestCollections=false`):
+      MigrationsTests 10/10, PostgresSurveyResponseStoreTests 5/5, PostgresQueueStoreCsatTests 4/4,
+      PostgresSurveyAnalyticsTests 2/2, PostgresCsatTemplateStoreTests 7/7, CsatSmsCorrelatorTests 12/12
+      (Postgres), CsatReplyMailHandlerMailHogTests 1/1 (MailHog SMTP round-trip). **Container contention:**
+      running all 5 Postgres classes together (5 separate `MigrationsFixture` containers) hit transient
+      `Connection reset by peer` at connection-open under the loaded host (~15 containers); every class
+      passes when its container runs isolated (12→2→0 failures across retries — infra, not logic).
+- [x] 6.3 AOT publish `src/Verbara.Platform.Api -c Release -r linux-x64 /p:PublishAot=true` → 0 trim/AOT warnings; all 5 DTOs serialize via source-gen.
+      ✅ 2026-07-11: publish **completed** — `Generating native code` → emitted a **native ELF 64-bit PIE
+      executable** at `src/Verbara.Platform.Api/bin/Release/net10.0/linux-x64/publish/Verbara.Platform.Api`
+      (78.9 MB, stripped; **0 `.dll` + 0 `.so`** in publish/ = fully self-contained single-file AOT).
+      **0 IL2xxx/IL3xxx trim/AOT warnings, 0 warnings of any kind, 0 `NotSupportedException`.** All named
+      CSAT types resolve via source-gen: 5 DTOs + `CsatResponseRecordedEvent` in `ApiJsonContext`,
+      `CsatWebChatTokenPayload` in `CsatWebChatTokenVerifier`'s context, `UpsertCsatTemplateRequest`
+      registered. (`CsatConversationEndedSignal` is a Pro-internal orchestrator signal, never wire-
+      serialized → no `[JsonSerializable]` needed; the 0-warning graph confirms its path is trim-safe.)
 
 ## 7. Docs + CHANGELOG (Phase G)
 

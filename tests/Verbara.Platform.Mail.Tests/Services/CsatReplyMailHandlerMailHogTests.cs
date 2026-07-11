@@ -83,7 +83,7 @@ public sealed class CsatReplyMailHandlerMailHogTests
                 }
             }
 
-            await Task.Delay(250);
+            await Task.Delay(250); // fence-allow: LOOP-DRIVER — poll pacing while MailHog delivers the message to its HTTP API
         }
 
         return null;

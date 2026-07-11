@@ -53,7 +53,7 @@ public sealed class CsatSmsCorrelatorFixture : IAsyncLifetime
             }
             catch (NpgsqlException) when (attempt < maxAttempts)
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt));
+                await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt)); // fence-allow: GUARD-TIMEOUT — backoff between connect retries while the Postgres container comes up
             }
         }
     }

@@ -157,7 +157,7 @@ public sealed class CsatRunnerWiringTests : IClassFixture<UnifiedPlatformApiFact
         await orchestrator.StartAsync(ct);
         try
         {
-            await Task.Delay(100, ct);
+            await Task.Delay(100, ct); // fence-allow: SETTLE — let the orchestrator's ExecuteAsync subscribe to endSource.Ended before the first push
 
             // Drive the conversation-end resolution → pushes a signal onto Ended → orchestrator routes.
             await endSource.HandleClosedAsync(
@@ -196,7 +196,7 @@ public sealed class CsatRunnerWiringTests : IClassFixture<UnifiedPlatformApiFact
         {
             if (predicate())
                 return true;
-            await Task.Delay(25);
+            await Task.Delay(25); // fence-allow: LOOP-DRIVER — poll pacing for the fire-and-forget seam call
         }
         return predicate();
     }
