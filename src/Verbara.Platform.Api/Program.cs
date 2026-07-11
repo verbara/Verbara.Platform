@@ -557,6 +557,64 @@ builder.Services.AddSingleton<Verbara.Platform.Api.Services.ICsatWebChatTokenVer
 // tenant-default-locale → global-default-locale → global-default-en-US.
 builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatTemplateProvider,
     Verbara.Platform.Api.Services.CsatTemplateProvider>();
+
+// ─── CSAT Runner: Pro engine hosting + the 4 remaining dispatch/trigger seams ─────
+// csat-runner Phase E2 (tasks 5b.1–5b.5). Pro (upstream) can't reference Platform
+// (downstream), so its CSAT orchestrator (an IHostedService) consumes 5 Pro-owned seams
+// via dependency inversion; Platform implements them and hosts the engine. AddProCsatRunner
+// registers the orchestrator + the 3 Pro channel adapters + the license/sampling/metrics
+// foundation; the orchestrator self-gates at runtime on LicenseFeature.CsatRunner via the
+// Pro ILicenseGuard (no composition-time gate needed). The 5 seams (4 here + the
+// ICsatTemplateProvider above) MUST all resolve or the orchestrator fails to construct.
+
+// 5b.1 — webchat: bridges to IConversationService.SendMessageAsync (csat_requested system message).
+builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatConversationSignal,
+    Verbara.Platform.Api.Services.CsatConversationSignalAdapter>();
+
+// 5b.2 — email: bridges to IEmailService.SendAsync; Reply-To rides EmailMessage.ReplyToAddress.
+builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatEmailDispatcher,
+    Verbara.Platform.Api.Services.CsatEmailDispatcherAdapter>();
+
+// 5b.3 — sms: bridges to ISmsProvider.SendAsync + writes the csat_pending_dispatches row the
+// Phase-D CsatSmsCorrelator consumes. ISmsProvider (Twilio) + NpgsqlDataSource are resolved
+// optionally so the adapter constructs under the Testing/in-memory profile (fails only at
+// dispatch time when SMS is genuinely unconfigured). The outbound sender number comes from
+// Twilio config (there is no AddSms/SmsOptions binding in the Api host).
+builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatSmsDispatcher>(sp =>
+    new Verbara.Platform.Api.Services.CsatSmsDispatcherAdapter(
+        sp.GetRequiredService<Verbara.Platform.Conversations.IConversationStore>(),
+        sp.GetRequiredService<Verbara.Platform.Queues.IQueueStore>(),
+        sp.GetRequiredService<Verbara.Platform.Surveys.ISurveyStore>(),
+        builder.Configuration["Twilio:FromNumber"] ?? builder.Configuration["Sms:DefaultFromNumber"] ?? string.Empty,
+        sp.GetService<Verbara.Platform.Channels.Sms.ISmsProvider>(),
+        sp.GetService<NpgsqlDataSource>(),
+        sp.GetService<TimeProvider>()));
+
+// 5b.4 — conversation-end trigger source (ICsatConversationEndSource) driven from the
+// ConversationStateChangedEvent → Closed transition on PlatformEventBus. Singleton exposed via
+// the Pro seam AND run as a hosted service (it subscribes to the end stream and pushes signals).
+builder.Services.AddSingleton<Verbara.Platform.Api.Services.CsatConversationEndSource>();
+builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatConversationEndSource>(sp =>
+    sp.GetRequiredService<Verbara.Platform.Api.Services.CsatConversationEndSource>());
+builder.Services.AddHostedService(sp =>
+    sp.GetRequiredService<Verbara.Platform.Api.Services.CsatConversationEndSource>());
+
+// 5b.5 — host Pro's CSAT engine. WithEmail configures the tokenized Reply-To (domain + HMAC
+// signing secret shared with the Phase-C inbound reply parser); WithWebChat pins the
+// csat_requested system-message type. The orchestrator + 3 channel adapters + hosted service
+// register here.
+Verbara.Sdk.Pro.CsatRunner.DependencyInjection.CsatRunnerServiceCollectionExtensions.AddProCsatRunner(
+    builder.Services,
+    csat => csat
+        .WithEmail(email =>
+        {
+            email.ReplyToDomain = builder.Configuration["Csat:Email:ReplyToDomain"] ?? "csat.verbara.local";
+            email.TokenSigningSecret = builder.Configuration["Csat:Email:TokenSigningSecret"]
+                ?? builder.Configuration["Csat:WebChatTokenSecret"]
+                ?? "verbara.csat.email.reply-token." + (licensePath ?? "default");
+        })
+        .WithWebChat(web => web.SystemMessageType = "csat_requested"));
+
 builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<Verbara.Platform.Api.Services.Reports.ReportSchedulerService>());
 

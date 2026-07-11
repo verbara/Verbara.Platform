@@ -58,12 +58,46 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
       **Pre-req for Phase B (2.3 license) and Phase E (5.2 ICsatTemplateProvider) — pull forward from 8.1.**
       ✅ Done 2026-07-11 (pulled forward): all Pro pins → 2.9.0-pro, CsatRunner pkg added to Api;
       Platform builds 0-warning against Pro 2.9.0-pro.
-- [ ] 5b.1 `CsatConversationSignalAdapter : ICsatConversationSignal` — bridges to `IConversationService.SendMessageAsync` (webchat `csat_requested` system message).
-- [ ] 5b.2 `CsatEmailDispatcherAdapter : ICsatEmailDispatcher` — bridges to `IEmailService.SendAsync` (Reply-To via Platform `MailMessage` headers).
-- [ ] 5b.3 `CsatSmsDispatcherAdapter : ICsatSmsDispatcher` — bridges to `ISmsProvider.SendAsync`; writes the `csat_pending_dispatches` row the Phase-D SMS correlator consumes.
-- [ ] 5b.4 `CsatConversationEndSource : ICsatConversationEndSource` — hot `IObservable<CsatConversationEndedSignal>` driven from Platform's conversation-end lifecycle + per-queue CSAT config snapshot (Enabled / PreferredChannel / SamplingRatePercent).
-- [ ] 5b.5 Composition root (`Program.cs`): `AddProCsatRunner(...)` + register all 5 seam impls; the Pro orchestrator runs as a hosted service, gated by `LicenseFeature.CsatRunner`.
-- [ ] 5b.6 Tests: each seam adapter bridges correctly; end-to-end wiring (conversation-end → orchestrator → adapter → Platform service) with fakes.
+- [x] 5b.1 `CsatConversationSignalAdapter : ICsatConversationSignal` — bridges to `IConversationService.SendMessageAsync` (webchat `csat_requested` system message).
+      ✅ `src/Verbara.Platform.Api/Services/CsatConversationSignalAdapter.cs` — sends a `System`-kind
+      message (`ConversationOwnerKind.System`, `senderId = EntityId.From("system")`) carrying a single
+      `TextBlock(systemMessageType)`; matches `DefaultActionExecutor`'s system-message convention.
+- [x] 5b.2 `CsatEmailDispatcherAdapter : ICsatEmailDispatcher` — bridges to `IEmailService.SendAsync` (Reply-To via Platform `MailMessage` headers).
+      ✅ `src/Verbara.Platform.Api/Services/CsatEmailDispatcherAdapter.cs`. Platform's `EmailMessage`
+      carried no Reply-To/header bag, so added an additive nullable `EmailMessage.ReplyToAddress`
+      (`src/Verbara.Platform.Core/Email/EmailMessage.cs`) and `SmtpSender.BuildMimeMessage` now stamps
+      `mime.ReplyTo` (`src/Verbara.Platform.Mail/Services/SmtpSender.cs`). Back-compat (nullable; both
+      `ApiJsonContext` + `MailJsonContext` source-gen `EmailMessage` auto-pick it up).
+- [x] 5b.3 `CsatSmsDispatcherAdapter : ICsatSmsDispatcher` — bridges to `ISmsProvider.SendAsync`; writes the `csat_pending_dispatches` row the Phase-D SMS correlator consumes.
+      ✅ `src/Verbara.Platform.Api/Services/CsatSmsDispatcherAdapter.cs` — sends via `ISmsProvider`
+      (from = Twilio config), then INSERTs the row via the Npgsql facade (`channel='sms'`,
+      `correlator`=phone, explicit `NpgsqlDbType.Text`/`.TimestampTz` on nullable/timestamp params,
+      `ON CONFLICT (tenant_id, dispatch_id) DO NOTHING` for idempotency). The seam `CsatSmsRequest`
+      carries no survey/queue, so `survey_id`/`queue_name` are resolved from the conversation → queue
+      → active CSAT survey. Verified against a real Postgres: INSERT succeeds + the correlator's
+      verbatim SELECT reads the row back (survey_id/queue_name/conversation_id) + idempotent re-insert.
+- [x] 5b.4 `CsatConversationEndSource : ICsatConversationEndSource` — hot `IObservable<CsatConversationEndedSignal>` driven from Platform's conversation-end lifecycle + per-queue CSAT config snapshot (Enabled / PreferredChannel / SamplingRatePercent).
+      ✅ `src/Verbara.Platform.Api/Services/CsatConversationEndSource.cs` — subscribes to
+      `PlatformEventBus.Events.OfType<ConversationStateChangedEvent>()` filtered to the terminal
+      `Closed` transition (the canonical conversation-end signal; no dedicated ended event exists —
+      same event `PushToHubRelay`/`RealtimeStateBridge` consume). Resolves the queue's `CsatConfig`
+      snapshot via `IQueueStore`, the tenant's active CSAT `Survey` id via `ISurveyStore`, and the
+      recipient address (null for webchat) + locale via `IContactStore`; mints `SurveyResponseId` and
+      pushes onto an internal `Subject`. Implements both `ICsatConversationEndSource` (`Ended`) and
+      `BackgroundService`; only digital channels (webchat/email/sms) proceed.
+- [x] 5b.5 Composition root (`Program.cs`): `AddProCsatRunner(...)` + register all 5 seam impls; the Pro orchestrator runs as a hosted service, gated by `LicenseFeature.CsatRunner`.
+      ✅ `src/Verbara.Platform.Api/Program.cs` — registers all 4 new seams (+ the existing
+      `ICsatTemplateProvider`) and calls `AddProCsatRunner(...)` with `WithEmail` (ReplyToDomain +
+      HMAC token secret) + `WithWebChat("csat_requested")`. `AddProCsatRunner` registers the Pro
+      orchestrator (`IHostedService`) + the 3 channel adapters; the orchestrator self-gates at runtime
+      on `LicenseFeature.CsatRunner` via the Pro `ILicenseGuard`. SMS dispatcher deps
+      (`ISmsProvider`/`NpgsqlDataSource`) resolve optionally so DI holds under the in-memory profile.
+- [x] 5b.6 Tests: each seam adapter bridges correctly; end-to-end wiring (conversation-end → orchestrator → adapter → Platform service) with fakes.
+      ✅ `tests/Verbara.Platform.Api.Tests/CsatSeamAdaptersTests.cs` (per-seam bridge unit tests with
+      NSubstitute Platform-service fakes) + `tests/Verbara.Platform.Api.Tests/CsatRunnerWiringTests.cs`
+      (DI resolution of the Pro orchestrator + all 5 seams + 3 channel adapters; end-to-end
+      conversation-end signal → orchestrator routes → webchat adapter → `IConversationService`
+      asserted called). 10/10 new green; full `Verbara.Platform.Api.Tests` 1628/1628 green.
 
 ## 6. AOT validation + cross-package tests (Phase F)
 
