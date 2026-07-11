@@ -39,10 +39,10 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
 
 ## 5. Template store + ICsatTemplateProvider + admin endpoints (Phase E)
 
-- [ ] 5.1 `src/Verbara.Platform.Surveys/CsatTemplateStore.cs` (NEW `ICsatTemplateStore`) + `src/Verbara.Platform.Storage.Postgres/Stores/PostgresCsatTemplateStore.cs`; seed default templates per locale (en-US/es-419/pt-BR) per channel
-- [ ] 5.2 `src/Verbara.Platform.Api/Services/CsatTemplateProvider.cs` (NEW, implements Pro's `Verbara.Sdk.Pro.CsatRunner.ICsatTemplateProvider`) — fallback chain tenant-locale → tenant-default-locale → global-default-locale → global-default-en-US; `AddSingleton<ICsatTemplateProvider, CsatTemplateProvider>()`
-- [ ] 5.3 `TenantProvisioningService.cs` — seed default CSAT templates on tenant create
-- [ ] 5.4 `src/Verbara.Platform.Api/Endpoints/CsatTemplateAdminEndpoints.cs` (NEW) — `GET`/`PUT`/`DELETE /api/v1/admin/csat/templates/{id}` + `POST …/{id}/preview-voice` (Pro TTS synth), all `AdminOnly` + audit; `tests/…/CsatTemplateAdminEndpointsTests.cs`
+- [x] 5.1 `src/Verbara.Platform.Surveys/CsatTemplateStore.cs` (NEW `ICsatTemplateStore` + `CsatTemplateEntry` + `CsatDefaultTemplates`) + `src/Verbara.Platform.Storage.Postgres/Stores/PostgresCsatTemplateStore.cs` (Npgsql facade over `csat_templates`, explicit `NpgsqlDbType` on nullable params) + `src/Verbara.Platform.Storage.InMemory/InMemoryCsatTemplateStore.cs` (Testing-env parity with `InMemorySurveyStore`); registered in `AddPostgresStorage` / `AddInMemoryStorage`. Default templates seeded per locale (en-US/es-419/pt-BR) per templatable channel (email/sms/voice) via `CsatDefaultTemplates.ForTenant`
+- [x] 5.2 `src/Verbara.Platform.Api/Services/CsatTemplateProvider.cs` (NEW, implements Pro's `Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatTemplateProvider`) — fallback chain tenant-locale → tenant-default-locale → global-default-locale → global-default-en-US; maps `CsatTemplateEntry` → Pro `CsatTemplate` (`Subject`/`Body`/`Locale`=resolved); `AddSingleton<ICsatTemplateProvider, CsatTemplateProvider>()` in Program.cs
+- [x] 5.3 `TenantProvisioningService.cs` — seed default CSAT templates on tenant create via `CreateDefaultCsatTemplatesAsync` (mirrors `CreateDefaultCsatSurvey` golden-default hook; injects `ICsatTemplateStore`)
+- [x] 5.4 `src/Verbara.Platform.Api/Endpoints/CsatTemplateAdminEndpoints.cs` (NEW) — `GET`(list+by-id)/`PUT`/`DELETE /api/v1/admin/csat/templates/{id}` + `POST …/{id}/preview-voice`, all `AdminOnly` + `csat`-category audit; `UpsertCsatTemplateRequest` + `CsatTemplateDto[]` registered in `ApiJsonContext`. **`preview-voice` returns HTTP 501 "voice preview deferred"** — Pro voice/TTS is deferred (no `ITtsSynthesizer`, `CsatVoiceOptions` intentionally absent); endpoint shape present, no fake synthesis. `tests/…/CsatTemplateAdminEndpointsTests.cs` (15 tests: CRUD, 501, AdminOnly 403, provider fallback)
 
 ## 5b. Pro engine hosting + dispatch/trigger seams (Phase E2)
 

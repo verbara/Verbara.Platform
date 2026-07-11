@@ -48,6 +48,10 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatResponseDto))]
 [JsonSerializable(typeof(Verbara.Platform.Api.Dtos.QueueCsatConfigDto))]
 [JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatTemplateDto))]
+// CSAT (csat-runner Phase E) — admin template CRUD surface: list projection +
+// upsert request. preview-voice returns the shared ProblemDetails (already registered).
+[JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatTemplateDto[]))]
+[JsonSerializable(typeof(Verbara.Platform.Api.Dtos.UpsertCsatTemplateRequest))]
 [JsonSerializable(typeof(CsatResponseRecordedEvent))]
 // Typification — response DTOs
 [JsonSerializable(typeof(TypificationSchemaDto[]))]

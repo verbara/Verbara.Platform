@@ -550,6 +550,13 @@ builder.Services.AddSingleton<Verbara.Platform.Api.Services.ICsatWebChatTokenVer
             System.Text.Encoding.UTF8.GetBytes("verbara.csat.webchat.token:" + (licensePath ?? "default")));
     return new Verbara.Platform.Api.Services.HmacCsatWebChatTokenVerifier(secret);
 });
+// CSAT template provider (csat-runner Phase E). Platform's in-process implementation of
+// Pro's Verbara.Sdk.Pro.CsatRunner.ICsatTemplateProvider contract — Pro's channel adapters
+// resolve locale-templated prompts via DI (NOT an API call; Platform/ADR-0020 boundary).
+// Backed by ICsatTemplateStore over csat_templates; fallback chain tenant-locale →
+// tenant-default-locale → global-default-locale → global-default-en-US.
+builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatTemplateProvider,
+    Verbara.Platform.Api.Services.CsatTemplateProvider>();
 builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<Verbara.Platform.Api.Services.Reports.ReportSchedulerService>());
 
@@ -1733,6 +1740,10 @@ v1.MapSurveyEndpoints();
 // csat-runner Phase B — CSAT capture (webchat token-verified / email+sms internal
 // service-key gated) + per-queue analytics read. License-gated (LicenseFeature.CsatRunner).
 v1.MapCsatResponseEndpoints(builder.Configuration["Services:ServiceKey"]);
+// CSAT admin template CRUD (csat-runner Phase E). AdminOnly + audit; manages the
+// csat_templates store the ICsatTemplateProvider resolves prompts through. preview-voice
+// returns HTTP 501 (Pro voice/TTS synthesis deferred).
+v1.MapCsatTemplateAdminEndpoints();
 v1.MapTypificationEndpoints();
 // P2c.1 — per-tenant BYO LLM provider admin (typification:ai:configure gated, no license gate).
 v1.MapTenantLlmConfigEndpoints();

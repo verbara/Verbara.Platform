@@ -17,6 +17,7 @@ public class TenantProvisioningServiceTests
     private readonly IRoleTemplateStore _templateStore = Substitute.For<IRoleTemplateStore>();
     private readonly IQueueStore _queueStore = Substitute.For<IQueueStore>();
     private readonly ISurveyStore _surveyStore = Substitute.For<ISurveyStore>();
+    private readonly ICsatTemplateStore _csatTemplateStore = Substitute.For<ICsatTemplateStore>();
     private readonly IAutomationRuleStore _automationStore = Substitute.For<IAutomationRuleStore>();
     private readonly IFlowStore _flowStore = Substitute.For<IFlowStore>();
     private readonly ITenantAuthConfigStore _authConfigStore = Substitute.For<ITenantAuthConfigStore>();
@@ -32,7 +33,7 @@ public class TenantProvisioningServiceTests
         ]);
 
         _sut = new TenantProvisioningService(
-            _roleStore, _templateStore, _queueStore, _surveyStore,
+            _roleStore, _templateStore, _queueStore, _surveyStore, _csatTemplateStore,
             _automationStore, _flowStore, _authConfigStore, _retentionStore,
             NullLogger<TenantProvisioningService>.Instance);
     }
@@ -58,6 +59,32 @@ public class TenantProvisioningServiceTests
 
         await _surveyStore.Received(1).SaveAsync(
             Arg.Is<Survey>(s => s.Type == SurveyType.Csat),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OnTenantCreated_ShouldSeedDefaultCsatTemplates_ForEachLocaleAndChannel()
+    {
+        var tenant = CreateTenant();
+
+        await _sut.OnTenantCreatedAsync(tenant);
+
+        // 3 locales (en-US / es-419 / pt-BR) × 3 templatable channels (email / sms / voice).
+        await _csatTemplateStore.Received(9).SaveAsync(
+            Arg.Is<CsatTemplateEntry>(t => t.IsDefault && t.TenantId == tenant.TenantId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OnTenantCreated_ShouldSeedEnUsVoiceDefaultCsatTemplate()
+    {
+        var tenant = CreateTenant();
+
+        await _sut.OnTenantCreatedAsync(tenant);
+
+        await _csatTemplateStore.Received(1).SaveAsync(
+            Arg.Is<CsatTemplateEntry>(t =>
+                t.Channel == "voice" && t.Locale == "en-US" && t.IsDefault && t.Subject == null),
             Arg.Any<CancellationToken>());
     }
 

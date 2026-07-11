@@ -15,6 +15,7 @@ internal sealed partial class TenantProvisioningService : ITenantLifecycleHandle
     private readonly IRoleTemplateStore _templateStore;
     private readonly IQueueStore _queueStore;
     private readonly ISurveyStore _surveyStore;
+    private readonly ICsatTemplateStore _csatTemplateStore;
     private readonly IAutomationRuleStore _automationStore;
     private readonly IFlowStore _flowStore;
     private readonly ITenantAuthConfigStore _authConfigStore;
@@ -26,6 +27,7 @@ internal sealed partial class TenantProvisioningService : ITenantLifecycleHandle
         IRoleTemplateStore templateStore,
         IQueueStore queueStore,
         ISurveyStore surveyStore,
+        ICsatTemplateStore csatTemplateStore,
         IAutomationRuleStore automationStore,
         IFlowStore flowStore,
         ITenantAuthConfigStore authConfigStore,
@@ -36,6 +38,7 @@ internal sealed partial class TenantProvisioningService : ITenantLifecycleHandle
         _templateStore = templateStore;
         _queueStore = queueStore;
         _surveyStore = surveyStore;
+        _csatTemplateStore = csatTemplateStore;
         _automationStore = automationStore;
         _flowStore = flowStore;
         _authConfigStore = authConfigStore;
@@ -57,6 +60,7 @@ internal sealed partial class TenantProvisioningService : ITenantLifecycleHandle
         await CreateAuthConfigAsync(tenantId, plan, cancellationToken);
         await CreateRetentionPolicyAsync(tenant.TenantId, plan, cancellationToken);
         await CreateDefaultSurveyAsync(tenantId, cancellationToken);
+        await CreateDefaultCsatTemplatesAsync(tenantId, cancellationToken);
 
         // ── Template resources (if template valid) ──
 
@@ -168,6 +172,18 @@ internal sealed partial class TenantProvisioningService : ITenantLifecycleHandle
     {
         var survey = TenantProvisioningTemplates.CreateDefaultCsatSurvey(tenantId);
         await _surveyStore.SaveAsync(survey, ct);
+    }
+
+    // csat-runner Phase E: seed the default CSAT prompt templates per locale
+    // (en-US / es-419 / pt-BR) per templatable channel (email / sms / voice) so the
+    // ICsatTemplateProvider fallback chain always resolves a non-null template. Mirrors
+    // the CreateDefaultCsatSurvey golden-default seeding pattern. Idempotent — the store
+    // upserts on (tenant_id, template_id) and the seed ids are deterministic.
+    private async Task CreateDefaultCsatTemplatesAsync(TenantId tenantId, CancellationToken ct)
+    {
+        var templates = CsatDefaultTemplates.ForTenant(tenantId, DateTimeOffset.UtcNow);
+        foreach (var template in templates)
+            await _csatTemplateStore.SaveAsync(template, ct);
     }
 
     private async Task ApplyTemplateResourcesAsync(Tenant tenant, string template, CancellationToken ct)
