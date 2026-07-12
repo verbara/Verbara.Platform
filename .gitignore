@@ -9,6 +9,7 @@ obj/
 *.lscache
 TestResults/
 coverage/
+artifacts/
 .worktrees/
 CLAUDE.md
 .claude/

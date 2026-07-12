@@ -43,6 +43,28 @@ jobs:
     name: Build + Unit Tests (Release)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # openapi-typed-client (Platform/ADR-0035): the OpenAPI-export step below needs
+    # Verbara.Platform.Api to reach a request-serving state, which — independent of the OpenAPI
+    # feature itself — requires a genuinely reachable Postgres (DataProtection key persistence
+    # (ADR-0003) throws otherwise outside Environment=Testing, and several Pro Realtime/Cluster
+    # modules eagerly resolve Postgres-backed services during IHostedService startup; see
+    # design.md D1's deviation note for the full trace of why a build-time / no-DB export proved
+    # infeasible). This ephemeral service container is scoped to this job only and is torn down
+    # with the runner — never a persistent or shared database.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: platform_ci
+          POSTGRES_PASSWORD: platform_ci
+          POSTGRES_DB: platform_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -69,6 +91,72 @@ jobs:
 
       - name: Build (Release, warnings-as-errors)
         run: dotnet build Verbara.Platform.slnx -c Release
+
+      # openapi-typed-client (Platform/ADR-0035): CI-runtime capture of the Platform OpenAPI
+      # document (design.md D1 — build-time export via Microsoft.Extensions.ApiDescription.Server
+      # was tried and found infeasible for this host; see the deviation note). Starts the already
+      # -built Api binary against the ephemeral `postgres` service container above, waits for it
+      # to report ready, retrieves /openapi/v1.json, then stops the host. Runs the exact same
+      # AddOpenApi()/MapOpenApi() runtime code path Program.cs already ships — no new runtime
+      # endpoint, no gating change (Platform:OpenApi:Enabled is explicitly set for this CI process
+      # only, exactly like a maintainer running the host locally with the flag on).
+      - name: Export OpenAPI document (CI-runtime capture)
+        working-directory: src/Verbara.Platform.Api
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          ASPNETCORE_URLS: http://127.0.0.1:8099
+          Platform__OpenApi__Enabled: "true"
+          ConnectionStrings__Postgres: "Host=127.0.0.1;Port=5432;Database=platform_ci;Username=platform_ci;Password=platform_ci"
+          Services__ServiceKey: ci-openapi-export-key
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/openapi"
+
+          dotnet bin/Release/net10.0/Verbara.Platform.Api.dll > "$GITHUB_WORKSPACE/artifacts/openapi/host.log" 2>&1 &
+          host_pid=$!
+
+          cleanup() {
+            kill -9 "$host_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=""
+          for _ in $(seq 1 30); do
+            if curl -sf -o /dev/null "http://127.0.0.1:8099/openapi/v1.json"; then
+              ready="1"
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -z "$ready" ]; then
+            echo "::error::Verbara.Platform.Api did not serve /openapi/v1.json within 30s."
+            echo "--- host.log (tail) ---"
+            tail -100 "$GITHUB_WORKSPACE/artifacts/openapi/host.log" || true
+            exit 1
+          fi
+
+          curl -sf -o "$GITHUB_WORKSPACE/artifacts/openapi/openapi-document.json" \
+            "http://127.0.0.1:8099/openapi/v1.json"
+
+          doc="$GITHUB_WORKSPACE/artifacts/openapi/openapi-document.json"
+          echo "Exported OpenAPI document:"
+          echo "  openapi: $(jq -r '.openapi' "$doc")"
+          echo "  paths:   $(jq '.paths | length' "$doc")"
+          echo "  schemas: $(jq '.components.schemas | length' "$doc")"
+
+      - name: Verify CsatResponseDto fixture against the exported document
+        run: >-
+          python3 scripts/verify-openapi-fixture.py
+          artifacts/openapi/openapi-document.json
+          openspec/changes/openapi-typed-client/fixtures/openapi-document.v1.sample.json
+
+      - name: Upload OpenAPI document artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: openapi-document-${{ github.sha }}
+          path: artifacts/openapi/openapi-document.json
+          retention-days: 90
 
       - name: Unit tests
         # Excludes ONLY the two genuinely container-backed test projects —

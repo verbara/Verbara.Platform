@@ -135,6 +135,19 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ConversationAssignedEvent))]
 [JsonSerializable(typeof(ConversationMessageEvent))]
 [JsonSerializable(typeof(ConversationStateChangedEvent))]
+// openapi-typed-client (Platform/ADR-0035): ConversationState was previously reachable only as
+// a NESTED member of ConversationStateChangedEvent above, never as a ROOT serializable type.
+// The runtime OpenAPI document generator (Microsoft.AspNetCore.OpenApi's
+// OpenApiSchemaService -> JsonSchemaExporter) needs root metadata for
+// ConversationEndpoints.ListConversations' `ConversationState? state` query parameter and threw
+// System.NotSupportedException ("JsonTypeInfo metadata ... was not provided") — a 500 on
+// /openapi/v1.json discovered while validating this change, pre-existing and unrelated to any
+// endpoint behavior change (adds schema metadata only; no wire format changes).
+[JsonSerializable(typeof(ConversationState?))]
+// openapi-typed-client (Platform/ADR-0035): same root-type gap as ConversationState above,
+// this time for a `Guid?` query parameter surfaced once the ConversationState fix let document
+// generation proceed further through the endpoint list.
+[JsonSerializable(typeof(Guid?))]
 [JsonSerializable(typeof(AgentStateChangedEvent))]
 [JsonSerializable(typeof(AgentPendingStateChangedEvent))]
 [JsonSerializable(typeof(CampaignStatusChangedEvent))]

@@ -1,0 +1,65 @@
+# Cross-repo contract for the OpenAPI typed-client train. Seeded by /xr:change 2026-07-12.
+# Next: /xr:propagate openapi-typed-client  (fans this out into the web/ child change).
+#
+# Motivation: the csat-runner incident (Web PR#159, v3.13.1-web) — a hand-written consumer
+# DTO drifted from the real Platform contract. This train removes the duplicate-by-hand
+# REST type surface (docs/research/2026-07-12-cross-repo-deps-audit.md in verbara-meta,
+# codification item (d)).
+#
+# Scope boundary (4-host analysis, 2026-07-12): the Platform repo ships FOUR executable
+# hosts — this train covers the Api host's REST surface ONLY.
+#   - Realtime (/hubs/platform, SignalR) IS Web-facing, but hub messages are not
+#     representable in the OpenAPI document (no REST paths) and the typed-client path
+#     lives in Pro (Verbara.Sdk.Pro.Push.SignalR IPlatformHubClient) — typing it
+#     end-to-end is ADR-0020's deferred follow-up (owner: Pro) and would pull Pro into
+#     this train for a non-REST mechanism. Explicitly OUT; Web keeps its 4 hand-written
+#     hub payload interfaces (src/core/realtime/platform-hub.ts) until that follow-up.
+#   - Mail + Renderer are internal producers (X-Service-Key, consumed server-to-server
+#     by the Api host) with no Web-facing contract — not a typed-client boundary.
+#
+# Version targets (tentative next-minor; operator may re-pin at /xr:release):
+#   Platform 2.18.0     -> 2.19.0
+#   Web      3.13.1-web -> 3.14.0-web
+#
+# fixtures/openapi-document.v1.sample.json is the golden ENVELOPE sample of the handoff
+# artifact: field names verbatim from the real CsatResponseDto (the exact DTO Web guessed
+# wrong — Web PR#159); numeric formats are illustrative. Host child task 1 regenerates and
+# verifies this sample against the real emitted document before Web's codegen consumes it.
+kind: feature
+version: 1
+change_id: openapi-typed-client
+decision_ref: Platform/ADR-0035
+
+repos:
+  - path: ../Verbara.Platform
+    role: producer
+    buildOrder: 1
+    childChange: HOST
+    summary: >
+      Emits the OpenAPI document as a consumable CI artifact — the runtime half EXISTS:
+      src/Verbara.Platform.Api/Program.cs:1565-1576 registers AddOpenApi()
+      (Microsoft.AspNetCore.OpenApi 10.0.5, Directory.Packages.props:136-137) gated behind
+      IsDevelopment() || Platform:OpenApi:Enabled, and Program.cs:1688-1693 serves
+      /openapi/v1.json + Scalar UI at /scalar/v1; already AOT-clean (no AOT-specific
+      conditional; host is IsAotCompatible with reflection-off JSON). NET-NEW: no
+      Microsoft.Extensions.ApiDescription.Server reference anywhere (no build-time export)
+      and no CI workflow builds/exports/publishes the document (all 8 workflows checked) —
+      the export job + artifact publication is the gap this child closes.
+
+  - path: ../Verbara.Platform.Web
+    role: consumer
+    buildOrder: 2
+    childChange: web/openapi-typed-client
+    summary: >
+      Generates API types from the Platform document — integration point EXISTS:
+      src/core/api/client.ts:1-284 is the single customFetch wrapper every hook funnels
+      through with a generic <T> (swap-the-T migration, no call-site plumbing);
+      vite.config.ts:29-31 already proxies /api/v1 -> localhost:5000; .github/workflows/
+      ci.yml:38-64 build job (tsc -b && vite build) type-checks generated types for free.
+      NET-NEW: zero codegen tooling (no openapi/swagger/orval hits in package.json), no
+      generated .d.ts, no response validation at the API layer. Migration surface: 62
+      non-test hook files under src/core/api/hooks/ with ~277 hand-written interface/type
+      declarations; v3.13.1-web itself is the motivating drift bug.
+
+fixtures:
+  - fixtures/openapi-document.v1.sample.json
