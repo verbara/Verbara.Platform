@@ -55,8 +55,9 @@ fixture cannot silently drift from the real contract the way the hand-written We
 consumer type did (Web PR#159, v3.13.1-web).
 
 The exported document SHALL match the golden wire fixture verbatim (the
-verbatim-fixture-citation rule, `/xr:propagate`) for the `CsatResponseDto` schema's 6 fields
-exactly:
+verbatim-fixture-citation rule, `/xr:propagate`): the envelope keys `openapi`, `info`, `paths`,
+and `components.schemas`; the sample path (with the version-template caveat noted below); and
+the `CsatResponseDto` schema's 6 fields exactly:
 
 - `queueName`
 - `channel`

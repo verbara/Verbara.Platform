@@ -9,6 +9,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **CI OpenAPI export artifact (`openapi-typed-client`, ADR-0035).** The `build-and-test` job now
+  captures `/openapi/v1.json` from a briefly-running host (ephemeral CI-only Postgres `services:`
+  container, `Platform:OpenApi:Enabled=true`) and publishes it as the `openapi-document-<sha>`
+  artifact for Web's typed-client codegen (build-time export via
+  `Microsoft.Extensions.ApiDescription.Server` evaluated and found infeasible — hosted-service
+  startup requires live Postgres; full trace in ADR-0035). `scripts/verify-openapi-fixture.py`
+  guards the golden `CsatResponseDto` fixture against contract drift. Runtime `/openapi/v1.json` /
+  `/scalar/v1` behavior and gating unchanged.
+
+### Fixed
+- **`/openapi/v1.json` returned HTTP 500** — two bare query-parameter types (`ConversationState?`,
+  `Guid?`) were missing root `[JsonSerializable]` entries in `ApiJsonContext` (pre-existing;
+  surfaced by the first real invocation of the endpoint). Additive schema metadata only — no
+  endpoint request/response contract, gating, or status-code change.
+
 ---
 
 ## [2.18.0] — 2026-07-11 — CSAT consumer (customer-satisfaction capture; digital-first) + Pro CSAT engine hosting
