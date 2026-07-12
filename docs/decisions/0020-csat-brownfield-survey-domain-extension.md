@@ -5,7 +5,7 @@
 - **Deciders:** Verbara maintainer (Harol A. Reina H.)
 - **Related:**
   - Specs: [`docs/specs/2026-05-18-platform-240-csat-consumer.md`](../specs/2026-05-18-platform-240-csat-consumer.md), [`Verbara.Sdk.Pro/docs/specs/2026-05-18-pro-260-csat-runner-v1.md`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/specs/2026-05-18-pro-260-csat-runner-v1.md)
-  - Plans: [`docs/plans/active/2026-05-18-platform-240-csat-consumer.md`](../plans/active/2026-05-18-platform-240-csat-consumer.md), [`Verbara.Sdk.Pro/docs/plans/active/2026-05-18-pro-260-csat-runner-v1.md`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/plans/active/2026-05-18-pro-260-csat-runner-v1.md)
+  - Plans: [`docs/plans/completed/2026-05-18-platform-240-csat-consumer.md`](../plans/completed/2026-05-18-platform-240-csat-consumer.md) (moved to `completed/` on ship, PR #144), [`Verbara.Sdk.Pro/docs/plans/active/2026-05-18-pro-260-csat-runner-v1.md`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/plans/active/2026-05-18-pro-260-csat-runner-v1.md)
   - System plan file: `~/.claude/plans/si-refactored-pascal.md` (planning-mode canonical until materialized in repos)
 
 ## Context
