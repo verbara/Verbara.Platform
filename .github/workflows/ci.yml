@@ -149,7 +149,7 @@ jobs:
         run: >-
           python3 scripts/verify-openapi-fixture.py
           artifacts/openapi/openapi-document.json
-          openspec/changes/openapi-typed-client/fixtures/openapi-document.v1.sample.json
+          openspec/changes/archive/2026-07-12-openapi-typed-client/fixtures/openapi-document.v1.sample.json
 
       - name: Upload OpenAPI document artifact
         uses: actions/upload-artifact@v7.0.1

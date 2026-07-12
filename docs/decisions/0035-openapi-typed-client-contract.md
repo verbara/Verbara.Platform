@@ -35,8 +35,8 @@ capture**: the `build-and-test` job in `.github/workflows/ci.yml` starts the alr
 `Platform:OpenApi:Enabled=true`, polls `/openapi/v1.json` until it responds, saves the response as
 `artifacts/openapi/openapi-document.json`, stops the host, verifies the document's
 `CsatResponseDto` schema fragment against the golden fixture
-(`openspec/changes/openapi-typed-client/fixtures/openapi-document.v1.sample.json`, via
-`scripts/verify-openapi-fixture.py`), and uploads the document as a versioned, run-scoped CI
+(`openspec/changes/archive/2026-07-12-openapi-typed-client/fixtures/openapi-document.v1.sample.json`,
+via `scripts/verify-openapi-fixture.py`), and uploads the document as a versioned, run-scoped CI
 artifact (`openapi-document-${{ github.sha }}`, `actions/upload-artifact`). Web's
 `web/openapi-typed-client` child change (buildOrder 2) downloads that artifact for its codegen.
 
