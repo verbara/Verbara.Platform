@@ -6,7 +6,7 @@
 
 - Pro-side spec: [`Verbara.Sdk.Pro/docs/specs/2026-05-18-pro-260-csat-runner-v1.md`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/specs/2026-05-18-pro-260-csat-runner-v1.md)
 - ADR: [`docs/decisions/0020-csat-brownfield-survey-domain-extension.md`](../decisions/0020-csat-brownfield-survey-domain-extension.md)
-- Active execution plan: [`docs/plans/active/2026-05-18-platform-240-csat-consumer.md`](../plans/active/2026-05-18-platform-240-csat-consumer.md)
+- Execution plan (shipped, moved to `completed/` — PR #144): [`docs/plans/completed/2026-05-18-platform-240-csat-consumer.md`](../plans/completed/2026-05-18-platform-240-csat-consumer.md)
 - System-path canonical plan (planning-mode source): `~/.claude/plans/si-refactored-pascal.md`
 
 ---
