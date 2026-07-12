@@ -72,9 +72,11 @@
       --filter "FullyQualifiedName!~Storage.Postgres.Tests&FullyQualifiedName!~Identity.Redis.Tests"`
       — full suite green: 1628 tests, 1628 passed, 0 failed. No new test failures (no runtime
       endpoint behavior changed; the two `ApiJsonContext` additions are additive schema metadata).
-- [ ] 4.3 CI green on the PR (the new export/upload steps included) — **not yet run**; this
-      requires an actual GitHub Actions execution (PR or `merge_group`), which this apply-stage
-      session cannot trigger directly. Local end-to-end simulation of the exact step logic
-      (task 2.2) passed; flagged for the next stage/PR-open step to confirm in the real pipeline.
+- [x] 4.3 CI green on the PR (the new export/upload steps included) — **CLOSED BY EVIDENCE**: the
+      real PR #149 GitHub Actions run executed the export/upload steps added in task 2.1 and
+      produced the artifact `openapi-document-e43c0ab43deee2ee526b66bbd9d40d8b366619c4`
+      (24,892 bytes), confirming the CI-runtime capture mechanism (ADR-0035) works end-to-end in
+      the real pipeline, not just the local simulation (task 2.2). PR #149 merged to main at
+      2026-07-12T22:24:54Z.
 - [x] 4.4 `npx -y @fission-ai/openspec@1.6.0 validate --all --strict --no-interactive` — green
       (12 passed, 0 failed).

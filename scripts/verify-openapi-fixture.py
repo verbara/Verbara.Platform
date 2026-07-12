@@ -3,13 +3,14 @@
 
 Usage: verify-openapi-fixture.py <real-openapi-document.json> <fixture.json>
 
-Part of the openapi-typed-client change (Platform/ADR-0035): the fixture
-(fixtures/openapi-document.v1.sample.json in the change directory) is a hand-curated golden
-ENVELOPE sample whose CsatResponseDto schema field names must stay verbatim with the real,
-CI-captured Platform OpenAPI document (openapi/openapi-export capability spec, requirement
+Part of the openapi-typed-client change (Platform/ADR-0035, archived to
+openspec/changes/archive/2026-07-12-openapi-typed-client/): the fixture
+(fixtures/openapi-document.v1.sample.json in the archived change directory) is a hand-curated
+golden ENVELOPE sample whose CsatResponseDto schema field names must stay verbatim with the real,
+CI-captured Platform OpenAPI document (openapi-export capability spec, requirement
 "The golden fixture is verified against the real emitted document"). This is the repeatable
-check that replaces the one-off eyeball comparison performed at propose-time — see
-openspec/changes/openapi-typed-client/design.md D3.
+check that replaces the one-off eyeball comparison performed at propose-time — see the archived
+change's design.md D3.
 
 Compares ONLY the `components.schemas.CsatResponseDto` fragment:
   - Field NAMES must match exactly (a name present in one schema and missing from the other
