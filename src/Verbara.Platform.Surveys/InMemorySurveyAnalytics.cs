@@ -36,6 +36,17 @@ public sealed class InMemorySurveyAnalytics : ISurveyAnalytics
     }
 
     /// <inheritdoc />
+    public async Task<SurveyScoreSummary> GetByQueueAndChannelAsync(
+        TenantId tenantId, string queueName, string channel, DateRange range, CancellationToken ct)
+    {
+        var responses = await _responseStore
+            .GetByQueueAndChannelAsync(tenantId, queueName, channel, range, ct)
+            .ConfigureAwait(false);
+        return SummarizeRatings(responses);
+    }
+
+    /// <inheritdoc />
+    [Obsolete("Use GetByQueueAndChannelAsync; removed in v2.19.0 (csat-runner Phase A / Pro ADR-0012 cadence).")]
     public async Task<SurveyScoreSummary> GetByQueueAsync(TenantId tenantId, EntityId surveyId, string queueName, CancellationToken ct)
     {
         var all = await _responseStore.GetBySurveyAsync(tenantId, surveyId, ct).ConfigureAwait(false);
@@ -54,6 +65,23 @@ public sealed class InMemorySurveyAnalytics : ISurveyAnalytics
     }
 
     // -------------------------------------------------------------------------
+
+    // CSAT-flavored summary: averages the Rating column directly (per ADR-0020 a
+    // CSAT row exposes Rating rather than parsing Answers[csatRatingQuestionId]).
+    // NPS bands do not apply to a 1..5 CSAT rating, so promoter/passive/detractor
+    // and NpsScore are null.
+    private static SurveyScoreSummary SummarizeRatings(IReadOnlyList<SurveyResponse> responses)
+    {
+        var ratings = responses
+            .Where(r => r.Rating.HasValue)
+            .Select(r => (double)r.Rating!.Value)
+            .ToList();
+
+        if (ratings.Count == 0)
+            return new SurveyScoreSummary(0, 0d, null, null, null, null);
+
+        return new SurveyScoreSummary(ratings.Count, ratings.Average(), null, null, null, null);
+    }
 
     private static SurveyScoreSummary Summarize(Survey? survey, IReadOnlyList<SurveyResponse> responses)
     {

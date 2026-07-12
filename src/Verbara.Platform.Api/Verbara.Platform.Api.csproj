@@ -120,6 +120,10 @@
     <PackageReference Include="Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres" />
     <PackageReference Include="Verbara.Sdk.Pro.Analytics.Storage.Postgres" />
     <PackageReference Include="Verbara.Sdk.Pro.Licensing" />
+    <!-- CSAT train (Platform/ADR-0020): Pro CSAT engine — Platform hosts the orchestrator
+         (AddProCsatRunner) and implements its 5 boundary seams (ICsatTemplateProvider +
+         ICsatConversationSignal/Email/SmsDispatcher/ConversationEndSource). -->
+    <PackageReference Include="Verbara.Sdk.Pro.CsatRunner" />
     <PackageReference Include="Verbara.Sdk.Pro.AgentAssist" />
     <PackageReference Include="Verbara.Sdk.Pro.AgentAssist.Storage.Postgres" />
     <PackageReference Include="Verbara.Sdk.Pro.Routing" />

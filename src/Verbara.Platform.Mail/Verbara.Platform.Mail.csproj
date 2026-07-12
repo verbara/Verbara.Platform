@@ -26,6 +26,9 @@
     <PackageReference Include="MailKit" />
     <PackageReference Include="Microsoft.Graph" />
     <PackageReference Include="Azure.Identity" />
+    <!-- csat-runner Phase C — reuse Pro's HMAC reply-token verifier (ICsatReplyTokenSigner),
+         never re-hand-roll the HMAC (ADR-0022 boundary: Platform implements/hosts, Pro owns crypto). -->
+    <PackageReference Include="Verbara.Sdk.Pro.CsatRunner" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Verbara.Sdk.Data.Npgsql" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />

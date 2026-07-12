@@ -21,6 +21,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SmsConnector>();
         services.AddSingleton<SmsWebhookHandler>();
 
+        // CSAT correlator (csat-runner Phase D). Plugs into the inbound SMS path after
+        // SmsWebhookHandler to capture bare 1..5 digit replies against an open
+        // csat_pending_dispatches row, falling through to normal routing otherwise. Depends on the
+        // host-provided NpgsqlDataSource + ICsatCaptureForwarder (registered in the Api composition
+        // root); registered here so any host wiring AddSms picks the correlator up.
+        services.AddSingleton<CsatSmsCorrelator>();
+
         return services;
     }
 

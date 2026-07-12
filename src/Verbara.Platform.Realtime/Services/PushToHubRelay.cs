@@ -62,6 +62,14 @@ internal sealed class PushToHubRelay : IHostedService
 {
     private readonly IPushEventBus _bus;
     private readonly IHubContext<PlatformHub, IPlatformHubClient> _hubContext;
+    // csat-runner Phase B — non-generic hub context for the CSAT recorded event.
+    // IPlatformHubClient (the strongly-typed client) is defined in the Verbara.Sdk.Pro
+    // package and has no OnCsatResponseRecorded method (that Pro-side interface change
+    // ships separately). Until it does, the CSAT branch fans out over the untyped
+    // IHubContext<PlatformHub> using the client method name "OnCsatResponseRecorded"
+    // to the supervisor:{tenantId} group — the wire contract the Web supervisor client
+    // subscribes to is identical either way.
+    private readonly IHubContext<PlatformHub> _untypedHubContext;
     private readonly IClusterLeader _fanoutLeader;
     private readonly IRelayOutcomeSink _outcomeSink;
     private readonly ILogger<PushToHubRelay> _logger;
@@ -69,6 +77,7 @@ internal sealed class PushToHubRelay : IHostedService
     private IDisposable? _conversationSubscription;
     private IDisposable? _agentSubscription;
     private IDisposable? _clusterSubscription;
+    private IDisposable? _csatSubscription;
     // v2.4.7 — Platform.Api PlatformEventBus publishes Verbara.Platform.Core
     // event types directly (no Core→Pro translator exists), so the Pro-typed
     // subscriptions above never matched anything from the Api side. The Core
@@ -87,12 +96,14 @@ internal sealed class PushToHubRelay : IHostedService
     public PushToHubRelay(
         IPushEventBus bus,
         IHubContext<PlatformHub, IPlatformHubClient> hubContext,
+        IHubContext<PlatformHub> untypedHubContext,
         [FromKeyedServices(RealtimeLeaderResources.Fanout)] IClusterLeader fanoutLeader,
         IRelayOutcomeSink outcomeSink,
         ILogger<PushToHubRelay> logger)
     {
         _bus = bus;
         _hubContext = hubContext;
+        _untypedHubContext = untypedHubContext;
         _fanoutLeader = fanoutLeader;
         _outcomeSink = outcomeSink;
         _logger = logger;
@@ -115,6 +126,10 @@ internal sealed class PushToHubRelay : IHostedService
         _coreAgentSubscription = _bus.OfType<CoreEvents.AgentStateChangedEvent>()
             .Subscribe(evt => ForwardCoreAgent(evt));
 
+        // csat-runner Phase B — CSAT recorded → supervisor:{tenantId}.
+        _csatSubscription = _bus.OfType<CoreEvents.CsatResponseRecordedEvent>()
+            .Subscribe(evt => ForwardCsatRecorded(evt));
+
         return Task.CompletedTask;
     }
 
@@ -125,11 +140,13 @@ internal sealed class PushToHubRelay : IHostedService
         _clusterSubscription?.Dispose();
         _coreConversationSubscription?.Dispose();
         _coreAgentSubscription?.Dispose();
+        _csatSubscription?.Dispose();
         _conversationSubscription = null;
         _agentSubscription = null;
         _clusterSubscription = null;
         _coreConversationSubscription = null;
         _coreAgentSubscription = null;
+        _csatSubscription = null;
         return Task.CompletedTask;
     }
 
@@ -351,6 +368,69 @@ internal sealed class PushToHubRelay : IHostedService
             TenantId: tenantId);
 
         _lastSend = SendAgentAsync($"tenant:{tenantId}", payload, tenantId, eventType, leaderSnapshot);
+    }
+
+    // ─── CSAT recorded (csat-runner Phase B) ──────────────────────────────────
+    // Routes Verbara.Platform.Core.CsatResponseRecordedEvent to the
+    // supervisor:{tenantId} group. Uses the untyped hub context because the
+    // strongly-typed IPlatformHubClient (Pro package) has no OnCsatResponseRecorded
+    // method yet; the "OnCsatResponseRecorded" client method name is the wire contract.
+
+    private void ForwardCsatRecorded(CoreEvents.CsatResponseRecordedEvent evt)
+    {
+        var leaderSnapshot = SnapshotLeader();
+        var tenantId = evt.TenantId;
+        var eventType = evt.Type;
+
+        if (!leaderSnapshot.IsLeader)
+        {
+            RealtimeLog.SkippedForwardNotLeader(_logger, eventType, leaderSnapshot.Resource);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNotLeader);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            PushToHubRelayLog.SkippedNullTenant(_logger, eventType);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNullTenant);
+            return;
+        }
+
+        var payload = new CsatResponseRecordedPayload(
+            TenantId: tenantId,
+            ResponseId: evt.ResponseId,
+            SurveyId: evt.SurveyId,
+            ConversationId: evt.ConversationId,
+            Channel: evt.Channel,
+            QueueName: evt.QueueName,
+            Rating: evt.Rating,
+            Comment: evt.Comment,
+            CapturedAt: evt.CapturedAt);
+
+        _lastSend = SendCsatAsync($"supervisor:{tenantId}", payload, tenantId, eventType, leaderSnapshot);
+    }
+
+    private async Task SendCsatAsync(
+        string group,
+        CsatResponseRecordedPayload payload,
+        string tenantId,
+        string eventType,
+        LeaderSnapshot leaderSnapshot)
+    {
+        try
+        {
+            await _untypedHubContext.Clients.Group(group)
+                .SendAsync("OnCsatResponseRecorded", payload)
+                .ConfigureAwait(false);
+
+            PushToHubRelayLog.Forwarded(_logger, eventType, tenantId);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.Forwarded);
+        }
+        catch (Exception ex)
+        {
+            PushToHubRelayLog.ForwardError(_logger, eventType, ex.Message);
+            RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.ForwardError, ex.Message);
+        }
     }
 
     /// <summary>

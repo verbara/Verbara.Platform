@@ -84,6 +84,12 @@ internal sealed partial class SmtpSender : IEmailService
         mime.From.Add(new MailboxAddress(fromName, fromAddress));
         foreach (var r in message.Recipients)
             mime.To.Add(new MailboxAddress(r.Name ?? r.Email, r.Email));
+        // csat-runner Phase E2 — the CSAT email dispatch seam carries a tokenized Reply-To
+        // (csat+{token}@{ReplyToDomain}) so Platform's inbound reply parser can correlate.
+        // EmailMessage carries no generic header bag, so the address rides ReplyToAddress and
+        // is stamped here at send time. Null for every non-CSAT email (no header added).
+        if (!string.IsNullOrEmpty(message.ReplyToAddress))
+            mime.ReplyTo.Add(MailboxAddress.Parse(message.ReplyToAddress));
         mime.Subject = message.Subject;
         var builder = new BodyBuilder { TextBody = message.TextBody, HtmlBody = message.HtmlBody };
         if (message.Attachments is not null)

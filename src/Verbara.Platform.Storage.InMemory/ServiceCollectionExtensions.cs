@@ -95,6 +95,8 @@ public static class ServiceCollectionExtensions
         // Surveys
         services.AddSingleton<ISurveyStore, InMemorySurveyStore>();
         services.AddSingleton<ISurveyResponseStore, InMemorySurveyResponseStore>();
+        // csat-runner Phase E: per-tenant CSAT prompt template store.
+        services.AddSingleton<ICsatTemplateStore, InMemoryCsatTemplateStore>();
 
         // Typification
         services.AddSingleton<ITypificationSchemaStore, InMemoryTypificationSchemaStore>();

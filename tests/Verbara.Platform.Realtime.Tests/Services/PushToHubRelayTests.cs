@@ -75,8 +75,10 @@ public sealed class PushToHubRelayTests
 
     private sealed record HubMocks(
         IHubContext<PlatformHub, IPlatformHubClient> HubContext,
+        IHubContext<PlatformHub> UntypedHubContext,
         IHubClients<IPlatformHubClient> HubClients,
-        IPlatformHubClient GroupClient);
+        IPlatformHubClient GroupClient,
+        IClientProxy UntypedGroupClient);
 
     private static HubMocks CreateMockHubContext(string group)
     {
@@ -91,7 +93,14 @@ public sealed class PushToHubRelayTests
         var hubContext = Substitute.For<IHubContext<PlatformHub, IPlatformHubClient>>();
         hubContext.Clients.Returns(hubClients);
 
-        return new HubMocks(hubContext, hubClients, groupClient);
+        // csat-runner Phase B — untyped hub context used by the CSAT recorded branch.
+        var untypedGroupClient = Substitute.For<IClientProxy>();
+        var untypedClients = Substitute.For<IHubClients>();
+        untypedClients.Group(group).Returns(untypedGroupClient);
+        var untypedHubContext = Substitute.For<IHubContext<PlatformHub>>();
+        untypedHubContext.Clients.Returns(untypedClients);
+
+        return new HubMocks(hubContext, untypedHubContext, hubClients, groupClient, untypedGroupClient);
     }
 
     private static (PushToHubRelay relay, FakePushEventBus bus, HubMocks mocks, FakeClusterLeader leader, RelayOutcomeSink sink)
@@ -108,6 +117,7 @@ public sealed class PushToHubRelayTests
         var relay = new PushToHubRelay(
             bus,
             mocks.HubContext,
+            mocks.UntypedHubContext,
             leader,
             sink,
             logger ?? NullLogger<PushToHubRelay>.Instance);
@@ -179,6 +189,41 @@ public sealed class PushToHubRelayTests
                 p.ReasonCode == "break" &&
                 p.PreviousState == "ready" &&
                 p.NewState == "paused"));
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldForwardToSupervisorGroup_WhenCsatResponseRecordedEventIsPublished()
+    {
+        var (relay, bus, mocks, _, _) = BuildSut("supervisor:acme");
+        await relay.StartAsync(CancellationToken.None);
+
+        var capturedAt = DateTimeOffset.UtcNow;
+        var evt = new Verbara.Platform.Core.CsatResponseRecordedEvent(
+            TenantId: "acme",
+            ResponseId: "resp-1",
+            SurveyId: "srv-csat-v1",
+            ConversationId: "conv-8f2a1c4e",
+            Channel: "webchat",
+            QueueName: "support-tier1",
+            Rating: 5,
+            Comment: "Fast and friendly, thanks!",
+            CapturedAt: capturedAt);
+
+        bus.Emit(evt);
+        await WaitForDispatch(relay);
+
+        await mocks.UntypedGroupClient.Received(1).SendCoreAsync(
+            "OnCsatResponseRecorded",
+            Arg.Is<object?[]>(a =>
+                a.Length == 1 &&
+                a[0] is CsatResponseRecordedPayload &&
+                ((CsatResponseRecordedPayload)a[0]!).TenantId == "acme" &&
+                ((CsatResponseRecordedPayload)a[0]!).Rating == 5 &&
+                ((CsatResponseRecordedPayload)a[0]!).QueueName == "support-tier1" &&
+                ((CsatResponseRecordedPayload)a[0]!).Channel == "webchat"),
+            Arg.Any<CancellationToken>());
 
         await relay.StopAsync(CancellationToken.None);
     }

@@ -62,6 +62,11 @@ if (!string.IsNullOrEmpty(postgresConn))
 }
 builder.Services.AddSingleton<TokenStore>();
 
+// ── CSAT email IMAP gap-fill (csat-runner Phase C) ──
+// Binds Imap + CsatCapture config, reuses Pro's HMAC reply-token verifier, and registers the
+// ImapInboundPoller hosted service (a no-op unless Imap:Enabled=true).
+builder.Services.AddPlatformMail(builder.Configuration);
+
 // ── Token refresh background service ──
 // Transient-retry policy for Azure AD token-endpoint POST — retry 3/1s, 15s per-attempt timeout,
 // circuit opens after 3 consecutive failures for 120s. Separate from mail.graph so refresh-path

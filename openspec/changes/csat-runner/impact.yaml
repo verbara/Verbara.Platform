@@ -1,0 +1,50 @@
+# Cross-repo contract for the CSAT Runner train. Seeded by /xr:change 2026-07-07.
+# Next: /xr:propagate csat-runner  (fans this out into pro/ + web/ child changes).
+#
+# Re-pin (operator decision 2026-07-07 — next-minor across the train; all three plan
+# targets froze 2026-05-18 and their original numbers were spent/superseded):
+#   Pro      2.6.0-pro   -> 2.9.0-pro
+#   Platform 2.4.0       -> 2.18.0
+#   Web      3.2.0-web   -> 3.13.0-web
+kind: feature
+version: 1
+change_id: csat-runner
+decision_ref: Platform/ADR-0020
+
+repos:
+  - path: ../Verbara.Sdk.Pro
+    role: producer
+    buildOrder: 1
+    childChange: pro/csat-runner
+    summary: >
+      Ships the CSAT engine — NONE exists yet. Frozen plan+spec
+      (docs/plans/active/2026-05-18-pro-260-csat-runner-v1.md and docs/specs/…same, "APPROVED,
+      execution paused") add 2 packages (Verbara.Sdk.Pro.CsatRunner +
+      Verbara.Sdk.Pro.CsatRunner.Storage.Postgres), LicenseFeature.CsatRunner, and the public
+      ICsatChannelAdapter / ICsatTemplateProvider interfaces. Re-pin 2.6.0-pro -> 2.9.0-pro
+      (2.6.0-pro was spent on ADR-0026 Phase B; current baseline 2.8.1-pro).
+
+  - path: ../Verbara.Platform
+    role: consumer
+    buildOrder: 2
+    childChange: HOST
+    summary: >
+      Host repo + CSAT consumer — PARTIAL brownfield per ADR-0020. Extends the existing Surveys
+      domain: src/Verbara.Platform.Surveys/SurveyResponse.cs, ISurveyAnalytics.cs, and
+      src/Verbara.Platform.Storage.Postgres/Stores/PostgresSurveyResponseStore.cs; adds
+      src/Verbara.Platform.Api/Endpoints/CsatResponseEndpoints.cs (POST /api/v1/csat/responses/*),
+      the Mail IMAP poller + SMS correlator, and CsatResponseRecordedEvent (wire shape in fixtures/).
+      Plan docs/plans/active/2026-05-18-platform-240-csat-consumer.md. Re-pin 2.4.0 -> 2.18.0 (current 2.17.0).
+
+  - path: ../Verbara.Platform.Web
+    role: consumer
+    buildOrder: 2
+    childChange: web/csat-runner
+    summary: >
+      CSAT UI surface (decoupled HTTP consumer) — PARTIAL. src/admin/surveys/survey-list-page.tsx
+      already renders the CSAT survey type; NET-NEW work is the supervisor CSAT card and the webchat
+      embed rating panel (deferred from v3.0.0-web per docs/specs/2026-05-09-track-7c.md:184). No Web
+      CSAT spec authored yet. Re-pin 3.2.0-web -> 3.13.0-web (current 3.12.0-web).
+
+fixtures:
+  - fixtures/csat-response-capture.v1.json
