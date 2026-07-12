@@ -90,3 +90,34 @@ Pro owns:
 - Existing Survey domain: [`src/Verbara.Platform.Surveys/`](../../src/Verbara.Platform.Surveys/)
 - Pro pipeline template (mirror): [`Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.CallAnalytics/Engine/CallAnalyticsEngine.cs`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/src/Verbara.Sdk.Pro.CallAnalytics/Engine/CallAnalyticsEngine.cs)
 - Related ADR: [`Verbara.Sdk.Pro 0012`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md) — same 2-release deprecation pattern applied to `GetByQueueAsync` here.
+
+## Deferred follow-ups (post-ship — recorded 2026-07-12)
+
+The digital CSAT slice shipped 2026-07-11 (Pro `2.9.0-pro` + Platform `2.18.0` +
+Web `3.13.0-web`). Of the three post-ship follow-ups identified during close-out,
+the Web analytics-contract fix landed as `3.13.1-web` (2026-07-12, PR
+Verbara.Platform.Web#159). The two below remain **deferred / not yet scheduled**
+and are recorded here — against the CSAT decision anchor — so cross-repo backlog
+discovery (`/xr:pending`, which mines `docs/decisions/` for items marked
+deferred/follow-up) surfaces them:
+
+- **[owner: Pro] Typed `IPlatformHubClient.OnCsatResponseRecorded` Hub method.**
+  The real-time supervisor push currently fans out through the untyped
+  `IHubContext` name-based relay. The typed path adds
+  `OnCsatResponseRecorded(CsatResponseRecordedEvent)` to
+  `Verbara.Sdk.Pro.Push.SignalR/Hubs/IPlatformHubClient.cs` (+ a
+  `CsatResponseRecordedEvent` under `Pro.Push.SignalR/Events/`) plus a matching
+  typed branch in Platform's `Verbara.Platform.Realtime/Services/PushToHubRelay.cs`.
+  **Priority: low** — the untyped relay is functionally correct; this is
+  type-safety hardening only. Deferred to avoid a Pro release cascade
+  (Pro → Platform re-pin) for a non-functional change.
+
+- **[owner: Web] CSAT KPI card queue scope — ⟨NEEDS PRODUCT-OWNER INPUT⟩.** The
+  supervisor wallboard KPI card is scoped to a single queue (`sortedQueues[0]`
+  in `wallboard-page.tsx`). Whether it should instead aggregate CSAT across all
+  visible queues (which would require a new tenant-wide analytics endpoint) or
+  expose an explicit queue selector is a **product/UX decision, not a bug**.
+  Blocked on: product-owner call. If aggregation is chosen, it cascades a new
+  Platform read endpoint (API-first) before the Web surface.
+
+decision_ref: Platform/ADR-0020 · csat-runner train close-out.
