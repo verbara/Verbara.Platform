@@ -1,0 +1,12 @@
+{
+  "_comment": "Golden wire shape for POST /api/v1/csat/responses/voice — the capture the survey-IVR leg submits after DTMF collection. Reuses the FROZEN capture shape of src/Verbara.Platform.Api/Dtos/CsatResponseRequest.cs (csat-runner fixtures/csat-response-capture.v1.json) 1:1, extending the channel route/value set with 'voice'; comment is null (DTMF carries no free text). responseToken is the Platform-minted voice-leg token (v1.{payload}.{sig}, HMAC pattern of Pro's HmacCsatReplyTokenSigner). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "responseToken": "v1.eyJ0aWQiOiJ0ZW4tNDIiLCJzdmkiOiJzcnYtY3NhdC12MSIsInEiOiJzdXBwb3J0LXRpZXIxIiwiY2giOiJ2b2ljZSJ9.hmac-sha256-7d-ttl",
+  "surveyId": "srv-csat-v1",
+  "questionId": "csat-rating-v1",
+  "channel": "voice",
+  "queueName": "support-tier1",
+  "rating": 4,
+  "comment": null,
+  "capturedAt": "2026-07-13T09:15:00Z",
+  "conversationId": "conv-8f2a1c4e"
+}
