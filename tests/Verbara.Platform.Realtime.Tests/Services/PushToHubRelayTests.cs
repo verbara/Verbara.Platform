@@ -10,6 +10,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+// csat-completion — the typed hub method takes the Pro-package payload; alias it to disambiguate from
+// the identically-named Verbara.Platform.Realtime.Contracts.Dtos.CsatResponseRecordedPayload.
+using CsatResponseRecordedPayload = Verbara.Sdk.Pro.Push.SignalR.Events.CsatResponseRecordedPayload;
 
 namespace Verbara.Platform.Realtime.Tests.Services;
 
@@ -75,10 +78,8 @@ public sealed class PushToHubRelayTests
 
     private sealed record HubMocks(
         IHubContext<PlatformHub, IPlatformHubClient> HubContext,
-        IHubContext<PlatformHub> UntypedHubContext,
         IHubClients<IPlatformHubClient> HubClients,
-        IPlatformHubClient GroupClient,
-        IClientProxy UntypedGroupClient);
+        IPlatformHubClient GroupClient);
 
     private static HubMocks CreateMockHubContext(string group)
     {
@@ -86,6 +87,8 @@ public sealed class PushToHubRelayTests
         groupClient.OnConversationStateChanged(Arg.Any<ConversationStatePayload>()).Returns(Task.CompletedTask);
         groupClient.OnAgentStateChanged(Arg.Any<AgentStatePayload>()).Returns(Task.CompletedTask);
         groupClient.OnClusterNodeStateChanged(Arg.Any<ClusterNodeStatePayload>()).Returns(Task.CompletedTask);
+        // csat-completion — the CSAT recorded branch now uses the typed hub client method.
+        groupClient.OnCsatResponseRecorded(Arg.Any<CsatResponseRecordedPayload>()).Returns(Task.CompletedTask);
 
         var hubClients = Substitute.For<IHubClients<IPlatformHubClient>>();
         hubClients.Group(group).Returns(groupClient);
@@ -93,14 +96,7 @@ public sealed class PushToHubRelayTests
         var hubContext = Substitute.For<IHubContext<PlatformHub, IPlatformHubClient>>();
         hubContext.Clients.Returns(hubClients);
 
-        // csat-runner Phase B — untyped hub context used by the CSAT recorded branch.
-        var untypedGroupClient = Substitute.For<IClientProxy>();
-        var untypedClients = Substitute.For<IHubClients>();
-        untypedClients.Group(group).Returns(untypedGroupClient);
-        var untypedHubContext = Substitute.For<IHubContext<PlatformHub>>();
-        untypedHubContext.Clients.Returns(untypedClients);
-
-        return new HubMocks(hubContext, untypedHubContext, hubClients, groupClient, untypedGroupClient);
+        return new HubMocks(hubContext, hubClients, groupClient);
     }
 
     private static (PushToHubRelay relay, FakePushEventBus bus, HubMocks mocks, FakeClusterLeader leader, RelayOutcomeSink sink)
@@ -117,7 +113,6 @@ public sealed class PushToHubRelayTests
         var relay = new PushToHubRelay(
             bus,
             mocks.HubContext,
-            mocks.UntypedHubContext,
             leader,
             sink,
             logger ?? NullLogger<PushToHubRelay>.Instance);
@@ -194,8 +189,10 @@ public sealed class PushToHubRelayTests
     }
 
     [Fact]
-    public async Task StartAsync_ShouldForwardToSupervisorGroup_WhenCsatResponseRecordedEventIsPublished()
+    public async Task StartAsync_ShouldForwardToSupervisorGroupViaTypedMethod_WhenCsatResponseRecordedEventIsPublished()
     {
+        // csat-completion — the CSAT branch now delivers through the strongly-typed
+        // IPlatformHubClient.OnCsatResponseRecorded (wire method name + payload shape unchanged).
         var (relay, bus, mocks, _, _) = BuildSut("supervisor:acme");
         await relay.StartAsync(CancellationToken.None);
 
@@ -214,16 +211,45 @@ public sealed class PushToHubRelayTests
         bus.Emit(evt);
         await WaitForDispatch(relay);
 
-        await mocks.UntypedGroupClient.Received(1).SendCoreAsync(
-            "OnCsatResponseRecorded",
-            Arg.Is<object?[]>(a =>
-                a.Length == 1 &&
-                a[0] is CsatResponseRecordedPayload &&
-                ((CsatResponseRecordedPayload)a[0]!).TenantId == "acme" &&
-                ((CsatResponseRecordedPayload)a[0]!).Rating == 5 &&
-                ((CsatResponseRecordedPayload)a[0]!).QueueName == "support-tier1" &&
-                ((CsatResponseRecordedPayload)a[0]!).Channel == "webchat"),
-            Arg.Any<CancellationToken>());
+        mocks.HubClients.Received(1).Group("supervisor:acme");
+        await mocks.GroupClient.Received(1).OnCsatResponseRecorded(
+            Arg.Is<CsatResponseRecordedPayload>(p =>
+                p.TenantId == "acme" &&
+                p.Rating == 5 &&
+                p.QueueName == "support-tier1" &&
+                p.Channel == "webchat"));
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldDeliverVoiceChannelWithNullComment_WhenVoiceCsatRecorded()
+    {
+        // csat-completion — the payload channel set now includes 'voice', with a null comment (DTMF
+        // carries no free text); the typed method delivers it to supervisor:{tenantId} unchanged.
+        var (relay, bus, mocks, _, _) = BuildSut("supervisor:acme");
+        await relay.StartAsync(CancellationToken.None);
+
+        var evt = new Verbara.Platform.Core.CsatResponseRecordedEvent(
+            TenantId: "acme",
+            ResponseId: "resp-voice-1",
+            SurveyId: "srv-csat-v1",
+            ConversationId: "conv-8f2a1c4e",
+            Channel: "voice",
+            QueueName: "support-tier1",
+            Rating: 4,
+            Comment: null,
+            CapturedAt: DateTimeOffset.UtcNow);
+
+        bus.Emit(evt);
+        await WaitForDispatch(relay);
+
+        await mocks.GroupClient.Received(1).OnCsatResponseRecorded(
+            Arg.Is<CsatResponseRecordedPayload>(p =>
+                p.Channel == "voice" &&
+                p.Rating == 4 &&
+                p.QueueName == "support-tier1" &&
+                p.Comment == null));
 
         await relay.StopAsync(CancellationToken.None);
     }

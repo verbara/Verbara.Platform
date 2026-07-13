@@ -79,6 +79,12 @@ internal sealed class InMemoryConversationStore : IConversationStore
         return Task.FromResult(result);
     }
 
+    public Task<Conversation?> FindByIdAcrossTenantsAsync(EntityId conversationId, CancellationToken ct)
+    {
+        var result = _items.Values.FirstOrDefault(c => c.ConversationId == conversationId);
+        return Task.FromResult(result);
+    }
+
     public Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         IReadOnlyList<Conversation> result = _items.Values

@@ -10,16 +10,29 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Api.Services;
 
-/// <summary>Where a live voice call is being blind-transferred (3B.2c queue/agent; 3B.2d external).</summary>
+/// <summary>
+/// Where a live voice call is being blind-transferred (3B.2c queue/agent; 3B.2d external;
+/// csat-completion survey-IVR handoff).
+/// </summary>
 internal enum VoiceTransferKind
 {
     Queue,
     Agent,
     External,
+    /// <summary>
+    /// csat-completion (Platform/ADR-0020): hand the caller leg off to the shared survey-IVR dialplan
+    /// context so the caller can rate the call by DTMF. <see cref="VoiceTransferTarget.Value"/> is the
+    /// survey id and <see cref="VoiceTransferTarget.Token"/> the Platform-minted voice-leg token.
+    /// </summary>
+    SurveyIvr,
 }
 
-/// <summary>A blind-transfer destination: <see cref="Value"/> is the queue id, agent id, or external number.</summary>
-internal sealed record VoiceTransferTarget(VoiceTransferKind Kind, string Value);
+/// <summary>
+/// A blind-transfer destination: <see cref="Value"/> is the queue id, agent id, external number, or —
+/// for <see cref="VoiceTransferKind.SurveyIvr"/> — the survey id. <see cref="Token"/> carries the
+/// Platform-minted voice-leg token for a survey-IVR handoff (null for the other kinds).
+/// </summary>
+internal sealed record VoiceTransferTarget(VoiceTransferKind Kind, string Value, string? Token = null);
 
 /// <summary>Result of a transfer attempt — <see cref="Error"/> is a stable machine code on failure.</summary>
 internal sealed record VoiceTransferOutcome(bool Accepted, string? Error);
@@ -50,6 +63,18 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
     private const string OutboundCallerIdVariable = "OUTBOUND_CALLERID";
     /// <summary>Fixed extension in both <c>[stasis-queue]</c> and <c>[transfer-agent]</c> (external uses the number).</summary>
     private const string FixedExten = "s";
+    /// <summary>
+    /// csat-completion: the shared survey-IVR dialplan context the caller leg is redirected into to
+    /// collect a DTMF CSAT rating (static + shared across tenants like <c>[stasis-queue]</c> /
+    /// <c>[transfer-agent]</c>; per-tenant survey config comes from the queue <c>CsatConfig</c> +
+    /// Realtime DB, NOT a per-tenant rendered file). Mirrors the Pro voice-adapter default
+    /// <c>CsatVoiceOptions.SurveyIvrContext</c>.
+    /// </summary>
+    private const string SurveyIvrContext = "survey-ivr";
+    /// <summary>Channel variable the <c>[survey-ivr]</c> context reads to resolve the active survey.</summary>
+    private const string SurveyIdVariable = "SURVEY_ID";
+    /// <summary>Channel variable carrying the Platform-minted voice-leg capture token.</summary>
+    private const string SurveyTokenVariable = "SURVEY_TOKEN";
 
     private readonly IConversationStore _conversations;
     private readonly IQueueStore _queues;
@@ -104,8 +129,9 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
         // Resolve the destination, set the variable(s) the target context reads, then Redirect the
         // customer leg. Queue → [stasis-queue] (the inbound contract: QUEUE_NAME + exten s);
         // Agent → [transfer-agent] (dials TRANSFER_TARGET); External → [outbound-agent] (TRUNK +
-        // OUTBOUND_CALLERID, exten = the dialed number — shared with click-to-dial 3B.2d). AMI sends are
-        // best-effort (mirrors RealtimeStateBridge): a stale channel just leaves the call as-is.
+        // OUTBOUND_CALLERID, exten = the dialed number — shared with click-to-dial 3B.2d);
+        // SurveyIvr → [survey-ivr] (SURVEY_ID + SURVEY_TOKEN — csat-completion voice CSAT handoff). AMI
+        // sends are best-effort (mirrors RealtimeStateBridge): a stale channel just leaves the call as-is.
         string context;
         var exten = FixedExten;
         switch (target.Kind)
@@ -159,6 +185,19 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
                 await SendVarAsync(server, channel, OutboundCallerIdVariable, callerId, ct).ConfigureAwait(false);
                 context = OutboundAgentContext;
                 exten = number;
+                break;
+            }
+            case VoiceTransferKind.SurveyIvr:
+            {
+                // csat-completion (Platform/ADR-0020): set the survey id + the Platform-minted voice-leg
+                // token the IVR reads, then Redirect the customer leg into the shared [survey-ivr] context.
+                // Per-tenant survey config is resolved from the queue CsatConfig + Realtime DB inside the
+                // dialplan — this handoff is tenant-agnostic in the shared context.
+                if (string.IsNullOrEmpty(target.Value))
+                    return new VoiceTransferOutcome(false, "invalid-survey");
+                await SendVarAsync(server, channel, SurveyIdVariable, target.Value, ct).ConfigureAwait(false);
+                await SendVarAsync(server, channel, SurveyTokenVariable, target.Token ?? string.Empty, ct).ConfigureAwait(false);
+                context = SurveyIvrContext;
                 break;
             }
             default:

@@ -895,6 +895,113 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         conversation.Metadata.Should().NotContainKey("pendingCallbackEval");
     }
 
+    // ─── csat-completion — VoiceAgentHangupEvent publish (Platform/ADR-0020) ─────
+
+    // Adds a participant carrying a HangupCause + LeftAt (SDK-internal AddParticipant, via reflection —
+    // mirrors AddCaller) so the abnormal-hangup verdict can be exercised end-to-end through the bridge.
+    private static void AddParticipantWithHangup(
+        CallSession session, string channel, ParticipantRole role, HangupCause? cause, DateTimeOffset? leftAt)
+    {
+        var participant = new SessionParticipant
+        {
+            UniqueId = channel,
+            Channel = channel,
+            Technology = "PJSIP",
+            Role = role,
+            HangupCause = cause,
+            LeftAt = leftAt,
+        };
+        var add = typeof(CallSession).GetMethod("AddParticipant", BindingFlags.Instance | BindingFlags.NonPublic)
+                  ?? throw new InvalidOperationException("CallSession.AddParticipant not found.");
+        add.Invoke(session, [participant]);
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldPublishNonAbnormalHangupEvent_WhenCleanHangupAfterAnswer()
+    {
+        var session = MakeSession("link-hg-clean", Tenant, AgentInterface);
+        session.QueueName = "acme-Support";
+        _sessions.GetById("s-link-hg-clean").Returns(session);
+        // Agent leg ends cleanly (NormalClearing) → IsAbnormalAgentHangup returns false.
+        AddParticipantWithHangup(session, "PJSIP/acme-agent-1", ParticipantRole.Agent,
+            HangupCause.NormalClearing, _clock.UtcNow);
+        var conversation = VoiceConversation("link-hg-clean", ConversationState.Active);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-hg-clean", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Busy));
+        var events = CaptureEvents();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-hg-clean", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(39)));
+
+        events.OfType<VoiceAgentHangupEvent>().Should().ContainSingle(ev =>
+            ev.TenantId == Tenant &&
+            ev.ConversationId == conversation.ConversationId.Value &&
+            ev.QueueName == "Support" &&
+            ev.Abnormal == false);
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldPublishAbnormalHangupEvent_WhenAgentLegDiesAbnormally()
+    {
+        var session = MakeSession("link-hg-abn", Tenant, AgentInterface);
+        session.QueueName = "acme-Support";
+        _sessions.GetById("s-link-hg-abn").Returns(session);
+        // Agent leg dies with a non-normal cause and leaves before the caller → abnormal verdict is true.
+        var agentLeft = _clock.UtcNow;
+        AddParticipantWithHangup(session, "PJSIP/acme-agent-1", ParticipantRole.Agent,
+            HangupCause.NetworkOutOfOrder, agentLeft);
+        AddParticipantWithHangup(session, "PJSIP/acme-trunk/+15551230000", ParticipantRole.Caller,
+            HangupCause.NormalClearing, agentLeft.AddSeconds(2));
+        var conversation = VoiceConversation("link-hg-abn", ConversationState.Active);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-hg-abn", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Busy));
+        var events = CaptureEvents();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-hg-abn", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(39)));
+
+        events.OfType<VoiceAgentHangupEvent>().Should().ContainSingle(ev =>
+            ev.ConversationId == conversation.ConversationId.Value && ev.Abnormal);
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldNotPublishHangupEvent_WhenFollowerPod()
+    {
+        // A follower pod (no AMI-owner lease) produces no side-effects, so nothing is published.
+        var session = MakeSession("link-hg-follower", Tenant, AgentInterface);
+        _sessions.GetById("s-link-hg-follower").Returns(session);
+        var events = CaptureEvents();
+        var bridge = CreateBridge(isLeader: false);
+
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-hg-follower", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(39)));
+
+        events.OfType<VoiceAgentHangupEvent>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldNotPublishHangupEvent_WhenNeverAnsweredAbandoned()
+    {
+        // A never-answered call transitions Queued → Abandoned; it carries no served interaction and no
+        // abnormal verdict, so no VoiceAgentHangupEvent is published.
+        var session = MakeSession("link-hg-aband", Tenant);
+        session.QueueName = "acme-Support";
+        _sessions.GetById("s-link-hg-aband").Returns(session);
+        var conversation = VoiceConversation("link-hg-aband", ConversationState.Queued);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-hg-aband", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        var events = CaptureEvents();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-hg-aband", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(8), null));
+
+        conversation.State.Should().Be(ConversationState.Abandoned);
+        events.OfType<VoiceAgentHangupEvent>().Should().BeEmpty();
+    }
+
     [Fact]
     public async Task OnCallEnded_ShouldNotStampCallbackNumber_WhenCallerAnonymous()
     {

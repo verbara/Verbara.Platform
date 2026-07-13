@@ -10,6 +10,46 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **CSAT voice channel end-to-end + aggregate KPI (`csat-completion`, ADR-0020).** Completes the CSAT
+  train by wiring the voice channel through the existing digital slice and closing the two deferred
+  ADR-0020 follow-ups. All additive/back-compat — the digital slice (`csat-runner`) is unaffected.
+  Consumes **Verbara.Sdk.Pro 2.9.0-pro** (the new `Verbara.Sdk.Pro.CsatRunner` voice adapter + typed
+  `IPlatformHubClient.OnCsatResponseRecorded`). Pairs with the Web aggregate KPI card. Host side of the
+  cross-repo `csat-completion` change.
+  - **Voice trigger** — `CsatConversationEndSource` now maps `ChannelType.Voice` → `voice` and solicits
+    on the answered `WrapUp` transition (never the never-answered `Abandoned`); the digital `Closed`
+    path is unchanged (design D1).
+  - **Voice agent-hangup domain event** — `VoiceConversationBridge.OnCallEndedAsync` publishes a typed
+    sealed `VoiceAgentHangupEvent (TenantId, ConversationId, QueueName, Abnormal, HangupAt)` on the
+    in-process `PlatformEventBus` at the point the existing `IsAbnormalAgentHangup` verdict is computed
+    (leader-gated, exactly-once cluster-wide). Registered in `ApiJsonContext` for SSE-safety.
+  - **Survey-IVR handoff** — new `VoiceTransferKind.SurveyIvr` reuses `VoiceCallControlService.BlindTransferAsync`
+    to set `SURVEY_ID` / `SURVEY_TOKEN` and AMI-`Redirect` the caller leg into the shared static
+    `[survey-ivr]` dialplan context (`docker/asterisk-config/extensions.conf`); per-tenant survey config
+    comes from the queue `CsatConfig` + Realtime DB, not per-tenant file rendering (design D5).
+  - **Voice capture endpoint** — `POST /api/v1/csat/responses/voice` binds the frozen `CsatResponseRequest`
+    shape (`channel` `voice`, `comment` null), anonymous + Platform-minted voice-leg-token-verified
+    (`ICsatVoiceTokenVerifier`, HMAC `v1.{payload}.{sig}` mirroring the webchat verifier) + license-gated,
+    sharing the persist → publish → audit path and setting `SurveyResponse.CallId`.
+  - **Scope-wide aggregate analytics** — new `GET /api/v1/analytics/csat` (`SupervisorPlus` + license-gated)
+    returns a typed sealed `CsatAggregateDto` envelope (`totalResponses`, `averageRating`, `rangeStart`,
+    `rangeEnd`, `queues[]`) whose rows reuse `CsatResponseDto` verbatim; `channel` echoes the requested
+    filter and is `all` when unfiltered. Backed by a new `ISurveyAnalytics.GetScopeAggregateAsync` overload
+    over the existing `(tenant_id, queue_name, captured_at DESC) WHERE channel IS NOT NULL` partial index
+    — no schema change. Resolves ADR-0020's ⟨NEEDS PRODUCT-OWNER INPUT⟩ wallboard question in favor of
+    aggregation (product-owner call 2026-07-13).
+  - **Voice template preview live** — `POST /api/v1/admin/csat/templates/{id}/preview-voice` synthesizes the
+    resolved voice template body through the Pro TTS seam (`TtsPromptCache` → SDK `SpeechSynthesizer`) and
+    returns the audio (`audio/L16`), replacing the prior HTTP 501; the 400/404 guards are unchanged.
+  - **Composition root** — registered the Pro voice seams so `AddProCsatRunner` wires the voice adapter:
+    `ICsatVoiceCaptureSink` (`CsatVoiceCaptureSinkAdapter` → the Surveys capture path), `IDtmfSource`
+    (`AmiDtmfSource` → AMI `DTMFEnd` stream), `IAmiConnection` (primary server), and a default offline
+    `SpeechSynthesizer` (`SilenceSpeechSynthesizer`, superseded by a configured TTS provider).
+- **Typed supervisor CSAT push (`csat-completion`, ADR-0020 follow-up).** `PushToHubRelay` now routes the
+  recorded CSAT event through the strongly-typed `IPlatformHubClient.OnCsatResponseRecorded(CsatResponseRecordedPayload)`
+  (the untyped `IHubContext<PlatformHub>` name-based relay is retired). The wire method name and payload
+  shape are unchanged (`channel` set now includes `voice`), so no SignalR client observes a change — pure
+  type-safety hardening, compilable only against the advanced Pro pin.
 - **CI OpenAPI export artifact (`openapi-typed-client`, ADR-0035)** (#149). The `build-and-test` job now
   captures `/openapi/v1.json` from a briefly-running host (ephemeral CI-only Postgres `services:`
   container, `Platform:OpenApi:Enabled=true`) and publishes it as the `openapi-document-<sha>`

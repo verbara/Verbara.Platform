@@ -94,6 +94,32 @@ internal sealed class PostgresSurveyResponseStore : ISurveyResponseStore
         return rows.Select(r => r.ToResponse()).ToList();
     }
 
+    public async Task<IReadOnlyList<SurveyResponse>> GetByChannelAndRangeAsync(
+        TenantId tenantId, string? channel, DateRange range, CancellationToken ct)
+    {
+        // Scope-wide (all queues) read over the same partial index (csat-completion). The channel filter
+        // is optional — null/empty means all channels; the WHERE channel IS NOT NULL predicate keeps the
+        // scan on the partial index either way.
+        var hasChannel = !string.IsNullOrWhiteSpace(channel);
+        var rows = await _dataSource.QueryListAsync(
+            SelectColumns +
+            "FROM survey_responses " +
+            "WHERE tenant_id = @TenantId AND channel IS NOT NULL " +
+            (hasChannel ? "AND channel = @Channel " : "") +
+            "AND captured_at >= @RangeStart AND captured_at <= @RangeEnd " +
+            "ORDER BY captured_at DESC",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                if (hasChannel)
+                    p.Add(new NpgsqlParameter("Channel", channel!));
+                p.Add(new NpgsqlParameter("RangeStart", NpgsqlDbType.TimestampTz) { Value = range.Start });
+                p.Add(new NpgsqlParameter("RangeEnd", NpgsqlDbType.TimestampTz) { Value = range.End });
+            },
+            ResponseRow.Map, ct);
+        return rows.Select(r => r.ToResponse()).ToList();
+    }
+
     private const string SelectColumns =
         "SELECT response_id, survey_id, tenant_id, conversation_id, contact_id, agent_id, answers, submitted_at, " +
         "channel, queue_name, rating, comment, captured_at, call_id ";

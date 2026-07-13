@@ -216,6 +216,63 @@ public sealed class VoiceCallControlServiceTests : IDisposable
         outcome.Error.Should().Be("no-trunk");
     }
 
+    // ─── csat-completion — survey-IVR handoff (Platform/ADR-0020) ─────────────────
+
+    [Fact]
+    public async Task BlindTransferAsync_ShouldSetSurveyVarsAndRedirectToSurveyIvr_WhenSurveyIvrTarget()
+    {
+        var conv = VoiceConversation();
+        _conversations.GetByIdAsync(TenantId, conv.ConversationId, Arg.Any<CancellationToken>()).Returns(conv);
+        var sut = CreateService();
+
+        var outcome = await sut.BlindTransferAsync(
+            TenantId, conv.ConversationId,
+            new VoiceTransferTarget(VoiceTransferKind.SurveyIvr, "srv-csat-v1", Token: "v1.payload.sig"),
+            CancellationToken.None);
+
+        outcome.Accepted.Should().BeTrue();
+        await _ami.Received().SendActionAsync(
+            Arg.Is<SetVarAction>(v => v.Channel == CustomerChannel && v.Variable == "SURVEY_ID" && v.Value == "srv-csat-v1"),
+            Arg.Any<CancellationToken>());
+        await _ami.Received().SendActionAsync(
+            Arg.Is<SetVarAction>(v => v.Variable == "SURVEY_TOKEN" && v.Value == "v1.payload.sig"),
+            Arg.Any<CancellationToken>());
+        await _ami.Received().SendActionAsync(
+            Arg.Is<RedirectAction>(r => r.Channel == CustomerChannel
+                && r.Context == "survey-ivr" && r.Exten == "s"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task BlindTransferAsync_ShouldReturnNotLeader_WhenSurveyIvrAndNotLeader()
+    {
+        var sut = CreateService(isLeader: false);
+
+        var outcome = await sut.BlindTransferAsync(
+            TenantId, EntityId.New(),
+            new VoiceTransferTarget(VoiceTransferKind.SurveyIvr, "srv-csat-v1", Token: "v1.payload.sig"),
+            CancellationToken.None);
+
+        outcome.Accepted.Should().BeFalse();
+        outcome.Error.Should().Be("not-leader");
+    }
+
+    [Fact]
+    public async Task BlindTransferAsync_ShouldReturnChannelUnknown_WhenSurveyIvrAndCustomerChannelMissing()
+    {
+        var conv = VoiceConversation(withChannel: false);
+        _conversations.GetByIdAsync(TenantId, conv.ConversationId, Arg.Any<CancellationToken>()).Returns(conv);
+        var sut = CreateService();
+
+        var outcome = await sut.BlindTransferAsync(
+            TenantId, conv.ConversationId,
+            new VoiceTransferTarget(VoiceTransferKind.SurveyIvr, "srv-csat-v1", Token: "v1.payload.sig"),
+            CancellationToken.None);
+
+        outcome.Error.Should().Be("channel-unknown");
+        await _ami.DidNotReceive().SendActionAsync(Arg.Any<RedirectAction>(), Arg.Any<CancellationToken>());
+    }
+
     private sealed class FakeRouteResolver : OutboundRouteResolverBase
     {
         public Trunk? Trunk;

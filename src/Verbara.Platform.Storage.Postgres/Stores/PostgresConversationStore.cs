@@ -210,6 +210,20 @@ internal sealed class PostgresConversationStore : IConversationStore
         return row?.ToConversation();
     }
 
+    public async Task<Conversation?> FindByIdAcrossTenantsAsync(EntityId conversationId, CancellationToken ct)
+    {
+        // conversation_id is globally unique, so this resolves at most one row regardless of tenant.
+        // Used only by the in-process voice-CSAT capture sink to recover the row's tenant partition
+        // (the Pro CsatCapture carries no tenant — see IConversationStore).
+        var row = await _dataSource.QueryFirstOrDefaultAsync(
+            "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "FROM conversations WHERE conversation_id = @ConversationId",
+            p => p.Add(new NpgsqlParameter("ConversationId", conversationId.Value)),
+            ConversationRow.Map, ct);
+        return row?.ToConversation();
+    }
+
     public async Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         var rows = await _dataSource.QueryListAsync(

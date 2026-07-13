@@ -550,6 +550,19 @@ builder.Services.AddSingleton<Verbara.Platform.Api.Services.ICsatWebChatTokenVer
             System.Text.Encoding.UTF8.GetBytes("verbara.csat.webchat.token:" + (licensePath ?? "default")));
     return new Verbara.Platform.Api.Services.HmacCsatWebChatTokenVerifier(secret);
 });
+// CSAT voice-leg capture token verifier (csat-completion, Platform/ADR-0020). Verifies the
+// Platform-minted v1.{payload}.{sig} responseToken the survey-IVR leg submits with its DTMF rating.
+// Mirrors the webchat token pattern; the secret is shared (Csat:WebChatTokenSecret) so a single CSAT
+// signing key covers both channels, with the same stable per-deployment fallback.
+builder.Services.AddSingleton<Verbara.Platform.Api.Services.ICsatVoiceTokenVerifier>(_ =>
+{
+    var configured = builder.Configuration["Csat:WebChatTokenSecret"];
+    var secret = !string.IsNullOrEmpty(configured)
+        ? System.Text.Encoding.UTF8.GetBytes(configured)
+        : System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes("verbara.csat.webchat.token:" + (licensePath ?? "default")));
+    return new Verbara.Platform.Api.Services.HmacCsatVoiceTokenVerifier(secret);
+});
 // CSAT template provider (csat-runner Phase E). Platform's in-process implementation of
 // Pro's Verbara.Sdk.Pro.CsatRunner.ICsatTemplateProvider contract — Pro's channel adapters
 // resolve locale-templated prompts via DI (NOT an API call; Platform/ADR-0020 boundary).
@@ -599,10 +612,33 @@ builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatConversa
 builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<Verbara.Platform.Api.Services.CsatConversationEndSource>());
 
+// 5b.6 — voice CSAT seams (csat-completion, Platform/ADR-0020). AddProCsatRunner now wires the Pro
+// voice adapter unconditionally, so its host-supplied seams MUST resolve: the capture sink (lands the
+// collected DTMF rating on the Surveys capture path), the DTMF source (adapts the AMI DTMFEnd stream),
+// the AMI connection (the primary server's connection), and a SpeechSynthesizer (the TtsPromptCache TTS
+// seam — a real provider when configured, else the offline SilenceSpeechSynthesizer). These are
+// registered BEFORE AddProCsatRunner so the voice adapter + TtsPromptCache construct.
+builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatVoiceCaptureSink,
+    Verbara.Platform.Api.Services.CsatVoiceCaptureSinkAdapter>();
+builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Adapters.Voice.IDtmfSource,
+    Verbara.Platform.Api.Services.AmiDtmfSource>();
+// IAmiConnection: the voice adapter AMI-BlindTransfers the caller leg via the primary server's
+// connection. Resolved from the server pool (fail-closed to a throwing accessor when unconfigured —
+// the adapter only runs on the AMI-owner pod with a live primary server).
+builder.Services.TryAddSingleton<Verbara.Sdk.IAmiConnection>(sp =>
+    sp.GetRequiredService<Verbara.Sdk.Live.Server.VerbaraServerPool>().GetServer("primary")?.Connection
+    ?? throw new InvalidOperationException("No primary AMI server is configured for voice CSAT dispatch."));
+// SpeechSynthesizer: default to the offline Silence synthesizer so a dev / single-host deployment is
+// self-contained. TryAdd lets an operator register a real SDK TTS provider (Azure / ElevenLabs / …)
+// earlier in the composition root to supersede it.
+builder.Services.TryAddSingleton<Verbara.Sdk.VoiceAi.SpeechSynthesizer,
+    Verbara.Platform.Api.Services.SilenceSpeechSynthesizer>();
+
 // 5b.5 — host Pro's CSAT engine. WithEmail configures the tokenized Reply-To (domain + HMAC
 // signing secret shared with the Phase-C inbound reply parser); WithWebChat pins the
-// csat_requested system-message type. The orchestrator + 3 channel adapters + hosted service
-// register here.
+// csat_requested system-message type; WithVoice pins the shared survey-IVR dialplan context/exten
+// (matching Platform's [survey-ivr] context + VoiceCallControlService.SurveyIvr handoff). The
+// orchestrator + 4 channel adapters + hosted service register here.
 Verbara.Sdk.Pro.CsatRunner.DependencyInjection.CsatRunnerServiceCollectionExtensions.AddProCsatRunner(
     builder.Services,
     csat => csat
@@ -613,6 +649,7 @@ Verbara.Sdk.Pro.CsatRunner.DependencyInjection.CsatRunnerServiceCollectionExtens
                 ?? builder.Configuration["Csat:WebChatTokenSecret"]
                 ?? "verbara.csat.email.reply-token." + (licensePath ?? "default");
         })
+        .WithVoice(voice => voice.SurveyIvrContext = "survey-ivr")
         .WithWebChat(web => web.SystemMessageType = "csat_requested"));
 
 builder.Services.AddHostedService(sp =>

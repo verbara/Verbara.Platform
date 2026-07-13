@@ -121,19 +121,22 @@ public sealed class CsatTemplateAdminEndpointsTests : IClassFixture<UnifiedPlatf
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
-    // ─── Preview voice (deferred) ────────────────────────────────────────────────
+    // ─── Preview voice (csat-completion — synthesized) ───────────────────────────
 
     [Fact]
-    public async Task PreviewVoice_ShouldReturn501Deferred_WhenTemplateExists()
+    public async Task PreviewVoice_ShouldReturnSynthesizedAudio_WhenTemplateExists()
     {
+        // csat-completion — the voice channel ships, so preview-voice synthesizes the resolved template
+        // body through the Pro TTS seam (TtsPromptCache → SpeechSynthesizer) instead of returning 501.
         var id = $"tmpl-{Guid.NewGuid():N}";
         await UpsertAsync(id, "voice", "en-US", body: "Rate one to five.");
 
         var response = await _client.PostAsync($"/api/admin/csat/templates/{id}/preview-voice", content: null);
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotImplemented);
-        var node = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
-        node["title"]!.GetValue<string>().Should().Be("Voice preview deferred");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("audio/L16");
+        var audio = await response.Content.ReadAsByteArrayAsync();
+        audio.Length.Should().BeGreaterThan(0);
     }
 
     [Fact]

@@ -356,6 +356,10 @@ public sealed class CollectReasonNodeHandlerTests
             string voiceLinkedId, CancellationToken ct) =>
             Task.FromResult<Conversation?>(null);
 
+        public Task<Conversation?> FindByIdAcrossTenantsAsync(
+            EntityId conversationId, CancellationToken ct) =>
+            Task.FromResult<Conversation?>(null);
+
         public Task<IReadOnlyList<Conversation>> ListByContactAsync(
             TenantId tenantId, EntityId contactId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<Conversation>>([]);

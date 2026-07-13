@@ -46,6 +46,35 @@ public sealed class InMemorySurveyAnalytics : ISurveyAnalytics
     }
 
     /// <inheritdoc />
+    public async Task<CsatScopeAggregate> GetScopeAggregateAsync(
+        TenantId tenantId, string? channel, DateRange range, CancellationToken ct)
+    {
+        var responses = await _responseStore
+            .GetByChannelAndRangeAsync(tenantId, channel, range, ct)
+            .ConfigureAwait(false);
+
+        // Group the rated rows by queue; compute per-queue totals + means and the response-weighted
+        // scope roll-up (mirrors the Postgres GROUP BY queue_name path).
+        var queues = responses
+            .Where(r => r.Rating.HasValue && !string.IsNullOrEmpty(r.QueueName))
+            .GroupBy(r => r.QueueName!, StringComparer.Ordinal)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g =>
+            {
+                var ratings = g.Select(r => (double)r.Rating!.Value).ToList();
+                return new CsatQueueAggregate(g.Key, ratings.Count, ratings.Average());
+            })
+            .ToList();
+
+        var scopeTotal = queues.Sum(q => q.TotalResponses);
+        var scopeAvg = scopeTotal > 0
+            ? queues.Sum(q => q.AverageRating * q.TotalResponses) / scopeTotal
+            : 0d;
+
+        return new CsatScopeAggregate(scopeTotal, scopeAvg, queues);
+    }
+
+    /// <inheritdoc />
     [Obsolete("Use GetByQueueAndChannelAsync; removed in v2.19.0 (csat-runner Phase A / Pro ADR-0012 cadence).")]
     public async Task<SurveyScoreSummary> GetByQueueAsync(TenantId tenantId, EntityId surveyId, string queueName, CancellationToken ct)
     {

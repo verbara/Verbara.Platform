@@ -31,6 +31,14 @@ internal static class CsatResponseEndpoints
 
         webchat.MapPost("/webchat", CaptureWebChat);
 
+        // Public voice capture (csat-completion, Platform/ADR-0020) — the survey-IVR leg submits the
+        // collected DTMF rating here after the handoff. Anonymous but voice-token-verified. License-gated.
+        var voice = app.MapGroup("/csat/responses")
+            .AllowAnonymous()
+            .RequireLicenseFeature(LicenseFeature.CsatRunner);
+
+        voice.MapPost("/voice", CaptureVoice);
+
         // Internal email/sms capture — worker service-key gated (the IMAP poller /
         // SMS correlator forward parsed digit replies here). License-gated.
         var internalCapture = app.MapGroup("/csat/responses")
@@ -54,13 +62,15 @@ internal static class CsatResponseEndpoints
         internalCapture.MapPost("/email", CaptureEmail);
         internalCapture.MapPost("/sms", CaptureSms);
 
-        // Per-queue CSAT analytics read — SupervisorPlus + license-gated.
+        // CSAT analytics reads — SupervisorPlus + license-gated. Per-queue drill-down + the scope-wide
+        // aggregate roll-up (csat-completion, Platform/ADR-0020).
         var analytics = app.MapGroup("/analytics/csat")
             .RequireAuthorization("SupervisorPlus")
             .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.CsatRunner);
 
         analytics.MapGet("/queues/{queueId}", GetQueueCsatSummary);
+        analytics.MapGet("/", GetScopeCsatAggregate);
     }
 
     // ─── WebChat (public, token-verified) ───────────────────────────────────────
@@ -92,6 +102,45 @@ internal static class CsatResponseEndpoints
 
         var tenantId = new TenantId(token.TenantId);
         var result = await CaptureAsync(body, tenantId, context, responseStore, eventBus, audit, ct).ConfigureAwait(false);
+        return result.Result switch
+        {
+            Ok<CsatResponseDto> ok => ok,
+            ValidationProblem vp => vp,
+            _ => TypedResults.BadRequest(),
+        };
+    }
+
+    // ─── Voice (public, voice-token-verified) — csat-completion ─────────────────
+
+    private static async Task<Results<Ok<CsatResponseDto>, UnauthorizedHttpResult, ValidationProblem, BadRequest>> CaptureVoice(
+        [FromBody] CsatResponseRequest body,
+        HttpContext context,
+        [FromServices] ICsatVoiceTokenVerifier tokenVerifier,
+        [FromServices] ISurveyResponseStore responseStore,
+        [FromServices] PlatformEventBus eventBus,
+        [FromServices] IAuditService audit,
+        CancellationToken ct)
+    {
+        var token = tokenVerifier.Verify(body.ResponseToken, DateTimeOffset.UtcNow);
+
+        // Missing / malformed / expired token → reject, persist nothing.
+        if (token is null)
+            return TypedResults.Unauthorized();
+
+        // The signed tenant/queue/channel MUST match the submitted claims; voice tokens only sign voice.
+        if (!string.Equals(token.QueueName, body.QueueName, StringComparison.Ordinal) ||
+            !string.Equals(token.Channel, body.Channel, StringComparison.Ordinal) ||
+            !string.Equals(body.Channel, "voice", StringComparison.Ordinal))
+            return TypedResults.Unauthorized();
+
+        var validation = ValidateBody(body);
+        if (validation is not null)
+            return validation;
+
+        var tenantId = new TenantId(token.TenantId);
+        // Voice DTMF carries no free text — the capture's comment is null (frozen fixture). CallId is set
+        // from the correlated voice conversation so the CDR can join the recorded rating to the call.
+        var result = await CaptureAsync(body, tenantId, context, responseStore, eventBus, audit, ct, setCallId: true).ConfigureAwait(false);
         return result.Result switch
         {
             Ok<CsatResponseDto> ok => ok,
@@ -160,7 +209,8 @@ internal static class CsatResponseEndpoints
         ISurveyResponseStore responseStore,
         PlatformEventBus eventBus,
         IAuditService audit,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool setCallId = false)
     {
         if (!EntityId.IsValid(body.SurveyId) || !EntityId.IsValid(body.ConversationId))
             return TypedResults.BadRequest();
@@ -175,6 +225,9 @@ internal static class CsatResponseEndpoints
             TenantId = tenantId,
             ConversationId = conversationId,
             ContactId = conversationId, // capture has no distinct contact id; correlate by conversation
+            // Voice captures (csat-completion) set CallId from the correlated voice conversation so the
+            // CDR can join the recorded rating to the call; digital captures leave it null.
+            CallId = setCallId ? conversationId : null,
             Answers = [new SurveyAnswer(EntityId.From(SurveyQuestionIds.CsatRating), body.Rating.ToString(System.Globalization.CultureInfo.InvariantCulture))],
             SubmittedAt = body.CapturedAt,
             Channel = body.Channel,
@@ -256,6 +309,47 @@ internal static class CsatResponseEndpoints
             AverageRating: summary.AverageScore,
             RangeStart: start,
             RangeEnd: end));
+    }
+
+    // ─── Scope-wide aggregate read (csat-completion) ────────────────────────────
+
+    private static async Task<Results<Ok<CsatAggregateDto>, BadRequest>> GetScopeCsatAggregate(
+        HttpContext context,
+        [FromServices] ISurveyAnalytics analytics,
+        [FromQuery] string? range,
+        [FromQuery] string? channel,
+        CancellationToken ct)
+    {
+        if (!context.Items.TryGetValue("TenantId", out var val) || val is not TenantId tenantId)
+            return TypedResults.BadRequest();
+
+        var end = DateTimeOffset.UtcNow;
+        var start = end - ParseRange(range);
+        var dateRange = new DateRange(start, end);
+        // The channel filter echoes back into the envelope + every queues[] row; 'all' when unfiltered.
+        var hasChannel = !string.IsNullOrWhiteSpace(channel);
+        var channelEcho = hasChannel ? channel! : "all";
+
+        var scope = await analytics
+            .GetScopeAggregateAsync(tenantId, hasChannel ? channel : null, dateRange, ct)
+            .ConfigureAwait(false);
+
+        var queues = scope.Queues
+            .Select(q => new CsatResponseDto(
+                QueueName: q.QueueName,
+                Channel: channelEcho,
+                TotalResponses: q.TotalResponses,
+                AverageRating: q.AverageRating,
+                RangeStart: start,
+                RangeEnd: end))
+            .ToList();
+
+        return TypedResults.Ok(new CsatAggregateDto(
+            TotalResponses: scope.TotalResponses,
+            AverageRating: scope.AverageRating,
+            RangeStart: start,
+            RangeEnd: end,
+            Queues: queues));
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────

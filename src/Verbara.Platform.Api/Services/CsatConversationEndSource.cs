@@ -12,29 +12,30 @@ namespace Verbara.Platform.Api.Services;
 /// Platform's in-process implementation of the Pro-defined
 /// <see cref="ICsatConversationEndSource"/> trigger seam (csat-runner Phase E2, task 5b.4;
 /// Platform/ADR-0020 + verbara-meta/ADR-0005 open-core boundary). Pro defines the trigger; Platform
-/// owns the digital conversation lifecycle and the per-queue CSAT configuration and pushes a
+/// owns the conversation lifecycle and the per-queue CSAT configuration and pushes a
 /// <see cref="CsatConversationEndedSignal"/> onto the hot <see cref="Ended"/> stream each time a
-/// digital conversation (webchat/email/sms) on a CSAT-configured queue ends. Pro's
-/// <c>CsatRunnerOrchestrator</c> subscribes to <see cref="Ended"/> for the process lifetime and
+/// conversation (webchat/email/sms, and — since csat-completion — voice) on a CSAT-configured queue
+/// ends. Pro's <c>CsatRunnerOrchestrator</c> subscribes to <see cref="Ended"/> for the process lifetime and
 /// applies the license, queue-enabled, sampling, and preferred-channel gates on each signal — it
 /// never calls back into Platform.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The conversation-end hook is the existing <see cref="ConversationStateChangedEvent"/> published on
-/// the in-process <see cref="PlatformEventBus"/> (there is no dedicated "conversation ended" event;
-/// the terminal <see cref="ConversationState.Closed"/> transition is the canonical end signal, the
-/// same event <c>PushToHubRelay</c> and <c>RealtimeStateBridge</c> already consume). This service is a
+/// the in-process <see cref="PlatformEventBus"/> (there is no dedicated "conversation ended" event).
+/// For digital channels the terminal <see cref="ConversationState.Closed"/> transition is the canonical
+/// end signal; voice conversations never reach <see cref="ConversationState.Closed"/> — they solicit on
+/// the answered <see cref="ConversationState.WrapUp"/> transition, and NEVER on the never-answered
+/// <see cref="ConversationState.Abandoned"/> (design D1). This service is a
 /// <see cref="BackgroundService"/> that subscribes to
-/// <c>PlatformEventBus.Events.OfType&lt;ConversationStateChangedEvent&gt;()</c> and, for each
-/// transition into <see cref="ConversationState.Closed"/>, resolves the queue-config snapshot +
-/// identity/recipient/locale and pushes a signal — mirroring the
-/// <c>VerbaraCapacitySyncService</c> subscription pattern.
+/// <c>PlatformEventBus.Events.OfType&lt;ConversationStateChangedEvent&gt;()</c> and, for each matching
+/// terminal transition, resolves the queue-config snapshot + identity/recipient/locale and pushes a
+/// signal — mirroring the <c>VerbaraCapacitySyncService</c> subscription pattern.
 /// </para>
 /// <para>
 /// Resolution: the <see cref="Conversation"/> (channel + queue owner + contact) is loaded via
-/// <see cref="IConversationStore"/>; only the digital channels
-/// (<see cref="ChannelType.WebChat"/>/<see cref="ChannelType.Email"/>/<see cref="ChannelType.Sms"/>)
+/// <see cref="IConversationStore"/>; only the supported channels
+/// (<see cref="ChannelType.WebChat"/>/<see cref="ChannelType.Email"/>/<see cref="ChannelType.Sms"/>/<see cref="ChannelType.Voice"/>)
 /// proceed. The queue's <see cref="CsatConfig"/> snapshot
 /// (<c>Enabled</c>/<c>PreferredChannel</c>/<c>SamplingRatePercent</c>) comes from
 /// <see cref="IQueueStore"/>; the tenant's active CSAT <see cref="Survey"/> yields the
@@ -92,7 +93,7 @@ internal sealed partial class CsatConversationEndSource : BackgroundService, ICs
     {
         _subscription = _eventBus.Events
             .OfType<ConversationStateChangedEvent>()
-            .Where(static e => string.Equals(e.NewState, nameof(ConversationState.Closed), StringComparison.Ordinal))
+            .Where(static e => IsSolicitTerminalState(e.NewState))
             .Subscribe(
                 onNext: evt => HandleClosedSafely(evt, stoppingToken),
                 onError: HandleSubscriptionFault,
@@ -140,7 +141,18 @@ internal sealed partial class CsatConversationEndSource : BackgroundService, ICs
 
             var nativeChannel = MapChannel(conversation.Channel);
             if (nativeChannel is null)
-                return; // non-digital (voice/whatsapp/etc.) — the engine handles only email/sms/webchat
+                return; // unsupported channel (whatsapp/etc.) — the engine handles voice + email/sms/webchat
+
+            // Terminal-state / channel reconciliation (design D1): digital channels solicit on the
+            // `Closed` transition; voice conversations never reach `Closed` — they solicit on the
+            // answered `WrapUp` transition (never on the never-answered `Abandoned`). A transition that
+            // does not match the conversation's channel (e.g. a digital `WrapUp`, or a voice `Closed`)
+            // is not a CSAT solicit event, so it is ignored.
+            var isVoice = conversation.Channel is ChannelType.Voice;
+            var isVoiceWrapUp = isVoice && string.Equals(evt.NewState, nameof(ConversationState.WrapUp), StringComparison.Ordinal);
+            var isDigitalClosed = !isVoice && string.Equals(evt.NewState, nameof(ConversationState.Closed), StringComparison.Ordinal);
+            if (!isVoiceWrapUp && !isDigitalClosed)
+                return;
 
             // Queue-config snapshot (Enabled / PreferredChannel / SamplingRatePercent).
             string queueName = string.Empty;
@@ -209,14 +221,24 @@ internal sealed partial class CsatConversationEndSource : BackgroundService, ICs
         }
     }
 
-    // Digital channels the CSAT engine routes over; every other ChannelType is out of scope.
+    // Channels the CSAT engine routes over; every other ChannelType is out of scope. Voice joins the
+    // digital channels (csat-completion, Platform/ADR-0020): its adapter is Pro-owned but Platform still
+    // resolves and pushes the end signal for it, keyed on the voice-specific terminal state (see D1).
     private static string? MapChannel(ChannelType channel) => channel switch
     {
         ChannelType.WebChat => "webchat",
         ChannelType.Email => "email",
         ChannelType.Sms => "sms",
+        ChannelType.Voice => "voice",
         _ => null,
     };
+
+    // The terminal transitions that MAY solicit CSAT: `Closed` for the digital channels and `WrapUp`
+    // (answered) for voice. `Abandoned` (never-answered voice) is deliberately excluded — there is no
+    // served interaction to rate. The handler reconciles the state against the conversation's channel.
+    private static bool IsSolicitTerminalState(string newState) =>
+        string.Equals(newState, nameof(ConversationState.Closed), StringComparison.Ordinal) ||
+        string.Equals(newState, nameof(ConversationState.WrapUp), StringComparison.Ordinal);
 
     public override void Dispose()
     {

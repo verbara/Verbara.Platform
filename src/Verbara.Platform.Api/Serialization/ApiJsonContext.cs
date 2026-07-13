@@ -46,6 +46,8 @@ namespace Verbara.Platform.Api.Serialization;
 // for the no-reflection AOT contract (JsonSerializerIsReflectionEnabledByDefault=false).
 [JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatResponseRequest))]
 [JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatResponseDto))]
+// csat-completion (Platform/ADR-0020) — scope-wide aggregate read envelope (queues[] reuse CsatResponseDto).
+[JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatAggregateDto))]
 [JsonSerializable(typeof(Verbara.Platform.Api.Dtos.QueueCsatConfigDto))]
 [JsonSerializable(typeof(Verbara.Platform.Api.Dtos.CsatTemplateDto))]
 // CSAT (csat-runner Phase E) — admin template CRUD surface: list projection +
@@ -160,6 +162,9 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ConversationAbandonedEvent))]
 [JsonSerializable(typeof(AgentCapacityChangedEvent))]
 [JsonSerializable(typeof(VoiceScreenPopEvent))]
+// csat-completion (Platform/ADR-0020) — voice agent-hangup domain event. In-process (PlatformEventBus)
+// but every PlatformEvent is registered so the SSE relay's runtime-type serialization never crashes.
+[JsonSerializable(typeof(VoiceAgentHangupEvent))]
 // SSE: Agent Assist events
 [JsonSerializable(typeof(AgentAssistSuggestionEvent))]
 [JsonSerializable(typeof(AgentAssistSentimentEvent))]
