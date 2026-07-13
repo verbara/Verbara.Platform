@@ -134,7 +134,7 @@ The R9/R10/R11 risk classes from the prior plan disappear as concepts rather tha
 
 ## Sequencing (cross-repo)
 
-1. **Phase 1 — SDK foundation.** Build `Verbara.Sdk.Data.Npgsql` (facade + reader/param helpers) with unit tests. Migrate `Verbara.Sdk.Sessions.Postgres` as the SDK pilot (simplest surface, already the prior canary). Pack to both feeds (`/media/Data/Source/Verbara/local-nuget-feed/` + `Verbara.Platform/local-nuget-feed/` per `feedback_nuget_two_feeds.md`).
+1. **Phase 1 — SDK foundation.** Build `Verbara.Sdk.Data.Npgsql` (facade + reader/param helpers) with unit tests. Migrate `Verbara.Sdk.Sessions.Postgres` as the SDK pilot (simplest surface, already the prior canary). Pack to both feeds (`../local-nuget-feed/` + `Verbara.Platform/local-nuget-feed/` per `feedback_nuget_two_feeds.md`).
 2. **Phase 2 — Platform pilot + proof-of-concept gate.** Migrate `Verbara.Platform.Storage.Postgres` (in Platform.Api closure → line 34 of its csproj references Dapper directly). Run the AOT publish and **confirm the diagnostic count drops from 50.** This validates the entire approach at Platform scale before the sweep.
 3. **Phase 3 — Pro sweep.** Migrate the 7 Pro storage packages via the `dapper-aot-migration` subagent (one per package, fresh context), in waves: Wave 1 simplest (Dialer, EventStore, Cluster, Realtime), Wave 2 special-handling (Analytics, CallAnalytics, AgentAssist). Plus `Verbara.Platform.Identity` `DapperXmlRepository` and any direct `Verbara.Platform.Api` sites.
 4. **Phase 4 — Flip + triple gate.** Edit `Verbara.Platform.Api.csproj` (`<IsAotCompatible>true>`, remove analyzer disables, add `<PublishAot>true>` + `<InvariantGlobalization>true>`). Triple gate: **G1** AOT publish clean (0 diagnostics, native ELF, no Verbara `.dll` in publish dir); **G2** full cross-repo test matrix green (Platform.Api 943 + Realtime 22 + Pro 1,329 + SDK ~3,079, zero new failures); **G3** AOT image E2E smoke (`docker/Dockerfile.api-aot`, `runtime-deps:10.0`; Setup Wizard + WebChat + Email + SIP smoke; 0 `PlatformNotSupportedException`, memory steady <250 MB, JSONB byte-identical vs IL baseline).
@@ -169,7 +169,7 @@ The R9/R10/R11 risk classes from the prior plan disappear as concepts rather tha
 
 ```sh
 # Pilot proof-of-concept (Phase 2) — the gate Option O could never pass
-cd /media/Data/Source/Verbara/Verbara.Platform/src/Verbara.Platform.Api
+cd ../Verbara.Platform/src/Verbara.Platform.Api
 dotnet publish Verbara.Platform.Api.csproj -c Release -r linux-x64 --self-contained true \
   -p:PublishAot=true -p:InvariantGlobalization=true -p:TrimmerSingleWarn=false \
   -o /tmp/aot-publish-phase-d/ 2>&1 | tee /tmp/aot-publish-phase-d.log
@@ -178,7 +178,7 @@ file /tmp/aot-publish-phase-d/Verbara.Platform.Api                              
 ls /tmp/aot-publish-phase-d/*.dll 2>/dev/null | wc -l                                              # 0 (no managed Verbara DLLs)
 
 # Full test matrix (Phase 4 G2)
-cd /media/Data/Source/Verbara/Verbara.Platform && dotnet test Verbara.Platform.slnx -c Release
-cd /media/Data/Source/Verbara/Verbara.Sdk.Pro && dotnet test -c Release
-cd /media/Data/Source/Verbara/Verbara.Sdk && dotnet test -c Release
+cd ../Verbara.Platform && dotnet test Verbara.Platform.slnx -c Release
+cd ../Verbara.Sdk.Pro && dotnet test -c Release
+cd ../Verbara.Sdk && dotnet test -c Release
 ```

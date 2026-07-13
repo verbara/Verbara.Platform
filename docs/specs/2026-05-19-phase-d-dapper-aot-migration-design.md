@@ -197,7 +197,7 @@ new tests. Refactor only build configuration + AssemblyInfo.
 Per `feedback_nuget_two_feeds.md` (Docker context only sees the Platform-local copy):
 
 - During sweep: experimental version suffix `2.5.0-dapperaot.N` (SDK) / `2.5.0-pro-dapperaot.N` (Pro). N = session-incremented.
-- Each pack writes to BOTH `/media/Data/Source/Verbara/local-nuget-feed/` AND `Verbara.Platform/local-nuget-feed/`.
+- Each pack writes to BOTH `../local-nuget-feed/` AND `Verbara.Platform/local-nuget-feed/`.
 - At sweep close (3.C green): single final pack with real semver (`2.5.0` SDK / `2.5.0-pro` Pro), single commit per repo.
 
 ## 6. Risk register (initial)

@@ -25,6 +25,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   surfaced by the first real invocation of the endpoint). Additive schema metadata only — no
   endpoint request/response contract, gating, or status-code change.
 
+### Changed
+- **Docs hygiene — machine-path purge in living spec docs (`docs-hygiene-sweep`).** Removed all
+  absolute `/media/Data/Source/Verbara/...` machine-path prefixes from 8 tracked `docs/specs/`
+  design documents (5 doctor-named + 3 phase-d): `cd`/`dotnet pack` instructions rewritten
+  workspace-relative (`../Verbara.Sdk.Pro`, `../local-nuget-feed/`), cross-repo file citations
+  repo-qualified relative, per the ADR-0005 public-repo content rule + `openspec/config.yaml`
+  absolute-path ban. Token-level path substitutions only — dated period-correct content and
+  Spanish prose otherwise untouched; no code changed (PR number cited at archive time).
+
 ---
 
 ## [2.18.0] — 2026-07-11 — CSAT consumer (customer-satisfaction capture; digital-first) + Pro CSAT engine hosting
