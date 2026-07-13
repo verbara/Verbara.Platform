@@ -199,8 +199,10 @@ name-based relay), following the `SendConversationAsync`/`SendAgentAsync` typed 
 relay. The typed `OnCsatResponseRecorded` method is defined on `IPlatformHubClient` in the Pro package
 (buildOrder 1) — Platform's typed branch compiles only against the advanced Pro pin. The wire method
 name and the `CsatResponseRecordedPayload` shape are unchanged
-(`fixtures/csat-response-recorded-payload.v1.json`, whose `channel` set now includes `voice` alongside
-`webchat`/`email`/`sms`), so no SignalR client observes a wire change — this is type-safety hardening
+(`fixtures/csat-response-recorded-payload.v1.json` — verbatim fields `tenantId`, `responseId`,
+`surveyId`, `conversationId`, `channel`, `queueName`, `rating`, `comment` (nullable), `capturedAt`;
+the `channel` set now includes `voice` alongside `webchat`/`email`/`sms`), so no SignalR client
+observes a wire change — this is type-safety hardening
 (Platform/ADR-0020 deferred follow-up). `CsatResponseRecordedEvent` MUST remain a typed sealed record
 registered in `ApiJsonContext` (Native AOT). Each capture MUST also write an audit row via
 `IAuditService.RecordAsync` under the `csat` category.
