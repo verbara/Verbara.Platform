@@ -406,7 +406,7 @@ Added to `ManagementBillingEndpoints`:
 ### 2.10 Changes
 
 **Files:**
-- Modify: `/media/Data/Source/Verbara/Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.MultiTenant/TenantStatus.cs` — add Warning, Degraded, PendingDeletion
+- Modify: `../Verbara.Sdk.Pro/src/Verbara.Sdk.Pro.MultiTenant/TenantStatus.cs` — add Warning, Degraded, PendingDeletion
 - Create: `src/Verbara.Platform.Billing/PaymentStatus.cs`
 - Create: `src/Verbara.Platform.Billing/DunningConfig.cs`
 - Create: `src/Verbara.Platform.Billing/DunningRecord.cs`
@@ -549,12 +549,12 @@ When PlatformAdmin sets add-ons via management settings PUT:
 
 ```sh
 # Sdk.Pro (TenantStatus enum change)
-cd /media/Data/Source/Verbara/Verbara.Sdk.Pro
+cd ../Verbara.Sdk.Pro
 dotnet build && dotnet test
-dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/
+dotnet pack -c Release -o ../local-nuget-feed/
 
 # Platform
-cd /media/Data/Source/Verbara/Verbara.Platform
+cd ../Verbara.Platform
 rm -rf ~/.nuget/packages/asterisk.sdk.pro*
 dotnet restore && dotnet build Verbara.Platform.slnx && dotnet test Verbara.Platform.slnx
 ```

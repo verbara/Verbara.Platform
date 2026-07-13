@@ -321,12 +321,12 @@ Real Dapper 2.1.72 ships TFMs `net48 / netstandard2.0 / netcoreapp3.1 / net6.0 /
 ### 8.1 Pack to local feeds
 
 ```sh
-cd /media/Data/Source/Verbara/Verbara.Sdk
+cd ../Verbara.Sdk
 dotnet pack src/Verbara.Sdk.Dapper.Stubs/ -c Release \
-    -o /media/Data/Source/Verbara/local-nuget-feed/
+    -o ../local-nuget-feed/
 # Sync to Platform repo copy per feedback_nuget_two_feeds.md:
-cp /media/Data/Source/Verbara/local-nuget-feed/Verbara.Sdk.Dapper.Stubs.2.1.72-aotstub.1.nupkg \
-   /media/Data/Source/Verbara/Verbara.Platform/local-nuget-feed/
+cp ../local-nuget-feed/Verbara.Sdk.Dapper.Stubs.2.1.72-aotstub.1.nupkg \
+   ../Verbara.Platform/local-nuget-feed/
 # Clear NuGet cache so consumers pull fresh:
 rm -rf ~/.nuget/packages/verbara.sdk.dapper.stubs/
 ```

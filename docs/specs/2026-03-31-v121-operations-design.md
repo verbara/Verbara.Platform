@@ -618,7 +618,7 @@ After refactor: `grep -r "new {" src/Verbara.Platform.Api/Endpoints/` returns **
 
 SDK Pro changes require:
 1. Implement in `Verbara.Sdk.Pro.Cluster`
-2. `dotnet pack -c Release -o /media/Data/Source/Verbara/local-nuget-feed/`
+2. `dotnet pack -c Release -o ../local-nuget-feed/`
 3. `rm -rf ~/.nuget/packages/asterisk.sdk.pro.cluster*/`
 4. `dotnet restore` in Platform
 

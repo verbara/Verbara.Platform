@@ -1,0 +1,66 @@
+# Cross-repo contract for the docs-hygiene sweep train. Seeded by /xr:change 2026-07-13.
+# Next: /xr:propagate docs-hygiene-sweep  (fans out into sdk/ + pro/ child changes).
+#
+# Motivation: kill the /xr:doctor scheduled-cleanup backlog (WARN families
+# rebrand-residue:Verbara.Sdk, path-leak:Verbara.Sdk.Pro, path-leak:Verbara.Platform —
+# yellow since doctor run 1). Scope is the FULL non-exempt sweep per the /xr:change scout
+# inventories — the doctor's evidence lines truncate to 5 files (head -5); the real hit
+# lists are larger (Sdk 13 living docs, Pro 7 specs, Platform 8 specs), and a partial
+# scrub would leave every WARN standing.
+#
+# Deliberately OUT of scope (functional values / machine transcripts, not authored prose):
+#   - Verbara.Sdk.Pro/nuget.config (live NuGet source value)
+#   - Verbara.Platform/tests/**/load-test report transcripts (dated NBomber/soak output)
+#   These gain path-leak exemptions in verbara-meta's xr-doctor.sh via a sidecar meta PR
+#   (verbara-meta hosts mechanisms, never changes — ADR-0005), or their WARNs cannot clear.
+#
+# Also note (Sdk scout risk finding): src/Verbara.Sdk.Hosting/README.md:79 documents a
+# FICTIONAL API (AddAsteriskServerPool with a builder callback that never existed
+# post-rebrand) — it must be REWRITTEN against Examples/MultiServerExample/README.md
+# (AddVerbaraMultiServer + runtime VerbaraServerPool.AddServerAsync), never token-swapped.
+# NATS subject strings like `asterisk.sdk.calls...` are runtime data values — untouched.
+#
+# Model-dispatch note: first train under profile workhorse=opus, opsx=opus (ADR-0011
+# addendum) — the sonnet baseline comparator lives in ~/.cache/verbara-xr/model-metrics.tsv.
+kind: feature
+version: 1
+change_id: docs-hygiene-sweep
+decision_ref: verbara-meta/ADR-0007
+
+repos:
+  - path: ../Verbara.Sdk
+    role: producer
+    buildOrder: 1
+    childChange: sdk/docs-hygiene-sweep
+    summary: >
+      Rebrand-residue purge — 13 living docs (not 5), all under Examples/* and src/*/README.md:
+      AddAsterisk*/AsteriskOptions/AsteriskServer(Pool) -> AddVerbara*/VerbaraOptions/
+      VerbaraServer(Pool), every replacement verified against real symbols
+      (src/Verbara.Sdk.Hosting/ServiceCollectionExtensions.cs:24,31,140,174,255,292).
+      Established mechanism: the post-2.0.0 rename mop-up chore line (#82, #80, #26,
+      3c4f690a). Hosting README:79 rewritten per the fictional-API risk note above.
+
+  - path: ../Verbara.Sdk.Pro
+    role: producer
+    buildOrder: 1
+    childChange: pro/docs-hygiene-sweep
+    summary: >
+      Path-leak purge — 7 tracked spec docs (5 named by the doctor + wire-crud-sse.md +
+      v101-full-system-deployment-design.md), all /media/Data/Source/ prefixes in
+      docs/specs/2026-03-*. Established mechanism + replacement convention: commit c0f56b5
+      (#19) — feed path -> "$LOCAL_NUGET_FEED", sibling repos -> repo-relative; dated
+      period-correct content otherwise untouched. nuget.config stays literal (functional).
+
+  - path: ../Verbara.Platform
+    role: producer
+    buildOrder: 1
+    childChange: HOST
+    summary: >
+      Path-leak purge — 8 tracked spec docs (5 named + 3 phase-d design docs), all
+      /media/Data/Source/ prefixes: cd/pack instructions -> workspace-relative
+      (../Verbara.Sdk.Pro, ../local-nuget-feed/), cross-repo file cites -> repo-qualified
+      relative (ADR-0005 public-repo content rule, openspec/config.yaml proposal rule
+      line 31 already bans absolute machine paths). LoadTests transcripts untouched
+      (exemption sidecar, see header).
+
+fixtures: []

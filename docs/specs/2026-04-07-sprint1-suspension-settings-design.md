@@ -283,7 +283,7 @@ PUT /management/tenants/{id}/settings (PlatformAdminOnly)
 ### Build Verification
 
 ```sh
-cd /media/Data/Source/Verbara/Verbara.Platform
+cd ../Verbara.Platform
 dotnet build Verbara.Platform.slnx && dotnet test Verbara.Platform.slnx
 ```
 
