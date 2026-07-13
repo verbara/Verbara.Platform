@@ -32,7 +32,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   workspace-relative (`../Verbara.Sdk.Pro`, `../local-nuget-feed/`), cross-repo file citations
   repo-qualified relative, per the ADR-0005 public-repo content rule + `openspec/config.yaml`
   absolute-path ban. Token-level path substitutions only — dated period-correct content and
-  Spanish prose otherwise untouched; no code changed (PR number cited at archive time).
+  Spanish prose otherwise untouched; no code changed (#152).
 
 ---
 

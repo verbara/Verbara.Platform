@@ -45,4 +45,7 @@ Re-verified 2026-07-12 with `grep -n '/media/Data/Source/'`:
       files (the `tests/**` load-test transcripts stay leaked by design — out of scope).
 - [x] 3.3 `npx -y @fission-ai/openspec@1.6.0 validate --all --strict --no-interactive` — MUST pass.
 - [ ] 3.4 `/xr:doctor` re-scan confirms the `path-leak:Verbara.Platform` WARN family clears for the
-      authored `docs/specs/` prose.
+      authored `docs/specs/` prose. — ORCHESTRATOR post-train step: the doctor re-scan runs after the
+      full cross-repo train (Sdk + Pro child legs + this host) lands, not at host archive time. Left
+      unchecked here by design; the host in-scope precondition is met (task 3.2 confirms the 8 files
+      grep-clean of `/media/Data/Source/`).
