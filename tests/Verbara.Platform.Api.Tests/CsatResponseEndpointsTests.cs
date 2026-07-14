@@ -323,6 +323,91 @@ public sealed class CsatResponseEndpointsTests : IDisposable
 
         resp.StatusCode.Should().Be(HttpStatusCode.PaymentRequired);
     }
+
+    // ── Scope-wide aggregate read (csat-completion) ────────────────────────────
+
+    private static async Task SeedResponseAsync(
+        WebApplicationFactory<Program> factory, string queue, string channel, int rating, string conversationId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<ISurveyResponseStore>();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SurveyResponse
+        {
+            ResponseId = EntityId.New(),
+            SurveyId = EntityId.From(TestSurveyId),
+            TenantId = new TenantId(AuthenticatedPlatformApiFactory.TestTenantId),
+            ConversationId = EntityId.From(conversationId),
+            ContactId = EntityId.From(conversationId),
+            Answers = [new SurveyAnswer(EntityId.From(SurveyQuestionIds.CsatRating), rating.ToString(System.Globalization.CultureInfo.InvariantCulture))],
+            SubmittedAt = now,
+            Channel = channel,
+            QueueName = queue,
+            Rating = rating,
+            CapturedAt = now,
+        }, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task GetScopeCsatAggregate_ShouldRollUpAcrossQueues_WhenSupervisorAuthorized()
+    {
+        var (factory, _) = BuildLicensedFactory();
+        using var client = AuthenticatedClient(factory);
+
+        await SeedResponseAsync(factory, "support-tier1", "webchat", 5, "conv-agg-1");
+        await SeedResponseAsync(factory, "support-tier1", "webchat", 4, "conv-agg-2");
+        await SeedResponseAsync(factory, "billing", "webchat", 3, "conv-agg-3");
+
+        var resp = await client.GetAsync("/api/v1/analytics/csat?range=24h");
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+        // Envelope sums the scope: 3 responses; the queues[] carry the CsatResponseDto shape with channel 'all'.
+        root.GetProperty("totalResponses").GetInt32().Should().Be(3);
+        var queues = root.GetProperty("queues");
+        queues.GetArrayLength().Should().Be(2);
+        foreach (var q in queues.EnumerateArray())
+        {
+            q.GetProperty("channel").GetString().Should().Be("all");
+            q.GetProperty("queueName").GetString().Should().NotBeNullOrEmpty();
+            q.TryGetProperty("totalResponses", out _).Should().BeTrue();
+            q.TryGetProperty("averageRating", out _).Should().BeTrue();
+            q.TryGetProperty("rangeStart", out _).Should().BeTrue();
+            q.TryGetProperty("rangeEnd", out _).Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task GetScopeCsatAggregate_ShouldEchoChannelFilter_WhenChannelQueried()
+    {
+        var (factory, _) = BuildLicensedFactory();
+        using var client = AuthenticatedClient(factory);
+
+        await SeedResponseAsync(factory, "support-tier1", "voice", 4, "conv-vagg-1");
+        await SeedResponseAsync(factory, "support-tier1", "webchat", 2, "conv-vagg-2");
+
+        var resp = await client.GetAsync("/api/v1/analytics/csat?channel=voice");
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+        // Only the voice response counts, and every queues[] row echoes 'voice'.
+        root.GetProperty("totalResponses").GetInt32().Should().Be(1);
+        foreach (var q in root.GetProperty("queues").EnumerateArray())
+            q.GetProperty("channel").GetString().Should().Be("voice");
+    }
+
+    [Fact]
+    public async Task GetScopeCsatAggregate_ShouldReturn402_WhenCsatRunnerUnlicensed()
+    {
+        using var factory = BuildUnlicensedFactory();
+        using var client = AuthenticatedClient(factory);
+
+        var resp = await client.GetAsync("/api/v1/analytics/csat?range=24h");
+
+        resp.StatusCode.Should().Be(HttpStatusCode.PaymentRequired);
+    }
 }
 
 /// <summary>

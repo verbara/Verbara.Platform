@@ -26,6 +26,15 @@ public interface IConversationStore
     /// </summary>
     Task<Conversation?> FindByVoiceLinkedIdAcrossTenantsAsync(string voiceLinkedId, CancellationToken ct);
 
+    /// <summary>
+    /// Returns the conversation with <paramref name="conversationId"/> WITHOUT a tenant scope, or
+    /// <see langword="null"/> if none exists. A conversation id is a globally unique <c>EntityId</c>,
+    /// so this resolves at most one row. Used ONLY by the in-process voice-CSAT capture sink
+    /// (csat-completion): the Pro <c>CsatCapture</c> the sink receives carries the correlated
+    /// conversation id but no tenant, so the sink recovers the row's tenant partition via this lookup.
+    /// </summary>
+    Task<Conversation?> FindByIdAcrossTenantsAsync(EntityId conversationId, CancellationToken ct);
+
     /// <summary>Returns all conversations for a given contact (GDPR export).</summary>
     Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);
 

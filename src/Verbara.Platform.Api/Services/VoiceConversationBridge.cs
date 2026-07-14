@@ -410,11 +410,28 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             // leader-gated callback worker (A6) reads to decide whether the dropped caller deserves
             // a priority callback. We persist them in the SAME SaveAsync as the WrapUp transition so
             // the eval markers and the state advance commit atomically (no half-stamped row on crash).
+            bool? abnormalHangup = null;
             if (wasActive)
-                await StampCallbackEvalFactsAsync(tenantId, session, conversation).ConfigureAwait(false);
+                abnormalHangup = await StampCallbackEvalFactsAsync(tenantId, session, conversation).ConfigureAwait(false);
 
             await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
             _eventBus.Publish(new ConversationStateChangedEvent(tenantId.Value, conversation.ConversationId.Value, oldState.ToString(), conversation.State.ToString()));
+
+            // csat-completion (Platform/ADR-0020): publish the agent-hangup domain event for an ANSWERED
+            // call (WrapUp) so the voice-CSAT path can decide whether to solicit while the caller leg is
+            // still up. Only the leader reaches here (the handler is leader-gated + per-call-stripe-locked),
+            // so it fires exactly once cluster-wide. Never-answered (Abandoned) calls carry no served
+            // interaction and no abnormal verdict, so they are not published.
+            if (wasActive && abnormalHangup is { } abnormal)
+            {
+                var queueName = ResolveQueueDisplayName(tenantId.Value, session.QueueName);
+                _eventBus.Publish(new VoiceAgentHangupEvent(
+                    tenantId.Value,
+                    conversation.ConversationId.Value,
+                    queueName,
+                    abnormal,
+                    _clock.UtcNow));
+            }
         }
 
         // Release capacity + go ACW only for an answered (Active) call — symmetric with the
@@ -458,8 +475,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     /// Stamps the callback-eval contract metadata the A6 leader-gated worker reads. The KEY STRINGS are
     /// a hard cross-component contract — A6 looks them up verbatim. Best-effort lookups (queue, contact)
     /// fall back to "absent": A6 escalates a callback with no number / no origin queue rather than fail.
+    /// Returns the abnormal-hangup verdict so the caller can publish the csat-completion
+    /// <see cref="VoiceAgentHangupEvent"/> with the same verdict it stamped.
     /// </summary>
-    private async Task StampCallbackEvalFactsAsync(TenantId tenantId, CallSession session, Conversation conversation)
+    private async Task<bool> StampCallbackEvalFactsAsync(TenantId tenantId, CallSession session, Conversation conversation)
     {
         var agent = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Agent);
         var caller = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Caller);
@@ -478,6 +497,24 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         if (originQueueId is { } queueId)
             conversation.SetMetadata("originQueueId", queueId.Value);
         // else: leave originQueueId absent — A6 escalates "no origin queue".
+
+        return abnormal;
+    }
+
+    /// <summary>
+    /// Resolves the platform queue display name from the Asterisk realtime <c>{tenant}-{Queue.Name}</c>
+    /// in <see cref="CallSession.QueueName"/> — the same prefix-strip as
+    /// <see cref="ResolveQueueAutoAnswerAsync"/> but WITHOUT a store round-trip (the
+    /// <see cref="VoiceAgentHangupEvent"/> only needs the display name). Returns the empty string when the
+    /// raw name is blank.
+    /// </summary>
+    private static string ResolveQueueDisplayName(string tenant, string? rawQueueName)
+    {
+        if (string.IsNullOrWhiteSpace(rawQueueName))
+            return string.Empty;
+
+        var prefix = tenant + "-";
+        return rawQueueName.StartsWith(prefix, StringComparison.Ordinal) ? rawQueueName[prefix.Length..] : rawQueueName;
     }
 
     /// <summary>

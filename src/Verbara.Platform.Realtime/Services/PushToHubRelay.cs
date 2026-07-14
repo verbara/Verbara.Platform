@@ -8,6 +8,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using CoreEvents = Verbara.Platform.Core;
+// csat-completion: the typed IPlatformHubClient.OnCsatResponseRecorded takes the Pro-package payload.
+// Both Verbara.Platform.Realtime.Contracts.Dtos and Verbara.Sdk.Pro.Push.SignalR.Events define a
+// CsatResponseRecordedPayload with the same field shape, so the Pro one is aliased to disambiguate.
+using CsatResponseRecordedPayload = Verbara.Sdk.Pro.Push.SignalR.Events.CsatResponseRecordedPayload;
 
 namespace Verbara.Platform.Realtime.Services;
 
@@ -62,14 +66,9 @@ internal sealed class PushToHubRelay : IHostedService
 {
     private readonly IPushEventBus _bus;
     private readonly IHubContext<PlatformHub, IPlatformHubClient> _hubContext;
-    // csat-runner Phase B — non-generic hub context for the CSAT recorded event.
-    // IPlatformHubClient (the strongly-typed client) is defined in the Verbara.Sdk.Pro
-    // package and has no OnCsatResponseRecorded method (that Pro-side interface change
-    // ships separately). Until it does, the CSAT branch fans out over the untyped
-    // IHubContext<PlatformHub> using the client method name "OnCsatResponseRecorded"
-    // to the supervisor:{tenantId} group — the wire contract the Web supervisor client
-    // subscribes to is identical either way.
-    private readonly IHubContext<PlatformHub> _untypedHubContext;
+    // csat-completion (Platform/ADR-0020): the CSAT recorded event now routes through the strongly-typed
+    // _hubContext (IPlatformHubClient.OnCsatResponseRecorded) like every other branch — the untyped
+    // IHubContext<PlatformHub> the csat-runner Phase B relay used is retired now the Pro method ships.
     private readonly IClusterLeader _fanoutLeader;
     private readonly IRelayOutcomeSink _outcomeSink;
     private readonly ILogger<PushToHubRelay> _logger;
@@ -96,14 +95,12 @@ internal sealed class PushToHubRelay : IHostedService
     public PushToHubRelay(
         IPushEventBus bus,
         IHubContext<PlatformHub, IPlatformHubClient> hubContext,
-        IHubContext<PlatformHub> untypedHubContext,
         [FromKeyedServices(RealtimeLeaderResources.Fanout)] IClusterLeader fanoutLeader,
         IRelayOutcomeSink outcomeSink,
         ILogger<PushToHubRelay> logger)
     {
         _bus = bus;
         _hubContext = hubContext;
-        _untypedHubContext = untypedHubContext;
         _fanoutLeader = fanoutLeader;
         _outcomeSink = outcomeSink;
         _logger = logger;
@@ -396,6 +393,9 @@ internal sealed class PushToHubRelay : IHostedService
             return;
         }
 
+        // The typed IPlatformHubClient.OnCsatResponseRecorded expects the Pro-package payload
+        // (Verbara.Sdk.Pro.Push.SignalR.Events.CsatResponseRecordedPayload) — the same field shape as
+        // the Platform.Realtime.Contracts payload, disambiguated here by full qualification.
         var payload = new CsatResponseRecordedPayload(
             TenantId: tenantId,
             ResponseId: evt.ResponseId,
@@ -410,6 +410,12 @@ internal sealed class PushToHubRelay : IHostedService
         _lastSend = SendCsatAsync($"supervisor:{tenantId}", payload, tenantId, eventType, leaderSnapshot);
     }
 
+    // csat-completion (Platform/ADR-0020): the typed IPlatformHubClient.OnCsatResponseRecorded method
+    // now exists on the advanced Pro pin, so the CSAT branch routes through the strongly-typed hub
+    // context like SendConversationAsync/SendAgentAsync (the untyped name-based relay is retired). The
+    // wire method name ("OnCsatResponseRecorded") and the CsatResponseRecordedPayload shape are
+    // unchanged (fixtures/csat-response-recorded-payload.v1.json), so no SignalR client observes a
+    // change — this is type-safety hardening only. The channel set now includes 'voice'.
     private async Task SendCsatAsync(
         string group,
         CsatResponseRecordedPayload payload,
@@ -419,8 +425,8 @@ internal sealed class PushToHubRelay : IHostedService
     {
         try
         {
-            await _untypedHubContext.Clients.Group(group)
-                .SendAsync("OnCsatResponseRecorded", payload)
+            await _hubContext.Clients.Group(group)
+                .OnCsatResponseRecorded(payload)
                 .ConfigureAwait(false);
 
             PushToHubRelayLog.Forwarded(_logger, eventType, tenantId);

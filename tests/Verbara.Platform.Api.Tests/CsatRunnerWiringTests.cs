@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using NSubstitute;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Conversations;
@@ -7,6 +8,9 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Surveys;
+using Verbara.Sdk;
+using Verbara.Sdk.Live.Server;
+using Verbara.Sdk.Pro.CsatRunner.Adapters.Voice;
 using Verbara.Sdk.Pro.CsatRunner.Contracts;
 using Verbara.Sdk.Pro.CsatRunner.Engine;
 using Verbara.Sdk.Pro.Licensing;
@@ -48,11 +52,51 @@ public sealed class CsatRunnerWiringTests : IClassFixture<UnifiedPlatformApiFact
         var orchestrator = sp.GetRequiredService<CsatRunnerOrchestrator>();
         Assert.NotNull(orchestrator);
 
-        // All 3 Pro channel adapters resolve (webchat/email/sms), keyed by Channel downstream.
+        // All 4 Pro channel adapters resolve (webchat/email/sms/voice), keyed by Channel downstream.
+        // The voice adapter (csat-completion) resolves the voice seams + IAmiConnection; it is included
+        // in the orchestrator's IEnumerable<ICsatChannelAdapter>, so a broken voice registration would
+        // fault the orchestrator resolution above.
         var adapters = sp.GetServices<ICsatChannelAdapter>().ToList();
         Assert.Contains(adapters, a => a.Channel == "webchat");
         Assert.Contains(adapters, a => a.Channel == "email");
         Assert.Contains(adapters, a => a.Channel == "sms");
+        Assert.Contains(adapters, a => a.Channel == "voice");
+
+        // The voice-specific host seams the voice adapter/TtsPromptCache depend on.
+        Assert.NotNull(sp.GetRequiredService<ICsatVoiceCaptureSink>());
+        Assert.NotNull(sp.GetRequiredService<IDtmfSource>());
+        Assert.NotNull(sp.GetRequiredService<IAmiConnection>());
+    }
+
+    // ─── csat-completion regression: headless / no-AMI boot must NOT crash ───────────
+    //
+    // The composition root registers IAmiConnection as a DeferredPrimaryAmiConnection: resolution of the
+    // primary server's live connection is deferred to first USE, so the CsatRunnerOrchestrator (which
+    // constructs the voice adapter during Host.StartAsync) resolves even when no telephony is configured.
+    // The previous factory threw at boot, crashing every headless boot — notably the CI OpenAPI-export
+    // capture (ci.yml "Export OpenAPI document"). This test boots the REAL Program.cs composition with NO
+    // AMI stub (unlike the shared factory), leaving the production deferred wrapper in place over the real,
+    // empty-in-tests VerbaraServerPool (GetServer("primary") is null), then resolves the orchestrator + voice
+    // adapter to prove the whole voice branch — and thus Host.StartAsync — constructs without throwing.
+    [Fact]
+    public void OrchestratorGraph_ShouldResolveVoiceAdapterViaDeferredWrapper_WhenNoPrimaryAmiServerConfigured()
+    {
+        using var noAmiFactory = new NoAmiStubPlatformApiFactory();
+        using var scope = noAmiFactory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+
+        // The production IAmiConnection registration survived (deferred wrapper, not a stub), over the real
+        // pool which has no servers added — i.e. GetServer("primary") is null.
+        Assert.IsType<DeferredPrimaryAmiConnection>(sp.GetRequiredService<IAmiConnection>());
+
+        // Resolving the orchestrator forces DI to construct every channel adapter, voice included, which
+        // resolves IAmiConnection. With the deferred wrapper this must NOT throw despite the empty pool —
+        // the exact resolution Host.StartAsync performs when it constructs the orchestrator BackgroundService.
+        var orchestrator = sp.GetRequiredService<CsatRunnerOrchestrator>();
+        Assert.NotNull(orchestrator);
+
+        var adapters = sp.GetServices<ICsatChannelAdapter>().ToList();
+        Assert.Contains(adapters, a => a.Channel == "voice");
     }
 
     [Fact]
@@ -200,4 +244,59 @@ public sealed class CsatRunnerWiringTests : IClassFixture<UnifiedPlatformApiFact
         }
         return predicate();
     }
+}
+
+/// <summary>
+/// Test host that composes the REAL Program.cs graph (auth + in-memory stores + all-features license, like
+/// <see cref="UnifiedPlatformApiFactory"/>) but — crucially — leaves the production
+/// <see cref="DeferredPrimaryAmiConnection"/> registration in place instead of the shared factory's
+/// <see cref="IAmiConnection"/> stub. It re-registers the deferred wrapper over the real (empty-in-tests)
+/// <see cref="VerbaraServerPool"/> AFTER <c>StubVerbaraHostedServices</c> runs (same builder → last wins), so
+/// the csat-completion no-AMI-boot regression exercises the real fail-at-use wrapper, not a mock.
+/// </summary>
+internal sealed class NoAmiStubPlatformApiFactory : WebApplicationFactory<Program>
+{
+    private const string TestApiKey = "no-ami-test-key-99999";
+    private const string TestTenantId = "tenant-no-ami-001";
+    private const string TestUserId = "no-ami-test-admin-user";
+
+    private static readonly string s_hashedKey = HashKey(TestApiKey);
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        builder.UseEnvironment("Testing");
+
+        builder.ConfigureServices(services =>
+        {
+            AuthenticatedPlatformApiFactory.SetupTestAuth(services, s_hashedKey, TestTenantId, TestUserId);
+
+            // Removes the real AMI/ARI hosted services + stubs IAmiConnection/IVerbaraServer. We keep the
+            // hosted-service removal (no real AMI connect at boot) but OVERRIDE its IAmiConnection stub below.
+            AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
+
+            services.AddAllProFeaturesLicensed();
+            if (!services.Any(d => d.ServiceType == typeof(byte[])))
+                services.AddSingleton<byte[]>([]);
+
+            AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
+
+            // Restore the production IAmiConnection wiring: the deferred wrapper over the real pool (which
+            // has no servers added in tests → GetServer("primary") is null, the exact CI no-AMI state).
+            // Added LAST at the IHostBuilder level → wins over StubVerbaraHostedServices' stub.
+            foreach (var d in services.Where(d => d.ServiceType == typeof(IAmiConnection)).ToList())
+                services.Remove(d);
+            services.AddSingleton<IAmiConnection>(sp =>
+                new DeferredPrimaryAmiConnection(sp.GetRequiredService<VerbaraServerPool>()));
+        });
+
+        var host = base.CreateHost(builder);
+
+        AuthenticatedPlatformApiFactory.SeedEnterpriseFeatureGate(host.Services, TestTenantId);
+        AuthenticatedPlatformApiFactory.SeedTestCustomerTenant(host.Services, TestTenantId);
+
+        return host;
+    }
+
+    private static string HashKey(string rawKey)
+        => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawKey)));
 }

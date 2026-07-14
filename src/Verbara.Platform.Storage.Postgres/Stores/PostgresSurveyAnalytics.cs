@@ -63,6 +63,50 @@ internal sealed class PostgresSurveyAnalytics : ISurveyAnalytics
         return new SurveyScoreSummary((int)row.Total, row.AvgRating ?? 0d, null, null, null, null);
     }
 
+    public async Task<CsatScopeAggregate> GetScopeAggregateAsync(
+        TenantId tenantId, string? channel, DateRange range, CancellationToken ct)
+    {
+        // Scope-wide roll-up over the same partial index as the per-queue read (csat-completion). One
+        // GROUP BY queue_name pass yields the per-queue rows; the scope totals are summed from those rows
+        // (response-weighted mean) so a single query serves the whole envelope. The channel filter is
+        // optional — null/empty means all channels (the WHERE channel IS NOT NULL predicate still rides
+        // the partial index). No schema change.
+        var hasChannel = !string.IsNullOrWhiteSpace(channel);
+        var sql =
+            "SELECT queue_name, COUNT(*) AS total, AVG(rating)::double precision AS avg_rating " +
+            "FROM survey_responses " +
+            "WHERE tenant_id = @TenantId AND channel IS NOT NULL AND rating IS NOT NULL " +
+            (hasChannel ? "AND channel = @Channel " : "") +
+            "AND captured_at >= @RangeStart AND captured_at <= @RangeEnd " +
+            "GROUP BY queue_name ORDER BY queue_name";
+
+        var rows = await _dataSource.QueryListAsync(
+            sql,
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                if (hasChannel)
+                    p.Add(new NpgsqlParameter("Channel", channel!));
+                p.Add(new NpgsqlParameter("RangeStart", NpgsqlDbType.TimestampTz) { Value = range.Start });
+                p.Add(new NpgsqlParameter("RangeEnd", NpgsqlDbType.TimestampTz) { Value = range.End });
+            },
+            QueueAggregateRow.Map, ct).ConfigureAwait(false);
+
+        var queues = new List<CsatQueueAggregate>(rows.Count);
+        long scopeTotal = 0;
+        double weightedSum = 0d;
+        foreach (var row in rows)
+        {
+            var avg = row.AvgRating ?? 0d;
+            queues.Add(new CsatQueueAggregate(row.QueueName, (int)row.Total, avg));
+            scopeTotal += row.Total;
+            weightedSum += avg * row.Total;
+        }
+
+        var scopeAvg = scopeTotal > 0 ? weightedSum / scopeTotal : 0d;
+        return new CsatScopeAggregate((int)scopeTotal, scopeAvg, queues);
+    }
+
     [Obsolete("Use GetByQueueAndChannelAsync; removed in v2.19.0 (csat-runner Phase A / Pro ADR-0012 cadence).")]
     public Task<SurveyScoreSummary> GetByQueueAsync(TenantId tenantId, EntityId surveyId, string queueName, CancellationToken ct)
 #pragma warning disable CS0618 // delegating the obsolete member to preserve the legacy behavior until v2.19.0 removal
@@ -76,6 +120,20 @@ internal sealed class PostgresSurveyAnalytics : ISurveyAnalytics
 
         public static AggregateRow Map(NpgsqlDataReader r) => new()
         {
+            Total = r.GetInt64("total"),
+            AvgRating = r.IsDBNull(r.GetOrdinal("avg_rating")) ? null : r.GetDouble("avg_rating"),
+        };
+    }
+
+    private sealed class QueueAggregateRow
+    {
+        public string QueueName { get; init; } = string.Empty;
+        public long Total { get; init; }
+        public double? AvgRating { get; init; }
+
+        public static QueueAggregateRow Map(NpgsqlDataReader r) => new()
+        {
+            QueueName = r.GetString("queue_name"),
             Total = r.GetInt64("total"),
             AvgRating = r.IsDBNull(r.GetOrdinal("avg_rating")) ? null : r.GetDouble("avg_rating"),
         };

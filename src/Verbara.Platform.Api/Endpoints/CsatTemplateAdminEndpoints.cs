@@ -2,6 +2,7 @@ using Verbara.Platform.Api.Dtos;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Surveys;
+using Verbara.Sdk.Pro.CsatRunner.Adapters.Voice;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,12 +16,11 @@ namespace Verbara.Platform.Api.Endpoints;
 /// <c>ICsatTemplateProvider</c> the Pro engine resolves prompts through.
 /// </summary>
 /// <remarks>
-/// <c>POST …/{id}/preview-voice</c> is present in shape but returns HTTP 501: Pro's voice
-/// channel adapter (and its TTS synthesis) is <b>deferred</b> — the Pro CSAT nupkg ships no
-/// <c>ITtsSynthesizer</c> and <c>CsatVoiceOptions</c> is intentionally absent (digital-first;
-/// voice is a Path-A follow-up per Pro <c>docs/research/2026-07-07-csat-voice-bridge-ownership.md</c>).
-/// Rather than fake a synthesis, the endpoint returns a clear "voice preview deferred" RFC 9457
-/// ProblemDetails so callers get an honest, forward-compatible contract.
+/// <c>POST …/{id}/preview-voice</c> synthesizes the resolved voice template body through the
+/// Pro-shipped TTS seam (<c>TtsPromptCache</c> → the SDK <c>SpeechSynthesizer</c>) now that the voice
+/// channel ships (csat-completion, Platform/ADR-0020) — it previously returned HTTP 501 while the Pro
+/// voice bridge was deferred. It keeps the 400-on-bad-id / 404-on-missing guards and returns the
+/// synthesized audio bytes (Asterisk-native signed-linear 16-bit 8 kHz).
 /// </remarks>
 internal static class CsatTemplateAdminEndpoints
 {
@@ -168,18 +168,22 @@ internal static class CsatTemplateAdminEndpoints
         return TypedResults.NoContent();
     }
 
-    // ─── Preview voice (deferred) ────────────────────────────────────────────────
+    // ─── Preview voice (csat-completion) ─────────────────────────────────────────
 
-    private static async Task<Results<NotFound, BadRequest, ProblemHttpResult>> PreviewVoice(
+    /// <summary>Media type of the synthesized voice-prompt preview (Asterisk-native signed-linear 16-bit 8 kHz).</summary>
+    private const string VoicePreviewMediaType = "audio/L16; rate=8000; channels=1";
+
+    private static async Task<Results<FileContentHttpResult, NotFound, BadRequest>> PreviewVoice(
         string id,
         HttpContext context,
         [FromServices] ICsatTemplateStore store,
+        [FromServices] TtsPromptCache promptCache,
         CancellationToken ct)
     {
-        // Endpoint shape is present, but Pro's voice channel adapter + TTS synthesis are
-        // DEFERRED (digital-first; the Pro CSAT nupkg ships no ITtsSynthesizer and
-        // CsatVoiceOptions is intentionally absent). We resolve the template so a missing id
-        // still 404s honestly, then return HTTP 501 rather than fabricate audio.
+        // csat-completion (Platform/ADR-0020): the voice channel ships, so this synthesizes the resolved
+        // voice template body through the Pro-shipped TTS seam (TtsPromptCache → the SDK
+        // SpeechSynthesizer) rather than returning HTTP 501. The 400-on-bad-id / 404-on-missing guards
+        // are unchanged.
         if (!EntityId.IsValid(id))
             return TypedResults.BadRequest();
 
@@ -188,13 +192,14 @@ internal static class CsatTemplateAdminEndpoints
         if (template is null)
             return TypedResults.NotFound();
 
-        return TypedResults.Problem(
-            title: "Voice preview deferred",
-            detail: "Voice CSAT preview is not yet available: the Pro voice channel adapter and TTS " +
-                    "synthesis are deferred (digital-first). This endpoint will synthesize the template " +
-                    "body once the Pro voice bridge ships.",
-            statusCode: StatusCodes.Status501NotImplemented,
-            type: "https://verbara.platform/errors/voice-preview-deferred");
+        // Synthesize the template body (cached per tenant/locale/version). A preview keys on the template
+        // id so an admin re-preview after an edit re-synthesizes the changed copy. MUST NOT fabricate
+        // audio — the synthesis runs through the real Pro seam.
+        var audio = await promptCache
+            .GetAsync(tenantId.Value, template.Locale, template.TemplateId.Value, template.Body, ct)
+            .ConfigureAwait(false);
+
+        return TypedResults.File(audio.ToArray(), VoicePreviewMediaType);
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────

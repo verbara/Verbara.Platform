@@ -1,0 +1,12 @@
+{
+  "_comment": "Golden wire shape for the OnCsatResponseRecorded SignalR push to the supervisor:{tenantId} group. Derived 1:1 from src/Verbara.Platform.Realtime.Contracts/Dtos/CsatResponseRecordedPayload.cs (camelCase over the SignalR JSON protocol). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate). csat-completion extends the channel enum with 'voice'; webchat/email/sms remain valid.",
+  "tenantId": "ten-42",
+  "responseId": "resp-3b9d70aa",
+  "surveyId": "srv-csat-v1",
+  "conversationId": "conv-8f2a1c4e",
+  "channel": "voice",
+  "queueName": "support-tier1",
+  "rating": 4,
+  "comment": null,
+  "capturedAt": "2026-07-13T09:15:00Z"
+}

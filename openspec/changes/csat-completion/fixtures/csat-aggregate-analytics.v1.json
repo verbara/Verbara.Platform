@@ -1,0 +1,25 @@
+{
+  "_comment": "Golden wire shape for the NEW scope-wide aggregate CSAT analytics read endpoint (GET /api/v1/analytics/csat — the aggregate-across-queues option chosen by the product owner 2026-07-13, resolving ADR-0020's open KPI-card question). The envelope carries the tenant/scope rollup; each queues[] row reuses the existing per-queue projection src/Verbara.Platform.Api/Dtos/CsatResponseDto.cs VERBATIM (queueName, channel, totalResponses, averageRating, rangeStart, rangeEnd). `channel` echoes the requested filter and is `all` when unfiltered. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "totalResponses": 128,
+  "averageRating": 4.4,
+  "rangeStart": "2026-07-06T00:00:00Z",
+  "rangeEnd": "2026-07-13T00:00:00Z",
+  "queues": [
+    {
+      "queueName": "support-tier1",
+      "channel": "all",
+      "totalResponses": 97,
+      "averageRating": 4.5,
+      "rangeStart": "2026-07-06T00:00:00Z",
+      "rangeEnd": "2026-07-13T00:00:00Z"
+    },
+    {
+      "queueName": "billing",
+      "channel": "all",
+      "totalResponses": 31,
+      "averageRating": 4.1,
+      "rangeStart": "2026-07-06T00:00:00Z",
+      "rangeEnd": "2026-07-13T00:00:00Z"
+    }
+  ]
+}

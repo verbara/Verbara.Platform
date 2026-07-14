@@ -1,0 +1,81 @@
+# impact.yaml — cross-repo contract for csat-completion (T11 schema, verbara-meta).
+# Written by /xr:change 2026-07-13; scope decided by operator: full train (voice/IVR
+# channel + typed supervisor push + scope-wide KPI aggregate — the aggregate option
+# resolves ADR-0020's ⟨NEEDS PRODUCT-OWNER INPUT⟩ on the wallboard card).
+#
+# Verbara.Sdk is deliberately ABSENT from repos[]: its scout confirmed the existing
+# primitives fully cover the voice path (Actions/BlindTransferAction.cs + RedirectAction.cs,
+# Events/HangupEvent.cs, Agi/Commands/GetDataCommand.cs + GetOptionCommand.cs,
+# VoiceAi/SpeechSynthesizer.cs) — the net-new components (TtsPromptCache, DtmfCollector,
+# VoiceCsatChannelAdapter, CsatVoiceOptions) land in Pro per the parked plan
+# ../Verbara.Sdk.Pro/docs/plans/active/2026-05-18-pro-260-csat-runner-v1.md.
+
+kind: feature
+version: 1
+change_id: csat-completion
+decision_ref: Platform/ADR-0020
+
+repos:
+  - path: ../Verbara.Sdk.Pro
+    role: producer
+    buildOrder: 1
+    childChange: pro/csat-completion
+    summary: >
+      Extends the existing channel-adapter seam
+      src/Verbara.Sdk.Pro.CsatRunner/Contracts/ICsatChannelAdapter.cs (Channel-string
+      keyed, drop-in additive; its doc-comment already names the deferred voice adapter)
+      with VoiceCsatChannelAdapter + net-new TtsPromptCache/DtmfCollector/CsatVoiceOptions,
+      following the shipped BlindTransfer-into-IVR precedent
+      src/Verbara.Sdk.Pro.Dialer/PostCall/TransferPostCallHandler.cs; adds the typed
+      OnCsatResponseRecorded method to
+      src/Verbara.Sdk.Pro.Push.SignalR/Hubs/IPlatformHubClient.cs (8 typed methods exist
+      today, none CSAT — this is the precise seam the Platform typed relay is blocked on).
+
+  - path: ../Verbara.Platform
+    role: consumer
+    buildOrder: 2
+    childChange: HOST
+    summary: >
+      Host repo. Wires voice into the existing trigger seam
+      src/Verbara.Platform.Api/Services/CsatConversationEndSource.cs (MapChannel
+      deliberately excludes Voice — line 218 falls through to null); publishes the
+      agent-hangup signal from src/Verbara.Platform.Api/Services/VoiceConversationBridge.cs
+      (OnCallEndedAsync + IsAbnormalAgentHangup exist today but are not published as a
+      domain event); reuses the AMI Redirect machinery of
+      src/Verbara.Platform.Api/Services/VoiceCallControlService.cs (BlindTransferAsync)
+      for the survey-IVR handoff; replaces the untyped relay branch
+      src/Verbara.Platform.Realtime/Services/PushToHubRelay.cs:379-434
+      (SendAsync("OnCsatResponseRecorded", ...)) with a typed IPlatformHubClient branch
+      following the typed SendConversationAsync/SendAgentAsync pattern in the same file;
+      adds the NEW scope-wide aggregate CSAT analytics read endpoint — nothing exists
+      beyond per-queue (src/Verbara.Platform.Surveys/ISurveyAnalytics.cs
+      GetByQueueAndChannelAsync; only read endpoint is
+      GET /api/v1/analytics/csat/queues/{queueId}).
+
+  - path: ../Verbara.Platform.Web
+    role: consumer
+    buildOrder: 2
+    childChange: web/csat-completion
+    summary: >
+      Fulfils the existing living-spec promise csat-operator-views ("for the queues in
+      the supervisor's scope") by replacing the hard-wired single-queue card
+      src/operations/wallboard/wallboard-page.tsx:45
+      (<CsatKpiCard queueId={sortedQueues[0]?.queueId} />) +
+      src/operations/wallboard/csat-kpi-card.tsx with consumption of the new aggregate
+      endpoint via generated OpenAPI types (precedent:
+      src/core/api/hooks/use-analytics.ts:508-558 useCsatQueueAnalytics); adds the
+      OnCsatResponseRecorded handler to src/core/realtime/platform-hub.ts (only
+      OnPresenceUpdated/OnSupervisionStarted/OnWhisperReceived registered today — the
+      CSAT card is pure TanStack-Query polling, no realtime consumption exists).
+
+fixtures:
+  # Existing wire shape (derived 1:1 from
+  # src/Verbara.Platform.Realtime.Contracts/Dtos/CsatResponseRecordedPayload.cs) —
+  # touched by Pro's typed hub method and Web's new SignalR handler:
+  - fixtures/csat-response-recorded-payload.v1.json
+  # NET-NEW wire shapes, frozen at /xr:change time (fixture-completeness rule) — the
+  # aggregate envelope reuses CsatResponseDto rows verbatim; the voice capture reuses
+  # the frozen CsatResponseRequest shape with channel 'voice'. The HOST design.md
+  # elaborates semantics; any field change bumps `version:` here before /xr:propagate:
+  - fixtures/csat-aggregate-analytics.v1.json
+  - fixtures/csat-voice-capture.v1.json

@@ -276,10 +276,146 @@ public sealed class CsatSeamAdaptersTests
         var pushed = false;
         using var sub = source.Ended.Subscribe(_ => pushed = true);
 
+        // A voice conversation that reaches Closed is NOT a solicit event — voice solicits on WrapUp only.
         await source.HandleClosedAsync(
-            new ConversationStateChangedEvent("ten-42", "conv-voice-1", nameof(ConversationState.WrapUp), nameof(ConversationState.Closed)),
+            new ConversationStateChangedEvent("ten-42", "conv-voice-1", nameof(ConversationState.Active), nameof(ConversationState.Closed)),
             CancellationToken.None);
 
         Assert.False(pushed);
+    }
+
+    // ─── csat-completion — voice channel trigger (design D1) ─────────────────────
+
+    private static (IConversationStore, IQueueStore, ISurveyStore, IContactStore) VoiceStores(
+        TenantId tenant, EntityId conversationId, EntityId queueId, EntityId contactId, ConversationState state, bool csatEnabled)
+    {
+        var conversationStore = Substitute.For<IConversationStore>();
+        conversationStore.GetByIdAsync(tenant, conversationId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Conversation?>(new Conversation
+            {
+                ConversationId = conversationId,
+                TenantId = tenant,
+                ContactId = contactId,
+                Channel = ChannelType.Voice,
+                State = state,
+                Owner = ConversationOwner.ForQueue(queueId),
+                CreatedAt = DateTimeOffset.UtcNow,
+            }));
+
+        var queueStore = Substitute.For<IQueueStore>();
+        queueStore.GetByIdAsync(tenant, queueId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Queue?>(new Queue
+            {
+                QueueId = queueId,
+                TenantId = tenant,
+                Name = "support-tier1",
+                Csat = new CsatConfig(Enabled: csatEnabled, PreferredChannel: "voice", PromptTemplateId: null, SamplingRatePercent: 100),
+                CreatedAt = DateTimeOffset.UtcNow,
+            }));
+
+        var surveyStore = Substitute.For<ISurveyStore>();
+        surveyStore.GetActiveAsync(tenant, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Survey>>([new Survey
+            {
+                SurveyId = EntityId.From("srv-csat-v1"),
+                TenantId = tenant,
+                Name = "Customer Satisfaction",
+                Type = SurveyType.Csat,
+                Questions = [],
+            }]));
+
+        var contactStore = Substitute.For<IContactStore>();
+        contactStore.GetByIdAsync(tenant, contactId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Contact?>(new Contact
+            {
+                ContactId = contactId,
+                TenantId = tenant,
+                PreferredLanguage = "es-419",
+                CreatedAt = DateTimeOffset.UtcNow,
+            }));
+
+        return (conversationStore, queueStore, surveyStore, contactStore);
+    }
+
+    [Fact]
+    public async Task HandleClosedAsync_ShouldPushVoiceSignal_WhenAnsweredVoiceCallWrapsUp()
+    {
+        var tenant = new TenantId("ten-42");
+        var conversationId = EntityId.From("conv-voice-wrap");
+        var (conversationStore, queueStore, surveyStore, contactStore) = VoiceStores(
+            tenant, conversationId, EntityId.From("queue-support"), EntityId.From("contact-1"),
+            ConversationState.WrapUp, csatEnabled: true);
+
+        var source = new CsatConversationEndSource(
+            new PlatformEventBus(),
+            conversationStore, queueStore, surveyStore, contactStore,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CsatConversationEndSource>.Instance);
+
+        CsatConversationEndedSignal? pushed = null;
+        using var sub = source.Ended.Subscribe(s => pushed = s);
+
+        // Answered voice call: Active → WrapUp is the solicit transition.
+        await source.HandleClosedAsync(
+            new ConversationStateChangedEvent("ten-42", "conv-voice-wrap", nameof(ConversationState.Active), nameof(ConversationState.WrapUp)),
+            CancellationToken.None);
+
+        Assert.NotNull(pushed);
+        Assert.Equal("voice", pushed!.NativeChannel);
+        Assert.Equal("support-tier1", pushed.QueueName);
+        Assert.Equal("srv-csat-v1", pushed.SurveyId);
+        Assert.True(pushed.CsatEnabled);
+    }
+
+    [Fact]
+    public async Task HandleClosedAsync_ShouldNotPush_WhenVoiceCallAbandoned()
+    {
+        var tenant = new TenantId("ten-42");
+        var conversationId = EntityId.From("conv-voice-aband");
+        var (conversationStore, queueStore, surveyStore, contactStore) = VoiceStores(
+            tenant, conversationId, EntityId.From("queue-support"), EntityId.From("contact-1"),
+            ConversationState.Abandoned, csatEnabled: true);
+
+        var source = new CsatConversationEndSource(
+            new PlatformEventBus(),
+            conversationStore, queueStore, surveyStore, contactStore,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CsatConversationEndSource>.Instance);
+
+        var pushed = false;
+        using var sub = source.Ended.Subscribe(_ => pushed = true);
+
+        // Never-answered voice call: Queued → Abandoned is NOT in the solicit filter, so nothing fires.
+        await source.HandleClosedAsync(
+            new ConversationStateChangedEvent("ten-42", "conv-voice-aband", nameof(ConversationState.Queued), nameof(ConversationState.Abandoned)),
+            CancellationToken.None);
+
+        Assert.False(pushed);
+    }
+
+    [Fact]
+    public async Task HandleClosedAsync_ShouldPushWithCsatEnabledFalse_WhenVoiceQueueCsatDisabled()
+    {
+        var tenant = new TenantId("ten-42");
+        var conversationId = EntityId.From("conv-voice-disabled");
+        var (conversationStore, queueStore, surveyStore, contactStore) = VoiceStores(
+            tenant, conversationId, EntityId.From("queue-support"), EntityId.From("contact-1"),
+            ConversationState.WrapUp, csatEnabled: false);
+
+        var source = new CsatConversationEndSource(
+            new PlatformEventBus(),
+            conversationStore, queueStore, surveyStore, contactStore,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CsatConversationEndSource>.Instance);
+
+        CsatConversationEndedSignal? pushed = null;
+        using var sub = source.Ended.Subscribe(s => pushed = s);
+
+        await source.HandleClosedAsync(
+            new ConversationStateChangedEvent("ten-42", "conv-voice-disabled", nameof(ConversationState.Active), nameof(ConversationState.WrapUp)),
+            CancellationToken.None);
+
+        // The signal is still pushed with CsatEnabled=false so the orchestrator's queue-disabled skip
+        // path owns the decision (single source of truth).
+        Assert.NotNull(pushed);
+        Assert.Equal("voice", pushed!.NativeChannel);
+        Assert.False(pushed.CsatEnabled);
     }
 }

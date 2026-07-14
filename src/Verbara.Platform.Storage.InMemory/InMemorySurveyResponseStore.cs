@@ -47,4 +47,20 @@ internal sealed class InMemorySurveyResponseStore : ISurveyResponseStore
 
         return Task.FromResult(result);
     }
+
+    public Task<IReadOnlyList<SurveyResponse>> GetByChannelAndRangeAsync(
+        TenantId tenantId, string? channel, DateRange range, CancellationToken ct)
+    {
+        var hasChannel = !string.IsNullOrWhiteSpace(channel);
+        IReadOnlyList<SurveyResponse> result = _items.Values
+            .Where(r => r.TenantId == tenantId
+                        && r.Channel is not null
+                        && (!hasChannel || string.Equals(r.Channel, channel, StringComparison.OrdinalIgnoreCase))
+                        && r.CapturedAt.HasValue
+                        && range.Contains(r.CapturedAt.Value))
+            .OrderByDescending(r => r.CapturedAt!.Value)
+            .ToList();
+
+        return Task.FromResult(result);
+    }
 }
