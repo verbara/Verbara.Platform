@@ -9,6 +9,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-07-14
+
 ### Added
 - **CSAT voice channel end-to-end + aggregate KPI (`csat-completion`, ADR-0020).** Completes the CSAT
   train by wiring the voice channel through the existing digital slice and closing the two deferred
@@ -78,6 +80,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Spanish prose otherwise untouched; no code changed (#152).
 
 ---
+
+### Changed
+
+- Advanced `Verbara.Sdk.*` package pins 2.3.0 → 2.3.1 (LMNT mid-send abort fix + docs purge; 2026-07-14 release train).
 
 ## [2.18.0] — 2026-07-11 — CSAT consumer (customer-satisfaction capture; digital-first) + Pro CSAT engine hosting
 
