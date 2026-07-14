@@ -13,8 +13,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **CSAT voice channel end-to-end + aggregate KPI (`csat-completion`, ADR-0020).** Completes the CSAT
   train by wiring the voice channel through the existing digital slice and closing the two deferred
   ADR-0020 follow-ups. All additive/back-compat — the digital slice (`csat-runner`) is unaffected.
-  Consumes **Verbara.Sdk.Pro 2.9.0-pro** (the new `Verbara.Sdk.Pro.CsatRunner` voice adapter + typed
-  `IPlatformHubClient.OnCsatResponseRecorded`). Pairs with the Web aggregate KPI card. Host side of the
+  Consumes **Verbara.Sdk.Pro 2.10.0-pro** (the new `Verbara.Sdk.Pro.CsatRunner` voice adapter + typed
+  `IPlatformHubClient.OnCsatResponseRecorded`; pin advanced in-train once v2.10.0-pro published to
+  GitHub Packages). Pairs with the Web aggregate KPI card. Host side of the
   cross-repo `csat-completion` change.
   - **Voice trigger** — `CsatConversationEndSource` now maps `ChannelType.Voice` → `voice` and solicits
     on the answered `WrapUp` transition (never the never-answered `Abandoned`); the digital `Closed`
