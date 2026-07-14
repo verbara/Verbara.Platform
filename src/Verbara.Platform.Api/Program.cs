@@ -623,11 +623,16 @@ builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Contracts.ICsatVoiceCap
 builder.Services.AddSingleton<Verbara.Sdk.Pro.CsatRunner.Adapters.Voice.IDtmfSource,
     Verbara.Platform.Api.Services.AmiDtmfSource>();
 // IAmiConnection: the voice adapter AMI-BlindTransfers the caller leg via the primary server's
-// connection. Resolved from the server pool (fail-closed to a throwing accessor when unconfigured —
-// the adapter only runs on the AMI-owner pod with a live primary server).
+// connection. Deferred to first USE (DeferredPrimaryAmiConnection), NOT resolved at boot: the
+// CsatRunnerOrchestrator constructs the voice adapter (and thus resolves this) during Host.StartAsync,
+// so a throwing factory here crashed every headless / no-telephony boot (CI OpenAPI-export capture,
+// minimal deploys). The wrapper looks up GetServer("primary") on each member access and throws the
+// descriptive InvalidOperationException only when a dispatch genuinely needs AMI and none is configured
+// — fail-at-use, mirroring AmiDtmfSource's fail-closed pool access. The adapter only runs on the
+// AMI-owner pod with a live primary server, so deferring the failure is semantically correct.
 builder.Services.TryAddSingleton<Verbara.Sdk.IAmiConnection>(sp =>
-    sp.GetRequiredService<Verbara.Sdk.Live.Server.VerbaraServerPool>().GetServer("primary")?.Connection
-    ?? throw new InvalidOperationException("No primary AMI server is configured for voice CSAT dispatch."));
+    new Verbara.Platform.Api.Services.DeferredPrimaryAmiConnection(
+        sp.GetRequiredService<Verbara.Sdk.Live.Server.VerbaraServerPool>()));
 // SpeechSynthesizer: default to the offline Silence synthesizer so a dev / single-host deployment is
 // self-contained. TryAdd lets an operator register a real SDK TTS provider (Azure / ElevenLabs / …)
 // earlier in the composition root to supersede it.

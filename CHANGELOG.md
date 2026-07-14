@@ -44,8 +44,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     returns the audio (`audio/L16`), replacing the prior HTTP 501; the 400/404 guards are unchanged.
   - **Composition root** — registered the Pro voice seams so `AddProCsatRunner` wires the voice adapter:
     `ICsatVoiceCaptureSink` (`CsatVoiceCaptureSinkAdapter` → the Surveys capture path), `IDtmfSource`
-    (`AmiDtmfSource` → AMI `DTMFEnd` stream), `IAmiConnection` (primary server), and a default offline
-    `SpeechSynthesizer` (`SilenceSpeechSynthesizer`, superseded by a configured TTS provider).
+    (`AmiDtmfSource` → AMI `DTMFEnd` stream), `IAmiConnection` (`DeferredPrimaryAmiConnection` — resolves the
+    primary server's connection lazily on first dispatch and throws only then if none is configured, so a
+    headless / no-telephony host still boots), and a default offline `SpeechSynthesizer`
+    (`SilenceSpeechSynthesizer`, superseded by a configured TTS provider).
 - **Typed supervisor CSAT push (`csat-completion`, ADR-0020 follow-up).** `PushToHubRelay` now routes the
   recorded CSAT event through the strongly-typed `IPlatformHubClient.OnCsatResponseRecorded(CsatResponseRecordedPayload)`
   (the untyped `IHubContext<PlatformHub>` name-based relay is retired). The wire method name and payload

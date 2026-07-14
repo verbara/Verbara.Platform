@@ -165,6 +165,22 @@ The one net-new DTO (`CsatAggregateDto`) is a typed sealed record registered in 
 is a `PlatformEvent`-derived record (in-process bus, not serialized over the wire) but stays reflection-
 free. AOT publish must show 0 trim/AOT warnings on the advanced Pro pin.
 
+### D9 — `IAmiConnection` deferred to first use (fail-at-use, not fail-at-boot)
+
+`AddProCsatRunner` wires the voice adapter **unconditionally**, and the `CsatRunnerOrchestrator`
+BackgroundService constructs every channel adapter — voice included — during `Host.StartAsync`. The
+voice adapter takes an `IAmiConnection`, so the composition-root registration is resolved at host start.
+Registering it as a factory that eagerly reads the primary `VerbaraServer.Connection` and threw when none
+was configured crashed **every headless / no-telephony boot** (the CI OpenAPI-export capture in
+`ci.yml`, minimal deploys). Resolution: `IAmiConnection` is a Platform-owned `DeferredPrimaryAmiConnection`
+that looks up `VerbaraServerPool.GetServer("primary")` on each member access and throws the descriptive
+`InvalidOperationException` only when a voice CSAT dispatch genuinely needs AMI and no primary server
+exists — the same fail-closed pool access `AmiDtmfSource` uses, and the same `GetServer("primary")` accessor
+`VoiceConversationBridge` / `VoiceCallControlService` use (no parallel access path). Voice CSAT dispatch only
+ever fires for voice conversations, which require a live AMI connection, so deferring the failure to the
+dispatch call site is semantically correct. AOT-safe (no reflection; direct virtual dispatch onto the
+resolved connection).
+
 ## Risks / Trade-offs
 
 - **Voice trigger widening touches a hot event path** → `CsatConversationEndSource` now matches more
