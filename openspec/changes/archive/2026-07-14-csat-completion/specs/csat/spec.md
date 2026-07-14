@@ -207,7 +207,7 @@ observes a wire change — this is type-safety hardening
 registered in `ApiJsonContext` (Native AOT). Each capture MUST also write an audit row via
 `IAuditService.RecordAsync` under the `csat` category.
 
-#### Scenario: Supervisor session receives the recorded event via the typed method
+#### Scenario: Supervisor session receives the recorded event
 
 - **GIVEN** a supervisor subscribed to the `supervisor:{tenantId}` group and a valid capture for that tenant
 - **WHEN** the response is persisted
