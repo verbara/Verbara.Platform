@@ -121,3 +121,33 @@ deferred/follow-up) surfaces them:
   Platform read endpoint (API-first) before the Web surface.
 
 decision_ref: Platform/ADR-0020 · csat-runner train close-out.
+
+## Addendum (2026-07-14): both deferred follow-ups resolved by `csat-completion` (append-only)
+
+The two follow-ups recorded above as **deferred / not yet scheduled** were both
+delivered by the cross-repo change `csat-completion` (host: Platform PR #155,
+merged 2026-07-14; Pro + Web children archived alongside). They are no longer
+open — recorded here so `/xr:pending` (which mines this ADR for items marked
+deferred/follow-up) stops surfacing them; the items above are preserved
+unchanged per the append-only convention.
+
+- **[owner: Pro] Typed `IPlatformHubClient.OnCsatResponseRecorded` Hub method — RESOLVED.**
+  The Pro child added the typed `OnCsatResponseRecorded(CsatResponseRecordedPayload)`
+  method to `IPlatformHubClient`, and Platform's `PushToHubRelay` CSAT branch was
+  converted from the untyped `IHubContext` name-based relay to the typed
+  `IPlatformHubClient.OnCsatResponseRecorded` path (mirroring
+  `SendConversationAsync`/`SendAgentAsync`). The wire method name and
+  `CsatResponseRecordedPayload` shape are unchanged, so no SignalR client observed
+  a wire change. Living spec: `csat` → "CsatResponseRecordedEvent real-time push"
+  (now MODIFIED to the typed relay).
+
+- **[owner: Web] CSAT KPI card queue scope ⟨NEEDS PRODUCT-OWNER INPUT⟩ — RESOLVED to aggregation.**
+  The product owner decided (2026-07-13) in favor of a scope-wide aggregate over
+  a per-queue selector. As the API-first prerequisite, Platform added the
+  scope-wide `GET /api/v1/analytics/csat` aggregate read (`SupervisorPlus`,
+  license-gated, backed by the existing `WHERE channel IS NOT NULL` partial index,
+  no schema change); the Web child replaced the single-queue wallboard card with
+  aggregate consumption. Living spec: `csat` → "Scope-wide aggregate CSAT
+  analytics read" (new requirement, coexisting with the per-queue read).
+
+decision_ref: Platform/ADR-0020 · csat-completion train close-out.
