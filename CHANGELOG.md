@@ -78,12 +78,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   repo-qualified relative, per the ADR-0005 public-repo content rule + `openspec/config.yaml`
   absolute-path ban. Token-level path substitutions only — dated period-correct content and
   Spanish prose otherwise untouched; no code changed (#152).
+- Advanced `Verbara.Sdk.*` package pins 2.3.0 → 2.3.1 (LMNT mid-send abort fix + docs purge;
+  2026-07-14 release train).
 
 ---
-
-### Changed
-
-- Advanced `Verbara.Sdk.*` package pins 2.3.0 → 2.3.1 (LMNT mid-send abort fix + docs purge; 2026-07-14 release train).
 
 ## [2.18.0] — 2026-07-11 — CSAT consumer (customer-satisfaction capture; digital-first) + Pro CSAT engine hosting
 
