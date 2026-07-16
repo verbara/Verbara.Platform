@@ -1,0 +1,46 @@
+kind: feature
+version: 1
+change_id: openapi-response-schemas
+decision_ref: Platform/ADR-0035
+
+repos:
+  - path: ../Verbara.Platform
+    role: producer
+    buildOrder: 1
+    childChange: HOST
+    summary: >
+      Extends the proven typed-response pattern of
+      src/Verbara.Platform.Api/Endpoints/CsatResponseEndpoints.cs:282,347
+      (Task<Results<Ok<CsatResponseDto>, BadRequest>> + TypedResults.Ok — the only
+      pattern that surfaces named components/schemas response entries) to the ~415
+      handlers across ~77 endpoint files still returning untyped Task<IResult> via
+      Results.Ok/Results.Json with zero .Produces<T>() metadata. The capture/verify
+      pipeline needs no new plumbing: .github/workflows/ci.yml:95-158 (CI-runtime
+      capture + artifact upload) and scripts/verify-openapi-fixture.py (golden-fixture
+      guard, today asserting only CsatResponseDto) already exist and extend naturally.
+
+  - path: ../Verbara.Platform.Web
+    role: consumer
+    buildOrder: 2
+    childChange: web/openapi-response-adoption
+    summary: >
+      Consumption machinery is fully built and proven (scout verdict: covered):
+      scripts/generate-api-types.mjs emits every components/schemas entry verbatim on
+      regenerate; src/core/api/generated/openapi.d.ts is the single seam the migration
+      reads from; src/core/api/client.ts:222 customFetch<T> is the swap-the-T contract;
+      src/core/api/hooks/use-analytics.ts:523 (CsatResponseDto) is the proven end-to-end
+      consumption site. The child regenerates openapi.d.ts and migrates the admin
+      remainder (38 files annotated no-match in the archived
+      openspec/changes/archive/2026-07-16-openapi-typed-client-admin/); the three
+      pre-existing HELD children (openapi-typed-client-agent 8 files/~22 decls,
+      -analytics 4/~43, -operations 3 REST hooks/14 decls) un-gate on this thread and
+      run as their own backlog items, not as children of this change.
+
+fixtures:
+  - fixtures/response-schema-manifest.v1.json
+    # To be produced by the HOST change: the named response-schema inventory per
+    # endpoint group (schema name + verbatim field names) for every wire shape the
+    # Web consumer slices touch (admin-remainder 38 files, agent, analytics,
+    # operations groups) — the verbatim-fixture-citation source for all children.
+    # verify-openapi-fixture.py extends to assert this manifest against the captured
+    # document (fixture completeness rule, T11).
