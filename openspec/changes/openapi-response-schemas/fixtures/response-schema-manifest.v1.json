@@ -1,0 +1,58 @@
+{
+  "$comment": "Golden inventory of named response schemas Platform emits in /openapi/v1.json components/schemas. SEED STATE (2026-07-16): carries the single response schema already proven in the captured document (ADR-0035 CSAT seed; field names verbatim from openspec/changes/archive/2026-07-12-openapi-typed-client/fixtures/openapi-document.v1.sample.json and confirmed against Web's generated openapi.d.ts). The HOST change MUST complete every group below with schema name + verbatim field names for all wire shapes the Web consumer slices touch (admin-remainder, agent, analytics, operations) BEFORE /xr:propagate — an empty group at propagate time is a blocking fixture-completeness finding (T11). verify-openapi-fixture.py extends to assert this manifest against the CI-captured document. Naming note: the C# record and Web alias names differ from the emitted schema name (CsatAggregateDto / CsatAggregateAnalyticsDto vs emitted CsatResponseDto) — the manifest records EMITTED names only.",
+  "$propose_note": "PROPOSE STAGE (docs/propose-openapi-response-schemas, 2026-07-16): the four groups stay TO-COMPLETE-BY-HOST. Verbatim EMITTED schema names + camelCase field names cannot be captured at propose time — a named response schema for a group's DTO only appears in /openapi/v1.json AFTER that handler is converted to the typed Results<Ok<TDto>,...> pattern (tasks.md Group 3), and the emitted name can differ from the C# record name (the CsatAggregateDto -> emitted CsatResponseDto lesson). Freezing C#-source-derived PascalCase names here now would reintroduce exactly the guess-the-DTO failure the verbatim-fixture-citation rule exists to prevent (csat-runner, Web PR#159). The 'candidateFiles' below are the design-stage group membership (resolves design OQ2), verified from the endpoint tree by the propose inventory pass; they are NOT wire shapes. Completion (schemas + status flip) is tasks.md Group 2, gated before /xr:propagate.",
+  "version": 1,
+  "groups": {
+    "csat": {
+      "status": "proven",
+      "schemas": {
+        "CsatResponseDto": ["queueName", "channel", "totalResponses", "averageRating", "rangeStart", "rangeEnd"]
+      }
+    },
+    "admin-remainder": {
+      "status": "TO-COMPLETE-BY-HOST",
+      "candidateFiles": [
+        "AdminEndpoints.cs", "AuthAdminEndpoints.cs", "ChannelConfigEndpoints.cs",
+        "ManagementApiKeyEndpoints.cs", "ManagementBillingEndpoints.cs", "ManagementClusterEndpoints.cs",
+        "ManagementImpersonationEndpoints.cs", "ManagementSystemEndpoints.cs", "ManagementTenantEndpoints.cs",
+        "ManagementTenantIpAllowlistEndpoints.cs", "ManagementTenantSettingsEndpoints.cs",
+        "ManagementWebhookEndpoints.cs", "OidcEndpoints.cs", "PartnerBillingEndpoints.cs",
+        "PartnerCustomerEndpoints.cs", "PartnerRevenueEndpoints.cs", "PartnerSettingsEndpoints.cs",
+        "RbacEndpoints.cs", "TenantLlmConfigEndpoints.cs", "TenantSettingsEndpoints.cs",
+        "TypificationEndpoints.cs (schema-admin part)", "WebhookSubscriptionEndpoints.cs"
+      ],
+      "schemas": {}
+    },
+    "agent": {
+      "status": "TO-COMPLETE-BY-HOST",
+      "candidateFiles": [
+        "AgentEndpoints.cs", "AgentAssistEndpoints.cs", "AgentAssistFeatureEndpoints.cs",
+        "CaseEndpoints.cs", "CannedResponseEndpoints.cs", "ContactEndpoints.cs",
+        "ConversationEndpoints.cs", "KnowledgeBaseEndpoints.cs", "ReasonHintEndpoints.cs",
+        "SkillEndpoints.cs", "SupervisorEndpoints.cs", "VoiceEndpoints.cs", "WebChatEndpoints.cs",
+        "TypificationEndpoints.cs (runtime /typify part)"
+      ],
+      "schemas": {}
+    },
+    "analytics": {
+      "status": "TO-COMPLETE-BY-HOST",
+      "candidateFiles": [
+        "AnalyticsEndpoints.cs", "AnalyticsLiveEndpoints.cs", "CallAnalyticsEndpoints.cs",
+        "CreditLedgerEndpoints.cs", "QueueMetricsEndpoints.cs", "ScheduledReportEndpoints.cs"
+      ],
+      "schemas": {}
+    },
+    "operations": {
+      "status": "TO-COMPLETE-BY-HOST",
+      "candidateFiles": [
+        "RealtimeEndpoints.cs", "VoiceMetadataEndpoints.cs", "AiCreditsEndpoints.cs",
+        "RecordingEndpoints.cs", "BotEndpoints.cs", "SurveyEndpoints.cs", "GdprEndpoints.cs",
+        "OnboardingEndpoints.cs", "NotificationEndpoints.cs", "AuditEndpoints.cs",
+        "HolidayCalendarEndpoints.cs", "DncListEndpoints.cs", "CallerIdPoolEndpoints.cs",
+        "CallAttemptEndpoints.cs", "CampaignEndpoints.cs", "DidRouteEndpoints.cs",
+        "OutboundRouteEndpoints.cs", "QueueMembersEndpoints.cs", "SetupEndpoints.cs", "FlowEndpoints.cs"
+      ],
+      "schemas": {}
+    }
+  }
+}
