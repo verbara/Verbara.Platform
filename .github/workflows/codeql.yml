@@ -49,7 +49,7 @@ jobs:
             --store-password-in-clear-text
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.36.3
+        uses: github/codeql-action/init@v4.37.0
         with:
           languages: csharp
           # Trace exactly the `dotnet build` step below. Without build-mode the
@@ -63,6 +63,6 @@ jobs:
         run: dotnet build Verbara.Platform.slnx -c Release --no-incremental
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v4.36.3
+        uses: github/codeql-action/analyze@v4.37.0
         with:
           category: "/language:csharp"
