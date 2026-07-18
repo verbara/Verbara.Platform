@@ -9,6 +9,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Dialer license enforcement at the point of spend (wires `Verbara.Sdk.Pro` 2.11.0-pro; Pro/ADR-0016).**
+  Passes `ILicenseGuard` into the shared `OriginateExecutorBase` factory, so both outbound originate
+  paths — agent click-to-dial (`AgentOutboundDialService`) and the W5b caller-rescue
+  `CallbackOriginator` — now enforce the Dialer license before every billable PSTN send. These two
+  paths had **no** license check before; on revocation they stop originating within ~sub-second
+  (via the Pro version-stamped guard cache). Advances all `Verbara.Sdk.Pro.*` pins 2.10.0-pro →
+  2.11.0-pro (pins formalize in-train once 2.11.0-pro publishes to GitHub Packages).
+  - **SOURCE-BREAKING (test doubles only):** custom `OriginateExecutorBase` subclasses now override
+    `ExecuteCoreAsync` (the base `ExecuteAsync` is the non-virtual spend-point template method); the
+    two `FakeOriginateExecutor` test doubles were updated accordingly.
+
 ## [2.19.0] - 2026-07-14
 
 ### Added
