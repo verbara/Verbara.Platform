@@ -1198,7 +1198,12 @@ if (!string.IsNullOrEmpty(clusterConn))
                     sp.GetRequiredService<ILogger<Verbara.Sdk.Pro.Dialer.Execution.DefaultOriginateExecutor>>(),
                     sp.GetService<Verbara.Sdk.Pro.Dialer.Health.ITrunkHealthProvider>(),
                     sp.GetService<Verbara.Sdk.Pro.Dialer.PostCall.PostCallHandlerBase>(),
-                    sp.GetService<TimeProvider>()));
+                    sp.GetService<TimeProvider>(),
+                    // Pro/ADR-0016: enforce the dialer license at the point of spend. ILicenseGuard is
+                    // registered by AddProLicenseGuard() above, so both consumers of this executor
+                    // (AgentOutboundDialService click-to-dial + the W5b CallbackOriginator) inherit
+                    // spend-point enforcement — the two paths that had NO license check before.
+                    sp.GetService<Verbara.Sdk.Pro.Licensing.ILicenseGuard>()));
             // The outbound route + DNC resolvers register only with the full dialer Postgres storage, so
             // they are optional here (GetService): a voice-only tenant fails DNC open + uses the default trunk.
             builder.Services.AddSingleton<Verbara.Platform.Api.Services.IAgentOutboundDialService>(sp =>

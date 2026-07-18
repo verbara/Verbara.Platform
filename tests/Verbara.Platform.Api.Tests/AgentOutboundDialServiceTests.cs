@@ -184,7 +184,10 @@ public sealed class AgentOutboundDialServiceTests
         public string? LastNode;
         public OriginateResult Result = new(true, "act-1", null);
 
-        public override ValueTask<OriginateResult> ExecuteAsync(OriginateAction action, string nodeId, CancellationToken ct)
+        // Pro/ADR-0016: the spend-point license check lives on the non-virtual ExecuteAsync
+        // template method; derived executors override ExecuteCoreAsync. No guard is passed, so
+        // the base allows through to this core unchanged.
+        protected override ValueTask<OriginateResult> ExecuteCoreAsync(OriginateAction action, string nodeId, CancellationToken ct)
         {
             LastAction = action;
             LastNode = nodeId;
