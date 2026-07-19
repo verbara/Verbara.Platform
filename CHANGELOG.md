@@ -16,7 +16,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `CallbackOriginator` — now enforce the Dialer license before every billable PSTN send. These two
   paths had **no** license check before; on revocation they stop originating within ~sub-second
   (via the Pro version-stamped guard cache). Advances all `Verbara.Sdk.Pro.*` pins 2.10.0-pro →
-  2.11.0-pro (pins formalize in-train once 2.11.0-pro publishes to GitHub Packages).
+  2.11.0-pro (pins formalize in-train once 2.11.0-pro publishes to GitHub Packages). (#161)
   - **SOURCE-BREAKING (test doubles only):** custom `OriginateExecutorBase` subclasses now override
     `ExecuteCoreAsync` (the base `ExecuteAsync` is the non-virtual spend-point template method); the
     two `FakeOriginateExecutor` test doubles were updated accordingly.
@@ -27,7 +27,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `components/schemas` entry in `/openapi/v1.json` (**183 → 391 schemas**). Wire bodies are
   byte-identical — schema **metadata** only, no request/response contract, status-code, or gating
   change — verified by the full endpoint suite (1645 tests). Unblocks the Platform.Web typed-client
-  migration (the `web/openapi-response-adoption` child in this change's `impact.yaml`).
+  migration (the `web/openapi-response-adoption` child in this change's `impact.yaml`). (#162)
   - Registers 10 response DTOs in `ApiJsonContext` that were returned untyped and never source-gen
     registered (`InvoiceDto`, `UsageRecordDto`, `QuotaDto`, `QuotaStatusDto`, `CircuitStatusResponse`,
     `ActiveSessionDto`, `ListenEntry`, `PauseResultDto`, `SurveyScoreSummary`, `UserPurgePreview`) —
