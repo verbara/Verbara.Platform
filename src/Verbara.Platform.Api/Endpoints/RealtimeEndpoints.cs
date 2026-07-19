@@ -5,6 +5,7 @@ using Verbara.Sdk.Pro.Licensing;
 using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Pro.Realtime;
 using Verbara.Sdk.Pro.Realtime.Models;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -31,17 +32,17 @@ internal static class RealtimeEndpoints
 
     // ─── Handlers ────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListProfiles(
+    private static async Task<Ok<List<EndpointProfileDto>>> ListProfiles(
         HttpContext context,
         [FromServices] EndpointProfileStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var items = await store.ListAsync(tenantId, ct);
-        return Results.Ok(items.Select(MapToDto).ToList());
+        return TypedResults.Ok(items.Select(MapToDto).ToList());
     }
 
-    private static async Task<IResult> GetProfile(
+    private static async Task<Results<Ok<EndpointProfileDto>, NotFound>> GetProfile(
         long id,
         HttpContext context,
         [FromServices] EndpointProfileStoreBase store,
@@ -49,10 +50,10 @@ internal static class RealtimeEndpoints
     {
         var tenantId = GetTenantId(context);
         var profile = await store.GetAsync(id, tenantId, ct);
-        return profile is null ? Results.NotFound() : Results.Ok(MapToDto(profile));
+        return profile is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(profile));
     }
 
-    private static async Task<IResult> GetDefaultProfile(
+    private static async Task<Results<Ok<EndpointProfileDto>, NotFound>> GetDefaultProfile(
         string type,
         HttpContext context,
         [FromServices] EndpointProfileStoreBase store,
@@ -61,7 +62,7 @@ internal static class RealtimeEndpoints
         var tenantId = GetTenantId(context);
         var profileType = ParseProfileType(type);
         var profile = await store.GetDefaultAsync(tenantId, profileType, ct);
-        return profile is null ? Results.NotFound() : Results.Ok(MapToDto(profile));
+        return profile is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(profile));
     }
 
     private static async Task<IResult> CreateProfile(

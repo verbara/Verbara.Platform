@@ -1,5 +1,6 @@
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Core;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -73,16 +74,16 @@ internal static class GdprEndpoints
 
     // --- Purge (contact) ------------------------------------------------------
 
-    private static async Task<IResult> PurgeContactData(
+    private static async Task<Results<Ok<PurgeResult>, BadRequest<ErrorResponse>>> PurgeContactData(
         HttpContext context,
         [FromBody] GdprPurgeRequest body,
         [FromServices] IGdprPurgeService purgeService,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.ContactId))
-            return Results.BadRequest(new ErrorResponse("contactId is required"));
+            return TypedResults.BadRequest(new ErrorResponse("contactId is required"));
         if (string.IsNullOrWhiteSpace(body.Reason))
-            return Results.BadRequest(new ErrorResponse("reason is required"));
+            return TypedResults.BadRequest(new ErrorResponse("reason is required"));
 
         var tenantId = GetTenantId(context);
         var userId = context.User.FindFirst("sub")?.Value ?? "unknown";
@@ -101,25 +102,25 @@ internal static class GdprEndpoints
                 CancellationToken.None);
         }
 
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
     // --- Purge (user) ---------------------------------------------------------
 
-    private static async Task<IResult> PurgeUserData(
+    private static async Task<Results<Ok<PurgeResult>, BadRequest<ErrorResponse>>> PurgeUserData(
         HttpContext context,
         [FromBody] GdprUserPurgeRequest body,
         [FromServices] IGdprPurgeService purgeService,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.UserId))
-            return Results.BadRequest(new ErrorResponse("userId is required"));
+            return TypedResults.BadRequest(new ErrorResponse("userId is required"));
         if (string.IsNullOrWhiteSpace(body.Reason))
-            return Results.BadRequest(new ErrorResponse("reason is required"));
+            return TypedResults.BadRequest(new ErrorResponse("reason is required"));
 
         var confirmHeader = context.Request.Headers["X-Confirm-Purge"].ToString();
         if (!string.Equals(confirmHeader, "true", StringComparison.OrdinalIgnoreCase))
-            return Results.BadRequest(new ErrorResponse("X-Confirm-Purge: true header is required to confirm destructive operation"));
+            return TypedResults.BadRequest(new ErrorResponse("X-Confirm-Purge: true header is required to confirm destructive operation"));
 
         var tenantId = GetTenantId(context);
         var performedBy = context.User.FindFirst("sub")?.Value ?? "unknown";
@@ -127,23 +128,23 @@ internal static class GdprEndpoints
         var result = await purgeService.PurgeUserDataAsync(
             tenantId.Value, body.UserId, performedBy, body.Reason, ct);
 
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
     // --- Purge Preview --------------------------------------------------------
 
-    private static async Task<IResult> PurgePreview(
+    private static async Task<Results<Ok<UserPurgePreview>, BadRequest<ErrorResponse>>> PurgePreview(
         HttpContext context,
         [FromQuery] string userId,
         [FromServices] IGdprPurgeService purgeService,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(userId))
-            return Results.BadRequest(new ErrorResponse("userId query parameter is required"));
+            return TypedResults.BadRequest(new ErrorResponse("userId query parameter is required"));
 
         var tenantId = GetTenantId(context);
         var preview = await purgeService.PreviewUserPurgeAsync(tenantId.Value, userId, ct);
-        return Results.Ok(preview);
+        return TypedResults.Ok(preview);
     }
 
     // --- Purge Log ------------------------------------------------------------
@@ -161,16 +162,16 @@ internal static class GdprEndpoints
 
     // --- Retention Policy -----------------------------------------------------
 
-    private static async Task<IResult> GetRetentionPolicy(
+    private static async Task<Ok<RetentionPolicyDto>> GetRetentionPolicy(
         string tenantId,
         [FromServices] ITenantRetentionPolicyStore store,
         CancellationToken ct)
     {
         var policy = await store.GetAsync(tenantId, ct);
         if (policy is null)
-            return Results.Ok(new RetentionPolicyDto(tenantId, null, null, null, null));
+            return TypedResults.Ok(new RetentionPolicyDto(tenantId, null, null, null, null));
 
-        return Results.Ok(new RetentionPolicyDto(
+        return TypedResults.Ok(new RetentionPolicyDto(
             policy.TenantId,
             policy.ConversationRetentionDays,
             policy.AuthEventRetentionDays,
@@ -178,7 +179,7 @@ internal static class GdprEndpoints
             policy.UsageRecordRetentionDays));
     }
 
-    private static async Task<IResult> UpdateRetentionPolicy(
+    private static async Task<Ok<RetentionPolicyDto>> UpdateRetentionPolicy(
         string tenantId,
         [FromBody] UpdateRetentionPolicyRequest body,
         [FromServices] ITenantRetentionPolicyStore store,
@@ -194,7 +195,7 @@ internal static class GdprEndpoints
         };
 
         await store.SaveAsync(policy, ct);
-        return Results.Ok(new RetentionPolicyDto(
+        return TypedResults.Ok(new RetentionPolicyDto(
             tenantId,
             policy.ConversationRetentionDays,
             policy.AuthEventRetentionDays,

@@ -3,6 +3,7 @@ using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -41,14 +42,14 @@ internal static class RbacEndpoints
 
     // --- Permission Catalog ---
 
-    private static async Task<IResult> ListPermissions(
+    private static async Task<Ok<IReadOnlyList<PermissionDefinition>>> ListPermissions(
         [FromServices] IPermissionStore store, CancellationToken ct)
     {
         var permissions = await store.GetAllAsync(ct);
-        return Results.Ok(permissions);
+        return TypedResults.Ok(permissions);
     }
 
-    private static async Task<IResult> ListPermissionsByCategory(
+    private static async Task<Ok<List<PermissionGroupDto>>> ListPermissionsByCategory(
         [FromServices] IPermissionStore store, CancellationToken ct)
     {
         var all = await store.GetAllAsync(ct);
@@ -56,33 +57,35 @@ internal static class RbacEndpoints
             .Select(g => new PermissionGroupDto(g.Key, g.ToList()))
             .OrderBy(g => g.Category)
             .ToList();
-        return Results.Ok(grouped);
+        return TypedResults.Ok(grouped);
     }
 
     // --- Role Templates ---
 
-    private static async Task<IResult> ListRoleTemplates(
+    private static async Task<Ok<IReadOnlyList<RoleTemplate>>> ListRoleTemplates(
         [FromServices] IRoleTemplateStore store, CancellationToken ct)
     {
         var templates = await store.GetAllAsync(ct);
-        return Results.Ok(templates);
+        return TypedResults.Ok(templates);
     }
 
-    private static async Task<IResult> GetRoleTemplate(
+    private static async Task<Results<Ok<RoleTemplate>, NotFound>> GetRoleTemplate(
         string id, [FromServices] IRoleTemplateStore store, CancellationToken ct)
     {
         var template = await store.GetByIdAsync(id, ct);
-        return template is null ? Results.NotFound() : Results.Ok(template);
+        if (template is null)
+            return TypedResults.NotFound();
+        return TypedResults.Ok(template);
     }
 
     // --- Tenant Roles ---
 
-    private static async Task<IResult> ListTenantRoles(
+    private static async Task<Ok<IReadOnlyList<TenantRole>>> ListTenantRoles(
         HttpContext context, [FromServices] ITenantRoleStore store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var roles = await store.ListAsync(tenantId, ct);
-        return Results.Ok(roles);
+        return TypedResults.Ok(roles);
     }
 
     private static async Task<IResult> CreateTenantRole(
@@ -133,22 +136,24 @@ internal static class RbacEndpoints
         return Results.Created($"/admin/roles/{roleId}", created);
     }
 
-    private static async Task<IResult> GetTenantRole(
+    private static async Task<Results<Ok<TenantRole>, NotFound>> GetTenantRole(
         string id, HttpContext context, [FromServices] ITenantRoleStore store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var role = await store.GetByIdAsync(tenantId, id, ct);
-        return role is null ? Results.NotFound() : Results.Ok(role);
+        if (role is null)
+            return TypedResults.NotFound();
+        return TypedResults.Ok(role);
     }
 
-    private static async Task<IResult> UpdateTenantRole(
+    private static async Task<Results<Ok<TenantRole>, NotFound>> UpdateTenantRole(
         string id, HttpContext context, [FromBody] UpdateTenantRoleRequest body,
         [FromServices] ITenantRoleStore store, [FromServices] PermissionResolver resolver,
         IClock clock, [FromServices] IAuditService audit, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var role = await store.GetByIdAsync(tenantId, id, ct);
-        if (role is null) return Results.NotFound();
+        if (role is null) return TypedResults.NotFound();
 
         var before = new { role.RoleId, role.Name, role.Description };
 
@@ -175,7 +180,7 @@ internal static class RbacEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(updated);
+        return TypedResults.Ok(updated!);
     }
 
     private static async Task<IResult> DeleteTenantRole(
@@ -241,15 +246,15 @@ internal static class RbacEndpoints
 
     // --- User Role Assignments ---
 
-    private static async Task<IResult> GetUserRoles(
+    private static async Task<Ok<IReadOnlyList<UserRoleAssignment>>> GetUserRoles(
         string id, HttpContext context, [FromServices] IUserRoleStore store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var roles = await store.GetRolesForUserAsync(tenantId, EntityId.From(id), ct);
-        return Results.Ok(roles);
+        return TypedResults.Ok(roles);
     }
 
-    private static async Task<IResult> ReplaceUserRoles(
+    private static async Task<Ok<IReadOnlyList<UserRoleAssignment>>> ReplaceUserRoles(
         string id, HttpContext context, [FromBody] ReplaceUserRolesRequest body,
         [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver,
         [FromServices] IAuditService audit, CancellationToken ct)
@@ -274,7 +279,7 @@ internal static class RbacEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(roles);
+        return TypedResults.Ok(roles);
     }
 
     private static async Task<IResult> AddUserRole(
@@ -328,14 +333,14 @@ internal static class RbacEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> GetUserEffectivePermissions(
+    private static async Task<Ok<UserPermissionsDto>> GetUserEffectivePermissions(
         string id, HttpContext context,
         [FromServices] PermissionResolver resolver, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
         var permissions = await resolver.ResolveAsync(tenantId, userId, ct);
-        return Results.Ok(new UserPermissionsDto(id, permissions.Order().ToList()));
+        return TypedResults.Ok(new UserPermissionsDto(id, permissions.Order().ToList()));
     }
 
     // --- Helpers ---

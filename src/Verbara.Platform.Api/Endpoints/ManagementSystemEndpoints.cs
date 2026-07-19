@@ -5,6 +5,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Licensing;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -45,11 +46,11 @@ internal static class ManagementSystemEndpoints
     // but returns the upstream Pro contract verbatim (Tier, ExpiresAt, MaxAgents, MaxNodes,
     // AuthorizedDigestsCount, LastValidationResult, LastValidationAt, RevalidationInterval,
     // Licensee). No Platform DTO wrapper — Pro guarantees the shape via LicensingJsonContext.
-    private static IResult GetLicenseStatus(
+    private static Ok<LicenseStatusSnapshot> GetLicenseStatus(
         [FromServices] ILicenseStatusReader reader)
-        => Results.Ok(reader.Snapshot());
+        => TypedResults.Ok(reader.Snapshot());
 
-    private static async Task<IResult> GetSystemInfo(
+    private static async Task<Ok<SystemInfoDto>> GetSystemInfo(
         [FromServices] Verbara.Platform.Core.IFeatureRegistry features,
         [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
@@ -57,10 +58,10 @@ internal static class ManagementSystemEndpoints
         var hostTenant = await tenantStore.GetHostTenantAsync(ct);
         var version = typeof(ManagementSystemEndpoints).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
-        return Results.Ok(new SystemInfoDto(version, hostTenant?.TenantId, hostTenant?.Name ?? "Verbara", features.GetFeatures()));
+        return TypedResults.Ok(new SystemInfoDto(version, hostTenant?.TenantId, hostTenant?.Name ?? "Verbara", features.GetFeatures()));
     }
 
-    private static IResult GetLicenseInfo(
+    private static Ok<LicenseInfoDto> GetLicenseInfo(
         [FromServices] ILicenseStatus licenseStatus,
         [FromServices] IOptions<LicenseOptions> licenseOptions,
         [FromServices] TimeProvider timeProvider)
@@ -87,7 +88,7 @@ internal static class ManagementSystemEndpoints
             licenseOptions.Value.GracePeriod,
             timeProvider.GetUtcNow());
 
-        return Results.Ok(new LicenseInfoDto(
+        return TypedResults.Ok(new LicenseInfoDto(
             licenseStatus.IsValid,
             licenseStatus.LicenseId,
             licenseStatus.Licensee,
@@ -131,20 +132,20 @@ internal static class ManagementSystemEndpoints
         }
     }
 
-    private static IResult UpdateLicense(
+    private static Ok<MessageResponse> UpdateLicense(
         [FromBody] UpdateLicenseRequest body,
         [FromServices] ILicenseStatus licenseStatus)
     {
-        return Results.Ok(new MessageResponse("License activation not yet implemented. Place a .lic file at the configured path and restart."));
+        return TypedResults.Ok(new MessageResponse("License activation not yet implemented. Place a .lic file at the configured path and restart."));
     }
 
-    private static IResult GetSettings([FromServices] SystemSettingsStore store)
+    private static Ok<SystemSettingsDto> GetSettings([FromServices] SystemSettingsStore store)
     {
         var record = store.Get();
-        return Results.Ok(new SystemSettingsDto(record.PlatformName, record.DefaultTimezone, record.DefaultLanguage));
+        return TypedResults.Ok(new SystemSettingsDto(record.PlatformName, record.DefaultTimezone, record.DefaultLanguage));
     }
 
-    private static async Task<IResult> SaveSettings(
+    private static async Task<Ok<SystemSettingsDto>> SaveSettings(
         HttpContext context,
         [FromBody] SystemSettingsRequest body,
         [FromServices] SystemSettingsStore store,
@@ -172,7 +173,7 @@ internal static class ManagementSystemEndpoints
                 ct: ct);
         }
 
-        return Results.Ok(new SystemSettingsDto(record.PlatformName, record.DefaultTimezone, record.DefaultLanguage));
+        return TypedResults.Ok(new SystemSettingsDto(record.PlatformName, record.DefaultTimezone, record.DefaultLanguage));
     }
 }
 

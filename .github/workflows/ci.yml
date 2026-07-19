@@ -145,11 +145,14 @@ jobs:
           echo "  paths:   $(jq '.paths | length' "$doc")"
           echo "  schemas: $(jq '.components.schemas | length' "$doc")"
 
-      - name: Verify CsatResponseDto fixture against the exported document
+      - name: Verify response-schema manifest against the exported document
+        # openapi-response-schemas (Platform/ADR-0035): assert every named response schema the
+        # manifest declares (per consumer group, verbatim field names) exists in the captured
+        # document. Subsumes the earlier single-CsatResponseDto fixture check (design D4).
         run: >-
           python3 scripts/verify-openapi-fixture.py
           artifacts/openapi/openapi-document.json
-          openspec/changes/archive/2026-07-12-openapi-typed-client/fixtures/openapi-document.v1.sample.json
+          openspec/changes/openapi-response-schemas/fixtures/response-schema-manifest.v1.json
 
       - name: Upload OpenAPI document artifact
         uses: actions/upload-artifact@v7.0.1

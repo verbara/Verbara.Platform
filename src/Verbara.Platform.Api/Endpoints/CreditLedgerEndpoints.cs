@@ -2,6 +2,7 @@ using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -50,18 +51,18 @@ internal static class CreditLedgerEndpoints
 
     // ─── Operator mint ────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> TopUp(
+    private static async Task<Results<Ok<CreditBalanceResponse>, BadRequest<ErrorResponse>>> TopUp(
         [FromBody] TopUpRequest req,
         [FromServices] ICreditLedgerStore ledger,
         [FromServices] IClock clock,
         CancellationToken ct)
     {
         if (req.Amount <= 0m)
-            return Results.BadRequest(new ErrorResponse("Amount must be positive."));
+            return TypedResults.BadRequest(new ErrorResponse("Amount must be positive."));
         if (string.IsNullOrWhiteSpace(req.TenantId))
-            return Results.BadRequest(new ErrorResponse("TenantId is required."));
+            return TypedResults.BadRequest(new ErrorResponse("TenantId is required."));
         if (string.IsNullOrWhiteSpace(req.IdempotencyKey))
-            return Results.BadRequest(new ErrorResponse("IdempotencyKey is required."));
+            return TypedResults.BadRequest(new ErrorResponse("IdempotencyKey is required."));
 
         var tenantId = new TenantId(req.TenantId);
 
@@ -81,21 +82,21 @@ internal static class CreditLedgerEndpoints
         await ledger.PostGrantAsync(entry, ct);
 
         var balance = await ledger.GetBalanceAsync(tenantId, ct);
-        return Results.Ok(new CreditBalanceResponse(balance));
+        return TypedResults.Ok(new CreditBalanceResponse(balance));
     }
 
-    private static async Task<IResult> PromoGrant(
+    private static async Task<Results<Ok<CreditBalanceResponse>, BadRequest<ErrorResponse>>> PromoGrant(
         [FromBody] PromoGrantRequest req,
         [FromServices] ICreditLedgerStore ledger,
         [FromServices] IClock clock,
         CancellationToken ct)
     {
         if (req.Amount <= 0m)
-            return Results.BadRequest(new ErrorResponse("Amount must be positive."));
+            return TypedResults.BadRequest(new ErrorResponse("Amount must be positive."));
         if (string.IsNullOrWhiteSpace(req.TenantId))
-            return Results.BadRequest(new ErrorResponse("TenantId is required."));
+            return TypedResults.BadRequest(new ErrorResponse("TenantId is required."));
         if (string.IsNullOrWhiteSpace(req.IdempotencyKey))
-            return Results.BadRequest(new ErrorResponse("IdempotencyKey is required."));
+            return TypedResults.BadRequest(new ErrorResponse("IdempotencyKey is required."));
 
         var tenantId = new TenantId(req.TenantId);
 
@@ -116,10 +117,10 @@ internal static class CreditLedgerEndpoints
         await ledger.PostGrantAsync(entry, ct);
 
         var balance = await ledger.GetBalanceAsync(tenantId, ct);
-        return Results.Ok(new CreditBalanceResponse(balance));
+        return TypedResults.Ok(new CreditBalanceResponse(balance));
     }
 
-    private static async Task<IResult> PartnerGrant(
+    private static async Task<Results<Ok<CreditBalanceResponse>, BadRequest<ErrorResponse>, NotFound<ErrorResponse>>> PartnerGrant(
         [FromBody] PartnerGrantRequest req,
         [FromServices] ICreditLedgerStore ledger,
         [FromServices] ITenantStore tenantStore,
@@ -127,24 +128,24 @@ internal static class CreditLedgerEndpoints
         CancellationToken ct)
     {
         if (req.Amount <= 0m)
-            return Results.BadRequest(new ErrorResponse("Amount must be positive."));
+            return TypedResults.BadRequest(new ErrorResponse("Amount must be positive."));
         if (string.IsNullOrWhiteSpace(req.TenantId))
-            return Results.BadRequest(new ErrorResponse("TenantId is required."));
+            return TypedResults.BadRequest(new ErrorResponse("TenantId is required."));
         if (string.IsNullOrWhiteSpace(req.IdempotencyKey))
-            return Results.BadRequest(new ErrorResponse("IdempotencyKey is required."));
+            return TypedResults.BadRequest(new ErrorResponse("IdempotencyKey is required."));
 
         // Partner grants are only valid for a tenant whose parent is a Partner — the single-hop
         // ParentTenantId + parent.Type == TenantType.Partner gate (ManagementTenantEndpoints.cs pattern), so the
         // partner-funded draws stay attributable to the owning partner with no Tenant-model change.
         var customer = await tenantStore.GetAsync(req.TenantId, ct);
         if (customer is null)
-            return Results.NotFound(new ErrorResponse($"Tenant '{req.TenantId}' not found."));
+            return TypedResults.NotFound(new ErrorResponse($"Tenant '{req.TenantId}' not found."));
         if (string.IsNullOrEmpty(customer.ParentTenantId))
-            return Results.BadRequest(new ErrorResponse("Partner grants require a tenant whose parent is a Partner."));
+            return TypedResults.BadRequest(new ErrorResponse("Partner grants require a tenant whose parent is a Partner."));
 
         var parent = await tenantStore.GetAsync(customer.ParentTenantId, ct);
         if (parent?.Type != TenantType.Partner)
-            return Results.BadRequest(new ErrorResponse("Partner grants require a tenant whose parent is a Partner."));
+            return TypedResults.BadRequest(new ErrorResponse("Partner grants require a tenant whose parent is a Partner."));
 
         var tenantId = new TenantId(req.TenantId);
 
@@ -164,12 +165,12 @@ internal static class CreditLedgerEndpoints
         await ledger.PostGrantAsync(entry, ct);
 
         var balance = await ledger.GetBalanceAsync(tenantId, ct);
-        return Results.Ok(new CreditBalanceResponse(balance));
+        return TypedResults.Ok(new CreditBalanceResponse(balance));
     }
 
     // ─── Tenant read ──────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetBalance(
+    private static async Task<Ok<CreditBalanceResponse>> GetBalance(
         HttpContext context,
         [FromServices] ICreditLedgerStore ledger,
         [FromServices] ITenantQuotaStore quotaStore,
@@ -184,10 +185,10 @@ internal static class CreditLedgerEndpoints
         await lazyMinter.EnsureCurrentPeriodGrantAsync(quota, ct);
 
         var balance = await ledger.GetBalanceAsync(tenantId, ct);
-        return Results.Ok(new CreditBalanceResponse(balance));
+        return TypedResults.Ok(new CreditBalanceResponse(balance));
     }
 
-    private static async Task<IResult> GetEntries(
+    private static async Task<Ok<PagedResult<CreditLedgerEntryDto>>> GetEntries(
         HttpContext context,
         [FromQuery] int page,
         [FromQuery] int pageSize,
@@ -208,11 +209,11 @@ internal static class CreditLedgerEndpoints
         var items = await ledger.GetEntriesAsync(tenantId, page, pageSize, ct);
         var total = await ledger.GetEntriesCountAsync(tenantId, ct);
 
-        return Results.Ok(new PagedResult<CreditLedgerEntryDto>(
+        return TypedResults.Ok(new PagedResult<CreditLedgerEntryDto>(
             items.Select(MapEntry).ToList(), total, page, pageSize));
     }
 
-    private static async Task<IResult> GetRemainingBySource(
+    private static async Task<Ok<SourceRemainingResponse>> GetRemainingBySource(
         HttpContext context,
         [FromServices] ICreditLedgerStore ledger,
         [FromServices] ITenantQuotaStore quotaStore,
@@ -235,12 +236,12 @@ internal static class CreditLedgerEndpoints
             .Select(static r => new SourceRemainingDto(r.Source.ToString(), r.Remaining))
             .ToList();
 
-        return Results.Ok(new SourceRemainingResponse(dtos));
+        return TypedResults.Ok(new SourceRemainingResponse(dtos));
     }
 
     // ─── Partner derive-on-read attribution ───────────────────────────────────────
 
-    private static async Task<IResult> GetPartnerAttribution(
+    private static async Task<Ok<PartnerAttributionResponse>> GetPartnerAttribution(
         HttpContext context,
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? to,
@@ -259,7 +260,7 @@ internal static class CreditLedgerEndpoints
         var periodStart = from ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
         var periodEnd = to ?? now;
 
-        return Results.Ok(await AggregatePartnerAttributionAsync(
+        return TypedResults.Ok(await AggregatePartnerAttributionAsync(
             partnerTenantId, periodStart, periodEnd, ledger, tenantStore, ct));
     }
 

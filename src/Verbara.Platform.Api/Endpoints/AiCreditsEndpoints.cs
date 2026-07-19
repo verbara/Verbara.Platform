@@ -4,6 +4,7 @@ using Verbara.Platform.Api.Services;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Platform.Llm;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -29,7 +30,7 @@ internal static class AiCreditsEndpoints
             .MapGet("", GetCredits);
     }
 
-    private static async Task<IResult> GetCredits(
+    private static async Task<Results<Ok<AiCreditsResponse>, ForbidHttpResult>> GetCredits(
         HttpContext context,
         [FromServices] ITenantQuotaStore quotaStore,
         [FromServices] IUsageRecordStore usageStore,
@@ -42,7 +43,7 @@ internal static class AiCreditsEndpoints
 
         var perms = await ResolveCallerPermissions(context, permissionResolver, tenantId, ct);
         if (!PermissionResolver.HasPermission(perms, "typification:ai:configure"))
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var ratio = Math.Max(1, platform.Value.CreditTokenRatio);
         var (start, end, _) = BillingPeriod.Current(clock);
@@ -56,7 +57,7 @@ internal static class AiCreditsEndpoints
         long? remaining = allowance is { } a ? Math.Max(0, a - consumedCredits) : null;
         double percent = allowance is { } a2 && a2 > 0 ? (double)consumedCredits / a2 * 100 : 0;
 
-        return Results.Ok(new AiCreditsResponse(
+        return TypedResults.Ok(new AiCreditsResponse(
             AllowanceCredits: allowance,
             ConsumedCredits: consumedCredits,
             RemainingCredits: remaining,

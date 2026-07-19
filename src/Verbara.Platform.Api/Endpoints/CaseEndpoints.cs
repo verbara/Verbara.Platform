@@ -1,6 +1,7 @@
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -18,7 +19,7 @@ internal static class CaseEndpoints
         group.MapPost("/{id}/conversations/{conversationId}", LinkConversation);
     }
 
-    private static async Task<IResult> ListCases(
+    private static async Task<Ok<PagedResult<Case>>> ListCases(
         HttpContext context,
         [FromServices] ICaseStore store,
         [FromQuery] string? status,
@@ -41,10 +42,10 @@ internal static class CaseEndpoints
             items = items.Where(c => c.Priority == p);
 
         var filtered = items.ToList();
-        return Results.Ok(new PagedResult<Case>(filtered, result.TotalCount, page, pageSize));
+        return TypedResults.Ok(new PagedResult<Case>(filtered, result.TotalCount, page, pageSize));
     }
 
-    private static async Task<IResult> GetCase(
+    private static async Task<Results<Ok<Case>, NotFound>> GetCase(
         string id,
         HttpContext context,
         [FromServices] ICaseStore store,
@@ -52,7 +53,7 @@ internal static class CaseEndpoints
     {
         var tenantId = GetTenantId(context);
         var caseEntity = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return caseEntity is null ? Results.NotFound() : Results.Ok(caseEntity);
+        return caseEntity is null ? TypedResults.NotFound() : TypedResults.Ok(caseEntity);
     }
 
     private static async Task<IResult> CreateCase(
@@ -93,7 +94,7 @@ internal static class CaseEndpoints
         return Results.Created($"/cases/{caseEntity.CaseId.Value}", caseEntity);
     }
 
-    private static async Task<IResult> UpdateCase(
+    private static async Task<Results<Ok<Case>, NotFound, BadRequest<ErrorResponse>>> UpdateCase(
         string id,
         HttpContext context,
         [FromBody] UpdateCaseRequest body,
@@ -104,7 +105,7 @@ internal static class CaseEndpoints
         var tenantId = GetTenantId(context);
         var existing = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (body.Subject is not null)
             existing.Subject = body.Subject;
@@ -112,14 +113,14 @@ internal static class CaseEndpoints
         if (body.Status is not null)
         {
             if (!Enum.TryParse<CaseStatus>(body.Status, ignoreCase: true, out var status))
-                return Results.BadRequest(new ErrorResponse($"Invalid status '{body.Status}'"));
+                return TypedResults.BadRequest(new ErrorResponse($"Invalid status '{body.Status}'"));
             existing.Status = status;
         }
 
         if (body.Priority is not null)
         {
             if (!Enum.TryParse<CasePriority>(body.Priority, ignoreCase: true, out var priority))
-                return Results.BadRequest(new ErrorResponse($"Invalid priority '{body.Priority}'"));
+                return TypedResults.BadRequest(new ErrorResponse($"Invalid priority '{body.Priority}'"));
             existing.Priority = priority;
         }
 
@@ -130,10 +131,10 @@ internal static class CaseEndpoints
         existing.UpdatedBy = context.User.FindFirst("sub")?.Value;
 
         await store.SaveAsync(existing, ct);
-        return Results.Ok(existing);
+        return TypedResults.Ok(existing);
     }
 
-    private static async Task<IResult> LinkConversation(
+    private static async Task<Results<Ok<Case>, NotFound<ErrorResponse>>> LinkConversation(
         string id,
         string conversationId,
         HttpContext context,
@@ -145,16 +146,16 @@ internal static class CaseEndpoints
 
         var caseEntity = await caseStore.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (caseEntity is null)
-            return Results.NotFound(new ErrorResponse($"Case '{id}' not found"));
+            return TypedResults.NotFound(new ErrorResponse($"Case '{id}' not found"));
 
         var conversation = await conversationStore.GetByIdAsync(tenantId, EntityId.From(conversationId), ct);
         if (conversation is null)
-            return Results.NotFound(new ErrorResponse($"Conversation '{conversationId}' not found"));
+            return TypedResults.NotFound(new ErrorResponse($"Conversation '{conversationId}' not found"));
 
         caseEntity.AddConversation(EntityId.From(conversationId));
         await caseStore.SaveAsync(caseEntity, ct);
 
-        return Results.Ok(caseEntity);
+        return TypedResults.Ok(caseEntity);
     }
 
     private static TenantId GetTenantId(HttpContext context)

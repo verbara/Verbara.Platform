@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -21,24 +23,24 @@ internal static class AuthAdminEndpoints
         group.MapDelete("/sessions/by-user/{userId}", RevokeAllUserSessions);
     }
 
-    private static async Task<IResult> GetConfig(
+    private static async Task<Results<Ok<TenantAuthConfigResponse>, UnauthorizedHttpResult>> GetConfig(
         HttpContext context,
         [FromServices] ITenantAuthConfigStore configStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var config = await configStore.GetAsync(tenantId, ct)
             ?? new TenantAuthConfig { TenantId = tenantId };
 
         // ADMIN-001 (PREPUB-2026-05-09): project to redacted response so the
         // OIDC client secret never leaves the process via HTTP.
-        return Results.Ok(TenantAuthConfigResponse.FromConfig(config));
+        return TypedResults.Ok(TenantAuthConfigResponse.FromConfig(config));
     }
 
-    private static async Task<IResult> UpdateConfig(
+    private static async Task<Results<Ok<TenantAuthConfigResponse>, UnauthorizedHttpResult>> UpdateConfig(
         [FromBody] UpdateTenantAuthConfigRequest body,
         HttpContext context,
         [FromServices] ITenantAuthConfigStore configStore,
@@ -46,7 +48,7 @@ internal static class AuthAdminEndpoints
     {
         var tenantId = GetTenantId(context);
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var config = await configStore.GetAsync(tenantId, ct)
             ?? new TenantAuthConfig { TenantId = tenantId };
@@ -75,10 +77,10 @@ internal static class AuthAdminEndpoints
         // ADMIN-001 (PREPUB-2026-05-09): project to redacted response so the
         // OIDC client secret never leaves the process via HTTP — applies to
         // PUT-after-write as well as GET reads.
-        return Results.Ok(TenantAuthConfigResponse.FromConfig(config));
+        return TypedResults.Ok(TenantAuthConfigResponse.FromConfig(config));
     }
 
-    private static async Task<IResult> ListEvents(
+    private static async Task<Results<Ok<PagedResult<AuthEvent>>, UnauthorizedHttpResult>> ListEvents(
         HttpContext context,
         [FromServices] AuthEventService authEvents,
         int page = 1,
@@ -91,7 +93,7 @@ internal static class AuthAdminEndpoints
     {
         var tenantId = GetTenantId(context);
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         if (endDate.HasValue && endDate.Value.TimeOfDay == TimeSpan.Zero)
             endDate = endDate.Value.AddDays(1).AddTicks(-1);
@@ -104,10 +106,10 @@ internal static class AuthAdminEndpoints
             Page: page,
             PageSize: pageSize);
 
-        return Results.Ok(await authEvents.SearchAsync(tenantId, query, ct));
+        return TypedResults.Ok(await authEvents.SearchAsync(tenantId, query, ct));
     }
 
-    private static async Task<IResult> ListSessions(
+    private static async Task<Results<Ok<IReadOnlyList<ActiveSession>>, UnauthorizedHttpResult>> ListSessions(
         HttpContext context,
         SessionService sessionService,
         string? userId,
@@ -115,13 +117,13 @@ internal static class AuthAdminEndpoints
     {
         var tenantId = GetTenantId(context);
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var sessions = string.IsNullOrWhiteSpace(userId)
             ? await sessionService.ListAllActiveSessionsAsync(tenantId, ct)
             : await sessionService.ListActiveSessionsAsync(tenantId, userId, ct);
 
-        return Results.Ok(sessions);
+        return TypedResults.Ok(sessions);
     }
 
     private static async Task<IResult> RevokeSession(
@@ -142,7 +144,7 @@ internal static class AuthAdminEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> RevokeAllUserSessions(
+    private static async Task<Results<Ok<RevokedSessionsResponse>, UnauthorizedHttpResult>> RevokeAllUserSessions(
         string userId,
         HttpContext context,
         [FromServices] SessionService sessionService,
@@ -151,7 +153,7 @@ internal static class AuthAdminEndpoints
         var tenantId = GetTenantId(context);
         var adminUserId = GetUserId(context);
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var ip = context.Connection.RemoteIpAddress?.ToString();
         var ua = context.Request.Headers.UserAgent.FirstOrDefault();
@@ -159,7 +161,7 @@ internal static class AuthAdminEndpoints
         var count = await sessionService.RevokeAllSessionsForUserAsync(
             tenantId, adminUserId ?? "admin", userId, ip, ua, ct);
 
-        return Results.Ok(new RevokedSessionsResponse(count));
+        return TypedResults.Ok(new RevokedSessionsResponse(count));
     }
 
     private static string? GetTenantId(HttpContext context) =>

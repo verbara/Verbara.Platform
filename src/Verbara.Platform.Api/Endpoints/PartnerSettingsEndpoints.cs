@@ -4,6 +4,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Core.Branding;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -26,7 +27,7 @@ internal static class PartnerSettingsEndpoints
 
     // ── GET ───────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetPartnerSettings(
+    private static async Task<Results<Ok<TenantSettingsDto>, NotFound, ForbidHttpResult>> GetPartnerSettings(
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
         [FromServices] ITenantAuthConfigStore authConfigStore,
@@ -41,13 +42,13 @@ internal static class PartnerSettingsEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var dto = await TenantSettingsEndpoints.BuildSettingsDto(
             callerTenantId, tenantStore, authConfigStore, quotaStore, retentionStore,
             addOnStore, dunningStore, featureGateService, brandingStore, ct);
 
-        return dto is null ? Results.NotFound() : Results.Ok(dto);
+        return dto is null ? TypedResults.NotFound() : TypedResults.Ok(dto);
     }
 
     // ── PUT ───────────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ using Verbara.Sdk.Pro.Cluster;
 using Verbara.Sdk.Pro.Cluster.Drain;
 using Verbara.Sdk.Pro.Cluster.Registry;
 using Verbara.Sdk.Pro.Cluster.Transport;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -35,14 +36,14 @@ internal static class ManagementClusterEndpoints
         group.MapGet("/instances", ListInstances);
     }
 
-    private static IResult GetStatus(IServiceProvider services)
+    private static Ok<MgmtClusterStatusDto> GetStatus(IServiceProvider services)
     {
         var manager = services.GetService<ClusterManager>();
         if (manager is null)
-            return Results.Ok(new MgmtClusterStatusDto("local", [], 0, 0, [], []));
+            return TypedResults.Ok(new MgmtClusterStatusDto("local", [], 0, 0, [], []));
 
         var status = manager.GetStatus();
-        return Results.Ok(new MgmtClusterStatusDto(
+        return TypedResults.Ok(new MgmtClusterStatusDto(
             status.InstanceId,
             status.Nodes.Select(MapNodeToDto).ToList(),
             status.TotalChannels,
@@ -61,15 +62,15 @@ internal static class ManagementClusterEndpoints
         return Results.Ok(nodes.Select(MapNodeToDto).ToList());
     }
 
-    private static async Task<IResult> GetNode(string nodeId, IServiceProvider services, CancellationToken ct)
+    private static async Task<Results<Ok<MgmtClusterNodeDto>, NotFound>> GetNode(string nodeId, IServiceProvider services, CancellationToken ct)
     {
         var transport = services.GetService<ClusterTransportBase>();
         if (transport is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var nodes = await transport.GetNodesAsync(ct);
         var node = nodes.FirstOrDefault(n => n.NodeId == nodeId);
-        return node is null ? Results.NotFound() : Results.Ok(MapNodeToDto(node));
+        return node is null ? TypedResults.NotFound() : TypedResults.Ok(MapNodeToDto(node));
     }
 
     private static async Task<IResult> DrainNode(
@@ -176,38 +177,38 @@ internal static class ManagementClusterEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> CancelDrain(
+    private static async Task<Results<Ok<StatusUpdateResponse>, ProblemHttpResult, NotFound<ErrorResponse>>> CancelDrain(
         string nodeId,
         [FromServices] IServiceProvider services,
         CancellationToken ct)
     {
         var manager = services.GetService<ClusterManager>();
         if (manager is null)
-            return Results.Problem(ClusterNotRegistered, statusCode: 503);
+            return TypedResults.Problem(ClusterNotRegistered, statusCode: 503);
 
         var drainStatus = manager.Drain.GetDrainStatus(nodeId);
         if (drainStatus is null)
-            return Results.NotFound(new ErrorResponse($"No active drain for node '{nodeId}'"));
+            return TypedResults.NotFound(new ErrorResponse($"No active drain for node '{nodeId}'"));
 
         await manager.Drain.CancelDrainAsync(nodeId, ct);
-        return Results.Ok(new StatusUpdateResponse(nodeId, "drain_cancelled"));
+        return TypedResults.Ok(new StatusUpdateResponse(nodeId, "drain_cancelled"));
     }
 
-    private static async Task<IResult> ForceDrain(
+    private static async Task<Results<Ok<StatusUpdateResponse>, ProblemHttpResult, NotFound<ErrorResponse>>> ForceDrain(
         string nodeId,
         [FromServices] IServiceProvider services,
         CancellationToken ct)
     {
         var manager = services.GetService<ClusterManager>();
         if (manager is null)
-            return Results.Problem(ClusterNotRegistered, statusCode: 503);
+            return TypedResults.Problem(ClusterNotRegistered, statusCode: 503);
 
         var drainStatus = manager.Drain.GetDrainStatus(nodeId);
         if (drainStatus is null)
-            return Results.NotFound(new ErrorResponse($"No active drain for node '{nodeId}'"));
+            return TypedResults.NotFound(new ErrorResponse($"No active drain for node '{nodeId}'"));
 
         await manager.Drain.ForceDrainAsync(nodeId, ct);
-        return Results.Ok(new StatusUpdateResponse(nodeId, "force_drained"));
+        return TypedResults.Ok(new StatusUpdateResponse(nodeId, "force_drained"));
     }
 
     private static IResult ListInstances([FromServices] IServiceProvider services)

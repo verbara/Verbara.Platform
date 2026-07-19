@@ -3,6 +3,7 @@ using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -34,7 +35,7 @@ internal static class ManagementTenantIpAllowlistEndpoints
         group.MapDelete("/{entryId:guid}", Remove);
     }
 
-    internal static async Task<IResult> List(
+    internal static async Task<Ok<IpAllowlistListResponse>> List(
         string tenantId,
         [FromServices] ITenantIpAllowlistStore store,
         [FromServices] ITenantAuthConfigStore authConfigStore,
@@ -45,7 +46,7 @@ internal static class ManagementTenantIpAllowlistEndpoints
         var dto = new IpAllowlistListResponse(
             Enabled: config?.IpAllowlistEnabled ?? false,
             Entries: entries.Select(e => new IpAllowlistEntryDto(e.Id, e.Cidr, e.Description, e.CreatedAt)).ToArray());
-        return Results.Ok(dto);
+        return TypedResults.Ok(dto);
     }
 
     internal static async Task<IResult> Add(

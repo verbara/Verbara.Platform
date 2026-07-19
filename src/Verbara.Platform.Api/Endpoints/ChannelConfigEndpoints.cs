@@ -2,6 +2,7 @@ using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Core;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -54,7 +55,7 @@ internal static class ChannelConfigEndpoints
             : Results.Ok(new ChannelStatusDto(channelType.ToString(), false));
     }
 
-    private static async Task<IResult> UpdateChannelConfig(
+    private static async Task<Results<Ok<TenantChannelConfig>, BadRequest<string>>> UpdateChannelConfig(
         string channel,
         HttpContext context,
         [FromBody] UpdateChannelConfigRequest body,
@@ -63,7 +64,7 @@ internal static class ChannelConfigEndpoints
         CancellationToken ct)
     {
         if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out var channelType))
-            return Results.BadRequest($"Invalid channel type: {channel}");
+            return TypedResults.BadRequest($"Invalid channel type: {channel}");
 
         var tenantId = GetTenantId(context);
         var before = await store.GetAsync(tenantId, channelType, ct);
@@ -91,15 +92,15 @@ internal static class ChannelConfigEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(config);
+        return TypedResults.Ok(config);
     }
 
-    private static IResult TestChannelConfig(string channel)
+    private static Results<Ok<ChannelTestResponse>, BadRequest<string>> TestChannelConfig(string channel)
     {
         if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out _))
-            return Results.BadRequest($"Invalid channel type: {channel}");
+            return TypedResults.BadRequest($"Invalid channel type: {channel}");
 
-        return Results.Ok(new ChannelTestResponse(true, "Connection test passed"));
+        return TypedResults.Ok(new ChannelTestResponse(true, "Connection test passed"));
     }
 
     private static TenantId GetTenantId(HttpContext context)

@@ -7,6 +7,7 @@ using Verbara.Sdk.Pro.Dialer.Contacts;
 using Verbara.Sdk.Pro.Dialer.Dispositions;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -89,7 +90,7 @@ internal static class CampaignEndpoints
         return Results.Created($"/admin/campaigns/{id}", MapToSummary(campaign));
     }
 
-    private static async Task<IResult> ListCampaigns(
+    private static async Task<Ok<PagedResult<CampaignSummaryDto>>> ListCampaigns(
         HttpContext context,
         [FromServices] CampaignStoreBase campaignStore,
         int page = 1,
@@ -100,10 +101,10 @@ internal static class CampaignEndpoints
         var items = await campaignStore.ListCampaignsAsync(tenantId, page, pageSize, ct);
         var total = await campaignStore.CountCampaignsAsync(tenantId, ct);
         var dtos = items.Select(MapToSummary).ToList();
-        return Results.Ok(new PagedResult<CampaignSummaryDto>(dtos, total, page, pageSize));
+        return TypedResults.Ok(new PagedResult<CampaignSummaryDto>(dtos, total, page, pageSize));
     }
 
-    private static async Task<IResult> GetCampaign(
+    private static async Task<Results<Ok<CampaignDetailDto>, NotFound>> GetCampaign(
         long id,
         HttpContext context,
         [FromServices] CampaignStoreBase campaignStore,
@@ -111,10 +112,10 @@ internal static class CampaignEndpoints
     {
         var tenantId = GetTenantId(context);
         var campaign = await campaignStore.GetCampaignAsync(tenantId, id, ct);
-        return campaign is null ? Results.NotFound() : Results.Ok(MapToDetail(campaign));
+        return campaign is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDetail(campaign));
     }
 
-    private static async Task<IResult> UpdateCampaign(
+    private static async Task<Results<Ok<CampaignDetailDto>, NotFound>> UpdateCampaign(
         long id,
         HttpContext context,
         [FromBody] UpdateCampaignRequest body,
@@ -125,7 +126,7 @@ internal static class CampaignEndpoints
         var tenantId = GetTenantId(context);
         var campaign = await campaignStore.GetCampaignAsync(tenantId, id, ct);
         if (campaign is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var before = MapToDetail(campaign);
 
@@ -167,7 +168,7 @@ internal static class CampaignEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(MapToDetail(campaign));
+        return TypedResults.Ok(MapToDetail(campaign));
     }
 
     private static async Task<IResult> DeleteCampaign(
@@ -274,7 +275,7 @@ internal static class CampaignEndpoints
 
     // ─── Contact List Handlers ────────────────────────────────────────────────
 
-    private static async Task<IResult> ListContactLists(
+    private static async Task<Ok<List<ContactListDto>>> ListContactLists(
         long id,
         HttpContext context,
         [FromServices] ContactListStoreBase contactListStore,
@@ -282,7 +283,7 @@ internal static class CampaignEndpoints
     {
         var tenantId = GetTenantId(context);
         var lists = await contactListStore.ListContactListsAsync(tenantId, id, ct);
-        return Results.Ok(lists.Select(MapToContactListDto).ToList());
+        return TypedResults.Ok(lists.Select(MapToContactListDto).ToList());
     }
 
     private static async Task<IResult> CreateContactList(
@@ -316,7 +317,7 @@ internal static class CampaignEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> ImportContacts(
+    private static async Task<Ok<ImportResultDto>> ImportContacts(
         long id,
         long listId,
         HttpContext context,
@@ -328,7 +329,7 @@ internal static class CampaignEndpoints
         var rows = body.Contacts.Select(c => new ContactImportRow(
             c.FirstName, c.LastName, c.Phone, c.PhoneType, c.Metadata)).ToList();
         var imported = await contactListStore.ImportContactsAsync(tenantId, listId, rows, ct);
-        return Results.Ok(new ImportResultDto(imported, 0, 0));
+        return TypedResults.Ok(new ImportResultDto(imported, 0, 0));
     }
 
     private static async Task<IResult> ListContacts(
@@ -347,7 +348,7 @@ internal static class CampaignEndpoints
 
     // ─── Disposition Handlers ─────────────────────────────────────────────────
 
-    private static async Task<IResult> ListDispositions(
+    private static async Task<Ok<List<DispositionCodeDto>>> ListDispositions(
         long id,
         HttpContext context,
         [FromServices] DispositionCodeStoreBase dispositionStore,
@@ -355,7 +356,7 @@ internal static class CampaignEndpoints
     {
         var tenantId = GetTenantId(context);
         var codes = await dispositionStore.ListByCampaignAsync(tenantId, id, ct);
-        return Results.Ok(codes.Select(MapToDispositionDto).ToList());
+        return TypedResults.Ok(codes.Select(MapToDispositionDto).ToList());
     }
 
     private static async Task<IResult> CreateDisposition(
@@ -383,7 +384,7 @@ internal static class CampaignEndpoints
         return Results.Created($"/admin/campaigns/{id}/dispositions/{created.Id}", MapToDispositionDto(created));
     }
 
-    private static async Task<IResult> UpdateDisposition(
+    private static async Task<Results<Ok<DispositionCodeDto>, NotFound>> UpdateDisposition(
         long id,
         long codeId,
         HttpContext context,
@@ -394,7 +395,7 @@ internal static class CampaignEndpoints
         var tenantId = GetTenantId(context);
         var existing = (await dispositionStore.ListByCampaignAsync(tenantId, id, ct))
             .FirstOrDefault(d => d.Id == codeId);
-        if (existing is null) return Results.NotFound();
+        if (existing is null) return TypedResults.NotFound();
 
         if (body.Label is not null) existing.Label = body.Label;
         if (body.Category is not null) existing.Category = ParseDispositionCategory(body.Category);
@@ -406,7 +407,7 @@ internal static class CampaignEndpoints
         if (body.SortOrder.HasValue) existing.SortOrder = body.SortOrder.Value;
 
         await dispositionStore.UpdateAsync(tenantId, existing, ct);
-        return Results.Ok(MapToDispositionDto(existing));
+        return TypedResults.Ok(MapToDispositionDto(existing));
     }
 
     private static async Task<IResult> DeleteDisposition(
@@ -423,7 +424,7 @@ internal static class CampaignEndpoints
 
     // ─── Callback Handlers ────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListCallbacks(
+    private static async Task<Ok<List<CallbackDto>>> ListCallbacks(
         long id, HttpContext context, [FromServices] CampaignStoreBase store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -432,7 +433,7 @@ internal static class CampaignEndpoints
             .Where(c => c.CampaignId == id)
             .Select(c => new CallbackDto(c.CampaignId, c.ContactId, c.ScheduledAt, c.AgentId))
             .ToList();
-        return Results.Ok(filtered);
+        return TypedResults.Ok(filtered);
     }
 
     private static async Task<IResult> CreateCallback(
@@ -448,7 +449,7 @@ internal static class CampaignEndpoints
 
     // ─── Metrics Handlers ─────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetCampaignMetrics(
+    private static async Task<Results<Ok<CampaignMetricsDto>, NotFound>> GetCampaignMetrics(
         long id,
         HttpContext context,
         [FromServices] CampaignStoreBase campaignStore,
@@ -456,12 +457,12 @@ internal static class CampaignEndpoints
     {
         var tenantId = GetTenantId(context);
         var campaign = await campaignStore.GetCampaignAsync(tenantId, id, ct);
-        if (campaign is null) return Results.NotFound();
+        if (campaign is null) return TypedResults.NotFound();
         var snapshot = await campaignStore.GetCampaignMetricsAsync(tenantId, id, ct);
-        return Results.Ok(MapToMetricsDto(snapshot, campaign));
+        return TypedResults.Ok(MapToMetricsDto(snapshot, campaign));
     }
 
-    private static async Task<IResult> ListActiveCampaignMetrics(
+    private static async Task<Ok<List<CampaignMetricsDto>>> ListActiveCampaignMetrics(
         HttpContext context,
         [FromServices] CampaignStoreBase campaignStore,
         CancellationToken ct)
@@ -470,7 +471,7 @@ internal static class CampaignEndpoints
         var snapshots = await campaignStore.GetActiveCampaignMetricsAsync(tenantId, ct);
         var campaigns = await campaignStore.GetActiveCampaignsAsync(tenantId, ct);
         var campaignMap = campaigns.ToDictionary(c => c.Id);
-        return Results.Ok(snapshots.Select(s =>
+        return TypedResults.Ok(snapshots.Select(s =>
         {
             campaignMap.TryGetValue(s.CampaignId, out var c);
             return MapToMetricsDto(s, c);

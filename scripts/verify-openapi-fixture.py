@@ -1,137 +1,100 @@
 #!/usr/bin/env python3
-"""Verify the golden OpenAPI fixture's CsatResponseDto fragment against the real document.
+"""Verify the response-schema manifest against the real, CI-captured OpenAPI document.
 
-Usage: verify-openapi-fixture.py <real-openapi-document.json> <fixture.json>
+Usage: verify-openapi-fixture.py <real-openapi-document.json> <response-schema-manifest.json>
 
-Part of the openapi-typed-client change (Platform/ADR-0035, archived to
-openspec/changes/archive/2026-07-12-openapi-typed-client/): the fixture
-(fixtures/openapi-document.v1.sample.json in the archived change directory) is a hand-curated
-golden ENVELOPE sample whose CsatResponseDto schema field names must stay verbatim with the real,
-CI-captured Platform OpenAPI document (openapi-export capability spec, requirement
-"The golden fixture is verified against the real emitted document"). This is the repeatable
-check that replaces the one-off eyeball comparison performed at propose-time — see the archived
-change's design.md D3.
+Part of openapi-response-schemas (Platform/ADR-0035). The manifest
+(openspec/changes/openapi-response-schemas/fixtures/response-schema-manifest.v1.json) is the
+golden, cross-repo contract: per consumer group, the EMITTED components/schemas name plus the
+verbatim field names Platform surfaces for every wire shape the Platform.Web typed-client consumes.
+This check is the CI guard that the emitted document still carries every named schema with the exact
+field names the manifest (and the downstream Web children) cite — replacing the earlier one-off,
+single-`CsatResponseDto` eyeball comparison (design D4). It generalises the original check: the
+`csat` group's `CsatResponseDto` entry subsumes the previous hard-coded fragment.
 
-Compares ONLY the `components.schemas.CsatResponseDto` fragment:
-  - Field NAMES must match exactly (a name present in one schema and missing from the other
-    fails the check) — this is the field the csat-runner incident (Web PR#159, v3.13.1-web) got
-    wrong by hand-transcribing the DTO instead of generating from the real contract.
-  - Numeric/date-time FORMATS are illustrative in the fixture per its own documented intent
-    (impact.yaml) and are NOT compared — e.g. the fixture's `totalResponses` uses
-    `{"type": "integer", "format": "int64"}` while .NET 10's OpenAPI generator currently emits a
-    `{"type": ["integer", "string"], "format": "int32", "pattern": "..."}` union for the same
-    C# `int` property; both describe the same field, so format-level literalism would make this
-    check re-fail on every unrelated .NET/ASP.NET Core servicing update. TYPE families (string vs
-    number vs integer, ignoring the int/string big-number union) are still compared.
+For every group in the manifest and every `SchemaName: [field, ...]` under it, asserts:
+  - `components.schemas.<SchemaName>` exists in the real document, and
+  - its property NAMES equal the manifest's field list EXACTLY (a name in one but not the other
+    fails — the csat-runner incident, Web PR#159, was a hand-transcribed field-name drift).
 
-Exit code 0 on match, 1 on any field-name mismatch or missing schema, 2 on usage/IO error.
+Field names only: the manifest records the verbatim camelCase names Web types against. JSON types
+/ numeric-format literalism are intentionally NOT compared (the .NET 10 OpenAPI generator emits
+`["integer","string"]`-style unions for some numerics; comparing them would re-fail this check on
+unrelated servicing updates — the documented tolerance carried over from the original script).
+
+Exit 0 on full match, 1 on any missing schema or field-name mismatch, 2 on usage/IO error.
 """
 import json
 import sys
 
-REQUIRED_FIELDS = (
-    "queueName",
-    "channel",
-    "totalResponses",
-    "averageRating",
-    "rangeStart",
-    "rangeEnd",
-)
 
-# Base JSON Schema "type" families the union-typed 2020-12 schemas (.NET 10 emits
-# ["integer", "string"] / ["number", "string"] for some numeric properties, see module
-# docstring) may present as; the fixture uses the plain singular form.
-_TYPE_FAMILY = {
-    "integer": {"integer", "string"},
-    "number": {"number", "string"},
-    "string": {"string"},
-}
-
-
-def _type_set(schema_type) -> set[str]:
-    if isinstance(schema_type, list):
-        return set(schema_type)
-    return {schema_type}
-
-
-def _families_compatible(fixture_type: str, real_types: set[str]) -> bool:
-    allowed = _TYPE_FAMILY.get(fixture_type, {fixture_type})
-    return bool(allowed & real_types)
+def _load(path: str):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <real-openapi-document.json> <fixture.json>", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <real-openapi-document.json> <response-schema-manifest.json>",
+              file=sys.stderr)
         return 2
 
-    real_path, fixture_path = sys.argv[1], sys.argv[2]
-
+    real_path, manifest_path = sys.argv[1], sys.argv[2]
     try:
-        with open(real_path, encoding="utf-8") as f:
-            real_doc = json.load(f)
+        real_doc = _load(real_path)
     except (OSError, json.JSONDecodeError) as exc:
         print(f"::error::Failed to read/parse real document {real_path}: {exc}", file=sys.stderr)
         return 2
-
     try:
-        with open(fixture_path, encoding="utf-8") as f:
-            fixture_doc = json.load(f)
+        manifest = _load(manifest_path)
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"::error::Failed to read/parse fixture {fixture_path}: {exc}", file=sys.stderr)
+        print(f"::error::Failed to read/parse manifest {manifest_path}: {exc}", file=sys.stderr)
         return 2
 
-    real_schema = real_doc.get("components", {}).get("schemas", {}).get("CsatResponseDto")
-    fixture_schema = fixture_doc.get("components", {}).get("schemas", {}).get("CsatResponseDto")
-
-    if real_schema is None:
-        print("::error::CsatResponseDto schema missing from the real captured document — "
-              "the /api/v{version}/analytics/csat/queues/{queueId} endpoint may have been "
-              "removed, renamed, or its response type changed.", file=sys.stderr)
+    real_schemas = real_doc.get("components", {}).get("schemas", {})
+    groups = manifest.get("groups", {})
+    if not groups:
+        print(f"::error::manifest {manifest_path} has no 'groups' — malformed.", file=sys.stderr)
         return 1
-    if fixture_schema is None:
-        print(f"::error::CsatResponseDto schema missing from fixture {fixture_path} — "
-              "the fixture is malformed.", file=sys.stderr)
-        return 1
-
-    real_props = real_schema.get("properties", {})
-    fixture_props = fixture_schema.get("properties", {})
 
     errors: list[str] = []
+    checked_schemas = 0
+    checked_fields = 0
 
-    for field in REQUIRED_FIELDS:
-        if field not in real_props:
-            errors.append(f"'{field}' present in fixture but MISSING from the real document")
-        if field not in fixture_props:
-            errors.append(f"'{field}' present in the real document but MISSING from the fixture")
-
-    # Field-name completeness in both directions (catches additions/removals beyond the
-    # documented 6, since the fixture's whole purpose is field-name fidelity).
-    extra_in_real = set(real_props) - set(fixture_props)
-    extra_in_fixture = set(fixture_props) - set(real_props)
-    for field in sorted(extra_in_real):
-        errors.append(f"'{field}' is in the real document but not in the fixture (fixture is stale)")
-    for field in sorted(extra_in_fixture):
-        errors.append(f"'{field}' is in the fixture but not in the real document (endpoint contract changed)")
-
-    # Type-family check (not exact format — see module docstring).
-    for field in REQUIRED_FIELDS:
-        if field not in real_props or field not in fixture_props:
-            continue  # already reported above
-        fixture_type = fixture_props[field].get("type")
-        real_types = _type_set(real_props[field].get("type"))
-        if isinstance(fixture_type, str) and not _families_compatible(fixture_type, real_types):
-            errors.append(
-                f"'{field}' type family mismatch: fixture={fixture_type!r} real={sorted(real_types)!r}"
-            )
+    for group_name, group in groups.items():
+        status = group.get("status")
+        schemas = group.get("schemas", {})
+        if status == "TO-COMPLETE-BY-HOST":
+            errors.append(f"group '{group_name}' is still TO-COMPLETE-BY-HOST — manifest incomplete")
+            continue
+        if not schemas:
+            errors.append(f"group '{group_name}' has no schemas (status={status!r})")
+            continue
+        for schema_name, fields in schemas.items():
+            checked_schemas += 1
+            real_schema = real_schemas.get(schema_name)
+            if real_schema is None:
+                errors.append(f"[{group_name}] schema '{schema_name}' MISSING from the captured "
+                              f"document (endpoint removed/renamed or response type changed)")
+                continue
+            real_props = set(real_schema.get("properties", {}).keys())
+            manifest_fields = set(fields)
+            checked_fields += len(manifest_fields)
+            for missing in sorted(manifest_fields - real_props):
+                errors.append(f"[{group_name}] '{schema_name}.{missing}' in manifest but MISSING "
+                              f"from the real document")
+            for extra in sorted(real_props - manifest_fields):
+                errors.append(f"[{group_name}] '{schema_name}.{extra}' in the real document but "
+                              f"NOT in the manifest (manifest is stale)")
 
     if errors:
-        print("::error::CsatResponseDto fixture verification FAILED:", file=sys.stderr)
+        print("::error::response-schema manifest verification FAILED:", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
 
-    print(f"OK: CsatResponseDto fixture matches the real document for all {len(REQUIRED_FIELDS)} fields "
-          f"({', '.join(REQUIRED_FIELDS)}).")
+    print(f"OK: response-schema manifest matches the captured document "
+          f"({checked_schemas} schemas / {checked_fields} field names across {len(groups)} groups).")
     return 0
 
 

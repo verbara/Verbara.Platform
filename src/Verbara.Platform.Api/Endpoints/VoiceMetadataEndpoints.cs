@@ -3,6 +3,7 @@ using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Ami.Responses;
 using Verbara.Sdk.Live.Server;
 using Verbara.Sdk.Pro.Cluster.Leadership;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Verbara.Platform.Api.Services;
@@ -27,7 +28,7 @@ internal static partial class VoiceMetadataEndpoints
     /// When Voice-AMI is not configured (test environments or non-voice deployments) the AMI
     /// services are not registered and the endpoint also returns the fallback catalog.
     /// </summary>
-    private static async Task<IResult> ListCodecs(
+    private static async Task<Ok<VoiceCodecsResponse>> ListCodecs(
         IServiceProvider services,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
@@ -37,13 +38,13 @@ internal static partial class VoiceMetadataEndpoints
         // IClusterLeader is conditionally registered — resolve optionally.
         var leader = services.GetKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner);
         if (leader is null || !leader.IsLeader)
-            return Results.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
+            return TypedResults.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
 
         // VerbaraServerPool is always registered (AddVerbaraMultiServer → TryAddSingleton).
         var serverPool = services.GetRequiredService<VerbaraServerPool>();
         var server = serverPool.GetServer("primary");
         if (server is null)
-            return Results.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
+            return TypedResults.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
 
         try
         {
@@ -53,14 +54,14 @@ internal static partial class VoiceMetadataEndpoints
 
             var installed = KnownCodecs.ParseInstalledCodecs(response.Output);
             return installed.Length > 0
-                ? Results.Ok(new VoiceCodecsResponse("asterisk", installed))
-                : Results.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
+                ? TypedResults.Ok(new VoiceCodecsResponse("asterisk", installed))
+                : TypedResults.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
         }
 #pragma warning disable CA1031 // Do not catch general exception types — intentional graceful degradation: any AMI failure returns fallback catalog instead of 5xx
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogCodecQueryFailed(logger, ex);
-            return Results.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
+            return TypedResults.Ok(new VoiceCodecsResponse("fallback", KnownCodecs.FallbackCatalog));
         }
 #pragma warning restore CA1031
     }

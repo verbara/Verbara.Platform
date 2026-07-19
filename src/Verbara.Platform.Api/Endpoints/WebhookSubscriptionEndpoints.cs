@@ -4,6 +4,7 @@ using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Webhooks;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -28,14 +29,14 @@ internal static class WebhookSubscriptionEndpoints
         group.MapGet("/{id}/circuit-status", GetCircuitStatus);
     }
 
-    private static async Task<IResult> ListSubscriptions(
+    private static async Task<Ok<List<WebhookSubscription>>> ListSubscriptions(
         HttpContext context,
         [FromServices] IWebhookSubscriptionStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var subs = await store.ListByTenantAsync(tenantId, ct);
-        return Results.Ok(subs.Select(MaskSecret).ToList());
+        return TypedResults.Ok(subs.Select(MaskSecret).ToList());
     }
 
     private static async Task<IResult> CreateSubscription(
@@ -84,23 +85,23 @@ internal static class WebhookSubscriptionEndpoints
             subscription);
     }
 
-    private static async Task<IResult> GetSubscription(
+    private static async Task<Results<Ok<WebhookSubscription>, NotFound>> GetSubscription(
         string id,
         HttpContext context,
         [FromServices] IWebhookSubscriptionStore store,
         CancellationToken ct)
     {
         var sub = await store.GetByIdAsync(id, ct);
-        if (sub is null) return Results.NotFound();
+        if (sub is null) return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         if (!string.Equals(sub.TenantId, tenantId, StringComparison.Ordinal))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
-        return Results.Ok(MaskSecret(sub));
+        return TypedResults.Ok(MaskSecret(sub));
     }
 
-    private static async Task<IResult> UpdateSubscription(
+    private static async Task<Results<Ok<WebhookSubscription>, NotFound, BadRequest<ErrorResponse>, BadRequest<ErrorDetailResponse>>> UpdateSubscription(
         string id,
         HttpContext context,
         [FromBody] UpdateWebhookSubscriptionRequest body,
@@ -109,25 +110,25 @@ internal static class WebhookSubscriptionEndpoints
         CancellationToken ct)
     {
         var sub = await store.GetByIdAsync(id, ct);
-        if (sub is null) return Results.NotFound();
+        if (sub is null) return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         if (!string.Equals(sub.TenantId, tenantId, StringComparison.Ordinal))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (body.EndpointUrl is not null
             && (!Uri.TryCreate(body.EndpointUrl, UriKind.Absolute, out var uri)
                 || !string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)))
-            return Results.BadRequest(new ErrorResponse("EndpointUrl must be a valid HTTPS URL"));
+            return TypedResults.BadRequest(new ErrorResponse("EndpointUrl must be a valid HTTPS URL"));
 
         if (body.EventTypes is not null)
         {
             if (body.EventTypes.Count == 0)
-                return Results.BadRequest(new ErrorResponse("At least one event type is required"));
+                return TypedResults.BadRequest(new ErrorResponse("At least one event type is required"));
 
             var invalid = body.EventTypes.Where(e => !WebhookEventTypes.IsValid(e)).ToList();
             if (invalid.Count > 0)
-                return Results.BadRequest(new ErrorDetailResponse(
+                return TypedResults.BadRequest(new ErrorDetailResponse(
                     "Invalid event types", invalid));
         }
 
@@ -141,7 +142,7 @@ internal static class WebhookSubscriptionEndpoints
         };
 
         await store.SaveAsync(updated, ct);
-        return Results.Ok(MaskSecret(updated));
+        return TypedResults.Ok(MaskSecret(updated));
     }
 
     private static async Task<IResult> DeleteSubscription(
@@ -163,7 +164,7 @@ internal static class WebhookSubscriptionEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> TestSubscription(
+    private static async Task<Results<Ok<MessageResponse>, NotFound>> TestSubscription(
         string id,
         HttpContext context,
         [FromServices] IWebhookSubscriptionStore store,
@@ -172,11 +173,11 @@ internal static class WebhookSubscriptionEndpoints
         CancellationToken ct)
     {
         var sub = await store.GetByIdAsync(id, ct);
-        if (sub is null) return Results.NotFound();
+        if (sub is null) return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         if (!string.Equals(sub.TenantId, tenantId, StringComparison.Ordinal))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var now = clock.UtcNow;
         var testPayload = JsonSerializer.Serialize(new WebhookEventPayload(
@@ -205,10 +206,10 @@ internal static class WebhookSubscriptionEndpoints
         await deliveryStore.SaveAsync(delivery, ct);
 
         // Save to store — the poll loop will pick it up within 30s.
-        return Results.Ok(new MessageResponse($"Test event queued as delivery {delivery.DeliveryId}"));
+        return TypedResults.Ok(new MessageResponse($"Test event queued as delivery {delivery.DeliveryId}"));
     }
 
-    private static async Task<IResult> ListDeliveries(
+    private static async Task<Results<Ok<PagedResult<WebhookDelivery>>, NotFound>> ListDeliveries(
         string id,
         HttpContext context,
         [FromQuery] int page,
@@ -218,20 +219,20 @@ internal static class WebhookSubscriptionEndpoints
         CancellationToken ct)
     {
         var sub = await subStore.GetByIdAsync(id, ct);
-        if (sub is null) return Results.NotFound();
+        if (sub is null) return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         if (!string.Equals(sub.TenantId, tenantId, StringComparison.Ordinal))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var p = page > 0 ? page : 1;
         var ps = pageSize > 0 ? Math.Min(pageSize, 100) : 20;
 
         var result = await deliveryStore.ListBySubscriptionAsync(id, p, ps, ct);
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> RotateSecret(
+    private static async Task<Results<Ok<WebhookSubscription>, NotFound>> RotateSecret(
         string id,
         HttpContext context,
         [FromServices] IWebhookSubscriptionStore store,
@@ -239,11 +240,11 @@ internal static class WebhookSubscriptionEndpoints
         CancellationToken ct)
     {
         var sub = await store.GetByIdAsync(id, ct);
-        if (sub is null) return Results.NotFound();
+        if (sub is null) return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         if (!string.Equals(sub.TenantId, tenantId, StringComparison.Ordinal))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var updated = sub with
         {
@@ -254,10 +255,10 @@ internal static class WebhookSubscriptionEndpoints
         await store.SaveAsync(updated, ct);
 
         // Return with new secret visible after rotation
-        return Results.Ok(updated);
+        return TypedResults.Ok(updated);
     }
 
-    private static async Task<IResult> ResetCircuit(
+    private static async Task<Results<Ok<MessageResponse>, NotFound>> ResetCircuit(
         string id,
         HttpContext context,
         [FromServices] IWebhookSubscriptionStore store,
@@ -265,11 +266,11 @@ internal static class WebhookSubscriptionEndpoints
         CancellationToken ct)
     {
         var sub = await store.GetByIdAsync(id, ct);
-        if (sub is null) return Results.NotFound();
+        if (sub is null) return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         if (!string.Equals(sub.TenantId, tenantId, StringComparison.Ordinal))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var reset = sub with
         {
@@ -282,23 +283,23 @@ internal static class WebhookSubscriptionEndpoints
         };
 
         await store.SaveAsync(reset, ct);
-        return Results.Ok(new MessageResponse($"Circuit breaker reset for subscription {id}"));
+        return TypedResults.Ok(new MessageResponse($"Circuit breaker reset for subscription {id}"));
     }
 
-    private static async Task<IResult> GetCircuitStatus(
+    private static async Task<Results<Ok<CircuitStatusResponse>, NotFound>> GetCircuitStatus(
         string id,
         HttpContext context,
         [FromServices] IWebhookSubscriptionStore store,
         CancellationToken ct)
     {
         var sub = await store.GetByIdAsync(id, ct);
-        if (sub is null) return Results.NotFound();
+        if (sub is null) return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         if (!string.Equals(sub.TenantId, tenantId, StringComparison.Ordinal))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
-        return Results.Ok(new CircuitStatusResponse(
+        return TypedResults.Ok(new CircuitStatusResponse(
             sub.SubscriptionId,
             sub.CircuitStatus.ToString(),
             sub.CircuitFailures,

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Verbara.Platform.Api.Endpoints.Shared;
@@ -61,7 +62,7 @@ internal static class ConversationEndpoints
             .RequireAuthorization("Permission:typification:correct-autonomous");
     }
 
-    private static async Task<IResult> ListConversations(
+    private static async Task<Ok<PagedResult<Conversation>>> ListConversations(
         HttpContext context,
         [FromServices] IConversationStore store,
         ConversationState? state,
@@ -81,10 +82,10 @@ internal static class ConversationEndpoints
         };
 
         var result = await store.ListAsync(tenantId, query, ct);
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> GetConversation(
+    private static async Task<Results<Ok<Conversation>, NotFound>> GetConversation(
         string id,
         HttpContext context,
         [FromServices] IConversationStore store,
@@ -92,10 +93,10 @@ internal static class ConversationEndpoints
     {
         var tenantId = GetTenantId(context);
         var conversation = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return conversation is null ? Results.NotFound() : Results.Ok(conversation);
+        return conversation is null ? TypedResults.NotFound() : TypedResults.Ok(conversation);
     }
 
-    private static async Task<IResult> GetMessages(
+    private static async Task<Ok<IReadOnlyList<Message>>> GetMessages(
         string id,
         HttpContext context,
         [FromServices] IMessageStore store,
@@ -105,10 +106,10 @@ internal static class ConversationEndpoints
     {
         var tenantId = GetTenantId(context);
         var messages = await store.GetConversationMessagesAsync(tenantId, EntityId.From(id), limit, offset, ct);
-        return Results.Ok(messages);
+        return TypedResults.Ok(messages);
     }
 
-    private static async Task<IResult> SendMessage(
+    private static async Task<Ok<Message>> SendMessage(
         string id,
         HttpContext context,
         [FromBody] SendMessageRequest body,
@@ -131,10 +132,10 @@ internal static class ConversationEndpoints
             ConversationOwnerKind.Agent,
             ct);
 
-        return Results.Ok(message);
+        return TypedResults.Ok(message);
     }
 
-    private static async Task<IResult> AcceptConversation(
+    private static async Task<Ok<OwnershipResult>> AcceptConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
@@ -143,10 +144,10 @@ internal static class ConversationEndpoints
         var tenantId = GetTenantId(context);
         var agentId = GetCurrentAgentId(context);
         var result = await switchboard.AcceptAsync(EntityId.From(id), tenantId, agentId, ct);
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> RejectConversation(
+    private static async Task<Ok<OwnershipResult>> RejectConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
@@ -155,10 +156,10 @@ internal static class ConversationEndpoints
         var tenantId = GetTenantId(context);
         var agentId = GetCurrentAgentId(context);
         var result = await switchboard.RejectAsync(EntityId.From(id), tenantId, agentId, ct);
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> TransferConversation(
+    private static async Task<Results<Ok<OwnershipResult>, BadRequest<ErrorResponse>>> TransferConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
@@ -173,12 +174,12 @@ internal static class ConversationEndpoints
         else if (body.TargetAgentId is not null)
             result = await switchboard.TransferToAgentAsync(EntityId.From(id), tenantId, EntityId.From(body.TargetAgentId), ct);
         else
-            return Results.BadRequest(new ErrorResponse("Either targetQueueId or targetAgentId must be specified"));
+            return TypedResults.BadRequest(new ErrorResponse("Either targetQueueId or targetAgentId must be specified"));
 
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> CloseConversation(
+    private static async Task<Results<Ok<Conversation>, NotFound>> CloseConversation(
         string id,
         HttpContext context,
         [FromServices] IConversationStore store,
@@ -187,14 +188,14 @@ internal static class ConversationEndpoints
         var tenantId = GetTenantId(context);
         var conversation = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (conversation is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         conversation.TransitionTo(ConversationState.Closed);
         await store.SaveAsync(conversation, ct);
-        return Results.Ok(conversation);
+        return TypedResults.Ok(conversation);
     }
 
-    private static async Task<IResult> GetTypificationForm(
+    private static async Task<Results<Ok<TypificationFormResponse>, NotFound>> GetTypificationForm(
         string id,
         HttpContext context,
         [FromServices] IConversationStore conversationStore,
@@ -205,18 +206,18 @@ internal static class ConversationEndpoints
         var tenantId = GetTenantId(context);
         var conversation = await conversationStore.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (conversation is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var resolved = await resolver.ResolveForConversationAsync(conversation, ct);
         if (resolved is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         // C9 — resolve the wrap-up prefill (preselected reason path + prefilled field
         // values) from the conversation's captured context. Pure + never throws; empty
         // collections map to null so the client distinguishes "no prefill" cleanly.
         var prefill = prefillResolver.ResolvePrefill(resolved.Schema, resolved.SubtreeRoot, conversation);
 
-        return Results.Ok(new TypificationFormResponse(
+        return TypedResults.Ok(new TypificationFormResponse(
             Schema: TypificationEndpoints.ToSchemaDto(resolved.Schema),
             SubtreeRootNodeId: resolved.SubtreeRoot?.Value,
             PrefilledNodePath: prefill.PrefilledNodePath.Count > 0
@@ -236,7 +237,7 @@ internal static class ConversationEndpoints
     // (so later reconciliation can cover even shadow-suppressed suggestions). When
     // Mode == Shadow the record is saved but the response surfaces nothing.
     // C1: the Band field on the response is server-authoritative; client cannot escalate.
-    private static async Task<IResult> GetTypificationSuggestion(
+    private static async Task<Results<Ok<TypificationSuggestionResponse>, NotFound, JsonHttpResult<ErrorResponse>>> GetTypificationSuggestion(
         string id,
         HttpContext context,
         [FromServices] IConversationStore conversationStore,
@@ -267,19 +268,19 @@ internal static class ConversationEndpoints
         // 1. Conversation must exist.
         var conversation = await conversationStore.GetByIdAsync(tenantId, conversationId, ct);
         if (conversation is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         // 1b. No bound schema → nothing to classify against.
         var resolved = await resolver.ResolveForConversationAsync(conversation, ct);
         if (resolved is null)
-            return Results.Ok(EmptySuggestion);
+            return TypedResults.Ok(EmptySuggestion);
 
         // 2. AI disabled for this schema, or Mode == Off → no suggestion (C1: Mode==Off
         //    is now an explicit authority independent of the Enabled flag).
         //    E1 — read the EFFECTIVE config (binding override ?? schema) so a per-binding
         //    pilot can enable/disable AI for one scope without touching the schema default.
         if (!resolved.EffectiveAiConfig.Enabled || resolved.EffectiveAiConfig.Mode == AiMode.Off)
-            return Results.Ok(EmptySuggestion);
+            return TypedResults.Ok(EmptySuggestion);
 
         // 2b. ADR-0032 — runtime entitlement re-check for platform-managed tenants. The PlatformLlm
         //     entitlement is enforced at opt-in (PUT /admin/ai/llm-config) but can be revoked OUTSIDE
@@ -311,7 +312,7 @@ internal static class ConversationEndpoints
                 },
                 ct: ct);
 
-            return Results.Ok(EmptySuggestion);
+            return TypedResults.Ok(EmptySuggestion);
         }
 
         // 3. Load the transcript. Both message stores ORDER BY created_at ASC (oldest
@@ -336,9 +337,9 @@ internal static class ConversationEndpoints
             switch (q.Outcome)
             {
                 case QuotaOutcome.HardBlock:
-                    return Results.Json(new ErrorResponse("AI credit allowance exhausted."), ApiJsonContext.Default.ErrorResponse, statusCode: 402);
+                    return TypedResults.Json(new ErrorResponse("AI credit allowance exhausted."), ApiJsonContext.Default.ErrorResponse, statusCode: 402);
                 case QuotaOutcome.SoftBlock:
-                    return Results.Ok(EmptySuggestion);
+                    return TypedResults.Ok(EmptySuggestion);
                 // Allow + Warn proceed (Warn overflows into PostPaid overage).
             }
         }
@@ -371,7 +372,7 @@ internal static class ConversationEndpoints
                 },
                 ct: ct);
 
-            return Results.Ok(EmptySuggestion);
+            return TypedResults.Ok(EmptySuggestion);
         }
 
         // 4. Classify (never throws — degrades to null on no-text / LLM-failure / invalid).
@@ -381,7 +382,7 @@ internal static class ConversationEndpoints
         var classification = await classifier.ClassifyAsync(
             EntityId.From(tenantId.Value), resolved.Schema, resolved.SubtreeRoot, conversation, transcript, ct);
         if (classification is null)
-            return Results.Ok(EmptySuggestion);
+            return TypedResults.Ok(EmptySuggestion);
 
         // 4b. E3 — record the call's token usage against the tenant's UTC-day running sum. The LLM
         //     call happened (classification is non-null), so record once regardless of band/mode —
@@ -488,9 +489,9 @@ internal static class ConversationEndpoints
         // Response Band == persisted SurfacedBand. None → empty payload (shadow / below-threshold /
         // sentiment-gated all collapse here, preserving every prior externally-observable behavior).
         if (surfacedBand == TypificationBand.None)
-            return Results.Ok(EmptySuggestion);
+            return TypedResults.Ok(EmptySuggestion);
 
-        return Results.Ok(new TypificationSuggestionResponse(
+        return TypedResults.Ok(new TypificationSuggestionResponse(
             SuggestedNodePath: classification.NodePath.Select(n => n.Value).ToArray(),
             SuggestedFieldValues: classification.FieldValues.Count > 0 ? classification.FieldValues : null,
             Confidence: classification.Confidence,
@@ -502,7 +503,7 @@ internal static class ConversationEndpoints
     private static readonly TypificationSuggestionResponse EmptySuggestion =
         new(SuggestedNodePath: null, SuggestedFieldValues: null, Confidence: null, Sentiment: null);
 
-    private static async Task<IResult> TypifyConversation(
+    private static async Task<Results<Ok<TypificationSubmission>, NotFound, BadRequest<ErrorResponse>, BadRequest<TypifyErrorResponse>>> TypifyConversation(
         string id,
         HttpContext context,
         [FromServices] IConversationStore conversationStore,
@@ -525,11 +526,11 @@ internal static class ConversationEndpoints
         // 1. Load conversation + resolve the bound published schema.
         var conversation = await conversationStore.GetByIdAsync(tenantId, conversationId, ct);
         if (conversation is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var resolved = await resolver.ResolveForConversationAsync(conversation, ct);
         if (resolved is null)
-            return Results.BadRequest(new ErrorResponse("no typification schema bound"));
+            return TypedResults.BadRequest(new ErrorResponse("no typification schema bound"));
 
         var schema = resolved.Schema;
 
@@ -557,7 +558,7 @@ internal static class ConversationEndpoints
         var validation = validator.ValidateSubmission(schema, path, body.FieldValues, aiSource);
         if (!validation.IsValid)
         {
-            return Results.BadRequest(new TypifyErrorResponse(
+            return TypedResults.BadRequest(new TypifyErrorResponse(
                 validation.Errors.Select(e => new TypifyFieldError(e.Field, e.Message)).ToArray()));
         }
 
@@ -569,7 +570,7 @@ internal static class ConversationEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new ErrorResponse(ex.Message));
+            return TypedResults.BadRequest(new ErrorResponse(ex.Message));
         }
 
         await conversationStore.SaveAsync(conversation, ct);
@@ -708,7 +709,7 @@ internal static class ConversationEndpoints
             leafNodeId.Value,
             agentId.Value));
 
-        return Results.Ok(submission);
+        return TypedResults.Ok(submission);
     }
 
     /// <summary>
@@ -789,7 +790,7 @@ internal static class ConversationEndpoints
         return Results.Created($"/conversations/{conversation.ConversationId.Value}", conversation);
     }
 
-    private static async Task<IResult> HoldConversation(
+    private static async Task<Results<Ok<OwnershipResult>, BadRequest<ErrorResponse>>> HoldConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
@@ -800,11 +801,11 @@ internal static class ConversationEndpoints
         var result = await switchboard.HoldAsync(EntityId.From(id), tenantId, agentId, ct);
 
         return result.Success
-            ? Results.Ok(result)
-            : Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot hold conversation"));
+            ? TypedResults.Ok(result)
+            : TypedResults.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot hold conversation"));
     }
 
-    private static async Task<IResult> UnholdConversation(
+    private static async Task<Results<Ok<OwnershipResult>, BadRequest<ErrorResponse>>> UnholdConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
@@ -815,8 +816,8 @@ internal static class ConversationEndpoints
         var result = await switchboard.UnholdAsync(EntityId.From(id), tenantId, agentId, ct);
 
         return result.Success
-            ? Results.Ok(result)
-            : Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot unhold conversation"));
+            ? TypedResults.Ok(result)
+            : TypedResults.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot unhold conversation"));
     }
 
     // ADR-0034 — POST /conversations/{id}/typification-correction. A supervisor holding the
@@ -831,7 +832,7 @@ internal static class ConversationEndpoints
     // (a single Postgres transaction / lock-scoped InMemory compound), closing the previous 2-write
     // window where a fault between the correction write and the audit write could leave a
     // correction with no audit trail (or vice versa).
-    private static async Task<IResult> CorrectTypification(
+    private static async Task<Results<Ok<TypificationCorrectionResponse>, BadRequest<ErrorResponse>, NotFound, JsonHttpResult<TypificationCorrectionErrorResponse>>> CorrectTypification(
         string id,
         HttpContext context,
         [FromServices] ITypificationSubmissionStore submissionStore,
@@ -848,11 +849,11 @@ internal static class ConversationEndpoints
 
         // Body validation (BadRequest, not a 409 guard): a corrected leaf/path is required.
         if (body.CorrectedNodePath is not { Count: > 0 })
-            return Results.BadRequest(new ErrorResponse("correctedNodePath must be a non-empty root→leaf path"));
+            return TypedResults.BadRequest(new ErrorResponse("correctedNodePath must be a non-empty root→leaf path"));
 
         var submission = await submissionStore.GetByConversationIdAsync(tenantId, conversationId, ct);
         if (submission is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         // ── Guards (all BEFORE any write; each returns 409 + a machine-readable code) ──
 
@@ -944,7 +945,7 @@ internal static class ConversationEndpoints
         // (e) Metric (tenant-dimensioned).
         metrics.RecordCorrection(tenantId.Value);
 
-        return Results.Ok(new TypificationCorrectionResponse(
+        return TypedResults.Ok(new TypificationCorrectionResponse(
             ConversationId: conversationId.Value,
             CorrectedNodePath: correctedPath.Select(n => n.Value).ToArray(),
             CorrectedLeafNodeId: correctedLeaf.Value,
@@ -954,8 +955,8 @@ internal static class ConversationEndpoints
     }
 
     // Machine-readable 409 for the correction guards.
-    private static IResult Conflict(string code, string message) =>
-        Results.Json(
+    private static JsonHttpResult<TypificationCorrectionErrorResponse> Conflict(string code, string message) =>
+        TypedResults.Json(
             new TypificationCorrectionErrorResponse(code, message),
             ApiJsonContext.Default.TypificationCorrectionErrorResponse,
             statusCode: StatusCodes.Status409Conflict);

@@ -1,6 +1,7 @@
 using Verbara.Platform.Audit;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Core;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -23,14 +24,14 @@ internal static class BotEndpoints
 
     // ─── Handlers ────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListBots(
+    private static async Task<Ok<BotDto[]>> ListBots(
         HttpContext context,
         [FromServices] IBotConfigStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var items = await store.ListAsync(tenantId, ct);
-        return Results.Ok(items.Select(ToDto).ToArray());
+        return TypedResults.Ok(items.Select(ToDto).ToArray());
     }
 
     private static async Task<IResult> CreateBot(
@@ -68,7 +69,7 @@ internal static class BotEndpoints
         return Results.Created($"/admin/bots/{config.BotId}", ToDto(config));
     }
 
-    private static async Task<IResult> GetBot(
+    private static async Task<Results<Ok<BotDto>, NotFound>> GetBot(
         string id,
         HttpContext context,
         [FromServices] IBotConfigStore store,
@@ -76,10 +77,10 @@ internal static class BotEndpoints
     {
         var tenantId = GetTenantId(context);
         var config = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return config is null ? Results.NotFound() : Results.Ok(ToDto(config));
+        return config is null ? TypedResults.NotFound() : TypedResults.Ok(ToDto(config));
     }
 
-    private static async Task<IResult> UpdateBot(
+    private static async Task<Results<Ok<BotDto>, NotFound>> UpdateBot(
         string id,
         HttpContext context,
         [FromBody] UpdateBotRequest body,
@@ -90,7 +91,7 @@ internal static class BotEndpoints
         var tenantId = GetTenantId(context);
         var existing = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var before = new { existing.BotId, existing.Name, existing.IsActive };
 
@@ -115,7 +116,7 @@ internal static class BotEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(ToDto(existing));
+        return TypedResults.Ok(ToDto(existing));
     }
 
     private static async Task<IResult> DeleteBot(

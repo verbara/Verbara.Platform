@@ -5,6 +5,7 @@ using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Sdk.Pro.Dialer.Scheduling;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -34,17 +35,17 @@ internal static class HolidayCalendarEndpoints
 
     // ─── CRUD Handlers ────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListCalendars(
+    private static async Task<Ok<List<HolidayCalendarDto>>> ListCalendars(
         HttpContext context,
         [FromServices] HolidayCalendarStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var items = await store.ListAsync(tenantId, ct);
-        return Results.Ok(items.Select(MapToDto).ToList());
+        return TypedResults.Ok(items.Select(MapToDto).ToList());
     }
 
-    private static async Task<IResult> GetCalendar(
+    private static async Task<Results<Ok<HolidayCalendarDto>, NotFound>> GetCalendar(
         long id,
         HttpContext context,
         [FromServices] HolidayCalendarStoreBase store,
@@ -52,7 +53,7 @@ internal static class HolidayCalendarEndpoints
     {
         var tenantId = GetTenantId(context);
         var item = await store.GetAsync(id, tenantId, ct);
-        return item is null ? Results.NotFound() : Results.Ok(MapToDto(item));
+        return item is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(item));
     }
 
     private static async Task<IResult> CreateCalendar(
@@ -80,7 +81,7 @@ internal static class HolidayCalendarEndpoints
         return Results.Created($"/admin/holiday-calendars/{id}", MapToDto(calendar));
     }
 
-    private static async Task<IResult> UpdateCalendar(
+    private static async Task<Results<Ok<HolidayCalendarDto>, NotFound>> UpdateCalendar(
         long id,
         HttpContext context,
         [FromBody] UpdateHolidayCalendarRequest body,
@@ -90,7 +91,7 @@ internal static class HolidayCalendarEndpoints
     {
         var tenantId = GetTenantId(context);
         var existing = await store.GetAsync(id, tenantId, ct);
-        if (existing is null) return Results.NotFound();
+        if (existing is null) return TypedResults.NotFound();
 
         var before = MapToDto(existing);
 
@@ -108,7 +109,7 @@ internal static class HolidayCalendarEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(MapToDto(existing));
+        return TypedResults.Ok(MapToDto(existing));
     }
 
     private static async Task<IResult> DeleteCalendar(
@@ -137,7 +138,7 @@ internal static class HolidayCalendarEndpoints
 
     // ─── Holiday Handlers ─────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListHolidays(
+    private static async Task<Ok<List<HolidayDto>>> ListHolidays(
         long id,
         HttpContext context,
         [FromServices] HolidayCalendarStoreBase store,
@@ -145,7 +146,7 @@ internal static class HolidayCalendarEndpoints
     {
         var tenantId = GetTenantId(context);
         var holidays = await store.ListHolidaysAsync(id, tenantId, ct);
-        return Results.Ok(holidays.Select(MapHolidayToDto).ToList());
+        return TypedResults.Ok(holidays.Select(MapHolidayToDto).ToList());
     }
 
     private static async Task<IResult> AddHoliday(

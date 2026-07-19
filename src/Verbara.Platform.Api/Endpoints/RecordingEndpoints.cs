@@ -1,6 +1,7 @@
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.EventStore;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -21,7 +22,7 @@ internal static class RecordingEndpoints
 
     // ─── Handlers ─────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetRecordingMetadata(
+    private static async Task<Results<Ok<RecordingMetadataDto>, NotFound>> GetRecordingMetadata(
         string sessionId,
         HttpContext context,
         [FromServices] ICompletedSessionStore cdrStore,
@@ -31,9 +32,9 @@ internal static class RecordingEndpoints
         var row = await cdrStore.GetAsync(tenantId, sessionId, ct);
 
         if (row is null || string.IsNullOrWhiteSpace(row.RecordingName))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
-        return Results.Ok(new RecordingMetadataDto(
+        return TypedResults.Ok(new RecordingMetadataDto(
             SessionId: row.SessionId,
             RecordingName: row.RecordingName,
             HasRecording: true,

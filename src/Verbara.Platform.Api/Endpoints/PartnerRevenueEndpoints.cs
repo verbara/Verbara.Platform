@@ -1,5 +1,6 @@
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -21,7 +22,7 @@ internal static class PartnerRevenueEndpoints
 
     // ── Summary ───────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetRevenueSummary(
+    private static async Task<Results<Ok<PartnerRevenueSummaryDto>, ForbidHttpResult>> GetRevenueSummary(
         HttpContext context,
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? until,
@@ -31,7 +32,7 @@ internal static class PartnerRevenueEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var records = await revenueStore.ListAsync(new TenantId(callerTenantId), from, until, ct);
 
@@ -42,12 +43,12 @@ internal static class PartnerRevenueEndpoints
             CustomerCount: records.Select(r => r.CustomerTenantId.Value).Distinct().Count(),
             InvoiceCount: records.Select(r => r.InvoiceId.Value).Distinct().Count());
 
-        return Results.Ok(summary);
+        return TypedResults.Ok(summary);
     }
 
     // ── Details ───────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetRevenueDetails(
+    private static async Task<Results<Ok<List<PartnerRevenueDetailDto>>, ForbidHttpResult>> GetRevenueDetails(
         HttpContext context,
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? until,
@@ -57,7 +58,7 @@ internal static class PartnerRevenueEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var records = await revenueStore.ListAsync(new TenantId(callerTenantId), from, until, ct);
 
@@ -71,7 +72,7 @@ internal static class PartnerRevenueEndpoints
             PeriodStart: r.PeriodStart,
             PeriodEnd: r.PeriodEnd)).ToList();
 
-        return Results.Ok(details);
+        return TypedResults.Ok(details);
     }
 }
 

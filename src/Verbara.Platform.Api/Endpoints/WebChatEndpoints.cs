@@ -10,6 +10,7 @@ using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -39,7 +40,7 @@ internal static partial class WebChatEndpoints
             .ExcludeFromDescription();
     }
 
-    private static async Task<IResult> CreateSession(
+    private static async Task<Results<Ok<CreateSessionResponse>, NotFound<ErrorResponse>>> CreateSession(
         CreateSessionRequest request,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IConversationLifecycleService lifecycleService,
@@ -52,7 +53,7 @@ internal static partial class WebChatEndpoints
 
         var tenant = await tenantStore.GetAsync(request.TenantId, ct);
         if (tenant is null)
-            return Results.NotFound(new ErrorResponse("Tenant not found"));
+            return TypedResults.NotFound(new ErrorResponse("Tenant not found"));
 
         // Create anonymous contact for this WebChat visitor
         var visitorAddress = new ChannelAddress(ChannelType.WebChat, $"webchat-{Guid.NewGuid():N}");
@@ -72,7 +73,7 @@ internal static partial class WebChatEndpoints
         var sessionId = await sessionManager.ConnectAsync(
             tid, conversation.ConversationId, visitorAddress, clock);
 
-        return Results.Ok(new CreateSessionResponse(sessionId, $"/ws/webchat/{sessionId}"));
+        return TypedResults.Ok(new CreateSessionResponse(sessionId, $"/ws/webchat/{sessionId}"));
     }
 
     internal static async Task HandleWebSocket(
@@ -161,7 +162,7 @@ internal static partial class WebChatEndpoints
         }
     }
 
-    private static async Task<IResult> SendRestMessage(
+    private static async Task<Results<Ok<MessageResponse>, NotFound<ErrorResponse>, BadRequest<ErrorResponse>>> SendRestMessage(
         string sessionId,
         WebChatMessageRequest request,
         [FromServices] WebChatSessionManager sessionManager,
@@ -172,10 +173,10 @@ internal static partial class WebChatEndpoints
     {
         var session = await sessionManager.GetSessionAsync(sessionId);
         if (session is null || !session.IsConnected)
-            return Results.NotFound(new ErrorResponse("Session not found or disconnected"));
+            return TypedResults.NotFound(new ErrorResponse("Session not found or disconnected"));
 
         if (string.IsNullOrWhiteSpace(request.Text))
-            return Results.BadRequest(new ErrorResponse("Text is required"));
+            return TypedResults.BadRequest(new ErrorResponse("Text is required"));
 
         await sessionManager.TouchAsync(sessionId, clock);
 
@@ -189,6 +190,6 @@ internal static partial class WebChatEndpoints
         await inboundRouter.RouteFirstInboundAsync(
             sessionId, session.TenantId, pipelineResult, inbound.Content, ct);
 
-        return Results.Ok(new MessageResponse("Message sent"));
+        return TypedResults.Ok(new MessageResponse("Message sent"));
     }
 }

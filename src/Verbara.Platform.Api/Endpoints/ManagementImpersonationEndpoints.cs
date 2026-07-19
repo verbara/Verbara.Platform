@@ -6,6 +6,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Core.Impersonation;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -103,7 +104,13 @@ internal static class ManagementImpersonationEndpoints
         adminGroup.MapGet("/history", ListSessionHistory);
     }
 
-    private static async Task<IResult> StartImpersonation(
+    private static async Task<Results<
+        Ok<ImpersonateResponse>,
+        UnauthorizedHttpResult,
+        ForbidHttpResult,
+        NotFound<ErrorResponse>,
+        BadRequest<ErrorResponse>,
+        ProblemHttpResult>> StartImpersonation(
         [FromBody] ImpersonateRequest body,
         HttpContext context,
         [FromServices] PermissionResolver permissionResolver,
@@ -121,28 +128,28 @@ internal static class ManagementImpersonationEndpoints
             ?? context.User.FindFirstValue("tenant_id");
 
         if (string.IsNullOrEmpty(callerUserId) || string.IsNullOrEmpty(callerTenantId))
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         // Verify caller has impersonate permission
         var callerPermissions = await permissionResolver.ResolveAsync(
             new TenantId(callerTenantId), EntityId.From(callerUserId), ct);
 
         if (!PermissionResolver.HasPermission(callerPermissions, "platform:tenant:impersonate"))
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         // Validate target tenant exists
         var targetTenant = await tenantStore.GetAsync(body.TargetTenantId, ct);
         if (targetTenant is null)
-            return Results.NotFound(new ErrorResponse($"Tenant '{body.TargetTenantId}' not found."));
+            return TypedResults.NotFound(new ErrorResponse($"Tenant '{body.TargetTenantId}' not found."));
 
         // Cannot impersonate the host/platform tenant
         var hostTenant = await tenantStore.GetHostTenantAsync(ct);
         if (hostTenant is not null && targetTenant.TenantId == hostTenant.TenantId)
-            return Results.BadRequest(new ErrorResponse("Cannot impersonate the platform tenant."));
+            return TypedResults.BadRequest(new ErrorResponse("Cannot impersonate the platform tenant."));
 
         // Target must be active
         if (targetTenant.Status != TenantStatus.Active)
-            return Results.BadRequest(new ErrorResponse("Target tenant is not active."));
+            return TypedResults.BadRequest(new ErrorResponse("Target tenant is not active."));
 
         // ── P0 SECURITY CHECK (v1.9.0): verify target is in caller's hierarchy ──
         // Without this check, any tenant admin with platform:tenant:impersonate could
@@ -175,7 +182,7 @@ internal static class ManagementImpersonationEndpoints
                     },
                     ct);
 
-                return Results.Problem(
+                return TypedResults.Problem(
                     title: "Impersonation not authorized",
                     detail: "Target tenant is not in your tenant hierarchy.",
                     statusCode: StatusCodes.Status403Forbidden);
@@ -186,7 +193,7 @@ internal static class ManagementImpersonationEndpoints
         var adminUser = await userStore.GetByIdAsync(
             new TenantId(callerTenantId), EntityId.From(callerUserId), ct);
         if (adminUser is null)
-            return Results.NotFound(new ErrorResponse("Admin user not found."));
+            return TypedResults.NotFound(new ErrorResponse("Admin user not found."));
 
         // Target permissions: caller's permissions minus platform:* scoped ones
         var nonPlatformPerms = callerPermissions
@@ -206,7 +213,7 @@ internal static class ManagementImpersonationEndpoints
                 .CountActiveByActorTenantAsync(callerTenantId, ct);
             if (activeCount >= maxConcurrent)
             {
-                return Results.Problem(
+                return TypedResults.Problem(
                     title: "Too many active impersonation sessions",
                     detail:
                         $"Tenant '{callerTenantId}' already has {activeCount} active impersonation sessions " +
@@ -280,7 +287,7 @@ internal static class ManagementImpersonationEndpoints
             },
             ct);
 
-        return Results.Ok(new ImpersonateResponse(
+        return TypedResults.Ok(new ImpersonateResponse(
             token, expiresAt, body.TargetTenantId, targetTenant.Name, body.ReadOnly, sessionId));
     }
 
@@ -385,7 +392,7 @@ internal static class ManagementImpersonationEndpoints
 
     // ─── R5.2 PB.2 — admin session-management endpoints ───────────────────────
 
-    private static async Task<IResult> ListActiveSessions(
+    private static async Task<Results<Ok<PagedResult<ImpersonationSessionDto>>, ForbidHttpResult>> ListActiveSessions(
         HttpContext context,
         [FromServices] IImpersonationSessionStore sessionStore,
         [FromServices] ITenantAuthConfigStore authConfigStore,
@@ -402,7 +409,7 @@ internal static class ManagementImpersonationEndpoints
 
         var paged = await sessionStore.ListActiveAsync(scopeTenant, page, pageSize, ct);
         var dtos = await MapSessionsAsync(paged.Items, authConfigStore, clock.GetUtcNow(), ct);
-        return Results.Ok(new PagedResult<ImpersonationSessionDto>(
+        return TypedResults.Ok(new PagedResult<ImpersonationSessionDto>(
             dtos, paged.TotalCount, paged.Page, paged.PageSize));
     }
 
@@ -472,7 +479,7 @@ internal static class ManagementImpersonationEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> ListSessionHistory(
+    private static async Task<Results<Ok<PagedResult<ImpersonationSessionDto>>, ForbidHttpResult>> ListSessionHistory(
         HttpContext context,
         [FromServices] IImpersonationSessionStore sessionStore,
         [FromServices] ITenantStore tenantStore,
@@ -490,7 +497,7 @@ internal static class ManagementImpersonationEndpoints
 
         var paged = await sessionStore.ListHistoryAsync(scopeTenant, from, to, page, pageSize, ct);
         var dtos = paged.Items.Select(s => MapSession(s, autoTimeoutMinutes: 0, now: clock.GetUtcNow())).ToList();
-        return Results.Ok(new PagedResult<ImpersonationSessionDto>(
+        return TypedResults.Ok(new PagedResult<ImpersonationSessionDto>(
             dtos, paged.TotalCount, paged.Page, paged.PageSize));
     }
 
@@ -499,7 +506,7 @@ internal static class ManagementImpersonationEndpoints
     /// PlatformAdmins (host tenant) may pass any tenant or null (= all tenants);
     /// Partner admins are pinned to their own tenant id.
     /// </summary>
-    private static async Task<(string? Tenant, IResult? Error)> ResolveAdminScopeAsync(
+    private static async Task<(string? Tenant, ForbidHttpResult? Error)> ResolveAdminScopeAsync(
         HttpContext context,
         ITenantStore tenantStore,
         string? requestedTenant,
@@ -508,7 +515,7 @@ internal static class ManagementImpersonationEndpoints
         var callerTenantId = context.User.FindFirstValue("tid")
             ?? context.User.FindFirstValue("tenant_id");
         if (string.IsNullOrEmpty(callerTenantId))
-            return (null, Results.Forbid());
+            return (null, TypedResults.Forbid());
 
         var callerTenant = await tenantStore.GetAsync(callerTenantId, ct);
         var isPlatformAdmin = IsPlatformTenantCaller(callerTenant);

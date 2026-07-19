@@ -3,6 +3,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.AgentAssist.Features;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -30,15 +31,15 @@ internal static class AgentAssistFeatureEndpoints
         group.MapPut("", UpdateFeature);
     }
 
-    private static async Task<IResult> GetFeature(
+    private static async Task<Ok<AgentAssistFeatureDto>> GetFeature(
         [FromServices] IAgentAssistFeatureToggle toggle,
         CancellationToken ct)
     {
         var state = await toggle.GetCurrentAsync(ct);
-        return Results.Ok(ToDto(state));
+        return TypedResults.Ok(ToDto(state));
     }
 
-    private static async Task<IResult> UpdateFeature(
+    private static async Task<Results<Ok<AgentAssistFeatureDto>, ValidationProblem>> UpdateFeature(
         HttpContext context,
         [FromBody] AgentAssistFeatureUpdateRequest body,
         [FromServices] IAgentAssistFeatureToggle toggle,
@@ -57,7 +58,7 @@ internal static class AgentAssistFeatureEndpoints
             if (string.IsNullOrWhiteSpace(candidate)
                 || !AllowedProviders.Contains(candidate))
             {
-                return Results.ValidationProblem(new Dictionary<string, string[]>
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
                 {
                     ["provider"] = ["Provider must be one of: deepgram, whisper, azure-whisper, google."],
                 });
@@ -69,7 +70,7 @@ internal static class AgentAssistFeatureEndpoints
             var missing = ValidateCredentials(normalizedProvider, creds);
             if (missing is not null)
             {
-                return Results.ValidationProblem(new Dictionary<string, string[]>
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
                 {
                     ["credentials"] = [missing],
                 });
@@ -126,7 +127,7 @@ internal static class AgentAssistFeatureEndpoints
             },
             ct: ct);
 
-        return Results.Ok(ToDto(persisted));
+        return TypedResults.Ok(ToDto(persisted));
     }
 
     private static AgentAssistFeatureDto ToDto(AgentAssistFeatureState state)
