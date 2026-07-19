@@ -19,6 +19,7 @@ using Verbara.Platform.Flows;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Typification;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Surveys;
 using Verbara.Platform.Switchboard;
 using Verbara.Platform.Api.Voice;
 using Microsoft.AspNetCore.Mvc;
@@ -658,6 +659,22 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(MfaEnrollVerifyRequest))]
 [JsonSerializable(typeof(MfaEnrollCompleteRequest))]
 [JsonSerializable(typeof(ProfileRegenerateRecoveryCodesRequest))]
+// openapi-response-schemas (Platform/ADR-0035): response DTOs surfaced as named schemas by the
+// admin-remainder group's typed-result conversion. These were returned via untyped Results.Ok(...)
+// and never registered — a latent source-gen gap under JsonSerializerIsReflectionEnabledByDefault=false.
+[JsonSerializable(typeof(InvoiceDto))]
+[JsonSerializable(typeof(List<InvoiceDto>))]
+[JsonSerializable(typeof(UsageRecordDto))]
+[JsonSerializable(typeof(List<UsageRecordDto>))]
+[JsonSerializable(typeof(QuotaStatusDto))]
+[JsonSerializable(typeof(QuotaDto))]
+[JsonSerializable(typeof(CircuitStatusResponse))]
+[JsonSerializable(typeof(ActiveSessionDto))]
+[JsonSerializable(typeof(ActiveSessionDto[]))]
+[JsonSerializable(typeof(ListenEntry))]
+[JsonSerializable(typeof(PauseResultDto))]
+[JsonSerializable(typeof(SurveyScoreSummary))]
+[JsonSerializable(typeof(UserPurgePreview))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

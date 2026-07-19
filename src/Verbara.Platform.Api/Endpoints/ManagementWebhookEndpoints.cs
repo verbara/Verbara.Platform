@@ -1,6 +1,7 @@
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Webhooks;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -14,7 +15,7 @@ internal static class ManagementWebhookEndpoints
         group.MapPost("/dead-letter/{id}/retry", RetryDeadLetter);
     }
 
-    private static async Task<IResult> ListDeadLetter(
+    private static async Task<Results<Ok<PagedResult<WebhookDelivery>>, BadRequest<ErrorResponse>>> ListDeadLetter(
         [FromQuery] string tenantId,
         [FromQuery] int page,
         [FromQuery] int pageSize,
@@ -22,16 +23,16 @@ internal static class ManagementWebhookEndpoints
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(tenantId))
-            return Results.BadRequest(new ErrorResponse("tenantId query parameter is required"));
+            return TypedResults.BadRequest(new ErrorResponse("tenantId query parameter is required"));
 
         var p = page > 0 ? page : 1;
         var ps = pageSize > 0 ? Math.Min(pageSize, 100) : 20;
 
         var result = await store.ListDeadLetterAsync(tenantId, p, ps, ct);
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> RetryDeadLetter(
+    private static async Task<Results<Ok<MessageResponse>, NotFound, BadRequest<ErrorResponse>>> RetryDeadLetter(
         string id,
         [FromServices] IWebhookDeliveryStore store,
         [FromServices] IClock clock,
@@ -39,10 +40,10 @@ internal static class ManagementWebhookEndpoints
     {
         var delivery = await store.GetByIdAsync(id, ct);
         if (delivery is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (delivery.Status != WebhookDeliveryStatus.DeadLetter)
-            return Results.BadRequest(new ErrorResponse("Only dead-letter deliveries can be retried"));
+            return TypedResults.BadRequest(new ErrorResponse("Only dead-letter deliveries can be retried"));
 
         var retried = delivery with
         {
@@ -56,6 +57,6 @@ internal static class ManagementWebhookEndpoints
         };
 
         await store.UpdateAsync(retried, ct);
-        return Results.Ok(new MessageResponse($"Delivery {id} re-enqueued for retry"));
+        return TypedResults.Ok(new MessageResponse($"Delivery {id} re-enqueued for retry"));
     }
 }

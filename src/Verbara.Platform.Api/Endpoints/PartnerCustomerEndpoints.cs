@@ -6,6 +6,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Core.Branding;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -41,7 +42,7 @@ internal static class PartnerCustomerEndpoints
 
     // ── List ─────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListCustomers(
+    private static async Task<Results<Ok<List<PartnerCustomerDto>>, ForbidHttpResult>> ListCustomers(
         HttpContext context,
         [FromQuery] string? status,
         [FromQuery] string? plan,
@@ -51,7 +52,7 @@ internal static class PartnerCustomerEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var children = await tenantStore.GetChildrenAsync(callerTenantId, ct);
 
@@ -63,7 +64,7 @@ internal static class PartnerCustomerEndpoints
         if (Enum.TryParse<TenantPlan>(plan, ignoreCase: true, out var planFilter))
             result = result.Where(t => t.GetPlan() == planFilter);
 
-        return Results.Ok(result.Select(MapToDto).ToList());
+        return TypedResults.Ok(result.Select(MapToDto).ToList());
     }
 
     // ── Create ───────────────────────────────────────────────────────────────
@@ -156,7 +157,7 @@ internal static class PartnerCustomerEndpoints
 
     // ── Get ──────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetCustomer(
+    private static async Task<Results<Ok<PartnerCustomerDto>, ForbidHttpResult, NotFound>> GetCustomer(
         string customerId,
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
@@ -165,18 +166,18 @@ internal static class PartnerCustomerEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var customer = await tenantStore.GetAsync(customerId, ct);
         if (customer is null || customer.ParentTenantId != callerTenantId)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
-        return Results.Ok(MapToDto(customer));
+        return TypedResults.Ok(MapToDto(customer));
     }
 
     // ── Update ───────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> UpdateCustomer(
+    private static async Task<Results<Ok<PartnerCustomerDto>, ForbidHttpResult, NotFound>> UpdateCustomer(
         string customerId,
         HttpContext context,
         [FromBody] UpdatePartnerCustomerRequest body,
@@ -187,11 +188,11 @@ internal static class PartnerCustomerEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var customer = await tenantStore.GetAsync(customerId, ct);
         if (customer is null || customer.ParentTenantId != callerTenantId)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var before = new { customer.TenantId, customer.Name };
 
@@ -228,12 +229,12 @@ internal static class PartnerCustomerEndpoints
             },
             ct: ct);
 
-        return Results.Ok(MapToDto(updated));
+        return TypedResults.Ok(MapToDto(updated));
     }
 
     // ── Suspend ──────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> SuspendCustomer(
+    private static async Task<Results<Ok<StatusUpdateResponse>, ForbidHttpResult, ValidationProblem, NotFound>> SuspendCustomer(
         string customerId,
         HttpContext context,
         [FromBody] SuspendCustomerRequest body,
@@ -248,14 +249,14 @@ internal static class PartnerCustomerEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         if (string.IsNullOrWhiteSpace(body.Reason))
-            return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["Required"] });
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["Required"] });
 
         var customer = await tenantStore.GetAsync(customerId, ct);
         if (customer is null || customer.ParentTenantId != callerTenantId)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         await tenantStore.UpdateStatusAsync(customerId, TenantStatus.Suspended, ct);
         tierCache.Remove(customerId);
@@ -276,12 +277,12 @@ internal static class PartnerCustomerEndpoints
             },
             ct: ct);
 
-        return Results.Ok(new StatusUpdateResponse(customerId, "Suspended"));
+        return TypedResults.Ok(new StatusUpdateResponse(customerId, "Suspended"));
     }
 
     // ── Activate ─────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ActivateCustomer(
+    private static async Task<Results<Ok<StatusUpdateResponse>, ForbidHttpResult, NotFound>> ActivateCustomer(
         string customerId,
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
@@ -293,11 +294,11 @@ internal static class PartnerCustomerEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var customer = await tenantStore.GetAsync(customerId, ct);
         if (customer is null || customer.ParentTenantId != callerTenantId)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         await tenantStore.UpdateStatusAsync(customerId, TenantStatus.Active, ct);
         tierCache.Remove(customerId);
@@ -314,12 +315,12 @@ internal static class PartnerCustomerEndpoints
             },
             ct: ct);
 
-        return Results.Ok(new StatusUpdateResponse(customerId, "Active"));
+        return TypedResults.Ok(new StatusUpdateResponse(customerId, "Active"));
     }
 
     // ── Settings GET ─────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetCustomerSettings(
+    private static async Task<Results<Ok<TenantSettingsDto>, ForbidHttpResult, NotFound>> GetCustomerSettings(
         string customerId,
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
@@ -335,16 +336,16 @@ internal static class PartnerCustomerEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var customer = await tenantStore.GetAsync(customerId, ct);
         if (customer is null || customer.ParentTenantId != callerTenantId)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var dto = await TenantSettingsEndpoints.BuildSettingsDto(customerId, tenantStore, authConfigStore,
             quotaStore, retentionStore, addOnStore, dunningStore, featureGateService, brandingStore, ct);
 
-        return dto is null ? Results.NotFound() : Results.Ok(dto);
+        return dto is null ? TypedResults.NotFound() : TypedResults.Ok(dto);
     }
 
     // ── Settings PUT ─────────────────────────────────────────────────────────

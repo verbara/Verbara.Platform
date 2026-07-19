@@ -4,6 +4,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -20,14 +21,14 @@ internal static class ManagementApiKeyEndpoints
         group.MapDelete("/{id}", RevokeKey);
     }
 
-    private static async Task<IResult> ListKeys(
+    private static async Task<Ok<List<MgmtApiKeyDto>>> ListKeys(
         [FromServices] ITenantStore tenantStore,
         [FromServices] IApiKeyStore apiKeyStore,
         CancellationToken ct)
     {
         var host = await tenantStore.GetHostTenantAsync(ct);
         if (host is null)
-            return Results.Ok(Array.Empty<object>());
+            return TypedResults.Ok(new List<MgmtApiKeyDto>());
 
         var tenantId = new TenantId(host.TenantId);
         var keys = await apiKeyStore.ListAsync(tenantId, new PagedQuery(1, 100), ct);
@@ -39,7 +40,7 @@ internal static class ManagementApiKeyEndpoints
                 k.ExpiresAt, k.CreatedAt, k.LastUsedAt))
             .ToList();
 
-        return Results.Ok(mgmtKeys);
+        return TypedResults.Ok(mgmtKeys);
     }
 
     private static async Task<IResult> CreateKey(
@@ -89,7 +90,7 @@ internal static class ManagementApiKeyEndpoints
             new CreateMgmtApiKeyResponse(apiKey.KeyId.Value, apiKey.Name, rawKey, apiKey.ExpiresAt));
     }
 
-    private static async Task<IResult> RotateKey(
+    private static async Task<Results<Ok<CreateMgmtApiKeyResponse>, ProblemHttpResult, NotFound>> RotateKey(
         string id,
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
@@ -100,12 +101,12 @@ internal static class ManagementApiKeyEndpoints
     {
         var host = await tenantStore.GetHostTenantAsync(ct);
         if (host is null)
-            return Results.Problem("Platform not initialized.", statusCode: 503);
+            return TypedResults.Problem("Platform not initialized.", statusCode: 503);
 
         var tenantId = new TenantId(host.TenantId);
         var existing = await apiKeyStore.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (existing is null || existing.KeyType != ApiKeyType.Management)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         // Revoke old key
         await apiKeyStore.RevokeAsync(tenantId, existing.KeyId, ct);
@@ -140,7 +141,7 @@ internal static class ManagementApiKeyEndpoints
                 ["previous_key_id"] = id,
             },
             ct: ct);
-        return Results.Ok(new CreateMgmtApiKeyResponse(newKey.KeyId.Value, newKey.Name, rawKey, newKey.ExpiresAt));
+        return TypedResults.Ok(new CreateMgmtApiKeyResponse(newKey.KeyId.Value, newKey.Name, rawKey, newKey.ExpiresAt));
     }
 
     private static async Task<IResult> RevokeKey(

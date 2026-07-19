@@ -4,6 +4,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Core.Branding;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -29,7 +30,7 @@ internal static class ManagementTenantSettingsEndpoints
         group.MapPut("/", UpdateSettings);
     }
 
-    private static async Task<IResult> GetSettings(
+    private static async Task<Results<Ok<TenantSettingsDto>, NotFound>> GetSettings(
         string id,
         [FromServices] ITenantStore tenantStore,
         [FromServices] ITenantAuthConfigStore authConfigStore,
@@ -44,7 +45,7 @@ internal static class ManagementTenantSettingsEndpoints
         var dto = await TenantSettingsEndpoints.BuildSettingsDto(
             id, tenantStore, authConfigStore, quotaStore, retentionStore,
             addOnStore, dunningStore, featureGateService, brandingStore, ct);
-        return dto is null ? Results.NotFound() : Results.Ok(dto);
+        return dto is null ? TypedResults.NotFound() : TypedResults.Ok(dto);
     }
 
     private static async Task<IResult> UpdateSettings(

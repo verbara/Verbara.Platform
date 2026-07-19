@@ -1,5 +1,6 @@
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -18,7 +19,7 @@ internal static class ContactEndpoints
         group.MapDelete("/{id}", DeleteContact);
     }
 
-    private static async Task<IResult> GetContact(
+    private static async Task<Results<Ok<Contact>, NotFound>> GetContact(
         string id,
         HttpContext context,
         [FromServices] IContactStore store,
@@ -26,10 +27,10 @@ internal static class ContactEndpoints
     {
         var tenantId = GetTenantId(context);
         var contact = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return contact is null ? Results.NotFound() : Results.Ok(contact);
+        return contact is null ? TypedResults.NotFound() : TypedResults.Ok(contact);
     }
 
-    private static async Task<IResult> GetContactConversations(
+    private static async Task<Ok<PagedResult<Conversation>>> GetContactConversations(
         string id,
         HttpContext context,
         [FromServices] IConversationStore store,
@@ -45,10 +46,10 @@ internal static class ContactEndpoints
             PageSize = pageSize,
         };
         var result = await store.ListAsync(tenantId, query, ct);
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> SearchContacts(
+    private static async Task<Ok<PagedResult<Contact>>> SearchContacts(
         HttpContext context,
         [FromServices] IContactStore store,
         string? search = null,
@@ -58,7 +59,7 @@ internal static class ContactEndpoints
     {
         var tenantId = GetTenantId(context);
         var result = await store.SearchAsync(tenantId, search, new PagedQuery(page, pageSize), ct);
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
     private static async Task<IResult> CreateContact(
@@ -99,7 +100,7 @@ internal static class ContactEndpoints
         return Results.Created($"/contacts/{contact.ContactId}", contact);
     }
 
-    private static async Task<IResult> UpdateContact(
+    private static async Task<Results<Ok<Contact>, NotFound>> UpdateContact(
         string id,
         HttpContext context,
         [FromBody] UpdateContactRequest body,
@@ -110,7 +111,7 @@ internal static class ContactEndpoints
         var tenantId = GetTenantId(context);
         var contact = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (contact is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (body.FirstName is not null) contact.FirstName = body.FirstName;
         if (body.LastName is not null) contact.LastName = body.LastName;
@@ -135,7 +136,7 @@ internal static class ContactEndpoints
 
         contact.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(contact, ct);
-        return Results.Ok(contact);
+        return TypedResults.Ok(contact);
     }
 
     private static async Task<IResult> DeleteContact(

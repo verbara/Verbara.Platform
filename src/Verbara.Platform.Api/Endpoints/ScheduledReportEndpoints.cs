@@ -4,6 +4,7 @@ using Verbara.Platform.Api.Services.Reports;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Reports;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using NCrontab;
 
@@ -28,7 +29,7 @@ internal static class ScheduledReportEndpoints
         group.MapGet("/{id}/history/{executionId}/download", DownloadExecution);
     }
 
-    private static async Task<IResult> ListReports(
+    private static async Task<Ok<ScheduledReportDto[]>> ListReports(
         HttpContext context,
         [FromServices] IScheduledReportStore store,
         [FromServices] IClock clock,
@@ -36,7 +37,7 @@ internal static class ScheduledReportEndpoints
     {
         var tenantId = GetTenantId(context);
         var reports = await store.ListByTenantAsync(tenantId.Value, ct);
-        return Results.Ok(reports.Select(ToDto).ToArray());
+        return TypedResults.Ok(reports.Select(ToDto).ToArray());
     }
 
     private static ScheduledReportDto ToDto(ScheduledReport r) =>
@@ -109,7 +110,7 @@ internal static class ScheduledReportEndpoints
         return Results.Created($"/admin/reports/{report.ReportId}", ToDto(report));
     }
 
-    private static async Task<IResult> GetReport(
+    private static async Task<Results<Ok<ScheduledReportDto>, NotFound>> GetReport(
         string id,
         HttpContext context,
         [FromServices] IScheduledReportStore store,
@@ -118,8 +119,8 @@ internal static class ScheduledReportEndpoints
         var tenantId = GetTenantId(context);
         var report = await store.GetByIdAsync(id, ct);
         if (report is null || !string.Equals(report.TenantId, tenantId.Value, StringComparison.Ordinal))
-            return Results.NotFound();
-        return Results.Ok(ToDto(report));
+            return TypedResults.NotFound();
+        return TypedResults.Ok(ToDto(report));
     }
 
     private static async Task<IResult> UpdateReport(

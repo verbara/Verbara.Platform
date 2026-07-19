@@ -5,6 +5,7 @@ using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -46,13 +47,13 @@ internal static class ManagementBillingEndpoints
 
     // ─── Rate Card Handlers ──────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListRateCards(
+    private static async Task<Ok<List<RateCardDto>>> ListRateCards(
         [FromQuery] string tenantId,
         [FromServices] IRateCardStore store,
         CancellationToken ct)
     {
         var cards = await store.ListAsync(new TenantId(tenantId), ct);
-        return Results.Ok(cards.Select(MapRateCardToDto).ToList());
+        return TypedResults.Ok(cards.Select(MapRateCardToDto).ToList());
     }
 
     private static async Task<IResult> CreateRateCard(
@@ -96,7 +97,7 @@ internal static class ManagementBillingEndpoints
         return Results.Created($"/management/rate-cards/{rateCard.RateCardId.Value}", MapRateCardToDto(rateCard));
     }
 
-    private static async Task<IResult> UpdateRateCard(
+    private static async Task<Results<Ok<RateCardDto>, NotFound>> UpdateRateCard(
         string id,
         HttpContext context,
         [FromQuery] string tenantId,
@@ -108,7 +109,7 @@ internal static class ManagementBillingEndpoints
         var tid = new TenantId(tenantId);
         var existing = await store.GetByIdAsync(tid, EntityId.From(id), ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var updated = new RateCard
         {
@@ -140,7 +141,7 @@ internal static class ManagementBillingEndpoints
             metadata: BuildMetadata(context, tenantId),
             ct: ct);
 
-        return Results.Ok(MapRateCardToDto(updated));
+        return TypedResults.Ok(MapRateCardToDto(updated));
     }
 
     private static async Task<IResult> DeleteRateCard(
@@ -179,7 +180,7 @@ internal static class ManagementBillingEndpoints
 
     // ─── Invoice Handlers ────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListInvoices(
+    private static async Task<Ok<List<InvoiceDto>>> ListInvoices(
         [FromQuery] string tenantId,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
@@ -187,7 +188,7 @@ internal static class ManagementBillingEndpoints
         CancellationToken ct)
     {
         var invoices = await store.ListAsync(new TenantId(tenantId), page ?? 1, pageSize ?? 20, ct);
-        return Results.Ok(invoices.Select(MapInvoiceToDto).ToList());
+        return TypedResults.Ok(invoices.Select(MapInvoiceToDto).ToList());
     }
 
     private static async Task<IResult> GenerateInvoice(
@@ -237,17 +238,17 @@ internal static class ManagementBillingEndpoints
         return Results.Created($"/management/invoices/{invoice.InvoiceId.Value}", MapInvoiceToDto(invoice));
     }
 
-    private static async Task<IResult> GetInvoice(
+    private static async Task<Results<Ok<InvoiceDto>, NotFound>> GetInvoice(
         string id,
         [FromQuery] string tenantId,
         [FromServices] IInvoiceStore store,
         CancellationToken ct)
     {
         var invoice = await store.GetByIdAsync(new TenantId(tenantId), EntityId.From(id), ct);
-        return invoice is null ? Results.NotFound() : Results.Ok(MapInvoiceToDto(invoice));
+        return invoice is null ? TypedResults.NotFound() : TypedResults.Ok(MapInvoiceToDto(invoice));
     }
 
-    private static async Task<IResult> IssueInvoice(
+    private static async Task<Results<Ok<StatusUpdateResponse>, NotFound>> IssueInvoice(
         string id,
         HttpContext context,
         [FromQuery] string tenantId,
@@ -260,7 +261,7 @@ internal static class ManagementBillingEndpoints
         var tid = new TenantId(tenantId);
         var invoice = await store.GetByIdAsync(tid, EntityId.From(id), ct);
         if (invoice is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var statusBefore = invoice.Status;
 
@@ -289,12 +290,12 @@ internal static class ManagementBillingEndpoints
             metadata: BuildMetadata(context, tenantId),
             ct: ct);
 
-        return Results.Ok(new StatusUpdateResponse(id, "Issued"));
+        return TypedResults.Ok(new StatusUpdateResponse(id, "Issued"));
     }
 
     // ─── Usage Handlers ──────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetUsageSummary(
+    private static async Task<Ok<List<UsageSummaryDto>>> GetUsageSummary(
         string tenantId,
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? until,
@@ -307,10 +308,10 @@ internal static class ManagementBillingEndpoints
         var effectiveUntil = until ?? now;
 
         var summaries = await store.GetSummaryAsync(new TenantId(tenantId), effectiveFrom, effectiveUntil, ct);
-        return Results.Ok(summaries.Select(MapSummaryToDto).ToList());
+        return TypedResults.Ok(summaries.Select(MapSummaryToDto).ToList());
     }
 
-    private static async Task<IResult> GetUsageDetails(
+    private static async Task<Results<Ok<List<UsageRecordDto>>, BadRequest<ErrorResponse>>> GetUsageDetails(
         string tenantId,
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? until,
@@ -329,30 +330,30 @@ internal static class ManagementBillingEndpoints
         if (!string.IsNullOrEmpty(type))
         {
             if (!Enum.TryParse<UsageType>(type, out var parsed))
-                return Results.BadRequest(new ErrorResponse($"Unknown usage type: {type}"));
+                return TypedResults.BadRequest(new ErrorResponse($"Unknown usage type: {type}"));
             typeFilter = parsed;
         }
 
         var records = await store.ListAsync(new TenantId(tenantId), effectiveFrom, effectiveUntil, typeFilter, page ?? 1, pageSize ?? 50, ct);
-        return Results.Ok(records.Select(MapRecordToDto).ToList());
+        return TypedResults.Ok(records.Select(MapRecordToDto).ToList());
     }
 
     // ─── Quota Handlers ──────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetQuotaStatus(
+    private static async Task<Ok<QuotaStatusDto>> GetQuotaStatus(
         string tenantId,
         [FromServices] IQuotaEnforcementService service,
         CancellationToken ct)
     {
         var status = await service.GetQuotaStatusAsync(new TenantId(tenantId), ct);
 
-        return Results.Ok(new QuotaStatusDto(
+        return TypedResults.Ok(new QuotaStatusDto(
             status.TenantId.Value,
             status.Quota is not null ? MapQuotaToDto(status.Quota) : null,
             status.CurrentUsage.Select(MapSummaryToDto).ToList()));
     }
 
-    private static async Task<IResult> UpdateQuota(
+    private static async Task<Results<Ok<QuotaDto>, BadRequest<ErrorResponse>>> UpdateQuota(
         string tenantId,
         HttpContext context,
         [FromBody] UpdateQuotaRequest body,
@@ -361,7 +362,7 @@ internal static class ManagementBillingEndpoints
         CancellationToken ct)
     {
         if (body.QuotaAction is not null && !Enum.TryParse<QuotaAction>(body.QuotaAction, out _))
-            return Results.BadRequest(new ErrorResponse($"Unknown quota action: {body.QuotaAction}"));
+            return TypedResults.BadRequest(new ErrorResponse($"Unknown quota action: {body.QuotaAction}"));
 
         var tid = new TenantId(tenantId);
         var existing = await store.GetAsync(tid, ct);
@@ -418,20 +419,20 @@ internal static class ManagementBillingEndpoints
             metadata: BuildMetadata(context, tenantId),
             ct: ct);
 
-        return Results.Ok(MapQuotaToDto(quota));
+        return TypedResults.Ok(MapQuotaToDto(quota));
     }
 
     // ─── Dunning Handlers ────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetDunning(
+    private static async Task<Results<Ok<DunningRecordDto>, NotFound>> GetDunning(
         string id,
         [FromServices] IDunningStore dunningStore,
         CancellationToken ct)
     {
         var record = await dunningStore.GetActiveAsync(id, ct);
         return record is null
-            ? Results.NotFound()
-            : Results.Ok(new DunningRecordDto(
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(new DunningRecordDto(
                 record.DunningId,
                 record.TenantId,
                 record.InvoiceId,
@@ -443,7 +444,7 @@ internal static class ManagementBillingEndpoints
                 record.IsActive));
     }
 
-    private static async Task<IResult> PauseDunning(
+    private static async Task<Results<Ok<DunningRecordDto>, NotFound>> PauseDunning(
         string id,
         HttpContext context,
         [FromServices] IDunningStore dunningStore,
@@ -452,7 +453,7 @@ internal static class ManagementBillingEndpoints
     {
         var record = await dunningStore.GetActiveAsync(id, ct);
         if (record is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var wasPaused = record.IsPaused;
         record.IsPaused = !record.IsPaused;
@@ -474,7 +475,7 @@ internal static class ManagementBillingEndpoints
             metadata: BuildMetadataWithDunning(context, id, record.DunningId),
             ct: ct);
 
-        return Results.Ok(new DunningRecordDto(
+        return TypedResults.Ok(new DunningRecordDto(
             record.DunningId,
             record.TenantId,
             record.InvoiceId,
@@ -493,7 +494,7 @@ internal static class ManagementBillingEndpoints
     /// (Phase B B.2) uses this dedicated action to restore dunning processing
     /// after a hold period.
     /// </summary>
-    private static async Task<IResult> ResumeDunning(
+    private static async Task<Results<Ok<DunningRecordDto>, NotFound>> ResumeDunning(
         string id,
         HttpContext context,
         [FromServices] IDunningStore dunningStore,
@@ -502,7 +503,7 @@ internal static class ManagementBillingEndpoints
     {
         var record = await dunningStore.GetActiveAsync(id, ct);
         if (record is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var wasPaused = record.IsPaused;
         record.IsPaused = false;
@@ -523,7 +524,7 @@ internal static class ManagementBillingEndpoints
             metadata: BuildMetadataWithDunning(context, id, record.DunningId),
             ct: ct);
 
-        return Results.Ok(new DunningRecordDto(
+        return TypedResults.Ok(new DunningRecordDto(
             record.DunningId,
             record.TenantId,
             record.InvoiceId,
@@ -535,7 +536,7 @@ internal static class ManagementBillingEndpoints
             record.IsActive));
     }
 
-    private static async Task<IResult> PayInvoice(
+    private static async Task<Results<Ok<MessageResponse>, BadRequest<ErrorResponse>, NotFound>> PayInvoice(
         string invoiceId,
         HttpContext context,
         [FromQuery] string tenantId,
@@ -549,15 +550,15 @@ internal static class ManagementBillingEndpoints
     {
         // BILL-002: validate invoice id shape before hitting the store.
         if (!EntityId.IsValid(invoiceId))
-            return Results.BadRequest(new ErrorResponse("Invalid invoiceId."));
+            return TypedResults.BadRequest(new ErrorResponse("Invalid invoiceId."));
 
         // BILL-002: require ?tenantId= and assert it matches the dunning record below.
         if (string.IsNullOrWhiteSpace(tenantId))
-            return Results.BadRequest(new ErrorResponse("Query parameter 'tenantId' is required."));
+            return TypedResults.BadRequest(new ErrorResponse("Query parameter 'tenantId' is required."));
 
         var dunningRecord = await dunningStore.GetByInvoiceAsync(invoiceId, ct);
         if (dunningRecord is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         // BILL-002: emit pay-attempted audit + reject if the caller-supplied
         // tenantId disagrees with the dunning record's tenant. Audit goes to
@@ -580,7 +581,7 @@ internal static class ManagementBillingEndpoints
                     ("reason", "tenant_id_mismatch")),
                 ct: ct);
 
-            return Results.BadRequest(new ErrorResponse(
+            return TypedResults.BadRequest(new ErrorResponse(
                 "tenantId does not match the dunning record's tenant."));
         }
 
@@ -590,7 +591,7 @@ internal static class ManagementBillingEndpoints
             ct);
 
         if (invoice is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var paymentStatusBefore = invoice.PaymentStatus;
         var invoiceStatusBefore = invoice.Status;
@@ -639,7 +640,7 @@ internal static class ManagementBillingEndpoints
                 ("dunning_id", dunningRecord.DunningId)),
             ct: ct);
 
-        return Results.Ok(new MessageResponse("Invoice marked as paid"));
+        return TypedResults.Ok(new MessageResponse("Invoice marked as paid"));
     }
 
     // ─── Audit Helpers ───────────────────────────────────────────────────────────

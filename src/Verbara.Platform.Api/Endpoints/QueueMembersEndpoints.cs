@@ -4,6 +4,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Pro.Realtime;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -31,7 +32,7 @@ internal static partial class QueueMembersEndpoints
 
     // ─── GET /queues/{queueId}/members ────────────────────────────────────────
 
-    private static async Task<IResult> ListMembers(
+    private static async Task<Results<Ok<List<QueueMemberDto>>, NotFound>> ListMembers(
         string queueId,
         HttpContext context,
         [FromServices] IQueueStore queueStore,
@@ -42,7 +43,7 @@ internal static partial class QueueMembersEndpoints
     {
         var tenantId = GetTenantId(context);
         var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(queueId), ct);
-        if (queue is null) return Results.NotFound();
+        if (queue is null) return TypedResults.NotFound();
 
         var memberships = await membershipStore.ListByQueueAsync(tenantId, queue.QueueId, ct);
         var result = new List<QueueMemberDto>(memberships.Count);
@@ -62,7 +63,7 @@ internal static partial class QueueMembersEndpoints
                 m.Source == MembershipSource.Manual ? "Manual" : "Skill",
                 m.AllowedChannels));
         }
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
     // ─── POST /queues/{queueId}/members ───────────────────────────────────────
@@ -179,7 +180,7 @@ internal static partial class QueueMembersEndpoints
 
     // ─── PATCH /queues/{queueId}/members/{agentId} ────────────────────────────
 
-    private static async Task<IResult> UpdateMember(
+    private static async Task<Results<Ok<QueueMemberDto>, NotFound, BadRequest<string>>> UpdateMember(
         string queueId,
         string agentId,
         HttpContext context,
@@ -194,10 +195,10 @@ internal static partial class QueueMembersEndpoints
         var tenantId = GetTenantId(context);
         var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(queueId), ct);
         var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(agentId), ct);
-        if (queue is null || agent is null) return Results.NotFound();
+        if (queue is null || agent is null) return TypedResults.NotFound();
 
         var existing = await membershipStore.GetAsync(tenantId, queue.QueueId, agent.AgentId, ct);
-        if (existing is null) return Results.NotFound();
+        if (existing is null) return TypedResults.NotFound();
 
         var newPenalty = body.Penalty.HasValue
             ? Math.Clamp(body.Penalty.Value, 0, 10)
@@ -218,8 +219,8 @@ internal static partial class QueueMembersEndpoints
         }
         else if (body.AllowedChannels is not null)
         {
-            if (ValidateChannels(body.AllowedChannels) is { ok: false, error: var chErr })
-                return Results.BadRequest(chErr);
+            if (ValidateChannels(body.AllowedChannels) is { ok: false, error: { } chErr })
+                return TypedResults.BadRequest(chErr);
             newAllowedChannels = body.AllowedChannels;
             channelsChanged = !ChannelListsEqual(existing.AllowedChannels, body.AllowedChannels);
         }
@@ -277,7 +278,7 @@ internal static partial class QueueMembersEndpoints
             newPenalty, newExcluded, isPaused, reason,
             existing.Source == MembershipSource.Manual ? "Manual" : "Skill",
             newAllowedChannels);
-        return Results.Ok(dto);
+        return TypedResults.Ok(dto);
     }
 
     // ─── ADR-0026 Phase A.6 helpers ──────────────────────────────────────────
@@ -311,7 +312,7 @@ internal static partial class QueueMembersEndpoints
 
     // ─── POST /queues/{queueId}/members/{agentId}/pause ───────────────────────
 
-    private static async Task<IResult> PauseMember(
+    private static async Task<Results<Ok<PauseResultDto>, NotFound>> PauseMember(
         string queueId,
         string agentId,
         HttpContext context,
@@ -331,7 +332,7 @@ internal static partial class QueueMembersEndpoints
 
     // ─── POST /queues/{queueId}/members/{agentId}/resume ──────────────────────
 
-    private static async Task<IResult> ResumeMember(
+    private static async Task<Results<Ok<PauseResultDto>, NotFound>> ResumeMember(
         string queueId,
         string agentId,
         HttpContext context,
@@ -348,7 +349,7 @@ internal static partial class QueueMembersEndpoints
             context, queueStore, agentStore, membershipStore, pauseTracker, audit, loggerFactory, ct);
     }
 
-    private static async Task<IResult> SetPausedAsync(
+    private static async Task<Results<Ok<PauseResultDto>, NotFound>> SetPausedAsync(
         string queueId, string agentId, bool paused, string? reason,
         HttpContext context,
         IQueueStore queueStore, IAgentStore agentStore,
@@ -359,10 +360,10 @@ internal static partial class QueueMembersEndpoints
         var tenantId = GetTenantId(context);
         var queue = await queueStore.GetByIdAsync(tenantId, EntityId.From(queueId), ct);
         var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(agentId), ct);
-        if (queue is null || agent is null) return Results.NotFound();
+        if (queue is null || agent is null) return TypedResults.NotFound();
 
         var existing = await membershipStore.GetAsync(tenantId, queue.QueueId, agent.AgentId, ct);
-        if (existing is null) return Results.NotFound();
+        if (existing is null) return TypedResults.NotFound();
 
         pauseTracker.Set(tenantId.Value, queueId, agentId, paused, reason);
 
@@ -400,7 +401,7 @@ internal static partial class QueueMembersEndpoints
             metadata: BuildMetadata(context, extras),
             ct: ct);
 
-        return Results.Ok(new PauseResultDto(queueId, agentId, paused, reason,
+        return TypedResults.Ok(new PauseResultDto(queueId, agentId, paused, reason,
             RealtimeSynced: syncService is not null));
     }
 

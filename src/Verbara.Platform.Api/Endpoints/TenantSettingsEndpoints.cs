@@ -6,6 +6,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Core.Branding;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -184,7 +185,7 @@ internal static class TenantSettingsEndpoints
         group.MapPut("/settings", UpdateSettings);
     }
 
-    private static async Task<IResult> GetSettings(
+    private static async Task<Results<Ok<TenantSettingsDto>, UnauthorizedHttpResult, NotFound>> GetSettings(
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
         [FromServices] ITenantAuthConfigStore authConfigStore,
@@ -200,11 +201,13 @@ internal static class TenantSettingsEndpoints
                     ?? context.User.FindFirst("tenant_id")?.Value;
 
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var dto = await BuildSettingsDto(tenantId, tenantStore, authConfigStore, quotaStore, retentionStore,
             addOnStore, dunningStore, featureGateService, brandingStore, ct);
-        return dto is null ? Results.NotFound() : Results.Ok(dto);
+        if (dto is null)
+            return TypedResults.NotFound();
+        return TypedResults.Ok(dto);
     }
 
     private static async Task<IResult> UpdateSettings(

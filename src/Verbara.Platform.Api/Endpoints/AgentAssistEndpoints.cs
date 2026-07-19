@@ -3,6 +3,7 @@ using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.AgentAssist.Options;
 using Verbara.Sdk.Pro.AgentAssist.Storage.Postgres.Stores;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -38,7 +39,7 @@ internal static class AgentAssistEndpoints
 
     // ─── Session Handlers ─────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetSession(
+    private static async Task<Results<Ok<AgentAssistSessionDto>, NotFound>> GetSession(
         string sessionId,
         HttpContext context,
         [FromServices] AgentAssistSessionStore store,
@@ -52,12 +53,12 @@ internal static class AgentAssistEndpoints
         var session = sessions.FirstOrDefault(s => s.SessionId == sessionId);
 
         if (session is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
-        return Results.Ok(MapSessionToDto(session));
+        return TypedResults.Ok(MapSessionToDto(session));
     }
 
-    private static async Task<IResult> GetSessionSuggestions(
+    private static async Task<Ok<SuggestionLogRowDto[]>> GetSessionSuggestions(
         string sessionId,
         [FromServices] SuggestionLogStore store,
         CancellationToken ct)
@@ -74,10 +75,10 @@ internal static class AgentAssistEndpoints
             r.SuggestionText,
             r.Whispered)).ToArray();
 
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
-    private static async Task<IResult> GetSessionCompliance(
+    private static async Task<Ok<ComplianceAlertRowDto[]>> GetSessionCompliance(
         string sessionId,
         [FromServices] ComplianceAlertStore store,
         CancellationToken ct)
@@ -92,51 +93,51 @@ internal static class AgentAssistEndpoints
             r.Phrase,
             r.Severity)).ToArray();
 
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
     // ─── Admin Config Handlers ────────────────────────────────────────────────
 
-    private static IResult GetConfig(
+    private static Ok<AgentAssistConfigSnapshot> GetConfig(
         [FromServices] IOptions<AgentAssistOptions> options,
         [FromServices] AgentAssistConfigStore configStore)
     {
         var snapshot = configStore.GetSnapshot() ?? BuildSnapshot(options.Value);
-        return Results.Ok(snapshot);
+        return TypedResults.Ok(snapshot);
     }
 
-    private static IResult UpdateConfig(
+    private static Ok<AgentAssistConfigSnapshot> UpdateConfig(
         AgentAssistConfigSnapshot body,
         [FromServices] AgentAssistConfigStore configStore)
     {
         configStore.Update(body);
-        return Results.Ok(body);
+        return TypedResults.Ok(body);
     }
 
-    private static IResult GetKeywordRules([FromServices] AgentAssistConfigStore configStore)
+    private static Ok<KeywordRuleDto[]> GetKeywordRules([FromServices] AgentAssistConfigStore configStore)
     {
-        return Results.Ok(configStore.GetKeywordRules());
+        return TypedResults.Ok(configStore.GetKeywordRules());
     }
 
-    private static IResult UpdateKeywordRules(
+    private static Ok<KeywordRuleDto[]> UpdateKeywordRules(
         KeywordRuleDto[] rules,
         [FromServices] AgentAssistConfigStore configStore)
     {
         configStore.UpdateKeywordRules(rules);
-        return Results.Ok(rules);
+        return TypedResults.Ok(rules);
     }
 
-    private static IResult GetComplianceRules([FromServices] AgentAssistConfigStore configStore)
+    private static Ok<ComplianceRuleDto[]> GetComplianceRules([FromServices] AgentAssistConfigStore configStore)
     {
-        return Results.Ok(configStore.GetComplianceRules());
+        return TypedResults.Ok(configStore.GetComplianceRules());
     }
 
-    private static IResult UpdateComplianceRules(
+    private static Ok<ComplianceRuleDto[]> UpdateComplianceRules(
         ComplianceRuleDto[] rules,
         [FromServices] AgentAssistConfigStore configStore)
     {
         configStore.UpdateComplianceRules(rules);
-        return Results.Ok(rules);
+        return TypedResults.Ok(rules);
     }
 
     // ─── Mapping Helpers ──────────────────────────────────────────────────────

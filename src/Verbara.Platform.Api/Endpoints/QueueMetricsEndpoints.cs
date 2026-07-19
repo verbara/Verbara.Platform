@@ -4,6 +4,7 @@ using Verbara.Platform.Queues;
 using Verbara.Sdk.Pro.Analytics;
 using Verbara.Sdk.Pro.Analytics.Live;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -27,7 +28,7 @@ internal static class QueueMetricsEndpoints
         group.MapGet("/queue-metrics", GetQueueMetrics);
     }
 
-    private static async Task<IResult> GetQueueMetrics(
+    private static async Task<Ok<QueueMetricsDto[]>> GetQueueMetrics(
         HttpContext context,
         [FromServices] IQueueStore queueStore,
         [FromServices] IAgentStore agentStore,
@@ -113,7 +114,7 @@ internal static class QueueMetricsEndpoints
         if (liveMetrics is null || !anyLiveMetricsAvailable)
             context.Response.Headers[MetricsAvailableHeader] = "false";
 
-        return Results.Ok(dtos.ToArray());
+        return TypedResults.Ok(dtos.ToArray());
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

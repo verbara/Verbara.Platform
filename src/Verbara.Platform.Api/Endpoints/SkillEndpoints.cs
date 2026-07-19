@@ -4,6 +4,7 @@ using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Licensing;
 using Verbara.Sdk.Pro.Routing.Models;
 using Verbara.Sdk.Pro.Routing.Skills;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -35,12 +36,12 @@ internal static class SkillEndpoints
 
     // ─── Skill Definition Handlers ────────────────────────────────────────────
 
-    private static async Task<IResult> ListSkills(
+    private static async Task<Ok<List<SkillDto>>> ListSkills(
         [FromServices] SkillCatalogBase catalog,
         CancellationToken ct)
     {
         var skills = await catalog.GetSkillsAsync(ct);
-        return Results.Ok(skills.Select(MapToDto).ToList());
+        return TypedResults.Ok(skills.Select(MapToDto).ToList());
     }
 
     private static async Task<IResult> CreateSkill(
@@ -72,7 +73,7 @@ internal static class SkillEndpoints
         return Results.Created($"/admin/skills/{skill.Name}", MapToDto(skill));
     }
 
-    private static async Task<IResult> UpsertSkill(
+    private static async Task<Ok<SkillDto>> UpsertSkill(
         string name,
         HttpContext context,
         [FromBody] UpsertSkillRequest body,
@@ -99,7 +100,7 @@ internal static class SkillEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(MapToDto(skill));
+        return TypedResults.Ok(MapToDto(skill));
     }
 
     private static async Task<IResult> DeleteSkill(
@@ -143,13 +144,13 @@ internal static class SkillEndpoints
 
     // ─── Agent Skill Handlers ─────────────────────────────────────────────────
 
-    private static async Task<IResult> GetAgentSkills(
+    private static async Task<Ok<List<AgentSkillDto>>> GetAgentSkills(
         string agentId,
         [FromServices] SkillCatalogBase catalog,
         CancellationToken ct)
     {
         var agentSkills = await catalog.GetAgentSkillsAsync(agentId, ct);
-        return Results.Ok(agentSkills.Select(MapAgentSkillToDto).ToList());
+        return TypedResults.Ok(agentSkills.Select(MapAgentSkillToDto).ToList());
     }
 
     private static async Task<IResult> AssignSkill(
@@ -178,13 +179,13 @@ internal static class SkillEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> ListAgentsWithSkill(
+    private static async Task<Ok<List<AgentSkillDto>>> ListAgentsWithSkill(
         string name,
         [FromServices] SkillCatalogBase catalog,
         CancellationToken ct)
     {
         var agentSkills = await catalog.GetAgentsWithSkillAsync(name, ct);
-        return Results.Ok(agentSkills.Select(MapAgentSkillToDto).ToList());
+        return TypedResults.Ok(agentSkills.Select(MapAgentSkillToDto).ToList());
     }
 
     // ─── Mapping Helpers ─────────────────────────────────────────────────────

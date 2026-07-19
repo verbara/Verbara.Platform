@@ -20,6 +20,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **SOURCE-BREAKING (test doubles only):** custom `OriginateExecutorBase` subclasses now override
     `ExecuteCoreAsync` (the base `ExecuteAsync` is the non-virtual spend-point template method); the
     two `FakeOriginateExecutor` test doubles were updated accordingly.
+- **Named OpenAPI response schemas for the typed-client consumer groups (`openapi-response-schemas`,
+  ADR-0035).** Converts ~183 success handlers across the `admin-remainder`, `agent`, `analytics`, and
+  `operations` endpoint groups from untyped `Task<IResult>` / `Results.Ok(...)` to the typed
+  `Results<Ok<TDto>, …>` + `TypedResults.*` pattern, so each success DTO now surfaces as a named
+  `components/schemas` entry in `/openapi/v1.json` (**183 → 391 schemas**). Wire bodies are
+  byte-identical — schema **metadata** only, no request/response contract, status-code, or gating
+  change — verified by the full endpoint suite (1645 tests). Unblocks the Platform.Web typed-client
+  migration (the `web/openapi-response-adoption` child in this change's `impact.yaml`).
+  - Registers 10 response DTOs in `ApiJsonContext` that were returned untyped and never source-gen
+    registered (`InvoiceDto`, `UsageRecordDto`, `QuotaDto`, `QuotaStatusDto`, `CircuitStatusResponse`,
+    `ActiveSessionDto`, `ListenEntry`, `PauseResultDto`, `SurveyScoreSummary`, `UserPurgePreview`) —
+    a latent `JsonSerializerIsReflectionEnabledByDefault=false` serialization gap fixed in passing.
+  - Completes the cross-repo `response-schema-manifest.v1.json` (137 schemas, verbatim field names)
+    and generalizes `scripts/verify-openapi-fixture.py` + its CI step from the single-`CsatResponseDto`
+    fixture check to a manifest-driven, per-group assertion.
+  - Handlers left untyped by design (OQ1): success shapes wrapping a domain entity
+    (`SearchArticles`→`Article`, `GetBotAnalytics`→`BotAnalyticsSummary`), or `Created<T>` / 204 /
+    redirect / polymorphic returns.
 
 ## [2.19.0] - 2026-07-14
 

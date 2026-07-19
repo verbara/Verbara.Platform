@@ -7,6 +7,7 @@ using Verbara.Platform.Identity;
 using Verbara.Platform.Identity.Mfa;
 using Verbara.Platform.Identity.OidcTokenExchange;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -277,7 +278,7 @@ internal static class OidcEndpoints
     // Visibility elevated to internal so Verbara.Platform.Api.Tests (InternalsVisibleTo)
     // can directly assert the refresh cookie is deleted on the versioned auth path,
     // consistent with the sibling CompleteOidcLoginAsync / AuthEndpoints.Logout seams.
-    internal static async Task<IResult> OidcLogout(
+    internal static async Task<Ok<MessageResponse>> OidcLogout(
         HttpContext context,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
@@ -300,6 +301,6 @@ internal static class OidcEndpoints
         }
 
         RefreshTokenCookie.Delete(context);
-        return Results.Ok(new MessageResponse("Logged out"));
+        return TypedResults.Ok(new MessageResponse("Logged out"));
     }
 }

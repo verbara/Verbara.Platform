@@ -1,6 +1,7 @@
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -38,14 +39,14 @@ internal static class CannedResponseEndpoints
         return group;
     }
 
-    private static async Task<IResult> ListAll(
+    private static async Task<Ok<List<CannedResponseDto>>> ListAll(
         HttpContext context,
         [FromServices] ICannedResponseStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var items = await store.ListByTenantAsync(tenantId, ct);
-        return Results.Ok(items.Select(ToDto).ToList());
+        return TypedResults.Ok(items.Select(ToDto).ToList());
     }
 
     private static async Task<IResult> Create(
@@ -86,7 +87,7 @@ internal static class CannedResponseEndpoints
         return Results.Created($"/admin/canned-responses/{response.ResponseId.Value}", ToDto(response));
     }
 
-    private static async Task<IResult> Update(
+    private static async Task<Results<Ok<CannedResponseDto>, NotFound>> Update(
         string id,
         UpdateCannedResponseRequest request,
         HttpContext context,
@@ -97,7 +98,7 @@ internal static class CannedResponseEndpoints
         var tenantId = GetTenantId(context);
         var existing = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (request.Shortcut is not null) existing.Shortcut = request.Shortcut;
         if (request.Title is not null) existing.Title = request.Title;
@@ -107,7 +108,7 @@ internal static class CannedResponseEndpoints
         existing.UpdatedAt = clock.UtcNow;
 
         await store.SaveAsync(existing, ct);
-        return Results.Ok(ToDto(existing));
+        return TypedResults.Ok(ToDto(existing));
     }
 
     private static async Task<IResult> Delete(
@@ -121,7 +122,7 @@ internal static class CannedResponseEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> Search(
+    private static async Task<Ok<List<CannedResponseDto>>> Search(
         HttpContext context,
         [FromServices] ICannedResponseStore store,
         [FromQuery] string? q,
@@ -133,7 +134,7 @@ internal static class CannedResponseEndpoints
             ? await store.ListByTenantAsync(tenantId, ct)
             : await store.SearchAsync(tenantId, q, ct);
 
-        return Results.Ok(items.Select(ToDto).ToList());
+        return TypedResults.Ok(items.Select(ToDto).ToList());
     }
 
     private static CannedResponseDto ToDto(CannedResponse r) =>

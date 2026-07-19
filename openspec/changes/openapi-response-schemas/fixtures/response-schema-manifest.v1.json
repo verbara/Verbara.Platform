@@ -1,58 +1,1322 @@
 {
-  "$comment": "Golden inventory of named response schemas Platform emits in /openapi/v1.json components/schemas. SEED STATE (2026-07-16): carries the single response schema already proven in the captured document (ADR-0035 CSAT seed; field names verbatim from openspec/changes/archive/2026-07-12-openapi-typed-client/fixtures/openapi-document.v1.sample.json and confirmed against Web's generated openapi.d.ts). The HOST change MUST complete every group below with schema name + verbatim field names for all wire shapes the Web consumer slices touch (admin-remainder, agent, analytics, operations) BEFORE /xr:propagate — an empty group at propagate time is a blocking fixture-completeness finding (T11). verify-openapi-fixture.py extends to assert this manifest against the CI-captured document. Naming note: the C# record and Web alias names differ from the emitted schema name (CsatAggregateDto / CsatAggregateAnalyticsDto vs emitted CsatResponseDto) — the manifest records EMITTED names only.",
-  "$propose_note": "PROPOSE STAGE (docs/propose-openapi-response-schemas, 2026-07-16): the four groups stay TO-COMPLETE-BY-HOST. Verbatim EMITTED schema names + camelCase field names cannot be captured at propose time — a named response schema for a group's DTO only appears in /openapi/v1.json AFTER that handler is converted to the typed Results<Ok<TDto>,...> pattern (tasks.md Group 3), and the emitted name can differ from the C# record name (the CsatAggregateDto -> emitted CsatResponseDto lesson). Freezing C#-source-derived PascalCase names here now would reintroduce exactly the guess-the-DTO failure the verbatim-fixture-citation rule exists to prevent (csat-runner, Web PR#159). The 'candidateFiles' below are the design-stage group membership (resolves design OQ2), verified from the endpoint tree by the propose inventory pass; they are NOT wire shapes. Completion (schemas + status flip) is tasks.md Group 2, gated before /xr:propagate.",
+  "$comment": "Completed manifest: named response schemas Platform emits in /openapi/v1.json components/schemas for the four consumer groups (verbatim field names from the CI-captured document, openapi-response-schemas Platform/ADR-0035). csat is the original proven seed. Each group's schemas are the emitted top-level response DTOs of that group's typed handlers; nested types are covered transitively in the document. verify-openapi-fixture.py asserts every name+fields below against the captured document.",
   "version": 1,
   "groups": {
     "csat": {
       "status": "proven",
       "schemas": {
-        "CsatResponseDto": ["queueName", "channel", "totalResponses", "averageRating", "rangeStart", "rangeEnd"]
+        "CsatResponseDto": [
+          "queueName",
+          "channel",
+          "totalResponses",
+          "averageRating",
+          "rangeStart",
+          "rangeEnd"
+        ]
       }
     },
     "admin-remainder": {
-      "status": "TO-COMPLETE-BY-HOST",
+      "status": "complete",
       "candidateFiles": [
-        "AdminEndpoints.cs", "AuthAdminEndpoints.cs", "ChannelConfigEndpoints.cs",
-        "ManagementApiKeyEndpoints.cs", "ManagementBillingEndpoints.cs", "ManagementClusterEndpoints.cs",
-        "ManagementImpersonationEndpoints.cs", "ManagementSystemEndpoints.cs", "ManagementTenantEndpoints.cs",
-        "ManagementTenantIpAllowlistEndpoints.cs", "ManagementTenantSettingsEndpoints.cs",
-        "ManagementWebhookEndpoints.cs", "OidcEndpoints.cs", "PartnerBillingEndpoints.cs",
-        "PartnerCustomerEndpoints.cs", "PartnerRevenueEndpoints.cs", "PartnerSettingsEndpoints.cs",
-        "RbacEndpoints.cs", "TenantLlmConfigEndpoints.cs", "TenantSettingsEndpoints.cs",
-        "TypificationEndpoints.cs (schema-admin part)", "WebhookSubscriptionEndpoints.cs"
+        "AdminEndpoints.cs",
+        "AuthAdminEndpoints.cs",
+        "ChannelConfigEndpoints.cs",
+        "ManagementApiKeyEndpoints.cs",
+        "ManagementBillingEndpoints.cs",
+        "ManagementClusterEndpoints.cs",
+        "ManagementImpersonationEndpoints.cs",
+        "ManagementSystemEndpoints.cs",
+        "ManagementTenantEndpoints.cs",
+        "ManagementTenantIpAllowlistEndpoints.cs",
+        "ManagementTenantSettingsEndpoints.cs",
+        "ManagementWebhookEndpoints.cs",
+        "OidcEndpoints.cs",
+        "PartnerBillingEndpoints.cs",
+        "PartnerCustomerEndpoints.cs",
+        "PartnerRevenueEndpoints.cs",
+        "PartnerSettingsEndpoints.cs",
+        "RbacEndpoints.cs",
+        "TenantLlmConfigEndpoints.cs",
+        "TenantSettingsEndpoints.cs",
+        "TypificationEndpoints.cs (schema-admin part)",
+        "WebhookSubscriptionEndpoints.cs"
       ],
-      "schemas": {}
+      "schemas": {
+        "ActiveSession": [
+          "sessionId",
+          "userId",
+          "userEmail",
+          "userDisplayName",
+          "ipAddress",
+          "userAgent",
+          "createdAt",
+          "expiresAt",
+          "lastActivity"
+        ],
+        "AdminAgentResponseDto": [
+          "agentId",
+          "tenantId",
+          "userId",
+          "displayName",
+          "state",
+          "pendingState",
+          "pendingReason",
+          "pendingSince",
+          "hasPendingPause",
+          "teamId",
+          "skills",
+          "extension",
+          "autoAnswer",
+          "canAcceptWork",
+          "createdAt",
+          "updatedAt",
+          "capacityOverride",
+          "effectiveCapacity"
+        ],
+        "AgentQueueMembershipDto": [
+          "queueId",
+          "queueName",
+          "penalty",
+          "isExcluded",
+          "allowedChannels",
+          "source"
+        ],
+        "CalibrationStatusDto": [
+          "samples",
+          "accuracy",
+          "autoFillReady",
+          "autonomousReady"
+        ],
+        "ChannelTestResponse": [
+          "success",
+          "message"
+        ],
+        "CircuitStatusResponse": [
+          "subscriptionId",
+          "status",
+          "failures",
+          "openedAt",
+          "nextProbeAt",
+          "probeAttempts"
+        ],
+        "CreateMgmtApiKeyResponse": [
+          "keyId",
+          "name",
+          "apiKey",
+          "expiresAt"
+        ],
+        "DunningRecordDto": [
+          "dunningId",
+          "tenantId",
+          "invoiceId",
+          "currentStage",
+          "startedAt",
+          "escalatedAt",
+          "resolvedAt",
+          "isPaused",
+          "isActive"
+        ],
+        "ImpersonateResponse": [
+          "accessToken",
+          "expiresAt",
+          "targetTenantId",
+          "targetTenantName",
+          "readOnly",
+          "sessionId"
+        ],
+        "InvoiceDto": [
+          "invoiceId",
+          "tenantId",
+          "periodStart",
+          "periodEnd",
+          "currency",
+          "lineItems",
+          "subtotal",
+          "tax",
+          "total",
+          "status",
+          "generatedAt",
+          "issuedAt",
+          "paidAt",
+          "paymentStatus",
+          "dueDate"
+        ],
+        "IpAllowlistListResponse": [
+          "enabled",
+          "entries"
+        ],
+        "LicenseInfoDto": [
+          "isValid",
+          "licenseId",
+          "licensee",
+          "status",
+          "expiresAt",
+          "licensedFeatures",
+          "maxNodes",
+          "lastValidatedAt",
+          "inGrace",
+          "gracePeriodRemaining",
+          "blocked"
+        ],
+        "LicenseStatusSnapshot": [
+          "isLoaded",
+          "isValid",
+          "tier",
+          "expiresAt",
+          "maxAgents",
+          "maxNodes",
+          "authorizedDigestsCount",
+          "lastValidationResult",
+          "lastValidationAt",
+          "revalidationInterval",
+          "licensee"
+        ],
+        "MessageResponse": [
+          "message"
+        ],
+        "MgmtApiKeyDto": [
+          "keyId",
+          "name",
+          "isRevoked",
+          "expiresAt",
+          "createdAt",
+          "lastUsedAt"
+        ],
+        "MgmtClusterNodeDto": [
+          "nodeId",
+          "state",
+          "weight",
+          "priorityTier",
+          "maxCapacity",
+          "asteriskVersion",
+          "startupTime"
+        ],
+        "MgmtClusterStatusDto": [
+          "instanceId",
+          "nodes",
+          "totalChannels",
+          "totalAgents",
+          "activeDrains",
+          "instances"
+        ],
+        "MgmtTenantDto": [
+          "tenantId",
+          "name",
+          "status",
+          "type",
+          "parentTenantId",
+          "maxConcurrentChannels",
+          "maxActiveCampaigns",
+          "metadata",
+          "createdAt",
+          "updatedAt"
+        ],
+        "PagedResultOfAdminAgentResponseDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfAuthEvent": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfImpersonationSessionDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfQueueDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfTeamDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfUserDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfWebhookDelivery": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PartnerCustomerDto": [
+          "tenantId",
+          "name",
+          "status",
+          "plan",
+          "createdAt"
+        ],
+        "PartnerRevenueDetailDto": [
+          "revenueId",
+          "customerTenantId",
+          "invoiceId",
+          "grossAmount",
+          "platformCost",
+          "partnerMargin",
+          "periodStart",
+          "periodEnd"
+        ],
+        "PartnerRevenueSummaryDto": [
+          "totalGross",
+          "totalPlatformCost",
+          "totalMargin",
+          "customerCount",
+          "invoiceCount"
+        ],
+        "PermissionDefinition": [
+          "permissionId",
+          "category",
+          "resource",
+          "action",
+          "description",
+          "implies"
+        ],
+        "PermissionGroupDto": [
+          "category",
+          "permissions"
+        ],
+        "PublishResultDto": [
+          "ok",
+          "errors"
+        ],
+        "QueueDto": [
+          "id",
+          "name",
+          "isActive",
+          "maxWaiting",
+          "slaTargets",
+          "overflowRule",
+          "wrapUp",
+          "requiredSkills",
+          "autoAnswerDefault",
+          "createdAt"
+        ],
+        "QuotaDto": [
+          "maxConcurrentChannels",
+          "maxActiveCampaigns",
+          "maxMonthlyVoiceMinutes",
+          "maxMonthlyMessages",
+          "maxStorageBytes",
+          "maxActiveAgents",
+          "quotaAction"
+        ],
+        "QuotaStatusDto": [
+          "tenantId",
+          "quota",
+          "currentUsage"
+        ],
+        "RateCardDto": [
+          "rateCardId",
+          "tenantId",
+          "name",
+          "currency",
+          "effectiveFrom",
+          "effectiveTo",
+          "isDefault",
+          "rates"
+        ],
+        "RevokedSessionsResponse": [
+          "revokedCount"
+        ],
+        "RoleTemplate": [
+          "templateId",
+          "name",
+          "description",
+          "isSystem",
+          "createdAt",
+          "permissions"
+        ],
+        "SchemaBindingDto": [
+          "bindingId",
+          "scope",
+          "scopeRef",
+          "schemaId",
+          "subtreeRootNodeId",
+          "priority",
+          "aiConfigOverride"
+        ],
+        "StatusUpdateResponse": [
+          "id",
+          "status"
+        ],
+        "SystemInfoDto": [
+          "version",
+          "hostTenantId",
+          "platformName",
+          "features"
+        ],
+        "SystemSettingsDto": [
+          "platformName",
+          "defaultTimezone",
+          "defaultLanguage"
+        ],
+        "TeamDto": [
+          "id",
+          "name",
+          "memberCount",
+          "createdAt"
+        ],
+        "TenantAuthConfigResponse": [
+          "tenantId",
+          "mfaPolicy",
+          "mfaRequiredRoles",
+          "passwordMinLength",
+          "passwordRequireUppercase",
+          "passwordRequireNumber",
+          "passwordRequireSpecial",
+          "lockoutThreshold",
+          "lockoutDurationMinutes",
+          "sessionIdleTimeoutMinutes",
+          "sessionAbsoluteTimeoutHours",
+          "oidcEnabled",
+          "oidcAuthority",
+          "oidcClientId",
+          "oidcClientSecretSet",
+          "oidcClientSecretFingerprint",
+          "oidcAutoCreateUsers",
+          "oidcDefaultRole",
+          "impersonationMaxConcurrentSessions",
+          "impersonationAutoTimeoutMinutes",
+          "ipAllowlistEnabled",
+          "updatedAt"
+        ],
+        "TenantChannelConfig": [
+          "tenantId",
+          "channel",
+          "credentials",
+          "isActive"
+        ],
+        "TenantLlmConfigResponse": [
+          "providerType",
+          "model",
+          "settings",
+          "enabled",
+          "aiSource",
+          "platformLlmAvailable",
+          "keySet",
+          "keyLast4",
+          "updatedAt"
+        ],
+        "TenantRole": [
+          "roleId",
+          "tenantId",
+          "name",
+          "description",
+          "sourceTemplateId",
+          "isDefault",
+          "createdAt",
+          "updatedAt",
+          "permissions"
+        ],
+        "TenantSettingsDto": [
+          "tenantId",
+          "name",
+          "type",
+          "status",
+          "operational",
+          "auth",
+          "quotas",
+          "retention",
+          "rateLimitTier",
+          "plan",
+          "enabledFeatures",
+          "addOns",
+          "dunning",
+          "branding"
+        ],
+        "TestLlmConnectionResponse": [
+          "reachable",
+          "authOk",
+          "modelOk",
+          "latencyMs",
+          "error"
+        ],
+        "TypificationSchemaDto": [
+          "schemaId",
+          "name",
+          "version",
+          "isPublished",
+          "maxDepth",
+          "nodes",
+          "fields",
+          "aiConfig",
+          "createdAt",
+          "updatedAt"
+        ],
+        "UsageRecordDto": [
+          "recordId",
+          "usageType",
+          "quantity",
+          "unit",
+          "channel",
+          "referenceId",
+          "recordedAt"
+        ],
+        "UsageSummaryDto": [
+          "usageType",
+          "totalQuantity",
+          "recordCount",
+          "periodStart",
+          "periodEnd",
+          "lastUpdatedAt"
+        ],
+        "UserDto": [
+          "id",
+          "email",
+          "displayName",
+          "role",
+          "status",
+          "createdAt"
+        ],
+        "UserPermissionsDto": [
+          "userId",
+          "permissions"
+        ],
+        "UserRoleAssignment": [
+          "tenantId",
+          "userId",
+          "roleId",
+          "assignedAt",
+          "assignedBy"
+        ],
+        "WebhookSubscription": [
+          "subscriptionId",
+          "tenantId",
+          "name",
+          "endpointUrl",
+          "secret",
+          "eventTypes",
+          "isActive",
+          "createdAt",
+          "updatedAt",
+          "circuitStatus",
+          "circuitFailures",
+          "circuitOpenedAt",
+          "circuitNextProbeAt",
+          "circuitProbeAttempts"
+        ]
+      }
     },
     "agent": {
-      "status": "TO-COMPLETE-BY-HOST",
+      "status": "complete",
       "candidateFiles": [
-        "AgentEndpoints.cs", "AgentAssistEndpoints.cs", "AgentAssistFeatureEndpoints.cs",
-        "CaseEndpoints.cs", "CannedResponseEndpoints.cs", "ContactEndpoints.cs",
-        "ConversationEndpoints.cs", "KnowledgeBaseEndpoints.cs", "ReasonHintEndpoints.cs",
-        "SkillEndpoints.cs", "SupervisorEndpoints.cs", "VoiceEndpoints.cs", "WebChatEndpoints.cs",
+        "AgentEndpoints.cs",
+        "AgentAssistEndpoints.cs",
+        "AgentAssistFeatureEndpoints.cs",
+        "CaseEndpoints.cs",
+        "CannedResponseEndpoints.cs",
+        "ContactEndpoints.cs",
+        "ConversationEndpoints.cs",
+        "KnowledgeBaseEndpoints.cs",
+        "ReasonHintEndpoints.cs",
+        "SkillEndpoints.cs",
+        "SupervisorEndpoints.cs",
+        "VoiceEndpoints.cs",
+        "WebChatEndpoints.cs",
         "TypificationEndpoints.cs (runtime /typify part)"
       ],
-      "schemas": {}
+      "schemas": {
+        "ActiveSessionDto": [
+          "sessionId",
+          "agentId",
+          "queueName",
+          "callerIdNum",
+          "connectedAt"
+        ],
+        "AgentAssistConfigSnapshot": [
+          "audioSocketPort",
+          "suggestionTimeoutMs",
+          "sentimentTimeoutMs",
+          "complianceTimeoutMs",
+          "maxHistorySegments",
+          "inactivityTimeoutMinutes",
+          "whisperEnabled",
+          "whisperThreshold",
+          "filterQueueNames",
+          "filterAgentIds"
+        ],
+        "AgentAssistFeatureDto": [
+          "enabled",
+          "provider",
+          "credentialsConfigured",
+          "apiKeyMasked",
+          "endpointMasked",
+          "updatedAt",
+          "updatedBy"
+        ],
+        "AgentAssistSessionDto": [
+          "sessionId",
+          "tenantId",
+          "queueName",
+          "agentId",
+          "startedAt",
+          "endedAt",
+          "suggestionCount",
+          "complianceAlerts",
+          "finalSentiment"
+        ],
+        "AgentMeResponseDto": [
+          "agentId",
+          "tenantId",
+          "userId",
+          "displayName",
+          "state",
+          "capacity",
+          "teamId",
+          "skills",
+          "extension",
+          "sipPassword",
+          "autoAnswer",
+          "canAcceptWork",
+          "pendingState",
+          "pendingReason",
+          "pendingSince",
+          "activeWorkCount",
+          "createdAt",
+          "updatedAt"
+        ],
+        "AgentSkillDto": [
+          "agentId",
+          "skillName",
+          "proficiency"
+        ],
+        "ArticleDto": [
+          "id",
+          "title",
+          "content",
+          "tags",
+          "published",
+          "language",
+          "createdAt",
+          "updatedAt"
+        ],
+        "CannedResponseDto": [
+          "responseId",
+          "shortcut",
+          "title",
+          "body",
+          "category",
+          "tags",
+          "createdBy",
+          "createdAt"
+        ],
+        "Case": [
+          "caseId",
+          "tenantId",
+          "caseNumber",
+          "subject",
+          "priority",
+          "status",
+          "contactId",
+          "assignedAgentId",
+          "slaPolicyId",
+          "conversationIds",
+          "createdAt",
+          "updatedAt",
+          "createdBy",
+          "updatedBy"
+        ],
+        "ComplianceAlertRowDto": [
+          "id",
+          "sessionId",
+          "tenantId",
+          "occurredAt",
+          "ruleId",
+          "phrase",
+          "severity"
+        ],
+        "ComplianceRuleDto": [
+          "ruleId",
+          "pattern",
+          "severity",
+          "action",
+          "description"
+        ],
+        "Contact": [
+          "contactId",
+          "tenantId",
+          "firstName",
+          "lastName",
+          "company",
+          "segment",
+          "preferredChannel",
+          "preferredLanguage",
+          "timezone",
+          "doNotContact",
+          "addresses",
+          "customFields",
+          "channelConsent",
+          "createdAt",
+          "updatedAt",
+          "createdBy",
+          "updatedBy",
+          "fullName"
+        ],
+        "Conversation": [
+          "conversationId",
+          "tenantId",
+          "contactId",
+          "channel",
+          "owner",
+          "state",
+          "caseId",
+          "createdAt",
+          "closedAt",
+          "updatedAt",
+          "createdBy",
+          "updatedBy",
+          "voiceLinkedId",
+          "queuePriority",
+          "metadata",
+          "sessions"
+        ],
+        "CreateSessionResponse": [
+          "sessionId",
+          "wsUrl"
+        ],
+        "KeywordRuleDto": [
+          "ruleId",
+          "keyword",
+          "priority",
+          "suggestionText"
+        ],
+        "ListenEntry": [
+          "supervisorId",
+          "sessionId",
+          "startedAt"
+        ],
+        "Message": [
+          "messageId",
+          "conversationId",
+          "tenantId",
+          "direction",
+          "channel",
+          "senderId",
+          "content",
+          "deliveryStatus",
+          "externalMessageId",
+          "createdAt",
+          "deliveredAt",
+          "readAt",
+          "updatedAt",
+          "createdBy",
+          "updatedBy"
+        ],
+        "OwnershipResult": [
+          "success",
+          "newOwner",
+          "newState",
+          "failureReason"
+        ],
+        "PagedResultOfCase": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfContact": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfConversation": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "ReasonHintDto": [
+          "id",
+          "scope",
+          "scopeRef",
+          "reasonPath",
+          "priority",
+          "isActive"
+        ],
+        "SkillDto": [
+          "name",
+          "category",
+          "description"
+        ],
+        "StuckConversationDto": [
+          "conversationId",
+          "channel",
+          "state",
+          "ownerAgentId",
+          "ownerAgentName",
+          "ownerOfflineSince",
+          "failoverAttempts",
+          "escalated"
+        ],
+        "SuggestionLogRowDto": [
+          "id",
+          "sessionId",
+          "tenantId",
+          "emittedAt",
+          "priority",
+          "source",
+          "triggerPhrase",
+          "suggestionText",
+          "whispered"
+        ],
+        "TypificationCorrectionResponse": [
+          "conversationId",
+          "correctedNodePath",
+          "correctedLeafNodeId",
+          "correctedByUserId",
+          "correctedAt",
+          "confirmed"
+        ],
+        "TypificationFormResponse": [
+          "schema",
+          "subtreeRootNodeId",
+          "prefilledNodePath",
+          "prefilledFieldValues"
+        ],
+        "TypificationSubmission": [
+          "tenantId",
+          "conversationId",
+          "agentId",
+          "schemaId",
+          "schemaVersion",
+          "selectedNodePath",
+          "leafNodeId",
+          "fieldValues",
+          "notes",
+          "aiSuggested",
+          "aiConfidence",
+          "aiAccepted",
+          "source",
+          "suggestedLeafNodeId",
+          "suggestedNodePath",
+          "duration",
+          "completedAt",
+          "autonomousActorId",
+          "correctionState",
+          "correctedAt"
+        ],
+        "TypificationSuggestionResponse": [
+          "suggestedNodePath",
+          "suggestedFieldValues",
+          "confidence",
+          "sentiment",
+          "band"
+        ],
+        "VoiceDialResponse": [
+          "accepted",
+          "correlationId",
+          "error"
+        ],
+        "VoiceTransferResponse": [
+          "accepted",
+          "error"
+        ]
+      }
     },
     "analytics": {
-      "status": "TO-COMPLETE-BY-HOST",
+      "status": "complete",
       "candidateFiles": [
-        "AnalyticsEndpoints.cs", "AnalyticsLiveEndpoints.cs", "CallAnalyticsEndpoints.cs",
-        "CreditLedgerEndpoints.cs", "QueueMetricsEndpoints.cs", "ScheduledReportEndpoints.cs"
+        "AnalyticsEndpoints.cs",
+        "AnalyticsLiveEndpoints.cs",
+        "CallAnalyticsEndpoints.cs",
+        "CreditLedgerEndpoints.cs",
+        "QueueMetricsEndpoints.cs",
+        "ScheduledReportEndpoints.cs"
       ],
-      "schemas": {}
+      "schemas": {
+        "AgentIntervalDto": [
+          "agentId",
+          "intervalStart",
+          "intervalSeconds",
+          "callsHandled",
+          "ahtMs",
+          "occupancyPercent",
+          "rnaCount",
+          "transfers",
+          "totalPauseMs",
+          "loginDurationMs"
+        ],
+        "CdrDetailDto": [
+          "cdr",
+          "timeline",
+          "qaSummary",
+          "calledNumber",
+          "linkedSessionId",
+          "transferCount",
+          "recordingName",
+          "recordingStreamUrl",
+          "hasTranscript"
+        ],
+        "ComplianceSummaryResponse": [
+          "rules",
+          "totalViolations",
+          "totalSessionsWithViolations",
+          "severityBreakdown",
+          "from",
+          "to"
+        ],
+        "CreditBalanceResponse": [
+          "balance"
+        ],
+        "CurrentIntervalDto": [
+          "intervalStart",
+          "intervalEnd",
+          "callsOffered",
+          "callsAnswered",
+          "callsAbandoned",
+          "ahtMs",
+          "asaMs",
+          "slaPercent",
+          "abandonRatePercent"
+        ],
+        "DashboardDto": [
+          "kpis",
+          "previousPeriodKpis",
+          "volumeTrend",
+          "slaTrend",
+          "channelDistribution"
+        ],
+        "IntervalDto": [
+          "queueName",
+          "intervalStart",
+          "intervalSeconds",
+          "callsOffered",
+          "callsAnswered",
+          "callsAbandoned",
+          "slaPercent",
+          "asaMs",
+          "ahtMs",
+          "abandonRatePercent",
+          "slaMetCount"
+        ],
+        "LiveStateDto": [
+          "queueName",
+          "callsWaiting",
+          "longestWaitMs",
+          "agentsAvailable",
+          "agentsOnCall",
+          "agentsPaused",
+          "agentsInWrapUp"
+        ],
+        "PagedDataResponseOfCdrRowDto": [
+          "data",
+          "hasMore",
+          "page",
+          "pageSize"
+        ],
+        "PagedDataResponseOfQaRowDto": [
+          "data",
+          "hasMore",
+          "page",
+          "pageSize"
+        ],
+        "PagedResultOfCreditLedgerEntryDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PartnerAttributionResponse": [
+          "total",
+          "customers"
+        ],
+        "QaDetailDto": [
+          "sessionId",
+          "analyzedAt",
+          "agentName",
+          "queueName",
+          "reason",
+          "outcome",
+          "narrative",
+          "actionItems",
+          "qaScore",
+          "maxPossibleScore",
+          "criteria",
+          "violations",
+          "sentimentLabel",
+          "sentimentTrend",
+          "sentimentScore",
+          "primaryTopic",
+          "allTopics",
+          "sentimentTimeline",
+          "agentTalkRatio",
+          "silenceCount",
+          "interruptionCount"
+        ],
+        "QueueMetricsDto": [
+          "queueId",
+          "queueName",
+          "waiting",
+          "avgWaitSeconds",
+          "slaPercent",
+          "agentsAvailable",
+          "agentsBusy",
+          "agentsAway"
+        ],
+        "ScheduledReportDto": [
+          "id",
+          "name",
+          "type",
+          "schedule",
+          "filters",
+          "recipients",
+          "format",
+          "isActive",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "lastRunAt",
+          "nextRunAt"
+        ],
+        "SentimentTrendsResponse": [
+          "points",
+          "bucket",
+          "from",
+          "to"
+        ],
+        "SourceRemainingResponse": [
+          "sources"
+        ],
+        "TopicTrendsResponse": [
+          "trends",
+          "totalAnalyzed"
+        ]
+      }
     },
     "operations": {
-      "status": "TO-COMPLETE-BY-HOST",
+      "status": "complete",
       "candidateFiles": [
-        "RealtimeEndpoints.cs", "VoiceMetadataEndpoints.cs", "AiCreditsEndpoints.cs",
-        "RecordingEndpoints.cs", "BotEndpoints.cs", "SurveyEndpoints.cs", "GdprEndpoints.cs",
-        "OnboardingEndpoints.cs", "NotificationEndpoints.cs", "AuditEndpoints.cs",
-        "HolidayCalendarEndpoints.cs", "DncListEndpoints.cs", "CallerIdPoolEndpoints.cs",
-        "CallAttemptEndpoints.cs", "CampaignEndpoints.cs", "DidRouteEndpoints.cs",
-        "OutboundRouteEndpoints.cs", "QueueMembersEndpoints.cs", "SetupEndpoints.cs", "FlowEndpoints.cs"
+        "RealtimeEndpoints.cs",
+        "VoiceMetadataEndpoints.cs",
+        "AiCreditsEndpoints.cs",
+        "RecordingEndpoints.cs",
+        "BotEndpoints.cs",
+        "SurveyEndpoints.cs",
+        "GdprEndpoints.cs",
+        "OnboardingEndpoints.cs",
+        "NotificationEndpoints.cs",
+        "AuditEndpoints.cs",
+        "HolidayCalendarEndpoints.cs",
+        "DncListEndpoints.cs",
+        "CallerIdPoolEndpoints.cs",
+        "CallAttemptEndpoints.cs",
+        "CampaignEndpoints.cs",
+        "DidRouteEndpoints.cs",
+        "OutboundRouteEndpoints.cs",
+        "QueueMembersEndpoints.cs",
+        "SetupEndpoints.cs",
+        "FlowEndpoints.cs"
       ],
-      "schemas": {}
+      "schemas": {
+        "AiCreditsResponse": [
+          "allowanceCredits",
+          "consumedCredits",
+          "remainingCredits",
+          "usagePercent",
+          "periodEnd",
+          "actionOnExhaustion"
+        ],
+        "BotDto": [
+          "id",
+          "name",
+          "defaultFlowId",
+          "fallbackQueueId",
+          "confidenceThreshold",
+          "maxTurns",
+          "isActive",
+          "createdAt"
+        ],
+        "CallbackDto": [
+          "campaignId",
+          "contactId",
+          "scheduledAt",
+          "agentId"
+        ],
+        "CallerIdEntryDto": [
+          "id",
+          "phoneNumber",
+          "areaCode",
+          "isActive"
+        ],
+        "CallerIdPoolDto": [
+          "id",
+          "name"
+        ],
+        "CampaignDetailDto": [
+          "id",
+          "name",
+          "description",
+          "status",
+          "mode",
+          "queueName",
+          "teamName",
+          "maxConcurrentCalls",
+          "powerRatio",
+          "targetAbandonRate",
+          "timezone",
+          "campaignStart",
+          "campaignEnd",
+          "schedule",
+          "holidays",
+          "dncEnabled",
+          "maxAttemptsPerContact",
+          "retryIntervalMinutes",
+          "timeBetweenAttemptsMinutes",
+          "complianceNotes",
+          "totalContacts",
+          "contactsDialed",
+          "createdAt"
+        ],
+        "CampaignMetricsDto": [
+          "campaignId",
+          "campaignName",
+          "status",
+          "contactsDialed",
+          "contactsRemaining",
+          "connectRate",
+          "abandonRate",
+          "activeCalls",
+          "pacingRate"
+        ],
+        "ContactListDto": [
+          "id",
+          "name",
+          "totalContacts",
+          "pendingContacts",
+          "completedContacts",
+          "sourceFileName",
+          "createdAt"
+        ],
+        "DidRouteDto": [
+          "id",
+          "did",
+          "queueId",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ],
+        "DispositionCodeDto": [
+          "id",
+          "code",
+          "label",
+          "category",
+          "isSuccess",
+          "triggerRetry",
+          "retryDelayMinutes",
+          "triggerCallback",
+          "isActive",
+          "sortOrder"
+        ],
+        "DncCheckResultDto": [
+          "exists"
+        ],
+        "DncEntryDto": [
+          "id",
+          "phoneNumber",
+          "reason",
+          "createdAt",
+          "expiresAt"
+        ],
+        "DncImportResultDto": [
+          "imported",
+          "skipped"
+        ],
+        "DncListDto": [
+          "id",
+          "name",
+          "scope",
+          "entryCount",
+          "createdAt"
+        ],
+        "EndpointProfileDto": [
+          "id",
+          "name",
+          "type",
+          "isDefault",
+          "transport",
+          "codecs",
+          "webrtc",
+          "maxContacts",
+          "directMedia",
+          "context",
+          "qualifyFrequency"
+        ],
+        "HolidayCalendarDto": [
+          "id",
+          "name"
+        ],
+        "HolidayDto": [
+          "id",
+          "date",
+          "name",
+          "allowedStart",
+          "allowedEnd"
+        ],
+        "ImportResultDto": [
+          "imported",
+          "skipped",
+          "duplicates"
+        ],
+        "NotificationDto": [
+          "notificationId",
+          "type",
+          "category",
+          "severity",
+          "title",
+          "body",
+          "actionUrl",
+          "isRead",
+          "createdAt",
+          "readAt"
+        ],
+        "OnboardingStatusDto": [
+          "wizardCompleted",
+          "templateApplied",
+          "checklist",
+          "checklistDismissed"
+        ],
+        "OutboundRouteDto": [
+          "id",
+          "campaignId",
+          "pattern",
+          "patternType",
+          "trunkId",
+          "overflowTrunkId",
+          "dialPrefix",
+          "priority"
+        ],
+        "PagedResultOfAuditEventDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfCampaignSummaryDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PauseResultDto": [
+          "queueId",
+          "agentId",
+          "isPaused",
+          "reason",
+          "realtimeSynced"
+        ],
+        "PurgeResult": [
+          "purgeId",
+          "entitiesDeleted",
+          "purgedAt"
+        ],
+        "QueueMemberDto": [
+          "queueId",
+          "agentId",
+          "displayName",
+          "penalty",
+          "isExcluded",
+          "isPaused",
+          "pauseReason",
+          "source",
+          "allowedChannels"
+        ],
+        "RecordingMetadataDto": [
+          "sessionId",
+          "recordingName",
+          "hasRecording",
+          "streamUrl"
+        ],
+        "RetentionPolicyDto": [
+          "tenantId",
+          "conversationRetentionDays",
+          "authEventRetentionDays",
+          "auditRetentionDays",
+          "usageRecordRetentionDays"
+        ],
+        "SurveyDto": [
+          "id",
+          "name",
+          "type",
+          "questions",
+          "isActive"
+        ],
+        "SurveyScoreSummary": [
+          "totalResponses",
+          "averageScore",
+          "promoters",
+          "passives",
+          "detractors",
+          "npsScore"
+        ],
+        "UnreadCountDto": [
+          "count"
+        ],
+        "UserPurgePreview": [
+          "userId",
+          "tenantId",
+          "authEventCount",
+          "auditTrailCount",
+          "previewedAt"
+        ],
+        "VoiceCodecsResponse": [
+          "source",
+          "codecs"
+        ]
+      }
     }
   }
 }

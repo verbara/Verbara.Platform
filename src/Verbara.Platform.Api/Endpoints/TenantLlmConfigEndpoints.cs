@@ -6,6 +6,7 @@ using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Llm;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -42,7 +43,7 @@ internal static class TenantLlmConfigEndpoints
 
     // ─── GET — masked config (200 + { configured:false } when no row) ────────────
 
-    private static async Task<IResult> GetConfig(
+    private static async Task<Results<Ok<EmptyLlmConfigResponse>, Ok<TenantLlmConfigResponse>, ForbidHttpResult>> GetConfig(
         HttpContext context,
         [FromServices] ITenantLlmConfigStore store,
         [FromServices] PermissionResolver permissionResolver,
@@ -59,14 +60,14 @@ internal static class TenantLlmConfigEndpoints
 
         var config = await store.GetAsync(EntityId.From(tenantId.Value), ct);
         if (config is null)
-            return Results.Ok(new EmptyLlmConfigResponse(Configured: false, PlatformLlmAvailable: available));
+            return TypedResults.Ok(new EmptyLlmConfigResponse(Configured: false, PlatformLlmAvailable: available));
 
-        return Results.Ok(TenantLlmConfigResponse.FromConfig(config, platformLlmAvailable: available));
+        return TypedResults.Ok(TenantLlmConfigResponse.FromConfig(config, platformLlmAvailable: available));
     }
 
     // ─── PUT — upsert (preserve stored key when omitted) ─────────────────────────
 
-    private static async Task<IResult> UpsertConfig(
+    private static async Task<Results<Ok<TenantLlmConfigResponse>, ForbidHttpResult, BadRequest<ErrorResponse>, JsonHttpResult<ErrorResponse>>> UpsertConfig(
         HttpContext context,
         [FromBody] UpsertLlmConfigRequest body,
         [FromServices] ITenantLlmConfigStore store,
@@ -83,14 +84,14 @@ internal static class TenantLlmConfigEndpoints
             return forbid;
 
         if (string.IsNullOrWhiteSpace(body.Model))
-            return Results.BadRequest(new ErrorResponse("Model is required."));
+            return TypedResults.BadRequest(new ErrorResponse("Model is required."));
 
         // Platform-managed AI is a licensed entitlement: gate the opt-in on PlanFeature.PlatformLlm.
         // BYO (the default) is a baseline capability and stays ungated.
         var platformLlmAvailable = featureGate.IsFeatureEnabled(tenantId.Value, PlanFeature.PlatformLlm);
         if (body.AiSource == AiSource.PlatformManaged && !platformLlmAvailable)
         {
-            return Results.Json(
+            return TypedResults.Json(
                 new ErrorResponse("Platform-managed AI is not included in this tenant's plan."),
                 ApiJsonContext.Default.ErrorResponse, statusCode: StatusCodes.Status403Forbidden);
         }
@@ -101,9 +102,9 @@ internal static class TenantLlmConfigEndpoints
         if (body.ProviderType == ProviderType.AzureOpenAi)
         {
             if (string.IsNullOrWhiteSpace(body.Settings?.AzureDeployment))
-                return Results.BadRequest(new ErrorResponse("settings.azureDeployment is required for the AzureOpenAi provider."));
+                return TypedResults.BadRequest(new ErrorResponse("settings.azureDeployment is required for the AzureOpenAi provider."));
             if (string.IsNullOrWhiteSpace(body.Settings?.AzureApiVersion))
-                return Results.BadRequest(new ErrorResponse("settings.azureApiVersion is required for the AzureOpenAi provider."));
+                return TypedResults.BadRequest(new ErrorResponse("settings.azureApiVersion is required for the AzureOpenAi provider."));
         }
 
         var entityTenantId = EntityId.From(tenantId.Value);
@@ -143,7 +144,7 @@ internal static class TenantLlmConfigEndpoints
         await store.UpsertAsync(config, ct);
         resolver.Invalidate(entityTenantId);
 
-        return Results.Ok(TenantLlmConfigResponse.FromConfig(config, platformLlmAvailable: platformLlmAvailable));
+        return TypedResults.Ok(TenantLlmConfigResponse.FromConfig(config, platformLlmAvailable: platformLlmAvailable));
     }
 
     // ─── DELETE — remove the row (back to manual/agent-driven mode) ──────────────
@@ -170,7 +171,7 @@ internal static class TenantLlmConfigEndpoints
 
     // ─── POST /test — probe saved or draft config ───────────────────────────────
 
-    private static async Task<IResult> TestConnection(
+    private static async Task<Results<Ok<TestLlmConnectionResponse>, ForbidHttpResult>> TestConnection(
         HttpContext context,
         [FromBody] TestLlmConnectionRequest body,
         [FromServices] ITenantLlmConfigStore store,
@@ -215,7 +216,7 @@ internal static class TenantLlmConfigEndpoints
             if (overridesDestination && string.IsNullOrEmpty(body.ApiKey))
             {
                 // Refuse to send the stored key to a different provider/endpoint — never the stored key.
-                return Results.Ok(new TestLlmConnectionResponse(
+                return TypedResults.Ok(new TestLlmConnectionResponse(
                     Reachable: false, AuthOk: false, ModelOk: false, LatencyMs: 0,
                     Error: "An explicit apiKey is required when testing a different provider or endpoint than the saved configuration."));
             }
@@ -242,7 +243,7 @@ internal static class TenantLlmConfigEndpoints
 
         if (probe is null || string.IsNullOrWhiteSpace(probe.Model))
         {
-            return Results.Ok(new TestLlmConnectionResponse(
+            return TypedResults.Ok(new TestLlmConnectionResponse(
                 Reachable: false, AuthOk: false, ModelOk: false, LatencyMs: 0,
                 Error: "No provider configured to test. Save a provider or supply a draft in the request body."));
         }
@@ -258,7 +259,7 @@ internal static class TenantLlmConfigEndpoints
         {
             await provider.CompleteAsync(request, ct);
             sw.Stop();
-            return Results.Ok(new TestLlmConnectionResponse(
+            return TypedResults.Ok(new TestLlmConnectionResponse(
                 Reachable: true, AuthOk: true, ModelOk: true, LatencyMs: sw.ElapsedMilliseconds, Error: null));
         }
         catch (HttpRequestException ex)
@@ -268,7 +269,7 @@ internal static class TenantLlmConfigEndpoints
             // not necessarily an auth problem. Status null = transport-level failure (DNS/connect).
             var authFailed = ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
             var reachable = ex.StatusCode is not null;
-            return Results.Ok(new TestLlmConnectionResponse(
+            return TypedResults.Ok(new TestLlmConnectionResponse(
                 Reachable: reachable,
                 AuthOk: reachable && !authFailed,
                 ModelOk: false,
@@ -282,7 +283,7 @@ internal static class TenantLlmConfigEndpoints
         catch (Exception ex)
         {
             sw.Stop();
-            return Results.Ok(new TestLlmConnectionResponse(
+            return TypedResults.Ok(new TestLlmConnectionResponse(
                 Reachable: false, AuthOk: false, ModelOk: false, LatencyMs: sw.ElapsedMilliseconds,
                 Error: ex.GetType().Name));
         }
@@ -313,12 +314,12 @@ internal static class TenantLlmConfigEndpoints
     }
 
     /// <summary>
-    /// Returns a <c>Results.Forbid()</c> result when the caller lacks
+    /// Returns a <c>TypedResults.Forbid()</c> result when the caller lacks
     /// <c>typification:ai:configure</c>; <see langword="null"/> when authorized. The caller user id
     /// is resolved in the canonical order (<c>user_id</c> ?? NameIdentifier ?? <c>sub</c>) so an
     /// API-key caller's owning-user id wins over the key id (copied from <c>TypificationEndpoints</c>).
     /// </summary>
-    private static async Task<IResult?> EnsureConfigurePermissionAsync(
+    private static async Task<ForbidHttpResult?> EnsureConfigurePermissionAsync(
         HttpContext context,
         PermissionResolver permissionResolver,
         TenantId tenantId,
@@ -334,6 +335,6 @@ internal static class TenantLlmConfigEndpoints
 
         return PermissionResolver.HasPermission(perms, "typification:ai:configure")
             ? null
-            : Results.Forbid();
+            : TypedResults.Forbid();
     }
 }

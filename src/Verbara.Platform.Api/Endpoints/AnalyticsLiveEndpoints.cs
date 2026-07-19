@@ -3,6 +3,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Pro.Analytics;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -22,7 +23,7 @@ internal static class AnalyticsLiveEndpoints
 
     // ─── All Live States ───────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetAllLiveStates(
+    private static async Task<Ok<List<LiveStateDto>>> GetAllLiveStates(
         HttpContext context,
         [FromServices] AnalyticsQueryService svc,
         [FromServices] IQueueStore queueStore,
@@ -33,12 +34,12 @@ internal static class AnalyticsLiveEndpoints
         var dtos = states.Select(s => new LiveStateDto(
             s.QueueName, s.CallsWaiting, s.LongestWaitMs,
             s.AgentsAvailable, s.AgentsOnCall, s.AgentsPaused, s.AgentsInWrapUp)).ToList();
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
     // ─── Live State by Queue ───────────────────────────────────────────────────
 
-    private static async Task<IResult> GetLiveState(
+    private static async Task<Results<Ok<LiveStateDto>, NotFound>> GetLiveState(
         string queueName,
         HttpContext context,
         [FromServices] AnalyticsQueryService svc,
@@ -48,16 +49,16 @@ internal static class AnalyticsLiveEndpoints
         var allowedQueues = await GetTenantQueueNames(context, queueStore, ct);
         var state = svc.GetLiveState(queueName, allowedQueues);
         if (state is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
-        return Results.Ok(new LiveStateDto(
+        return TypedResults.Ok(new LiveStateDto(
             state.QueueName, state.CallsWaiting, state.LongestWaitMs,
             state.AgentsAvailable, state.AgentsOnCall, state.AgentsPaused, state.AgentsInWrapUp));
     }
 
     // ─── Current Interval ─────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetCurrentInterval(
+    private static async Task<Results<Ok<CurrentIntervalDto>, NotFound>> GetCurrentInterval(
         HttpContext context,
         [FromServices] AnalyticsQueryService svc,
         [FromServices] IQueueStore queueStore,
@@ -65,14 +66,14 @@ internal static class AnalyticsLiveEndpoints
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(queueName))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var allowedQueues = await GetTenantQueueNames(context, queueStore, ct);
         var snapshot = svc.GetCurrentInterval(queueName, allowedQueues);
         if (snapshot is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
-        return Results.Ok(new CurrentIntervalDto(
+        return TypedResults.Ok(new CurrentIntervalDto(
             snapshot.IntervalStart,
             snapshot.IntervalStart.AddSeconds(snapshot.IntervalSeconds),
             snapshot.CallsOffered, snapshot.CallsAnswered, snapshot.CallsAbandoned,

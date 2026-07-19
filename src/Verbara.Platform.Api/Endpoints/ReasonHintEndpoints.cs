@@ -6,6 +6,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -35,28 +36,28 @@ internal static class ReasonHintEndpoints
 
     // ─── Handlers ────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> List(
+    private static async Task<Ok<ReasonHintDto[]>> List(
         HttpContext context,
         [FromServices] IReasonHintStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var items = await store.ListAsync(tenantId, ct);
-        return Results.Ok(items.Select(MapToDto).ToArray());
+        return TypedResults.Ok(items.Select(MapToDto).ToArray());
     }
 
-    private static async Task<IResult> Get(
+    private static async Task<Results<Ok<ReasonHintDto>, NotFound>> Get(
         string id,
         HttpContext context,
         [FromServices] IReasonHintStore store,
         CancellationToken ct)
     {
         if (!EntityId.IsValid(id))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         var hint = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return hint is null ? Results.NotFound() : Results.Ok(MapToDto(hint));
+        return hint is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(hint));
     }
 
     private static async Task<IResult> Create(
@@ -107,7 +108,7 @@ internal static class ReasonHintEndpoints
         return Results.Created($"/api/v1/admin/reason-hints/{hint.HintId.Value}", dto);
     }
 
-    private static async Task<IResult> Update(
+    private static async Task<Results<Ok<ReasonHintDto>, NotFound, BadRequest<ErrorResponse>>> Update(
         string id,
         HttpContext context,
         [FromBody] UpdateReasonHintRequest body,
@@ -116,12 +117,12 @@ internal static class ReasonHintEndpoints
         CancellationToken ct)
     {
         if (!EntityId.IsValid(id))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         var existing = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var before = MapToDto(existing);
 
@@ -129,19 +130,19 @@ internal static class ReasonHintEndpoints
         if (body.Scope is not null)
         {
             if (!Enum.TryParse<ReasonHintScope>(body.Scope, ignoreCase: true, out scope))
-                return Results.BadRequest(new ErrorResponse($"Unknown reason-hint scope '{body.Scope}'."));
+                return TypedResults.BadRequest(new ErrorResponse($"Unknown reason-hint scope '{body.Scope}'."));
         }
 
         if (body.ScopeRef is not null && string.IsNullOrWhiteSpace(body.ScopeRef))
-            return Results.BadRequest(new ErrorResponse("ScopeRef is required."));
+            return TypedResults.BadRequest(new ErrorResponse("ScopeRef is required."));
 
         if (body.ReasonPath is not null)
         {
             if (string.IsNullOrWhiteSpace(body.ReasonPath))
-                return Results.BadRequest(new ErrorResponse("ReasonPath is required."));
+                return TypedResults.BadRequest(new ErrorResponse("ReasonPath is required."));
 
             if (!IsValidReasonPath(body.ReasonPath))
-                return Results.BadRequest(new ErrorResponse(
+                return TypedResults.BadRequest(new ErrorResponse(
                     "ReasonPath must be a non-empty JSON array of node codes (e.g. [\"CITAS\",\"REPROG\"])."));
         }
 
@@ -160,7 +161,7 @@ internal static class ReasonHintEndpoints
         await RecordAudit(context, audit, tenantId, "reason_hint.updated",
             targetId: updated.HintId.Value, before: before, after: after, ct);
 
-        return Results.Ok(after);
+        return TypedResults.Ok(after);
     }
 
     private static async Task<IResult> Delete(

@@ -9,6 +9,7 @@ using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Platform.Typification.Validation;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -122,17 +123,17 @@ internal static class TypificationEndpoints
 
     // ─── Schema handlers ─────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListSchemas(
+    private static async Task<Ok<TypificationSchemaDto[]>> ListSchemas(
         HttpContext context,
         [FromServices] ITypificationSchemaStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var schemas = await store.ListAsync(tenantId, ct);
-        return Results.Ok(schemas.Select(ToSchemaDto).ToArray());
+        return TypedResults.Ok(schemas.Select(ToSchemaDto).ToArray());
     }
 
-    private static async Task<IResult> GetSchema(
+    private static async Task<Results<Ok<TypificationSchemaDto>, NotFound>> GetSchema(
         string id,
         HttpContext context,
         [FromServices] ITypificationSchemaStore store,
@@ -140,7 +141,7 @@ internal static class TypificationEndpoints
     {
         var tenantId = GetTenantId(context);
         var schema = await store.GetByIdAsync(tenantId, EntityId.From(id), version: null, ct);
-        return schema is null ? Results.NotFound() : Results.Ok(ToSchemaDto(schema));
+        return schema is null ? TypedResults.NotFound() : TypedResults.Ok(ToSchemaDto(schema));
     }
 
     private static async Task<IResult> CreateSchema(
@@ -193,7 +194,7 @@ internal static class TypificationEndpoints
         return Results.Created($"/admin/typification/schemas/{schema.SchemaId}", ToSchemaDto(schema));
     }
 
-    private static async Task<IResult> UpdateSchema(
+    private static async Task<Results<Ok<TypificationSchemaDto>, NotFound, BadRequest<PublishResultDto>, ForbidHttpResult>> UpdateSchema(
         string id,
         HttpContext context,
         [FromBody] UpdateSchemaRequest body,
@@ -208,10 +209,10 @@ internal static class TypificationEndpoints
         var schemaId = EntityId.From(id);
         var latest = await store.GetByIdAsync(tenantId, schemaId, version: null, ct);
         if (latest is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (body.MaxDepth is < 1 or > 8)
-            return Results.BadRequest(new PublishResultDto(
+            return TypedResults.BadRequest(new PublishResultDto(
                 Ok: false,
                 Errors: [new PublishErrorDto("maxDepth", "MaxDepth must be between 1 and 8.")]));
 
@@ -243,7 +244,7 @@ internal static class TypificationEndpoints
         var aiGate = await ValidateAiConfigWriteAsync(
             context, permissionResolver, calibration, tenantId, schemaId, updated.AiConfig, ct);
         if (aiGate is not null)
-            return aiGate;
+            return MapAiGate<TypificationSchemaDto>(aiGate);
 
         await store.SaveAsync(updated, ct);
         await RecordAudit(context, audit, tenantId, "typification.schema.updated",
@@ -251,7 +252,7 @@ internal static class TypificationEndpoints
             before: new { latest.SchemaId, latest.Version, latest.IsPublished },
             after: new { updated.SchemaId, updated.Version, updated.IsPublished }, ct);
 
-        return Results.Ok(ToSchemaDto(updated));
+        return TypedResults.Ok(ToSchemaDto(updated));
     }
 
     private static async Task<IResult> DeleteSchema(
@@ -272,7 +273,7 @@ internal static class TypificationEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> PublishSchema(
+    private static async Task<Results<Ok<PublishResultDto>, NotFound>> PublishSchema(
         string id,
         HttpContext context,
         [FromServices] ITypificationSchemaStore store,
@@ -285,12 +286,12 @@ internal static class TypificationEndpoints
         var schemaId = EntityId.From(id);
         var latest = await store.GetByIdAsync(tenantId, schemaId, version: null, ct);
         if (latest is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var validation = validator.ValidateForPublish(latest);
         if (!validation.IsValid)
         {
-            return Results.Ok(new PublishResultDto(
+            return TypedResults.Ok(new PublishResultDto(
                 Ok: false,
                 Errors: validation.Errors.Select(e => new PublishErrorDto(e.Field, e.Message)).ToArray()));
         }
@@ -302,14 +303,14 @@ internal static class TypificationEndpoints
             before: new { latest.SchemaId, latest.Version, latest.IsPublished },
             after: new { published.SchemaId, published.Version, published.IsPublished }, ct);
 
-        return Results.Ok(new PublishResultDto(Ok: true, Errors: []));
+        return TypedResults.Ok(new PublishResultDto(Ok: true, Errors: []));
     }
 
     // C4 — calibration snapshot for the AI-config admin surface. Reads the empirical
     // readiness (sample count, accuracy, AutoFill/autonomous gates) so the designer UI
     // can show whether AutoFill / autonomous can yet be enabled. Requires the
     // `typification:ai:configure` permission (same audience that edits AiConfig).
-    private static async Task<IResult> GetCalibrationStatus(
+    private static async Task<Results<Ok<CalibrationStatusDto>, ForbidHttpResult>> GetCalibrationStatus(
         string id,
         HttpContext context,
         [FromServices] ITypificationCalibration calibration,
@@ -320,29 +321,29 @@ internal static class TypificationEndpoints
 
         var perms = await ResolveCallerPermissions(context, permissionResolver, tenantId, ct);
         if (!PermissionResolver.HasPermission(perms, "typification:ai:configure"))
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         // GetStatusAsync returns an all-zero / not-ready snapshot for a missing or
         // unpublished schema — that IS the correct "not calibrated" answer, so there
         // is no NotFound special-casing here.
         var status = await calibration.GetStatusAsync(tenantId, EntityId.From(id), ct);
-        return Results.Ok(new CalibrationStatusDto(
+        return TypedResults.Ok(new CalibrationStatusDto(
             status.Samples, status.Accuracy, status.AutoFillReady, status.AutonomousReady));
     }
 
     // ─── Binding handlers ────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListBindings(
+    private static async Task<Ok<SchemaBindingDto[]>> ListBindings(
         HttpContext context,
         [FromServices] ISchemaBindingStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var bindings = await store.ListAsync(tenantId, ct);
-        return Results.Ok(bindings.Select(ToBindingDto).ToArray());
+        return TypedResults.Ok(bindings.Select(ToBindingDto).ToArray());
     }
 
-    private static async Task<IResult> GetBinding(
+    private static async Task<Results<Ok<SchemaBindingDto>, NotFound>> GetBinding(
         string id,
         HttpContext context,
         [FromServices] ISchemaBindingStore store,
@@ -350,7 +351,7 @@ internal static class TypificationEndpoints
     {
         var tenantId = GetTenantId(context);
         var binding = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return binding is null ? Results.NotFound() : Results.Ok(ToBindingDto(binding));
+        return binding is null ? TypedResults.NotFound() : TypedResults.Ok(ToBindingDto(binding));
     }
 
     private static async Task<IResult> CreateBinding(
@@ -411,7 +412,7 @@ internal static class TypificationEndpoints
         return Results.Created($"/admin/typification/bindings/{binding.BindingId}", ToBindingDto(binding));
     }
 
-    private static async Task<IResult> UpdateBinding(
+    private static async Task<Results<Ok<SchemaBindingDto>, NotFound, BadRequest<PublishResultDto>, ForbidHttpResult>> UpdateBinding(
         string id,
         HttpContext context,
         [FromBody] UpdateBindingRequest body,
@@ -425,15 +426,15 @@ internal static class TypificationEndpoints
         var bindingId = EntityId.From(id);
         var existing = await store.GetByIdAsync(tenantId, bindingId, ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (!Enum.TryParse<BindingScope>(body.Scope, ignoreCase: true, out var scope))
-            return Results.BadRequest(new PublishResultDto(
+            return TypedResults.BadRequest(new PublishResultDto(
                 Ok: false,
                 Errors: [new PublishErrorDto("scope", $"Unknown binding scope '{body.Scope}'.")]));
 
         if (scope != BindingScope.Tenant && string.IsNullOrWhiteSpace(body.ScopeRef))
-            return Results.BadRequest(new PublishResultDto(
+            return TypedResults.BadRequest(new PublishResultDto(
                 Ok: false,
                 Errors: [new PublishErrorDto("scopeRef", $"ScopeRef is required for scope '{scope}'.")]));
 
@@ -448,7 +449,7 @@ internal static class TypificationEndpoints
             var gate = await ValidateAiConfigWriteAsync(
                 context, permissionResolver, calibration, tenantId, EntityId.From(body.SchemaId), aiConfigOverride, ct);
             if (gate is not null)
-                return gate;
+                return MapAiGate<SchemaBindingDto>(gate);
         }
 
         var updated = new SchemaBinding
@@ -470,7 +471,7 @@ internal static class TypificationEndpoints
             before: new { existing.BindingId, existing.Scope, existing.SchemaId },
             after: new { updated.BindingId, updated.Scope, updated.SchemaId }, ct);
 
-        return Results.Ok(ToBindingDto(updated));
+        return TypedResults.Ok(ToBindingDto(updated));
     }
 
     private static async Task<IResult> DeleteBinding(
@@ -791,8 +792,11 @@ internal static class TypificationEndpoints
     }
 
     // C4 — defense-in-depth write-time AI-config validation (Create + Update). Returns a
-    // non-null IResult (the error response) when the write must be rejected; null when OK.
-    private static async Task<IResult?> ValidateAiConfigWriteAsync(
+    // non-null typed error result (Forbid or BadRequest<PublishResultDto>) when the write must
+    // be rejected; null when OK. The typed union lets the converted Update handlers surface the
+    // arms, while the (still IResult-returning) Create handlers keep using it via the implicit
+    // Results<> → IResult conversion.
+    private static async Task<Results<ForbidHttpResult, BadRequest<PublishResultDto>>?> ValidateAiConfigWriteAsync(
         HttpContext context,
         PermissionResolver permissionResolver,
         ITypificationCalibration calibration,
@@ -806,7 +810,7 @@ internal static class TypificationEndpoints
         {
             var perms = await ResolveCallerPermissions(context, permissionResolver, tenantId, ct);
             if (!PermissionResolver.HasPermission(perms, "typification:ai:autonomous"))
-                return Results.Forbid();
+                return TypedResults.Forbid();
         }
 
         // AutoFill must be earned: reject enabling it on a schema whose published
@@ -815,7 +819,7 @@ internal static class TypificationEndpoints
         {
             var status = await calibration.GetStatusAsync(tenantId, schemaId, ct);
             if (!status.AutoFillReady)
-                return Results.BadRequest(new PublishResultDto(
+                return TypedResults.BadRequest(new PublishResultDto(
                     Ok: false,
                     Errors: [new PublishErrorDto("aiConfig.mode",
                         "AutoFill requires the schema to reach the calibration bar (samples + accuracy). Run in Shadow/SuggestOnly until calibration is ready.")]));
@@ -823,6 +827,18 @@ internal static class TypificationEndpoints
 
         return null;
     }
+
+    // Re-projects the gate's two-arm rejection union (Forbid | BadRequest<PublishResultDto>)
+    // into the wider 4-arm union the converted Update handlers return, without widening the wire
+    // body. The gate only ever yields those two shapes, so the fallback is unreachable.
+    private static Results<Ok<TDto>, NotFound, BadRequest<PublishResultDto>, ForbidHttpResult> MapAiGate<TDto>(
+        Results<ForbidHttpResult, BadRequest<PublishResultDto>> gate) =>
+        gate.Result switch
+        {
+            ForbidHttpResult forbid => forbid,
+            BadRequest<PublishResultDto> badRequest => badRequest,
+            _ => throw new InvalidOperationException("Unexpected AI-config gate result shape."),
+        };
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────

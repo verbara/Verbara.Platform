@@ -1,4 +1,5 @@
 using Verbara.Platform.Core.Notifications;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -36,7 +37,7 @@ internal static class NotificationEndpoints
 
     // ── Handlers ─────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListNotifications(
+    private static async Task<Results<Ok<List<NotificationDto>>, ForbidHttpResult>> ListNotifications(
         HttpContext context,
         [FromQuery] bool? unreadOnly,
         [FromQuery] int? limit,
@@ -46,26 +47,26 @@ internal static class NotificationEndpoints
     {
         var (tenantId, userId) = ExtractClaims(context);
         if (tenantId is null || userId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var items = await store.ListAsync(tenantId, userId, unreadOnly, limit ?? 50, offset ?? 0, ct);
-        return Results.Ok(items.Select(ToDto).ToList());
+        return TypedResults.Ok(items.Select(ToDto).ToList());
     }
 
-    private static async Task<IResult> GetUnreadCount(
+    private static async Task<Results<Ok<UnreadCountDto>, ForbidHttpResult>> GetUnreadCount(
         HttpContext context,
         [FromServices] INotificationStore store,
         CancellationToken ct)
     {
         var (tenantId, userId) = ExtractClaims(context);
         if (tenantId is null || userId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var count = await store.CountUnreadAsync(tenantId, userId, ct);
-        return Results.Ok(new UnreadCountDto(count));
+        return TypedResults.Ok(new UnreadCountDto(count));
     }
 
-    private static async Task<IResult> GetNotification(
+    private static async Task<Results<Ok<NotificationDto>, ForbidHttpResult, NotFound>> GetNotification(
         string id,
         HttpContext context,
         [FromServices] INotificationStore store,
@@ -73,13 +74,13 @@ internal static class NotificationEndpoints
     {
         var (tenantId, userId) = ExtractClaims(context);
         if (tenantId is null || userId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var notification = await store.GetAsync(id, ct);
         if (notification is null || notification.TenantId != tenantId || notification.UserId != userId)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
-        return Results.Ok(ToDto(notification));
+        return TypedResults.Ok(ToDto(notification));
     }
 
     private static async Task<IResult> MarkRead(

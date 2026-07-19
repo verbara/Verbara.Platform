@@ -9,6 +9,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Switchboard;
 using Verbara.Sdk.Pro.AgentAssist.Engine;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -43,12 +44,12 @@ internal static class SupervisorEndpoints
 
     // ─── Handlers ─────────────────────────────────────────────────────────────
 
-    private static IResult GetActiveSessions(
+    private static Ok<ActiveSessionDto[]> GetActiveSessions(
         IServiceProvider services)
     {
         var supervisor = services.GetService<AgentAssistSupervisor>();
         if (supervisor is null)
-            return Results.Ok(Array.Empty<ActiveSessionDto>());
+            return TypedResults.Ok(Array.Empty<ActiveSessionDto>());
 
         var dtos = supervisor.ActiveSessions.Values
             .Select(s =>
@@ -63,7 +64,7 @@ internal static class SupervisorEndpoints
             })
             .ToArray();
 
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
     private static IResult PostWhisper(
@@ -82,24 +83,24 @@ internal static class SupervisorEndpoints
         return Results.Ok();
     }
 
-    private static IResult PostListen(
+    private static Results<Ok<ListenEntry>, NotFound> PostListen(
         string sessionId,
         [FromBody] ListenRequest body,
         IServiceProvider services)
     {
         var supervisor = services.GetService<AgentAssistSupervisor>();
         if (supervisor is null || !supervisor.ActiveSessions.ContainsKey(sessionId))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var entry = new ListenEntry(body.SupervisorId, sessionId, DateTimeOffset.UtcNow);
         SupervisorListenStore.Sessions[sessionId + ":" + body.SupervisorId] = entry;
 
-        return Results.Ok(entry);
+        return TypedResults.Ok(entry);
     }
 
     // ─── Digital Conversation Monitoring ─────────────────────────────────────────
 
-    private static async Task<IResult> ListDigitalConversations(
+    private static async Task<Ok<PagedResult<Conversation>>> ListDigitalConversations(
         HttpContext context,
         [FromServices] IConversationStore store,
         [FromQuery] string? queue,
@@ -130,10 +131,10 @@ internal static class SupervisorEndpoints
         };
 
         var result = await store.ListAsync(tenantId, query, ct);
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> GetConversationMessages(
+    private static async Task<Ok<IReadOnlyList<Message>>> GetConversationMessages(
         string id,
         HttpContext context,
         [FromServices] IMessageStore messageStore,
@@ -144,10 +145,10 @@ internal static class SupervisorEndpoints
         var tenantId = GetTenantId(context);
         var messages = await messageStore.GetConversationMessagesAsync(
             tenantId, EntityId.From(id), limit, offset, ct);
-        return Results.Ok(messages);
+        return TypedResults.Ok(messages);
     }
 
-    private static async Task<IResult> TakeoverConversation(
+    private static async Task<Results<Ok<OwnershipResult>, UnauthorizedHttpResult, BadRequest<ErrorResponse>>> TakeoverConversation(
         string id,
         HttpContext context,
         [FromServices] IConversationSwitchboard switchboard,
@@ -157,21 +158,21 @@ internal static class SupervisorEndpoints
         var tenantId = GetTenantId(context);
         var supervisorId = context.User.FindFirst("sub")?.Value;
         if (supervisorId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var result = await switchboard.TransferToAgentAsync(
             EntityId.From(id), tenantId, EntityId.From(supervisorId), ct);
 
         if (!result.Success)
-            return Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Takeover failed"));
+            return TypedResults.BadRequest(new ErrorResponse(result.FailureReason ?? "Takeover failed"));
 
         eventBus.Publish(new ConversationAssignedEvent(
             tenantId.Value, id, supervisorId, "", "", ""));
 
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> ForceCloseConversation(
+    private static async Task<Ok<MessageResponse>> ForceCloseConversation(
         string id,
         [FromBody] SupervisorCloseRequest body,
         HttpContext context,
@@ -181,10 +182,10 @@ internal static class SupervisorEndpoints
         var tenantId = GetTenantId(context);
 
         await lifecycleService.CloseAsync(tenantId, EntityId.From(id), ct);
-        return Results.Ok(new MessageResponse($"Conversation {id} closed"));
+        return TypedResults.Ok(new MessageResponse($"Conversation {id} closed"));
     }
 
-    private static async Task<IResult> SendCoachingNote(
+    private static async Task<Results<Ok<MessageResponse>, BadRequest<ErrorResponse>>> SendCoachingNote(
         string id,
         [FromBody] CoachingNoteRequest body,
         HttpContext context,
@@ -197,7 +198,7 @@ internal static class SupervisorEndpoints
         var supervisorId = context.User.FindFirst("sub")?.Value ?? "supervisor";
 
         if (string.IsNullOrWhiteSpace(body.Text))
-            return Results.BadRequest(new ErrorResponse("Text is required"));
+            return TypedResults.BadRequest(new ErrorResponse("Text is required"));
 
         // Create a system message visible only to the agent (Direction=System marks it as internal)
         var note = new Message
@@ -220,7 +221,7 @@ internal static class SupervisorEndpoints
         eventBus.Publish(new ConversationMessageEvent(
             tenantId.Value, id, note.MessageId.Value, "System", "Coaching"));
 
-        return Results.Ok(new MessageResponse("Coaching note sent"));
+        return TypedResults.Ok(new MessageResponse("Coaching note sent"));
     }
 
     // ─── W5 (A7) Stuck Work + Manual Reassign ────────────────────────────────────
@@ -233,7 +234,7 @@ internal static class SupervisorEndpoints
     /// offline-agent + failover-work-by-owner queries (N+1 over a tenant's offline agents
     /// is fine for a supervisor-initiated query).
     /// </summary>
-    private static async Task<IResult> GetStuckConversations(
+    private static async Task<Ok<IReadOnlyList<StuckConversationDto>>> GetStuckConversations(
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
@@ -308,7 +309,7 @@ internal static class SupervisorEndpoints
         }
 
         IReadOnlyList<StuckConversationDto> result = stuck;
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
     /// <summary>

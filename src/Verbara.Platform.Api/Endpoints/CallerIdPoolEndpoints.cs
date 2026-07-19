@@ -4,6 +4,7 @@ using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -33,17 +34,17 @@ internal static class CallerIdPoolEndpoints
 
     // ─── CRUD Handlers ────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListPools(
+    private static async Task<Ok<List<CallerIdPoolDto>>> ListPools(
         HttpContext context,
         [FromServices] CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var items = await store.ListAsync(tenantId, ct);
-        return Results.Ok(items.Select(MapToDto).ToList());
+        return TypedResults.Ok(items.Select(MapToDto).ToList());
     }
 
-    private static async Task<IResult> GetPool(
+    private static async Task<Results<Ok<CallerIdPoolDto>, NotFound>> GetPool(
         long id,
         HttpContext context,
         [FromServices] CallerIdPoolStoreBase store,
@@ -51,7 +52,7 @@ internal static class CallerIdPoolEndpoints
     {
         var tenantId = GetTenantId(context);
         var item = await store.GetAsync(id, tenantId, ct);
-        return item is null ? Results.NotFound() : Results.Ok(MapToDto(item));
+        return item is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(item));
     }
 
     private static async Task<IResult> CreatePool(
@@ -79,7 +80,7 @@ internal static class CallerIdPoolEndpoints
         return Results.Created($"/admin/caller-id-pools/{id}", MapToDto(pool));
     }
 
-    private static async Task<IResult> UpdatePool(
+    private static async Task<Results<Ok<CallerIdPoolDto>, NotFound>> UpdatePool(
         long id,
         HttpContext context,
         [FromBody] UpdateCallerIdPoolRequest body,
@@ -89,7 +90,7 @@ internal static class CallerIdPoolEndpoints
     {
         var tenantId = GetTenantId(context);
         var existing = await store.GetAsync(id, tenantId, ct);
-        if (existing is null) return Results.NotFound();
+        if (existing is null) return TypedResults.NotFound();
 
         var before = MapToDto(existing);
 
@@ -107,7 +108,7 @@ internal static class CallerIdPoolEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(MapToDto(existing));
+        return TypedResults.Ok(MapToDto(existing));
     }
 
     private static async Task<IResult> DeletePool(
@@ -136,7 +137,7 @@ internal static class CallerIdPoolEndpoints
 
     // ─── Entry Handlers ───────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListEntries(
+    private static async Task<Ok<List<CallerIdEntryDto>>> ListEntries(
         long id,
         HttpContext context,
         [FromServices] CallerIdPoolStoreBase store,
@@ -144,7 +145,7 @@ internal static class CallerIdPoolEndpoints
     {
         var tenantId = GetTenantId(context);
         var entries = await store.ListEntriesAsync(id, tenantId, ct);
-        return Results.Ok(entries.Select(MapEntryToDto).ToList());
+        return TypedResults.Ok(entries.Select(MapEntryToDto).ToList());
     }
 
     private static async Task<IResult> AddEntry(

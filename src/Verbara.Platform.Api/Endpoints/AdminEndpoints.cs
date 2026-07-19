@@ -6,6 +6,7 @@ using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Pro.Realtime;
 using Verbara.Sdk.Pro.Realtime.Models;
 using Verbara.Platform.Api.Services;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -73,7 +74,7 @@ internal static class AdminEndpoints
 
     // ─── Users ────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListUsers(
+    private static async Task<Ok<PagedResult<UserDto>>> ListUsers(
         HttpContext context,
         [FromServices] IUserStore store,
         int page = 1,
@@ -93,10 +94,10 @@ internal static class AdminEndpoints
             result.TotalCount,
             result.Page,
             result.PageSize);
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
-    private static async Task<IResult> GetUser(
+    private static async Task<Results<Ok<UserDto>, NotFound>> GetUser(
         string id,
         HttpContext context,
         [FromServices] IUserStore store,
@@ -104,7 +105,7 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var user = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return user is null ? Results.NotFound() : Results.Ok(ToUserDto(user));
+        return user is null ? TypedResults.NotFound() : TypedResults.Ok(ToUserDto(user));
     }
 
     private static async Task<IResult> CreateUser(
@@ -147,7 +148,7 @@ internal static class AdminEndpoints
         return Results.Created($"/admin/users/{user.UserId}", ToUserDto(user));
     }
 
-    private static async Task<IResult> UpdateUser(
+    private static async Task<Results<Ok<UserDto>, NotFound>> UpdateUser(
         string id,
         HttpContext context,
         [FromBody] UpdateUserRequest body,
@@ -158,14 +159,14 @@ internal static class AdminEndpoints
         var tenantId = GetTenantId(context);
         var user = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (user is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         user.DisplayName = body.DisplayName ?? user.DisplayName;
         if (body.Role.HasValue) user.Role = body.Role.Value;
         if (body.Status.HasValue) user.Status = body.Status.Value;
         user.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(user, ct);
-        return Results.Ok(ToUserDto(user));
+        return TypedResults.Ok(ToUserDto(user));
     }
 
     private static UserDto ToUserDto(User u) =>
@@ -190,7 +191,7 @@ internal static class AdminEndpoints
 
     // ─── Queues ───────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListQueues(
+    private static async Task<Ok<PagedResult<QueueDto>>> ListQueues(
         HttpContext context,
         [FromServices] IQueueStore store,
         int page = 1,
@@ -204,10 +205,10 @@ internal static class AdminEndpoints
             result.TotalCount,
             result.Page,
             result.PageSize);
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
-    private static async Task<IResult> GetQueue(
+    private static async Task<Results<Ok<QueueDto>, NotFound>> GetQueue(
         string id,
         HttpContext context,
         [FromServices] IQueueStore store,
@@ -215,7 +216,7 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var queue = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return queue is null ? Results.NotFound() : Results.Ok(ToQueueDto(queue));
+        return queue is null ? TypedResults.NotFound() : TypedResults.Ok(ToQueueDto(queue));
     }
 
     private static QueueDto ToQueueDto(Queue q) => new(
@@ -304,7 +305,7 @@ internal static class AdminEndpoints
         return Results.Created($"/admin/queues/{queue.QueueId}", ToQueueDto(queue));
     }
 
-    private static async Task<IResult> UpdateQueue(
+    private static async Task<Results<Ok<QueueDto>, NotFound>> UpdateQueue(
         string id,
         HttpContext context,
         [FromBody] UpdateQueueRequest body,
@@ -315,7 +316,7 @@ internal static class AdminEndpoints
         var tenantId = GetTenantId(context);
         var queue = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (queue is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (body.Name is not null) queue.Name = body.Name;
         if (body.IsActive.HasValue) queue.IsActive = body.IsActive.Value;
@@ -361,7 +362,7 @@ internal static class AdminEndpoints
             catch { }
         }
 
-        return Results.Ok(ToQueueDto(queue));
+        return TypedResults.Ok(ToQueueDto(queue));
     }
 
     private static async Task<IResult> DeleteQueue(
@@ -413,7 +414,7 @@ internal static class AdminEndpoints
 
     // ─── Agents ───────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListAgents(
+    private static async Task<Ok<PagedResult<AdminAgentResponseDto>>> ListAgents(
         HttpContext context,
         [FromServices] IAgentStore store,
         [FromServices] ICapacityDefaultsProvider defaultsProvider,
@@ -432,10 +433,10 @@ internal static class AdminEndpoints
             .Select(a => AdminAgentResponseDto.FromAgent(a, AgentCapacityResolver.ResolveEffective(a.CapacityOverride, defaults)))
             .ToList();
         var dtos = new PagedResult<AdminAgentResponseDto>(items, result.TotalCount, result.Page, result.PageSize);
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
-    private static async Task<IResult> GetAgent(
+    private static async Task<Results<Ok<AdminAgentResponseDto>, NotFound>> GetAgent(
         string id,
         HttpContext context,
         [FromServices] IAgentStore store,
@@ -444,11 +445,11 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var agent = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        if (agent is null) return Results.NotFound();
+        if (agent is null) return TypedResults.NotFound();
 
         var defaults = await defaultsProvider.GetDefaultsAsync(tenantId, ct);
         var effective = AgentCapacityResolver.ResolveEffective(agent.CapacityOverride, defaults);
-        return Results.Ok(AdminAgentResponseDto.FromAgent(agent, effective));
+        return TypedResults.Ok(AdminAgentResponseDto.FromAgent(agent, effective));
     }
 
     private static async Task<IResult> CreateAgent(
@@ -565,7 +566,7 @@ internal static class AdminEndpoints
         return Results.Created($"/admin/agents/{agent.AgentId}", AdminAgentResponseDto.FromAgent(agent, effective));
     }
 
-    private static async Task<IResult> UpdateAgent(
+    private static async Task<Results<Ok<AdminAgentResponseDto>, BadRequest<string>, NotFound>> UpdateAgent(
         string id,
         HttpContext context,
         [FromBody] UpdateAgentRequest body,
@@ -579,11 +580,11 @@ internal static class AdminEndpoints
 
         // W6-A6 — validate the optional capacity override before loading/mutating the agent.
         if (body.Capacity is { } cap && ValidateCapacity(cap) is { } capError)
-            return Results.BadRequest(capError);
+            return TypedResults.BadRequest(capError);
 
         var agent = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (agent is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (body.DisplayName is not null) agent.DisplayName = body.DisplayName;
         if (body.TeamId is not null) agent.TeamId = EntityId.From(body.TeamId);
@@ -624,7 +625,7 @@ internal static class AdminEndpoints
 
         var defaults = await defaultsProvider.GetDefaultsAsync(tenantId, ct);
         var effective = AgentCapacityResolver.ResolveEffective(agent.CapacityOverride, defaults);
-        return Results.Ok(AdminAgentResponseDto.FromAgent(agent, effective));
+        return TypedResults.Ok(AdminAgentResponseDto.FromAgent(agent, effective));
     }
 
     private static async Task<IResult> DeleteAgent(
@@ -654,7 +655,7 @@ internal static class AdminEndpoints
     // /admin/agents/{agentId}/queues editor. Joins queue_memberships with
     // queues to project queue names alongside membership details so the
     // React UI can render channel multi-selects without an N+1 fetch.
-    private static async Task<IResult> ListAgentQueueMemberships(
+    private static async Task<Results<Ok<List<AgentQueueMembershipDto>>, NotFound>> ListAgentQueueMemberships(
         string id,
         HttpContext context,
         [FromServices] IAgentStore agentStore,
@@ -664,7 +665,7 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        if (agent is null) return Results.NotFound();
+        if (agent is null) return TypedResults.NotFound();
 
         var memberships = await membershipStore.ListByAgentAsync(tenantId, agent.AgentId, ct);
         var result = new List<AgentQueueMembershipDto>(memberships.Count);
@@ -680,7 +681,7 @@ internal static class AdminEndpoints
                 m.AllowedChannels,
                 m.Source == MembershipSource.Manual ? "Manual" : "Skill"));
         }
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
     // W3 (A6) — admin force-offline. The MANUAL counterpart to the automatic
@@ -762,7 +763,7 @@ internal static class AdminEndpoints
 
     // ─── Teams ────────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListTeams(
+    private static async Task<Ok<PagedResult<TeamDto>>> ListTeams(
         HttpContext context,
         [FromServices] ITeamStore store,
         int page = 1,
@@ -776,10 +777,10 @@ internal static class AdminEndpoints
             result.TotalCount,
             result.Page,
             result.PageSize);
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
-    private static async Task<IResult> GetTeam(
+    private static async Task<Results<Ok<TeamDto>, NotFound>> GetTeam(
         string id,
         HttpContext context,
         [FromServices] ITeamStore store,
@@ -787,7 +788,7 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var team = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return team is null ? Results.NotFound() : Results.Ok(ToDto(team));
+        return team is null ? TypedResults.NotFound() : TypedResults.Ok(ToDto(team));
     }
 
     private static async Task<IResult> CreateTeam(
@@ -809,7 +810,7 @@ internal static class AdminEndpoints
         return Results.Created($"/admin/teams/{team.TeamId}", ToDto(team));
     }
 
-    private static async Task<IResult> UpdateTeam(
+    private static async Task<Results<Ok<TeamDto>, NotFound>> UpdateTeam(
         string id,
         HttpContext context,
         [FromBody] UpdateTeamRequest body,
@@ -820,12 +821,12 @@ internal static class AdminEndpoints
         var tenantId = GetTenantId(context);
         var team = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (team is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (body.Name is not null) team.Name = body.Name;
         team.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(team, ct);
-        return Results.Ok(ToDto(team));
+        return TypedResults.Ok(ToDto(team));
     }
 
     private static TeamDto ToDto(Team t) =>

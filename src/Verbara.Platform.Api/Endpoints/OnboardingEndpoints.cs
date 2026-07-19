@@ -5,6 +5,7 @@ using Verbara.Platform.Core.Branding;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -36,7 +37,7 @@ internal static class OnboardingEndpoints
         group.MapPut("/dismiss-checklist", DismissChecklist);
     }
 
-    private static async Task<IResult> GetStatus(
+    private static async Task<Results<Ok<OnboardingStatusDto>, UnauthorizedHttpResult, NotFound<ErrorResponse>>> GetStatus(
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IQueueStore queueStore,
@@ -48,11 +49,11 @@ internal static class OnboardingEndpoints
                     ?? context.User.FindFirst("tenant_id")?.Value;
 
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var tenant = await tenantStore.GetAsync(tenantId, ct);
         if (tenant is null)
-            return Results.NotFound(new ErrorResponse("Tenant not found"));
+            return TypedResults.NotFound(new ErrorResponse("Tenant not found"));
 
         var meta = tenant.Metadata ?? new Dictionary<string, string>();
 
@@ -87,14 +88,14 @@ internal static class OnboardingEndpoints
             new("branding",           "Customize branding",                 hasBranding),
         };
 
-        return Results.Ok(new OnboardingStatusDto(
+        return TypedResults.Ok(new OnboardingStatusDto(
             WizardCompleted: wizardCompleted,
             TemplateApplied: templateApplied,
             Checklist: checklist,
             ChecklistDismissed: dismissed));
     }
 
-    private static async Task<IResult> ApplyTemplate(
+    private static async Task<Results<Ok<MessageResponse>, UnauthorizedHttpResult, BadRequest<ErrorResponse>, NotFound<ErrorResponse>, Conflict<ErrorResponse>>> ApplyTemplate(
         HttpContext context,
         [FromBody] ApplyTemplateRequest body,
         [FromServices] ITenantStore tenantStore,
@@ -105,21 +106,21 @@ internal static class OnboardingEndpoints
                     ?? context.User.FindFirst("tenant_id")?.Value;
 
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         if (!TenantProvisioningTemplates.ValidTemplateNames.Contains(body.Template))
-            return Results.BadRequest(new ErrorResponse(
+            return TypedResults.BadRequest(new ErrorResponse(
                 $"Invalid template '{body.Template}'. Valid templates: {string.Join(", ", TenantProvisioningTemplates.ValidTemplateNames)}"));
 
         var tenant = await tenantStore.GetAsync(tenantId, ct);
         if (tenant is null)
-            return Results.NotFound(new ErrorResponse("Tenant not found"));
+            return TypedResults.NotFound(new ErrorResponse("Tenant not found"));
 
         var meta = tenant.Metadata ?? new Dictionary<string, string>();
         if (meta.TryGetValue("OnboardingTemplate", out var existing) &&
             !string.Equals(existing, "none", StringComparison.OrdinalIgnoreCase))
         {
-            return Results.Conflict(new ErrorResponse(
+            return TypedResults.Conflict(new ErrorResponse(
                 $"Template '{existing}' has already been applied to this tenant"));
         }
 
@@ -144,10 +145,10 @@ internal static class OnboardingEndpoints
         await tenantStore.UpsertAsync(updated, ct);
         await provisioningService.ApplyTemplateAsync(updated, body.Template, ct);
 
-        return Results.Ok(new MessageResponse($"Template '{body.Template}' applied successfully"));
+        return TypedResults.Ok(new MessageResponse($"Template '{body.Template}' applied successfully"));
     }
 
-    private static async Task<IResult> Complete(
+    private static async Task<Results<Ok<MessageResponse>, UnauthorizedHttpResult, NotFound<ErrorResponse>>> Complete(
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
@@ -156,11 +157,11 @@ internal static class OnboardingEndpoints
                     ?? context.User.FindFirst("tenant_id")?.Value;
 
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var tenant = await tenantStore.GetAsync(tenantId, ct);
         if (tenant is null)
-            return Results.NotFound(new ErrorResponse("Tenant not found"));
+            return TypedResults.NotFound(new ErrorResponse("Tenant not found"));
 
         var newMetadata = new Dictionary<string, string>(tenant.Metadata ?? new Dictionary<string, string>())
         {
@@ -182,10 +183,10 @@ internal static class OnboardingEndpoints
 
         await tenantStore.UpsertAsync(updated, ct);
 
-        return Results.Ok(new MessageResponse("Onboarding wizard marked as completed"));
+        return TypedResults.Ok(new MessageResponse("Onboarding wizard marked as completed"));
     }
 
-    private static async Task<IResult> DismissChecklist(
+    private static async Task<Results<Ok<MessageResponse>, UnauthorizedHttpResult, NotFound<ErrorResponse>>> DismissChecklist(
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
@@ -194,11 +195,11 @@ internal static class OnboardingEndpoints
                     ?? context.User.FindFirst("tenant_id")?.Value;
 
         if (tenantId is null)
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
 
         var tenant = await tenantStore.GetAsync(tenantId, ct);
         if (tenant is null)
-            return Results.NotFound(new ErrorResponse("Tenant not found"));
+            return TypedResults.NotFound(new ErrorResponse("Tenant not found"));
 
         var newMetadata = new Dictionary<string, string>(tenant.Metadata ?? new Dictionary<string, string>())
         {
@@ -220,6 +221,6 @@ internal static class OnboardingEndpoints
 
         await tenantStore.UpsertAsync(updated, ct);
 
-        return Results.Ok(new MessageResponse("Checklist dismissed"));
+        return TypedResults.Ok(new MessageResponse("Checklist dismissed"));
     }
 }

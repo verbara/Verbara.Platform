@@ -3,6 +3,7 @@ using Verbara.Platform.Api.Middleware;
 using Verbara.Sdk.Pro.CallAnalytics.Domain;
 using Verbara.Sdk.Pro.CallAnalytics.Store;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -25,7 +26,7 @@ internal static class CallAnalyticsEndpoints
 
     // ─── Topic Trends ──────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetTopicTrends(
+    private static async Task<Results<Ok<TopicTrendsResponse>, ProblemHttpResult>> GetTopicTrends(
         HttpContext context,
         IServiceProvider services,
         string? from,
@@ -35,7 +36,7 @@ internal static class CallAnalyticsEndpoints
     {
         var store = services.GetService<ICallAnalyticsStore>();
         if (store is null)
-            return Results.Problem(StoreNotConfigured, statusCode: 503);
+            return TypedResults.Problem(StoreNotConfigured, statusCode: 503);
 
         var tenantId = GetTenantId(context);
 
@@ -98,12 +99,12 @@ internal static class CallAnalyticsEndpoints
                 AvgConfidence: kv.Value.Count > 0 ? kv.Value.TotalConfidence / kv.Value.Count : 0.0))
             .ToArray();
 
-        return Results.Ok(new TopicTrendsResponse(trends, results.Count));
+        return TypedResults.Ok(new TopicTrendsResponse(trends, results.Count));
     }
 
     // ─── Sentiment Trends ─────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetSentimentTrends(
+    private static async Task<Results<Ok<SentimentTrendsResponse>, ProblemHttpResult>> GetSentimentTrends(
         HttpContext context,
         IServiceProvider services,
         string? from,
@@ -114,7 +115,7 @@ internal static class CallAnalyticsEndpoints
     {
         var store = services.GetService<ICallAnalyticsStore>();
         if (store is null)
-            return Results.Problem(StoreNotConfigured, statusCode: 503);
+            return TypedResults.Problem(StoreNotConfigured, statusCode: 503);
 
         var tenantId = GetTenantId(context);
 
@@ -180,12 +181,12 @@ internal static class CallAnalyticsEndpoints
                 TotalCount: kv.Value.TotalCount))
             .ToArray();
 
-        return Results.Ok(new SentimentTrendsResponse(points, bucket, fromDate, toDate));
+        return TypedResults.Ok(new SentimentTrendsResponse(points, bucket, fromDate, toDate));
     }
 
     // ─── Compliance Summary ───────────────────────────────────────────────────
 
-    private static async Task<IResult> GetComplianceSummary(
+    private static async Task<Results<Ok<ComplianceSummaryResponse>, ProblemHttpResult>> GetComplianceSummary(
         HttpContext context,
         IServiceProvider services,
         string? from,
@@ -196,7 +197,7 @@ internal static class CallAnalyticsEndpoints
     {
         var store = services.GetService<ICallAnalyticsStore>();
         if (store is null)
-            return Results.Problem(StoreNotConfigured, statusCode: 503);
+            return TypedResults.Problem(StoreNotConfigured, statusCode: 503);
 
         var tenantId = GetTenantId(context);
 
@@ -288,7 +289,7 @@ internal static class CallAnalyticsEndpoints
         int filteredCritical = severityFilter == ComplianceSeverity.Critical ? totalCritical : (severityFilter is null ? totalCritical : 0);
         int totalViolations = rules.Sum(r => r.Occurrences);
 
-        return Results.Ok(new ComplianceSummaryResponse(
+        return TypedResults.Ok(new ComplianceSummaryResponse(
             Rules: rules,
             TotalViolations: totalViolations,
             TotalSessionsWithViolations: sessionsWithViolations.Count,

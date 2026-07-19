@@ -3,6 +3,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -29,7 +30,7 @@ internal static class AgentEndpoints
         group.MapPost("/me/offline", GoOffline);
     }
 
-    private static async Task<IResult> GetCurrentAgent(
+    private static async Task<Results<Ok<AgentMeResponseDto>, NotFound>> GetCurrentAgent(
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
@@ -41,7 +42,7 @@ internal static class AgentEndpoints
 
         var agent = await agentStore.GetByUserIdAsync(tenantId, userId, ct);
         if (agent is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         return await OkDtoAsync(conversationStore, capacityResolver, tenantId, agent, ct);
     }
@@ -54,7 +55,7 @@ internal static class AgentEndpoints
     // ALWAYS SaveAsync (so HasPendingPause is durable for GetAvailableAgentsAsync)
     // BEFORE publishing the event — otherwise the event-driven QueuePause could
     // fire while routing still sees the agent as eligible.
-    private static async Task<IResult> UpdateAgentState(
+    private static async Task<Results<Ok<AgentMeResponseDto>, NotFound>> UpdateAgentState(
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
@@ -69,7 +70,7 @@ internal static class AgentEndpoints
 
         var agent = await agentStore.GetByUserIdAsync(tenantId, userId, ct);
         if (agent is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var target = body.State;
         var oldState = agent.State;
@@ -161,7 +162,7 @@ internal static class AgentEndpoints
     // W4 (A5) — cancel a pending pause WITHOUT applying it. The agent stays in its
     // current (routable) state and resumes accepting new work. Publishes the unpause
     // (AgentPendingStateChangedEvent null). Idempotent: a no-op 200 when not pending.
-    private static async Task<IResult> CancelPendingPause(
+    private static async Task<Results<Ok<AgentMeResponseDto>, NotFound>> CancelPendingPause(
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
@@ -174,7 +175,7 @@ internal static class AgentEndpoints
 
         var agent = await agentStore.GetByUserIdAsync(tenantId, userId, ct);
         if (agent is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (agent.HasPendingPause)
         {
@@ -198,7 +199,7 @@ internal static class AgentEndpoints
     // Deliberately does NOT publish AgentPendingStateChangedEvent(null): doing so would
     // unpause then immediately re-pause for the now-non-routable state (the A4 flicker
     // contract). Idempotent: a no-op 200 when not pending.
-    private static async Task<IResult> ForcePendingPause(
+    private static async Task<Results<Ok<AgentMeResponseDto>, NotFound>> ForcePendingPause(
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
@@ -211,7 +212,7 @@ internal static class AgentEndpoints
 
         var agent = await agentStore.GetByUserIdAsync(tenantId, userId, ct);
         if (agent is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (agent.HasPendingPause)
         {
@@ -231,7 +232,7 @@ internal static class AgentEndpoints
         return await OkDtoAsync(conversationStore, capacityResolver, tenantId, agent, ct);
     }
 
-    private static async Task<IResult> OkDtoAsync(
+    private static async Task<Ok<AgentMeResponseDto>> OkDtoAsync(
         IConversationStore conversationStore,
         IAgentCapacityResolver capacityResolver,
         TenantId tenantId,
@@ -244,7 +245,7 @@ internal static class AgentEndpoints
         // (the agent was just loaded so it exists); merge over the hard defaults if it ever fires.
         var effective = await capacityResolver.ResolveAsync(tenantId, agent.AgentId, ct)
             ?? AgentCapacityResolver.ResolveEffective(agent.CapacityOverride, new ChannelCapacity());
-        return Results.Ok(AgentMeResponseDto.FromAgent(agent, activeWork, effective));
+        return TypedResults.Ok(AgentMeResponseDto.FromAgent(agent, activeWork, effective));
     }
 
     // W3 (A3) — heartbeat / proof-of-life. The browser refreshes the agent's

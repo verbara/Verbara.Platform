@@ -3,6 +3,7 @@ using Verbara.Platform.Api.Services;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -26,7 +27,7 @@ internal static class VoiceEndpoints
         voice.MapPost("/dial", Dial);
     }
 
-    private static async Task<IResult> BlindTransfer(
+    private static async Task<Results<Ok<VoiceTransferResponse>, BadRequest<VoiceTransferResponse>, NotFound, JsonHttpResult<VoiceTransferResponse>>> BlindTransfer(
         string id,
         HttpContext context,
         [FromBody] VoiceTransferRequest body,
@@ -38,9 +39,9 @@ internal static class VoiceEndpoints
         var tenantId = GetTenantId(context);
 
         if (!Enum.TryParse<VoiceTransferKind>(body.Kind, ignoreCase: true, out var kind))
-            return Results.BadRequest(new VoiceTransferResponse(false, "invalid-kind"));
+            return TypedResults.BadRequest(new VoiceTransferResponse(false, "invalid-kind"));
         if (string.IsNullOrWhiteSpace(body.Target))
-            return Results.BadRequest(new VoiceTransferResponse(false, "missing-target"));
+            return TypedResults.BadRequest(new VoiceTransferResponse(false, "missing-target"));
 
         var conversationId = EntityId.From(id);
 
@@ -49,12 +50,12 @@ internal static class VoiceEndpoints
         var agent = await agents.GetByUserIdAsync(tenantId, userId, ct);
         var conversation = await conversations.GetByIdAsync(tenantId, conversationId, ct);
         if (conversation is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
         if (agent is null
             || conversation.Owner?.Kind != ConversationOwnerKind.Agent
             || conversation.Owner.OwnerId != agent.AgentId)
         {
-            return Results.Json(
+            return TypedResults.Json(
                 new VoiceTransferResponse(false, "not-owner"),
                 ApiJsonContext.Default.VoiceTransferResponse,
                 statusCode: StatusCodes.Status403Forbidden);
@@ -64,11 +65,11 @@ internal static class VoiceEndpoints
             tenantId, conversationId, new VoiceTransferTarget(kind, body.Target), ct);
 
         return outcome.Accepted
-            ? Results.Ok(new VoiceTransferResponse(true, null))
-            : Results.BadRequest(new VoiceTransferResponse(false, outcome.Error));
+            ? TypedResults.Ok(new VoiceTransferResponse(true, null))
+            : TypedResults.BadRequest(new VoiceTransferResponse(false, outcome.Error));
     }
 
-    private static async Task<IResult> Dial(
+    private static async Task<Results<Ok<VoiceDialResponse>, BadRequest<VoiceDialResponse>, JsonHttpResult<VoiceDialResponse>>> Dial(
         HttpContext context,
         [FromBody] VoiceDialRequest body,
         [FromServices] IAgentOutboundDialService dialService,
@@ -83,7 +84,7 @@ internal static class VoiceEndpoints
         var agent = await agents.GetByUserIdAsync(tenantId, userId, ct);
         if (agent is null)
         {
-            return Results.Json(
+            return TypedResults.Json(
                 new VoiceDialResponse(false, null, "not-an-agent"),
                 ApiJsonContext.Default.VoiceDialResponse,
                 statusCode: StatusCodes.Status403Forbidden);
@@ -103,12 +104,12 @@ internal static class VoiceEndpoints
         }
 
         if (string.IsNullOrWhiteSpace(number))
-            return Results.BadRequest(new VoiceDialResponse(false, null, "missing-number"));
+            return TypedResults.BadRequest(new VoiceDialResponse(false, null, "missing-number"));
 
         var outcome = await dialService.DialAsync(tenantId, agent.AgentId, number, contactId, ct);
         return outcome.Accepted
-            ? Results.Ok(new VoiceDialResponse(true, outcome.CorrelationId, null))
-            : Results.BadRequest(new VoiceDialResponse(false, null, outcome.Error));
+            ? TypedResults.Ok(new VoiceDialResponse(true, outcome.CorrelationId, null))
+            : TypedResults.BadRequest(new VoiceDialResponse(false, null, outcome.Error));
     }
 
     private static TenantId GetTenantId(HttpContext context)

@@ -3,6 +3,7 @@ using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -23,7 +24,7 @@ internal static class ManagementTenantEndpoints
         group.MapDelete("/{id}", DeleteTenant);
     }
 
-    private static async Task<IResult> ListTenants(
+    private static async Task<Ok<List<MgmtTenantDto>>> ListTenants(
         [FromQuery] string? parentId,
         [FromQuery] string? status,
         [FromQuery] string? type,
@@ -60,16 +61,16 @@ internal static class ManagementTenantEndpoints
         if (Enum.TryParse<TenantType>(type, ignoreCase: true, out var typeFilter))
             result = result.Where(t => t.Type == typeFilter);
 
-        return Results.Ok(result.Select(MapToDto).ToList());
+        return TypedResults.Ok(result.Select(MapToDto).ToList());
     }
 
-    private static async Task<IResult> GetTenant(
+    private static async Task<Results<Ok<MgmtTenantDto>, NotFound>> GetTenant(
         string id,
         [FromServices] ITenantStore store,
         CancellationToken ct)
     {
         var tenant = await store.GetAsync(id, ct);
-        return tenant is null ? Results.NotFound() : Results.Ok(MapToDto(tenant));
+        return tenant is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(tenant));
     }
 
     private static async Task<IResult> CreateTenant(
@@ -165,7 +166,7 @@ internal static class ManagementTenantEndpoints
         return Results.Created($"/management/tenants/{tenant.TenantId}", MapToDto(tenant));
     }
 
-    private static async Task<IResult> UpdateTenant(
+    private static async Task<Results<Ok<MgmtTenantDto>, NotFound>> UpdateTenant(
         string id,
         HttpContext context,
         [FromBody] UpdateMgmtTenantRequest body,
@@ -175,7 +176,7 @@ internal static class ManagementTenantEndpoints
     {
         var existing = await store.GetAsync(id, ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var before = new { existing.TenantId, existing.Name };
 
@@ -218,10 +219,10 @@ internal static class ManagementTenantEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(MapToDto(updated));
+        return TypedResults.Ok(MapToDto(updated));
     }
 
-    private static async Task<IResult> SuspendTenant(
+    private static async Task<Results<Ok<StatusUpdateResponse>, NotFound, BadRequest<ErrorResponse>>> SuspendTenant(
         string id,
         HttpContext context,
         [FromServices] ITenantStore store,
@@ -231,9 +232,9 @@ internal static class ManagementTenantEndpoints
         CancellationToken ct)
     {
         var tenant = await store.GetAsync(id, ct);
-        if (tenant is null) return Results.NotFound();
+        if (tenant is null) return TypedResults.NotFound();
         if (tenant.Type == TenantType.Platform)
-            return Results.BadRequest(new ErrorResponse("Cannot suspend the Platform tenant."));
+            return TypedResults.BadRequest(new ErrorResponse("Cannot suspend the Platform tenant."));
 
         await store.UpdateStatusAsync(id, TenantStatus.Suspended, ct);
         await DispatchLifecycleAsync(lifecycleHandlers, h => h.OnTenantSuspendedAsync(id, ct), logger);
@@ -248,10 +249,10 @@ internal static class ManagementTenantEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(new StatusUpdateResponse(id, "Suspended"));
+        return TypedResults.Ok(new StatusUpdateResponse(id, "Suspended"));
     }
 
-    private static async Task<IResult> ActivateTenant(
+    private static async Task<Results<Ok<StatusUpdateResponse>, NotFound>> ActivateTenant(
         string id,
         HttpContext context,
         [FromServices] ITenantStore store,
@@ -259,7 +260,7 @@ internal static class ManagementTenantEndpoints
         CancellationToken ct)
     {
         var tenant = await store.GetAsync(id, ct);
-        if (tenant is null) return Results.NotFound();
+        if (tenant is null) return TypedResults.NotFound();
 
         await store.UpdateStatusAsync(id, TenantStatus.Active, ct);
         await audit.RecordAsync(
@@ -273,7 +274,7 @@ internal static class ManagementTenantEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(new StatusUpdateResponse(id, "Active"));
+        return TypedResults.Ok(new StatusUpdateResponse(id, "Active"));
     }
 
     private static async Task<IResult> DeleteTenant(

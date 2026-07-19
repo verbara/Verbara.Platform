@@ -1,6 +1,7 @@
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Surveys;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -26,14 +27,14 @@ internal static class SurveyEndpoints
 
     // ─── Admin CRUD ───────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListSurveys(
+    private static async Task<Ok<SurveyDto[]>> ListSurveys(
         HttpContext context,
         [FromServices] ISurveyStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var surveys = await store.GetAllAsync(tenantId, ct);
-        return Results.Ok(surveys.Select(ToSurveyDto).ToArray());
+        return TypedResults.Ok(surveys.Select(ToSurveyDto).ToArray());
     }
 
     private static SurveyDto ToSurveyDto(Survey s) =>
@@ -77,7 +78,7 @@ internal static class SurveyEndpoints
         return Results.Created($"/admin/surveys/{survey.SurveyId}", ToSurveyDto(survey));
     }
 
-    private static async Task<IResult> GetSurvey(
+    private static async Task<Results<Ok<SurveyDto>, NotFound>> GetSurvey(
         string id,
         HttpContext context,
         [FromServices] ISurveyStore store,
@@ -85,10 +86,10 @@ internal static class SurveyEndpoints
     {
         var tenantId = GetTenantId(context);
         var survey = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return survey is null ? Results.NotFound() : Results.Ok(ToSurveyDto(survey));
+        return survey is null ? TypedResults.NotFound() : TypedResults.Ok(ToSurveyDto(survey));
     }
 
-    private static async Task<IResult> UpdateSurvey(
+    private static async Task<Results<Ok<SurveyDto>, NotFound>> UpdateSurvey(
         string id,
         HttpContext context,
         [FromBody] UpdateSurveyRequest body,
@@ -99,7 +100,7 @@ internal static class SurveyEndpoints
         var tenantId = GetTenantId(context);
         var existing = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var before = new { existing.SurveyId, existing.Name, existing.Type, existing.IsActive };
 
@@ -124,7 +125,7 @@ internal static class SurveyEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(ToSurveyDto(updated));
+        return TypedResults.Ok(ToSurveyDto(updated));
     }
 
     private static async Task<IResult> DeleteSurvey(
@@ -151,7 +152,7 @@ internal static class SurveyEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> ActivateSurvey(
+    private static async Task<Results<Ok<SurveyDto>, NotFound>> ActivateSurvey(
         string id,
         HttpContext context,
         [FromBody] ActivateSurveyRequest body,
@@ -161,16 +162,16 @@ internal static class SurveyEndpoints
         var tenantId = GetTenantId(context);
         var existing = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         existing.IsActive = body.IsActive;
         await store.SaveAsync(existing, ct);
-        return Results.Ok(ToSurveyDto(existing));
+        return TypedResults.Ok(ToSurveyDto(existing));
     }
 
     // ─── Analytics ────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetSurveySummary(
+    private static async Task<Ok<SurveyScoreSummary>> GetSurveySummary(
         string id,
         HttpContext context,
         ISurveyAnalytics analytics,
@@ -178,7 +179,7 @@ internal static class SurveyEndpoints
     {
         var tenantId = GetTenantId(context);
         var summary = await analytics.GetSummaryAsync(tenantId, EntityId.From(id), ct);
-        return Results.Ok(summary);
+        return TypedResults.Ok(summary);
     }
 
     private static async Task<IResult> GetSurveyResponses(

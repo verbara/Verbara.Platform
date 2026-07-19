@@ -1,5 +1,6 @@
 using Verbara.Platform.Core;
 using Verbara.Platform.KnowledgeBase;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -28,7 +29,7 @@ internal static class KnowledgeBaseEndpoints
 
     // ─── Admin CRUD ───────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListArticles(
+    private static async Task<Ok<ArticleDto[]>> ListArticles(
         HttpContext context,
         [FromServices] IArticleStore store,
         int page = 1,
@@ -38,7 +39,7 @@ internal static class KnowledgeBaseEndpoints
         var tenantId = GetTenantId(context);
         var result = await store.ListAsync(tenantId, new PagedQuery { Page = page, PageSize = pageSize }, ct);
         var items = result.Items.Select(ToArticleDto).ToArray();
-        return Results.Ok(items);
+        return TypedResults.Ok(items);
     }
 
     private static async Task<IResult> CreateArticle(
@@ -64,7 +65,7 @@ internal static class KnowledgeBaseEndpoints
         return Results.Created($"/admin/articles/{article.ArticleId}", ToArticleDto(article));
     }
 
-    private static async Task<IResult> UpdateArticle(
+    private static async Task<Results<Ok<ArticleDto>, NotFound>> UpdateArticle(
         string id,
         HttpContext context,
         [FromBody] UpdateArticleRequest body,
@@ -75,7 +76,7 @@ internal static class KnowledgeBaseEndpoints
         var tenantId = GetTenantId(context);
         var article = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (article is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         if (body.Title is not null) article.Title = body.Title;
         if (body.Content is not null) article.Content = body.Content;
@@ -84,7 +85,7 @@ internal static class KnowledgeBaseEndpoints
         if (body.Language is not null) article.Language = body.Language;
         article.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(article, ct);
-        return Results.Ok(ToArticleDto(article));
+        return TypedResults.Ok(ToArticleDto(article));
     }
 
     private static ArticleDto ToArticleDto(Article a) =>
@@ -111,6 +112,9 @@ internal static class KnowledgeBaseEndpoints
 
     // ─── Agent Search ─────────────────────────────────────────────────────────
 
+    // OQ1: success shape wraps the KnowledgeBase domain entity `Article` (not an API response DTO
+    // registered in ApiJsonContext); left untyped rather than surface a domain entity as a named
+    // schema (openapi-response-schemas design D1/OQ1). A dedicated ArticleSearchDto is future work.
     private static async Task<IResult> SearchArticles(
         HttpContext context,
         IKnowledgeSearch search,

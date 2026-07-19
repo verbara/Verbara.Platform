@@ -4,6 +4,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Routing.Inbound;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -39,27 +40,27 @@ internal static partial class DidRouteEndpoints
 
     // ─── Handlers ────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> List(
+    private static async Task<Ok<List<DidRouteDto>>> List(
         HttpContext context,
         [FromServices] IDidRouteStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var items = await store.ListAsync(new TenantId(tenantId), ct);
-        return Results.Ok(items.Select(MapToDto).ToList());
+        return TypedResults.Ok(items.Select(MapToDto).ToList());
     }
 
-    private static async Task<IResult> ListActive(
+    private static async Task<Ok<List<DidRouteDto>>> ListActive(
         HttpContext context,
         [FromServices] IDidRouteStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var items = await store.ListActiveAsync(new TenantId(tenantId), ct);
-        return Results.Ok(items.Select(MapToDto).ToList());
+        return TypedResults.Ok(items.Select(MapToDto).ToList());
     }
 
-    private static async Task<IResult> GetByDid(
+    private static async Task<Results<Ok<DidRouteDto>, NotFound>> GetByDid(
         string did,
         HttpContext context,
         [FromServices] IDidRouteStore store,
@@ -67,21 +68,21 @@ internal static partial class DidRouteEndpoints
     {
         var tenantId = GetTenantId(context);
         var route = await store.GetByDidAsync(new TenantId(tenantId), did, ct);
-        return route is null ? Results.NotFound() : Results.Ok(MapToDto(route));
+        return route is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(route));
     }
 
-    private static async Task<IResult> Get(
+    private static async Task<Results<Ok<DidRouteDto>, NotFound>> Get(
         string id,
         HttpContext context,
         [FromServices] IDidRouteStore store,
         CancellationToken ct)
     {
         if (!EntityId.IsValid(id))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         var route = await store.GetAsync(new TenantId(tenantId), EntityId.From(id), ct);
-        return route is null ? Results.NotFound() : Results.Ok(MapToDto(route));
+        return route is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(route));
     }
 
     private static async Task<IResult> Create(
@@ -141,7 +142,7 @@ internal static partial class DidRouteEndpoints
         return Results.Created($"/api/v1/admin/did-routes/{created.RouteId.Value}", dto);
     }
 
-    private static async Task<IResult> Update(
+    private static async Task<Results<Ok<DidRouteDto>, NotFound, BadRequest<ErrorResponse>, Conflict>> Update(
         string id,
         HttpContext context,
         [FromBody] UpdateDidRouteRequest body,
@@ -151,29 +152,29 @@ internal static partial class DidRouteEndpoints
         CancellationToken ct)
     {
         if (!EntityId.IsValid(id))
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var tenantId = GetTenantId(context);
         var route = await store.GetAsync(new TenantId(tenantId), EntityId.From(id), ct);
         if (route is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var before = MapToDto(route);
 
         if (body.Did is not null)
         {
             if (string.IsNullOrWhiteSpace(body.Did) || !E164Regex().IsMatch(body.Did))
-                return Results.BadRequest(new ErrorResponse(
+                return TypedResults.BadRequest(new ErrorResponse(
                     "DID must be E.164: an optional leading '+' then 7–15 digits with a non-zero first digit."));
             route.Did = body.Did;
         }
         if (body.QueueId is not null)
         {
             if (!EntityId.IsValid(body.QueueId))
-                return Results.BadRequest(new ErrorResponse("Invalid queue id."));
+                return TypedResults.BadRequest(new ErrorResponse("Invalid queue id."));
             var queue = await queueStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(body.QueueId), ct);
             if (queue is null)
-                return Results.BadRequest(new ErrorResponse("Target queue does not exist for this tenant."));
+                return TypedResults.BadRequest(new ErrorResponse("Target queue does not exist for this tenant."));
             route.QueueId = EntityId.From(body.QueueId);
         }
         if (body.IsActive.HasValue)
@@ -186,7 +187,7 @@ internal static partial class DidRouteEndpoints
         catch (InvalidOperationException)
         {
             // Renaming onto an existing DID for this tenant — UNIQUE (tenant_id, did).
-            return Results.Conflict();
+            return TypedResults.Conflict();
         }
 
         var after = MapToDto(route);
@@ -201,7 +202,7 @@ internal static partial class DidRouteEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(after);
+        return TypedResults.Ok(after);
     }
 
     private static async Task<IResult> Delete(

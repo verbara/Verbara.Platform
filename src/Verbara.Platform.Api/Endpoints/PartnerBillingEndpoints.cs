@@ -2,6 +2,7 @@ using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -35,7 +36,7 @@ internal static class PartnerBillingEndpoints
 
     // ─── Rate Card Handlers ──────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListRateCards(
+    private static async Task<Results<Ok<List<RateCardDto>>, ForbidHttpResult>> ListRateCards(
         HttpContext context,
         [FromServices] IRateCardStore rateCardStore,
         CancellationToken ct)
@@ -43,10 +44,10 @@ internal static class PartnerBillingEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var cards = await rateCardStore.ListAsync(new TenantId(callerTenantId), ct);
-        return Results.Ok(cards.Select(MapRateCardToDto).ToList());
+        return TypedResults.Ok(cards.Select(MapRateCardToDto).ToList());
     }
 
     private static async Task<IResult> CreateRateCard(
@@ -76,7 +77,7 @@ internal static class PartnerBillingEndpoints
         return Results.Created($"/partner/rate-cards/{rateCard.RateCardId.Value}", MapRateCardToDto(rateCard));
     }
 
-    private static async Task<IResult> UpdateRateCard(
+    private static async Task<Results<Ok<RateCardDto>, ForbidHttpResult, NotFound>> UpdateRateCard(
         string rateCardId,
         HttpContext context,
         [FromBody] CreateRateCardRequest body,
@@ -86,12 +87,12 @@ internal static class PartnerBillingEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var partnerTid = new TenantId(callerTenantId);
         var existing = await rateCardStore.GetByIdAsync(partnerTid, EntityId.From(rateCardId), ct);
         if (existing is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var updated = new RateCard
         {
@@ -106,7 +107,7 @@ internal static class PartnerBillingEndpoints
         };
 
         await rateCardStore.SaveAsync(updated, ct);
-        return Results.Ok(MapRateCardToDto(updated));
+        return TypedResults.Ok(MapRateCardToDto(updated));
     }
 
     private static async Task<IResult> DeleteRateCard(
@@ -131,7 +132,7 @@ internal static class PartnerBillingEndpoints
 
     // ─── Customer Invoice Handlers ───────────────────────────────────────────────
 
-    private static async Task<IResult> ListCustomerInvoices(
+    private static async Task<Results<Ok<List<InvoiceDto>>, ForbidHttpResult, NotFound>> ListCustomerInvoices(
         string customerId,
         HttpContext context,
         [FromQuery] int? page,
@@ -143,14 +144,14 @@ internal static class PartnerBillingEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var customer = await tenantStore.GetAsync(customerId, ct);
         if (customer is null || customer.ParentTenantId != callerTenantId)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var invoices = await invoiceStore.ListAsync(new TenantId(customerId), page ?? 1, pageSize ?? 20, ct);
-        return Results.Ok(invoices.Select(MapInvoiceToDto).ToList());
+        return TypedResults.Ok(invoices.Select(MapInvoiceToDto).ToList());
     }
 
     private static async Task<IResult> GenerateCustomerInvoice(
@@ -253,7 +254,7 @@ internal static class PartnerBillingEndpoints
 
     // ─── Customer Usage Handler ──────────────────────────────────────────────────
 
-    private static async Task<IResult> GetCustomerUsage(
+    private static async Task<Results<Ok<List<UsageSummaryDto>>, ForbidHttpResult, NotFound>> GetCustomerUsage(
         string customerId,
         HttpContext context,
         [FromServices] ITenantStore tenantStore,
@@ -263,14 +264,14 @@ internal static class PartnerBillingEndpoints
         var callerTenantId = context.User.FindFirst("tid")?.Value
             ?? context.User.FindFirst("tenant_id")?.Value;
         if (callerTenantId is null)
-            return Results.Forbid();
+            return TypedResults.Forbid();
 
         var customer = await tenantStore.GetAsync(customerId, ct);
         if (customer is null || customer.ParentTenantId != callerTenantId)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var summaries = await meteringService.GetCurrentPeriodSummaryAsync(new TenantId(customerId), ct);
-        return Results.Ok(summaries.Select(MapSummaryToDto).ToList());
+        return TypedResults.Ok(summaries.Select(MapSummaryToDto).ToList());
     }
 
     // ─── Mapping Helpers ─────────────────────────────────────────────────────────

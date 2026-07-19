@@ -9,6 +9,7 @@ using Verbara.Sdk.Pro.CallAnalytics.Domain;
 using Verbara.Sdk.Pro.CallAnalytics.Store;
 using Verbara.Sdk.Pro.EventStore;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -33,7 +34,7 @@ internal static class AnalyticsEndpoints
 
     // ─── Dashboard Handler ─────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetDashboard(
+    private static async Task<Ok<DashboardDto>> GetDashboard(
         HttpContext context,
         [FromServices] IIntervalSnapshotStore snapshotStore,
         [FromServices] ICompletedSessionStore cdrStore,
@@ -100,12 +101,12 @@ internal static class AnalyticsEndpoints
             SlaTrend: slaTrend,
             ChannelDistribution: channelDistribution);
 
-        return Results.Ok(dashboard);
+        return TypedResults.Ok(dashboard);
     }
 
     // ─── CDR List Handler ──────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListCdr(
+    private static async Task<Ok<PagedDataResponse<CdrRowDto>>> ListCdr(
         HttpContext context,
         [FromServices] ICompletedSessionStore cdrStore,
         [FromServices] ICallAnalyticsStore qaStore,
@@ -194,12 +195,12 @@ internal static class AnalyticsEndpoints
                 Metadata: row.Metadata);
         }).ToArray();
 
-        return Results.Ok(new PagedDataResponse<CdrRowDto>(dtos, hasMore, page, pageSize));
+        return TypedResults.Ok(new PagedDataResponse<CdrRowDto>(dtos, hasMore, page, pageSize));
     }
 
     // ─── CDR Detail Handler ────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetCdrDetail(
+    private static async Task<Results<Ok<CdrDetailDto>, NotFound>> GetCdrDetail(
         string sessionId,
         HttpContext context,
         [FromServices] ICompletedSessionStore cdrStore,
@@ -213,7 +214,7 @@ internal static class AnalyticsEndpoints
 
         var row = await cdrStore.GetAsync(tenantId, sessionId, ct);
         if (row is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var agentNames = await BuildAgentNameMapAsync([row.AgentId], tenantIdObj, agentStore, ct);
         agentNames.TryGetValue(row.AgentId ?? "", out var agentName);
@@ -284,7 +285,7 @@ internal static class AnalyticsEndpoints
             ? $"/api/recordings/{row.SessionId}/stream"
             : null;
 
-        return Results.Ok(new CdrDetailDto(
+        return TypedResults.Ok(new CdrDetailDto(
             cdrRow,
             [.. timeline],
             qaSummary,
@@ -298,7 +299,7 @@ internal static class AnalyticsEndpoints
 
     // ─── QA List Handler ──────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListQa(
+    private static async Task<Ok<PagedDataResponse<QaRowDto>>> ListQa(
         HttpContext context,
         [FromServices] ICallAnalyticsStore qaStore,
         [FromServices] ICompletedSessionStore cdrStore,
@@ -371,12 +372,12 @@ internal static class AnalyticsEndpoints
                 Topics: topics);
         }).ToArray();
 
-        return Results.Ok(new PagedDataResponse<QaRowDto>(dtos, hasMore, page, pageSize));
+        return TypedResults.Ok(new PagedDataResponse<QaRowDto>(dtos, hasMore, page, pageSize));
     }
 
     // ─── QA Detail Handler ─────────────────────────────────────────────────────
 
-    private static async Task<IResult> GetQaDetail(
+    private static async Task<Results<Ok<QaDetailDto>, NotFound>> GetQaDetail(
         string sessionId,
         HttpContext context,
         [FromServices] ICallAnalyticsStore qaStore,
@@ -389,7 +390,7 @@ internal static class AnalyticsEndpoints
 
         var result = await qaStore.GetAsync(sessionId, tenantId, ct);
         if (result is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var cdr = await cdrStore.GetAsync(tenantId, sessionId, ct);
         var agentNames = await BuildAgentNameMapAsync([cdr?.AgentId], tenantIdObj, agentStore, ct);
@@ -449,12 +450,12 @@ internal static class AnalyticsEndpoints
             SilenceCount: result.Metrics.SilenceCount,
             InterruptionCount: result.Metrics.InterruptionCount);
 
-        return Results.Ok(dto);
+        return TypedResults.Ok(dto);
     }
 
     // ─── Agent Intervals Handler ───────────────────────────────────────────────
 
-    private static async Task<IResult> ListAgentIntervals(
+    private static async Task<Ok<List<AgentIntervalDto>>> ListAgentIntervals(
         HttpContext context,
         [FromServices] AnalyticsQueryService svc,
         string? from,
@@ -478,12 +479,12 @@ internal static class AnalyticsEndpoints
             s.Transfers,
             s.TotalPauseMs,
             s.LoginDurationMs)).ToList();
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
     // ─── Intervals Handler ─────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListIntervals(
+    private static async Task<Ok<IntervalDto[]>> ListIntervals(
         HttpContext context,
         [FromServices] IIntervalSnapshotStore snapshotStore,
         string? from,
@@ -511,7 +512,7 @@ internal static class AnalyticsEndpoints
             AbandonRatePercent: s.AbandonRatePercent,
             SlaMetCount: s.SlaMetCount)).ToArray();
 
-        return Results.Ok(dtos);
+        return TypedResults.Ok(dtos);
     }
 
     // ─── Bot Analytics Handler ─────────────────────────────────────────────────

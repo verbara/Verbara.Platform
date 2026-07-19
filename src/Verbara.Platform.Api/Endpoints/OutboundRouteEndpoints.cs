@@ -2,6 +2,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Sdk.Pro.Dialer.Routing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -22,17 +23,17 @@ internal static class OutboundRouteEndpoints
 
     // ─── Handlers ────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> ListRoutes(
+    private static async Task<Ok<List<OutboundRouteDto>>> ListRoutes(
         HttpContext context,
         [FromServices] OutboundRouteStoreBase routeStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var items = await routeStore.ListByPriorityAsync(tenantId, ct);
-        return Results.Ok(items.Select(MapToDto).ToList());
+        return TypedResults.Ok(items.Select(MapToDto).ToList());
     }
 
-    private static async Task<IResult> GetRoute(
+    private static async Task<Results<Ok<OutboundRouteDto>, NotFound>> GetRoute(
         long id,
         HttpContext context,
         [FromServices] OutboundRouteStoreBase routeStore,
@@ -40,7 +41,7 @@ internal static class OutboundRouteEndpoints
     {
         var tenantId = GetTenantId(context);
         var route = await routeStore.GetAsync(id, tenantId, ct);
-        return route is null ? Results.NotFound() : Results.Ok(MapToDto(route));
+        return route is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(route));
     }
 
     private static async Task<IResult> CreateRoute(
@@ -77,7 +78,7 @@ internal static class OutboundRouteEndpoints
         return Results.Created($"/admin/routes/{id}", MapToDto(route));
     }
 
-    private static async Task<IResult> UpdateRoute(
+    private static async Task<Results<Ok<OutboundRouteDto>, NotFound>> UpdateRoute(
         long id,
         HttpContext context,
         [FromBody] UpdateOutboundRouteRequest body,
@@ -88,7 +89,7 @@ internal static class OutboundRouteEndpoints
         var tenantId = GetTenantId(context);
         var route = await routeStore.GetAsync(id, tenantId, ct);
         if (route is null)
-            return Results.NotFound();
+            return TypedResults.NotFound();
 
         var before = MapToDto(route);
 
@@ -112,7 +113,7 @@ internal static class OutboundRouteEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Ok(MapToDto(route));
+        return TypedResults.Ok(MapToDto(route));
     }
 
     private static async Task<IResult> DeleteRoute(

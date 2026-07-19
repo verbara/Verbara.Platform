@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints.Audit;
@@ -54,7 +55,7 @@ internal static class AuditAdminEndpoints
 
     // ─── Query (paginated) ───────────────────────────────────────────────────
 
-    private static async Task<IResult> QueryEvents(
+    private static async Task<Results<Ok<PagedResult<AuditEventDto>>, ForbidHttpResult>> QueryEvents(
         HttpContext context,
         [FromServices] IAuditQueryService service,
         [FromServices] IFeatureGateService featureGate,
@@ -90,7 +91,7 @@ internal static class AuditAdminEndpoints
         context.Response.Headers[RetentionHeader] =
             retention.ToString(CultureInfo.InvariantCulture);
 
-        return Results.Ok(result);
+        return TypedResults.Ok(result);
     }
 
     // ─── Export (streaming) ──────────────────────────────────────────────────
@@ -211,7 +212,7 @@ internal static class AuditAdminEndpoints
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private static (TenantId Tenant, IResult? Error) ResolveTenantScope(
+    private static (TenantId Tenant, ForbidHttpResult? Error) ResolveTenantScope(
         HttpContext context, string? requestedTenant)
     {
         var actorTenantClaim = context.User.FindFirst("tenant_id")?.Value
@@ -221,7 +222,7 @@ internal static class AuditAdminEndpoints
             // No tenant claim — fall back to the X-Tenant-Id header / Items.
             if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
                 return (tid, null);
-            return (default, Results.Forbid());
+            return (default, TypedResults.Forbid());
         }
 
         // Cross-tenant query is permitted only for PlatformAdmin / SystemAdmin
@@ -239,7 +240,7 @@ internal static class AuditAdminEndpoints
         if (roleClaim is "Admin" or "SystemAdmin" or "PlatformAdmin")
             return (new TenantId(requestedTenant), null);
 
-        return (default, Results.Forbid());
+        return (default, TypedResults.Forbid());
     }
 
     private static int ResolveRetentionDays(IFeatureGateService featureGate, string tenantId)
