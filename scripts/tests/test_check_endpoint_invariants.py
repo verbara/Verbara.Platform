@@ -16,7 +16,7 @@ _SCRIPT = os.path.join(_HERE, os.pardir, "check-endpoint-invariants.py")
 
 # Keep in sync with LOC_BUDGETS in the script under test.
 _PROGRAM = "src/Verbara.Platform.Api/Program.cs"
-_BUDGET = 1941
+_BUDGET = 1932
 
 
 def _run(root):

@@ -3,16 +3,13 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
-using Verbara.Sdk.Pro.Realtime;
-using Verbara.Sdk.Pro.Realtime.Models;
 using Verbara.Platform.Api.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 
 namespace Verbara.Platform.Api.Endpoints;
 
-internal static partial class AdminEndpoints
+internal static class AdminEndpoints
 {
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
@@ -237,7 +234,6 @@ internal static partial class AdminEndpoints
         [FromBody] CreateQueueRequest body,
         [FromServices] IQueueStore store,
         IClock clock,
-        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -287,23 +283,8 @@ internal static partial class AdminEndpoints
                 type: "https://verbara.platform/errors/entity-already-exists");
         }
 
-        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null)
-        {
-            try
-            {
-                var opts = new RealtimeQueueOptions
-                {
-                    Timeout = 30,
-                    Wrapuptime = queue.WrapUp?.DefaultWrapUpSeconds ?? 15,
-                    Servicelevel = queue.SlaTargets?.AnswerWithinSeconds ?? 20,
-                    Maxlen = queue.MaxWaiting ?? 0,
-                };
-                await syncService.SyncQueueAsync(tenantId, queue.Name, opts, ct);
-            }
-            catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "SyncQueue", queue.Name, tenantId.Value, ex); }
-        }
-
+        // ADR-0012 Ola-3 — the Asterisk realtime sync now rides IQueueStore.SaveAsync
+        // (RealtimeSyncingQueueStore decorator); no endpoint-level Service-Locator resolve.
         return Results.Created($"/admin/queues/{queue.QueueId}", ToQueueDto(queue));
     }
 
@@ -313,7 +294,6 @@ internal static partial class AdminEndpoints
         [FromBody] UpdateQueueRequest body,
         [FromServices] IQueueStore store,
         IClock clock,
-        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -348,23 +328,7 @@ internal static partial class AdminEndpoints
         queue.UpdatedAt = clock.UtcNow;
         await store.SaveAsync(queue, ct);
 
-        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null)
-        {
-            try
-            {
-                var opts = new RealtimeQueueOptions
-                {
-                    Timeout = 30,
-                    Wrapuptime = queue.WrapUp?.DefaultWrapUpSeconds ?? 15,
-                    Servicelevel = queue.SlaTargets?.AnswerWithinSeconds ?? 20,
-                    Maxlen = queue.MaxWaiting ?? 0,
-                };
-                await syncService.SyncQueueAsync(tenantId, queue.Name, opts, ct);
-            }
-            catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "SyncQueue", queue.Name, tenantId.Value, ex); }
-        }
-
+        // ADR-0012 Ola-3 — sync rides IQueueStore.SaveAsync (RealtimeSyncingQueueStore decorator).
         return TypedResults.Ok(ToQueueDto(queue));
     }
 
@@ -373,21 +337,11 @@ internal static partial class AdminEndpoints
         HttpContext context,
         [FromServices] IQueueStore store,
         [FromServices] IQueueMembershipStore membershipStore,
-        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var queue = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        if (queue is not null)
-        {
-            var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-            if (syncService is not null)
-            {
-                try { await syncService.RemoveQueueAsync(tenantId, queue.Name, ct); }
-                catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "RemoveQueue", queue.Name, tenantId.Value, ex); }
-            }
-        }
-
+        // ADR-0012 Ola-3 — RemoveQueueAsync now rides IQueueStore.DeleteAsync
+        // (RealtimeSyncingQueueStore resolves the queue name before deleting).
         await membershipStore.DeleteAllForQueueAsync(tenantId, EntityId.From(id), ct);
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
         return Results.NoContent();
@@ -465,7 +419,6 @@ internal static partial class AdminEndpoints
         [FromServices] ICapacityDefaultsProvider defaultsProvider,
         [FromServices] IAuditService audit,
         IClock clock,
-        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -518,12 +471,8 @@ internal static partial class AdminEndpoints
             await RecordCapacityAuditAsync(audit, tenantId, GetCurrentUserId(context), agent.AgentId,
                 oldOverride: emptyOverride, newOverride: agent.CapacityOverride, ct);
 
-        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword) && syncService is not null)
-        {
-            try { await syncService.SyncAgentAsync(tenantId, agent.AgentId.Value, agent.DisplayName, agent.Extension, agent.SipPassword, ct: ct); }
-            catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "SyncAgent", agent.AgentId.Value, tenantId.Value, ex); }
-        }
+        // ADR-0012 Ola-3 — SyncAgentAsync (guarded on extension+password) now rides
+        // IAgentStore.SaveAsync (RealtimeSyncingAgentStore decorator).
 
         // ADR-0026 Phase A.1 — associate agent to queues with channel-aware
         // memberships. Sync to Asterisk queue_members is conditional: voice
@@ -548,21 +497,10 @@ internal static partial class AdminEndpoints
                     AllowedChannels = m.AllowedChannels,
                 }, ct);
 
-                // ADR-0026 Phase B (SDK Pro v2.6.0-pro) — voice-gate moved
-                // into IRealtimeSyncService.AddQueueMemberAsync. Just pass
-                // AllowedChannels through; the SDK upserts when null/voice
-                // included, or short-circuits to RemoveQueueMember otherwise.
-                if (syncService is not null)
-                {
-                    try
-                    {
-                        await syncService.AddQueueMemberAsync(
-                            tenantId.Value, queue.Name, agent.AgentId.Value,
-                            agent.DisplayName, penalty,
-                            allowedChannels: m.AllowedChannels, ct);
-                    }
-                    catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "AddQueueMember", queue.Name, tenantId.Value, ex); }
-                }
+                // ADR-0012 Ola-3 — AddQueueMemberAsync now rides
+                // IQueueMembershipStore.SaveAsync (RealtimeSyncingQueueMembershipStore
+                // decorator), which looks up queue.Name + agent.DisplayName from the
+                // keyed inner stores and applies the SDK v2.6.0-pro voice-gate.
             }
         }
 
@@ -579,7 +517,6 @@ internal static partial class AdminEndpoints
         [FromServices] ICapacityDefaultsProvider defaultsProvider,
         [FromServices] IAuditService audit,
         IClock clock,
-        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -619,16 +556,8 @@ internal static partial class AdminEndpoints
             await RecordCapacityAuditAsync(audit, tenantId, GetCurrentUserId(context), agent.AgentId,
                 oldOverride, agent.CapacityOverride, ct);
 
-        if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword))
-        {
-            var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-            if (syncService is not null)
-            {
-                try { await syncService.SyncAgentAsync(tenantId, agent.AgentId.Value, agent.DisplayName, agent.Extension, agent.SipPassword, ct: ct); }
-                catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "SyncAgent", agent.AgentId.Value, tenantId.Value, ex); }
-            }
-        }
-
+        // ADR-0012 Ola-3 — SyncAgentAsync (guarded on extension+password) now rides
+        // IAgentStore.SaveAsync (RealtimeSyncingAgentStore decorator).
         var defaults = await defaultsProvider.GetDefaultsAsync(tenantId, ct);
         var effective = AgentCapacityResolver.ResolveEffective(agent.CapacityOverride, defaults);
         return TypedResults.Ok(AdminAgentResponseDto.FromAgent(agent, effective));
@@ -639,41 +568,23 @@ internal static partial class AdminEndpoints
         HttpContext context,
         [FromServices] IAgentStore store,
         [FromServices] IQueueMembershipStore membershipStore,
-        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var agent = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (agent is null) return Results.NotFound();
 
-        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null)
-        {
-            try { await syncService.RemoveAgentAsync(tenantId, agent.AgentId.Value, ct); }
-            catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "RemoveAgent", agent.AgentId.Value, tenantId.Value, ex); }
-        }
-
+        // ADR-0012 Ola-3 — RemoveAgentAsync now rides IAgentStore.DeleteAsync
+        // (RealtimeSyncingAgentStore decorator).
         await membershipStore.DeleteAllForAgentAsync(tenantId, EntityId.From(id), ct);
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
         return Results.NoContent();
     }
 
-    // ── Best-effort realtime-sync observability (ADR-0012: no silent catch) ──────
-    // The Asterisk realtime sync in the admin write-paths is intentionally
-    // best-effort: the Pro realtime reconciler re-converges any missed upsert on
-    // its next pass, so a sync failure must never fail the admin write. These were
-    // empty `catch {}` blocks — which the ADR-0012 empty-catch gate now forbids:
-    // the eventual-consistency contract must be visible, not silent. Log at Warning.
-    [LoggerMessage(EventId = 4130, Level = LogLevel.Warning,
-        Message = "Best-effort Asterisk realtime sync deferred for {Operation} '{Entity}' (tenant {TenantId}); the realtime reconciler re-converges on its next pass.")]
-    static partial void LogRealtimeSyncDeferred(
-        ILogger logger, string operation, string entity, string tenantId, Exception exception);
-
-    private static void RealtimeSyncDeferred(
-        ILoggerFactory loggerFactory, string operation, string entity, string tenantId, Exception exception) =>
-        LogRealtimeSyncDeferred(
-            loggerFactory.CreateLogger("Verbara.Platform.Api.Endpoints.AdminEndpoints"),
-            operation, entity, tenantId, exception);
+    // ADR-0012 Ola-3 — the best-effort realtime-sync deferral logging (EventId 4130) that
+    // used to live here (LogRealtimeSyncDeferred / RealtimeSyncDeferred) moved with the sync
+    // itself into the store decorators (RealtimeSyncDeferralLog + RealtimeSyncing*Store). The
+    // admin write-paths no longer resolve IRealtimeSyncService at all — the storage seam does.
 
     // ADR-0026 Phase A.6 — agent-centric membership listing used by the
     // /admin/agents/{agentId}/queues editor. Joins queue_memberships with

@@ -101,20 +101,11 @@ internal static partial class QueueMembersEndpoints
             AllowedChannels = body.AllowedChannels,
         }, ct);
 
-        // ADR-0026 Phase B (SDK Pro v2.6.0-pro) — voice-gate moved into
-        // IRealtimeSyncService.AddQueueMemberAsync. Pass AllowedChannels
-        // directly; the SDK upserts when null/voice-included, or short-
-        // circuits to RemoveQueueMember otherwise. The syncedToAsterisk
-        // flag retains audit semantics: true when voice was included
-        // (regardless of whether the row physically existed before).
+        // ADR-0012 Ola-3 — AddQueueMemberAsync now rides IQueueMembershipStore.SaveAsync
+        // (RealtimeSyncingQueueMembershipStore decorator); no endpoint-level Service-Locator
+        // resolve. The syncedToAsterisk audit flag is derived from the SDK voice-gate the same
+        // way it always was — true when voice was included — independent of service presence.
         var syncedToAsterisk = IncludesVoice(body.AllowedChannels);
-        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null)
-        {
-            await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name,
-                agent.AgentId.Value, agent.DisplayName, penalty,
-                allowedChannels: body.AllowedChannels, ct);
-        }
 
         await audit.RecordAsync(
             tenantId, category: "config", action: "queue.members.added", severity: "info",
@@ -151,20 +142,16 @@ internal static partial class QueueMembersEndpoints
         var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(agentId), ct);
         if (queue is null || agent is null) return Results.NotFound();
 
-        // ADR-0026 Phase A.6 — only call Asterisk RemoveQueueMember if this
-        // membership previously had voice (null=all OR explicit voice). For a
-        // digital-only membership the row never existed in queue_members.
+        // ADR-0026 Phase A.6 — capture whether this membership previously had voice
+        // (null=all OR explicit voice) for the audit flag. For a digital-only membership
+        // the row never existed in queue_members.
         var existing = await membershipStore.GetAsync(tenantId, queue.QueueId, agent.AgentId, ct);
+        // ADR-0012 Ola-3 — RemoveQueueMemberAsync now rides IQueueMembershipStore.DeleteAsync
+        // (RealtimeSyncingQueueMembershipStore decorator); no endpoint-level Service-Locator
+        // resolve. The syncedToAsterisk audit flag stays derived from the prior voice state.
+        var syncedToAsterisk = IncludesVoice(existing?.AllowedChannels);
         await membershipStore.DeleteAsync(tenantId, queue.QueueId, agent.AgentId, ct);
         pauseTracker.Clear(tenantId.Value, queueId, agentId);
-
-        var syncedToAsterisk = false;
-        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null && IncludesVoice(existing?.AllowedChannels))
-        {
-            await syncService.RemoveQueueMemberAsync(tenantId.Value, queue.Name, agent.AgentId.Value, ct);
-            syncedToAsterisk = true;
-        }
 
         await audit.RecordAsync(
             tenantId, category: "config", action: "queue.members.removed", severity: "info",
@@ -242,21 +229,11 @@ internal static partial class QueueMembersEndpoints
             AllowedChannels = newAllowedChannels,
         }, ct);
 
-        // Asterisk sync diff: voice add/remove based on channel-include diff.
-        // ADR-0026 Phase B (SDK Pro v2.6.0-pro) — voice-gate moved into the
-        // SDK. AddQueueMemberAsync handles all 3 cases idempotently:
-        //   - null/voice + (new or penalty change) → upsert
-        //   - non-voice                            → short-circuit to Remove
-        // So a single call covers what was 3 branches in Phase A.
-        var existingIncludesVoice = IncludesVoice(existing.AllowedChannels);
-        var newIncludesVoice = IncludesVoice(newAllowedChannels);
-        var syncService = context.RequestServices.GetService<IRealtimeSyncService>();
-        if (syncService is not null && (existingIncludesVoice != newIncludesVoice || (newIncludesVoice && penaltyChanged)))
-        {
-            await syncService.AddQueueMemberAsync(tenantId.Value, queue.Name,
-                agent.AgentId.Value, agent.DisplayName, newPenalty,
-                allowedChannels: newAllowedChannels, ct);
-        }
+        // ADR-0012 Ola-3 — the Asterisk sync (AddQueueMemberAsync, which the SDK
+        // v2.6.0-pro voice-gate resolves to an upsert or a remove) now rides
+        // IQueueMembershipStore.SaveAsync (RealtimeSyncingQueueMembershipStore decorator);
+        // no endpoint-level Service-Locator resolve. The decorator re-issues the upsert on
+        // every SaveAsync — idempotent for a no-op change, matching the reconciler.
 
         if (penaltyChanged || channelsChanged || body.IsExcluded.HasValue)
         {
