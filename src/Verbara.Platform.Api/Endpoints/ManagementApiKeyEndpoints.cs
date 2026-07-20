@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
@@ -56,7 +57,7 @@ internal static class ManagementApiKeyEndpoints
         if (host is null)
             return Results.Problem("Platform not initialized.", statusCode: 503);
 
-        var rawKey = $"mgmt_{Guid.NewGuid():N}";
+        var rawKey = SecretTokenGenerator.Mint("mgmt_");
         var hashedKey = Convert.ToHexStringLower(
             SHA256.HashData(Encoding.UTF8.GetBytes(rawKey)));
 
@@ -112,7 +113,7 @@ internal static class ManagementApiKeyEndpoints
         await apiKeyStore.RevokeAsync(tenantId, existing.KeyId, ct);
 
         // Create new key with same name
-        var rawKey = $"mgmt_{Guid.NewGuid():N}";
+        var rawKey = SecretTokenGenerator.Mint("mgmt_");
         var hashedKey = Convert.ToHexStringLower(
             SHA256.HashData(Encoding.UTF8.GetBytes(rawKey)));
 
