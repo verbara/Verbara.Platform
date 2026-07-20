@@ -1,5 +1,11 @@
 # Plan: csat-runner Phase E (tasks 5.1–5.4) — template store + ICsatTemplateProvider + admin endpoints
 
+> **Status: COMPLETED — shipped in Platform v2.19.0 (2026-07-14).** Tasks 5.1–5.4 landed via the
+> `csat-runner` train (archived at `openspec/changes/archive/2026-07-12-csat-runner`); the
+> `CsatTemplateStore` / `CsatTemplateProvider` / `CsatTemplateAdminEndpoints` deliverables are on
+> `main`. The §5.4 `preview-voice` **501 deferral below was later superseded**: v2.19.0 shipped
+> voice CSAT end-to-end, so `preview-voice` now synthesizes live through the Pro TTS seam.
+
 Scope: STRICT tasks 5.1–5.4 of `openspec/changes/csat-runner/tasks.md`. No Phase E2/F/G/H, no `dotnet pack`.
 
 ## 5.1 — Template store
