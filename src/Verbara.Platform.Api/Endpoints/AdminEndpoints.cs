@@ -8,10 +8,11 @@ using Verbara.Sdk.Pro.Realtime.Models;
 using Verbara.Platform.Api.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Verbara.Platform.Api.Endpoints;
 
-internal static class AdminEndpoints
+internal static partial class AdminEndpoints
 {
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
@@ -236,6 +237,7 @@ internal static class AdminEndpoints
         [FromBody] CreateQueueRequest body,
         [FromServices] IQueueStore store,
         IClock clock,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -299,7 +301,7 @@ internal static class AdminEndpoints
                 };
                 await syncService.SyncQueueAsync(tenantId, queue.Name, opts, ct);
             }
-            catch { }
+            catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "SyncQueue", queue.Name, tenantId.Value, ex); }
         }
 
         return Results.Created($"/admin/queues/{queue.QueueId}", ToQueueDto(queue));
@@ -311,6 +313,7 @@ internal static class AdminEndpoints
         [FromBody] UpdateQueueRequest body,
         [FromServices] IQueueStore store,
         IClock clock,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -359,7 +362,7 @@ internal static class AdminEndpoints
                 };
                 await syncService.SyncQueueAsync(tenantId, queue.Name, opts, ct);
             }
-            catch { }
+            catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "SyncQueue", queue.Name, tenantId.Value, ex); }
         }
 
         return TypedResults.Ok(ToQueueDto(queue));
@@ -370,6 +373,7 @@ internal static class AdminEndpoints
         HttpContext context,
         [FromServices] IQueueStore store,
         [FromServices] IQueueMembershipStore membershipStore,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -380,7 +384,7 @@ internal static class AdminEndpoints
             if (syncService is not null)
             {
                 try { await syncService.RemoveQueueAsync(tenantId, queue.Name, ct); }
-                catch { }
+                catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "RemoveQueue", queue.Name, tenantId.Value, ex); }
             }
         }
 
@@ -461,6 +465,7 @@ internal static class AdminEndpoints
         [FromServices] ICapacityDefaultsProvider defaultsProvider,
         [FromServices] IAuditService audit,
         IClock clock,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -517,7 +522,7 @@ internal static class AdminEndpoints
         if (!string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword) && syncService is not null)
         {
             try { await syncService.SyncAgentAsync(tenantId, agent.AgentId.Value, agent.DisplayName, agent.Extension, agent.SipPassword, ct: ct); }
-            catch { }
+            catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "SyncAgent", agent.AgentId.Value, tenantId.Value, ex); }
         }
 
         // ADR-0026 Phase A.1 — associate agent to queues with channel-aware
@@ -556,7 +561,7 @@ internal static class AdminEndpoints
                             agent.DisplayName, penalty,
                             allowedChannels: m.AllowedChannels, ct);
                     }
-                    catch { }
+                    catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "AddQueueMember", queue.Name, tenantId.Value, ex); }
                 }
             }
         }
@@ -574,6 +579,7 @@ internal static class AdminEndpoints
         [FromServices] ICapacityDefaultsProvider defaultsProvider,
         [FromServices] IAuditService audit,
         IClock clock,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -619,7 +625,7 @@ internal static class AdminEndpoints
             if (syncService is not null)
             {
                 try { await syncService.SyncAgentAsync(tenantId, agent.AgentId.Value, agent.DisplayName, agent.Extension, agent.SipPassword, ct: ct); }
-                catch { }
+                catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "SyncAgent", agent.AgentId.Value, tenantId.Value, ex); }
             }
         }
 
@@ -633,6 +639,7 @@ internal static class AdminEndpoints
         HttpContext context,
         [FromServices] IAgentStore store,
         [FromServices] IQueueMembershipStore membershipStore,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -643,13 +650,30 @@ internal static class AdminEndpoints
         if (syncService is not null)
         {
             try { await syncService.RemoveAgentAsync(tenantId, agent.AgentId.Value, ct); }
-            catch { }
+            catch (Exception ex) { RealtimeSyncDeferred(loggerFactory, "RemoveAgent", agent.AgentId.Value, tenantId.Value, ex); }
         }
 
         await membershipStore.DeleteAllForAgentAsync(tenantId, EntityId.From(id), ct);
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
         return Results.NoContent();
     }
+
+    // ── Best-effort realtime-sync observability (ADR-0012: no silent catch) ──────
+    // The Asterisk realtime sync in the admin write-paths is intentionally
+    // best-effort: the Pro realtime reconciler re-converges any missed upsert on
+    // its next pass, so a sync failure must never fail the admin write. These were
+    // empty `catch {}` blocks — which the ADR-0012 empty-catch gate now forbids:
+    // the eventual-consistency contract must be visible, not silent. Log at Warning.
+    [LoggerMessage(EventId = 4130, Level = LogLevel.Warning,
+        Message = "Best-effort Asterisk realtime sync deferred for {Operation} '{Entity}' (tenant {TenantId}); the realtime reconciler re-converges on its next pass.")]
+    static partial void LogRealtimeSyncDeferred(
+        ILogger logger, string operation, string entity, string tenantId, Exception exception);
+
+    private static void RealtimeSyncDeferred(
+        ILoggerFactory loggerFactory, string operation, string entity, string tenantId, Exception exception) =>
+        LogRealtimeSyncDeferred(
+            loggerFactory.CreateLogger("Verbara.Platform.Api.Endpoints.AdminEndpoints"),
+            operation, entity, tenantId, exception);
 
     // ADR-0026 Phase A.6 — agent-centric membership listing used by the
     // /admin/agents/{agentId}/queues editor. Joins queue_memberships with

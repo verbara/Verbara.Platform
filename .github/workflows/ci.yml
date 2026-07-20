@@ -459,3 +459,25 @@ jobs:
             exit 1
           fi
           echo "AOT publish clean — zero IL trim/AOT warnings."
+
+  # Endpoint invariant gates (verbara-meta/ADR-0012 Ola 2 — gates #6 + #9). Two
+  # deterministic checks with no model in the loop, both freeze-current/ratchet:
+  #   #6 no empty `catch {}` under any Endpoints/ dir (silent error-swallowing) —
+  #      the 7 pre-existing best-effort Asterisk-sync swallows were remediated to
+  #      logged catches in this same change, so the floor is zero.
+  #   #9 Program.cs (the Api composition root) may not grow past its frozen LOC
+  #      budget — extract endpoint groups instead of growing the god-file.
+  # Cheap (~seconds, pure Python stdlib, no .NET). Guard logic is unit-tested in
+  # the coverage-scripts job (scripts/tests/test_check_endpoint_invariants.py).
+  # NOTE: making this a REQUIRED (merge-blocking) check needs a branch-protection /
+  # ruleset update (operator-authorized follow-up) — the job running on PRs is this
+  # deliverable, same posture as the aot-probe job above.
+  invariant-gates:
+    name: Invariant Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Endpoint invariant gates (empty-catch + LOC budgets)
+        run: python3 scripts/check-endpoint-invariants.py
