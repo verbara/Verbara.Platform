@@ -73,3 +73,7 @@ docker/asterisk-config/ari.conf
 docker/asterisk-config/manager.conf
 docker/asterisk-config/res_pgsql.conf
 docker/asterisk-config/http.conf
+
+# Python bytecode (from the coverage-gate-v2 check scripts + their unittests, ADR-0013)
+__pycache__/
+*.pyc
