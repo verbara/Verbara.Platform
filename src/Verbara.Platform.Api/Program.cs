@@ -351,6 +351,14 @@ NpgsqlDataSource? ResolveDataSource(string? candidateConnectionString)
 // See docs/plans/active/2026-04-27-auth-hotpath-hardening.md Phase 1 + ADR-0010.
 builder.Services.AddAuthHotpathCaching();
 
+// ─── ADR-0012 Ola-3: realtime-sync store decorators ─────────────────────────
+// Decorates IQueueStore / IAgentStore / IQueueMembershipStore with best-effort
+// Asterisk-realtime-sync wrappers (keyed-inner pattern, same shape as AHH above).
+// Migrates the sync out of the endpoint Service-Locator resolves into the storage
+// seam; pass-through when IRealtimeSyncService is not registered. MUST run AFTER
+// AddPostgresStorage / AddInMemoryStorage (they register the unkeyed stores it re-keys).
+builder.Services.AddRealtimeSyncingStores();
+
 // ─── W6 capacity defaults provider ─────────────────────────────────────────────
 // Supplies Queues' IAgentCapacityResolver with the per-tenant Max*Default columns,
 // read through the (now cached) ITenantAuthConfigStore registered just above — so the
@@ -1323,19 +1331,9 @@ builder.Services.AddSingleton<IDesiredStateProvider, PlatformDesiredStateProvide
 // lives in Asterisk Realtime; this is a UI-facing hint only.
 builder.Services.AddSingleton<QueueMemberPauseTracker>();
 
-// Trunk decorator — wraps PostgresTrunkStore with Realtime sync (only when Dialer is configured)
-if (!string.IsNullOrEmpty(dialerConnectionString))
-{
-    builder.Services.AddSingleton<TrunkStoreBase>(sp =>
-        new RealtimeSyncingTrunkStore(
-            new PostgresTrunkStore(sp.GetRequiredService<DialerDbContext>()),
-            sp.GetRequiredService<IRealtimeSyncService>()));
-}
-else
-{
-    builder.Services.AddSingleton<TrunkStoreBase>(sp =>
-        new InMemoryTrunkStore());
-}
+// Trunk decorator — wraps PostgresTrunkStore with Realtime sync (only when Dialer is
+// configured). Relocated to RealtimeSyncingStoresExtensions (ADR-0012 Ola-3 gate #9 LOC budget).
+builder.Services.AddRealtimeSyncingTrunkStore(dialerConnectionString);
 
 // ─── Pro EventStore + Analytics + CallAnalytics (engines + Postgres stores) ──
 var analyticsConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
@@ -1927,15 +1925,8 @@ if (!app.Environment.IsEnvironment("Testing"))
 
 app.Run();
 
-/// <summary>No-op trunk store used when Dialer is not configured.</summary>
-file sealed class InMemoryTrunkStore : TrunkStoreBase
-{
-    public override ValueTask<IReadOnlyList<Trunk>> ListAsync(string tenantId, CancellationToken ct = default)
-        => new(Array.Empty<Trunk>());
-
-    public override ValueTask<IReadOnlyList<Trunk>> ListActiveAsync(string tenantId, CancellationToken ct = default)
-        => new(Array.Empty<Trunk>());
-}
+// ADR-0012 Ola-3 — the file-scoped InMemoryTrunkStore relocated to
+// RealtimeSyncingStoresExtensions.cs (alongside AddRealtimeSyncingTrunkStore).
 
 // Expose Program for WebApplicationFactory in tests
 public partial class Program { }
