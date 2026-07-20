@@ -1,0 +1,37 @@
+kind: feature
+version: 1
+change_id: dialer-license-audit-sink
+decision_ref: Pro/ADR-0016
+
+# Scope A (Platform-only) of roadmap R-011, per product-owner decision 2026-07-20.
+# The IDialerLicenseAuditSink seam, the DialerLicenseAuditRecord type, and the DialerEngine
+# emission ALL already ship in the Pro SDK (Verbara.Sdk.Pro v2.11.0-pro) and are wired into
+# Platform's dialer stack — only the Postgres implementation + DI registration + table remain.
+# Pro is therefore NOT touched (no seam to add): this is a single-repo Platform change, no cascade.
+#
+# Deliberately OUT of scope (registered follow-up "Scope B", roadmap R-011b): durably recording
+# per-originate spend-point grants/denials. Pro's OriginateExecutorBase spend-point path today only
+# logs (EventId 13104) + increments a metric and drops the event — routing it to a sink would add a
+# new Pro-side emission on the deliberately allocation-free hot path (a two-repo cascade), and the
+# tick-scoped engine record below is the coherent business-level audit grain. Defer until a concrete
+# compliance need requires per-call rows.
+
+repos:
+  - path: ../Verbara.Platform
+    role: consumer
+    buildOrder: 1
+    childChange: HOST
+    summary: >
+      Implements the already-published optional seam IDialerLicenseAuditSink.RecordAsync(
+      DialerLicenseAuditRecord, CancellationToken) from Verbara.Sdk.Pro.Dialer/Diagnostics/
+      DialerLicenseAudit.cs:83 (doc-comment: "Platform implements this over NpgsqlExecutor as a
+      follow-up"; none registered by default, so DialerEngine resolves null and drops the record —
+      the live blind-spot). Mirrors the canonical Postgres audit pattern in
+      Verbara.Platform.Storage.Postgres/Stores/PostgresAuditStore.cs (NpgsqlExecutor + row.Map +
+      explicit NpgsqlParameter + PostgresJson.Ctx AOT boundary); registers the sink beside the
+      existing IAuditStore in Storage.Postgres/ServiceCollectionExtensions.cs; adds table migration
+      017_* (highest existing is 016_SurveyCsatExtensions.sql). No open change/plan pre-exists
+      (openspec list = "No active changes found").
+
+fixtures:
+  - fixtures/dialer-license-audit-record.v1.json

@@ -11,6 +11,7 @@ using Verbara.Platform.Queues;
 using Verbara.Platform.Storage.Postgres.Stores;
 using Verbara.Platform.Surveys;
 using Verbara.Platform.Typification;
+using Verbara.Sdk.Pro.Dialer.Diagnostics;
 using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Storage.Postgres;
@@ -76,6 +77,12 @@ namespace Verbara.Platform.Storage.Postgres;
 [JsonSerializable(typeof(Verbara.Platform.Llm.ProviderSettings))]
 [JsonSerializable(typeof(List<ChannelType>))]
 [JsonSerializable(typeof(IReadOnlyList<ChannelType>))]
+// dialer-license-audit-sink (Pro/ADR-0016) — the DialerLicenseAuditRecord.Campaigns
+// snapshot persists as the dialer_license_audit.campaigns jsonb column. Registered here so
+// PostgresDialerLicenseAuditSink serializes it through PostgresJson.Ctx (source-gen, no
+// reflection) under JsonSerializerIsReflectionEnabledByDefault=false (design D2, D6).
+[JsonSerializable(typeof(IReadOnlyList<QuiescedCampaignInfo>))]
+[JsonSerializable(typeof(QuiescedCampaignInfo))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

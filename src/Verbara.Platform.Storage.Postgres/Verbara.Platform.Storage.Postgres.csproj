@@ -35,7 +35,11 @@
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Verbara.Sdk.Data.Npgsql" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Verbara.Sdk.Pro.MultiTenant" />
+    <!-- dialer-license-audit-sink (Pro/ADR-0016): the IDialerLicenseAuditSink seam +
+         DialerLicenseAuditRecord / QuiescedCampaignInfo the Postgres sink implements. -->
+    <PackageReference Include="Verbara.Sdk.Pro.Dialer" />
   </ItemGroup>
 
 </Project>

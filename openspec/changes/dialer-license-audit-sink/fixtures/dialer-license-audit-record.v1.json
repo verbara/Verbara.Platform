@@ -1,0 +1,27 @@
+{
+  "_note": "Golden shape of Verbara.Sdk.Pro.Dialer.Diagnostics.DialerLicenseAuditRecord (SchemaVersion 1) as delivered in-process to IDialerLicenseAuditSink.RecordAsync. Pro never serializes this record; keys below are the .NET property names verbatim (DialerLicenseAudit.cs:29-76) — the Platform 017 migration columns + the row Map(NpgsqlDataReader) MUST cite these names. This is the tick-scoped enforcement-episode grain, NOT per-originate (Scope B, deferred).",
+  "_domains": {
+    "Event": ["QuiescencePending", "CampaignsQuiesced", "FlapAbsorbed", "Recovered"],
+    "Reason": "LicenseBlockReason? — nullable; null for the Recovered event (e.g. NotLicensed, Revoked)",
+    "Tier": "LicenseTier enum — one of None|Developer|SelfHostStartup|SelfHostBusiness|SaaSBusiness|SaaSEnterprise|WhiteLabel",
+    "nullable_columns": ["Reason", "ReasonSequence", "LicenseId", "Licensee"],
+    "Campaigns_item": "QuiescedCampaignInfo(long CampaignId, string TenantId, string Name) — snapshotted BEFORE teardown; empty [] for non-quiesce events"
+  },
+  "SchemaVersion": 1,
+  "Event": "CampaignsQuiesced",
+  "OccurredAt": "2026-07-20T14:03:52.117+00:00",
+  "TickSequence": 48213,
+  "EngineInstanceId": "b7c2f4a0-9e31-4d5a-8c6b-2f1e0a9d3c47",
+  "Reason": "Revoked",
+  "ReasonSequence": "NotLicensed,Revoked",
+  "ConsecutiveBlockedTicks": 6,
+  "Campaigns": [
+    { "CampaignId": 90142, "TenantId": "acme", "Name": "Q3 Outbound Winback" },
+    { "CampaignId": 90188, "TenantId": "acme", "Name": "Renewals Nudge" }
+  ],
+  "InFlightAtQuiesce": 3,
+  "LicenseId": "lic_7fK29ab",
+  "Licensee": "Acme Contact Center S.A.",
+  "Tier": "SelfHostBusiness",
+  "CampaignsRebuilt": 0
+}
