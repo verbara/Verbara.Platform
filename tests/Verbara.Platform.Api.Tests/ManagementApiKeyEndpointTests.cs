@@ -40,6 +40,24 @@ public sealed class ManagementApiKeyEndpointTests : IClassFixture<PlatformAdminA
     }
 
     [Fact]
+    public async Task RotateKey_ShouldReturnFreshKey_WhenKeyExists()
+    {
+        var createResponse = await _client.PostAsJsonAsync("/api/management/api-keys", new
+        {
+            name = "Rotate Test",
+        });
+        var created = await createResponse.Content.ReadFromJsonAsync<KeyResponseDto>();
+
+        var rotateResponse = await _client.PostAsync(
+            $"/api/management/api-keys/{created!.KeyId}/rotate", content: null);
+
+        rotateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var rotated = await rotateResponse.Content.ReadFromJsonAsync<KeyResponseDto>();
+        rotated!.ApiKey.Should().StartWith("mgmt_");
+        rotated.ApiKey.Should().NotBe(created.ApiKey); // a fresh CSPRNG value is minted on rotate
+    }
+
+    [Fact]
     public async Task RevokeKey_ShouldReturnNoContent()
     {
         // Create a key to revoke

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ADR-0012 endpoint-invariant gates for Verbara.Platform (deterministic, no model).
 
-Two gates, both freeze-current / ratchet posture (fail only on regression):
+Three gates, all freeze-current / ratchet posture (fail only on regression):
 
   #6 No silent error-swallowing — an empty `catch {}` (including multi-line and
      `catch (SomeException) {}`) anywhere under an `Endpoints/` directory is
@@ -17,6 +17,18 @@ Two gates, both freeze-current / ratchet posture (fail only on regression):
      may not grow. It is a ratchet — lower the number as endpoint groups are
      extracted; never raise it to fit new code (raising it is the exact decision
      the gate exists to surface in review).
+
+  #7 Credentials use a CSPRNG — a `Guid.NewGuid` that is string-interpolated into
+     a value assigned to a credential-named identifier (key / token / secret /
+     credential / password) is forbidden anywhere in the Api composition. A Guid
+     is contractually unique, not unguessable (~122 bits, fixed version/variant
+     nibbles), so minting a management/service key from one is the finding this
+     gate exists to kill. Mint via `SecretTokenGenerator.Mint` (CSPRNG-32) instead.
+     The discriminator is deliberate: a `Guid.NewGuid().ToString()` used as an
+     entity / message / session id is legitimate and NOT flagged — every real
+     credential mint the audit found was the `$"prefix_{Guid.NewGuid}"` shape,
+     every legit use was `.ToString()`-shaped. No allowlist; the positive control
+     is that every mint routes through SecretTokenGenerator (floor is zero).
 
 Exit 0 = all gates pass; 1 = at least one violation (with ::error:: annotations
 so GitHub renders them inline). Run from the repo root:
@@ -44,6 +56,20 @@ LOC_BUDGETS = {
 _EMPTY_CATCH = re.compile(r"catch\s*(\([^)]*\))?\s*\{\s*\}")
 _BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 _LINE_COMMENT = re.compile(r"//[^\n]*")
+
+# --- Gate #7 config: no Guid.NewGuid in a credential mint ---------------------
+# Matches a `Guid.NewGuid` that is string-INTERPOLATED (inside a `$"..."`) into a
+# value assigned to a credential-named identifier — e.g. `var rawKey = $"mgmt_{Guid
+# .NewGuid():N}"`. The interpolation requirement is the discriminator: it separates a
+# minted secret ($"prefix_{Guid.NewGuid}") from a legitimate id (`Guid.NewGuid()
+# .ToString("N")`, which never follows `= $"`), so `TokenId = Guid.NewGuid().ToString()`
+# and `sessionId = ...` are correctly NOT flagged. Scoped to the Api composition, where
+# credentials are minted (Media object keys etc. live elsewhere and are unrelated).
+_GUID_CRED_MINT = re.compile(
+    r"\b\w*(?:key|token|secret|credential|password)\w*\s*=\s*\$\"[^\"]*\{[^}]*Guid\.NewGuid",
+    re.IGNORECASE,
+)
+_GUID_GATE_SCOPE = "src/Verbara.Platform.Api"
 
 
 def _comment_spans(text):
@@ -91,6 +117,24 @@ def check_loc_budgets(root):
     return violations
 
 
+def find_guid_credential_mints(root):
+    """Repo-relative `path:line` for every Guid.NewGuid interpolated into a
+    credential-named assignment (in code, not a comment) under the Api scope."""
+    violations = []
+    scope = root / _GUID_GATE_SCOPE
+    for path in sorted(scope.glob("**/*.cs")):
+        if "obj" in path.parts or "bin" in path.parts:
+            continue  # skip generated build output
+        text = path.read_text(encoding="utf-8")
+        spans = _comment_spans(text)
+        for match in _GUID_CRED_MINT.finditer(text):
+            if any(start <= match.start() < end for start, end in spans):
+                continue  # the match is inside a comment
+            line = text.count("\n", 0, match.start()) + 1
+            violations.append(f"{path.relative_to(root).as_posix()}:{line}")
+    return violations
+
+
 def main(root=None):
     root = root or Path.cwd()
     failed = False
@@ -112,6 +156,16 @@ def main(root=None):
             print(f"::error::LOC budget (ADR-0012 gate #9): {violation}")
     else:
         print("Gate #9 (orchestrator LOC budgets): OK.")
+
+    guid_mints = find_guid_credential_mints(root)
+    if guid_mints:
+        failed = True
+        print("::error::Guid.NewGuid forbidden in a credential mint (ADR-0012 gate #7) — "
+              "mint secrets via SecretTokenGenerator.Mint (CSPRNG), never Guid.NewGuid:")
+        for violation in guid_mints:
+            print(f"  {violation}")
+    else:
+        print("Gate #7 (no Guid.NewGuid in credential mints): OK.")
 
     return 1 if failed else 0
 

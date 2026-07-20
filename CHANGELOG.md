@@ -9,6 +9,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Management API keys now minted from a CSPRNG, not `Guid.NewGuid()`** (ADR-0012 Ola-3,
+  gate #7). The 3 mgmt-key mint sites (`ManagementApiKeyEndpoints` create/rotate,
+  `SetupEndpoints`) now use `SecretTokenGenerator.Mint` (256-bit `RandomNumberGenerator`,
+  lowercase hex) instead of a Guid v4 (~122 bits, non-CSPRNG). Keys keep the `mgmt_` prefix.
+
+### Added
+- **Invariant gate #7** — a deterministic gate (`scripts/check-endpoint-invariants.py`, run in
+  the `Invariant Gates` CI job) forbidding `Guid.NewGuid` string-interpolated into a
+  credential-named value anywhere in the Api composition; `.ToString()`-shaped id uses stay
+  legitimate. Content-scoped (not filename-scoped, so `SetupEndpoints` is covered). Floor is
+  zero. decision_ref: verbara-meta/ADR-0012.
+
 ## [2.20.0] - 2026-07-20
 
 ### Changed — Dependencies

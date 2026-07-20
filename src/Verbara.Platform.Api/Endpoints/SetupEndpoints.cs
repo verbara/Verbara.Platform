@@ -168,7 +168,7 @@ internal static class SetupEndpoints
         }
 
         // 4. Generate Management API Key
-        var rawApiKey = $"mgmt_{Guid.NewGuid():N}";
+        var rawApiKey = SecretTokenGenerator.Mint("mgmt_");
         var hashedKey = Convert.ToHexStringLower(
             SHA256.HashData(Encoding.UTF8.GetBytes(rawApiKey)));
         var mgmtKey = new ApiKey
