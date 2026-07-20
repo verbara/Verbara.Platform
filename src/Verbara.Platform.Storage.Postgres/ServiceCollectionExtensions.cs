@@ -25,6 +25,7 @@ using Verbara.Platform.Surveys;
 using Verbara.Platform.Typification.Ai;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Platform.Core.Webhooks;
+using Verbara.Sdk.Pro.Dialer.Diagnostics;
 using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Storage.Postgres;
@@ -169,6 +170,14 @@ public static class ServiceCollectionExtensions
 
         // Audit
         services.AddSingleton<IAuditStore, PostgresAuditStore>();
+
+        // Dialer license-enforcement audit sink (dialer-license-audit-sink, Pro/ADR-0016).
+        // Implements the OPTIONAL Pro seam IDialerLicenseAuditSink; the Pro DialerEngine resolves it
+        // via GetService<IDialerLicenseAuditSink>() (null before this registration -> the record was
+        // silently dropped). The dialer stack is wired in Program.cs via AddProDialer /
+        // UsePostgresDialerStorage — this registration ships in the same Storage.Postgres package,
+        // so no Program.cs change is needed (design D4).
+        services.AddSingleton<IDialerLicenseAuditSink, PostgresDialerLicenseAuditSink>();
 
         // Billing
         services.AddSingleton<IUsageRecordStore, PostgresUsageRecordStore>();
