@@ -1,10 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Sdk.Pro.Realtime;
 using Verbara.Sdk.Pro.Realtime.Events;
@@ -16,36 +12,24 @@ namespace Verbara.Platform.Api.Tests;
 /// ADR-0012 gate #6 best-effort contract: the admin write-paths sync to Asterisk
 /// Realtime on a BEST-EFFORT basis — a sync failure must be swallowed (now logged,
 /// no longer an empty catch) because the Pro realtime reconciler re-converges on
-/// its next pass, so the admin write itself must still succeed. These tests drive
-/// each of the seven best-effort catch sites with an IRealtimeSyncService that
-/// throws and assert the write still returns success — covering both the contract
-/// and the catch bodies the empty-catch remediation introduced.
+/// its next pass, so the admin write itself must still succeed. This class runs on
+/// a factory whose IRealtimeSyncService throws on every call, then drives each of
+/// the seven best-effort catch sites and asserts the write still returns success —
+/// covering both the contract and the catch bodies the empty-catch remediation
+/// introduced.
 /// </summary>
-public sealed class AdminEndpointRealtimeFailureTests : IClassFixture<AuthenticatedPlatformApiFactory>
+public sealed class AdminEndpointRealtimeFailureTests
+    : IClassFixture<AdminEndpointRealtimeFailureTests.ThrowingSyncApiFactory>
 {
-    private readonly AuthenticatedPlatformApiFactory _factory;
+    private readonly HttpClient _client;
 
-    public AdminEndpointRealtimeFailureTests(AuthenticatedPlatformApiFactory factory)
-        => _factory = factory;
-
-    private HttpClient CreateThrowingSyncClient()
-    {
-        var client = _factory.WithWebHostBuilder(builder =>
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<IRealtimeSyncService>();
-                services.AddSingleton<IRealtimeSyncService>(new ThrowingRealtimeSyncService());
-            })).CreateClient();
-        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {AuthenticatedPlatformApiFactory.TestApiKey}");
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", AuthenticatedPlatformApiFactory.TestTenantId);
-        return client;
-    }
+    public AdminEndpointRealtimeFailureTests(ThrowingSyncApiFactory factory)
+        => _client = factory.CreateAuthenticatedClient();
 
     [Fact]
     public async Task CreateQueue_ShouldReturn201_WhenRealtimeSyncThrows()
     {
-        var client = CreateThrowingSyncClient();
-        var response = await client.PostAsync("/api/admin/queues",
+        var response = await _client.PostAsync("/api/admin/queues",
             JsonContent.Create(new { name = "q-sync-fail-create" }));
         response.StatusCode.Should().Be(HttpStatusCode.Created);
     }
@@ -53,12 +37,11 @@ public sealed class AdminEndpointRealtimeFailureTests : IClassFixture<Authentica
     [Fact]
     public async Task UpdateQueue_ShouldReturn200_WhenRealtimeSyncThrows()
     {
-        var client = CreateThrowingSyncClient();
-        var create = await client.PostAsync("/api/admin/queues",
+        var create = await _client.PostAsync("/api/admin/queues",
             JsonContent.Create(new { name = "q-sync-fail-update" }));
         var id = JsonNode.Parse(await create.Content.ReadAsStringAsync())!["id"]!.GetValue<string>();
 
-        var response = await client.PutAsync($"/api/admin/queues/{id}",
+        var response = await _client.PutAsync($"/api/admin/queues/{id}",
             JsonContent.Create(new { maxWaiting = 5 }));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
@@ -66,20 +49,18 @@ public sealed class AdminEndpointRealtimeFailureTests : IClassFixture<Authentica
     [Fact]
     public async Task DeleteQueue_ShouldReturn204_WhenRealtimeSyncThrows()
     {
-        var client = CreateThrowingSyncClient();
-        var create = await client.PostAsync("/api/admin/queues",
+        var create = await _client.PostAsync("/api/admin/queues",
             JsonContent.Create(new { name = "q-sync-fail-delete" }));
         var id = JsonNode.Parse(await create.Content.ReadAsStringAsync())!["id"]!.GetValue<string>();
 
-        var response = await client.DeleteAsync($"/api/admin/queues/{id}");
+        var response = await _client.DeleteAsync($"/api/admin/queues/{id}");
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
     [Fact]
     public async Task CreateAgent_ShouldReturn201_WhenAgentSyncThrows()
     {
-        var client = CreateThrowingSyncClient();
-        var response = await client.PostAsync("/api/admin/agents",
+        var response = await _client.PostAsync("/api/admin/agents",
             JsonContent.Create(new
             {
                 userId = "user-sync-fail-a",
@@ -93,12 +74,11 @@ public sealed class AdminEndpointRealtimeFailureTests : IClassFixture<Authentica
     [Fact]
     public async Task CreateAgent_ShouldReturn201_WhenAddQueueMemberThrows()
     {
-        var client = CreateThrowingSyncClient();
-        var queue = await client.PostAsync("/api/admin/queues",
+        var queue = await _client.PostAsync("/api/admin/queues",
             JsonContent.Create(new { name = "q-member-fail" }));
         var queueId = JsonNode.Parse(await queue.Content.ReadAsStringAsync())!["id"]!.GetValue<string>();
 
-        var response = await client.PostAsync("/api/admin/agents",
+        var response = await _client.PostAsync("/api/admin/agents",
             JsonContent.Create(new
             {
                 userId = "user-sync-fail-m",
@@ -111,12 +91,11 @@ public sealed class AdminEndpointRealtimeFailureTests : IClassFixture<Authentica
     [Fact]
     public async Task UpdateAgent_ShouldReturn200_WhenAgentSyncThrows()
     {
-        var client = CreateThrowingSyncClient();
-        var create = await client.PostAsync("/api/admin/agents",
+        var create = await _client.PostAsync("/api/admin/agents",
             JsonContent.Create(new { userId = "user-sync-fail-u", displayName = "Update Sync Agent" }));
         var id = JsonNode.Parse(await create.Content.ReadAsStringAsync())!["agentId"]!.GetValue<string>();
 
-        var response = await client.PutAsync($"/api/admin/agents/{id}",
+        var response = await _client.PutAsync($"/api/admin/agents/{id}",
             JsonContent.Create(new { extension = "7002", sipPassword = "s" }));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
@@ -124,8 +103,7 @@ public sealed class AdminEndpointRealtimeFailureTests : IClassFixture<Authentica
     [Fact]
     public async Task DeleteAgent_ShouldReturn204_WhenRealtimeSyncThrows()
     {
-        var client = CreateThrowingSyncClient();
-        var create = await client.PostAsync("/api/admin/agents",
+        var create = await _client.PostAsync("/api/admin/agents",
             JsonContent.Create(new
             {
                 userId = "user-sync-fail-d",
@@ -135,8 +113,15 @@ public sealed class AdminEndpointRealtimeFailureTests : IClassFixture<Authentica
             }));
         var id = JsonNode.Parse(await create.Content.ReadAsStringAsync())!["agentId"]!.GetValue<string>();
 
-        var response = await client.DeleteAsync($"/api/admin/agents/{id}");
+        var response = await _client.DeleteAsync($"/api/admin/agents/{id}");
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    /// <summary>Factory whose realtime sync throws on every operation.</summary>
+    public sealed class ThrowingSyncApiFactory : AuthenticatedPlatformApiFactory
+    {
+        protected override IRealtimeSyncService CreateRealtimeSyncService()
+            => new ThrowingRealtimeSyncService();
     }
 
     /// <summary>Every sync operation throws — models a fully unavailable realtime backend.</summary>

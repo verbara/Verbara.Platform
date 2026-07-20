@@ -30,7 +30,7 @@ namespace Verbara.Platform.Api.Tests;
 /// Also registers all in-memory store fallbacks so endpoints that depend on conditionally-
 /// registered Postgres stores (campaign, analytics) resolve correctly without a database.
 /// </summary>
-public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
+public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
 {
     public const string TestApiKey = "test-api-key-12345";
     public const string TestTenantId = "tenant-test-001";
@@ -61,6 +61,14 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
 
             // ── Dialer + Analytics stores ────────────────────────────────────
             RegisterInMemoryStores(services);
+
+            // ── Realtime sync (overridable) ──────────────────────────────────
+            // RegisterInMemoryStores already left a default no-op mock; this ADDS an
+            // overridable instance on top (last registration wins) so a subclass can
+            // inject a throwing stub for the best-effort-contract tests (ADR-0012
+            // gate #6) without disturbing the other factories that share the static
+            // helper. This closure runs after Startup, so it is the last word.
+            services.AddSingleton(CreateRealtimeSyncService());
         });
 
         var host = base.CreateHost(builder);
@@ -116,6 +124,14 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
         var task = tenantStore.UpsertAsync(tenant, CancellationToken.None);
         task.AsTask().GetAwaiter().GetResult();
     }
+
+    /// <summary>
+    /// The <see cref="Verbara.Sdk.Pro.Realtime.IRealtimeSyncService"/> registered for
+    /// tests. Base returns a no-op NSubstitute mock; a subclass overrides it to inject
+    /// a throwing stub (the best-effort-contract tests, ADR-0012 gate #6).
+    /// </summary>
+    protected virtual Verbara.Sdk.Pro.Realtime.IRealtimeSyncService CreateRealtimeSyncService()
+        => Substitute.For<Verbara.Sdk.Pro.Realtime.IRealtimeSyncService>();
 
     public HttpClient CreateAuthenticatedClient()
     {
@@ -311,6 +327,10 @@ public sealed class AuthenticatedPlatformApiFactory : WebApplicationFactory<Prog
             .ToList();
         foreach (var d in syncEngineDescriptors) services.Remove(d);
         RemoveAll<Verbara.Sdk.Pro.Realtime.IRealtimeSyncService>(services);
+        // Default no-op mock — this static helper is shared by several factories, so
+        // it must leave a working IRealtimeSyncService registered. AuthenticatedPlatform-
+        // ApiFactory.CreateHost ADDS an overridable instance on top (last-wins) so a
+        // subclass can swap in a throwing stub without affecting other factories.
         services.AddSingleton(Substitute.For<Verbara.Sdk.Pro.Realtime.IRealtimeSyncService>());
 
         // AgentAssist Postgres stores (concrete sealed types used by endpoints).
