@@ -101,6 +101,14 @@ jobs:
       # endpoint, no gating change (Platform:OpenApi:Enabled is explicitly set for this CI process
       # only, exactly like a maintainer running the host locally with the flag on).
       - name: Export OpenAPI document (CI-runtime capture)
+        # dependabot CI-load skip (Platform/decision_ref Sdk/ADR-0039, STEP-level):
+        # the OpenAPI-export chain boots the Api against the live Postgres service
+        # container — the heavy part of this job. On a dependabot PR the step is
+        # skipped (evaluates SUCCESS instantly) so the required check-run NAME
+        # ("Build + Unit Tests (Release)") still reports and the bot PR is not
+        # blocked forever (the ADR-0039 footgun: a JOB-level skip collapses the
+        # check context). merge_group always runs it (authoritative pre-merge gate).
+        if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
         working-directory: src/Verbara.Platform.Api
         env:
           ASPNETCORE_ENVIRONMENT: Development
@@ -149,12 +157,18 @@ jobs:
         # openapi-response-schemas (Platform/ADR-0035): assert every named response schema the
         # manifest declares (per consumer group, verbatim field names) exists in the captured
         # document. Subsumes the earlier single-CsatResponseDto fixture check (design D4).
+        # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): depends on the exported
+        # document above, so it is skipped on a bot PR alongside the export step.
+        if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
         run: >-
           python3 scripts/verify-openapi-fixture.py
           artifacts/openapi/openapi-document.json
           openspec/changes/archive/2026-07-19-openapi-response-schemas/fixtures/response-schema-manifest.v1.json
 
       - name: Upload OpenAPI document artifact
+        # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): no document is
+        # produced on a bot PR (export skipped above), so skip the upload too.
+        if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: openapi-document-${{ github.sha }}
@@ -246,12 +260,18 @@ jobs:
         # one dotnet test/vstest invocation reintroduces cross-project container
         # concurrency that per-project collection-serialization alone doesn't
         # cover, and reproduced real "Connection reset by peer" flake locally.
+        # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): the container-backed
+        # test run is the heavy part of this job; skipped on a bot PR so the
+        # required check-run NAME ("Live-DB Tests (Postgres)") still reports.
+        if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
         continue-on-error: true
         run: >-
           dotnet test tests/Verbara.Platform.Storage.Postgres.Tests/Verbara.Platform.Storage.Postgres.Tests.csproj
           --no-build -c Release --logger "console;verbosity=normal"
 
       - name: Live-DB tests — Identity.Redis.Tests
+        # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): as above.
+        if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
         continue-on-error: true
         run: >-
           dotnet test tests/Verbara.Platform.Identity.Redis.Tests/Verbara.Platform.Identity.Redis.Tests.csproj
@@ -375,3 +395,67 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate specs and changes (strict)
         run: npx -y @fission-ai/openspec@1.6.0 validate --all --strict --no-interactive
+
+  # AOT-at-PR gate (verbara-meta/ADR-0012 gate #1): run the REAL Native AOT publish
+  # of Verbara.Platform.Api on every PR and fail on any IL trim/AOT warning. Until now
+  # this gate only ran at release (the Dockerfile publishes AOT) — a dependency bump or
+  # a reflection-introducing change could regress AOT-safety and only surface at tag
+  # time. The R-011 apply ran this exact publish clean (0 IL2026/IL3050/IL207x, ~80MB
+  # ELF), so it passes today. This job runs on ALL PRs (NOT dependabot-skipped): a
+  # dependency bump is precisely what can break AOT, so the bot MUST clear it too.
+  # NOTE: making this a REQUIRED (merge-blocking) check needs a branch-protection /
+  # ruleset update (follow-up via gh api) — the job running on PRs is this deliverable.
+  aot-probe:
+    name: AOT Publish (Api)
+    runs-on: ubuntu-latest
+    # Native AOT compilation is slow (ILC + native codegen over the full Api closure);
+    # the R-011 apply took well under this. Generous ceiling so a slow runner does not
+    # false-fail without masking a genuine hang.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5.4.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Authenticate private NuGet feed (Verbara.Sdk.Pro.*)
+        # Same restore-auth as build-and-test: the Api references Pro packages from
+        # the private GitHub Packages feed, so auth IS needed here too.
+        env:
+          PACKAGES_PAT: ${{ secrets.PACKAGES_PAT }}
+        run: |
+          set -euo pipefail
+          dotnet nuget remove source local 2>/dev/null || true
+          dotnet nuget update source github \
+            --username verbara \
+            --password "$PACKAGES_PAT" \
+            --store-password-in-clear-text
+
+      - name: Native AOT publish (Api) — fail on any IL trim/AOT warning
+        # Mirrors scripts/profiling/aot-probe-publish.sh's grep-guard: publish the
+        # Api with PublishAot=true, capture the log, and fail if ANY `warning ILxxxx`
+        # (IL2026 / IL3050 / IL207x) is emitted. The grep-guard is used (rather than
+        # -warnaserror) to match the repo's existing aot-probe-publish.sh and stay
+        # robust to non-IL informational warnings the AOT toolchain can emit.
+        run: |
+          set -euo pipefail
+          LOG="$GITHUB_WORKSPACE/aot-publish.log"
+          set +e
+          dotnet publish src/Verbara.Platform.Api \
+            -c Release -r linux-x64 -p:PublishAot=true \
+            --nologo 2>&1 | tee "$LOG"
+          rc="${PIPESTATUS[0]}"
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::AOT publish failed (exit $rc)."
+            exit "$rc"
+          fi
+          if grep -E 'warning IL[0-9]+' "$LOG" >/dev/null 2>&1; then
+            echo "::error::Native AOT publish emitted IL trim/AOT warnings:"
+            grep -E 'warning IL[0-9]+' "$LOG"
+            exit 1
+          fi
+          echo "AOT publish clean — zero IL trim/AOT warnings."
