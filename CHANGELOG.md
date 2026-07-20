@@ -12,7 +12,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [2.20.0] - 2026-07-20
 
 ### Changed — Dependencies
-- Pin all `Verbara.Sdk.Pro.*` 2.11.0-pro → **2.11.1-pro** (in-train pin formalization; 2.11.1-pro adds the two test-only causal fences and the Sdk 2.3.2 bump — no production behaviour change vs. the 2.11.0-pro consumed by #161).
+- Pin all `Verbara.Sdk.Pro.*` 2.11.0-pro → **2.11.1-pro** and all direct `Verbara.Sdk.*` 2.3.1 → **2.3.2** (in-train pin formalization + transitive alignment: Pro 2.11.1-pro requires Sdk 2.3.2 transitively). No production behaviour change vs. the 2.11.0-pro consumed by #161.
 
 ### Added
 - **Dialer license enforcement at the point of spend (wires `Verbara.Sdk.Pro` 2.11.0-pro; Pro/ADR-0016).**
