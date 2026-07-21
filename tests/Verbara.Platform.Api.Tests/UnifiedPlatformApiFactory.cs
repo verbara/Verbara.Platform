@@ -30,7 +30,7 @@ namespace Verbara.Platform.Api.Tests;
 /// and provides authenticated HTTP client support. Replaces CampaignApiFactory and
 /// AnalyticsApiFactory so both test classes share one consistent factory implementation.
 /// </summary>
-public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
+public class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
 {
     public const string TestApiKey = "unified-test-key-77777";
     public const string TestTenantId = "tenant-unified-001";
@@ -43,6 +43,12 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
     public InMemoryCallAnalyticsStore QaStore { get; } = new();
     public InMemoryIntervalSnapshotStore SnapshotStore { get; } = new();
     internal Verbara.Platform.Storage.InMemory.InMemoryAgentStore AgentStore { get; } = new();
+
+    /// <summary>The <see cref="IAgentStore"/> the Analytics agent-name enrichment resolves. Defaults to
+    /// the seedable in-memory <see cref="AgentStore"/>; a subclass can return a throwing stub to exercise
+    /// the best-effort store-failure fallback in <c>BuildAgentNameMapAsync</c>. Registered LAST in
+    /// CreateHost so it wins over the realtime-sync decorator's unkeyed alias.</summary>
+    protected virtual IAgentStore CreateAgentStore() => AgentStore;
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -74,7 +80,7 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
 
             // ── Agent store (override the realtime-sync decorator's unkeyed alias with a
             //    test-accessible instance so Analytics agent-name enrichment can be seeded) ──
-            UpsertStore<IAgentStore>(services, AgentStore);
+            UpsertStore(services, CreateAgentStore());
         });
 
         var host = base.CreateHost(builder);

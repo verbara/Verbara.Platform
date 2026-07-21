@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
+using NSubstitute;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Pro.Analytics;
@@ -271,6 +272,44 @@ public sealed class AnalyticsEndpointTests : IClassFixture<UnifiedPlatformApiFac
             .GetValue<string>().Should().Be("sales");
         rows.Single(r => r!["sessionId"]!.GetValue<string>() == "qa-two-b")!["queueName"]!
             .GetValue<string>().Should().Be("billing");
+    }
+
+    [Fact]
+    public async Task ListCdr_ShouldFallBackToAgentId_WhenAgentStoreThrows()
+    {
+        // Store-throw path in BuildAgentNameMapAsync: the batch GetByIdsAsync throws, the single
+        // catch is swallowed, and every requested id keeps its self-name seed (agentName == agentId).
+        await using var factory = new ThrowingAgentStoreApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        await factory.CdrStore.UpsertAsync(MakeCdr(factory, "session-store-throw", "support", "agent-raw-id"));
+
+        var response = await client.GetAsync("/api/analytics/cdr");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var row = json!["data"]!.AsArray()
+            .Single(r => r!["sessionId"]!.GetValue<string>() == "session-store-throw");
+        row!["agentName"]!.GetValue<string>().Should().Be("agent-raw-id",
+            "on a store failure every id keeps its self-name seed");
+        await factory.ThrowingAgentStore.Received(1).GetByIdsAsync(
+            Arg.Any<TenantId>(), Arg.Any<IReadOnlyCollection<EntityId>>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Factory whose IAgentStore throws on the batch GetByIdsAsync lookup — models a
+    /// down agent store so the best-effort catch in BuildAgentNameMapAsync is exercised.</summary>
+    private sealed class ThrowingAgentStoreApiFactory : UnifiedPlatformApiFactory
+    {
+        public IAgentStore ThrowingAgentStore { get; } = Substitute.For<IAgentStore>();
+
+        public ThrowingAgentStoreApiFactory()
+        {
+            ThrowingAgentStore
+                .GetByIdsAsync(Arg.Any<TenantId>(), Arg.Any<IReadOnlyCollection<EntityId>>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromException<IReadOnlyList<Agent>>(new InvalidOperationException("agent store down")));
+        }
+
+        protected override IAgentStore CreateAgentStore() => ThrowingAgentStore;
     }
 
     [Fact]
