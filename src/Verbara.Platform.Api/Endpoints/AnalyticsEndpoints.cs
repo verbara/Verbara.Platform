@@ -146,12 +146,9 @@ internal static class AnalyticsEndpoints
         var agentNames = await BuildAgentNameMapAsync(pageRows.Select(r => r.AgentId).Distinct(), tenantIdObj, agentStore, ct);
 
         // Batch lookup QA scores
-        var qaResults = new Dictionary<string, CallAnalysisResult?>();
-        foreach (var row in pageRows)
-        {
-            var qa = await qaStore.GetAsync(row.SessionId, tenantId, ct);
-            qaResults[row.SessionId] = qa;
-        }
+        var sessionIds = pageRows.Select(r => r.SessionId).Distinct().ToList();
+        var qaList = await qaStore.GetBySessionIdsAsync(sessionIds, tenantId, ct);
+        var qaResults = qaList.ToDictionary(q => q.SessionId, q => (CallAnalysisResult?)q);
 
         // Batch lookup queue SLA targets (by name)
         var queueSlaMap = await BuildQueueSlaMapAsync(pageRows.Select(r => r.QueueName).Distinct(), tenantIdObj, queueStore, ct);
@@ -333,12 +330,9 @@ internal static class AnalyticsEndpoints
         var pageResults = hasMore ? results.Take(pageSize).ToList() : results.ToList();
 
         // Batch lookup CDR for AgentId / QueueName
-        var cdrMap = new Dictionary<string, CompletedSessionRow?>();
-        foreach (var r in pageResults)
-        {
-            var cdr = await cdrStore.GetAsync(tenantId, r.SessionId, ct);
-            cdrMap[r.SessionId] = cdr;
-        }
+        var sessionIds = pageResults.Select(r => r.SessionId).Distinct().ToList();
+        var cdrList = await cdrStore.GetBySessionIdsAsync(tenantId, sessionIds, ct);
+        var cdrMap = cdrList.ToDictionary(c => c.SessionId, c => (CompletedSessionRow?)c);
 
         // Batch enrich agent names
         var agentIds = cdrMap.Values
@@ -588,21 +582,29 @@ internal static class AnalyticsEndpoints
         [FromServices] IAgentStore agentStore,
         CancellationToken ct)
     {
-        var map = new Dictionary<string, string>();
-        foreach (var id in agentIds)
+        var ids = agentIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        // Missing-id → id fallback: seed every requested id to self-name, then overwrite with the
+        // resolved DisplayName for the agents the batch returns. A store throw is swallowed once and
+        // leaves every id self-named (same behavior as the pre-batch per-id catch, now single-shot).
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var id in ids)
+            map[id!] = id!;
+
+        try
         {
-            if (string.IsNullOrWhiteSpace(id)) continue;
-            if (map.ContainsKey(id)) continue;
-            try
-            {
-                var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(id), ct);
-                map[id] = agent?.DisplayName ?? id;
-            }
-            catch
-            {
-                map[id] = id;
-            }
+            var agents = await agentStore.GetByIdsAsync(tenantId, ids.Select(id => EntityId.From(id!)).ToList(), ct);
+            foreach (var agent in agents)
+                map[agent.AgentId.Value] = agent.DisplayName;
         }
+        catch
+        {
+            // Best-effort enrichment: on a store failure every id keeps its self-name seed.
+        }
+
         return map;
     }
 

@@ -14,6 +14,15 @@ internal sealed class InMemoryAgentStore : IAgentStore
         return Task.FromResult(item);
     }
 
+    public Task<IReadOnlyList<Agent>> GetByIdsAsync(TenantId tenantId, IReadOnlyCollection<EntityId> agentIds, CancellationToken ct)
+    {
+        var idSet = agentIds.ToHashSet();
+        IReadOnlyList<Agent> result = _items.Values
+            .Where(a => a.TenantId == tenantId && idSet.Contains(a.AgentId))
+            .ToList();
+        return Task.FromResult(result);
+    }
+
     public Task<Agent?> GetByUserIdAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
     {
         var result = _items.Values.FirstOrDefault(a =>

@@ -19,6 +19,16 @@ public sealed class InMemoryCompletedSessionStore : ICompletedSessionStore
         return new(row);
     }
 
+    public ValueTask<IReadOnlyList<CompletedSessionRow>> GetBySessionIdsAsync(
+        string tenantId, IReadOnlyCollection<string> sessionIds, CancellationToken ct = default)
+    {
+        var idSet = sessionIds.ToHashSet();
+        IReadOnlyList<CompletedSessionRow> results = _rows.Values
+            .Where(r => r.TenantId == tenantId && idSet.Contains(r.SessionId))
+            .ToList();
+        return new(results);
+    }
+
     public ValueTask<IReadOnlyList<CompletedSessionRow>> QueryAsync(string tenantId, CompletedSessionQuery query, CancellationToken ct = default)
     {
         var results = _rows.Values

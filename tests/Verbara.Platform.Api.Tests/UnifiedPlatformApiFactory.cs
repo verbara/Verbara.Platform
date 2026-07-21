@@ -42,6 +42,7 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
     public InMemoryCompletedSessionStore CdrStore { get; } = new();
     public InMemoryCallAnalyticsStore QaStore { get; } = new();
     public InMemoryIntervalSnapshotStore SnapshotStore { get; } = new();
+    internal Verbara.Platform.Storage.InMemory.InMemoryAgentStore AgentStore { get; } = new();
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -70,6 +71,10 @@ public sealed class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
             UpsertStore<ICompletedSessionStore>(services, CdrStore);
             UpsertStore<ICallAnalyticsStore>(services, QaStore);
             UpsertStore<IIntervalSnapshotStore>(services, SnapshotStore);
+
+            // ── Agent store (override the realtime-sync decorator's unkeyed alias with a
+            //    test-accessible instance so Analytics agent-name enrichment can be seeded) ──
+            UpsertStore<IAgentStore>(services, AgentStore);
         });
 
         var host = base.CreateHost(builder);
@@ -344,6 +349,16 @@ public sealed class InMemoryCompletedSessionStore : ICompletedSessionStore
         return new ValueTask<CompletedSessionRow?>(row);
     }
 
+    public ValueTask<IReadOnlyList<CompletedSessionRow>> GetBySessionIdsAsync(
+        string tenantId, IReadOnlyCollection<string> sessionIds, CancellationToken ct = default)
+    {
+        var idSet = sessionIds.ToHashSet();
+        IReadOnlyList<CompletedSessionRow> results = _rows.Values
+            .Where(r => r.TenantId == tenantId && idSet.Contains(r.SessionId))
+            .ToList();
+        return new ValueTask<IReadOnlyList<CompletedSessionRow>>(results);
+    }
+
     public ValueTask<IReadOnlyList<CompletedSessionRow>> QueryAsync(
         string tenantId, CompletedSessionQuery query, CancellationToken ct = default)
     {
@@ -407,6 +422,16 @@ public sealed class InMemoryCallAnalyticsStore : ICallAnalyticsStore
     {
         _results.TryGetValue($"{tenantId}:{sessionId}", out var result);
         return new ValueTask<CallAnalysisResult?>(result);
+    }
+
+    public ValueTask<IReadOnlyList<CallAnalysisResult>> GetBySessionIdsAsync(
+        IReadOnlyCollection<string> sessionIds, string tenantId, CancellationToken ct = default)
+    {
+        var idSet = sessionIds.ToHashSet();
+        IReadOnlyList<CallAnalysisResult> results = _results.Values
+            .Where(r => r.TenantId == tenantId && idSet.Contains(r.SessionId))
+            .ToList();
+        return new ValueTask<IReadOnlyList<CallAnalysisResult>>(results);
     }
 
     public ValueTask<IReadOnlyList<CallAnalysisResult>> QueryAsync(CallAnalyticsQuery query, CancellationToken ct = default)

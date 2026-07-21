@@ -29,6 +29,25 @@ internal sealed class PostgresAgentStore : IAgentStore
         return row?.ToAgent();
     }
 
+    public async Task<IReadOnlyList<Agent>> GetByIdsAsync(TenantId tenantId, IReadOnlyCollection<EntityId> agentIds, CancellationToken ct)
+    {
+        if (agentIds.Count == 0)
+            return [];
+
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "offline_since, created_at, updated_at, created_by, updated_by " +
+            "FROM agents WHERE tenant_id = @TenantId AND agent_id = ANY(@Ids)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("Ids", agentIds.Select(id => id.Value).ToArray()));
+            },
+            AgentRow.Map, ct);
+        return rows.Select(r => r.ToAgent()).ToList();
+    }
+
     public async Task<Agent?> GetByUserIdAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
     {
         // The ONLY callers are the self-scoped GET/PUT /agents/me (the caller's own

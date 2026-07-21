@@ -152,6 +152,77 @@ public sealed class InMemoryAgentStoreTests
     }
 
     [Fact]
+    public async Task GetByIdsAsync_ShouldReturnRequestedSubset_WhenMultipleSaved()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        var a1 = MakeAgent(tenant, AgentState.Available);
+        var a2 = MakeAgent(tenant, AgentState.Busy);
+        var a3 = MakeAgent(tenant, AgentState.Offline);
+        await store.SaveAsync(a1, CancellationToken.None);
+        await store.SaveAsync(a2, CancellationToken.None);
+        await store.SaveAsync(a3, CancellationToken.None);
+
+        var result = await store.GetByIdsAsync(tenant, [a1.AgentId, a3.AgentId], CancellationToken.None);
+
+        result.Select(a => a.AgentId).Should().BeEquivalentTo(new[] { a1.AgentId, a3.AgentId });
+    }
+
+    [Fact]
+    public async Task GetByIdsAsync_ShouldIsolateByTenant_WhenSameIdSetAcrossTenants()
+    {
+        var store = new InMemoryAgentStore();
+        var tenantA = new TenantId("tenant-a");
+        var tenantB = new TenantId("tenant-b");
+        var inA = MakeAgent(tenantA, AgentState.Available);
+        var inB = MakeAgent(tenantB, AgentState.Available);
+        await store.SaveAsync(inA, CancellationToken.None);
+        await store.SaveAsync(inB, CancellationToken.None);
+
+        var result = await store.GetByIdsAsync(tenantA, [inA.AgentId, inB.AgentId], CancellationToken.None);
+
+        result.Should().ContainSingle().Which.AgentId.Should().Be(inA.AgentId);
+    }
+
+    [Fact]
+    public async Task GetByIdsAsync_ShouldReturnEmpty_WhenEmptyCollection()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        await store.SaveAsync(MakeAgent(tenant, AgentState.Available), CancellationToken.None);
+
+        var result = await store.GetByIdsAsync(tenant, [], CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetByIdsAsync_ShouldOmitUnknownIds_WhenSomeNotPresent()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        var known = MakeAgent(tenant, AgentState.Available);
+        await store.SaveAsync(known, CancellationToken.None);
+
+        var result = await store.GetByIdsAsync(tenant, [known.AgentId, EntityId.New()], CancellationToken.None);
+
+        result.Should().ContainSingle().Which.AgentId.Should().Be(known.AgentId);
+    }
+
+    [Fact]
+    public async Task GetByIdsAsync_ShouldReturnEachAgentOnce_WhenDuplicateIdsRequested()
+    {
+        var store = new InMemoryAgentStore();
+        var tenant = new TenantId("tenant-1");
+        var agent = MakeAgent(tenant, AgentState.Available);
+        await store.SaveAsync(agent, CancellationToken.None);
+
+        var result = await store.GetByIdsAsync(tenant, [agent.AgentId, agent.AgentId], CancellationToken.None);
+
+        result.Should().ContainSingle().Which.AgentId.Should().Be(agent.AgentId);
+    }
+
+    [Fact]
     public async Task SaveAsync_ShouldRoundTripPendingFields_WhenPendingSet()
     {
         var store = new InMemoryAgentStore();

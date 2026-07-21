@@ -39,6 +39,9 @@ internal sealed class RealtimeSyncingAgentStore : IAgentStore
     public Task<Agent?> GetByIdAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
         => _inner.GetByIdAsync(tenantId, agentId, ct);
 
+    public Task<IReadOnlyList<Agent>> GetByIdsAsync(TenantId tenantId, IReadOnlyCollection<EntityId> agentIds, CancellationToken ct)
+        => _inner.GetByIdsAsync(tenantId, agentIds, ct);
+
     public Task<Agent?> GetByUserIdAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
         => _inner.GetByUserIdAsync(tenantId, userId, ct);
 
