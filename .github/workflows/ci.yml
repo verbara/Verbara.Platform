@@ -403,8 +403,8 @@ jobs:
   # time. The R-011 apply ran this exact publish clean (0 IL2026/IL3050/IL207x, ~80MB
   # ELF), so it passes today. This job runs on ALL PRs (NOT dependabot-skipped): a
   # dependency bump is precisely what can break AOT, so the bot MUST clear it too.
-  # NOTE: making this a REQUIRED (merge-blocking) check needs a branch-protection /
-  # ruleset update (follow-up via gh api) — the job running on PRs is this deliverable.
+  # This IS a required (merge-blocking) check: the main-protection ruleset requires the
+  # "AOT Publish (Api)" context (promoted 2026-07-20; verbara-meta/ADR-0012 G-012).
   aot-probe:
     name: AOT Publish (Api)
     runs-on: ubuntu-latest
@@ -469,9 +469,8 @@ jobs:
   #      budget — extract endpoint groups instead of growing the god-file.
   # Cheap (~seconds, pure Python stdlib, no .NET). Guard logic is unit-tested in
   # the coverage-scripts job (scripts/tests/test_check_endpoint_invariants.py).
-  # NOTE: making this a REQUIRED (merge-blocking) check needs a branch-protection /
-  # ruleset update (operator-authorized follow-up) — the job running on PRs is this
-  # deliverable, same posture as the aot-probe job above.
+  # This IS a required (merge-blocking) check: the main-protection ruleset requires the
+  # "Invariant Gates" context (promoted 2026-07-20; verbara-meta/ADR-0012 G-013).
   invariant-gates:
     name: Invariant Gates
     runs-on: ubuntu-latest
