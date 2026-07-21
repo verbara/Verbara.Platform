@@ -1,0 +1,84 @@
+# gates.yaml — ADR-0014 §2 Gate Contract manifest for Verbara.Platform.
+# One entry per language-agnostic gate class (G1-G8). Cross-checkable by /xr:doctor.
+#   status: present | partial | na
+#   impl:          (present/partial) the CONCRETE CI job / script / guard that instantiates it — exists in this repo
+#   justification: (na) why the class genuinely does not apply to this repo's stack + chain role
+#
+# Verbara.Platform is the 8/8 REFERENCE repo for this contract (ADR-0014 §2, "reference-implementation" column).
+repo: Verbara.Platform
+role: leaf
+visibility: public
+charter: docs/specs/architecture.md
+decision_ref: verbara-meta/ADR-0014
+gates:
+  - id: G1
+    class: build-strictness
+    status: present
+    impl: >-
+      .github/workflows/ci.yml job "Build + Unit Tests (Release)" — `dotnet build Verbara.Platform.slnx -c Release`
+      then `dotnet test` over the .slnx (fast lane excludes only the two container-backed projects). Required check.
+
+  - id: G2
+    class: warnings-as-errors+banned-deps
+    status: present
+    impl: >-
+      Directory.Build.props — TreatWarningsAsErrors=true + WarningLevel=9999 (fail the Release build on any warning);
+      `BanDapperPackageReferences` target (ADR-0022) errors on Dapper/Dapper.AOT/Verbara.Sdk.Dapper.Stubs;
+      `BanCrownJewelProInNonAotMicroservices` target (ADR-0023) errors if Realtime/Renderer/Mail reference a
+      crown-jewel Pro package. Enforced inside the G1 Release build.
+
+  - id: G3
+    class: coverage
+    status: present
+    impl: >-
+      .github/workflows/ci.yml job "Coverage Ratchet" (verbara-meta/ADR-0013 triplet):
+      scripts/check-patch-coverage.py (diff-cover vs origin/main >= patch floor),
+      scripts/check-coverage-floor.py (two-sided line band + branch + lines_valid_min),
+      scripts/check-exclusion-baseline.py (net-new [ExcludeFromCodeCoverage] denominator guard);
+      floors in coverage-floor.json / coverage-exclusion-baseline.json. Guard scripts unit-tested in the
+      "Coverage Script Tests" job (scripts/tests/).
+
+  - id: G4
+    class: architecture-layering
+    status: present
+    impl: >-
+      tests/Verbara.Platform.Architecture.Tests — ServiceLocatorScanner (exactly one allowlisted
+      RequestServices.GetService<IRealtimeSyncService> survivor under Endpoints/) + EnrichmentLoopScanner
+      (zero per-row store reads in a loop on the analytics enrichment surface); plus
+      tests/Verbara.Platform.Governance.Tests SyncFenceScanner (no unmarked wall-clock sync barrier in tests).
+      Roslyn scanners with liveness floors + true/false-positive self-tests; in the .slnx, so they run in the
+      G1/G3 unit lane.
+
+  - id: G5
+    class: content-invariants
+    status: present
+    impl: >-
+      .github/workflows/ci.yml job "Invariant Gates" — scripts/check-endpoint-invariants.py gate #6 (no empty
+      `catch {}` under any Endpoints/ dir) + gate #7 (no Guid.NewGuid interpolated into a credential-named mint;
+      mint via SecretTokenGenerator CSPRNG instead). Content-scoped grep gates, floor zero. Required check.
+
+  - id: G6
+    class: budgets
+    status: present
+    impl: >-
+      LOC_BUDGETS in scripts/check-endpoint-invariants.py gate #9 — frozen ratchet on
+      src/Verbara.Platform.Api/Program.cs (composition root may not grow past its budget; ratchet DOWN only).
+      Same "Invariant Gates" required check as G5.
+
+  - id: G7
+    class: publish-reality
+    status: present
+    impl: >-
+      .github/workflows/ci.yml job "AOT Publish (Api)" (verbara-meta/ADR-0012 gate #1) — real
+      `dotnet publish src/Verbara.Platform.Api -p:PublishAot=true`, fails on any `warning IL…` (IL2026/IL3050/IL207x).
+      Required (merge-blocking) check. SCOPED to the api image: per ADR-0023 the realtime/renderer/mail images
+      are IL BY DESIGN (SignalR/QuestPDF/MailKit reflection, no crown-jewel Pro IP), so AOT-publish is N/A for them.
+
+  - id: G8
+    class: supply-chain
+    status: present
+    impl: >-
+      .github/workflows/dependency-review.yml (Dependency Review — fail-on-severity high + deny AGPL/GPL/SSPL) +
+      dependabot-automerge.yml + codeql.yml (security-extended) + release.yml (cosign v3 signing of all 4 images,
+      verified against .github/cosign.pub) + digest-reconciliation.yml (daily authorized-digests.json drift check,
+      Layer-C license binding).
