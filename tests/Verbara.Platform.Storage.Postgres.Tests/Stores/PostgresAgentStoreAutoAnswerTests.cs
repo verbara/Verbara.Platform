@@ -76,6 +76,31 @@ public class PostgresAgentStoreAutoAnswerTests : IClassFixture<AgentStoreAutoAns
     }
 
     [Fact]
+    public async Task GetByIdsAsync_ShouldReturnRequestedSubsetScopedToTenant_WhenAgentsSaved()
+    {
+        var a1 = NewAgent(EntityId.New(), autoAnswer: null);
+        var a2 = NewAgent(EntityId.New(), autoAnswer: null);
+        var a3 = NewAgent(EntityId.New(), autoAnswer: null);
+        await _sut.SaveAsync(a1, CancellationToken.None);
+        await _sut.SaveAsync(a2, CancellationToken.None);
+        await _sut.SaveAsync(a3, CancellationToken.None);
+
+        var result = await _sut.GetByIdsAsync(Tenant, [a1.AgentId, a3.AgentId], CancellationToken.None);
+
+        result.Select(a => a.AgentId).Should().BeEquivalentTo(new[] { a1.AgentId, a3.AgentId });
+    }
+
+    [Fact]
+    public async Task GetByIdsAsync_ShouldReturnEmpty_WhenEmptyCollection()
+    {
+        await _sut.SaveAsync(NewAgent(EntityId.New(), autoAnswer: null), CancellationToken.None);
+
+        var result = await _sut.GetByIdsAsync(Tenant, [], CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SaveAsync_ShouldUpdateAutoAnswer_OnUpsert()
     {
         var userId = EntityId.New();

@@ -20,6 +20,16 @@ public sealed class InMemoryCallAnalyticsStore : ICallAnalyticsStore
         return new(result);
     }
 
+    public ValueTask<IReadOnlyList<CallAnalysisResult>> GetBySessionIdsAsync(
+        IReadOnlyCollection<string> sessionIds, string tenantId, CancellationToken ct = default)
+    {
+        var idSet = sessionIds.ToHashSet();
+        IReadOnlyList<CallAnalysisResult> results = _results.Values
+            .Where(r => r.TenantId == tenantId && idSet.Contains(r.SessionId))
+            .ToList();
+        return new(results);
+    }
+
     public ValueTask<IReadOnlyList<CallAnalysisResult>> QueryAsync(CallAnalyticsQuery query, CancellationToken ct = default)
     {
         var results = _results.Values

@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
+using NSubstitute;
+using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
 using Verbara.Sdk.Pro.Analytics;
 using Verbara.Sdk.Pro.CallAnalytics.Domain;
 using Verbara.Sdk.Pro.EventStore;
@@ -170,6 +173,143 @@ public sealed class AnalyticsEndpointTests : IClassFixture<UnifiedPlatformApiFac
         rows.Count.Should().BeGreaterThan(0);
         // agentName null when no agentId
         rows[0]!["agentName"].Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ListCdr_ShouldReturnAgentDisplayName_WhenAgentSeeded()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var agentId = EntityId.From("agent-enriched");
+        await factory.AgentStore.SaveAsync(new Agent
+        {
+            AgentId = agentId,
+            TenantId = new TenantId(UnifiedPlatformApiFactory.TestTenantId),
+            UserId = EntityId.New(),
+            DisplayName = "Alice Anderson",
+            State = AgentState.Available,
+            CreatedAt = DateTimeOffset.UtcNow,
+        }, CancellationToken.None);
+        await factory.CdrStore.UpsertAsync(MakeCdr(factory, "session-agent-enriched", "support", agentId.Value));
+
+        var response = await client.GetAsync("/api/analytics/cdr");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var row = json!["data"]!.AsArray()
+            .Single(r => r!["sessionId"]!.GetValue<string>() == "session-agent-enriched");
+        row!["agentName"]!.GetValue<string>().Should().Be("Alice Anderson");
+    }
+
+    [Fact]
+    public async Task ListCdr_ShouldEnrichBothRows_WhenTwoSessionsWithDistinctAgents()
+    {
+        // Two-session batch path (>1 id) — GetBySessionIdsAsync + GetByIdsAsync batch loads.
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+        var now = DateTimeOffset.UtcNow;
+
+        var agentA = EntityId.From("agent-A");
+        var agentB = EntityId.From("agent-B");
+        await factory.AgentStore.SaveAsync(new Agent
+        {
+            AgentId = agentA,
+            TenantId = new TenantId(UnifiedPlatformApiFactory.TestTenantId),
+            UserId = EntityId.New(),
+            DisplayName = "Agent A",
+            State = AgentState.Available,
+            CreatedAt = now,
+        }, CancellationToken.None);
+        await factory.AgentStore.SaveAsync(new Agent
+        {
+            AgentId = agentB,
+            TenantId = new TenantId(UnifiedPlatformApiFactory.TestTenantId),
+            UserId = EntityId.New(),
+            DisplayName = "Agent B",
+            State = AgentState.Available,
+            CreatedAt = now,
+        }, CancellationToken.None);
+
+        var cdrA = MakeCdr(factory, "session-two-a", "support", agentA.Value);
+        cdrA.StartedAt = now.AddMinutes(-2);
+        cdrA.CompletedAt = now.AddMinutes(-2).AddMinutes(5);
+        var cdrB = MakeCdr(factory, "session-two-b", "support", agentB.Value);
+        cdrB.StartedAt = now.AddMinutes(-1);
+        cdrB.CompletedAt = now.AddMinutes(-1).AddMinutes(5);
+        await factory.CdrStore.UpsertAsync(cdrA);
+        await factory.CdrStore.UpsertAsync(cdrB);
+
+        var response = await client.GetAsync("/api/analytics/cdr");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var rows = json!["data"]!.AsArray();
+        rows.Single(r => r!["sessionId"]!.GetValue<string>() == "session-two-a")!["agentName"]!
+            .GetValue<string>().Should().Be("Agent A");
+        rows.Single(r => r!["sessionId"]!.GetValue<string>() == "session-two-b")!["agentName"]!
+            .GetValue<string>().Should().Be("Agent B");
+    }
+
+    [Fact]
+    public async Task ListQa_ShouldEnrichBothRows_WhenTwoSessionsWithLinkedCdrs()
+    {
+        // Two-session batch path (>1 id) for ListQa — GetBySessionIdsAsync CDR batch load.
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        await factory.CdrStore.UpsertAsync(MakeCdr(factory, "qa-two-a", "sales"));
+        await factory.CdrStore.UpsertAsync(MakeCdr(factory, "qa-two-b", "billing"));
+        await factory.QaStore.SaveAsync(MakeQaResult(factory, "qa-two-a"));
+        await factory.QaStore.SaveAsync(MakeQaResult(factory, "qa-two-b"));
+
+        var response = await client.GetAsync("/api/analytics/qa");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var rows = json!["data"]!.AsArray();
+        rows.Single(r => r!["sessionId"]!.GetValue<string>() == "qa-two-a")!["queueName"]!
+            .GetValue<string>().Should().Be("sales");
+        rows.Single(r => r!["sessionId"]!.GetValue<string>() == "qa-two-b")!["queueName"]!
+            .GetValue<string>().Should().Be("billing");
+    }
+
+    [Fact]
+    public async Task ListCdr_ShouldFallBackToAgentId_WhenAgentStoreThrows()
+    {
+        // Store-throw path in BuildAgentNameMapAsync: the batch GetByIdsAsync throws, the single
+        // catch is swallowed, and every requested id keeps its self-name seed (agentName == agentId).
+        await using var factory = new ThrowingAgentStoreApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        await factory.CdrStore.UpsertAsync(MakeCdr(factory, "session-store-throw", "support", "agent-raw-id"));
+
+        var response = await client.GetAsync("/api/analytics/cdr");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        var row = json!["data"]!.AsArray()
+            .Single(r => r!["sessionId"]!.GetValue<string>() == "session-store-throw");
+        row!["agentName"]!.GetValue<string>().Should().Be("agent-raw-id",
+            "on a store failure every id keeps its self-name seed");
+        await factory.ThrowingAgentStore.Received(1).GetByIdsAsync(
+            Arg.Any<TenantId>(), Arg.Any<IReadOnlyCollection<EntityId>>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Factory whose IAgentStore throws on the batch GetByIdsAsync lookup — models a
+    /// down agent store so the best-effort catch in BuildAgentNameMapAsync is exercised.</summary>
+    private sealed class ThrowingAgentStoreApiFactory : UnifiedPlatformApiFactory
+    {
+        public IAgentStore ThrowingAgentStore { get; } = Substitute.For<IAgentStore>();
+
+        public ThrowingAgentStoreApiFactory()
+        {
+            ThrowingAgentStore
+                .GetByIdsAsync(Arg.Any<TenantId>(), Arg.Any<IReadOnlyCollection<EntityId>>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromException<IReadOnlyList<Agent>>(new InvalidOperationException("agent store down")));
+        }
+
+        protected override IAgentStore CreateAgentStore() => ThrowingAgentStore;
     }
 
     [Fact]

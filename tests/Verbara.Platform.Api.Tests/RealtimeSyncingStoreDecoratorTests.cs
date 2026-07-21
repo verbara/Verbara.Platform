@@ -152,6 +152,23 @@ public sealed class RealtimeSyncingStoreDecoratorTests
     }
 
     [Fact]
+    public async Task GetByIdsAsync_ShouldDelegateToInner_WhenAgentsExist()
+    {
+        var inner = new InMemoryAgentStore();
+        var sync = Substitute.For<IRealtimeSyncService>();
+        var sut = new RealtimeSyncingAgentStore(inner, sync, NullLogger<RealtimeSyncingAgentStore>.Instance);
+        var a1 = MakeAgent(extension: "7001", sipPassword: "secret");
+        var a2 = MakeAgent(extension: "7002", sipPassword: "secret");
+        await inner.SaveAsync(a1, CancellationToken.None);
+        await inner.SaveAsync(a2, CancellationToken.None);
+
+        var result = await sut.GetByIdsAsync(new TenantId(Tenant), [a1.AgentId, a2.AgentId], CancellationToken.None);
+
+        result.Select(a => a.AgentId).Should().BeEquivalentTo(new[] { a1.AgentId, a2.AgentId },
+            "the read must pass straight through to the inner store");
+    }
+
+    [Fact]
     public async Task AgentDelete_ShouldRemoveViaSync()
     {
         var inner = new InMemoryAgentStore();
