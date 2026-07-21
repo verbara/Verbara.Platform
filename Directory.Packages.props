@@ -121,6 +121,13 @@
          audit (NU1903) flags as an error. 2.9.0 is the patched release (same major, API-compatible
          floor for AspNetCore.OpenApi). Pre-existing on main; pinned here to unblock the build. -->
     <PackageVersion Include="Microsoft.OpenApi" Version="2.9.0" />
+    <!-- Transitive-pin override (CentralPackageTransitivePinningEnabled=true): System.Security.
+         Cryptography.Xml 10.0.7 is pulled transitively across src + test projects and carries four
+         HIGH-severity advisories (GHSA-23rf-6693-g89p / GHSA-8q5v-6pqq-x66h / GHSA-cvvh-rhrc-wg4q /
+         GHSA-g8r8-53c2-pm3f) that NuGet audit (NU1903) escalates to a build error under TWAE.
+         10.0.10 is the latest .NET 10 servicing patch, clearing all four. Advisory drift — published
+         after the last green main run (01560e4); pinned here to unblock every Platform build. -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup>
