@@ -9,6 +9,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-07-24
+
 ### Security
 - **Management API keys now minted from a CSPRNG, not `Guid.NewGuid()`** (ADR-0012 Ola-3,
   gate #7). The 3 mgmt-key mint sites (`ManagementApiKeyEndpoints` create/rotate,
