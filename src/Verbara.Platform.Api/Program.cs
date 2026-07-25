@@ -1630,7 +1630,7 @@ var openApiEnabled = builder.Environment.IsDevelopment()
 
 if (openApiEnabled)
 {
-    builder.Services.AddOpenApi();
+    builder.Services.AddOpenApi(o => o.AddSchemaTransformer<Verbara.Platform.Api.OpenApi.NumericSchemaTruthTransformer>());
 }
 
 var app = builder.Build();

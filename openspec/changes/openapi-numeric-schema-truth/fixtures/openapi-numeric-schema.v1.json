@@ -1,0 +1,59 @@
+{
+  "_comment": "Golden slice of the CORRECTED OpenAPI document (openapi-numeric-schema-truth), verbatim from the CI-captured document (fixtures/openapi-document.corrected.json). After the IOpenApiSchemaTransformer strips the spurious .NET 10 string arm, every numeric body/response field declares a SINGLE JSON type ('integer' or 'number'), never the ['integer','string']/['number','string'] union. Representative schemas below cover int32, double, nullable numerics, arrays, and $ref reuse. In OpenAPI 3.1 (Microsoft.OpenApi 2.9.0) a nullable numeric renders as a type ARRAY with the 'null' member (e.g. ['null','integer']) — the transformer preserves that Null flag and strips ONLY the 'string' arm. Child specs cite field name + single/nullable numeric type VERBATIM from here (verbatim-fixture-citation rule). Timestamps/EntityId stay 'string' as before (not part of the numeric union).",
+  "openapi": "3.1.1",
+  "components": {
+    "schemas": {
+      "CsatAggregateDto": {
+        "type": "object",
+        "properties": {
+          "totalResponses": { "type": "integer", "format": "int32" },
+          "averageRating": { "type": "number", "format": "double" },
+          "rangeStart": { "type": "string", "format": "date-time" },
+          "rangeEnd": { "type": "string", "format": "date-time" },
+          "queues": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CsatResponseDto" }
+          }
+        },
+        "required": ["totalResponses", "averageRating", "rangeStart", "rangeEnd", "queues"]
+      },
+      "CsatResponseDto": {
+        "type": "object",
+        "properties": {
+          "queueName": { "type": "string" },
+          "channel": { "type": "string" },
+          "totalResponses": { "type": "integer", "format": "int32" },
+          "averageRating": { "type": "number", "format": "double" },
+          "rangeStart": { "type": "string", "format": "date-time" },
+          "rangeEnd": { "type": "string", "format": "date-time" }
+        },
+        "required": ["queueName", "channel", "totalResponses", "averageRating", "rangeStart", "rangeEnd"]
+      },
+      "DashboardKpisDto": {
+        "type": "object",
+        "properties": {
+          "conversationsHandled": { "type": "integer", "format": "int32" },
+          "avgWaitMs": { "type": "number", "format": "double" },
+          "avgHandleTimeMs": { "type": "number", "format": "double" },
+          "slaPercent": { "type": "number", "format": "double" },
+          "abandonRatePercent": { "type": "number", "format": "double" }
+        },
+        "required": ["conversationsHandled", "avgWaitMs", "avgHandleTimeMs", "slaPercent", "abandonRatePercent"]
+      },
+      "QueueMetricsDto": {
+        "type": "object",
+        "properties": {
+          "queueId": { "type": "string" },
+          "queueName": { "type": "string" },
+          "waiting": { "type": ["null", "integer"], "format": "int32" },
+          "avgWaitSeconds": { "type": ["null", "number"], "format": "double" },
+          "slaPercent": { "type": "number", "format": "double" },
+          "agentsAvailable": { "type": "integer", "format": "int32" },
+          "agentsBusy": { "type": "integer", "format": "int32" },
+          "agentsAway": { "type": "integer", "format": "int32" }
+        },
+        "required": ["queueName", "slaPercent", "agentsAvailable", "agentsBusy", "agentsAway"]
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+kind: feature
+version: 1
+change_id: openapi-numeric-schema-truth
+decision_ref: Platform/ADR-0036   # NEW ADR authored by this change; amends Platform/ADR-0035
+                                  # (OpenAPI CI-export contract). Root cause: dotnet/aspnetcore #64145.
+
+# Cross-repo scope confirmed by /xr:change read-only scouts (2026-07-24). Three active repos were
+# scouted and are OUT OF SCOPE — none consumes Platform's emitted OpenAPI document or generates
+# types/a client from it, so none needs a regen:
+#   Verbara.Sdk      — grep openapi|swagger|nswag|refit = docs-only hits; its sole OpenAPI codegen
+#                      targets the Asterisk 22 spec (Asterisk.Sdk.Ari.SourceGenerators), not Platform.
+#                      No ProjectReference/PackageReference to Verbara.Platform.
+#   Verbara.Sdk.Pro  — grep openapi|swagger|nswag|refit|swashbuckle|kiota = 0 code hits; consumed BY
+#                      Platform via NuGet, not an HTTP consumer of Platform's REST API.
+#   verbara-website  — no openapi/codegen deps; Astro + Cloudflare Workers + authorized-digests.json only.
+
+repos:
+  - path: ../Verbara.Platform
+    role: producer
+    buildOrder: 1
+    childChange: HOST
+    summary: >
+      Host + sole contract producer. src/Verbara.Platform.Api/Program.cs:1633 registers
+      `AddOpenApi()` bare — NO IOpenApiSchemaTransformer/IOpenApiDocumentTransformer/document filter
+      registered (repo-wide grep zero hits) and `NumberHandling` set nowhere
+      (ConfigureHttpJsonOptions, Program.cs:1592-1609) — so .NET 10's JsonSchemaExporter emits every
+      numeric body/response field as the `["integer"|"number","string"]` union.
+      scripts/verify-openapi-fixture.py:20-23 only TOLERATES the artifact (compares field NAMES, not
+      JSON types); typed-response-schemas spec.md:19/design.md:82 explicitly tolerate it. This change
+      adds a NEW IOpenApiSchemaTransformer that strips the spurious string arm (document-only; NOT
+      NumberHandling.Strict — no runtime change, callers may still POST stringified numbers), regenerates
+      the fixture/manifest verification input, and authors ADR-0036. No existing mechanism strips it.
+
+  - path: ../Verbara.Platform.Web
+    role: consumer
+    buildOrder: 2   # Deliberately NOT sharing the host's terminal stage: Web is not nuget_coupled, but
+                    # it has a real CONTRACT dependency — it regenerates openapi.d.ts FROM Platform's
+                    # corrected document, so it must land after the host's document change (hard barrier).
+    childChange: web/openapi-numeric-schema-truth
+    summary: >
+      Sole document consumer. scripts/generate-api-types.mjs (openapi-typescript ^7.13.0 Node API, NO
+      transform/postTransform hook — grep zero) regenerates src/core/api/generated/openapi.d.ts
+      (543 `number | string` unions today) into clean single-typed numbers; unblocks the held openspec
+      change openapi-typed-client-analytics (its GATE was the union, now removed); retires the ~30 active
+      Number() coercion sites (use-billing.ts 27, use-partner.ts 8, use-queue-metrics.ts 6, use-analytics.ts
+      2 select-normalizers, use-teams/use-notifications/use-supervisor/use-typification-llm); corrects
+      openspec/specs/openapi-generated-types/spec.md:131-154 ("tally stands at 2" -> reality 30+) and closes
+      the deferred ">=3-genuine-sites shared coercion helper" decision as OBSOLETE (class extinct at source).
+      The check-generated-types-adoption.mjs ratchet auto-forces the baseline down as hooks adopt clean types.
+
+fixtures:
+  - fixtures/openapi-numeric-schema.v1.json
+  # Golden slice of the CORRECTED document: representative numeric schemas (int32/int64/double/nullable/
+  # array/ref) declared single-typed. This change is a document-wide numeric-TYPING correction applied
+  # uniformly to every schema, not a per-DTO field change — the fixture pins the corrected typing shape
+  # the consumer relies on (verbatim-citation target: field name + single JSON type, no string arm).
