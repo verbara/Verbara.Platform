@@ -165,6 +165,19 @@ jobs:
           artifacts/openapi/openapi-document.json
           openspec/changes/archive/2026-07-19-openapi-response-schemas/fixtures/response-schema-manifest.v1.json
 
+      - name: Verify residual contract shapes against the exported document
+        # openapi-residual-contract-shapes (decision_ref Platform/ADR-0036): assert the three residual
+        # shapes match their golden fixtures — ComplianceRuleSummaryDto.severity is the closed
+        # [Info,Warning,Critical] enum (document-only ComplianceSeverityEnumTransformer), TopicTrendsResponse
+        # emits trends/totalAnalyzed (no `topics`), and the PagedResultOf<T> envelope matches (D2/D3).
+        # Same CI-runtime-capture lane as the manifest check above (design D4). dependabot CI-load skip
+        # (Sdk/ADR-0039, STEP-level): depends on the exported document, so skipped on a bot PR alongside it.
+        if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
+        run: >-
+          python3 scripts/verify-residual-shapes.py
+          artifacts/openapi/openapi-document.json
+          openspec/changes/openapi-residual-contract-shapes/fixtures
+
       - name: Upload OpenAPI document artifact
         # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): no document is
         # produced on a bot PR (export skipped above), so skip the upload too.

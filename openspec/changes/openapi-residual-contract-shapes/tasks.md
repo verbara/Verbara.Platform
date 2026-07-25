@@ -9,23 +9,23 @@
 
 ## 1. The severity schema transformer (Phase A — foundation)
 
-- [ ] 1.1 Add `ComplianceSeverityEnumTransformer` (`IOpenApiSchemaTransformer`) in
+- [x] 1.1 Add `ComplianceSeverityEnumTransformer` (`IOpenApiSchemaTransformer`) in
   `src/Verbara.Platform.Api/OpenApi/`: for the emitted `ComplianceRuleSummaryDto` schema, narrow the
   `severity` string property to a closed enum `[Info, Warning, Critical]` (values sourced from
   `ComplianceSeverityBreakdownDto`, `CallAnalyticsEndpoints.cs:382-385`). Document-only, AOT-safe (no
   reflection over user types); the DTO member `Severity` stays `string` and stays in
   `Serialization/ApiJsonContext.cs:395-396`. Targets only the `severity` property on that one named
   schema — orthogonal to `NumericSchemaTruthTransformer`.
-- [ ] 1.2 Register it at `Program.cs:1633` on the existing seam —
+- [x] 1.2 Register it at `Program.cs:1633` on the existing seam —
   `AddOpenApi(o => o.AddSchemaTransformer<NumericSchemaTruthTransformer>().AddSchemaTransformer<ComplianceSeverityEnumTransformer>())`
   (both transformers on the one `AddOpenApi` call).
 
 ## 2. Tests (Phase B — critical component)
 
-- [ ] 2.1 Unit-test the transformer (`ComplianceSeverityEnumTransformerTests`): the `ComplianceRuleSummaryDto`
+- [x] 2.1 Unit-test the transformer (`ComplianceSeverityEnumTransformerTests`): the `ComplianceRuleSummaryDto`
   `severity` schema is narrowed to `type: string` with `enum: [Info, Warning, Critical]`; other
   properties and other schemas untouched; idempotent; no numeric schema affected.
-- [ ] 2.2 Integration-test the emitted document (`ResidualContractShapesCaptureTests`): boot the host
+- [x] 2.2 Integration-test the emitted document (`ResidualContractShapesCaptureTests`): boot the host
   in-memory (`Platform:OpenApi:Enabled=true`), fetch `/openapi/v1.json`, and assert (a)
   `ComplianceRuleSummaryDto.severity` is the closed enum + sibling fields `ruleId`, `ruleName`,
   `occurrences`, `sessionsAffected`, `firstSeen`, `lastSeen`; (b) `TopicTrendsResponse` emits
@@ -34,20 +34,24 @@
 
 ## 3. Fixture verification / handoff (Phase C — integration)
 
-- [ ] 3.1 Extend the existing verbatim-field assertion (`scripts/verify-openapi-fixture.py`-style) to
+- [x] 3.1 Extend the existing verbatim-field assertion (`scripts/verify-openapi-fixture.py`-style) to
   verify the three residual-shape fixtures against the CI-runtime-captured document:
   `fixtures/compliance-rule-summary.v1.json`, `fixtures/topic-trends-response.v1.json`,
   `fixtures/paged-result-envelope.v1.json` — field names verbatim per the `openapi-export` delta.
-- [ ] 3.2 Capture the corrected document (Stage-2 Web handoff); confirm `ComplianceRuleSummaryDto.severity`
+- [x] 3.2 Capture the corrected document (Stage-2 Web handoff); confirm `ComplianceRuleSummaryDto.severity`
   emits the closed enum and `TopicTrendsResponse`/`PagedResult<T>` match their fixtures. Record the
-  `PagedResultOf<T>` monomorphization as by-design (no producer change).
+  `PagedResultOf<T>` monomorphization as by-design (no producer change). Capture mechanism: the
+  `ResidualContractShapesCaptureTests` capture test writes the document when `CAPTURE_OPENAPI_PATH` is set,
+  mirroring the CI-runtime export lane (no headless `dotnet getdocument` — the host's ~28 eager-Postgres
+  IHostedServices make design-time export infeasible, per `Program.cs:1620-1627`).
 
 ## 4. Records
 
 - [ ] 4.1 (Optional) Author ADR-0037 (`docs/decisions/0037-*.md`) recording the "severity as a
   document-only enum" ruling and the "PagedResult monomorphization is by-design" ruling — amends/extends
   Platform/ADR-0036. Skip only if the operator confirms ADR-0036 suffices.
-- [ ] 4.2 Add the `[Unreleased]` CHANGELOG entry.
+  <!-- deferred — ADR-0036 covers this class (operator proceeded to apply without requesting a new ADR). -->
+- [x] 4.2 Add the `[Unreleased]` CHANGELOG entry.
 
 ## 5. Verification gate
 
