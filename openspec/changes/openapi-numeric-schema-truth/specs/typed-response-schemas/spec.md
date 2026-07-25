@@ -24,9 +24,9 @@ numeric union.
 
 - **GIVEN** the emitted document's `DashboardKpisDto` and `QueueMetricsDto` schemas
 - **WHEN** the document is captured
-- **THEN** `DashboardKpisDto.avgWaitMs` is `type: integer` (`format: int64`) and `QueueMetricsDto.waiting`
-  is a nullable `integer` — single-typed with no `string` arm, matching
-  `fixtures/openapi-numeric-schema.v1.json`
+- **THEN** `DashboardKpisDto.avgWaitMs` is `type: integer` (`format: int64`) — single-typed, no `string` arm
+- **AND** `QueueMetricsDto.waiting` is a nullable `type: integer` (`format: int32`) — i.e. `number | null`,
+  never `| string` — each field matching `fixtures/openapi-numeric-schema.v1.json` verbatim
 
 #### Scenario: Runtime request leniency is unchanged
 
