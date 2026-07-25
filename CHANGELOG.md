@@ -10,7 +10,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
-- **OpenAPI numeric schemas now declare a single JSON type** (ADR-0036, amends ADR-0035) — a new
+- **OpenAPI numeric schemas now declare a single JSON type** (ADR-0036, amends ADR-0035; #186) — a new
   `NumericSchemaTruthTransformer` (`IOpenApiSchemaTransformer`, registered on `AddOpenApi()`) strips
   the spurious `["integer","string"]`/`["number","string"]` union that .NET 10's `JsonSchemaExporter`
   reflected onto every numeric body/response field from the framework-default
