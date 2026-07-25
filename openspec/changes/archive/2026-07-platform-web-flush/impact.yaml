@@ -1,0 +1,55 @@
+# impact.yaml — cross-repo release contract (T11, kind: release)
+# Written by /xr:change "release flush Platform + Web unreleased mains" (2026-07-23).
+# Consumed by /xr:release (NOT /xr:propagate — a release has no per-repo OpenSpec
+# child change; it ships what is already on each main). See T11 §"kind: release".
+#
+# No fixtures[] → the verbatim-fixture-citation rule is N/A for this contract.
+# repos[].summary cites the EXISTING mechanism each read-only scout found (file
+# path + one line) plus the version being cut.
+
+kind: release
+version: 1
+change_id: 2026-07-platform-web-flush
+decision_ref: verbara-meta/ADR-0006   # cross-repo orchestration layer (defines /xr:release)
+
+repos:
+  - path: ../Verbara.Platform
+    role: producer
+    buildOrder: 1                      # leaf, nuget_coupled — released first per API-first direction
+    childChange: N/A
+    summary: >
+      v2.21.0 — flush 13 commits on main since v2.20.0 (CSPRNG-minted management API
+      keys, invariant gate #7, analytics batch-load / N+1 gate, realtime store
+      decoration, System.Security.Cryptography.Xml 10.0.10 pin). EXISTING MECHANISM:
+      .github/workflows/release.yml (tag-triggered "Model B" — push vX.Y.Z → build 4
+      images / cosign v3 / GH Release), governed by Platform/ADR-0024 (v2.4.2 shipping-
+      anomaly hardening) + Platform/ADR-0030 (cosign-v3 posture). CHANGELOG.md
+      [Unreleased] already populated (### Security + ### Added) — promote to
+      [2.21.0] before tagging. Bump Directory.Build.props <PackageVersion> 2.20.0→2.21.0.
+
+  - path: ../Verbara.Platform.Web
+    role: consumer
+    buildOrder: 2                      # decoupled (no compile dep) but tagged after Platform per API-first release direction
+    childChange: N/A
+    summary: >
+      v3.16.0-web — flush 20 commits on main since v3.15.0-web (OpenAPI typed-client
+      migration across Agent/Operations/Analytics hooks, fast-uri 3.1.4 HIGH-advisory
+      fix, openspec archives). EXISTING MECHANISM: .github/workflows/release.yml
+      (tag-triggered "Model B" — push vX.Y.Z-web → build multi-arch image / cosign v3 /
+      GH Release), governed by Web/ADR-0005 (versioning-track-end-tags). BLOCKER:
+      CHANGELOG.md [Unreleased] is EMPTY — the 20 commits must be written up from the
+      git log into a [3.16.0-web] section BEFORE the tag. Bump package.json version
+      3.15.0→3.16.0. NOTE: the [3.16.0-web] section is PRE-DRAFTED + operator-approved
+      (2026-07-24) at ./web-changelog-3.16.0-draft.md — /xr:release §H step 1 promotes
+      it verbatim (set the real tag date) rather than re-authoring.
+
+fixtures: []
+
+# Operational notes for /xr:release (not part of the T11 schema — YAML comments):
+#  - NO Sdk/Sdk.Pro pin cascade: both scouts confirmed Platform's SDK/Pro pins are
+#    already-published versions and Web is release-independent. /xr:release's pin-
+#    cascade preflight should confirm and then no-op the root/mid stages.
+#  - authorized-digests coupling: after BOTH images are tagged, /xr:release opens the
+#    single verbara-website data/authorized-digests.json PR carrying both new digests
+#    (neither repo's own release.yml does this).
+#  - Web's empty [Unreleased] is the only real work in this flush — populate it first.
