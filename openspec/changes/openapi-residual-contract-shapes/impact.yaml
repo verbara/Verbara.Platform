@@ -1,0 +1,83 @@
+kind: feature
+version: 1
+change_id: openapi-residual-contract-shapes
+decision_ref: Platform/ADR-0036   # Same "make the emitted OpenAPI document tell the truth" class as
+                                  # ADR-0036 (numeric-schema-truth), hosted at the same
+                                  # IOpenApiSchemaTransformer seam. The child /opsx:propose MAY author a
+                                  # follow-up ADR-0037 if the "severity as enum" decision (and the
+                                  # PagedResult monomorphization ruling) warrant their own durable record.
+
+# Follow-up to the archived `openapi-numeric-schema-truth` train. Web's [Unreleased] changelog logged
+# THREE residual "structural-divergence" shapes as separate Platform contract bugs. /xr:change read-only
+# scouts (2026-07-25, Platform + Platform.Web) reconciled all three against source — the advertised
+# "3 Platform contract bugs" is really 1 real Platform producer fix + 1 Web-only cleanup + 1 verify/drop:
+#
+#   1. TopicTrends `topics`->`trends`  — NOT a Platform bug. Source is already
+#      `record TopicTrendsResponse(TopicTrendDto[] Trends, int TotalAnalyzed)`
+#      (CallAnalyticsEndpoints.cs:355 -> serializes `trends`), and Web's generated openapi.d.ts:19158
+#      already has `trends`. The stale `topics` (+ dropped `from`/`to`) exists ONLY in Web's hand-written
+#      shadow (use-analytics.ts:334-339). => Web-only cleanup: delete shadow, repoint consumer.
+#   2. ComplianceRuleSummary.severity — THE genuine Platform producer fix. Source `Severity` is a plain
+#      `string` (CallAnalyticsEndpoints.cs:376); the intended literal union is Info|Warning|Critical
+#      (cf. ComplianceSeverityBreakdownDto, CallAnalyticsEndpoints.cs:382-385). Restore the enum at the
+#      contract (DTO enum at source, or a sibling IOpenApiSchemaTransformer emitting the enum).
+#   3. PagedResult envelope — likely NOT a bug. Source (Platform.Core/PagedResult.cs) and Web's generated
+#      envelope already agree ({items,totalCount,page,pageSize,totalPages,hasNextPage,hasPreviousPage}); the
+#      only "divergence" is openapi-typescript's `PagedResultOf<T>` monomorphization (inherent — no reusable
+#      generic). Web's one hand-written pagination shadow (AuditEventsPagedResult, use-audit-events.ts:39-47)
+#      is retired by that hook's OWN separate future migration, not by this change. => design phase VERIFIES
+#      and either documents "by-design, close" or de-scopes.
+#
+# Repos OUT OF SCOPE (same rationale as the sibling numeric-schema-truth change — none consumes Platform's
+# emitted OpenAPI document): Verbara.Sdk, Verbara.Sdk.Pro, verbara-website.
+
+repos:
+  - path: ../Verbara.Platform
+    role: producer
+    buildOrder: 1
+    childChange: HOST
+    summary: >
+      Host + sole contract producer. The IOpenApiSchemaTransformer seam
+      (src/Verbara.Platform.Api/OpenApi/NumericSchemaTruthTransformer.cs, registered at
+      Program.cs:1633 via AddOpenApi(o => o.AddSchemaTransformer<...>())) is the existing, correct home —
+      it PARTIALLY covers this need (right seam, right ADR lineage) but implements none of the three fixes
+      today. Real producer work is ONE shape: ComplianceRuleSummaryDto.Severity is a plain `string`
+      (Endpoints/CallAnalyticsEndpoints.cs:376) — restore the Info|Warning|Critical literal union at the
+      contract (DTO enum at source, or a sibling transformer on the same AddSchemaTransformer line), keeping
+      the DTO in ApiJsonContext (ApiJsonContext.cs:395-396) and honoring AOT/no-reflection. TopicTrends
+      (CallAnalyticsEndpoints.cs:355) already emits `trends` — NO Platform change. PagedResult
+      (Platform.Core/PagedResult.cs) envelope already correct — VERIFY only; the monomorphization is
+      openapi-typescript's, not a schema bug. Governs specs typed-response-schemas + openapi-export.
+
+  - path: ../Verbara.Platform.Web
+    role: consumer
+    buildOrder: 2   # Deliberately NOT sharing the host's terminal stage: Web is not nuget_coupled, but the
+                    # severity fix is a real CONTRACT dependency — Web narrows its shadow to the enum only
+                    # after Platform emits it, so it lands after the host (hard barrier). TopicTrends cleanup
+                    # is independent, but staged here to ship as one coherent contract landing.
+    childChange: web/openapi-residual-contract-shapes
+    summary: >
+      Sole document consumer; fully covered by existing machinery, no new mechanism. Coverage =
+      regenerate src/core/api/generated/openapi.d.ts via `npm run generate:api-types`
+      (scripts/generate-api-types.mjs, openapi-typescript ^7.13.0) then retire the two hand-written shadows
+      in src/core/api/hooks/use-analytics.ts — TopicTrendsResponse (lines 334-339, the stale `topics`/`from`/`to`)
+      and ComplianceRuleSummaryDto/ComplianceSummaryResponse (lines 351-371, severity literal union) — and
+      repoint the consumers in src/analytics/speech-analytics/speech-analytics-page.tsx (`data?.topics`->`trends`
+      at :71; severity display/filter/sort at :45,290,312,320). The openapi-generated-types living spec
+      (openspec/specs/openapi-generated-types/spec.md) currently SANCTIONS these shadows as by-design — this
+      change flips two of them from "keep hand-written" to "adopt generated". Adoption ratchet
+      (check-generated-types-adoption.mjs, baseline floor 37) unaffected (use-analytics already adopts).
+      PagedResult: NO Web action here (AuditEventsPagedResult retires under use-audit-events.ts's own migration).
+
+fixtures:
+  - fixtures/topic-trends-response.v1.json
+    # Corrected/canonical TopicTrendsResponse: verbatim `trends` (array of {topic,occurrences,avgConfidence})
+    # + `totalAnalyzed`. NO `topics`, NO `from`/`to` — pins exactly the fields Web's shadow must drop.
+  - fixtures/compliance-rule-summary.v1.json
+    # Target ComplianceRuleSummaryDto: `severity` as the Info|Warning|Critical literal union (not open string),
+    # plus ruleId/ruleName/occurrences/sessionsAffected/firstSeen/lastSeen. Verbatim-citation target for the
+    # producer's enum change AND the consumer's narrowed shadow.
+  - fixtures/paged-result-envelope.v1.json
+    # Canonical PagedResult<T> envelope: items/totalCount/page/pageSize/totalPages/hasNextPage/hasPreviousPage.
+    # Present for completeness (a consumed shape) even though the design phase is expected to rule it
+    # by-design; gives the "verify/close" decision a concrete verbatim reference rather than a guess.

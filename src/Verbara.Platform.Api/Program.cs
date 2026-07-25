@@ -5,6 +5,7 @@ using Verbara.Platform.Identity.Auth;
 using Microsoft.AspNetCore.DataProtection;
 using Verbara.Platform.Api.Endpoints;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.OpenApi;
 using Microsoft.AspNetCore.Authorization;
 using Npgsql;
 using Microsoft.AspNetCore.RateLimiting;
@@ -1607,31 +1608,13 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // call-time instead of silently using a reflection-based fallback —
     // making the omission loud + fixable.
 });
-// ─── OpenAPI (R5.3 Phase B Task B.7 / D.1) ───────────────────────────────────
-//
-// Spec generation + Scalar UI is opt-in outside Development to avoid leaking
-// surface in production. Set `Platform__OpenApi__Enabled=true` (env var) or
-// `Platform:OpenApi:Enabled=true` in configuration to enable in Production.
-//
-// openapi-typed-client (Platform/ADR-0035): this gate — and the runtime
-// AddOpenApi()/MapOpenApi()/MapScalarApiReference() surface it controls — is
-// UNCHANGED by that change. ADR-0035 exports the document via CI-runtime
-// capture (start the host with Platform:OpenApi:Enabled=true, curl
-// /openapi/v1.json) rather than a build-time generator, specifically so this
-// gate and the registration below never need to move. See the ADR for why the
-// build-time alternative (Microsoft.Extensions.ApiDescription.Server) was
-// tried and rejected: this host's ~28 IHostedServices (Pro Realtime/Cluster/
-// EventStore eager Postgres schema migration + DI resolution during
-// `app.Run()`'s startup phase, before any request is served) make a
-// no-live-DB design-time export infeasible without invasive changes across
-// multiple Pro packages, which is out of scope for an Api-host-only change.
+// ─── OpenAPI (R5.3 Phase B / ADR-0035; ADR-0036 schema transformers) ─────────
+// Registration extracted to VerbaraOpenApiExtensions to keep the composition root
+// under its LOC budget (verbara-meta/ADR-0012 gate #9) — see that file for the
+// CI-runtime-capture rationale. The flag also gates MapOpenApi()/Scalar below.
 var openApiEnabled = builder.Environment.IsDevelopment()
     || builder.Configuration.GetValue<bool>("Platform:OpenApi:Enabled");
-
-if (openApiEnabled)
-{
-    builder.Services.AddOpenApi(o => o.AddSchemaTransformer<Verbara.Platform.Api.OpenApi.NumericSchemaTruthTransformer>());
-}
+builder.Services.AddVerbaraOpenApi(openApiEnabled);
 
 var app = builder.Build();
 

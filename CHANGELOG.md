@@ -10,6 +10,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **OpenAPI `ComplianceRuleSummaryDto.severity` now declares the closed enum `Info | Warning | Critical`**
+  (decision_ref Platform/ADR-0036) — a new `ComplianceSeverityEnumTransformer` (`IOpenApiSchemaTransformer`,
+  registered alongside `NumericSchemaTruthTransformer` on the one `AddOpenApi()` call) narrows the emitted
+  `severity` property from an open `string` to the literal enum whose three values mirror
+  `ComplianceSeverityBreakdownDto` (`Info`/`Warning`/`Critical`). **Document-only, no runtime change** — the
+  DTO member stays `string` in source and in `ApiJsonContext`, the server still writes plain strings, and
+  `severity` is response-only (no request path binds it), so there is no deserialization change. AOT-safe
+  (target identified by a compile-time `typeof` match against `context.JsonTypeInfo`, no reflection over user
+  types). Same "make the emitted document tell the truth" posture as ADR-0036. Two sibling shapes are also
+  **verified** (no producer change): `TopicTrendsResponse` already emits `trends`/`totalAnalyzed` (the stale
+  `topics` lived only in Web's hand-written shadow — a regression guard locks the correct shape), and the
+  `PagedResult<T>` envelope matches field-for-field with `openapi-typescript`'s `PagedResultOf<T>`
+  monomorphization ruled by-design. A new `scripts/verify-residual-shapes.py` (CI, same runtime-capture lane
+  as the response-schema manifest check) pins all three against golden fixtures. Unblocks Platform.Web's
+  child change (retire the `TopicTrendsResponse`/`ComplianceRuleSummaryDto` shadows, repoint the
+  speech-analytics consumers). decision_ref: Platform/ADR-0036.
 - **OpenAPI numeric schemas now declare a single JSON type** (ADR-0036, amends ADR-0035; #186) — a new
   `NumericSchemaTruthTransformer` (`IOpenApiSchemaTransformer`, registered on `AddOpenApi()`) strips
   the spurious `["integer","string"]`/`["number","string"]` union that .NET 10's `JsonSchemaExporter`
