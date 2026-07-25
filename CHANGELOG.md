@@ -15,14 +15,39 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Management API keys now minted from a CSPRNG, not `Guid.NewGuid()`** (ADR-0012 Ola-3,
   gate #7). The 3 mgmt-key mint sites (`ManagementApiKeyEndpoints` create/rotate,
   `SetupEndpoints`) now use `SecretTokenGenerator.Mint` (256-bit `RandomNumberGenerator`,
-  lowercase hex) instead of a Guid v4 (~122 bits, non-CSPRNG). Keys keep the `mgmt_` prefix.
+  lowercase hex) instead of a Guid v4 (~122 bits, non-CSPRNG). Keys keep the `mgmt_` prefix. (#174)
+- **`System.Security.Cryptography.Xml` pinned to 10.0.10** — remediates 4 HIGH advisories present
+  in the transitively-resolved 10.0.7. (#179)
 
 ### Added
+- **Durable Postgres audit sink for dialer license enforcement** (Pro/ADR-0016) — a new
+  `PostgresDialerLicenseAuditSink` (+ migration 017 + DI) implements the already-published Pro seam
+  `IDialerLicenseAuditSink`, turning the previously silently-dropped tick-scoped
+  `DialerLicenseAuditRecord` (quiesce / flap / recover, with campaigns + tenant + in-flight) into a
+  durable compliance row. Per-originate per-call denial attribution is deferred. (#167)
 - **Invariant gate #7** — a deterministic gate (`scripts/check-endpoint-invariants.py`, run in
   the `Invariant Gates` CI job) forbidding `Guid.NewGuid` string-interpolated into a
   credential-named value anywhere in the Api composition; `.ToString()`-shaped id uses stay
   legitimate. Content-scoped (not filename-scoped, so `SetupEndpoints` is covered). Floor is
-  zero. decision_ref: verbara-meta/ADR-0012.
+  zero. decision_ref: verbara-meta/ADR-0012. (#174)
+- **ADR-0012 Ola-2/Ola-3 + ADR-0013 CI invariant-gate wave** — coverage gate v2 (patch-coverage +
+  two-sided band + exclusion baseline, #169); empty-catch grep + `Program.cs` LOC budget (#172);
+  AOT-at-PR publish gate + Dependabot step-level CI-load skip (#171); N+1 enrichment arch gate (#176);
+  Service-Locator arch-test host `Verbara.Platform.Architecture.Tests` (#175). All freeze-current /
+  ratchet, wired into existing required jobs. decision_ref: verbara-meta/ADR-0012, ADR-0013.
+
+### Changed
+- **Analytics agent/session enrichment batch-loaded to eliminate an N+1** (ADR-0012 Ola-3) — the
+  enrichment path now uses `= ANY(@Ids)` batch primitives instead of per-row lookups, guarded by the
+  new `EnrichmentLoopScanner` analyzer. (#176)
+- **Realtime queue/agent/membership stores wrapped in sync-decorators** (ADR-0012 Ola-3) — replaces 9
+  Service-Locator resolution sites with 3 `RealtimeSyncing{Queue,Agent,QueueMembership}Store`
+  decorators (the presence site stays behind a `size==1` carve-out). (#175)
+
+### Housekeeping
+- Architecture charter docs (`architecture.md` + `gates.yaml`, ADR-0014 §1/§2, #178); coverage-floor
+  band re-sync to the ADR-0013 superset script (#170) + patch-coverage liveness refinement (#173);
+  stale required-gate "promotion pending" comment cleanup (#177).
 
 ## [2.20.0] - 2026-07-20
 
