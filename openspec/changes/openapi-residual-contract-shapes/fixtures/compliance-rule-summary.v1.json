@@ -1,0 +1,9 @@
+{
+  "ruleId": "PCI-4.1",
+  "ruleName": "Card number spoken in clear",
+  "severity": "Critical",
+  "occurrences": 7,
+  "sessionsAffected": 5,
+  "firstSeen": "2026-07-20T14:03:11Z",
+  "lastSeen": "2026-07-24T09:41:52Z"
+}
