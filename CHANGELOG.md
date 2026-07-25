@@ -11,7 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 - **OpenAPI `ComplianceRuleSummaryDto.severity` now declares the closed enum `Info | Warning | Critical`**
-  (decision_ref Platform/ADR-0036) — a new `ComplianceSeverityEnumTransformer` (`IOpenApiSchemaTransformer`,
+  (decision_ref Platform/ADR-0036; #191) — a new `ComplianceSeverityEnumTransformer` (`IOpenApiSchemaTransformer`,
   registered alongside `NumericSchemaTruthTransformer` on the one `AddOpenApi()` call) narrows the emitted
   `severity` property from an open `string` to the literal enum whose three values mirror
   `ComplianceSeverityBreakdownDto` (`Info`/`Warning`/`Critical`). **Document-only, no runtime change** — the
