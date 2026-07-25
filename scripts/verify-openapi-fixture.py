@@ -17,20 +17,46 @@ For every group in the manifest and every `SchemaName: [field, ...]` under it, a
   - its property NAMES equal the manifest's field list EXACTLY (a name in one but not the other
     fails — the csat-runner incident, Web PR#159, was a hand-transcribed field-name drift).
 
-Field names only: the manifest records the verbatim camelCase names Web types against. JSON types
-/ numeric-format literalism are intentionally NOT compared (the .NET 10 OpenAPI generator emits
-`["integer","string"]`-style unions for some numerics; comparing them would re-fail this check on
-unrelated servicing updates — the documented tolerance carried over from the original script).
+Plus a document-wide numeric-truth assertion (openapi-numeric-schema-truth, Platform/ADR-0036):
+NO schema in the captured document may declare a numeric+`string` union type
+(`["integer","string"]` / `["number","string"]`, in any order). Before ADR-0036 the .NET 10
+`JsonSchemaExporter` emitted these unions for every numeric and this check merely TOLERATED them
+(field names only). The `NumericSchemaTruthTransformer` now strips the spurious `string` arm at the
+source, so the tolerance is upgraded to an enforced invariant: any reappearing union (e.g. a
+transformer regression or a hand-added `["number","string"]`) fails CI here. Nullable numerics
+(OpenAPI 3.1 `["null","integer"]` / `["null","number"]`) are LEGITIMATE and pass — only the `string`
+arm alongside a numeric is the artifact.
 
-Exit 0 on full match, 1 on any missing schema or field-name mismatch, 2 on usage/IO error.
+Exit 0 on full match, 1 on any missing schema, field-name mismatch, or surviving numeric+string
+union; 2 on usage/IO error.
 """
 import json
 import sys
+
+# openapi-numeric-schema-truth (Platform/ADR-0036): a numeric type array is the artifact IFF it
+# pairs a numeric member with "string". Nullable numerics ("null" + numeric) are legitimate.
+_NUMERIC_MEMBERS = frozenset({"integer", "number"})
 
 
 def _load(path: str):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _find_numeric_string_unions(node, path: str, out: list[str]) -> None:
+    """Recursively collect JSON-pointer-ish paths of every schema whose `type` is a
+    numeric+string union (a numeric member together with "string")."""
+    if isinstance(node, dict):
+        type_val = node.get("type")
+        if isinstance(type_val, list):
+            members = set(type_val)
+            if "string" in members and members & _NUMERIC_MEMBERS:
+                out.append(f"{path or '<root>'}: type={type_val}")
+        for key, value in node.items():
+            _find_numeric_string_unions(value, f"{path}.{key}" if path else key, out)
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            _find_numeric_string_unions(value, f"{path}[{i}]", out)
 
 
 def main() -> int:
@@ -87,6 +113,13 @@ def main() -> int:
                 errors.append(f"[{group_name}] '{schema_name}.{extra}' in the real document but "
                               f"NOT in the manifest (manifest is stale)")
 
+    # openapi-numeric-schema-truth (Platform/ADR-0036): assert no numeric+string union survives
+    # anywhere in the document. The NumericSchemaTruthTransformer must have stripped every one.
+    unions: list[str] = []
+    _find_numeric_string_unions(real_doc.get("components", {}).get("schemas", {}), "components.schemas", unions)
+    for u in unions:
+        errors.append(f"[numeric-truth] surviving numeric+string union (ADR-0036) — {u}")
+
     if errors:
         print("::error::response-schema manifest verification FAILED:", file=sys.stderr)
         for e in errors:
@@ -94,7 +127,8 @@ def main() -> int:
         return 1
 
     print(f"OK: response-schema manifest matches the captured document "
-          f"({checked_schemas} schemas / {checked_fields} field names across {len(groups)} groups).")
+          f"({checked_schemas} schemas / {checked_fields} field names across {len(groups)} groups); "
+          f"no numeric+string union survives (ADR-0036 numeric-truth invariant holds).")
     return 0
 
 

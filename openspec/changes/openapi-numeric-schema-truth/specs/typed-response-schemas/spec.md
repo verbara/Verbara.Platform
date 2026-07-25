@@ -20,13 +20,15 @@ numeric union.
   (`format: double`) — each a single JSON type with no `string` arm, matching
   `fixtures/openapi-numeric-schema.v1.json`
 
-#### Scenario: int64 and nullable numerics are single-typed too
+#### Scenario: nullable numerics keep their null arm but lose the string arm
 
 - **GIVEN** the emitted document's `DashboardKpisDto` and `QueueMetricsDto` schemas
 - **WHEN** the document is captured
-- **THEN** `DashboardKpisDto.avgWaitMs` is `type: integer` (`format: int64`) — single-typed, no `string` arm
-- **AND** `QueueMetricsDto.waiting` is a nullable `type: integer` (`format: int32`) — i.e. `number | null`,
-  never `| string` — each field matching `fixtures/openapi-numeric-schema.v1.json` verbatim
+- **THEN** `DashboardKpisDto.avgWaitMs` is `type: number` (`format: double`) — single-typed, no `string` arm
+- **AND** `QueueMetricsDto.waiting` is a nullable integer — rendered in OpenAPI 3.1 as
+  `type: ["null","integer"]` (`format: int32`), i.e. `integer | null`, never `| string` — each field
+  matching `fixtures/openapi-numeric-schema.v1.json` verbatim (the transformer preserves the `null`
+  arm and strips only `string`)
 
 #### Scenario: Runtime request leniency is unchanged
 

@@ -56,10 +56,12 @@ per-consumer workaround over a contract that lies.
   types now that the artifact is gone.
 - **Author ADR-0036** (amends ADR-0035): the numeric-schema-truth transformer + the >2^53 rider.
 
-Full corrected numeric-typing shape is pinned in `fixtures/openapi-numeric-schema.v1.json`:
+Full corrected numeric-typing shape is pinned in `fixtures/openapi-numeric-schema.v1.json`
+(verbatim from the CI-captured `fixtures/openapi-document.corrected.json`):
 `CsatAggregateDto.totalResponses` is `integer`/`int32`, `averageRating` is `number`/`double`,
-`DashboardKpisDto.avgWaitMs` is `integer`/`int64`, `QueueMetricsDto.waiting` is nullable `integer` —
-each a **single** JSON type, no `string` arm.
+`DashboardKpisDto.avgWaitMs` is `number`/`double` (the DTO field is `double`), `QueueMetricsDto.waiting`
+is nullable `integer` (OpenAPI 3.1 `["null","integer"]`/`int32`) — each a **single** numeric JSON type,
+no `string` arm.
 
 ## Capabilities
 

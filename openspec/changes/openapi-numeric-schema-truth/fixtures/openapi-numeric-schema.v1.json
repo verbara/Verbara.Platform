@@ -1,5 +1,5 @@
 {
-  "_comment": "Golden slice of the CORRECTED OpenAPI document (openapi-numeric-schema-truth). After the IOpenApiSchemaTransformer strips the spurious .NET 10 string arm, every numeric body/response field declares a SINGLE JSON type ('integer' or 'number'), never the ['integer','string']/['number','string'] union. Representative schemas below cover int32, int64, double, nullable numerics, arrays, and $ref reuse. Child specs cite field name + single type VERBATIM from here (verbatim-fixture-citation rule). Timestamps/EntityId stay 'string' as before (not part of the numeric union).",
+  "_comment": "Golden slice of the CORRECTED OpenAPI document (openapi-numeric-schema-truth), verbatim from the CI-captured document (fixtures/openapi-document.corrected.json). After the IOpenApiSchemaTransformer strips the spurious .NET 10 string arm, every numeric body/response field declares a SINGLE JSON type ('integer' or 'number'), never the ['integer','string']/['number','string'] union. Representative schemas below cover int32, double, nullable numerics, arrays, and $ref reuse. In OpenAPI 3.1 (Microsoft.OpenApi 2.9.0) a nullable numeric renders as a type ARRAY with the 'null' member (e.g. ['null','integer']) — the transformer preserves that Null flag and strips ONLY the 'string' arm. Child specs cite field name + single/nullable numeric type VERBATIM from here (verbatim-fixture-citation rule). Timestamps/EntityId stay 'string' as before (not part of the numeric union).",
   "openapi": "3.1.1",
   "components": {
     "schemas": {
@@ -33,8 +33,8 @@
         "type": "object",
         "properties": {
           "conversationsHandled": { "type": "integer", "format": "int32" },
-          "avgWaitMs": { "type": "integer", "format": "int64" },
-          "avgHandleTimeMs": { "type": "integer", "format": "int64" },
+          "avgWaitMs": { "type": "number", "format": "double" },
+          "avgHandleTimeMs": { "type": "number", "format": "double" },
           "slaPercent": { "type": "number", "format": "double" },
           "abandonRatePercent": { "type": "number", "format": "double" }
         },
@@ -43,9 +43,10 @@
       "QueueMetricsDto": {
         "type": "object",
         "properties": {
+          "queueId": { "type": "string" },
           "queueName": { "type": "string" },
-          "waiting": { "type": "integer", "format": "int32", "nullable": true },
-          "avgWaitSeconds": { "type": "number", "format": "double", "nullable": true },
+          "waiting": { "type": ["null", "integer"], "format": "int32" },
+          "avgWaitSeconds": { "type": ["null", "number"], "format": "double" },
           "slaPercent": { "type": "number", "format": "double" },
           "agentsAvailable": { "type": "integer", "format": "int32" },
           "agentsBusy": { "type": "integer", "format": "int32" },

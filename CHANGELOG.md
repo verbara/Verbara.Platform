@@ -9,6 +9,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **OpenAPI numeric schemas now declare a single JSON type** (ADR-0036, amends ADR-0035) — a new
+  `NumericSchemaTruthTransformer` (`IOpenApiSchemaTransformer`, registered on `AddOpenApi()`) strips
+  the spurious `["integer","string"]`/`["number","string"]` union that .NET 10's `JsonSchemaExporter`
+  reflected onto every numeric body/response field from the framework-default
+  `JsonNumberHandling.AllowReadingFromString` (dotnet/aspnetcore #64145). **Document-only** — it rewrites
+  the built `OpenApiSchema` model and does NOT change runtime deserialization (`AllowReadingFromString`
+  is retained; callers may still POST stringified numbers); explicitly NOT `NumberHandling.Strict`.
+  Blanket over int32/int64/double/float with an empty exemption list (no field exceeds 2^53); the ADR
+  rider requires any future >2^53 field to be an explicit `string` DTO property. AOT-safe (no reflection
+  over user types). `scripts/verify-openapi-fixture.py` is tightened to fail on any surviving numeric+string
+  union (nullable numerics `["null","integer"]` remain legitimate). Unblocks Platform.Web's typed-client
+  regeneration (retires ~30 `Number()` coercion sites). decision_ref: Platform/ADR-0036.
+
 ## [2.21.0] - 2026-07-24
 
 ### Security

@@ -1630,7 +1630,14 @@ var openApiEnabled = builder.Environment.IsDevelopment()
 
 if (openApiEnabled)
 {
-    builder.Services.AddOpenApi();
+    // openapi-numeric-schema-truth (Platform/ADR-0036, amends ADR-0035): the
+    // NumericSchemaTruthTransformer strips the spurious .NET 10 `string` arm that
+    // JsonSchemaExporter reflects onto every numeric schema (the framework-default
+    // JsonNumberHandling.AllowReadingFromString, dotnet/aspnetcore #64145), so the
+    // document declares numerics single-typed. Document-only — NOT
+    // NumberHandling.Strict; runtime deserialization stays lenient.
+    builder.Services.AddOpenApi(o =>
+        o.AddSchemaTransformer<Verbara.Platform.Api.OpenApi.NumericSchemaTruthTransformer>());
 }
 
 var app = builder.Build();
