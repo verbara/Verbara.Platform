@@ -9,6 +9,42 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`/health/ready` now returns 200 (not 503) on an unlicensed community / self-host boot**
+  (decision_ref Verbara.Sdk.Pro/ADR-0017; #194) — consumes the Verbara.Sdk.Pro producer fix by
+  bumping every `Verbara.Sdk.Pro.*` pin `2.12.0-pro` → `2.13.0-pro` in `Directory.Packages.props`.
+  The Pro `dialer-engine` readiness check now settles `Degraded` (with the `dialer license blocked:`
+  reason preserved) instead of `Unhealthy` when the dialer license is blocked, so the `/health/ready`
+  aggregate *degrades* rather than *fails* and the ASP.NET Core health middleware maps it to HTTP 200
+  — the pod joins the load balancer instead of being held permanently un-ready. **No Platform
+  health-check source change**: the severity decision lives entirely in Pro (open-core boundary);
+  the aggregate flips 503 → 200 purely on the pin bump. This is the readiness-layer generalization of
+  the `AsteriskAmiHealthCheck` posture ("a subsystem you did not enable, or that is blocked for a
+  non-operational reason, must not fail readiness"). decision_ref: Verbara.Sdk.Pro/ADR-0017.
+
+### Added
+- **Community-boot readiness contract test** (`CommunityBootReadinessTests`, decision_ref
+  Verbara.Sdk.Pro/ADR-0017; #194) — an integration test that boots Platform unlicensed, issues
+  `GET /health/ready`, and asserts over the JSON emitted by `HealthReportJsonWriter`: HTTP **200**
+  (not 503), top-level `status` `Degraded`, `checks.dialer-engine.status` == `Degraded`, and a
+  `description` that STARTS WITH the stable prefix `dialer license blocked:` (the prefix only — the
+  reason suffix `NotLicensed`/`Revoked`/`Expired`/`GraceExhausted` is deliberately not asserted). A
+  negative-pole case pins that a regression reverting `dialer-engine` to `Unhealthy` flips the
+  aggregate back to 503 and reds the test. The cross-repo readiness contract Platform consumes,
+  frozen by the golden fixture
+  `Verbara.Sdk.Pro/openspec/changes/license-gated-engine-health-degraded/fixtures/health-ready-community-boot.json`.
+
+### Changed
+- **Released-image smoke asserts the `dialer-engine` Degraded shape** (decision_ref
+  Verbara.Sdk.Pro/ADR-0017; #194) — `docker/verbara-smoke-released.sh` no longer treats a bare 200
+  from `/health/ready` as sufficient: after readiness it fetches the body once (reusing the existing
+  `python3` stdlib parse) and fails unless `checks.dialer-engine.status` == `Degraded` and its
+  `description` starts with `dialer license blocked:` (prefix only). The smoke leg in
+  `.github/workflows/release.yml` STAYS report-only (`continue-on-error: true`) for now; promotion to
+  gating is a documented post-merge follow-up, conditioned on the sharpened community leg running
+  green twice consecutively against images that carry the fix (design D5). decision_ref:
+  Verbara.Sdk.Pro/ADR-0017.
+
 ## [2.21.1] - 2026-07-25
 
 ### Fixed
