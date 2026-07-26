@@ -236,6 +236,59 @@ if [ "$ready" != true ]; then
 fi
 log "platform-api is ready."
 
+# ─── 3b. Community-boot readiness CONTRACT (Verbara.Sdk.Pro/ADR-0017) ────────
+# The demo substrate boots UNLICENSED (no Pro license mounted), so the Pro
+# dialer stack's ready-tagged `dialer-engine` check is license-blocked. Post
+# the 2.13.0-pro pin bump it settles Degraded (HTTP 200), not Unhealthy (503),
+# which is why /health/ready above returned 2xx at all. A bare 200 is NOT
+# enough: assert the exact consumed wire shape emitted by
+# HealthReportJsonWriter — `checks.dialer-engine.status == "Degraded"` and a
+# `description` starting with the stable `dialer license blocked:` prefix. We
+# pin the PREFIX only; the reason suffix (NotLicensed / Revoked / Expired /
+# GraceExhausted) is not part of the contract (design D2). Reuses the existing
+# python3 stdlib json parse — no new tool dependency.
+log "Asserting community-boot readiness contract on /health/ready (dialer-engine Degraded)..."
+READY_BODY="$(curl -fsS "${API_BASE}/health/ready" 2>/dev/null || true)"
+if [ -z "$READY_BODY" ]; then
+  fail "could not fetch /health/ready body for the dialer-engine Degraded assertion"
+  exit 1
+fi
+DIALER_CONTRACT="$(printf '%s' "$READY_BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+e = d.get('checks', {}).get('dialer-engine')
+if e is None:
+    print('MISSING'); sys.exit(0)
+status = e.get('status', '')
+desc = e.get('description', '') or ''
+if status != 'Degraded':
+    print('STATUS:' + status); sys.exit(0)
+if not desc.startswith('dialer license blocked:'):
+    print('PREFIX:' + desc); sys.exit(0)
+print('OK')
+" 2>/dev/null || printf 'PARSE_ERROR')"
+
+case "$DIALER_CONTRACT" in
+  OK)
+    log "Community-boot readiness contract OK (dialer-engine Degraded, 'dialer license blocked:' prefix present)." ;;
+  MISSING)
+    fail "/health/ready has no checks.dialer-engine entry — the Pro dialer readiness check is not registered (expected on a Postgres-configured community boot)"
+    echo "Response body: ${READY_BODY}" >&2
+    exit 1 ;;
+  STATUS:*)
+    fail "checks.dialer-engine.status is '${DIALER_CONTRACT#STATUS:}' — expected 'Degraded' (the 2.13.0-pro license-block-as-Degraded contract, Verbara.Sdk.Pro/ADR-0017)"
+    echo "Response body: ${READY_BODY}" >&2
+    exit 1 ;;
+  PREFIX:*)
+    fail "checks.dialer-engine.description '${DIALER_CONTRACT#PREFIX:}' does not start with 'dialer license blocked:' (cross-repo contract drift)"
+    echo "Response body: ${READY_BODY}" >&2
+    exit 1 ;;
+  *)
+    fail "could not parse checks.dialer-engine from /health/ready body"
+    echo "Response body: ${READY_BODY}" >&2
+    exit 1 ;;
+esac
+
 # ─── 4. The ONE end-to-end journey: setup -> login (touches Postgres) ───────
 
 log "Running journey: POST /api/v1/setup ..."
