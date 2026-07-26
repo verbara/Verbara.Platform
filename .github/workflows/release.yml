@@ -237,6 +237,16 @@ jobs:
   # noise on the release commit without stopping anything. Promote to
   # gating (drop continue-on-error, and/or make another step `needs: smoke`)
   # once it has a track record.
+  #
+  # FOLLOW-UP (Verbara.Sdk.Pro/ADR-0017, tasks.md 3.2): the smoke journey now
+  # additionally asserts the community-boot readiness contract (dialer-engine
+  # Degraded with the `dialer license blocked:` prefix). This leg STAYS
+  # report-only for now — the sharpened assertion first runs against a release
+  # image that PREDATES the 2.13.0-pro fix (it would return the old Unhealthy
+  # 503 shape), so gating it here would red the current release for a fix the
+  # released image does not yet carry. Graduate to gating only AFTER the
+  # sharpened community leg has run green TWICE CONSECUTIVELY against images
+  # that carry the fix (design D5). Deferred to a post-merge follow-up change.
   smoke:
     name: Post-release functional smoke (report-only)
     needs: release
