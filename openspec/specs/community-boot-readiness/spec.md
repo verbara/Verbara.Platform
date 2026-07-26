@@ -16,7 +16,7 @@ source to achieve this; the aggregate flips 503 → 200 solely by bumping the `V
 pins to the version carrying the producer fix (`2.13.0-pro`).
 
 The cross-repo readiness contract Platform consumes is frozen by the golden fixture
-`Verbara.Sdk.Pro/openspec/changes/license-gated-engine-health-degraded/fixtures/health-ready-community-boot.json`,
+`Verbara.Sdk.Pro/openspec/changes/archive/2026-07-26-license-gated-engine-health-degraded/fixtures/health-ready-community-boot.json`,
 emitted by `src/Verbara.Platform.Api/Health/HealthReportJsonWriter.cs`. The consumed field names —
 cited verbatim, not paraphrased — are: the top-level `status`; the `checks` object; within it the
 `dialer-engine` entry; that entry's `status` and `description`; and the stable `description` prefix
