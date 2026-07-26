@@ -9,6 +9,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.21.2] - 2026-07-26
+
 ### Fixed
 - **`/health/ready` now returns 200 (not 503) on an unlicensed community / self-host boot**
   (decision_ref Verbara.Sdk.Pro/ADR-0017; #194) — consumes the Verbara.Sdk.Pro producer fix by
