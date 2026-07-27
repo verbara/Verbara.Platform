@@ -403,6 +403,7 @@
           "lockoutDurationMinutes",
           "sessionIdleTimeoutMinutes",
           "sessionAbsoluteTimeoutHours",
+          "pendingPauseTimeoutMinutes",
           "oidcEnabled",
           "oidcAuthority",
           "oidcClientId",

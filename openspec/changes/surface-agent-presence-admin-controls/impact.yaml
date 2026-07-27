@@ -1,0 +1,42 @@
+kind: feature
+version: 1
+change_id: surface-agent-presence-admin-controls
+decision_ref: Verbara.Platform.Web/ADR-0009
+
+repos:
+  - path: ../Verbara.Platform
+    role: producer
+    buildOrder: 1
+    childChange: HOST
+    summary: >
+      Force-offline is FULLY shipped — POST /api/v1/admin/agents/{id}/force-offline
+      (src/Verbara.Platform.Api/Endpoints/AdminEndpoints.cs, ForceAgentOffline, AdminOnly +
+      RequireOperationalTenant; ForceAgentOfflineRequest registered in ApiJsonContext): zero change.
+      The PendingPauseTimeoutMinutes field exists on the model
+      (src/Verbara.Platform.Identity/TenantAuthConfig.cs:51, default 30, persisted by both stores)
+      but is absent from the HTTP surface: neither UpdateTenantAuthConfigRequest (write) nor
+      TenantAuthConfigResponse (read) carries it. This change adds the field to both DTOs plus one
+      handler line in AuthAdminEndpoints.cs UpdateConfig (L43), mirroring the existing
+      SessionIdleTimeoutMinutes handling (AuthAdminEndpoints.cs:65) and FromConfig projection
+      (TenantAuthConfigResponse.cs:61). No new endpoint, no store change, no migration.
+
+  - path: ../Verbara.Platform.Web
+    role: consumer
+    buildOrder: 2
+    childChange: web/surface-agent-presence-admin-controls
+    summary: >
+      Force-offline exists only in generated types (src/core/api/generated/openapi.d.ts:2526,
+      ForceAgentOfflineRequest) with NO hook; operations/agent-states/agent-states-page.tsx:192 has
+      a stub "Force Offline" menu item (toast only). This change adds a useForceOffline mutation
+      hook (src/core/api/hooks/use-agents.ts) + a button on admin/agents/agent-detail.tsx reusing
+      ConfirmDeleteDialog (src/core/ui/confirm-delete-dialog.tsx, confirmationWord "FORCE"). The
+      timeout editor mirrors the shipped sessionIdleTimeoutMinutes control on
+      admin/system/auth-config-page.tsx:206 (useAuthConfig / useUpdateAuthConfig over
+      GET/PUT /api/v1/admin/auth/config, src/core/api/hooks/use-auth-admin.ts): add a
+      pendingPauseTimeoutMinutes number Input (0 disables). New i18n keys under admin.json auth.*
+      across en-US / es-419 / pt-BR (parity gate scripts/i18n-parity-check.mjs).
+
+fixtures:
+  - fixtures/force-offline-request.json
+  - fixtures/tenant-auth-config-response.json
+  - fixtures/tenant-auth-config-update-request.json

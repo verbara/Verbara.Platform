@@ -9,6 +9,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`pendingPauseTimeoutMinutes` surfaced on the tenant auth-config HTTP contract**
+  (decision_ref Verbara.Platform.Web/ADR-0009) — `GET`/`PUT /api/v1/admin/auth/config` now read and
+  write the already-persisted `TenantAuthConfig.PendingPauseTimeoutMinutes` (W4 drain-sweep bound,
+  default 30; `<= 0` disables). `UpdateTenantAuthConfigRequest` gains a nullable `int?`
+  `pendingPauseTimeoutMinutes` partial-update field (omission leaves the persisted value untouched) and
+  `TenantAuthConfigResponse` echoes it as an `int`, both mirroring the shipped `sessionIdleTimeoutMinutes`
+  handling verbatim. Pure surfacing of an already-decided, already-shipped model field — no new endpoint,
+  no store change, no migration, no `ApiJsonContext` addition, no change to `PendingPauseDrainWorker`.
+  The redacted OIDC-secret surface (`oidcClientSecretSet` / `oidcClientSecretFingerprint`,
+  PREPUB-2026-05-09-ADMIN-001) is untouched. Unblocks the Verbara.Platform.Web admin control that binds
+  to the field (the Web child change).
+
 ## [2.21.2] - 2026-07-26
 
 ### Fixed

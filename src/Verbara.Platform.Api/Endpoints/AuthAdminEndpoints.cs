@@ -64,6 +64,7 @@ internal static class AuthAdminEndpoints
         if (body.LockoutDurationMinutes.HasValue) config.LockoutDurationMinutes = body.LockoutDurationMinutes.Value;
         if (body.SessionIdleTimeoutMinutes.HasValue) config.SessionIdleTimeoutMinutes = body.SessionIdleTimeoutMinutes.Value;
         if (body.SessionAbsoluteTimeoutHours.HasValue) config.SessionAbsoluteTimeoutHours = body.SessionAbsoluteTimeoutHours.Value;
+        if (body.PendingPauseTimeoutMinutes.HasValue) config.PendingPauseTimeoutMinutes = body.PendingPauseTimeoutMinutes.Value;
         if (body.OidcEnabled.HasValue) config.OidcEnabled = body.OidcEnabled.Value;
         if (body.OidcAuthority is not null) config.OidcAuthority = body.OidcAuthority;
         if (body.OidcClientId is not null) config.OidcClientId = body.OidcClientId;
@@ -189,6 +190,7 @@ internal sealed record UpdateTenantAuthConfigRequest
     public int? LockoutDurationMinutes { get; init; }
     public int? SessionIdleTimeoutMinutes { get; init; }
     public int? SessionAbsoluteTimeoutHours { get; init; }
+    public int? PendingPauseTimeoutMinutes { get; init; }
     public bool? OidcEnabled { get; init; }
     public string? OidcAuthority { get; init; }
     public string? OidcClientId { get; init; }
