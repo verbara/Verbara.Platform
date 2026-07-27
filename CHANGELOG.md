@@ -11,7 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - **`pendingPauseTimeoutMinutes` surfaced on the tenant auth-config HTTP contract**
-  (decision_ref Verbara.Platform.Web/ADR-0009) — `GET`/`PUT /api/v1/admin/auth/config` now read and
+  (decision_ref Verbara.Platform.Web/ADR-0009) (#198) — `GET`/`PUT /api/v1/admin/auth/config` now read and
   write the already-persisted `TenantAuthConfig.PendingPauseTimeoutMinutes` (W4 drain-sweep bound,
   default 30; `<= 0` disables). `UpdateTenantAuthConfigRequest` gains a nullable `int?`
   `pendingPauseTimeoutMinutes` partial-update field (omission leaves the persisted value untouched) and
