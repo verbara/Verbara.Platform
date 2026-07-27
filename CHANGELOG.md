@@ -10,6 +10,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **ci: docs/data-only CI fast-path (gate job, ADR-0016)** (decision_ref verbara-meta/ADR-0016) —
+  `ci.yml` gains a lightweight `gate` job that classifies the PR / `merge_group` diff via
+  `scripts/ci/classify-docs-only.sh` (strict fail-closed allowlist: `docs/**`, `openspec/**`,
+  `CHANGELOG.md`, top-level `*.md`, `**/README.md`). The three HEAVY required jobs — `Build + Unit
+  Tests (Release)`, `Coverage Ratchet`, `AOT Publish (Api)` — plus non-required `Live-DB Tests
+  (Postgres)` now `needs: gate` and report a satisfying `skipped` on a docs/data-only diff; the
+  ALWAYS-RUN required jobs (`OpenSpec Validate`, `Invariant Gates`) stay unconditional. `codeql.yml`
+  (non-required, no `merge_group`) gains a `pull_request` `paths-ignore` for the same allowlist inverse
+  (§2). The classifier ships with unit tests in the existing `Coverage Script Tests` job. Workflow-level
+  `paths-ignore` on `ci.yml` is banned (would strand the ruleset-17662679 required contexts forever).
+  A §6 canary docs-only PR is required before the fast path is trusted.
 - **`pendingPauseTimeoutMinutes` surfaced on the tenant auth-config HTTP contract**
   (decision_ref Verbara.Platform.Web/ADR-0009) (#198) — `GET`/`PUT /api/v1/admin/auth/config` now read and
   write the already-persisted `TenantAuthConfig.PendingPauseTimeoutMinutes` (W4 drain-sweep bound,

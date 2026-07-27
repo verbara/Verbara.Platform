@@ -13,6 +13,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # Docs/data-only CI fast-path §2 (verbara-meta/ADR-0016): CodeQL is NON-required and
+    # has NO merge_group trigger, so a workflow-level paths-ignore here is safe — it strands
+    # no required context (unlike ci.yml, where paths-ignore is BANNED). Skips the ~12-16 min
+    # SAST build on a docs/data-only PR. The allowlist inverse of §3.4 (docs/**, openspec/**,
+    # **/*.md, CHANGELOG.md); push:[main] + schedule keep the default-branch baseline fresh.
+    paths-ignore:
+      - "docs/**"
+      - "openspec/**"
+      - "**/*.md"
+      - "CHANGELOG.md"
   schedule:
     # Weekly Sundays 06:00 UTC — keeps the default-branch security baseline fresh
     # without pressuring weekday CI.
