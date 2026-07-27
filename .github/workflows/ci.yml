@@ -39,8 +39,34 @@ permissions:
   contents: read
 
 jobs:
+  # Docs/data-only CI fast-path gate (verbara-meta/ADR-0016 §1). Classifies the PR /
+  # merge_group diff and exposes outputs.docs_only. The HEAVY required jobs (build-and-test,
+  # coverage, aot-probe) gate on it and report a satisfying `skipped` when the diff is
+  # docs/data-only; the ALWAYS-RUN required jobs (openspec, invariant-gates) carry NO edge to
+  # this gate and validate the docs diff unconditionally (§3.3). live-db-tests is non-required
+  # but also gated (safe — §4 Platform row). This is the ONLY merge-queue-safe AND
+  # required-check-safe pattern — a workflow-level paths-ignore on ci.yml is BANNED (it would
+  # strand the ruleset 17662679 required contexts in `Expected` forever). Triggers stay
+  # unconditional (pull_request + merge_group, no path filter). Classifier: scripts/ci/
+  # classify-docs-only.sh (unit-tested in the coverage-scripts job, §3.4).
+  gate:
+    name: Docs-only gate
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0          # base sha must be reachable for the diff
+      - id: classify
+        env:                      # §3.1 event-specific base — never hardcode origin/main
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: ./scripts/ci/classify-docs-only.sh "$BASE_SHA" "${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
   build-and-test:
     name: Build + Unit Tests (Release)
+    needs: gate
+    if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # openapi-typed-client (Platform/ADR-0035): the OpenAPI-export step below needs
@@ -237,6 +263,10 @@ jobs:
   # tracked as an OpenSpec follow-up once this lane ships.
   live-db-tests:
     name: Live-DB Tests (Postgres)
+    # Non-required (report-only), but gated too — safe per ADR-0016 §4 Platform row: a
+    # non-required job skipping on a docs diff strands nothing.
+    needs: gate
+    if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     # Sized from local grounding: Storage.Postgres.Tests alone (~13 sequential
     # Testcontainers Postgres containers with parallelizeTestCollections:false)
@@ -292,6 +322,8 @@ jobs:
 
   coverage:
     name: Coverage Ratchet
+    needs: gate
+    if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Coverage-gate-v2 (verbara-meta/ADR-0013), mirroring Platform.Web's coverage job.
@@ -420,6 +452,8 @@ jobs:
   # "AOT Publish (Api)" context (promoted 2026-07-20; verbara-meta/ADR-0012 G-012).
   aot-probe:
     name: AOT Publish (Api)
+    needs: gate
+    if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     # Native AOT compilation is slow (ILC + native codegen over the full Api closure);
     # the R-011 apply took well under this. Generous ceiling so a slow runner does not
