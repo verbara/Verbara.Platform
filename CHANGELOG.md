@@ -9,18 +9,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-07-27
+
 ### Added
-- **ci: docs/data-only CI fast-path (gate job, ADR-0016)** (decision_ref verbara-meta/ADR-0016) —
-  `ci.yml` gains a lightweight `gate` job that classifies the PR / `merge_group` diff via
-  `scripts/ci/classify-docs-only.sh` (strict fail-closed allowlist: `docs/**`, `openspec/**`,
-  `CHANGELOG.md`, top-level `*.md`, `**/README.md`). The three HEAVY required jobs — `Build + Unit
-  Tests (Release)`, `Coverage Ratchet`, `AOT Publish (Api)` — plus non-required `Live-DB Tests
-  (Postgres)` now `needs: gate` and report a satisfying `skipped` on a docs/data-only diff; the
-  ALWAYS-RUN required jobs (`OpenSpec Validate`, `Invariant Gates`) stay unconditional. `codeql.yml`
-  (non-required, no `merge_group`) gains a `pull_request` `paths-ignore` for the same allowlist inverse
-  (§2). The classifier ships with unit tests in the existing `Coverage Script Tests` job. Workflow-level
-  `paths-ignore` on `ci.yml` is banned (would strand the ruleset-17662679 required contexts forever).
-  A §6 canary docs-only PR is required before the fast path is trusted.
 - **`pendingPauseTimeoutMinutes` surfaced on the tenant auth-config HTTP contract**
   (decision_ref Verbara.Platform.Web/ADR-0009) (#198) — `GET`/`PUT /api/v1/admin/auth/config` now read and
   write the already-persisted `TenantAuthConfig.PendingPauseTimeoutMinutes` (W4 drain-sweep bound,
@@ -31,7 +22,39 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no store change, no migration, no `ApiJsonContext` addition, no change to `PendingPauseDrainWorker`.
   The redacted OIDC-secret surface (`oidcClientSecretSet` / `oidcClientSecretFingerprint`,
   PREPUB-2026-05-09-ADMIN-001) is untouched. Unblocks the Verbara.Platform.Web admin control that binds
-  to the field (the Web child change).
+  to the field (the Web child change). **This is the MINOR driver of 2.22.0** — Verbara.Platform.Web
+  v3.18.0-web's `pendingPauseTimeoutMinutes` editor requires Platform **≥ 2.22.0**; against 2.21.2 the
+  field is absent from the response and dropped on write.
+- **ci: docs/data-only CI fast-path (gate job, ADR-0016)** (decision_ref verbara-meta/ADR-0016) (#200) —
+  `ci.yml` gains a lightweight `gate` job that classifies the PR / `merge_group` diff via
+  `scripts/ci/classify-docs-only.sh` (strict fail-closed allowlist: `docs/**`, `openspec/**`,
+  `CHANGELOG.md`, top-level `*.md`, `**/README.md`). The three HEAVY required jobs — `Build + Unit
+  Tests (Release)`, `Coverage Ratchet`, `AOT Publish (Api)` — plus non-required `Live-DB Tests
+  (Postgres)` now `needs: gate` and report a satisfying `skipped` on a docs/data-only diff; the
+  ALWAYS-RUN required jobs (`OpenSpec Validate`, `Invariant Gates`) stay unconditional. `codeql.yml`
+  (non-required, no `merge_group`) gains a `pull_request` `paths-ignore` for the same allowlist inverse
+  (§2). The classifier ships with unit tests in the existing `Coverage Script Tests` job. Workflow-level
+  `paths-ignore` on `ci.yml` is banned (would strand the ruleset-17662679 required contexts forever).
+  **§6-validated before this release on BOTH phases** — `pull_request` (#201) and `merge_group` (#202) —
+  with the heavy required jobs reporting `skipped` while the PR stayed mergeable under ruleset 17662679.
+  The in-repo pointer is `docs/ci-docs-fast-path.md` (#202); the standard itself lives in verbara-meta
+  ADR-0016.
+
+### Changed
+- **`release.yml` now emits the authorized-digests reminder for BOTH image-bound legs** (Pro/ADR-0011
+  Layer C) (#203) — the reminder step was gated on `matrix.name == 'api'`, but
+  `verbara-website/data/authorized-digests.json` stores one `current[]` entry **per image** per version
+  and has carried an `api` + `realtime` **pair** for every release since v2.5.1. The operator therefore
+  had to hand-dig realtime's digest out of a second matrix job's log every release. The step now fires on
+  `api` **and** `realtime`, prefixes every log line with its own image name, and appends a paste-ready
+  JSON block per image to the run's **Step Summary** so both digests land on one page; `released_at` is
+  derived from the tag (identical on both legs) rather than from wall-clock. The workflow header comment
+  that claimed image-binding is API-only is corrected, and
+  `docs/operations/2026-05-10-update-authorized-digests-after-release.md` — which mentioned `realtime`
+  zero times — now documents the pair end to end, including that the issuer's 6-entry embed cap
+  (`MAX_EMBEDDED_DIGESTS`) is **3 releases** of headroom, not 6. **No image, build, sign or verify step
+  changes**; this is release-operator ergonomics only. Landed pre-tag on purpose: `release.yml` executes
+  from the tagged ref, so merging it after the tag would not affect this release.
 
 ## [2.21.2] - 2026-07-26
 
