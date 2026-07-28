@@ -6,8 +6,18 @@
 #   - realtime  — IL (SignalR can't be AOT). Non-crown-jewel Pro plumbing only (guarded).
 #   - renderer  — IL (QuestPDF/ScottPlot). No Pro deps.
 #   - mail      — IL (MailKit/Graph). No Pro deps.
-# All four are pushed PUBLIC + cosign-signed. Only the api image's digest feeds the
-# Layer-C authorized-digests allow-list (image-binding is API-only).
+# All four are pushed PUBLIC + cosign-signed. The api AND realtime digests BOTH feed the
+# Layer-C authorized-digests allow-list: verbara-website's data/authorized-digests.json
+# carries ONE `current[]` entry PER IMAGE per version — an api+realtime PAIR for every
+# release since v2.5.1 (v2.4.2/v2.4.3 were the last api-only entries). renderer/mail carry
+# no Pro licensing code and are not image-bound. The "Authorized-digests reminder" step
+# below therefore runs on BOTH the api and the realtime matrix leg, each printing its own
+# digest. Recording only one breaks the since-v2.5.1 pair convention, drops the realtime
+# digest from every newly issued AuthorizedImageDigests claim, and hides the realtime image
+# from digest-reconciliation.yml's drift sweep. NOTE the runtime Layer-C check only fires
+# where a digest is readable: the Helm chart injects IMAGE_DIGEST on the api Deployment ONLY
+# (realtime is digest-PINNED, not digest-BOUND), so ContainerImageDigest.ReadFromEnvironment()
+# returns null in realtime and LicenseValidator takes its documented permissive path.
 #
 # Single-pass build (since v2.1.0-rc4): an OCI image cannot self-reference its own
 # manifest digest, so digest injection is operator-side (Pro/ADR-0011 Status update 2026-05-10).
@@ -206,14 +216,71 @@ jobs:
           echo "Signed ${{ matrix.name }} manifest-list digest: ${{ steps.build.outputs.digest }}"
           echo "Final image reference: $IMAGE_REF"
 
-      - name: Authorized-digests reminder (API only)
-        if: steps.retro.outputs.skip != 'true' && matrix.name == 'api'
+      # Fires on BOTH image-bound legs (api + realtime). verbara-website's
+      # data/authorized-digests.json stores one `current[]` entry PER IMAGE per version, so a
+      # release needs TWO entries; before v2.22.0 this step ran only on `api` and the operator
+      # had to hand-dig realtime's digest out of the other matrix job's log every release.
+      # Each leg prints ONLY its own digest — the image name is on every line, and the
+      # copy-paste block below is echoed into the run's Step Summary so both legs land on one
+      # page instead of two logs. renderer/mail are not image-bound (no Pro licensing code).
+      - name: Authorized-digests reminder (api + realtime)
+        # Informational only — must never red a release whose image is already pushed+signed.
+        continue-on-error: true
+        if: steps.retro.outputs.skip != 'true' && (matrix.name == 'api' || matrix.name == 'realtime')
+        env:
+          IMAGE_KIND: ${{ matrix.name }}
+          RELEASE_TAG: ${{ steps.tag.outputs.release_tag }}
+          IMAGE_REF_TAGGED: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}:${{ steps.tag.outputs.release_tag }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          echo "Next step (API image only — Layer C image-binding):"
-          echo "append a new entry to verbara-website's data/authorized-digests.json with"
-          echo "manifest_list_digest=${{ steps.build.outputs.digest }}"
-          echo "(see docs/operations/2026-05-10-update-authorized-digests-after-release.md)"
-          echo "Operator deploy: Helm --set api.image.digest=${{ steps.build.outputs.digest }}  |  Compose IMAGE_DIGEST=..."
+          set -euo pipefail
+          if [ "${IMAGE_KIND}" = "api" ]; then OTHER_KIND="realtime"; else OTHER_KIND="api"; fi
+          # `released_at` is derived from the TAG, not from wall-clock, so both matrix legs
+          # emit the SAME timestamp — the two entries for one version must not disagree
+          # (the issuer sorts `current` by released_at DESC). NOTE this is the tag/commit
+          # time, NOT the run-completion time every pre-v2.22.0 entry recorded (a LIGHTWEIGHT
+          # tag yields the tagged commit's date, which can be hours earlier) — see the
+          # runbook's Step Summary note before pasting. Fallback keeps this
+          # informational step from ever failing the release.
+          RELEASED_AT="$(TZ=UTC git for-each-ref \
+            --format='%(creatordate:format-local:%Y-%m-%dT%H:%M:%SZ)' \
+            "refs/tags/${GITHUB_REF_NAME}" 2>/dev/null || true)"
+          if [ -z "${RELEASED_AT}" ]; then RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; fi
+
+          echo "[${IMAGE_KIND}] Next step — Layer-C image-binding for the '${IMAGE_KIND}' image:"
+          echo "[${IMAGE_KIND}] append ONE entry to verbara-website data/authorized-digests.json 'current'."
+          echo "[${IMAGE_KIND}] This leg covers the '${IMAGE_KIND}' entry ONLY. The '${OTHER_KIND}' leg of this"
+          echo "[${IMAGE_KIND}] same matrix prints its own, DIFFERENT digest — this release needs BOTH."
+          echo "[${IMAGE_KIND}]   platform_version     = ${RELEASE_TAG}"
+          echo "[${IMAGE_KIND}]   image_ref            = ${IMAGE_REF_TAGGED}"
+          echo "[${IMAGE_KIND}]   manifest_list_digest = ${DIGEST}"
+          echo "[${IMAGE_KIND}]   released_at          = ${RELEASED_AT}"
+          echo "[${IMAGE_KIND}] (see docs/operations/2026-05-10-update-authorized-digests-after-release.md)"
+          echo "[${IMAGE_KIND}] Operator deploy: Helm --set ${IMAGE_KIND}.image.digest=${DIGEST}"
+          if [ "${IMAGE_KIND}" = "api" ]; then
+            echo "[api] Compose: IMAGE_DIGEST=${DIGEST} — the api Deployment/compose service also"
+            echo "[api] injects IMAGE_DIGEST at runtime; realtime is digest-pinned only."
+          fi
+
+          # Step Summary: both legs append to the SAME run summary page, so the operator reads
+          # ONE place and gets the full api+realtime pair, instead of digging the second digest
+          # out of the other matrix job's log.
+          {
+            echo "### authorized-digests entry — \`${IMAGE_KIND}\` @ \`${RELEASE_TAG}\`"
+            echo
+            echo "Append to \`verbara-website/data/authorized-digests.json\` → \`current\`."
+            echo "**This release needs BOTH the \`api\` and the \`realtime\` entry** — the"
+            echo "\`${OTHER_KIND}\` block is elsewhere on this same summary page."
+            echo
+            echo '```json'
+            echo "{"
+            echo "  \"platform_version\": \"${RELEASE_TAG}\","
+            echo "  \"image_ref\": \"${IMAGE_REF_TAGGED}\","
+            echo "  \"manifest_list_digest\": \"${DIGEST}\","
+            echo "  \"released_at\": \"${RELEASED_AT}\""
+            echo "}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Post-release FUNCTIONAL smoke (openspec/changes/released-image-smoke).
   # verbara-verify-image.sh / the "Verify cosign signature" step above prove
