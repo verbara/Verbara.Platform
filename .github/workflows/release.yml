@@ -46,6 +46,11 @@ jobs:
   release:
     name: Build, push, and sign ${{ matrix.name }} image
     runs-on: ubuntu-24.04
+    outputs:
+      # Consumed by the `github-release` job. Every matrix leg computes this from
+      # the same tag annotation, so the last-writer-wins semantics of matrix job
+      # outputs are harmless here — all four legs write the identical value.
+      retro_skip: ${{ steps.retro.outputs.skip }}
     strategy:
       fail-fast: false
       matrix:
@@ -314,6 +319,105 @@ jobs:
   # released image does not yet carry. Graduate to gating only AFTER the
   # sharpened community leg has run green TWICE CONSECUTIVELY against images
   # that carry the fix (design D5). Deferred to a post-merge follow-up change.
+  # `release.yml` built and cosign-signed the images but never created the Release
+  # object, so every version reopened the gap — `v2.18.0` shipped tagged + signed
+  # but release-less and was backfilled by hand on 2026-07-12 after an
+  # `/xr:pending` fact-check. Mirrors Verbara.Platform.Web's `release.yml`
+  # (Web #246) and Sdk.Pro's in-workflow `gh release create`.
+  #
+  # A SEPARATE job, not a matrix step: the `release` job fans out over 4 images,
+  # so a step there would race four ways for one Release object.
+  github-release:
+    name: Create GitHub Release
+    needs: release
+    # `needs.release.result` is 'success' only when EVERY image leg built, signed
+    # and verified — `fail-fast: false` means a partial failure still leaves the
+    # aggregate non-success. A Release object must never advertise a version whose
+    # image set is incomplete. A retroactive tag (ADR-0024) built nothing in this
+    # run, so it does not get an auto-created Release either.
+    if: needs.release.result == 'success' && needs.release.outputs.retro_skip != 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      # Scoped to this job — the workflow default stays `contents: read`.
+      contents: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Create GitHub Release
+        # Idempotent: `/xr:release` §H may already have created a themed Release
+        # for this tag (its title carries the release theme, which this workflow
+        # cannot know). If one exists, leave it alone — never overwrite an
+        # operator-authored body with the generated one.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release object for $TAG already exists — leaving it untouched."
+            exit 0
+          fi
+
+          VERSION="${TAG#v}"
+          NOTES_FILE="$(mktemp)"
+
+          # This version's own CHANGELOG section: everything between its heading
+          # (`## [2.22.0] - 2026-07-27`) and the next `## [` heading.
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { grab = 1; next }
+            grab && /^## \[/       { exit }
+            grab                   { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "::warning::No CHANGELOG.md section found for [$VERSION] — falling back to a pointer body."
+            printf 'See [`CHANGELOG.md`](https://github.com/%s/blob/main/CHANGELOG.md) for this release.\n' \
+              "$GITHUB_REPOSITORY" > "$NOTES_FILE"
+          fi
+
+          # Drop trailing blank lines and any horizontal rule the section ended on,
+          # so the footer below contributes the only `---` in the body.
+          awk '{ line[NR] = $0 }
+               END { last = NR
+                     while (last > 0 && (line[last] ~ /^[[:space:]]*$/ || line[last] == "---")) last--
+                     for (i = 1; i <= last; i++) print line[i] }' "$NOTES_FILE" > "${NOTES_FILE}.trimmed"
+          mv "${NOTES_FILE}.trimmed" "$NOTES_FILE"
+
+          # The manifest digests are NOT inlined here: they live one matrix
+          # boundary away, and plumbing them across (artifacts or a registry
+          # re-resolve) would add moving parts to the one path where a failure is
+          # most expensive. The run log prints all four, and the api/realtime pair
+          # is published in verbara-website's authorized-digests ledger.
+          {
+            printf '\n---\n\n'
+            printf 'Signed images (linux/amd64), all four cosign-signed with the same key:\n\n'
+            for kind in api realtime renderer mail; do
+              printf -- '- `%s/verbara/platform/%s:%s`\n' "$REGISTRY" "$kind" "$TAG"
+            done
+            printf '\nVerify any of them:\n\n'
+            printf '    cosign verify --key https://verbara.io/keys/cosign.pub --insecure-ignore-tlog \\\n'
+            printf '      %s/verbara/platform/api:%s\n\n' "$REGISTRY" "$TAG"
+            printf 'Manifest digests for this release: see the [release run](%s/%s/actions/runs/%s).\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf 'The `api` + `realtime` pair is also published in '
+            printf '[verbara-website `data/authorized-digests.json`](https://github.com/verbara/verbara-website/blob/main/data/authorized-digests.json).\n'
+          } >> "$NOTES_FILE"
+
+          # Claim the `Latest` badge only when this really is the highest version
+          # tag, so a hotfix cut on an older line cannot steal it from a newer
+          # minor. Tags come from the API — this checkout is shallow.
+          HIGHEST="$(gh api "repos/${GITHUB_REPOSITORY}/tags" --paginate -q '.[].name' | sort -V | tail -1)"
+          if [ "$HIGHEST" = "$TAG" ]; then LATEST=true; else LATEST=false; fi
+          echo "highest tag=$HIGHEST · this tag=$TAG · --latest=$LATEST"
+
+          gh release create "$TAG" \
+            --verify-tag \
+            --latest="$LATEST" \
+            --title "$TAG" \
+            --notes-file "$NOTES_FILE"
+
   smoke:
     name: Post-release functional smoke (report-only)
     needs: release

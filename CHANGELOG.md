@@ -9,6 +9,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed — CI
+
+- **`release.yml` now creates the GitHub Release object itself.** The workflow built and
+  cosign-signed the four images on every `v*` tag but never created the Release, so each version
+  reopened the gap — `v2.18.0` shipped tagged + signed but release-less and was backfilled by hand
+  on 2026-07-12 after an `/xr:pending` fact-check (23 Release objects over 67 tags today). Added as
+  a **separate `github-release` job**, not a step in the image matrix, which fans out over 4 images
+  and would race four ways for one Release object. It runs only when `needs.release.result ==
+  'success'` — with `fail-fast: false`, a partial image failure leaves the aggregate non-success, so
+  a Release can never advertise a version whose image set is incomplete — and skips retroactive tags
+  (ADR-0024), which build nothing. It is **idempotent** (an existing themed Release from
+  `/xr:release` §H is left untouched); its body is this repo's own `CHANGELOG.md` section for the
+  version plus the four image refs, the verify command, and pointers to the run log and the
+  authorized-digests ledger for the manifest digests; and it claims the `Latest` badge **only when
+  the tag is the highest version**. `contents: write` is scoped to the new job — the workflow
+  default stays `contents: read`. Matches Verbara.Platform.Web `#246` and Sdk.Pro's in-workflow
+  `gh release create`.
+
 ## [2.22.0] - 2026-07-27
 
 ### Added
