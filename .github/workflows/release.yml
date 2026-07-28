@@ -221,6 +221,30 @@ jobs:
           echo "Signed ${{ matrix.name }} manifest-list digest: ${{ steps.build.outputs.digest }}"
           echo "Final image reference: $IMAGE_REF"
 
+      - name: Hand this leg's digest to the release-notes job
+        # A matrix job cannot pass a PER-LEG value downstream through `outputs` —
+        # all four legs write the same key and last-writer-wins collapses them to
+        # one. So each leg drops its digest in an artifact and the `github-release`
+        # job collects all four. Best-effort by design: the release-notes job
+        # degrades to a link if any of these are missing, so a hiccup here can
+        # never red a release whose images are already pushed and signed.
+        if: steps.retro.outputs.skip != 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p digests
+          printf '%s\n' "$DIGEST" > "digests/${{ matrix.name }}.txt"
+
+      - name: Upload this leg's digest
+        if: steps.retro.outputs.skip != 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-digest-${{ matrix.name }}
+          path: digests/${{ matrix.name }}.txt
+          retention-days: 1
+
       # Fires on BOTH image-bound legs (api + realtime). verbara-website's
       # data/authorized-digests.json stores one `current[]` entry PER IMAGE per version, so a
       # release needs TWO entries; before v2.22.0 this step ran only on `api` and the operator
@@ -344,6 +368,19 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v7
 
+      - name: Collect the image digests
+        # One artifact per matrix leg (see "Hand this leg's digest…" above).
+        # `continue-on-error` because the release notes must still be created if
+        # the digests cannot be collected — the body degrades to a link to the run
+        # rather than failing a release whose images are already pushed and signed.
+        id: digests
+        continue-on-error: true
+        uses: actions/download-artifact@v7.0.0
+        with:
+          pattern: release-digest-*
+          merge-multiple: true
+          path: digests
+
       - name: Create GitHub Release
         # Idempotent: `/xr:release` §H may already have created a themed Release
         # for this tag (its title carries the release theme, which this workflow
@@ -385,24 +422,37 @@ jobs:
                      for (i = 1; i <= last; i++) print line[i] }' "$NOTES_FILE" > "${NOTES_FILE}.trimmed"
           mv "${NOTES_FILE}.trimmed" "$NOTES_FILE"
 
-          # The manifest digests are NOT inlined here: they live one matrix
-          # boundary away, and plumbing them across (artifacts or a registry
-          # re-resolve) would add moving parts to the one path where a failure is
-          # most expensive. The run log prints all four, and the api/realtime pair
-          # is published in verbara-website's authorized-digests ledger.
+          # Digest table, one row per image, from the artifacts the matrix legs
+          # uploaded. Every row is emitted only if its file is present, and the
+          # whole table is skipped if none are — collection is best-effort, so a
+          # release whose images are pushed and signed still gets its Release
+          # object, just with a link to the run instead of the table.
           {
             printf '\n---\n\n'
             printf 'Signed images (linux/amd64), all four cosign-signed with the same key:\n\n'
+            printf '| Image | Pinned tag | Manifest digest |\n'
+            printf '|---|---|---|\n'
+            rows=0
             for kind in api realtime renderer mail; do
-              printf -- '- `%s/verbara/platform/%s:%s`\n' "$REGISTRY" "$kind" "$TAG"
+              ref="$REGISTRY/verbara/platform/$kind:$TAG"
+              if [ -f "digests/${kind}.txt" ]; then
+                digest="$(tr -d '[:space:]' < "digests/${kind}.txt")"
+                printf '| `%s` | `%s` | `%s` |\n' "$kind" "$ref" "$digest"
+                rows=$((rows + 1))
+              else
+                printf '| `%s` | `%s` | _(see [run log](%s/%s/actions/runs/%s))_ |\n' \
+                  "$kind" "$ref" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+              fi
             done
-            printf '\nVerify any of them:\n\n'
+            if [ "$rows" -eq 0 ]; then
+              echo "::warning::No digest artifacts collected — release notes fall back to the run log." >&2
+            fi
+            printf '\nPull by digest for absolute reproducibility, or verify any tag reference:\n\n'
             printf '    cosign verify --key https://verbara.io/keys/cosign.pub --insecure-ignore-tlog \\\n'
             printf '      %s/verbara/platform/api:%s\n\n' "$REGISTRY" "$TAG"
-            printf 'Manifest digests for this release: see the [release run](%s/%s/actions/runs/%s).\n' \
-              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
             printf 'The `api` + `realtime` pair is also published in '
-            printf '[verbara-website `data/authorized-digests.json`](https://github.com/verbara/verbara-website/blob/main/data/authorized-digests.json).\n'
+            printf '[verbara-website `data/authorized-digests.json`](https://github.com/verbara/verbara-website/blob/main/data/authorized-digests.json) '
+            printf '(Pro license image binding, ADR-0023 Layer C).\n'
           } >> "$NOTES_FILE"
 
           # Claim the `Latest` badge only when this really is the highest version
