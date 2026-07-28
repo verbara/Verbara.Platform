@@ -30,6 +30,33 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   default stays `contents: read`. Matches Verbara.Platform.Web `#246` and Sdk.Pro's in-workflow
   `gh release create`.
 
+### Dependencies
+
+- **Verbara.Sdk `2.3.2` → `2.4.0`** and **Verbara.Sdk.Pro `2.13.0-pro` → `2.13.1-pro`** — all 29
+  consumed packages cascaded across `Directory.Packages.props` (7 `Verbara.Sdk.*` pins + 22
+  `Verbara.Sdk.Pro.*` pins). Sdk `2.4.0` (tag `v2.4.0`, 2026-07-26) is a **dependency-bump release
+  carrying no API change**, so nothing under `src/` or `tests/` changes: the baseline moved, no
+  feature was adopted. `2.13.1-pro` is the Pro build compiled against Sdk `2.4.0`. The resulting
+  compatibility triple — **Verbara.Sdk `2.4.0` × Verbara.Sdk.Pro `2.13.1-pro` × Verbara.Platform
+  (the next version cut from `main`)** — is what this entry records; per `Verbara.Sdk/ADR-0040` D3
+  the cascade rides alone and cuts no version of its own.
+- **`Microsoft.Extensions.*` `10.0.9` → `10.0.10`** (7 central pins), bumped **in the same commit**
+  as the `Verbara.Sdk.*` pins. Sdk `2.4.0` raises that family's transitive floor to `10.0.10` and
+  Platform pins it **directly**, so advancing only the `Verbara.Sdk.*` half would leave a direct pin
+  below the floor Platform's own dependency now declares — a fatal **`NU1605`** package-downgrade
+  error under `CentralPackageTransitivePinningEnabled=true` + `TreatWarningsAsErrors=true`
+  (`NU1605` is deliberately absent from `NoWarn`). Moving both halves together is what clears it.
+  Same shape as the `2.3.0` cascade recorded in `[2.17.0]`.
+- **Deliberately out of scope** (`Verbara.Sdk/ADR-0040` D4 — a cascade's scope is declared, never
+  inferred by prefix): `Microsoft.Extensions.TimeProvider.Testing` stays at `10.0.0` (test-only, on
+  a different servicing track), and neither `OpenTelemetry` (floor raised to `1.17.0`) nor
+  `NATS.Client.Core` (floor raised to `3.0.0`, a **major**) gains a direct pin — Platform pins
+  neither and both arrive purely transitively. Platform's source-level exposure to NATS is **zero**
+  (the realtime transport is SignalR + StackExchange.Redis), so the residual risk reduces to restore
+  resolution plus Native AOT publish behaviour, both covered by the existing required gates —
+  notably `AOT Publish (Api)`, which fails on any `warning ILxxxx`. decision_ref
+  `Verbara.Sdk/ADR-0040`.
+
 ## [2.22.0] - 2026-07-27
 
 ### Added
