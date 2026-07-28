@@ -21,9 +21,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a Release can never advertise a version whose image set is incomplete — and skips retroactive tags
   (ADR-0024), which build nothing. It is **idempotent** (an existing themed Release from
   `/xr:release` §H is left untouched); its body is this repo's own `CHANGELOG.md` section for the
-  version plus the four image refs, the verify command, and pointers to the run log and the
-  authorized-digests ledger for the manifest digests; and it claims the `Latest` badge **only when
-  the tag is the highest version**. `contents: write` is scoped to the new job — the workflow
+  version plus a per-image table carrying the pinned tag ref **and the manifest digest**, the verify
+  command, and a pointer to the authorized-digests ledger; and it claims the `Latest` badge **only
+  when the tag is the highest version**. The digests reach the notes as one artifact per matrix leg
+  (a matrix job cannot pass a per-leg value downstream through `outputs` — last-writer-wins
+  collapses the four into one). Collection is **best-effort in three degrees**: every row falls back
+  to a run-log link on its own, so a missing artifact costs one cell, not the release. `contents: write` is scoped to the new job — the workflow
   default stays `contents: read`. Matches Verbara.Platform.Web `#246` and Sdk.Pro's in-workflow
   `gh release create`.
 
