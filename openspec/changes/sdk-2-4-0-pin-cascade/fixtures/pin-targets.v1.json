@@ -1,0 +1,103 @@
+{
+  "_note": "Golden pin targets for the Sdk 2.3.2 -> 2.4.0 cascade. This is the wire shape of a pin cascade: there is no DTO or endpoint, so the 'fields' every consumer must cite verbatim are the version strings and pin counts below. A child change that writes 'bump to latest' instead of citing these values verbatim is a blocking finding in the boundary reconciliation matrix, exactly as a paraphrased DTO field name would be.",
+  "cascade": "sdk-2-4-0-pin-cascade",
+  "decisionRef": "Verbara.Sdk/ADR-0040",
+
+  "sdkBaseline": {
+    "from": "2.3.2",
+    "to": "2.4.0",
+    "tag": "v2.4.0",
+    "publishedAt": "2026-07-26",
+    "apiChange": "none — 2.4.0 is a pure dependency-bump release (Verbara.Sdk CHANGELOG.md, '### Changed — Dependency bumps')"
+  },
+
+  "raisedTransitiveFloors": {
+    "_source": "git show v2.4.0:Directory.Packages.props in Verbara.Sdk — these are the floors the PUBLISHED 2.4.0 packages declare, not Sdk main",
+    "Microsoft.Extensions.*": "10.0.10",
+    "NATS.Client.Core": "3.0.0",
+    "OpenTelemetry": "1.17.0",
+    "_exceptions": {
+      "Microsoft.Extensions.Configuration.Binder": "10.0.0",
+      "Microsoft.Extensions.Options.DataAnnotations": "10.0.0"
+    },
+    "_nu1605Set": "Only Microsoft.Extensions.* collides: both consumers pin it DIRECTLY at 10.0.9, below the 10.0.10 floor. NATS.Client.Core and OpenTelemetry are pinned directly by NEITHER consumer and arrive purely transitively."
+  },
+
+  "targets": {
+    "Verbara.Sdk.Pro": {
+      "verbaraSdkPins": {
+        "count": 17,
+        "from": "2.3.2",
+        "to": "2.4.0",
+        "file": "Directory.Packages.props",
+        "lines": "8-23 (16) + 29 (Verbara.Sdk.Data.Npgsql, separate ItemGroup)"
+      },
+      "microsoftExtensionsPins": {
+        "count": 13,
+        "from": "10.0.9",
+        "to": "10.0.10",
+        "file": "Directory.Packages.props",
+        "lines": "38-50 (one contiguous ItemGroup)"
+      },
+      "packageVersion": {
+        "from": "2.13.0-pro",
+        "to": "2.13.1-pro",
+        "file": "Directory.Build.props",
+        "line": 30,
+        "_why": "release.yml extracts this element and tags off it; merging pin changes WITHOUT bumping it is a silent no-op release (Verbara.Sdk.Pro openspec/config.yaml). Patch level follows the two prior cascade precedents: v2.8.1-pro (Sdk 2.3.0) and 2.11.1-pro (Sdk 2.3.2)."
+      }
+    },
+
+    "Verbara.Platform": {
+      "verbaraSdkPins": {
+        "count": 7,
+        "from": "2.3.2",
+        "to": "2.4.0",
+        "file": "Directory.Packages.props",
+        "lines": "24-26 + 43-46 (two NON-ADJACENT ItemGroups)"
+      },
+      "verbaraSdkProPins": {
+        "count": 22,
+        "from": "2.13.0-pro",
+        "to": "2.13.1-pro",
+        "file": "Directory.Packages.props",
+        "lines": "50-71"
+      },
+      "microsoftExtensionsPins": {
+        "count": 7,
+        "from": "10.0.9",
+        "to": "10.0.10",
+        "file": "Directory.Packages.props",
+        "lines": "9-15 (one contiguous ItemGroup)"
+      }
+    }
+  },
+
+  "outOfScope": [
+    {
+      "package": "Microsoft.Extensions.TimeProvider.Testing",
+      "pinnedAt": "10.0.0",
+      "where": "Verbara.Sdk.Pro Directory.Packages.props:72, Verbara.Platform Directory.Packages.props:140",
+      "reason": "Test-only, different servicing track. ADR-0040 D4: scope is declared, not inferred — a blanket Microsoft.Extensions.* rewrite that sweeps this in is a defect."
+    },
+    {
+      "package": "OpenTelemetry.Exporter.Prometheus.AspNetCore",
+      "pinnedAt": "1.15.2-beta.1 (in Verbara.Sdk)",
+      "reason": "Deliberately left on its own prerelease cadence by Sdk 2.4.0. Verbara.Sdk.Pro.OpenTelemetry suppresses NU5104 for it (src/Verbara.Sdk.Pro.OpenTelemetry/*.csproj:6-10) — watch that suppression, do not remove it."
+    }
+  ],
+
+  "prefixHazards": [
+    "'Verbara.Sdk.' also matches 'Verbara.Sdk.Pro.' in Verbara.Platform/Directory.Packages.props. Any rewrite must anchor on Verbara.Sdk. NOT followed by Pro. — the two families move to DIFFERENT versions in this cascade (2.4.0 vs 2.13.1-pro).",
+    "'Microsoft.Extensions.*' also matches Microsoft.Extensions.TimeProvider.Testing, which is out of scope in both repos."
+  ],
+
+  "sourceExposure": {
+    "_rule": "ADR-0040 D5 — a major in the transitive closure is a review item scoped by real source exposure.",
+    "NATS.Client.Core 3.x": {
+      "Verbara.Sdk.Pro": "ZERO. Repo-wide grep for NATS/Nats in src/ + tests/ returns 3 hits, all string literals in tests/Verbara.Sdk.Pro.Governance.Tests (ProjectGraph.cs:20 provider-suffix list, LayeringGuardTests.cs:8,120). No *.Nats project, no NATS.Client.* reference, no using NATS.",
+      "Verbara.Platform": "ZERO. grep -rn -i nats src/ returns zero hits. All NATS mentions are docs/history; Platform's realtime transport is SignalR + StackExchange.Redis. docker/docker-compose.coturn.yml:21 'NATs' is NAT traversal, a false positive.",
+      "_conclusion": "NATS 3.x cannot break either consumer at source level. Exposure reduces to (a) restore resolution and (b) AOT publish behaviour of the new NATS assembly inside the Api publish closure — only reachable at all via Verbara.Sdk.Push.Nats, which neither consumer references. Both are covered by existing required CI gates."
+    }
+  }
+}

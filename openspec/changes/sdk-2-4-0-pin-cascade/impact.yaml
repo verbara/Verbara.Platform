@@ -1,0 +1,75 @@
+kind: feature
+version: 1
+change_id: sdk-2-4-0-pin-cascade
+decision_ref: Verbara.Sdk/ADR-0040
+
+# Cascade of the Sdk 2.3.2 -> 2.4.0 baseline into the two NuGet-coupled consumers.
+# Registered as verbara-meta roadmap R-013 (Later) and required by ADR-0040 to run as
+# its own train, never folded into a release train (D3).
+#
+# Verbara.Platform.Web and verbara-website are absent by design: build-chain.yaml marks
+# both nuget_coupled: false, and neither pins a Verbara.Sdk.* package.
+
+repos:
+  - path: ../Verbara.Sdk
+    role: infra
+    buildOrder: 1
+    childChange: N/A
+    summary: >
+      Producer, already published — no code change. v2.4.0 shipped 2026-07-26 as a pure
+      dependency-bump release (CHANGELOG.md:25-31, "### Changed — Dependency bumps"); the
+      packages are on nuget.org, so no cross-repo-pack.sh hop is needed for this leg. The
+      repo's only touch in this change is docs/decisions/0040-sdk-pin-cascade-own-train.md,
+      the ADR this contract's decision_ref points at, already authored on
+      feat/sdk-2-4-0-pin-cascade. NOTE for /xr:apply: Sdk main has since moved
+      NATS.Client.Core to 3.0.1 (commit c98b3739, PR #135, still in [Unreleased]) — the
+      PUBLISHED 2.4.0 floor is 3.0.0, which is what fixtures/pin-targets.v1.json records.
+      role: infra keeps /xr:propagate from spawning a child change here (propagate step 1
+      skips role: infra), which is correct: there is nothing to implement in this repo.
+
+  - path: ../Verbara.Sdk.Pro
+    role: consumer
+    buildOrder: 2
+    childChange: pro/sdk-2-4-0-pin-cascade
+    summary: >
+      Extends the existing twice-executed pin-cascade mechanism, which in this repo is a
+      release commit + CHANGELOG callout, NOT an OpenSpec change — precedents are commit
+      0964f2b ("release: v2.8.1-pro — Sdk 2.3.0 pin cascade, transitive floor bumps",
+      16 Sdk pins + Microsoft.Extensions.* 10.0.8->10.0.9 + Npgsql in ONE commit, body
+      "NU1605 otherwise — verified restore/build/test clean") and commit b5d5c3b
+      ("release: 2.11.1-pro — Sdk pin 2.3.2"). The governance seam already exists:
+      .github/dependabot.yml:27-30 ignores "Verbara.Sdk.*" because "the pin is advanced
+      deliberately as part of the cross-repo release cadence (Sdk -> Pro -> Platform), not
+      by Dependabot". CHANGELOG.md:257 carries the established "> **Dependency floors:**"
+      callout shape to reuse. NU1605 is fatal here: Directory.Build.props:8
+      TreatWarningsAsErrors=true, :9 WarningLevel=9999, and NU1605 appears in no NoWarn
+      anywhere in the repo. Directory.Build.props:30 PackageVersion must move in the same
+      commit or release.yml produces a silent no-op.
+
+  - path: ../Verbara.Platform
+    role: consumer
+    buildOrder: 3
+    childChange: HOST
+    summary: >
+      Host repo (downstream-most affected consumer, chain_role leaf). Extends the existing
+      consumer pin-bump child-change mechanism, whose canonical template is
+      openspec/changes/archive/2026-07-26-license-gated-engine-health-degraded/proposal.md:24-27
+      — a tier MEDIANO propose-only consumer child whose entire "What Changes" is a
+      Directory.Packages.props pin bump, explicitly deferring "the pin cascade proper
+      (cross-repo-pack.sh + NuGet cache clear + dotnet restore)" to the apply stage. That
+      same archived change set decision_ref to the PRODUCER repo's ADR
+      (Verbara.Sdk.Pro/ADR-0017), which is the precedent this contract follows by pointing
+      at Verbara.Sdk/ADR-0040. The NU1605 half has an exact precedent in CHANGELOG.md:344
+      ([2.17.0]): "Sdk 2.3.0 raises transitive floors to Microsoft.Extensions.* >= 10.0.9
+      and Npgsql >= 10.0.3; Platform's central pins for both are bumped alongside ... to
+      clear the resulting NU1605/NU1109 downgrade errors." Directory.Packages.props:4-5
+      sets CentralPackageTransitivePinningEnabled=true, which is why the collision errors
+      rather than resolving upward; Directory.Build.props:12 suppresses NU1902 and NU1603
+      but deliberately NOT NU1605. What does NOT exist in this repo: any script, test or CI
+      check asserting a package version — correctness is enforced indirectly by restore +
+      build + the required aot-probe job (.github/workflows/ci.yml:453-508), which exists
+      precisely because "a dependency bump ... could regress AOT-safety and only surface at
+      tag time".
+
+fixtures:
+  - fixtures/pin-targets.v1.json
