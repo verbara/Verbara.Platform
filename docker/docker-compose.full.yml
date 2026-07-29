@@ -47,6 +47,8 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      secrets:
+        - nuget_auth_token
     logging: *default-logging
     ports:
       - "5000:5000"
@@ -100,6 +102,8 @@ services:
     build:
       context: ..
       dockerfile: src/Verbara.Platform.Renderer/Dockerfile.renderer
+      secrets:
+        - nuget_auth_token
     logging: *default-logging
     environment:
       ASPNETCORE_URLS: http://+:5010
@@ -120,14 +124,20 @@ services:
     build:
       context: ..
       dockerfile: src/Verbara.Platform.Realtime/Dockerfile.realtime
+      secrets:
+        - nuget_auth_token
     logging: *default-logging
     environment:
       ASPNETCORE_URLS: http://+:5030
       ASPNETCORE_ENVIRONMENT: Production
+      # Leader election reads Cluster, falling back to Postgres. Without either, startup throws
+      # "ConnectionStrings:Cluster (or :Postgres fallback) is required for leader election" and the
+      # container crash-loops. Same database platform-api uses.
+      ConnectionStrings__Postgres: Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret}
       # Pro.Push Redis backplane + SignalR backplane share the same Redis.
-      # Multi-pod scaling needs both; single-pod compose works without them
-      # but leaving them on keeps parity with K8s. Requires the `cluster` or
-      # `identity-redis` profile to start the redis service.
+      # NOT optional: StackExchange.Redis aborts on connect failure, so a realtime container that
+      # cannot reach Redis dies at Host.StartAsync. Redis is therefore a default service with a
+      # depends_on below rather than a profile-gated one.
       ConnectionStrings__Redis: redis:6379
       ConnectionStrings__IdentityRedis: redis:6379
       Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
@@ -135,6 +145,8 @@ services:
       Asterisk__ClusterNodeId: ${ASTERISK_CLUSTER_NODE_ID:-realtime-1}
     depends_on:
       platform-api:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:5030/health || exit 1"]
@@ -148,6 +160,8 @@ services:
     build:
       context: ..
       dockerfile: src/Verbara.Platform.Mail/Dockerfile.mail
+      secrets:
+        - nuget_auth_token
     logging: *default-logging
     environment:
       ASPNETCORE_URLS: http://+:5020
@@ -160,6 +174,10 @@ services:
       Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
       Microsoft__ClientId: ${MS_CLIENT_ID:-}
       Microsoft__TenantId: ${MS_TENANT_ID:-common}
+      # AddPlatformMail resolves HmacCsatReplyTokenSigner eagerly, so an empty value throws
+      # "The value cannot be an empty string (Parameter 'signingSecret')" at Host.StartAsync. mail is
+      # a health-gated dependency of platform-api, so that took the whole stack down.
+      Imap__TokenSigningSecret: ${CSAT_REPLY_TOKEN_SECRET:-local_dev_csat_reply_token_secret}
     depends_on:
       postgres:
         condition: service_healthy
@@ -240,7 +258,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    profiles: [cluster, identity-redis]
+    # No profile: realtime hard-depends on this (StackExchange.Redis aborts on connect failure), and
+    # realtime is in the default set, so gating Redis behind `cluster`/`identity-redis` made the
+    # default `up` crash-loop.
 
   minio:
     image: minio/minio
@@ -253,6 +273,15 @@ services:
     ports: ["9000:9000", "9001:9001"]
     restart: unless-stopped
     profiles: [s3]
+
+# Consumed by the .NET builds above to restore the private Verbara.Sdk.Pro.* packages from
+# GitHub Packages. Sourced from an env var rather than a file so no token ever sits in the repo:
+#   export NUGET_AUTH_TOKEN=<GitHub PAT with read:packages>
+# The Dockerfiles mount it with required=false, so builds needing only public packages still
+# work without it; without it a Pro-dependent build fails with NU1301 / 401 Unauthorized.
+secrets:
+  nuget_auth_token:
+    environment: NUGET_AUTH_TOKEN
 
 volumes:
   pgdata:
