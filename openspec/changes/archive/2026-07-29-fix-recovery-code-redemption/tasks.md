@@ -180,4 +180,13 @@
   **Measured:** patch **100.0% (25/25)**; band line **77.64%** inside `[75, 78]`, branch **63.39%**
   ≥ 60, **29310** lines ≥ 27690; exclusion baseline 0 = 0. All three gates pass locally.
 - [x] 6.5 `openspec validate --all --strict` green.
-- [ ] 6.6 CI green on the PR.
+- [x] 6.6 CI green on the PR. **PR #215**, merged `d25238dd` at 2026-07-29T11:35:29Z through the
+  merge queue. All 11 reporting checks green on the rebased head — `Build + Unit Tests (Release)`,
+  `AOT Publish (Api)`, `Coverage Ratchet`, `Analyze (C#)`, `CodeQL`, `Invariant Gates`,
+  `OpenSpec Validate`, `Coverage Script Tests`, `Dependency Review`, `Docs-only gate`,
+  `Live-DB Tests (Postgres)`; `Auto-merge safe Dependabot PRs` skips (n/a).
+  `Coverage Ratchet` reported patch **100.0% (25/25)**, matching the local measurement exactly.
+  Standing caveat, unchanged: the `Live-DB Tests (Postgres)` check is green only because both of its
+  steps carry `continue-on-error: true` — the underlying run failed **174 of 237** on that head,
+  worse than the 115 seen on #212. That is the pre-existing Testcontainers race, tracked as
+  `fix-testcontainers-tcp-readiness`, and nothing in it is attributable to this change.

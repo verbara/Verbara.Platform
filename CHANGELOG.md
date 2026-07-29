@@ -134,7 +134,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PasswordService.VerifyPassword` has carried since ADR-0013. **No stored value is rewritten,
   re-hashed, or invalidated**: both families keep verifying, so recovery codes already saved by users
   stay valid. This does **not** unify the two hash families and does **not** strengthen the SHA-256
-  digest. decision_ref `Platform/ADR-0013` (addendum of 2026-07-29).
+  digest. decision_ref `Platform/ADR-0013` (addendum of 2026-07-29). (#215)
 
 ### Security
 
@@ -150,7 +150,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Scope 3.4. **Operator-visible behavioural change:** an endpoint that could never lock an account
   now can — a user who repeatedly fumbles a recovery code or a TOTP code will hit the tenant's
   configured lockout threshold, and those attempts will appear in the auth-event log where nothing
-  appeared before.
+  appeared before. (#215)
 
 ## [2.22.0] - 2026-07-27
 
