@@ -8,6 +8,7 @@ using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Storage.Postgres;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Storage.Postgres.Tests;
@@ -20,6 +21,14 @@ public sealed class ServiceCollectionExtensionsTests
     public void AddPostgresStorage_ShouldRegisterAllStoreInterfaces()
     {
         var services = new ServiceCollection();
+        // AddPostgresStorage carries an implicit IDataProtectionProvider dependency:
+        // PostgresUserStore and PostgresTenantAuthConfigStore resolve it to wrap their
+        // column-level secrets (ADR-0003's protected-column register). The composition
+        // root always supplies it via AddPlatformDataProtection; a bare ServiceCollection
+        // must register a keyring explicitly. AddPostgresStorage deliberately does NOT
+        // self-register one — a silently installed ephemeral keyring is the exact
+        // ADR-0003 footgun ("keys regenerated on each process start… in use by accident").
+        services.AddDataProtection();
         services.AddPostgresStorage(FakeConnectionString);
         var provider = services.BuildServiceProvider();
 
@@ -71,6 +80,9 @@ public sealed class ServiceCollectionExtensionsTests
     public void AddPostgresStorage_ShouldRegisterAllExpectedStores()
     {
         var services = new ServiceCollection();
+        // See AddPostgresStorage_ShouldRegisterAllStoreInterfaces for why the keyring
+        // is registered explicitly here rather than by AddPostgresStorage itself.
+        services.AddDataProtection();
         services.AddPostgresStorage(FakeConnectionString);
 
         var storeInterfaces = new[]

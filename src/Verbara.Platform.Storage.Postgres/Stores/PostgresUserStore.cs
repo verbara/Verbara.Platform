@@ -1,16 +1,151 @@
+using System.Security.Cryptography;
 using Npgsql;
 using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Microsoft.AspNetCore.DataProtection;
 using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
 
 internal sealed class PostgresUserStore : IUserStore
 {
-    private readonly NpgsqlDataSource _dataSource;
+    /// <summary>
+    /// DataProtection purpose for the TOTP shared-secret column. ADR-0003
+    /// extension (same convention as
+    /// <see cref="PostgresTenantAuthConfigStore.OidcClientSecretProtectorPurpose"/>):
+    /// every column-level secret persistence path MUST go through
+    /// <see cref="IDataProtectionProvider"/> with a concern-specific purpose
+    /// string so each concern can rotate keys independently and cross-purpose
+    /// decryption is impossible.
+    /// <para>
+    /// The literal is part of the persistence contract — every value already
+    /// stored in <c>users.mfa_secret</c> was wrapped under it. Renaming it
+    /// makes every value stored under the old purpose unreadable, so a rename
+    /// requires a rewrap migration and is never a bare edit.
+    /// </para>
+    /// </summary>
+    public const string MfaSecretProtectorPurpose = "Verbara.UserMfaSecret";
 
-    public PostgresUserStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
+    /// <summary>
+    /// DataProtection purpose for the recovery-code digest array. Held apart
+    /// from <see cref="MfaSecretProtectorPurpose"/> because the two columns
+    /// have genuinely different lifecycles — the secret is written once at
+    /// enroll, the array is rewritten on every code redemption — and ADR-0003's
+    /// convention is one purpose per concern.
+    /// <para>
+    /// The literal is part of the persistence contract — every element already
+    /// stored in <c>users.mfa_recovery_codes</c> was wrapped under it.
+    /// Renaming it makes every value stored under the old purpose unreadable,
+    /// so a rename requires a rewrap migration and is never a bare edit.
+    /// </para>
+    /// </summary>
+    public const string MfaRecoveryCodesProtectorPurpose = "Verbara.UserMfaRecoveryCodes";
+
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly IDataProtector _mfaSecretProtector;
+    private readonly IDataProtector _mfaRecoveryCodesProtector;
+
+    public PostgresUserStore(NpgsqlDataSource dataSource, IDataProtectionProvider dataProtectionProvider)
+    {
+        ArgumentNullException.ThrowIfNull(dataSource);
+        ArgumentNullException.ThrowIfNull(dataProtectionProvider);
+        _dataSource = dataSource;
+        _mfaSecretProtector = dataProtectionProvider.CreateProtector(MfaSecretProtectorPurpose);
+        _mfaRecoveryCodesProtector = dataProtectionProvider.CreateProtector(MfaRecoveryCodesProtectorPurpose);
+    }
+
+    /// <summary>
+    /// Writes the encrypted form so the raw Base32 TOTP secret never lands in
+    /// the row. Null or empty in ⇒ <c>null</c> out, so a user who never
+    /// enrolled keeps the column's "no MFA material" shape.
+    /// </summary>
+    internal string? ProtectMfaSecret(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return null;
+        return _mfaSecretProtector.Protect(value);
+    }
+
+    /// <summary>
+    /// Returns the unwrapped (plaintext) TOTP shared secret expected by
+    /// callers (notably <c>MfaService.VerifyCode</c>, which feeds it straight
+    /// into the TOTP computation). On <see cref="CryptographicException"/> —
+    /// which means the row still holds the legacy unwrapped secret that the
+    /// <c>UserMfaEncryptionMigrator</c> has not yet rewritten — the value is
+    /// returned verbatim. The migrator runs on host startup and is idempotent;
+    /// the catch is a transitional belt-and-suspenders guard so a request
+    /// arriving between deploy and migrator completion doesn't fail.
+    /// </summary>
+    internal string? UnprotectMfaSecret(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return null;
+        try
+        {
+            return _mfaSecretProtector.Unprotect(value);
+        }
+        catch (CryptographicException)
+        {
+            // Legacy unwrapped row. Returning the raw value preserves TOTP
+            // verification until the migrator catches up. Protect-on-write
+            // ensures every NEW save is encrypted from this point forward.
+            return value;
+        }
+    }
+
+    /// <summary>
+    /// Wraps each recovery-code digest individually so the column stays a
+    /// <c>TEXT[]</c> of the same length (design D3). Elements are opaque: the
+    /// column holds both legacy BCrypt digests and the wizard's SHA-256 hex
+    /// digests, and neither is inspected, normalised, or re-hashed here.
+    /// <c>null</c> in ⇒ <c>null</c> out and empty in ⇒ empty out, so the
+    /// column keeps its shape.
+    /// </summary>
+    internal string[]? ProtectRecoveryCodes(IReadOnlyList<string>? values)
+    {
+        if (values is null)
+            return null;
+        if (values.Count == 0)
+            return [];
+
+        var wrapped = new string[values.Count];
+        for (var i = 0; i < values.Count; i++)
+            wrapped[i] = _mfaRecoveryCodesProtector.Protect(values[i]);
+        return wrapped;
+    }
+
+    /// <summary>
+    /// Unwraps each element independently. A <see cref="CryptographicException"/>
+    /// on one element means that element is still the legacy unwrapped digest
+    /// the <c>UserMfaEncryptionMigrator</c> has not yet rewritten, so it is
+    /// returned verbatim while its siblings still unwrap — a row interrupted
+    /// mid-rewrite therefore projects correctly, preserving order and length
+    /// (design D8). <c>null</c> in ⇒ <c>null</c> out and empty in ⇒ empty out.
+    /// </summary>
+    internal string[]? UnprotectRecoveryCodes(string[]? values)
+    {
+        if (values is null)
+            return null;
+        if (values.Length == 0)
+            return [];
+
+        var unwrapped = new string[values.Length];
+        for (var i = 0; i < values.Length; i++)
+        {
+            try
+            {
+                unwrapped[i] = _mfaRecoveryCodesProtector.Unprotect(values[i]);
+            }
+            catch (CryptographicException)
+            {
+                // Legacy unwrapped element. Returning it verbatim preserves
+                // recovery-code redemption until the migrator catches up.
+                unwrapped[i] = values[i];
+            }
+        }
+        return unwrapped;
+    }
 
     private const string SelectColumns =
         "user_id, tenant_id, email, display_name, role, status, created_at, updated_at, created_by, updated_by, " +
@@ -27,7 +162,7 @@ internal sealed class PostgresUserStore : IUserStore
                 p.Add(new NpgsqlParameter("UserId", userId.Value));
             },
             UserRow.Map, ct);
-        return row?.ToUser();
+        return row?.ToUser(this);
     }
 
     public async Task<User?> GetByEmailAsync(TenantId tenantId, string email, CancellationToken ct)
@@ -40,7 +175,7 @@ internal sealed class PostgresUserStore : IUserStore
                 p.Add(new NpgsqlParameter("Email", email));
             },
             UserRow.Map, ct);
-        return row?.ToUser();
+        return row?.ToUser(this);
     }
 
     public async Task<User?> FindByOidcSubjectAsync(TenantId tenantId, string oidcSubject, CancellationToken ct)
@@ -53,7 +188,7 @@ internal sealed class PostgresUserStore : IUserStore
                 p.Add(new NpgsqlParameter("OidcSubject", oidcSubject));
             },
             UserRow.Map, ct);
-        return row?.ToUser();
+        return row?.ToUser(this);
     }
 
     public Task<PagedResult<User>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
@@ -115,7 +250,7 @@ internal sealed class PostgresUserStore : IUserStore
                 UserRow.Map, ct);
         }
 
-        var items = rows.Select(r => r.ToUser()).ToList();
+        var items = rows.Select(r => r.ToUser(this)).ToList();
         return new PagedResult<User>(items, total, query.Page, query.PageSize);
     }
 
@@ -132,7 +267,7 @@ internal sealed class PostgresUserStore : IUserStore
                 p.Add(new NpgsqlParameter("Ids", userIds.ToArray()));
             },
             UserRow.Map, ct);
-        return rows.Select(r => r.ToUser()).ToList();
+        return rows.Select(r => r.ToUser(this)).ToList();
     }
 
     public async Task SaveAsync(User user, CancellationToken ct)
@@ -170,8 +305,12 @@ internal sealed class PostgresUserStore : IUserStore
                     p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)user.UpdatedBy ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("PasswordHash", NpgsqlDbType.Text) { Value = (object?)user.PasswordHash ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("MfaEnabled", user.MfaEnabled));
-                    p.Add(new NpgsqlParameter("MfaSecret", NpgsqlDbType.Text) { Value = (object?)user.MfaSecret ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("MfaRecoveryCodes", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = (object?)user.MfaRecoveryCodes?.ToArray() ?? DBNull.Value });
+                    // A7 (encrypt-mfa-secrets-at-rest): wrap on write — never write
+                    // plaintext MFA material. Both parameters stay explicitly typed
+                    // because either can be DBNull.Value and an untyped nullable
+                    // parameter throws 42P08.
+                    p.Add(new NpgsqlParameter("MfaSecret", NpgsqlDbType.Text) { Value = (object?)ProtectMfaSecret(user.MfaSecret) ?? DBNull.Value });
+                    p.Add(new NpgsqlParameter("MfaRecoveryCodes", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = (object?)ProtectRecoveryCodes(user.MfaRecoveryCodes) ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("MfaConfirmedAt", NpgsqlDbType.TimestampTz) { Value = (object?)user.MfaConfirmedAt ?? DBNull.Value });
                     p.Add(new NpgsqlParameter("EmailVerified", user.EmailVerified));
                     p.Add(new NpgsqlParameter("FailedLoginAttempts", user.FailedLoginAttempts));
@@ -267,7 +406,7 @@ internal sealed class PostgresUserStore : IUserStore
             oidc_subject = r.GetStringOrNull("oidc_subject"),
         };
 
-        public User ToUser() => new()
+        public User ToUser(PostgresUserStore store) => new()
         {
             UserId = EntityId.From(user_id),
             TenantId = new TenantId(tenant_id),
@@ -281,8 +420,14 @@ internal sealed class PostgresUserStore : IUserStore
             UpdatedBy = updated_by,
             PasswordHash = password_hash,
             MfaEnabled = mfa_enabled,
-            MfaSecret = mfa_secret,
-            MfaRecoveryCodes = mfa_recovery_codes,
+            // A7 (encrypt-mfa-secrets-at-rest): unwrap on read — internal
+            // callers (MfaService TOTP verification, recovery-code redemption)
+            // receive the original values; the API layer never projects either
+            // field, so they don't cross the HTTP boundary. The unwrap lives
+            // here and not in Map because Map MUST stay static to satisfy the
+            // Verbara.Sdk.Data.Npgsql mapper delegate (design D7).
+            MfaSecret = store.UnprotectMfaSecret(mfa_secret),
+            MfaRecoveryCodes = store.UnprotectRecoveryCodes(mfa_recovery_codes),
             MfaConfirmedAt = mfa_confirmed_at,
             EmailVerified = email_verified,
             FailedLoginAttempts = failed_login_attempts,

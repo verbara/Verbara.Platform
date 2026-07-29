@@ -150,3 +150,47 @@ Multiple Platform API replicas pointing at the same Postgres database **automati
 - ASP.NET Core DataProtection docs: https://learn.microsoft.com/aspnet/core/security/data-protection/
 - v1.9.2 JWT key wrap precedent: `docs/plans/completed/2026-04-21-r3c-platform-v1.9.2-hardening-follow-through.md`
 - R5.4 backup/DR runbook (where this table must be covered): `docs/plans/active/2026-04-22-r5-production-readiness-release-train.md` §"S5.8 Backup/DR runbook"
+
+---
+
+## Addendum 2026-07-29 — Protected-column register
+
+**Source change:** `encrypt-mfa-secrets-at-rest` (OpenSpec, tier MEDIANO, `decision_ref` Platform/ADR-0003).
+
+Append-only addendum. The **Decision** above is unchanged — this records *what the keyring actually protects today*, the contract that binds those values to it, and the precise boundary of that protection. As shipped, the DB-backed default is selected through `PlatformDataProtectionOptions.UsePostgres(NpgsqlDataSource)` on `AddPlatformDataProtection` (backed by `NpgsqlXmlRepository`), with `UseFileSystem(path)` and `UseEphemeralKeysForTesting()` as the two opt-ins; the persistence semantics decided above are unaffected.
+
+### The register
+
+Every column-level secret Platform wraps, and the DataProtection purpose string it is wrapped under:
+
+| Column | DataProtection purpose | Declared as | Notes |
+|---|---|---|---|
+| `tenant_auth_config.oidc_client_secret` | `Verbara.OidcClientSecret` | `PostgresTenantAuthConfigStore.OidcClientSecretProtectorPurpose` | Scalar `TEXT`. Shipped by `PREPUB-2026-05-09-ADMIN-001`; backfilled by `OidcClientSecretEncryptionMigrator`. |
+| `users.mfa_secret` | `Verbara.UserMfaSecret` | `PostgresUserStore.MfaSecretProtectorPurpose` | Scalar `TEXT` holding the Base32 TOTP shared secret. Encryption, not hashing — `MfaService.VerifyCode` recomputes the code from the secret itself. |
+| `users.mfa_recovery_codes` | `Verbara.UserMfaRecoveryCodes` | `PostgresUserStore.MfaRecoveryCodesProtectorPurpose` | Wrapped **element-wise**; the column stays `TEXT[]` with its original length and element order. Elements are opaque strings — the two coexisting digest formats are neither inspected nor normalised. |
+
+Both `users.*` rows were added by `encrypt-mfa-secrets-at-rest`, which also ships the one-shot idempotent `UserMfaEncryptionMigrator` (registered via `AddUserMfaEncryptionMigrator()`) to convert legacy unwrapped rows. Neither `users` column required a schema migration: `TEXT` / `TEXT[]` are unbounded and no index covers either.
+
+**The register is the canonical list.** Any future column-level secret MUST be added to this table at the moment it is wrapped — a wrapped column that is not registered here is indistinguishable from an unwrapped one to anyone auditing the deployment, and to anyone reasoning about what a lost keyring costs.
+
+### Purpose strings are a persistence contract, not a label
+
+A purpose string is an input to key derivation, so it is part of the stored value's identity. Once rows exist, **renaming a purpose makes every value stored under the old purpose permanently unreadable** — `Unprotect` throws `CryptographicException`, and the store's verbatim fallback then hands ciphertext to the caller. Two consequences bind every future change:
+
+- A rename is never a bare edit. It requires a rewrap migration that reads under the old purpose and writes under the new one, shipped in the same binary as the rename.
+- Purposes are **concern-specific by convention**, one per column, so each concern rotates independently and a protector for one concern cannot decrypt another's ciphertext. That is why `mfa_secret` and `mfa_recovery_codes` take two purposes rather than a shared `Verbara.UserMfa` — their lifecycles differ (the secret is written once at enroll, the array is rewritten on every redemption).
+
+Purposes are declared as `public const string` on the owning store so migrators bind the same symbol instead of a re-typed literal; store and migrator therefore cannot drift apart.
+
+### Residual risk — what the register does NOT cover
+
+**`AddPlatformDataProtection` exposes no `ProtectKeysWith*` option today.** With the default `UsePostgres` keyring, `data_protection_keys` holds the key XML **unencrypted, in the same database as every wrapped column above**. The honest statement of the boundary:
+
+- **NOT mitigated — complete database compromise.** An attacker holding a full dump holds the keyring and the ciphertext together and can unwrap every value in the register at leisure. Against that adversary the wrap buys nothing. Do not read this register as "secrets are encrypted at rest" without the qualifier.
+- **Mitigated — partial exposure**, which is the realistic self-host failure mode: a table-scoped dump (`pg_dump -t users`), a CSV or report extract, a read-replica scoped to application tables, or a SQL-injection read that reaches `users` but not `data_protection_keys`. In each of those the attacker gets ciphertext with no key material.
+
+Asset **A9** (database connection string + DataProtection keyring) in `docs/security/threat-model.md` already carries `Critical` sensitivity and states it owns A1–A8 transitively; this register is the concrete enumeration of that "transitively".
+
+### The follow-up that would close it
+
+**Wrap the keyring itself at rest** — `ProtectKeysWithCertificate` (an operator-supplied X.509 cert held outside the database) or a KMS-backed equivalent — so a full database dump yields ciphertext for the keyring as well as for the register's columns. That is deliberately **not** built by `encrypt-mfa-secrets-at-rest`: it changes the deployment contract for every operator (a new artifact to provision, back up, and rotate, and a new fail-closed startup path), which is its own decision. Whether it lands as an amendment to this ADR or as a successor ADR is left open until it is proposed.

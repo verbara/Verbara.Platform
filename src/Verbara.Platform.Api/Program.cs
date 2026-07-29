@@ -309,6 +309,13 @@ if (!string.IsNullOrEmpty(coreConnectionString))
     // to leave registered — re-runs are no-ops once every row is encrypted.
     builder.Services.AddOidcClientSecretEncryptionMigrator();
 
+    // A7 (encrypt-mfa-secrets-at-rest): one-shot, idempotent wrap of any legacy
+    // unwrapped users.mfa_secret / users.mfa_recovery_codes values. Same posture as
+    // the OIDC migrator above — runs after the schema migrations and after
+    // DataProtection is wired (registered later in this file), never blocks startup,
+    // and re-runs are zero-write no-ops once every value is wrapped.
+    builder.Services.AddUserMfaEncryptionMigrator();
+
     // P2c.1 (§6) — one-shot, idempotent seed of the appsettings global LLM key into the single
     // operational tenant's per-tenant tenant_llm_config row (the single-tenant / dev migration off
     // the retired shared global key). No-op unless the global key is set AND exactly one operational

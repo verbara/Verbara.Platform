@@ -150,6 +150,41 @@ Verify daily: `ls -lh /var/backups/pg/*.dump | tail -3` should show file from pa
 
 **Safety note:** never run PITR directly on the live primary. Always use a parallel instance, validate, then swap.
 
+### 1.6 DataProtection keyring (`data_protection_keys`) — SECURITY NOTE
+
+The DataProtection keyring is what unwraps every encrypted-at-rest column in the Platform database. Per [ADR-0003](../decisions/0003-dataprotection-key-persistence-strategy.md) the default backend is **Postgres** (`AddPlatformDataProtection` → `UsePostgres`), so the keys live in the `data_protection_keys` table of the same database this section backs up. **Losing that table is not recoverable from anything else** — the wrapped columns become permanently opaque.
+
+**What the keyring now costs if lost.** It is no longer only AgentAssist provider credentials and OIDC client secrets. It is also **MFA**. The columns it owns (the protected-column register in ADR-0003):
+
+| Column | Loss impact |
+|---|---|
+| `tenant_auth_config.oidc_client_secret` | Per-tenant OIDC SSO stops authenticating until the operator re-enters the client secret. |
+| `users.mfa_secret` | **Every MFA-enrolled user can no longer complete TOTP verification.** |
+| `users.mfa_recovery_codes` | Outstanding recovery codes can no longer be redeemed. |
+| AgentAssist STT/TTS provider keys (`agent_assist.feature_toggle`) | Tenants re-enter every provider key (the pre-existing ADR-0003 case). |
+
+**The MFA failure is SILENT by design.** A value that cannot be unwrapped is **not** an error — `PostgresUserStore` falls back to returning the stored value verbatim (a deliberate transitional guard so rows the startup migrator has not yet reached still authenticate). With the keyring gone, that fallback hands ciphertext to `MfaService.VerifyCode`, which simply **returns false**. There is no exception, no 5xx, and no health-check failure — only users reporting "my authenticator code is rejected". Do not expect the stack to tell you.
+
+**Detection signal.** `UserMfaEncryptionMigrator` logs its count quadruple once per boot (EventId `4201`: *scanned / legacy rows wrapped / already wrapped / failed*) and tags an `Activity` on `Verbara.Platform.UserMfaEncryption` with `scanned_rows`, `encrypted_rows`, `already_encrypted_rows`, `failed_rows`. Steady state on an already-migrated database is `encrypted_rows = 0`. **A boot that suddenly reports a large `encrypted_rows` on a table you already migrated means the old ciphertext no longer unwraps — i.e. the keyring changed or was lost.** That is the cheapest keyring-loss alarm available today.
+
+**Recovery when the keyring is genuinely gone.** There is no way to decrypt the affected columns. The supported path is per-column re-provisioning:
+
+1. **MFA — per-user admin reset.** `MfaAdminService.ResetMfaAsync` (`POST /management/mfa/users/{id}/reset`, behind the `MfaAdminGate` policy — host/partner tenant **plus** the `security.mfa.admin` permission) clears `MfaEnabled`, `MfaSecret`, `MfaRecoveryCodes`, and `MfaConfirmedAt` for one user, who then re-enrolls from scratch. It is already audit-emitting, so the mass reset leaves a complete trail. There is no bulk variant — script the per-user call if the enrolled population is large.
+2. **OIDC** — re-enter each tenant's client secret via `PUT /admin/auth/config`.
+3. **AgentAssist** — re-enter provider credentials per §2 of the [v1.11 release runbook](v1.11-release-runbook.md).
+
+**Mitigating property — and the trap.** Because the default keyring is Postgres-backed, `data_protection_keys` lives in the **same database** as `users` and `tenant_auth_config`, so the whole-database `pg_dump` in §1.3 and the WAL archive in §1.2 capture keyring and ciphertext together: a §1.4 full restore or a §1.5 PITR restores a self-consistent pair with nothing extra to do. **The trap is a table-scoped backup policy** — a `pg_dump -t` allowlist, a per-schema export, or a logical-replication subscription that ships only application tables will silently omit `data_protection_keys` and produce a restore in which every wrapped column is unrecoverable. Verify:
+
+```bash
+# The keyring table must be present in the dump you actually rely on.
+pg_restore -l /var/backups/pg/latest.dump | grep -c 'data_protection_keys'   # must be > 0
+
+# And it must be non-empty in the live database.
+psql "$CONNECTION_STRING" -c "SELECT COUNT(*) FROM data_protection_keys;"    # must be > 0
+```
+
+If you run `UseFileSystem(path)` instead of the Postgres default (single-node opt-in, ADR-0003), the keyring is **outside** every procedure in this runbook — back that directory up separately, or you are one container recreate away from the loss described above.
+
 ---
 
 ## 2. Redis snapshot strategy
@@ -255,6 +290,19 @@ Document in the DR exercise log which mitigation was chosen.
 
 Out of scope of this runbook — refer to Asterisk-specific runbook (`docs/operations/asterisk-pbx-runbook.md` if present, or the upstream Asterisk admin guide). Pro.Cluster + Pro.Realtime endpoint sync should re-provision PJSIP endpoints automatically when a replacement Asterisk node joins.
 
+### 3.6 DataProtection keyring lost — MFA and stored secrets unrecoverable
+
+**Symptoms:** no error anywhere. `/health/ready` is 200, logins with password succeed, but **every MFA-enrolled user reports that their authenticator code is rejected**; OIDC SSO tenants fail to authenticate; AgentAssist provider calls fail with credential errors. The corroborating signal is in the boot logs — `UserMfaEncryptionMigrator` (EventId `4201`) reporting a large `encrypted_rows` count on a database it already migrated. See §1.6 for why the failure is silent.
+
+**Typical causes:** restoring only application tables from a table-scoped backup (the §1.6 trap); a `UseFileSystem` keyring on an unmounted/ephemeral path lost to a container recreate; restoring the database into a deployment pointed at a *different* keyring.
+
+**Action:**
+
+1. **Do not let users re-enroll yet.** First establish whether the keyring is recoverable — check whether `data_protection_keys` is non-empty and whether the rows are the *original* ones (§1.6 verification commands). If a good whole-database backup exists, a §1.4 restore or §1.5 PITR brings keyring and ciphertext back as a consistent pair and costs nothing.
+2. **If the keyring is genuinely unrecoverable**, follow the re-provisioning path in §1.6 (per-user `MfaAdminService` reset, OIDC client-secret re-entry, AgentAssist credential re-entry). Every MFA reset is audited.
+3. **Fix the cause before declaring recovery.** A restore that reproduces the table-scoped backup policy will reproduce this incident on the next restore.
+4. **Log the incident** in `docs/operations/dr-exercises.md` — this scenario is the one most likely to be discovered during a real restore rather than during a chaos exercise.
+
 ---
 
 ## 4. Monthly chaos test exercise
@@ -335,6 +383,8 @@ An exercise that **fails any** of the above triggers a follow-up plan: open a ti
 | Restore Postgres from file | `./scripts/restore-pg.sh /path/to/backup.dump` |
 | Manual Redis snapshot now | `./scripts/backup-redis.sh` |
 | Verify WAL archiving | `aws s3 ls s3://YOUR_BUCKET/wal/ \| tail -3` |
+| Verify the keyring is in the dump (§1.6) | `pg_restore -l backup.dump \| grep -c 'data_protection_keys'` |
+| Verify the keyring is populated (§1.6) | `psql "$CONNECTION_STRING" -c "SELECT COUNT(*) FROM data_protection_keys;"` |
 | List local Postgres backups | `ls -lh /var/backups/pg/*.dump` |
 | Force WAL flush | `psql -c "SELECT pg_switch_wal();"` |
 | Trigger cluster node restart | `kubectl rollout restart deployment/platform-api` |
@@ -342,4 +392,4 @@ An exercise that **fails any** of the above triggers a follow-up plan: open a ti
 
 ---
 
-**Last reviewed:** 2026-04-26 (R5.4 S5.8). Update after each chaos exercise if the procedure changes.
+**Last reviewed:** 2026-07-29 (added §1.6 DataProtection keyring + §3.6 keyring-loss scenario, change `encrypt-mfa-secrets-at-rest`; previously 2026-04-26 / R5.4 S5.8). Update after each chaos exercise if the procedure changes.

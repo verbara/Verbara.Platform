@@ -39,6 +39,16 @@ public static class ServiceCollectionExtensions
     /// Registers Dapper/Npgsql implementations for all 17 store interfaces backed by PostgreSQL.
     /// Creates a singleton <see cref="NpgsqlDataSource"/> from the supplied connection string.
     /// </summary>
+    /// <remarks>
+    /// <b>Requires an <c>IDataProtectionProvider</c> in the container.</b>
+    /// <c>PostgresUserStore</c> (<c>mfa_secret</c>, <c>mfa_recovery_codes</c>) and
+    /// <c>PostgresTenantAuthConfigStore</c> (<c>oidc_client_secret</c>) resolve it to wrap their
+    /// column-level secrets — see ADR-0003's protected-column register. The composition root
+    /// supplies it via <c>AddPlatformDataProtection</c>; a bare <c>ServiceCollection</c> must
+    /// register a keyring itself. This method deliberately does NOT self-register one: a silently
+    /// installed ephemeral keyring loses every wrapped value on the next process start, which is
+    /// the exact footgun ADR-0003 closed.
+    /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="connectionString">PostgreSQL connection string.</param>
     /// <param name="configureDataSource">
@@ -69,6 +79,10 @@ public static class ServiceCollectionExtensions
     /// <c>Use*Storage(IServiceCollection, NpgsqlDataSource)</c> call to collapse the
     /// 14-pool sprawl into a single connection pool per host instance.
     /// </summary>
+    /// <remarks>
+    /// <b>Requires an <c>IDataProtectionProvider</c> in the container</b> — see the
+    /// connection-string overload's remarks for why this method does not register one itself.
+    /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="dataSource">A pre-built <see cref="NpgsqlDataSource"/>; registered as
     /// the canonical DI singleton via <c>TryAddSingleton</c>.</param>
@@ -237,6 +251,23 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddHostedService<OidcClientSecretEncryptionMigrator>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers <see cref="UserMfaEncryptionMigrator"/> as an
+    /// <see cref="Microsoft.Extensions.Hosting.IHostedService"/>. Closes threat-model
+    /// asset <b>A7</b> (MFA enrollment material): wraps any legacy unwrapped
+    /// <c>mfa_secret</c> / <c>mfa_recovery_codes</c> values in <c>users</c> with
+    /// DataProtection at process startup, for rows written before
+    /// <see cref="PostgresUserStore"/> started protecting on write. Idempotent — safe to
+    /// register unconditionally; subsequent runs find every value already wrapped and
+    /// issue zero writes.
+    /// </summary>
+    public static IServiceCollection AddUserMfaEncryptionMigrator(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddHostedService<UserMfaEncryptionMigrator>();
         return services;
     }
 
