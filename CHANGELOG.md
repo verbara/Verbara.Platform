@@ -39,14 +39,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   feature was adopted. `2.13.1-pro` is the Pro build compiled against Sdk `2.4.0`. The resulting
   compatibility triple — **Verbara.Sdk `2.4.0` × Verbara.Sdk.Pro `2.13.1-pro` × Verbara.Platform
   (the next version cut from `main`)** — is what this entry records; per `Verbara.Sdk/ADR-0040` D3
-  the cascade rides alone and cuts no version of its own.
+  the cascade rides alone and cuts no version of its own. (#210)
 - **`Microsoft.Extensions.*` `10.0.9` → `10.0.10`** (7 central pins), bumped **in the same commit**
   as the `Verbara.Sdk.*` pins. Sdk `2.4.0` raises that family's transitive floor to `10.0.10` and
   Platform pins it **directly**, so advancing only the `Verbara.Sdk.*` half would leave a direct pin
   below the floor Platform's own dependency now declares — a fatal **`NU1605`** package-downgrade
   error under `CentralPackageTransitivePinningEnabled=true` + `TreatWarningsAsErrors=true`
   (`NU1605` is deliberately absent from `NoWarn`). Moving both halves together is what clears it.
-  Same shape as the `2.3.0` cascade recorded in `[2.17.0]`.
+  Same shape as the `2.3.0` cascade recorded in `[2.17.0]`. (#210)
 - **Deliberately out of scope** (`Verbara.Sdk/ADR-0040` D4 — a cascade's scope is declared, never
   inferred by prefix): `Microsoft.Extensions.TimeProvider.Testing` stays at `10.0.0` (test-only, on
   a different servicing track), and neither `OpenTelemetry` (floor raised to `1.17.0`) nor
@@ -55,7 +55,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (the realtime transport is SignalR + StackExchange.Redis), so the residual risk reduces to restore
   resolution plus Native AOT publish behaviour, both covered by the existing required gates —
   notably `AOT Publish (Api)`, which fails on any `warning ILxxxx`. decision_ref
-  `Verbara.Sdk/ADR-0040`.
+  `Verbara.Sdk/ADR-0040`. (#210)
 
 ## [2.22.0] - 2026-07-27
 
