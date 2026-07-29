@@ -53,18 +53,17 @@ namespace Verbara.Platform.Api.Tests;
 /// </summary>
 public sealed class MfaPolicyEnforcementTests
 {
-    private const string TenantId = "mfa-policy-tenant";
-    private const string UserId = "mfa-policy-user";
-    private const string Email = "user@mfa-policy.test";
-    private const string Password = "CurrentPassword123!";
-
-    // BCrypt hash of Password — hashed once per class load to avoid BCrypt cost per test.
-    private static readonly string s_passwordHash = PasswordService.HashPassword(Password);
+    // Seeds live on the fixture that writes them; aliased here so this class reads unchanged.
+    private const string TenantId = AuthHandlerFixture.TenantId;
+    private const string UserId = AuthHandlerFixture.UserId;
+    private const string Email = AuthHandlerFixture.Email;
+    private const string Password = AuthHandlerFixture.Password;
+    private static readonly string s_passwordHash = AuthHandlerFixture.s_passwordHash;
 
     private static readonly string[] s_adminRole = ["Admin"];
     private static readonly string[] s_adminOnlyMfaRoles = ["Admin"];
-    private static readonly string[] s_wildcardScope = ["*"];
-    private static readonly string[] s_recoveryCodes = ["code1"];
+    private static readonly string[] s_wildcardScope = AuthHandlerFixture.s_wildcardScope;
+    private static readonly string[] s_recoveryCodes = AuthHandlerFixture.s_recoveryCodes;
 
     // ─── Gap 1: Login ────────────────────────────────────────────────────────
 
@@ -73,7 +72,7 @@ public sealed class MfaPolicyEnforcementTests
     {
         // Policy requires_all; user has NOT enrolled MFA. Before the fix this
         // would succeed and issue tokens — a direct policy bypass.
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: false, role: UserRole.Agent)
             .WithTenantPolicy(new TenantAuthConfig
             {
@@ -97,7 +96,7 @@ public sealed class MfaPolicyEnforcementTests
         // Policy optional + user not enrolled — the baseline happy path. Must
         // continue to issue tokens exactly as before; this test pins that the
         // policy gate adds NO regression to the existing optional flow.
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: false, role: UserRole.Agent)
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "optional" });
 
@@ -113,7 +112,7 @@ public sealed class MfaPolicyEnforcementTests
         // Policy required_all + user IS enrolled — fall through to existing
         // per-user challenge flow. The MfaChallengeResponse shape consumed by
         // the frontend today must remain unchanged (requiresMfa + mfaToken).
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: true, role: UserRole.Agent)
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "required_all" });
 
@@ -131,7 +130,7 @@ public sealed class MfaPolicyEnforcementTests
         // inapplicable → non-enrolled user must succeed. Pins that we do NOT
         // over-enforce by accidentally treating "required_for_roles" as
         // "required_all".
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: false, role: UserRole.Agent)
             .WithTenantPolicy(new TenantAuthConfig
             {
@@ -154,7 +153,7 @@ public sealed class MfaPolicyEnforcementTests
         // user obtained a refresh-token under the old policy. The old token
         // must die the moment the user tries to rotate it; the new replacement
         // must also be revoked so the attacker cannot keep cycling.
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: false, role: UserRole.Agent)
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "required_all" });
 
@@ -163,7 +162,7 @@ public sealed class MfaPolicyEnforcementTests
             UserId, TenantId, ipAddress: "1.2.3.4", userAgent: "Test", CancellationToken.None);
         var rawToken = tokenPair.RawToken;
 
-        var httpContext = MfaPolicyFixture.BuildHttpContext(refreshCookie: rawToken);
+        var httpContext = AuthHandlerFixture.BuildHttpContext(refreshCookie: rawToken);
 
         var result = await AuthEndpoints.Refresh(
             httpContext,
@@ -201,7 +200,7 @@ public sealed class MfaPolicyEnforcementTests
         // Password reset must NOT issue a session token directly; it must
         // signal action=verify so the frontend routes back through the MFA
         // challenge flow.
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: true, role: UserRole.Agent)
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "required_all" });
 
@@ -235,7 +234,7 @@ public sealed class MfaPolicyEnforcementTests
         // Policy required_all + user NOT enrolled. Reset succeeds, but must
         // signal action=enroll so the frontend drives enrollment before any
         // session token is issued.
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: false, role: UserRole.Agent)
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "required_all" });
 
@@ -266,7 +265,7 @@ public sealed class MfaPolicyEnforcementTests
         // Baseline happy path — policy optional, the legacy MessageResponse
         // must be preserved unchanged. Guards against accidentally rewriting
         // every password-reset success.
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: false, role: UserRole.Agent)
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "optional" });
 
@@ -298,7 +297,7 @@ public sealed class MfaPolicyEnforcementTests
         // User-bound Standard key + policy required_all + admin role covered.
         // Before the fix an admin could issue themselves a personal key to
         // sidestep MFA.
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: false, role: UserRole.Admin)
             .WithTenantPolicy(new TenantAuthConfig
             {
@@ -322,7 +321,7 @@ public sealed class MfaPolicyEnforcementTests
         // cannot complete a TOTP challenge, and operators must still be able
         // to automate platform-level operations. Locking this in prevents an
         // over-broad future edit from accidentally blocking integrations.
-        var fixture = new MfaPolicyFixture()
+        var fixture = new AuthHandlerFixture()
             .WithUser(mfaEnabled: false, role: UserRole.Admin)
             .WithTenantPolicy(new TenantAuthConfig { TenantId = TenantId, MfaPolicy = "required_all" })
             .WithApiKey(ApiKeyType.Management, rawKey: "platform-integration-key");
@@ -344,181 +343,5 @@ public sealed class MfaPolicyEnforcementTests
     /// stores. Using real services (not mocks) exercises the actual token
     /// generation + rotation code paths and keeps the tests close to production.
     /// </summary>
-    private sealed class MfaPolicyFixture
-    {
-        public readonly IUserStore UserStore = Substitute.For<IUserStore>();
-        public readonly IApiKeyStore ApiKeyStore = Substitute.For<IApiKeyStore>();
-        public readonly ITenantAuthConfigStore ConfigStore = Substitute.For<ITenantAuthConfigStore>();
-        public readonly IAuthEventStore AuthEventStore = Substitute.For<IAuthEventStore>();
-        public readonly IRefreshTokenStore RefreshTokenStore = Substitute.For<IRefreshTokenStore>();
-        public readonly Verbara.Platform.Identity.Mfa.IMfaPolicyEvaluator MfaPolicyEvaluator =
-            Substitute.For<Verbara.Platform.Identity.Mfa.IMfaPolicyEvaluator>();
-        public readonly Verbara.Platform.Identity.Mfa.InMemoryMfaPendingCache MfaPendingCache = new();
-        public readonly Verbara.Platform.Identity.Mfa.InMemoryPasswordResetCache PasswordResetCache = new();
-        public readonly AuthEventService AuthEvents;
-        public readonly JwtTokenService JwtService;
-        public readonly RefreshTokenService RefreshService;
-        public readonly AccountLockoutService LockoutService;
-        private readonly string _tempKeyDir;
-
-        public User User = null!;
-
-        public MfaPolicyFixture()
-        {
-            AuthEvents = new AuthEventService(AuthEventStore);
-            LockoutService = new AccountLockoutService(UserStore, ConfigStore, AuthEvents);
-
-            // JwtTokenService requires a writable data directory to persist its RSA
-            // signing key on first run. Use a unique per-fixture temp dir so parallel
-            // test runs don't collide.
-            _tempKeyDir = Path.Combine(Path.GetTempPath(), "asterisk-mfa-tests-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(_tempKeyDir);
-            JwtService = new JwtTokenService(
-                _tempKeyDir,
-                DataProtectionProvider.Create("Verbara.Platform.Tests"),
-                new InMemoryJtiRevocationCache());
-
-            // In-memory refresh-token backing store so rotation round-trips.
-            var storedTokens = new System.Collections.Concurrent.ConcurrentDictionary<string, RefreshToken>();
-            RefreshTokenStore.SaveAsync(Arg.Do<RefreshToken>(t => storedTokens[t.TokenHash] = t),
-                Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-            RefreshTokenStore.GetByHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(ci =>
-                {
-                    storedTokens.TryGetValue(ci.Arg<string>(), out var t);
-                    return Task.FromResult<RefreshToken?>(t);
-                });
-            RefreshTokenStore.RevokeAsync(Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-                .Returns(ci =>
-                {
-                    var tokenId = ci.ArgAt<string>(0);
-                    var match = storedTokens.Values.FirstOrDefault(v => v.TokenId == tokenId);
-                    if (match is not null) match.RevokedAt = ci.ArgAt<DateTimeOffset>(1);
-                    return Task.CompletedTask;
-                });
-            RefreshTokenStore.RevokeAllForUserAsync(
-                    Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-                .Returns(ci =>
-                {
-                    var tenantArg = ci.ArgAt<string>(0);
-                    var userArg = ci.ArgAt<string>(1);
-                    var revokedAt = ci.ArgAt<DateTimeOffset>(2);
-                    foreach (var t in storedTokens.Values.Where(v => v.TenantId == tenantArg && v.UserId == userArg))
-                        t.RevokedAt = revokedAt;
-                    return Task.CompletedTask;
-                });
-
-            RefreshService = new RefreshTokenService(RefreshTokenStore);
-        }
-
-        public MfaPolicyFixture WithUser(bool mfaEnabled, UserRole role)
-        {
-            User = new User
-            {
-                UserId = EntityId.From(UserId),
-                TenantId = new TenantId(TenantId),
-                Email = Email,
-                DisplayName = "Policy Test User",
-                Role = role,
-                Status = UserStatus.Active,
-                CreatedAt = DateTimeOffset.UtcNow,
-                PasswordHash = s_passwordHash,
-                MfaEnabled = mfaEnabled,
-                MfaSecret = mfaEnabled ? "JBSWY3DPEHPK3PXP" : null,
-                MfaRecoveryCodes = mfaEnabled ? s_recoveryCodes : null,
-                MfaConfirmedAt = mfaEnabled ? DateTimeOffset.UtcNow : null,
-            };
-
-            UserStore.GetByEmailAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult<User?>(User));
-            UserStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult<User?>(User));
-            return this;
-        }
-
-        public MfaPolicyFixture WithTenantPolicy(TenantAuthConfig config)
-        {
-            ConfigStore.GetAsync(TenantId, Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult<TenantAuthConfig?>(config));
-            // Wire IMfaPolicyEvaluator to delegate to the same config so tests stay coherent.
-            MfaPolicyEvaluator.RequiresMfaAsync(TenantId, Arg.Any<UserRole>(), Arg.Any<CancellationToken>())
-                .Returns(ci => Task.FromResult(config.IsMfaRequiredForRole(ci.Arg<UserRole>().ToString())));
-            return this;
-        }
-
-        public MfaPolicyFixture WithApiKey(ApiKeyType keyType, string rawKey)
-        {
-            var apiKey = new ApiKey
-            {
-                KeyId = EntityId.From("key-1"),
-                TenantId = new TenantId(TenantId),
-                Name = "test-key",
-                HashedKey = HashKey(rawKey),
-                Scopes = s_wildcardScope,
-                UserId = EntityId.From(UserId),
-                KeyType = keyType,
-                CreatedAt = DateTimeOffset.UtcNow,
-            };
-            ApiKeyStore.GetByHashAsync(apiKey.HashedKey, Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult<ApiKey?>(apiKey));
-            return this;
-        }
-
-        public static DefaultHttpContext BuildHttpContext(string? refreshCookie = null)
-        {
-            var ctx = new DefaultHttpContext();
-            // Minimum DI so the endpoints' RequestServices.GetService<T>() calls don't NRE
-            var services = new ServiceCollection();
-            ctx.RequestServices = services.BuildServiceProvider();
-
-            var claims = new List<Claim>
-            {
-                new("tid", TenantId),
-                new("sub", UserId),
-                new("user_id", UserId),
-            };
-            ctx.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestScheme"));
-
-            if (refreshCookie is not null)
-            {
-                ctx.Request.Headers.Cookie = $"refresh_token={refreshCookie}";
-            }
-
-            return ctx;
-        }
-
-        public Task<IResult> InvokeLoginAsync(LoginRequest body) =>
-            AuthEndpoints.Login(
-                body,
-                BuildHttpContext(refreshCookie: null),
-                UserStore,
-                LockoutService,
-                JwtService,
-                RefreshService,
-                AuthEvents,
-                ConfigStore,
-                MfaPolicyEvaluator,
-                MfaPendingCache,
-                authWriteQueue: null, // AHH Phase 4 — null queue → rehash skipped (test path)
-                CancellationToken.None);
-
-        public Task<IResult> InvokeApiKeyLoginAsync(ApiKeyLoginRequest body) =>
-            AuthEndpoints.ApiKeyLogin(
-                body,
-                BuildHttpContext(refreshCookie: null),
-                ApiKeyStore,
-                UserStore,
-                ConfigStore,
-                MfaPolicyEvaluator,
-                JwtService,
-                AuthEvents,
-                CancellationToken.None);
-
-        private static string HashKey(string rawKey)
-        {
-            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawKey));
-            return Convert.ToHexStringLower(bytes);
-        }
-    }
 
 }
