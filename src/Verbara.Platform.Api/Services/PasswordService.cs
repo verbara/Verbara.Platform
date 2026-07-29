@@ -114,16 +114,17 @@ internal sealed class PasswordService
             return Argon2.Verify(hash, password);
 
         // Default: legacy BCrypt. BCrypt.Net-Next accepts both $2a$ and $2b$
-        // variants; throws on malformed input which is treated as a verify
+        // variants; any failure to parse the STORED hash is treated as a verify
         // failure (not an error path that should reveal hash shape).
-        try
-        {
-            return BCrypt.Net.BCrypt.Verify(password, hash);
-        }
-        catch (BCrypt.Net.SaltParseException)
-        {
-            return false;
-        }
+        //
+        // The guard moved into BcryptVerifyGuard because catching SaltParseException
+        // alone left a hole: that type is raised only when the stored value does not
+        // begin with "$". A hash corrupt INSIDE the "$2" family — truncated, or with a
+        // non-numeric cost factor — raises IndexOutOfRangeException / FormatException /
+        // ArgumentOutOfRangeException instead, and two of those surface as HTTP 500 on
+        // the login path. ADR-0013 states the requirement; this makes both credential
+        // verifiers actually meet it.
+        return BcryptVerifyGuard.SafeVerify(password, hash);
     }
 
     /// <summary>

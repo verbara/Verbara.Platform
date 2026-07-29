@@ -88,9 +88,23 @@ public sealed class MfaEnrollEndpointsTests : IClassFixture<AuthenticatedPlatfor
         using var initDoc = JsonDocument.Parse(initBody);
         var secret = initDoc.RootElement.GetProperty("secret").GetString()!;
 
-        // Generate the live TOTP for this secret using the same OtpNet impl
-        // the production code uses; this proves the verify→persist branch works
-        // end-to-end without any clock-skew flakiness.
+        // Generate the live TOTP for this secret using the same OtpNet impl the
+        // production code uses, so the assertion is not clock-skew flaky.
+        //
+        // SCOPE — read this before trusting the test for anything else. What it
+        // covers: TOTP verification against the /init secret, and the SHAPE of the
+        // recovery codes handed back (10 codes, 8 chars each). What it does NOT
+        // cover: recovery-code REDEMPTION. The plaintext codes are asserted on and
+        // then discarded — this test never posts one to POST /auth/mfa/verify, so
+        // it says nothing about whether the digests persisted here can be redeemed.
+        //
+        // An earlier version of this comment claimed the test "proves the
+        // verify→persist branch works end-to-end". It meant the TOTP branch, but it
+        // read as redemption coverage, and that reading is exactly why the wizard
+        // shipped minting salted-SHA-256 digests that POST /auth/mfa/verify could
+        // not verify — redemption returned 500 "Invalid salt version" in production
+        // while this suite stayed green. The mint→redeem seam is covered by
+        // Mfa/MfaRecoveryCodeRedemptionTests; do not treat this test as a substitute.
         var live = OtpNet.Base32Encoding.ToBytes(secret);
         var totp = new OtpNet.Totp(live);
         var code = totp.ComputeTotp(DateTime.UtcNow);

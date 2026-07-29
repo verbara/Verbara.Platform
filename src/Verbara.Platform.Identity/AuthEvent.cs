@@ -23,6 +23,16 @@ public static class AuthEventTypes
     public const string PasswordChangeFailure = "password_change_failure";
     public const string MfaEnroll = "mfa_enroll";
     public const string MfaDisable = "mfa_disable";
+
+    /// <summary>
+    /// A second-factor verification attempt at <c>POST /auth/mfa/verify</c> failed — a wrong TOTP
+    /// code, a wrong recovery code, or no factor supplied. Distinct from
+    /// <see cref="LoginFailure"/>, which covers the password stage: the two happen at different
+    /// steps and conflating them would misreport which factor the caller failed. Emitted alongside
+    /// a lockout attempt so second-factor guessing is both audited and throttled
+    /// (<c>docs/security/audit-checklist.md</c> Scope 3.4).
+    /// </summary>
+    public const string MfaVerificationFailure = "mfa_verification_failure";
     public const string RecoveryCodesRegenerated = "recovery_codes_regenerated";
     public const string Lockout = "lockout";
     public const string SessionRevoked = "session_revoked";

@@ -113,6 +113,45 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   notably `AOT Publish (Api)`, which fails on any `warning ILxxxx`. decision_ref
   `Verbara.Sdk/ADR-0040`. (#210)
 
+### Fixed
+
+- **MFA recovery codes minted by the enrollment wizard could never be redeemed** —
+  `POST /api/v1/auth/mfa/verify` answered **HTTP 500** with the crypto library's raw
+  `"Invalid salt version"` message in `ProblemDetails.Detail`. `users.mfa_recovery_codes` carries two
+  digest families, and the sole redemption path called `BCrypt.Verify` unconditionally: codes minted
+  by **`POST /profile/security/mfa/enroll/verify`** and **`POST /profile/security/recovery-codes/regenerate`**
+  are 64-character salted SHA-256 hex, which fails BCrypt's `$2` precondition and raises
+  `SaltParseException`. Codes minted by the legacy `POST /auth/mfa/setup` and
+  `POST /auth/mfa/recovery-codes/regenerate` are BCrypt and were unaffected — as is every user who
+  enrolled through the shipped operator UI, which wires the legacy endpoints. The wizard routes were
+  nonetheless live and in the OpenAPI surface, so API clients using them held recovery codes that
+  could not be redeemed at all — a permanent lockout for the one situation recovery codes exist for,
+  made worse by the one-shot `mfaToken` challenge being consumed *before* the failure (every attempt
+  cost a full re-login) and by the UI rendering the 500 as a generic "invalid code". Fixed by
+  dispatching **per stored element** on its shape — `$2` → BCrypt, anything else → the already-shipped
+  salted-SHA-256 verifier `IRecoveryCodeService.Verify` (salt = the user id) — and by guarding the
+  BCrypt branch with `catch (BCrypt.Net.SaltParseException) → no match`, the same guard
+  `PasswordService.VerifyPassword` has carried since ADR-0013. **No stored value is rewritten,
+  re-hashed, or invalidated**: both families keep verifying, so recovery codes already saved by users
+  stay valid. This does **not** unify the two hash families and does **not** strengthen the SHA-256
+  digest. decision_ref `Platform/ADR-0013` (addendum of 2026-07-29).
+
+### Security
+
+- **Failed MFA verification is now audited and counts toward account lockout.**
+  `POST /api/v1/auth/mfa/verify` previously recorded **nothing** on any failure path — no lockout
+  attempt, no auth event — for a wrong TOTP code, a wrong recovery code, or the 500 above, even
+  though `/auth/login` has recorded both since it shipped. Second-factor guessing against an
+  anonymous endpoint was therefore unaudited and unthrottled beyond the global rate-limit bucket. A
+  failed attempt now calls `AccountLockoutService.RecordFailedAttemptAsync` and emits the new
+  `AuthEventTypes.MfaVerificationFailure` (`mfa_verification_failure`) auth event with IP,
+  user-agent, and a reason naming only which factor failed — never the submitted code, the stored
+  digest, or the TOTP secret. Closes the verification half of `docs/security/audit-checklist.md`
+  Scope 3.4. **Operator-visible behavioural change:** an endpoint that could never lock an account
+  now can — a user who repeatedly fumbles a recovery code or a TOTP code will hit the tenant's
+  configured lockout threshold, and those attempts will appear in the auth-event log where nothing
+  appeared before.
+
 ## [2.22.0] - 2026-07-27
 
 ### Added

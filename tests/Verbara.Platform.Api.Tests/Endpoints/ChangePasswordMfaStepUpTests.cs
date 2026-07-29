@@ -29,6 +29,19 @@ public sealed class ChangePasswordMfaStepUpTests
 
     private static readonly string s_knownHash = PasswordService.HashPassword(TestPassword);
 
+    /// <summary>
+    /// ⚠ NOT recovery-code coverage. Inert placeholders that exist only so the
+    /// fixture user's <c>MfaEnabled == true</c> looks plausible; this suite tests
+    /// the TOTP step-up gate on <c>/auth/change-password</c> and never redeems one.
+    /// </summary>
+    /// <remarks>
+    /// They belong to NEITHER stored-digest family — not BCrypt (no <c>$2</c>
+    /// prefix), not a 64-char salted SHA-256 hex digest. Mint→redeem coverage lives
+    /// in <c>Mfa/MfaRecoveryCodeRedemptionTests</c>, format dispatch in
+    /// <c>Services/MfaServiceTests</c>.
+    /// </remarks>
+    private static readonly string[] s_placeholderNonDigestRecoveryCodes = ["code1", "code2"];
+
     // ─── T1: MFA enrolled, code absent → 401 + step-up body ────────────────
 
     [Fact]
@@ -246,7 +259,8 @@ public sealed class ChangePasswordMfaStepUpTests
             CreatedAt = DateTimeOffset.UtcNow,
             MfaEnabled = true,
             MfaSecret = secret,
-            MfaRecoveryCodes = new[] { "code1", "code2" },
+            // See the field's remarks: placeholders, NOT redemption coverage.
+            MfaRecoveryCodes = s_placeholderNonDigestRecoveryCodes,
             MfaConfirmedAt = DateTimeOffset.UtcNow,
             PasswordHash = s_knownHash,
         };

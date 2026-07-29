@@ -87,6 +87,28 @@ public sealed class PasswordServiceTests
         PasswordService.VerifyPassword("anything", "$2a$malformed").Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("$2a$10$truncated")]
+    [InlineData("$2a$xx$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY")]
+    [InlineData("$2")]
+    [InlineData("$2a$")]
+    public void VerifyPassword_ShouldReturnFalse_WhenStoredHashIsCorruptInsideTheBcryptFamily(string corrupt)
+    {
+        // ADR-0013 requires a crypto-library parse failure on stored material to be a
+        // verify failure, never an error path. Catching SaltParseException alone did NOT
+        // deliver that: BCrypt.Net-Next raises it only when the value does not begin with
+        // "$". A hash corrupt INSIDE the "$2" family raises IndexOutOfRangeException /
+        // FormatException / ArgumentOutOfRangeException, two of which surface as HTTP 500
+        // from the login path. BcryptVerifyGuard closes that hole for both credential
+        // verifiers; these inputs are the measured cases, not hypothetical ones.
+        var act = () => PasswordService.VerifyPassword("anything", corrupt);
+
+        act.Should().NotThrow(
+            because: "a corrupt stored hash is a failed login, never a 500 leaking the "
+                   + "cryptography library's message through ProblemDetails.Detail");
+        act().Should().BeFalse();
+    }
+
     [Fact]
     public void ValidatePolicy_ShouldPass_WhenPasswordMeetsAllRequirements()
     {
