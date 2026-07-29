@@ -194,3 +194,11 @@ Asset **A9** (database connection string + DataProtection keyring) in `docs/secu
 ### The follow-up that would close it
 
 **Wrap the keyring itself at rest** — `ProtectKeysWithCertificate` (an operator-supplied X.509 cert held outside the database) or a KMS-backed equivalent — so a full database dump yields ciphertext for the keyring as well as for the register's columns. That is deliberately **not** built by `encrypt-mfa-secrets-at-rest`: it changes the deployment contract for every operator (a new artifact to provision, back up, and rotate, and a new fail-closed startup path), which is its own decision. Whether it lands as an amendment to this ADR or as a successor ADR is left open until it is proposed.
+
+### Open follow-up — detecting keyring loss, which is silent by design
+
+Losing the keyring produces **no error signal**. Every wrapped column's read path falls back to the stored value verbatim on `CryptographicException`, so `MfaService.VerifyCode` simply returns false, an OIDC token exchange simply fails, and nothing throws, 5xxs, or trips a health check. That fallback is deliberate — it is what lets a not-yet-migrated row keep working across a deploy — but it means the failure is invisible until users report it.
+
+The interim signal is the migrators' completion counters: `UserMfaEncryptionMigrator` logs EventId **4201** with `{scanned, encrypted, already-encrypted, failed}` on every boot, and `OidcClientSecretEncryptionMigrator` logs **4001** likewise. A keyring loss shows up as a boot that suddenly reports a large *legacy* count on a table it had already migrated — every value now fails its trial unwrap and is re-wrapped under the new key. **That is a usable alarm and no alert consumes it today.**
+
+Turning it into a real signal (a health-check degradation, or a metric with a stored baseline) is recorded here as an **open follow-up, not a decision**. It was deliberately not built alongside the register because the obvious implementation needs a persisted "already migrated" baseline to compare against — i.e. a completion marker, which `encrypt-mfa-secrets-at-rest` design D4 rejected on the grounds that a marker can desynchronise from the actual bytes and lie. Anyone picking this up must resolve that tension first rather than reintroducing the marker by another name.

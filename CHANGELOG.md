@@ -24,7 +24,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   length and order; elements stay opaque strings, so neither digest format is inspected, normalised,
   or re-hashed. Same protect-on-write / unprotect-on-read shape already shipped for
   `tenant_auth_config.oidc_client_secret` under `PREPUB-2026-05-09-ADMIN-001`. Threat-model asset
-  **A7**; the canonical column → purpose list is the new **protected-column register** in ADR-0003.
+  **A7**; the canonical column → purpose list is the new **protected-column register** in ADR-0003. (#212)
 - **One-shot idempotent startup migrator converts pre-existing rows.**
   `UserMfaEncryptionMigrator` (registered by `AddUserMfaEncryptionMigrator()`, called in `Program.cs`
   beside `AddOidcClientSecretEncryptionMigrator()`) walks `users` in **keyset-ordered batches** —
@@ -38,14 +38,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `4201`–`4204` and an `Activity` on `Verbara.Platform.UserMfaEncryption` tagged `scanned_rows` /
   `encrypted_rows` / `already_encrypted_rows` / `failed_rows` — never a secret, a ciphertext, or an
   email. Reads fall back to the stored value verbatim on `CryptographicException`, so rows the
-  migrator has not yet reached keep authenticating during the deploy window.
+  migrator has not yet reached keep authenticating during the deploy window. (#212)
 - **No schema change and no API change accompanies this.** `mfa_secret TEXT` and
   `mfa_recovery_codes TEXT[]` are unbounded and hold the longer ciphertext with **no SQL migration**;
   no index covers either column. `MfaSecret` and `MfaRecoveryCodes` are already never returned over
   HTTP, so there is no DTO, no `ApiJsonContext` entry, no endpoint, and no `Verbara.Platform.Web`
   change; no `Verbara.Sdk` / `Verbara.Sdk.Pro` change and no pin bump. `InMemoryUserStore` (no
   at-rest surface) and `CachedUserStore`'s ADR-0010 trust boundary are untouched. AOT posture
-  unchanged — `IDataProtection` is already AOT-clean in this host via `NpgsqlXmlRepository`.
+  unchanged — `IDataProtection` is already AOT-clean in this host via `NpgsqlXmlRepository`. (#212)
 - **Residual risk, stated rather than implied.** This does **not** defend against a compromise that
   includes the keyring. `AddPlatformDataProtection` exposes no `ProtectKeysWith*` option today, so
   with the default `UsePostgres` keyring `data_protection_keys` holds key XML **unencrypted in the
@@ -54,7 +54,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exposure: a table-scoped dump (`pg_dump -t users`), a CSV/report extract, a read-replica scoped to
   application tables, or a SQL-injection read that reaches `users` but not `data_protection_keys`.
   Wrapping the keyring itself (certificate or KMS) is named as the follow-up in the ADR-0003 addendum
-  and is not built here.
+  and is not built here. (#212)
 - **Operator impact — read before deploying or rolling back.** Keyring durability is now load-bearing
   for **MFA**, not only for OIDC client secrets and AgentAssist credentials, and the failure is
   **silent**: unwrappable values fall through verbatim and `MfaService.VerifyCode` simply returns
@@ -63,7 +63,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   verification for already-migrated users until it is rolled forward (or those users are reset);
   non-MFA authentication is unaffected in both directions, and there is no schema rollback because no
   schema migration ships. Documented in `docs/operations/backup-disaster-recovery.md` §1.6 + §3.6 and
-  `docs/operations/v1.11-release-runbook.md` §Rollback.
+  `docs/operations/v1.11-release-runbook.md` §Rollback. (#212)
 
 ### Changed — CI
 
