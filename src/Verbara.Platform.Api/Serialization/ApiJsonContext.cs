@@ -577,6 +577,13 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(RotateKeyResponse))]
 [JsonSerializable(typeof(AuditEventDto))]
 [JsonSerializable(typeof(PagedResult<AuditEventDto>))]
+// The LEGACY `GET /admin/audit` returns the store's entry shape verbatim for back-compat, not the
+// DTO the newer /admin/audit/events uses — so registering only the DTO left that endpoint returning
+// HTTP 500 ("JsonTypeInfo metadata for type PagedResult`1[AuditEntry] was not provided") on every
+// call. Reflection is off for this assembly, so an unregistered root type is a runtime failure, not
+// a slow path.
+[JsonSerializable(typeof(Verbara.Platform.Audit.AuditEntry))]
+[JsonSerializable(typeof(PagedResult<Verbara.Platform.Audit.AuditEntry>))]
 [JsonSerializable(typeof(Verbara.Platform.Media.MediaFile))]
 // ─── AOT (ADR-0022 Phase D): endpoint [FromBody] request DTOs ────────────────
 // Under PublishAot, System.Text.Json has NO reflection fallback, so every
