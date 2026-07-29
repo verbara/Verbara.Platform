@@ -210,3 +210,125 @@ Existing pre-Phase-4 tests pass unchanged: 853 / 853 Api.Tests PASS.
 - ADR-0012 — JWT rotation pool wire-up (Phase 3 sister; both ride v1.14.0).
 - Phase 0 baseline doc — empirical justification for Argon2id parameters
   and the AOT gate.
+
+---
+
+## Addendum 2026-07-29 — the prefix discriminator also governs recovery-code digests
+
+**Source change:** `fix-recovery-code-redemption` (OpenSpec, tier MEDIANO, `decision_ref`
+Platform/ADR-0013).
+
+Append-only addendum. The **Decision** above is unchanged: Argon2id remains the canonical password
+hash, BCrypt remains verify-only for passwords, and the on-login rehash is untouched. This records a
+**second column** that the same pattern now governs, and — because the two cases are not symmetric —
+the one part of the password decision that deliberately does **not** carry over.
+
+The *"Forward compatibility"* section above pre-authorises this: *"the prefix-discriminator pattern
+in `VerifyPassword` extends naturally. Add a new branch + new `IsXxxHash` predicate."* This is that
+case, applied to a different column.
+
+### The second column
+
+`users.mfa_recovery_codes` carries **two digest families**, written by two sets of mint paths:
+
+| Family | Written by | Shape |
+|---|---|---|
+| BCrypt cost-10 | `MfaService.HashRecoveryCodes` — the legacy MFA endpoints (`POST /auth/mfa/setup`, `POST /auth/mfa/recovery-codes/regenerate`) | `$2a$…`, 60 chars |
+| Salted SHA-256 | `IRecoveryCodeService.Hash(code, salt)` — the profile enrollment wizard (`POST /profile/security/mfa/enroll/verify`, `POST /profile/security/recovery-codes/regenerate`) | 64 uppercase hex chars |
+
+There is exactly one redemption path — `AuthEndpoints.MfaVerify` → `MfaService.ValidateRecoveryCode`
+— and until this change it called `BCrypt.Verify` unconditionally. A SHA-256 element therefore threw
+rather than failing to match.
+
+### The dispatch table
+
+`MfaService.ValidateRecoveryCode` now classifies **each stored element on its own shape**, exactly as
+`PasswordService.VerifyPassword` classifies a password hash:
+
+| Stored element | Verifier |
+|---|---|
+| starts with `$2` (the `PasswordService.IsBcryptHash` discriminator — `$2a$` and `$2b$` alike) | `BCrypt.Net.BCrypt.Verify` |
+| anything else | `IRecoveryCodeService.Verify(code, salt, storedHash)`, salt = `user.UserId.Value` |
+
+Two details are load-bearing:
+
+- **Per element, never once per array.** A mixed array — reachable through a partially-applied
+  migration or a manual database edit — verifies every element on its own terms instead of failing
+  at the first one of the unexpected family.
+- **The SHA-256 branch delegates; it does not reimplement.** `IRecoveryCodeService.Verify` already
+  normalises the input the same way `Hash` does and compares with
+  `CryptographicOperations.FixedTimeEquals`. It had zero callers in `src/` before this change — a
+  dead seam beside a live defect. Wiring it is both the fix and the removal of the shape that caused
+  the defect. The salt is a parameter because `Hash` salts with the user's id, which is not
+  recoverable from the digest.
+
+### The `SaltParseException` guard is a standing requirement, not a local nicety
+
+`PasswordService.VerifyPassword` has carried
+`catch (BCrypt.Net.SaltParseException) { return false; }` since this ADR, with the stated rationale
+of not leaking hash shape through the exception type. `MfaService.ValidateRecoveryCode` lacked it,
+and that omission is what turned a format mismatch into an **HTTP 500** carrying the crypto library's
+raw `"Invalid salt version"` message in `ProblemDetails.Detail` — `SaltParseException` derives
+directly from `Exception`, so `ErrorHandlingMiddleware` maps it through its fallthrough arm.
+
+**Therefore, as a standing requirement of this ADR: every verifier that reads stored credential
+material MUST treat a malformed or unrecognised stored value as a non-match, never as an exception
+and never as a match.** The guard is not a defensive flourish attached to the password path — it is
+the property that makes a credential verifier structurally incapable of 500-ing on the contents of
+its own column.
+
+**Catching `SaltParseException` alone does NOT satisfy that requirement**, which the implementation
+of `fix-recovery-code-redemption` established by measurement rather than assumption. BCrypt.Net-Next
+raises `SaltParseException` only when the stored value does not begin with `$`. A digest corrupt
+*inside* the `$2` family raises something else entirely:
+
+| Stored value | BCrypt.Net-Next raises | Mapped by `ErrorHandlingMiddleware` to |
+|---|---|---|
+| `code1`, a 64-char hex digest | `SaltParseException` | 500 (fallthrough arm) |
+| `$2a$10$truncated` | `ArgumentOutOfRangeException` | 400 |
+| `$2a$xx$…` (non-numeric cost) | `FormatException` | **500** |
+| `$2`, `$2a$` | `IndexOutOfRangeException` | **500** |
+
+Both credential verifiers therefore funnel every BCrypt comparison through a single guarded helper,
+`Verbara.Platform.Api.Services.BcryptVerifyGuard.SafeVerify`, whose exception filter covers
+`SaltParseException`, `ArgumentException` (and so `ArgumentOutOfRangeException`), `FormatException`
+and `IndexOutOfRangeException` — and deliberately nothing wider, so an
+`OperationCanceledException` or an `OutOfMemoryException` still propagates. The filter is pinned by
+`MfaServiceTests.ValidateRecoveryCode_ShouldReturnFalse_WhenStoredDigestIsCorruptInsideTheBcryptFamily`
+and `PasswordServiceTests.VerifyPassword_ShouldReturnFalse_WhenStoredHashIsCorruptInsideTheBcryptFamily`,
+both of which exercise the real library rather than a stub. Any future verifier must route through
+that helper rather than write its own `try`/`catch`.
+
+### What does NOT carry over: there is no rehash-on-verify here
+
+The password migration converges — every successful login rehashes a BCrypt user to Argon2id, so the
+legacy family drains over time and the ADR's job is to keep it verifiable *until then*. **The
+recovery-code case has no such convergence and is not meant to.** Both families are kept verifiable
+**indefinitely**:
+
+- Unifying them means re-hashing every element of the array, and a recovery code is only ever
+  presented in plaintext **at the moment it is redeemed and consumed**. The other nine elements are
+  only ever known as digests, so they cannot be converted — the only honest "migration" is to mint a
+  fresh set, which **invalidates every outstanding code**, including the ones users have already
+  filed in a password manager or printed.
+- The digest a user holds is the credential. Rewriting the column is therefore a user-visible
+  revocation, not a transparent upgrade. That is the whole difference from a password hash, which the
+  user re-supplies on every login.
+
+A future reader should not assume symmetry with the password migration: there is no `IsXxxHash`-then-
+rehash loop on this path, no write-back on successful verification, and no drain. A recovery-code
+family retires only when a deliberate change chooses to invalidate outstanding codes — and that is a
+decision of its own, not a consequence of this one.
+
+This addendum also does **not** claim the salted-SHA-256 form is strong. It is a single round over a
+small keyspace and deserves a stretched KDF; `fix-recovery-code-redemption` neither unifies the
+families nor strengthens that digest. It makes both readable. The at-rest exposure of the column is
+addressed separately by `encrypt-mfa-secrets-at-rest` (see the protected-column register in
+ADR-0003), which is byte-for-byte transparent to the dispatch described here.
+
+### Out of this addendum's scope
+
+The same change gave `POST /auth/mfa/verify` the lockout and audit bookkeeping it never had on the
+failure path (`AuthEventTypes.MfaVerificationFailure`). That is a correction to the endpoint's
+audit posture, not to the hash-dispatch decision recorded here; it is documented in
+`docs/security/threat-model.md` (A7 status update, 2026-07-29) and in `CHANGELOG.md`.

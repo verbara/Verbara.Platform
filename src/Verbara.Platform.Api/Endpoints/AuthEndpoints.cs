@@ -166,7 +166,12 @@ internal static class AuthEndpoints
 
     // ─── MFA Verify ──────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> MfaVerify(
+    // Visibility elevated from `private` to `internal` so the Api.Tests project
+    // (which has InternalsVisibleTo) can invoke this handler directly and redeem a
+    // recovery code end-to-end — the coverage that was missing when recovery-code
+    // redemption shipped broken. Same rationale as Login / Refresh / MfaConfirm /
+    // MfaDisable / RegenerateRecoveryCodes above.
+    internal static async Task<IResult> MfaVerify(
         [FromBody] MfaVerifyRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
@@ -176,6 +181,10 @@ internal static class AuthEndpoints
         AuthEventService authEvents,
         [FromServices] IMfaPendingCache mfaCache,
         [FromServices] ITenantAuthConfigStore configStore,
+        // The salted-SHA-256 verifier for recovery codes minted by the profile
+        // enrollment wizard. Legacy codes (BCrypt) need no service; the dispatch
+        // lives in MfaService.ValidateRecoveryCode, which classifies per element.
+        [FromServices] IRecoveryCodeService recoveryCodes,
         CancellationToken ct)
     {
         var pending = await mfaCache.TakeAsync(body.MfaToken, ct);
@@ -196,7 +205,10 @@ internal static class AuthEndpoints
 
         if (!verified && !string.IsNullOrEmpty(body.RecoveryCode) && user.MfaRecoveryCodes is { Count: > 0 })
         {
-            var (isValid, index) = MfaService.ValidateRecoveryCode(body.RecoveryCode, user.MfaRecoveryCodes);
+            // The salt MUST be user.UserId.Value — IRecoveryCodeService.Hash salts
+            // with it, so verification cannot reconstruct it from anything else.
+            var (isValid, index) = MfaService.ValidateRecoveryCode(
+                recoveryCodes, body.RecoveryCode, user.MfaRecoveryCodes, user.UserId.Value);
             if (isValid)
             {
                 // Remove used recovery code
@@ -209,8 +221,34 @@ internal static class AuthEndpoints
         }
 
         if (!verified)
-            return Results.Unauthorized();
+        {
+            // Failure bookkeeping — closes the audit-checklist Scope 3.4 gap. Until
+            // now this endpoint recorded NOTHING on any failure path: no lockout
+            // attempt, no auth event. Second-factor guessing was therefore both
+            // unaudited and unthrottled beyond the global rate-limit bucket, even
+            // though Login has recorded exactly this since it shipped. Mirrors
+            // Login's invalid-password branch, including the synchronous LogAsync
+            // — failure events are never deferred to AuthWriteQueue (ADR-0011).
+            var ip = GetIpAddress(context);
+            var ua = GetUserAgent(context);
 
+            // Name the factor that failed, and nothing else: the submitted code,
+            // the stored digest and the MFA secret MUST NOT reach the audit log.
+            // Both fields may be populated in one request; the recovery code is
+            // the factor evaluated last, so it names the failure when both were
+            // supplied and both were rejected.
+            var reason = !string.IsNullOrEmpty(body.RecoveryCode) ? "invalid_recovery_code"
+                : !string.IsNullOrEmpty(body.Code) ? "invalid_totp"
+                : "no_factor_supplied";
+
+            await lockoutService.RecordFailedAttemptAsync(user, ip, ua, ct);
+            await authEvents.LogAsync(pending.TenantId, user.UserId.Value, AuthEventTypes.MfaVerificationFailure, ip, ua,
+                new Dictionary<string, string> { ["reason"] = reason }, ct);
+            return Results.Unauthorized();
+        }
+
+        // Success path needs no bookkeeping here: IssueTokensAsync already resets
+        // the lockout counter (ResetAttemptsAsync) and emits the success event.
         return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, ct);
     }
 

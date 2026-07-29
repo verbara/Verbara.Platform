@@ -37,6 +37,18 @@ internal sealed class AuthHandlerFixture
 
     // BCrypt hash of Password — hashed once per class load to avoid BCrypt cost per test.
     internal static readonly string s_passwordHash = PasswordService.HashPassword(Password);
+    /// <summary>
+    /// ⚠ NOT recovery-code coverage. An inert placeholder that exists only so a fixture user's
+    /// <c>MfaEnabled == true</c> looks plausible; no suite sharing this fixture ever redeems it.
+    /// </summary>
+    /// <remarks>
+    /// <c>"code1"</c> belongs to NEITHER stored-digest family — not BCrypt (no <c>$2</c> prefix),
+    /// not a 64-char salted SHA-256 hex digest — so before <c>fix-recovery-code-redemption</c>
+    /// redeeming it would have raised <c>BCrypt.Net.SaltParseException</c> → HTTP 500 rather than
+    /// 401. That it was never redeemed by any test is precisely how the redemption defect shipped
+    /// unnoticed. Real coverage: mint→redeem in <c>Mfa/MfaRecoveryCodeRedemptionTests</c>,
+    /// format dispatch in <c>Services/MfaServiceTests</c>.
+    /// </remarks>
     internal static readonly string[] s_recoveryCodes = ["code1"];
     internal static readonly string[] s_wildcardScope = ["*"];
     public readonly IUserStore UserStore = Substitute.For<IUserStore>();

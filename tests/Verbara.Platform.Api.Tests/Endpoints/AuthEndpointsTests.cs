@@ -28,6 +28,22 @@ public sealed class AuthEndpointsTests
     private static readonly string[] s_expectedPasswordPolicyProps =
         ["MinLength", "RequireUppercase", "RequireNumber", "RequireSpecial"];
 
+    /// <summary>
+    /// ⚠ NOT recovery-code coverage. These are inert placeholders whose only job is
+    /// to make <c>MfaEnabled == true</c> look plausible on the fixture user.
+    /// </summary>
+    /// <remarks>
+    /// They belong to NEITHER stored-digest family: not BCrypt (no <c>$2</c> prefix)
+    /// and not a salted SHA-256 hex digest (not 64 hex chars). No test in this file
+    /// ever redeems one — and until <c>fix-recovery-code-redemption</c>, redeeming
+    /// one would have thrown <c>BCrypt.Net.SaltParseException</c> and surfaced as
+    /// HTTP 500 rather than 401. Real mint→redeem coverage across both families
+    /// lives in <c>Mfa/MfaRecoveryCodeRedemptionTests</c>; the format-dispatch unit
+    /// coverage lives in <c>Services/MfaServiceTests</c>. Do not read the presence
+    /// of this array as either.
+    /// </remarks>
+    private static readonly string[] s_placeholderNonDigestRecoveryCodes = ["code1", "code2"];
+
     [Fact]
     public void MfaChallengeResponse_ShouldSerializeWithFrontendFieldNames_WhenSerialized()
     {
@@ -594,7 +610,8 @@ public sealed class AuthEndpointsTests
             CreatedAt = DateTimeOffset.UtcNow,
             MfaEnabled = mfaEnabled,
             MfaSecret = mfaEnabled ? "SECRET" : null,
-            MfaRecoveryCodes = mfaEnabled ? new[] { "code1", "code2" } : null,
+            // See the field's remarks: placeholders, NOT redemption coverage.
+            MfaRecoveryCodes = mfaEnabled ? s_placeholderNonDigestRecoveryCodes : null,
             MfaConfirmedAt = mfaEnabled ? DateTimeOffset.UtcNow : null,
             PasswordHash = s_knownHash,
         };
