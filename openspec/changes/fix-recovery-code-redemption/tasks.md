@@ -2,9 +2,16 @@
 > **Phase A** foundation (batch) → **Phase B** critical components (focused, one per subagent) →
 > **Phase C** integration (batch). Groups 1/2/3 map to A/B/C.
 >
-> **Rebase note:** this change is authored on top of `feat/encrypt-mfa-secrets-at-rest` (PR #212).
-> Rebase onto it (or onto `main` after #212 merges) before implementing — the two touch the same test
-> project, threat model and CHANGELOG, but neither depends on the other semantically (design "Risks").
+> **Rebase note (resolved).** Authored alongside `encrypt-mfa-secrets-at-rest`, which has since
+> merged as **#212**; this branch is now rebased onto a `main` that also carries **#213**
+> (role-default permission fallback on refresh) and **#216** (the #212 archive). Three conflicts
+> resolved, none semantic: `CHANGELOG.md` and `docs/security/threat-model.md` were append-order
+> collisions, and `MfaPolicyEnforcementTests` took #213's refactor — it extracted the fixture into a
+> shared `AuthHandlerFixture`, so this change's task-4.7 annotation of the `"code1"` placeholder
+> moved there with it, where it now covers every suite sharing that fixture. `AuthEndpoints.cs`
+> auto-merged (#213 touches refresh, this change touches `MfaVerify`) and was re-verified rather
+> than trusted: full lane **3512 passed / 0 failed**, auth+MFA suites **269/269**, patch coverage
+> **100.0% (25/25)**.
 
 ## 1. Phase A — Foundation (batch)
 
