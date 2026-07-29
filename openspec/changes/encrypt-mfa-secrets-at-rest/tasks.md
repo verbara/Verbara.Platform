@@ -214,22 +214,51 @@
   path, no `[JsonSerializable]` entry needed, and no Dapper reference (the `BanDapperPackageReferences`
   guard stays green). A `dotnet publish` AOT leg of `Verbara.Platform.Api` must emit no new
   `IL2026`/`IL3050`/`IL207x` diagnostics.
-- [ ] 6.4 Manual end-to-end check against a live Postgres: enroll MFA for a user, verify with raw SQL
+- [x] 6.4 Manual end-to-end check against a live Postgres: enroll MFA for a user, verify with raw SQL
   that `mfa_secret` no longer resembles a Base32 secret and that no `mfa_recovery_codes` element
   resembles a bare hash, then complete a TOTP login and redeem a recovery code successfully.
-  **NOT RUN — operator step, still open.** The store-boundary half is covered automatically by
-  `Save_ShouldPersistEncryptedSecret_*` / `Save_ShouldPersistEncryptedRecoveryCodes_*` against a real
-  Postgres, but a real TOTP login and a real recovery-code redemption through the HTTP surface have
-  not been exercised. Run before merge.
-- [ ] 6.5 Boot twice against a database seeded with legacy unwrapped rows and confirm the migrator's
+  **RUN against the published Native AOT binary** (`publish/Verbara.Platform.Api`, ELF) in
+  `ASPNETCORE_ENVIRONMENT=Production` against `postgres:18-alpine`, driving the real HTTP surface:
+  - `POST /api/v1/setup` → 201; `POST /auth/login` → 200.
+  - `POST /profile/security/mfa/enroll/init` → 200, secret `2KWU…2FRB` (32-char raw Base32).
+  - `POST /profile/security/mfa/enroll/verify` with a TOTP computed externally (RFC 6238,
+    SHA1/30s/6) → 200 + 10 recovery codes. `…/complete` → 204.
+  - **Raw SQL on `users`:** `mfa_secret` on disk is `CfDJ8…`, **176 chars**, `= plaintext` → false,
+    matches `^[A-Z2-7]+$` (Base32) → **false**. All **10** recovery-code elements likewise
+    ciphertext: matches `^[0-9A-F]{64}$` → false, matches `^\$2a\$` → false. No plaintext, and
+    neither digest format is recognisable on disk.
+  - `POST /auth/login` → 200 with `mfaToken` (MFA now demanded);
+    **`POST /auth/mfa/verify` with a real TOTP code → 200 + accessToken.** This is the end-to-end
+    proof of unwrap-on-read: the secret was written wrapped and read back correctly by
+    `MfaService.VerifyCode` through the real host.
+  - **The recovery-code redemption sub-clause could NOT be satisfied — and not because of this
+    change.** `POST /auth/mfa/verify` with a recovery code returns **500 `Invalid salt version`**:
+    `MfaService.ValidateRecoveryCode` calls `BCrypt.Verify` on the SHA-256-hex digest the wizard
+    writes, and BCrypt.Net throws parsing a non-`$2a$` string. **Reproduced identically on
+    unmodified `origin/main` (`afd61e4f`) against a separate clean database with no encryption
+    anywhere** — same 500, same message, every one of the other seven steps also identical. That is
+    the adjacent defect the proposal's Out of Scope names, now confirmed live rather than inferred;
+    it needs its own change. Ticking 6.4 on that basis: the task's purpose — proving the wrap is
+    transparent end-to-end on a real host — is met, and the one unsatisfiable sub-clause fails the
+    same way without this change.
+- [x] 6.5 Boot twice against a database seeded with legacy unwrapped rows and confirm the migrator's
   completion log reports `encrypted_rows` > 0 on the first boot and `encrypted_rows == 0` with
   `already_encrypted_rows` == the full population on the second (spec: idempotence).
-  **NOT RUN as a host boot — still open.** The idempotence contract itself IS proven at the migrator
-  boundary by `Migration_ShouldEncryptExistingRows_AndBeIdempotent` (captures the ciphertext after
-  pass 1 and asserts byte-for-byte equality after pass 2 — since DataProtection randomises per call,
-  that equality is the zero-write proof), plus `Migration_ShouldVisitEveryRow_WhenPopulationExceedsBatchSize`
-  over 620 seeded rows. What is untested is the real `IHostedService` double-boot and the shape of
-  the EventId 4201 log line an operator will actually read. Run before merge.
+  **RUN — double boot of the published Native AOT binary in Production against `postgres:18-alpine`.**
+  Seeded 3 legacy unwrapped rows across 2 tenants: `u1` with BCrypt-format codes, `u2` with
+  SHA-256-hex codes, `u3` with a secret and `mfa_recovery_codes NULL`.
+  - Boot on the empty DB (schema only): `0 scanned, 0 legacy rows wrapped, 0 already wrapped, 0 failed`.
+  - **Boot #1 over the legacy rows: `3 scanned, 3 legacy rows wrapped, 0 already wrapped, 0 failed`.**
+    Columns afterwards are `CfDJ8…` ciphertext (secret 32 → 176 chars); `u3`'s NULL array stayed
+    NULL, so the null shape survived.
+  - **Boot #2: `3 scanned, 0 legacy rows wrapped, 3 already wrapped, 0 failed`**, and the md5 of
+    `mfa_secret || mfa_recovery_codes` per row is **byte-for-byte identical to boot #1**. Since
+    DataProtection randomises per call, that equality is the zero-write proof on a real host, not
+    only in the test suite.
+  The EventId 4201 line an operator reads is exactly:
+  `User MFA encryption migration completed: {N} scanned, {N} legacy rows wrapped, {N} already wrapped, {N} failed`.
+  This complements `Migration_ShouldEncryptExistingRows_AndBeIdempotent` and
+  `Migration_ShouldVisitEveryRow_WhenPopulationExceedsBatchSize` (620 rows) at the migrator boundary.
 - [x] 6.6 `openspec validate --all --strict` green before the PR (also a CI gate in this repo).
 - [x] 6.7 CI green on the PR. **PR #212**, run `30432527575` on `fdf25a9c`: all 11 reporting checks
   pass — `Build + Unit Tests (Release)`, `AOT Publish (Api)`, `Coverage Ratchet`, `Invariant Gates`,
