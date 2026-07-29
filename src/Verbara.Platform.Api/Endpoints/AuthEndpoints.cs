@@ -297,9 +297,38 @@ internal static class AuthEndpoints
             expiresAt,
             new TokenUserDto(user.UserId.Value, user.Email, user.DisplayName, user.Role.ToString().ToLowerInvariant()),
             user.TenantId.Value,
-            permissions?.ToArray() ?? [],
+            EffectivePermissions(permissions, user.Role),
             features,
             idleMinutes));
+    }
+
+    /// <summary>
+    /// Permissions to report to the client, falling back to role defaults when the RBAC store
+    /// resolved nothing.
+    /// </summary>
+    /// <remarks>
+    /// Every path that returns a <see cref="TokenResponse"/> carrying permissions MUST use this.
+    /// The resolver is best-effort — its failures are swallowed — so an unresolvable lookup is
+    /// indistinguishable on the wire from "this user has none". The response body drives the
+    /// frontend's route guards, so a path that skips the fallback strips a user's permissions
+    /// mid-session and drops them on /unauthorized. Login applied it; refresh did not, which is the
+    /// asymmetry this centralisation removes.
+    /// </remarks>
+    internal static string[] EffectivePermissions(IReadOnlySet<string>? resolved, UserRole role)
+    {
+        var permissions = resolved?.ToArray() ?? [];
+        if (permissions.Length > 0)
+        {
+            return permissions;
+        }
+
+        return role switch
+        {
+            UserRole.Admin => RoleDefaultPermissions.Admin,
+            UserRole.Supervisor => RoleDefaultPermissions.Supervisor,
+            UserRole.Agent => RoleDefaultPermissions.Agent,
+            _ => [],
+        };
     }
 
     // ─── Logout ─────────────────────────────────────────────────────────────────
@@ -925,17 +954,7 @@ internal static class AuthEndpoints
 
         // Fallback: if RBAC store returned empty and user has a privileged role,
         // grant role-based default permissions so the frontend can render correctly.
-        var effectivePermissions = permissions?.ToArray() ?? [];
-        if (effectivePermissions.Length == 0)
-        {
-            effectivePermissions = user.Role switch
-            {
-                UserRole.Admin => RoleDefaultPermissions.Admin,
-                UserRole.Supervisor => RoleDefaultPermissions.Supervisor,
-                UserRole.Agent => RoleDefaultPermissions.Agent,
-                _ => [],
-            };
-        }
+        var effectivePermissions = EffectivePermissions(permissions, user.Role);
 
         var (accessToken, expiresAt) = jwtService.GenerateAccessToken(user, permissions);
 
