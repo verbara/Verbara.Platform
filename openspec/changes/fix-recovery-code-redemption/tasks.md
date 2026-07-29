@@ -143,24 +143,34 @@
 
 ## 6. Verification
 
-- [ ] 6.1 `dotnet build Verbara.Platform.slnx` — **zero warnings** (`TreatWarningsAsErrors`,
+- [x] 6.1 `dotnet build Verbara.Platform.slnx` — **zero warnings** (`TreatWarningsAsErrors`,
   `WarningLevel 9999`).
-- [ ] 6.2 `dotnet test Verbara.Platform.slnx` green for every project the change touches, including
+- [x] 6.2 `dotnet test Verbara.Platform.slnx` green for every project the change touches, including
   the existing MFA suites (`MfaServiceTests`, `MfaEnrollEndpointsTests`, `AuthEndpointsTests`,
   `MfaPolicyEnforcementTests`, `ChangePasswordMfaStepUpTests`, `OidcMfaEnforcementTests`) and
   `RecoveryCodeServiceTests`. Note the standing caveat that `Storage.Postgres.Tests` is red on a
   pre-existing Testcontainers startup race unrelated to this change.
-- [ ] 6.3 **Reproduce the original defect as a regression check**, the way it was confirmed live:
+- [x] 6.3 **Reproduce the original defect as a regression check**, the way it was confirmed live:
   boot the host against a real Postgres, mint via `POST /profile/security/mfa/enroll/verify`, then
   redeem at `POST /auth/mfa/verify` — assert **200** where `origin/main` returns
   `500 {"detail": "Invalid salt version"}`. Two gotchas from that run, both pre-existing and
   unrelated: drive the host over **`localhost`, not `127.0.0.1`** (subdomain resolution takes `127`
   as the tenant and 403s every authenticated call), and export **`TZ=UTC`** (a
   `new DateTimeOffset(x, TimeSpan.Zero)` on a `Local`-kind value throws on a non-UTC machine).
-- [ ] 6.4 Run the coverage gate locally before pushing — `dotnet test` with
+  **Done.** Fresh `postgres:18-alpine`, host booted in Production, same `flow.py` driver that
+  produced the 500 on `origin/main`: `/setup` 201 → login 200 → wizard enroll init/verify/complete
+  200/200/204 → login demands MFA → `/auth/mfa/verify` with a **real TOTP** 200 → **`/auth/mfa/verify`
+  with a wizard-minted RECOVERY CODE returns 200 + accessToken**, where `origin/main` returned
+  `500 {"detail": "Invalid salt version"}`. Also verified live: replaying the consumed code → **401**
+  (one-time use holds), a wrong code → **401 not 500**, and `auth_events` contains
+  `mfa_verification_failure` rows with `reason = invalid_recovery_code` — the new bookkeeping writing
+  end-to-end on a real host. Environment torn down afterwards.
+- [x] 6.4 Run the coverage gate locally before pushing — `dotnet test` with
   `--collect:"XPlat Code Coverage" --settings coverlet.runsettings`, merge with `reportgenerator`,
   then `python3 scripts/check-patch-coverage.py coverage/report/Cobertura.xml coverage-floor.json`.
   Both edited source files are in the measured `Verbara.Platform.Api` assembly, so the 85% patch
   floor applies directly — do not assume, measure.
-- [ ] 6.5 `openspec validate --all --strict` green.
+  **Measured:** patch **100.0% (25/25)**; band line **77.64%** inside `[75, 78]`, branch **63.39%**
+  ≥ 60, **29310** lines ≥ 27690; exclusion baseline 0 = 0. All three gates pass locally.
+- [x] 6.5 `openspec validate --all --strict` green.
 - [ ] 6.6 CI green on the PR.
