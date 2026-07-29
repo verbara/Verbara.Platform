@@ -72,8 +72,10 @@
   release with no API change**, so a reader can tell "baseline moved" from "feature adopted".
 - [x] 4.2 Confirm the entry states the resulting `Sdk × Pro × Platform` triple — this is what
   discharges `Verbara.Sdk/ADR-0040` D6's compatibility-matrix obligation for the versions touched.
-- [ ] 4.3 Cite `decision_ref: Verbara.Sdk/ADR-0040` and the PR number in the entry (bind the PR
-  number from the `gh pr create` output — never predict it).
+- [x] 4.3 Cite `decision_ref: Verbara.Sdk/ADR-0040` and the PR number in the entry (bind the PR
+  number from the `gh pr create` output — never predict it). `decision_ref` landed with the entry
+  itself; the PR number **`#210`** did not exist yet at apply time and is **backfilled onto the
+  three `### Dependencies` bullets in this closing PR** — bound from the merged PR, never predicted.
 
 ## 5. Verification (apply-stage)
 
@@ -89,7 +91,14 @@
   source-level exposure — no `NATS` reference anywhere under `src/`; the realtime transport is
   SignalR + StackExchange.Redis).
 - [x] 5.5 `openspec validate --all --strict` green.
-- [ ] 5.6 **CI green on the PR** (full Platform required gate set, including `AOT Publish (Api)`).
-- [ ] 5.7 Record the rollback shape in the PR description: reverting the single
+- [x] 5.6 **CI green on the PR** (full Platform required gate set, including `AOT Publish (Api)`).
+  PR **`#210`**: all 12 reported contexts SUCCESS — `AOT Publish (Api)`, `Build + Unit Tests
+  (Release)`, `Coverage Ratchet`, `Coverage Script Tests`, `Live-DB Tests (Postgres)`, `Invariant
+  Gates`, `OpenSpec Validate`, `Docs-only gate`, `Analyze (C#)` / `CodeQL`, `Dependency Review`
+  (the only non-SUCCESS is `Auto-merge safe Dependabot PRs`, SKIPPED — not a Dependabot PR). The
+  diff touches `Directory.Packages.props`, so the ADR-0016 docs-only fast path correctly did **not**
+  skip the heavy jobs.
+- [x] 5.7 Record the rollback shape in the PR description: reverting the single
   `Directory.Packages.props` commit restores the `2.3.2` / `2.13.0-pro` / `10.0.9` baseline exactly,
-  because Platform owns no source change in this cascade.
+  because Platform owns no source change in this cascade. Present in the `#210` body as its own
+  `## Rollback` section.
