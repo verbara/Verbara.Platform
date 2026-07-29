@@ -9,6 +9,62 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **MFA enrollment material is now DataProtection-encrypted at rest** (`decision_ref`
+  Platform/ADR-0003, change `encrypt-mfa-secrets-at-rest`). `users.mfa_secret` held the **raw Base32
+  TOTP shared secret verbatim** — anyone who could read the column could mint valid codes for that
+  user indefinitely and silently, with no audit event — and `users.mfa_recovery_codes` held digests
+  in two coexisting formats, one of them a single-round salted SHA-256 hex over a ~40-bit keyspace
+  whose salt (`users.user_id`) sits in the same row. `PostgresUserStore` now wraps both on write and
+  unwraps on read via `IDataProtector` under two **concern-specific** purposes —
+  `MfaSecretProtectorPurpose` (`Verbara.UserMfaSecret`) and `MfaRecoveryCodesProtectorPurpose`
+  (`Verbara.UserMfaRecoveryCodes`), exposed as `public const string` so the migrator binds the
+  symbols rather than re-typed literals. The `TEXT[]` column is wrapped **element-wise**, preserving
+  length and order; elements stay opaque strings, so neither digest format is inspected, normalised,
+  or re-hashed. Same protect-on-write / unprotect-on-read shape already shipped for
+  `tenant_auth_config.oidc_client_secret` under `PREPUB-2026-05-09-ADMIN-001`. Threat-model asset
+  **A7**; the canonical column → purpose list is the new **protected-column register** in ADR-0003.
+- **One-shot idempotent startup migrator converts pre-existing rows.**
+  `UserMfaEncryptionMigrator` (registered by `AddUserMfaEncryptionMigrator()`, called in `Program.cs`
+  beside `AddOidcClientSecretEncryptionMigrator()`) walks `users` in **keyset-ordered batches** —
+  `users` is unbounded, unlike the one-row-per-tenant OIDC table — and detects state by **trial
+  unwrap**: a value that round-trips is already wrapped and is left byte-for-byte alone; a
+  `CryptographicException` marks it legacy and it is rewritten wrapped. Detection is per value and,
+  for the array, per element, so a crash mid-migration self-heals on the next boot. It issues an
+  `UPDATE` only for rows carrying at least one legacy value, so a second run performs **zero**
+  writes. It never blocks host startup (a missing `users` table — SQLSTATE `42P01` — is a silent
+  no-op; one failing row is counted and the scan continues) and emits **counts only** — EventIds
+  `4201`–`4204` and an `Activity` on `Verbara.Platform.UserMfaEncryption` tagged `scanned_rows` /
+  `encrypted_rows` / `already_encrypted_rows` / `failed_rows` — never a secret, a ciphertext, or an
+  email. Reads fall back to the stored value verbatim on `CryptographicException`, so rows the
+  migrator has not yet reached keep authenticating during the deploy window.
+- **No schema change and no API change accompanies this.** `mfa_secret TEXT` and
+  `mfa_recovery_codes TEXT[]` are unbounded and hold the longer ciphertext with **no SQL migration**;
+  no index covers either column. `MfaSecret` and `MfaRecoveryCodes` are already never returned over
+  HTTP, so there is no DTO, no `ApiJsonContext` entry, no endpoint, and no `Verbara.Platform.Web`
+  change; no `Verbara.Sdk` / `Verbara.Sdk.Pro` change and no pin bump. `InMemoryUserStore` (no
+  at-rest surface) and `CachedUserStore`'s ADR-0010 trust boundary are untouched. AOT posture
+  unchanged — `IDataProtection` is already AOT-clean in this host via `NpgsqlXmlRepository`.
+- **Residual risk, stated rather than implied.** This does **not** defend against a compromise that
+  includes the keyring. `AddPlatformDataProtection` exposes no `ProtectKeysWith*` option today, so
+  with the default `UsePostgres` keyring `data_protection_keys` holds key XML **unencrypted in the
+  same database** as the wrapped columns — an attacker with a **complete** database dump holds
+  keyring and ciphertext together and gains nothing from this change. What it mitigates is **partial**
+  exposure: a table-scoped dump (`pg_dump -t users`), a CSV/report extract, a read-replica scoped to
+  application tables, or a SQL-injection read that reaches `users` but not `data_protection_keys`.
+  Wrapping the keyring itself (certificate or KMS) is named as the follow-up in the ADR-0003 addendum
+  and is not built here.
+- **Operator impact — read before deploying or rolling back.** Keyring durability is now load-bearing
+  for **MFA**, not only for OIDC client secrets and AgentAssist credentials, and the failure is
+  **silent**: unwrappable values fall through verbatim and `MfaService.VerifyCode` simply returns
+  false. Recovery is a per-user admin MFA reset via `MfaAdminService` (already audit-emitting).
+  Rollback is **asymmetric** — reverting the binary leaves wrapped rows in place and breaks MFA
+  verification for already-migrated users until it is rolled forward (or those users are reset);
+  non-MFA authentication is unaffected in both directions, and there is no schema rollback because no
+  schema migration ships. Documented in `docs/operations/backup-disaster-recovery.md` §1.6 + §3.6 and
+  `docs/operations/v1.11-release-runbook.md` §Rollback.
+
 ### Changed — CI
 
 - **`release.yml` now creates the GitHub Release object itself.** The workflow built and
