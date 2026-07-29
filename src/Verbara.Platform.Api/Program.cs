@@ -303,25 +303,6 @@ if (!string.IsNullOrEmpty(coreConnectionString))
     // Apply Platform SQL migrations eagerly (before Pro EnsureSchemaAsync which references Platform tables)
     Verbara.Platform.Api.Services.DatabaseMigrationService.ApplyMigrations(coreConnectionString);
 
-    // ADMIN-001 (PREPUB-2026-05-09): one-shot, idempotent encryption of any
-    // legacy plaintext oidc_client_secret rows. Runs after the schema migrations
-    // and after DataProtection is wired (registered later in this file). Safe
-    // to leave registered — re-runs are no-ops once every row is encrypted.
-    builder.Services.AddOidcClientSecretEncryptionMigrator();
-
-    // A7 (encrypt-mfa-secrets-at-rest): one-shot, idempotent wrap of any legacy
-    // unwrapped users.mfa_secret / users.mfa_recovery_codes values. Same posture as
-    // the OIDC migrator above — runs after the schema migrations and after
-    // DataProtection is wired (registered later in this file), never blocks startup,
-    // and re-runs are zero-write no-ops once every value is wrapped.
-    builder.Services.AddUserMfaEncryptionMigrator();
-
-    // P2c.1 (§6) — one-shot, idempotent seed of the appsettings global LLM key into the single
-    // operational tenant's per-tenant tenant_llm_config row (the single-tenant / dev migration off
-    // the retired shared global key). No-op unless the global key is set AND exactly one operational
-    // tenant exists AND it has no config row yet. Runs after schema migrations + DataProtection.
-    builder.Services.AddTenantLlmConfigSeedMigrator();
-
     // Override in-memory capacity with persistent version for restart recovery
     builder.Services.AddSingleton<IAgentCapacityService>(sp =>
         new PersistentAgentCapacityService(
@@ -333,6 +314,13 @@ else
 {
     builder.Services.AddInMemoryStorage();
 }
+
+// One-shot, idempotent startup migrators (OIDC client secret / user MFA material /
+// tenant LLM config seed). Registered only when Postgres is configured — the registrar
+// owns that predicate — and always AFTER AddPostgresStorage + the schema runner above,
+// since each migrator reads tables the schema runner creates. See
+// StartupMigratorsExtensions for what each one does and why the order matters.
+builder.Services.AddPlatformStartupMigrators(coreConnectionString);
 
 // ADR-0015 Phase 2 helper — return the shared core DataSource when the supplied
 // connection string matches the core (most common deployment shape) so all Pro
