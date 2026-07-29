@@ -198,9 +198,18 @@
   Testcontainers then declares the container ready and Npgsql dies during authentication. The new
   fixture probes `pg_isready -U postgres -h 127.0.0.1` and is stable. Back-porting `-h 127.0.0.1`
   to the ~13 sibling fixtures is a **separate change** (it would likely also retire
-  `parallelizeTestCollections: false`). Tick 6.2 only once that lands or CI's live-db lane is green
-  — note that CI's main lane already excludes `Storage.Postgres.Tests` via
+  `parallelizeTestCollections: false`). Tick 6.2 only once that back-port lands — note that CI's
+  main lane already excludes `Storage.Postgres.Tests` via
   `--filter "FullyQualifiedName!~Storage.Postgres.Tests"`.
+  **Confirmed on PR #212 (run `30432527575`):** CI reproduces the same flake, worse than local —
+  `Storage.Postgres.Tests` ran **122 passed / 115 failed of 237**. The `Live-DB Tests (Postgres)`
+  check-run still reports **pass**, but ONLY because both of its test steps carry
+  `continue-on-error: true`; the underlying `dotnet test` printed `Test Run Failed.` Do not read
+  that green check as a green suite. Within that same run, all **13** new
+  `PostgresUserStoreMfaEncryptionTests` passed and **0** failed, as did the four repaired
+  `ServiceCollectionExtensionsTests` — so nothing in this change contributes to the 115.
+  `Identity.Redis.Tests` was **34/34**, matching the CI comment's note that Redis has no analogous
+  restart cycle.
 - [x] 6.3 Confirm the AOT posture is unchanged: no reflection introduced, no new DTO or serialization
   path, no `[JsonSerializable]` entry needed, and no Dapper reference (the `BanDapperPackageReferences`
   guard stays green). A `dotnet publish` AOT leg of `Verbara.Platform.Api` must emit no new
@@ -222,5 +231,14 @@
   over 620 seeded rows. What is untested is the real `IHostedService` double-boot and the shape of
   the EventId 4201 log line an operator will actually read. Run before merge.
 - [x] 6.6 `openspec validate --all --strict` green before the PR (also a CI gate in this repo).
-- [ ] 6.7 CI green on the PR. **NOT APPLICABLE YET** — no branch pushed and no PR opened; the work
-  sits in the local working tree. Tick after the PR runs.
+- [x] 6.7 CI green on the PR. **PR #212**, run `30432527575` on `fdf25a9c`: all 11 reporting checks
+  pass — `Build + Unit Tests (Release)`, `AOT Publish (Api)`, `Coverage Ratchet`, `Invariant Gates`,
+  `OpenSpec Validate`, `Analyze (C#)`, `CodeQL`, `Dependency Review`, `Docs-only gate`,
+  `Coverage Script Tests`, `Live-DB Tests (Postgres)`; `Auto-merge safe Dependabot PRs` skips (n/a).
+  `Coverage Ratchet` reports patch **100.0% (8/8)**, band line **77.42%** in `[75, 78]`, branch
+  **62.99%** ≥ 60, **29297** lines ≥ 27690, exclusion baseline 0 = 0.
+  Caveat carried from 6.2, so this tick is not read as more than it is: the
+  `Live-DB Tests (Postgres)` check is green only because its steps are `continue-on-error: true`;
+  its underlying run was 122/237. That lane is report-only by design and does not gate merge.
+  The first run on `1ea42a74` failed `Coverage Ratchet` at patch **0.0% (0/1)**; `fdf25a9c` fixed it
+  by making the composition-root registration coverable — see that commit and design D10.
