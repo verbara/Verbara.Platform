@@ -133,6 +133,13 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(Message))]
 [JsonSerializable(typeof(Contact))]
 [JsonSerializable(typeof(FlowDefinition))]
+// FlowEndpoints.ListFlows returns IFlowStore.ListAsync's result verbatim (no DTO projection), so
+// the COLLECTION is a root serializable type too. Registering only the element type compiles and
+// satisfies every WebApplicationFactory test — those hosts keep reflection enabled — but the AOT
+// image throws NotSupportedException ("JsonTypeInfo metadata for type
+// System.Collections.Generic.IReadOnlyList`1[Verbara.Platform.Flows.FlowDefinition] was not
+// provided") and GET /admin/flows answers 500. Same class as the W4 SSE registration miss.
+[JsonSerializable(typeof(IReadOnlyList<FlowDefinition>))]
 [JsonSerializable(typeof(ApiKey))]
 [JsonSerializable(typeof(OwnershipResult))]
 [JsonSerializable(typeof(ConversationAssignedEvent))]
