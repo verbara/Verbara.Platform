@@ -115,6 +115,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`GET /api/v1/admin/flows` answered HTTP 500 in every shipped image** — `FlowEndpoints.ListFlows`
+  returns `IFlowStore.ListAsync`'s result verbatim (no DTO projection), so the **collection** is a
+  root serializable type, not just its element. Only `FlowDefinition` was registered in
+  `ApiJsonContext`, so under `JsonSerializerIsReflectionEnabledByDefault=false` the serializer threw
+  `NotSupportedException: JsonTypeInfo metadata for type
+  System.Collections.Generic.IReadOnlyList\`1[Verbara.Platform.Flows.FlowDefinition] was not
+  provided` — the flow list was unreachable from the admin UI, and the flow designer could not be
+  opened from it. Fixed by registering `IReadOnlyList<FlowDefinition>`. **No `WebApplicationFactory`
+  test can catch this class of miss**: those hosts keep reflection enabled and answer 200 regardless,
+  which is why the new `FlowEndpointsTests` asserts on `ApiJsonContext.Default.GetTypeInfo` directly —
+  the same guard `SseEndpointsTests` grew over the `PlatformEvent` hierarchy after the ADR-0009 W4
+  registration miss. Reproduced against the lab stack and confirmed fixed there.
+- **`DELETE /api/v1/admin/skills/{name}` deleted the skill and *then* answered HTTP 500** —
+  `PostgresAuditStore.SerializeChange` passed every `string` through untouched on the assumption that
+  a string caller had already serialised its payload. `SkillEndpoints.DeleteSkill` passes the deleted
+  skill's **name** as `AuditChanges.Before`, so a bare identifier reached the `@BeforeJson::jsonb`
+  cast in `SaveAsync` and Postgres raised `22P02: invalid input syntax for type json`. The skill row
+  was already gone by then, so the operation half-succeeded: the skill was deleted, **no audit row was
+  written at all**, and the client saw a 500 — which in the admin UI left the row on screen, because
+  `useDeleteSkill` invalidates `['skills']` only in `onSuccess`. Pass-through now applies only when
+  the string actually parses as JSON (`JsonDocument.Parse`, reflection-free — the AOT boundary is
+  unchanged); anything else is encoded as a JSON string scalar, the same never-lose-the-audit-row
+  posture as the existing `NotSupportedException` / `InvalidOperationException` fallbacks. The fix
+  sits in the store, so it covers **every** audit call site rather than just this one. Verified
+  against the lab stack: create+delete now returns 201/204 and the audit row lands with
+  `jsonb_typeof(before_json) = 'string'`.
 - **MFA recovery codes minted by the enrollment wizard could never be redeemed** —
   `POST /api/v1/auth/mfa/verify` answered **HTTP 500** with the crypto library's raw
   `"Invalid salt version"` message in `ProblemDetails.Detail`. `users.mfa_recovery_codes` carries two
