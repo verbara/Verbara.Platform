@@ -87,6 +87,77 @@ public sealed class AuditEntriesNormalizationTests
     }
 
     [Fact]
+    public async Task SaveAsync_ShouldEncodeChangeAsJsonScalar_WhenValueIsABareString()
+    {
+        // Regression: SerializeChange used to pass EVERY string through untouched on the
+        // "pre-serialised JSON" assumption. SkillEndpoints.DeleteSkill passes the deleted skill's
+        // name as `Before`, so a bare identifier reached the `@BeforeJson::jsonb` cast and Postgres
+        // raised 22P02 — DELETE /admin/skills/{name} deleted the row and THEN answered 500.
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var entry = NewEntry(
+                tenantId: "tenant-bare-string",
+                category: "config",
+                severity: "info",
+                actorType: "user",
+                actorId: "alice",
+                // Not JSON: unquoted, and the hyphens make it unparseable as a number too.
+                changes: new AuditChanges(Before: "billing-tier-2", After: null));
+
+            await store.SaveAsync(entry, CancellationToken.None);
+
+            await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand(
+                "SELECT before_json::text, jsonb_typeof(before_json) FROM audit_entries WHERE entry_id = @EntryId",
+                conn);
+            cmd.Parameters.Add(new NpgsqlParameter("EntryId", entry.EntryId.Value));
+            await using var reader = await cmd.ExecuteReaderAsync();
+            (await reader.ReadAsync()).Should().BeTrue();
+
+            reader.GetString(0).Should().Be("\"billing-tier-2\"");
+            reader.GetString(1).Should().Be("string");
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldPassChangeThroughVerbatim_WhenValueIsAlreadyJson()
+    {
+        // The other half of the contract: a caller that pre-serialises its own payload must still
+        // land as structured jsonb, not as a doubly-encoded string.
+        await _fixture.ResetAsync();
+        var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            var store = new PostgresAuditStore(dataSource);
+            var entry = NewEntry(
+                tenantId: "tenant-preserialised",
+                category: "config",
+                severity: "info",
+                actorType: "user",
+                actorId: "alice",
+                changes: new AuditChanges(Before: "{\"status\":\"Active\"}", After: null));
+
+            await store.SaveAsync(entry, CancellationToken.None);
+
+            await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand(
+                "SELECT jsonb_typeof(before_json), before_json->>'status' FROM audit_entries WHERE entry_id = @EntryId",
+                conn);
+            cmd.Parameters.Add(new NpgsqlParameter("EntryId", entry.EntryId.Value));
+            await using var reader = await cmd.ExecuteReaderAsync();
+            (await reader.ReadAsync()).Should().BeTrue();
+
+            reader.GetString(0).Should().Be("object");
+            reader.GetString(1).Should().Be("Active");
+        }
+    }
+
+    [Fact]
     public async Task Query_ShouldFilterBySeverity_UsingIndex()
     {
         await _fixture.ResetAsync();

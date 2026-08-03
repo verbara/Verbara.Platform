@@ -364,8 +364,9 @@ internal sealed class PostgresAuditStore : IAuditStore
     /// type is not statically known; the suppression is justified: this is
     /// the documented audit-trail boundary, and the prior implementation
     /// silently lost 100 % of <c>Changes</c> — any structured persistence is
-    /// strictly better. Pre-serialised strings (already JSON) are passed
-    /// through verbatim.
+    /// strictly better. Pre-serialised strings are passed through verbatim
+    /// only when they actually parse as JSON; anything else is encoded as a
+    /// JSON string scalar so the <c>::jsonb</c> cast in SaveAsync cannot fail.
     /// </remarks>
     [UnconditionalSuppressMessage(
         "Trimming",
@@ -380,9 +381,15 @@ internal sealed class PostgresAuditStore : IAuditStore
         if (value is null)
             return null;
 
-        // Pre-serialised JSON string passes through unchanged.
+        // Pre-serialised JSON passes through unchanged — but ONLY when the string really is JSON.
+        // Call sites also hand us bare identifiers (SkillEndpoints.DeleteSkill passes the deleted
+        // skill's name as `Before`), and a bare identifier reaching the `@BeforeJson::jsonb` cast
+        // in SaveAsync makes Postgres raise 22P02 "invalid input syntax for type json". The row is
+        // already deleted by then, so the caller sees a 500 for an operation that succeeded.
+        // Anything that is not valid JSON is encoded as a JSON string scalar instead — same
+        // never-lose-the-audit-row posture as the two catch blocks below.
         if (value is string s)
-            return s;
+            return IsJson(s) ? s : JsonSerializer.Serialize(s, PostgresJson.Ctx.String);
 
         try
         {
@@ -403,6 +410,30 @@ internal sealed class PostgresAuditStore : IAuditStore
             // when a type isn't in any registered TypeInfoResolver. Fall
             // back the same way so audit records survive missing source-gen.
             return JsonSerializer.Serialize(value.ToString(), PostgresJson.Ctx.String);
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="candidate"/> parses as a JSON value (object, array or scalar) —
+    /// i.e. when it is safe to hand straight to a <c>::jsonb</c> cast.
+    /// </summary>
+    /// <remarks>
+    /// AOT-safe: <see cref="JsonDocument.Parse(string, JsonDocumentOptions)"/> is a reflection-free
+    /// reader over the raw text, so no <c>JsonTypeInfo</c> is involved.
+    /// </remarks>
+    private static bool IsJson(string candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+            return false;
+
+        try
+        {
+            using var _ = JsonDocument.Parse(candidate);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 
