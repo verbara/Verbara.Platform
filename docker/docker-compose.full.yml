@@ -47,6 +47,14 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      args:
+        # Stamps org.opencontainers.image.revision/created onto the image so a
+        # running container can be traced back to its commit. Export VCS_REF and
+        # BUILD_DATE before `docker compose build` to populate them:
+        #   export VCS_REF=$(git rev-parse --short HEAD) \
+        #          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        VCS_REF: ${VCS_REF:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
       secrets:
         - nuget_auth_token
     logging: *default-logging
