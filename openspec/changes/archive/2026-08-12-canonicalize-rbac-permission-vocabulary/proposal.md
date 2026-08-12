@@ -141,28 +141,28 @@ permission renames, which would need a data migration.
   onto `users`. Found while verifying this change: it is what made an earlier probe report a false
   negative, since `GET /admin/users/{id}/permissions` happily resolves the orphan row while login,
   which looks the user up by email, resolves the real user's empty set. A validation gap, not a
-  vocabulary problem. Follow-up.
+  vocabulary problem. Tracked as `harden-rbac-migration-seeder`.
 - **Renaming `security.jwt.rotate`** to canonical form — accepted inconsistency, recorded in
   ADR-0037.
 - **Logging the skipped clone.** When `RbacMigrationSeeder` skips a template because the tenant
   already owns a same-named role, nothing records it. That is the event an operator would want, but
   the seeder has no `ILogger` and threading one through `Storage.Postgres` is plumbing beyond this
-  change. Follow-up.
+  change. Tracked as `harden-rbac-migration-seeder`.
 - **Provenance labels on CI-built images.** `release.yml`'s `docker/build-push-action` step passes
   no `build-args`, so images built by CI carry `revision`/`created`/`version` = `unknown`; only a
   local build with the env vars exported gets real values. Still a strict improvement — the
   pre-change shipped image carried no provenance labels at all, only the Ubuntu base's
   `image.version=24.04` — but the traceability goal is only half met until the workflow passes them.
-  Follow-up.
+  Tracked as `stamp-ci-image-provenance`.
 - **Convergence of the resolved assignment.** The name-resolving assignment is idempotent for
   unchanged data — the case that runs on every boot — but not convergent: if the tenant later
   creates the exact template `role_id`, or renames the equivalent role, a subsequent run resolves
   via the exact-id branch and inserts a *second* row for the same user, which
   `ON CONFLICT (tenant_id, user_id, role_id)` cannot catch because the `role_id` differs. Low
   severity (both roles are admin-equivalent and `PermissionResolver` unions them), but it is a real
-  edge. Follow-up.
+  edge. Tracked as `harden-rbac-migration-seeder`.
 - **Per-tenant fault isolation in `RbacMigrationSeeder`.** The loop still has no transaction and no
   per-tenant `try`/`catch`, so any *future* unexpected error still takes down every tenant queued
   behind it. The three concrete aborts are fixed; the structural blast radius is not.
   `RoleTemplateSeeder.ReseedExistingTenantsAsync` already has per-tenant transactions and is the
-  model to follow. Follow-up.
+  model to follow. Tracked as `harden-rbac-migration-seeder`.
