@@ -9,19 +9,21 @@ namespace Verbara.Platform.Api.Endpoints.Retention;
 /// <summary>
 /// R5.2 PC.1 — admin retention policy surface. Exposes the existing
 /// <c>Pro.Storage.Common.Retention</c> infrastructure (DryRun toggle, per-target
-/// overview, manual run-now) behind <c>retention.read</c> / <c>retention.manage</c>
-/// permissions.
+/// overview, manual run-now) behind the <c>system:retention:view</c> /
+/// <c>system:retention:manage</c> permissions.
 /// </summary>
 /// <remarks>
 /// Wired in <c>Program.cs</c> via:
 /// <code>
 /// options.AddPolicy(RetentionAdminEndpoints.ReadPolicy,
-///     p => p.AddRequirements(new PlatformAdminRequirement("retention.read")));
+///     p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.RetentionView)));
 /// options.AddPolicy(RetentionAdminEndpoints.ManagePolicy,
-///     p => p.AddRequirements(new PlatformAdminRequirement("retention.manage")));
+///     p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.RetentionManage)));
 /// </code>
-/// Both policies double-lock the surface: PlatformAdmin scope + dot-notation
-/// permission, mirroring the PA.1 / PB.1 / PB.2 pattern.
+/// Both policies double-lock the surface: PlatformAdmin scope + an explicit RBAC
+/// permission, mirroring the PA.1 / PB.1 / PB.2 pattern. ADR-0037 replaced the
+/// earlier <c>retention.read</c> / <c>retention.manage</c> ids, which were granted
+/// to the admin templates but never catalogued and so never resolvable.
 /// </remarks>
 public static class RetentionAdminEndpoints
 {

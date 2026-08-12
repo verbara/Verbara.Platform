@@ -1434,63 +1434,60 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("PartnerAdminOnly", p =>
         p.AddRequirements(new PartnerAdminRequirement()));
 
-    // R5.2 PA.1 — MFA admin surface. PlatformAdminRequirement combines the
-    // host/partner-tenant gate with the seeded "security.mfa.admin" RBAC
-    // permission so the surface is double-locked: only platform admins (or
-    // partner admins managing their children) with the explicit permission can
-    // list users / reset MFA / revoke sessions.
+    // ─── Permission-gated admin surfaces (ADR-0037) ──────────────────────────
+    // Each of these double-locks a surface: PlatformAdminRequirement combines the
+    // host/partner-tenant gate with an explicit RBAC permission, so only platform
+    // admins (or partner admins managing their children) holding that permission
+    // get through. The ids come from PlatformAdminPermissions rather than string
+    // literals: PermissionResolver.HasPermission is an exact set-membership test,
+    // so a gate naming an id that PermissionSeeder does not catalogue can never be
+    // satisfied on its permission — a guard test asserts every constant here is a
+    // catalog member.
+
+    // R5.2 PA.1 — MFA admin surface (list users / reset MFA / revoke sessions).
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.Mfa.MfaAdminEndpoints.AuthorizationPolicy,
-        p => p.AddRequirements(new PlatformAdminRequirement("security.mfa.admin")));
+        p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.MfaManage)));
 
-    // c1 (credit-ledger-topups) — top-up mint double-lock: host/partner-tenant gate + the seeded
-    // billing:credits:grant permission, enforced against both management-key scopes and user JWT
-    // permissions (minting AI credits is money creation, so the permission must be a real gate).
+    // c1 (credit-ledger-topups) — top-up mint, enforced against both management-key
+    // scopes and user JWT permissions (minting AI credits is money creation, so the
+    // permission must be a real gate).
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.CreditLedgerEndpoints.GrantPolicy,
-        p => p.AddRequirements(new PlatformAdminRequirement("billing:credits:grant")));
+        p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.CreditsGrant)));
 
     // R5.2 PB.1 — audit log viewer + export. Two policies so the export surface
     // can be revoked independently of read access (compliance scenarios where
-    // viewing in-app is fine but mass extract requires extra approval). Both
-    // run through PlatformAdminRequirement (host/partner gate + seeded
-    // dot-notation permission `audit.read` / `audit.export`).
+    // viewing in-app is fine but mass extract requires extra approval).
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.QueryPolicy,
-        p => p.AddRequirements(new PlatformAdminRequirement("audit.read")));
+        p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.AuditView)));
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.ExportPolicy,
-        p => p.AddRequirements(new PlatformAdminRequirement("audit.export")));
+        p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.AuditExport)));
 
-    // R5.2 PB.2 — impersonation admin surface. Same double-lock pattern as
-    // PA.1 / PB.1: PlatformAdminRequirement combines host/partner-tenant
-    // gating with the seeded `security.impersonation.manage` permission so
-    // only platform admins (or partner admins managing their children) with
-    // the explicit permission can list / revoke active sessions or read
-    // history.
+    // R5.2 PB.2 — impersonation session administration (list active, revoke, read
+    // history). Deliberately a different permission from platform:tenant:impersonate,
+    // which authorises *starting* a session.
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.ManagementImpersonationEndpoints.AdminAuthorizationPolicy,
-        p => p.AddRequirements(new PlatformAdminRequirement("security.impersonation.manage")));
+        p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.ImpersonationManage)));
 
-    // R5.2 PC.1 — retention admin surface. Same double-lock pattern as
-    // PA.1 / PB.1 / PB.2: PlatformAdminRequirement combines host/partner
-    // tenant gating with the seeded `retention.read` (overview) /
-    // `retention.manage` (DryRun toggle + manual run-now) permissions
-    // (P0.9 commit f20892e).
+    // R5.2 PC.1 — retention admin surface: view (overview + config) split from
+    // manage (DryRun toggle + manual run-now).
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.Retention.RetentionAdminEndpoints.ReadPolicy,
-        p => p.AddRequirements(new PlatformAdminRequirement("retention.read")));
+        p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.RetentionView)));
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.Retention.RetentionAdminEndpoints.ManagePolicy,
-        p => p.AddRequirements(new PlatformAdminRequirement("retention.manage")));
+        p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.RetentionManage)));
 
-    // R5.4 S5.9 — JWT signing-key rotation surface. Same double-lock pattern
-    // as the R5.2 admin surfaces: PlatformAdminRequirement combines host/partner
-    // tenant gating with the seeded `security.jwt.rotate` permission. Closes
-    // C.1 of post-R5.1 triage (v1.9.2 partial single-key impl).
+    // R5.4 S5.9 — JWT signing-key rotation. Closes C.1 of post-R5.1 triage
+    // (v1.9.2 partial single-key impl). Keeps the dot-notation id: it is the one
+    // dot id that IS catalogued (ADR-0037 accepted exemption).
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.Security.JwtKeyEndpoints.AuthorizationPolicy,
-        p => p.AddRequirements(new PlatformAdminRequirement("security.jwt.rotate")));
+        p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.JwtRotate)));
 
     // Plan 32C PlatformHub method-level policies (Supervisor/Agent/PlatformAdmin)
     // moved to Verbara.Platform.Realtime per ADR-0022 along with the Hub itself.
@@ -1828,7 +1825,7 @@ v1.MapAgentAssistEndpoints();
 v1.MapSupervisorEndpoints();
 v1.MapSkillEndpoints();
 v1.MapAuditEndpoints();
-// R5.2 PB.1 — audit log viewer + export (audit.read / audit.export gated).
+// R5.2 PB.1 — audit log viewer + export (system:audit:view / system:audit:export gated).
 Verbara.Platform.Api.Endpoints.Audit.AuditAdminEndpoints.MapAuditAdminEndpoints(v1);
 v1.MapSurveyEndpoints();
 // csat-runner Phase B — CSAT capture (webchat token-verified / email+sms internal
@@ -1850,9 +1847,9 @@ v1.MapReasonHintEndpoints();
 v1.MapScheduledReportEndpoints();
 v1.MapRealtimeEndpoints();
 v1.MapAuthAdminEndpoints();
-// R5.2 PA.1 — MFA admin surface (PlatformAdmin + security.mfa.admin permission).
+// R5.2 PA.1 — MFA admin surface (PlatformAdmin + system:mfa:manage permission).
 Verbara.Platform.Api.Endpoints.Mfa.MfaAdminEndpoints.MapMfaAdminEndpoints(v1);
-// R5.2 PC.1 — retention admin surface (retention.read / retention.manage gated).
+// R5.2 PC.1 — retention admin surface (system:retention:view / system:retention:manage gated).
 Verbara.Platform.Api.Endpoints.Retention.RetentionAdminEndpoints.MapRetentionAdminEndpoints(v1);
 // R5.4 S5.9 — JWT signing-key rotation admin surface (security.jwt.rotate gated).
 Verbara.Platform.Api.Endpoints.Security.JwtKeyEndpoints.MapJwtKeyEndpoints(v1);
@@ -1892,11 +1889,14 @@ if (!app.Environment.IsEnvironment("Testing"))
         {
             await Verbara.Platform.Storage.Postgres.Seeds.RbacSeederOrchestrator
                 .SeedRbacAsync(npgsqlDs, CancellationToken.None);
-            Console.WriteLine("RBAC seeder: permissions, templates, and role migration complete.");
+            Verbara.Platform.Api.RbacSeedLog.SeedCompleted(app.Logger);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"RBAC seeder skipped: {ex.Message}");
+            // ADR-0037 — loud, but never fatal. A silent Console.WriteLine here is what let a
+            // fully broken role model (5 of 11 templates seeded) go unnoticed for weeks. The
+            // boot deliberately continues: a transient database fault must not brick the host.
+            Verbara.Platform.Api.RbacSeedLog.SeedFailed(app.Logger, ex);
         }
     }
 }

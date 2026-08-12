@@ -9,7 +9,8 @@ namespace Verbara.Platform.Api.Tests.Retention;
 /// <summary>
 /// R5.2 PC.1 — verifies admin retention endpoints under <c>/management/retention</c>:
 /// list targets, get config, run-now (dry-run + purge), patch config (DryRun toggle).
-/// Permission gates: <c>retention.read</c> + <c>retention.manage</c> via PlatformAdminRequirement.
+/// Permission gates: <c>system:retention:view</c> + <c>system:retention:manage</c> via
+/// PlatformAdminRequirement (ADR-0037).
 /// </summary>
 public sealed class RetentionAdminEndpointsTests : IClassFixture<PlatformAdminApiFactory>
 {

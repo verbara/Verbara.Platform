@@ -14,8 +14,9 @@ namespace Verbara.Platform.Api.Endpoints.Audit;
 /// R5.2 PB.1 — admin audit log viewer endpoints.
 /// </summary>
 /// <remarks>
-/// Two surfaces gated behind the new <c>audit.read</c> / <c>audit.export</c>
-/// permissions seeded by P0.9 (commit <c>f20892e</c>):
+/// Two surfaces gated behind the <c>system:audit:view</c> / <c>system:audit:export</c>
+/// permissions (ADR-0037; previously the uncatalogued <c>audit.read</c> /
+/// <c>audit.export</c>, which no principal could hold):
 /// <list type="bullet">
 ///   <item><description><c>GET /admin/audit/events</c> — paginated query with rich filters.</description></item>
 ///   <item><description><c>GET /admin/audit/export</c> — streaming CSV / JSON export of the same filter shape.</description></item>
@@ -28,9 +29,9 @@ namespace Verbara.Platform.Api.Endpoints.Audit;
 /// Wired in <c>Program.cs</c> via:
 /// <code>
 /// options.AddPolicy(AuditAdminEndpoints.QueryPolicy,
-///     p => p.AddRequirements(new PlatformAdminRequirement("audit.read")));
+///     p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.AuditView)));
 /// options.AddPolicy(AuditAdminEndpoints.ExportPolicy,
-///     p => p.AddRequirements(new PlatformAdminRequirement("audit.export")));
+///     p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.AuditExport)));
 /// </code>
 ///
 /// The legacy <c>/admin/audit</c> endpoints in <see cref="AuditEndpoints"/>
@@ -226,7 +227,7 @@ internal static class AuditAdminEndpoints
         }
 
         // Cross-tenant query is permitted only for PlatformAdmin / SystemAdmin
-        // roles (the policy already enforced the audit.read permission). If the
+        // roles (the policy already enforced the system:audit:view permission). If the
         // caller asks for a tenant that isn't theirs but they aren't an admin
         // role, refuse rather than silently scoping back to actor tenant.
         if (string.IsNullOrEmpty(requestedTenant))

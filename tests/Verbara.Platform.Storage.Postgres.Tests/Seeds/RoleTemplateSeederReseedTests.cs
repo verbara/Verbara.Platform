@@ -13,6 +13,22 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Seeds;
 [Collection("PostgresRbac")]
 public sealed class RoleTemplateSeederReseedTests
 {
+    /// <summary>
+    /// The seven R5.2 P0.9 dot-notation ids retired by ADR-0037. They were granted by
+    /// <c>RoleTemplateSeeder</c> but never catalogued by <c>PermissionSeeder</c>, which is what
+    /// aborted the un-transacted seeding loop with <c>23503</c>.
+    /// </summary>
+    private static readonly string[] RetiredPermissionIds =
+    [
+        "security.mfa.admin",
+        "audit.read",
+        "audit.export",
+        "security.impersonation.manage",
+        "retention.read",
+        "retention.manage",
+        "tenant.settings.write",
+    ];
+
     private readonly PostgresRbacFixture _fixture;
 
     public RoleTemplateSeederReseedTests(PostgresRbacFixture fixture)
@@ -45,13 +61,23 @@ public sealed class RoleTemplateSeederReseedTests
         report["tenant-a"].PermissionsRemoved.Should().Be(0);
 
         var stored = await ReadTenantPermissionsAsync(conn, "tenant-a");
-        stored.Should().Contain("security.mfa.admin");
-        stored.Should().Contain("audit.read");
-        stored.Should().Contain("audit.export");
-        stored.Should().Contain("retention.read");
-        stored.Should().Contain("retention.manage");
-        stored.Should().Contain("tenant.settings.write");
-        stored.Should().Contain("security.impersonation.manage");
+
+        // ADR-0037 — the canonical domain:resource:action ids that replaced the retired R5.2 P0.9
+        // dot-notation set. The retired ids were granted here but never catalogued by
+        // PermissionSeeder, so they could never survive the FK onto permissions.
+        stored.Should().Contain("system:mfa:manage");
+        stored.Should().Contain("system:audit:view");
+        stored.Should().Contain("system:audit:export");
+        stored.Should().Contain("system:impersonation:manage");
+        stored.Should().Contain("system:retention:view");
+        stored.Should().Contain("system:retention:manage");
+        // security.jwt.rotate keeps its dot spelling — the one dot id that IS catalogued (ADR-0037).
+        stored.Should().Contain("security.jwt.rotate");
+        // tenant.settings.write was dropped without replacement; system:tenant:configure covers it.
+        stored.Should().NotContain(RetiredPermissionIds,
+            "the R5.2 P0.9 dot-notation ids are retired and uncatalogued; re-seeding must never " +
+            "re-introduce them (ADR-0037)");
+
         stored.Should().BeEquivalentTo(canonical);
     }
 

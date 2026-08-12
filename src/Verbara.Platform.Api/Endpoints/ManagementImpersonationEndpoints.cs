@@ -17,12 +17,17 @@ internal static class ManagementImpersonationEndpoints
     /// R5.2 PB.2 — admin authorization policy for the impersonation session
     /// management surface. Wired in <c>Program.cs</c> via
     /// <c>AddPolicy("ImpersonationAdminGate", p =&gt; p.AddRequirements(new
-    /// PlatformAdminRequirement("security.impersonation.manage")))</c>.
+    /// PlatformAdminRequirement(PlatformAdminPermissions.ImpersonationManage)))</c>.
     /// PlatformAdminRequirement combines host/partner-tenant gating with the
-    /// seeded <c>security.impersonation.manage</c> permission so the surface is
+    /// <c>system:impersonation:manage</c> permission so the surface is
     /// double-locked: only platform admins (or partner admins managing their
     /// children) with the explicit permission can list / revoke active
-    /// sessions or read history.
+    /// sessions or read history. That id is deliberately distinct from
+    /// <c>platform:tenant:impersonate</c>, which authorises <em>starting</em> a
+    /// session (enforced in-handler by <c>StartImpersonation</c>): <c>system_admin</c>
+    /// administers sessions but cannot start one. ADR-0037 replaced the earlier
+    /// <c>security.impersonation.manage</c> id, which was granted but never
+    /// catalogued and so never resolvable.
     /// </summary>
     public const string AdminAuthorizationPolicy = "ImpersonationAdminGate";
 
@@ -95,7 +100,7 @@ internal static class ManagementImpersonationEndpoints
         group.MapDelete("/impersonate", EndImpersonation);
 
         // R5.2 PB.2 — admin session-management surface, double-gated by
-        // PlatformAdminRequirement + `security.impersonation.manage`.
+        // PlatformAdminRequirement + `system:impersonation:manage`.
         var adminGroup = app.MapGroup("/management/impersonation/sessions")
             .RequireAuthorization(AdminAuthorizationPolicy);
 

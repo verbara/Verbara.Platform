@@ -108,7 +108,7 @@ public sealed class AuditEndpointsFilterTests : IClassFixture<PlatformAdminApiFa
         var response = await nonAdminClient.GetAsync("/api/v1/admin/audit/events");
 
         // PlatformAdminAuthorizationHandler refuses (Agent role + non-host tenant
-        // lacking audit.read), surfacing as 403 from the authorization pipeline.
+        // lacking system:audit:view), surfacing as 403 from the authorization pipeline.
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 

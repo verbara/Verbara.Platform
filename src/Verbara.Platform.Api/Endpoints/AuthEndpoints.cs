@@ -1149,6 +1149,12 @@ internal static class RoleDefaultPermissions
         "system:tenant:configure", "system:typification:configure",
         "system:integration:manage", "system:audit:view",
         "system:auth:configure", "system:cluster:manage",
+        // ADR-0037 — canonical ids for the MFA-admin, audit-export, impersonation-session
+        // and retention surfaces (replacing the retired R5.2 P0.9 dot-notation ids, which
+        // were never catalogued and so never resolvable).
+        "system:mfa:manage", "system:audit:export",
+        "system:impersonation:manage",
+        "system:retention:view", "system:retention:manage",
         "agentassist:session:view", "agentassist:config:manage",
         "callanalytics:analysis:view", "callanalytics:config:manage",
     ];

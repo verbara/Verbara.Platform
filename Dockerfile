@@ -60,6 +60,22 @@ COPY --from=build /app .
 # api.image.digest / the compose template). When unset (local `docker run`,
 # dev), Pro's ContainerImageDigest.ReadFromEnvironment() returns null and
 # license validation falls through to the expiry check (dev-mode semantics).
+
+# Build provenance. Without these, a running container cannot be traced back to
+# the commit it was built from — `docker inspect` shows only the base image's
+# inherited labels, so "is my lab current?" is unanswerable from image metadata
+# alone. Pass them at build time:
+#   docker build --build-arg VCS_REF=$(git rev-parse --short HEAD) \
+#                --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) .
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ARG VERSION=unknown
+LABEL org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.title="Verbara Platform API" \
+      org.opencontainers.image.source="https://github.com/verbara/Verbara.Platform"
+
 EXPOSE 5000
 ENV ASPNETCORE_URLS=http://+:5000
 ENTRYPOINT ["./Verbara.Platform.Api"]

@@ -12,9 +12,11 @@ internal static class MfaAdminEndpoints
     /// <summary>Authorization policy name for the MFA admin surface.</summary>
     /// <remarks>
     /// Wired in <c>Program.cs</c> via <c>AddPolicy("MfaAdminGate", p =&gt;
-    /// p.AddRequirements(new PlatformAdminRequirement("security.mfa.admin")))</c>.
+    /// p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.MfaManage)))</c>.
     /// PlatformAdminRequirement combines host/partner-tenant gating with the
-    /// permission check so the surface is double-locked.
+    /// <c>system:mfa:manage</c> permission check so the surface is double-locked
+    /// (ADR-0037; previously the uncatalogued <c>security.mfa.admin</c>, which no
+    /// principal could hold).
     /// </remarks>
     public const string AuthorizationPolicy = "MfaAdminGate";
 
