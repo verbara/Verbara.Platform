@@ -161,6 +161,88 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   re-hashed, or invalidated**: both families keep verifying, so recovery codes already saved by users
   stay valid. This does **not** unify the two hash families and does **not** strengthen the SHA-256
   digest. decision_ref `Platform/ADR-0013` (addendum of 2026-07-29). (#215)
+- **RBAC seeding aborted on every boot, leaving 5 of 11 role templates and six admin surfaces with an
+  unsatisfiable permission gate** (decision_ref `Platform/ADR-0037`, change
+  `canonicalize-rbac-permission-vocabulary`). Permission ids had two coexisting vocabularies. The
+  canonical one is `domain:resource:action`; a second, dot-notation set introduced by R5.2 Phase 0
+  P0.9 — `audit.read`, `audit.export`, `security.mfa.admin`, `security.impersonation.manage`,
+  `retention.read`, `retention.manage`, `tenant.settings.write` — was granted to the `admin`,
+  `system_admin` and `platform_admin` templates **ahead of** the features that would consume them,
+  with the catalog side deferred, and the catalog side never landed. `role_template_permissions`
+  carries a foreign key onto the catalog, so every one of those grants raised `23503`
+  (`role_template_permissions_permission_id_fkey`); `RoleTemplateSeeder.SeedAsync` inserts row-by-row
+  with `ON CONFLICT DO NOTHING` and **no transaction**, so the whole seeding loop aborted at the first
+  orphan grant; and `Program.cs` wrapped the seeder in a `try/catch` that only emitted a
+  `Console.WriteLine`, which made the failure invisible in normal operation. Measured on a live
+  database seeded 2026-07-29: **5 of 11 role templates existed**, seeding died on the 5th (`admin`,
+  left holding a partial **67 grants**), and `system_admin`, `api`, `platform_admin`, `partner_admin`,
+  `partner_billing` and `partner_viewer` were never created at all — across **103 tenants and 507
+  tenant roles** there was not one partner role, and the single `Platform Admin` role held **zero
+  permissions**. (#225)
+  - **Six endpoint gates named orphan ids, so no principal could satisfy them by permission.**
+    `PermissionResolver.HasPermission` is an exact set-membership test — no alias, prefix or
+    implication layer at check time — so the audit, MFA-admin, impersonation-session and retention
+    surfaces stayed reachable only through the `Admin`/`SystemAdmin` role shortcut in
+    `PlatformAdminAuthorizationHandler`, which skips the permission check entirely; and users whose
+    permissions resolved to nothing fell back to the hardcoded `RoleDefaultPermissions.Admin` list in
+    `AuthEndpoints`, masking the empty RBAC state from the client.
+  - **One vocabulary — the retired ids and their gates move together.** `security.mfa.admin` →
+    `system:mfa:manage`, `audit.read` → `system:audit:view` (already catalogued), `audit.export` →
+    `system:audit:export`, `security.impersonation.manage` → `system:impersonation:manage`,
+    `retention.read` → `system:retention:view`, `retention.manage` → `system:retention:manage`;
+    `tenant.settings.write` is **dropped** — it gated nothing and `system:tenant:configure` already
+    covers it. `security.jwt.rotate` keeps its dot spelling as a recorded exemption: it is the one dot
+    id that **is** catalogued, so renaming it would churn live `tenant_role_permissions` rows for no
+    behavioural gain. Impersonation deliberately keeps **two** distinct ids —
+    `platform:tenant:impersonate` authorises *starting* a session, `system:impersonation:manage`
+    authorises *administering* them (list active, revoke, read history), and `system_admin` is
+    excluded from the former by design while retaining the latter. The catalog grows **83 → 88**, and
+    `RoleDefaultPermissions.Admin` moves with it since it documents itself as mirroring the `admin`
+    template. Clients gating on the retired ids break by design; `Verbara.Platform.Web` moves its
+    guards onto the canonical ids in the same track (Web `#275`).
+  - **Catalog integrity is now a build-time invariant, not a runtime hope.** Gate ids are held as
+    constants in the new `PlatformAdminPermissions` rather than as string literals at the policy site,
+    `PermissionSeeder.GetPermissions()` is projected through the new `PermissionCatalog` seam, and
+    tests assert that every id in `RoleTemplateSeeder` (both `AllPermissions()` and the explicit
+    per-template lists) and every id named by a `PlatformAdminRequirement` gate is a catalog member —
+    so the class of defect that produced this entry fails the build instead of the boot. The startup
+    `catch` now logs at **Error** through the host logger (`RbacSeedLog.SeedFailed`) instead of writing
+    to `Console`; the boot still proceeds, because a transient database fault must not brick the host
+    and the systematic cause is caught at build time.
+  - **The loud log paid for itself on the very next boot.** With `23503` resolved and the failure
+    finally visible, startup surfaced a second, independent abort the `Console.WriteLine` had been
+    swallowing all along: `RbacMigrationSeeder` raised `23505` against `idx_tenant_roles_name`, a
+    unique index its `ON CONFLICT (tenant_id, role_id)` clause did not target, killing the per-tenant
+    clone loop partway through. Fixed in the same change (untargeted `ON CONFLICT DO NOTHING`, an
+    `EXISTS` guard on the grant insert, and a resolving `SELECT` on the `user_roles` assignment).
+  - **A restart repairs an affected database with no migration script — with two stated limits.**
+    Inserts are `ON CONFLICT DO NOTHING` and un-transacted, and `RbacMigrationSeeder` re-clones
+    templates into every tenant on each boot, so once the FK cause is gone the missing templates, the
+    missing `admin` grants and the missing per-tenant rows all fill in. Neither limit below is
+    introduced here and neither is reachable as a privilege problem, but both are worth stating so the
+    sentence is not read as more than it is. First, the clone only refreshes grants for roles whose
+    `role_id` equals the template id, so a tenant whose template-derived role carries a suffixed id
+    (`admin-demo`, `role_admin_<tenant>` — the majority shape) keeps the grants it was provisioned
+    with; that is invisible to the six surfaces above, because `PlatformAdminRequirement` denies any
+    tenant that is neither the host nor a `Partner` before it ever consults a permission. Second,
+    per-tenant `platform_admin` roles remain the `tools/RbacReseed` CLI's job, and that CLI matches
+    `role_id = 'platform_admin'` while `SetupEndpoints` provisions `platform-admin-{tenant}`, so it
+    does not currently reach them. Both are pre-existing (R5.2 PC.3) and tracked as follow-ups.
+  - **Riding along in the same PR: the API image now carries OCI provenance labels.** Unrelated to RBAC,
+    but shipped in `#225`. The `Dockerfile` gains `VCS_REF` / `BUILD_DATE` / `VERSION` build args (each
+    defaulting to `unknown`) mapped onto `org.opencontainers.image.revision`, `.created` and `.version`,
+    alongside a fixed `.title` and `.source`; `docker/docker-compose.full.yml` passes the first two
+    through. Without them a running container could not be traced back to the commit it was built from —
+    `docker inspect` showed only the base image's inherited labels. `release.yml` does **not** pass the
+    build args yet, so images published by CI still label `revision=unknown`; that gap is the harvested
+    follow-up change `stamp-ci-image-provenance`.
+  - **Deliberately out of scope: the `Admin`/`SystemAdmin` role shortcut itself.** This work makes the
+    permissions actually work — the six surfaces are now reachable on their permission, so the shortcut
+    stops being load-bearing and becomes a convenience — but it does **not** remove the shortcut. The
+    five deltas became the living `openspec/specs/rbac-permission-vocabulary/` spec on archive, which
+    also harvested the deferred work as two open changes rather than burying it:
+    `harden-rbac-migration-seeder` (per-tenant fault isolation for the still-untransacted loop) and
+    `stamp-ci-image-provenance` (the `release.yml` build-args gap described above). (#226)
 
 ### Security
 
