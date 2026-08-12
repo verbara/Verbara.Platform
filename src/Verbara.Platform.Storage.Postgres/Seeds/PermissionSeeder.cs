@@ -33,7 +33,12 @@ internal static class PermissionSeeder
         }
     }
 
-    private static IEnumerable<PermissionRow> GetPermissions()
+    /// <summary>
+    /// The permission catalog: every row written to the <c>permissions</c> table.
+    /// Internal so <see cref="PermissionCatalog"/> can project the ids for the
+    /// ADR-0037 catalog-integrity guard tests.
+    /// </summary>
+    internal static IEnumerable<PermissionRow> GetPermissions()
     {
         // ── contacts (8) ──
         yield return P("contacts:conversation:handle", "contacts", "conversation", "handle",
@@ -58,7 +63,7 @@ internal static class PermissionSeeder
             "Create new contacts",
             ["contacts:contact:view"]);
 
-        // ── queues (5) ──
+        // ── queues (8) ──
         yield return P("queues:queue:view", "queues", "queue", "view",
             "View queue configuration and status");
         yield return P("queues:queue:create", "queues", "queue", "create",
@@ -199,7 +204,7 @@ internal static class PermissionSeeder
         yield return P("typification:correct-autonomous", "typification", "correct-autonomous", "correct",
             "Correct an autonomously stamped (AutoAi) typification disposition within the correction window");
 
-        // ── system (6) ──
+        // ── system (11) ──
         yield return P("system:tenant:configure", "system", "tenant", "configure",
             "Configure tenant settings");
         yield return P("system:typification:configure", "system", "typification", "configure",
@@ -212,6 +217,20 @@ internal static class PermissionSeeder
             "Manage cluster nodes and configuration");
         yield return P("system:auth:configure", "system", "auth", "configure",
             "Configure authentication settings (MFA policy, OIDC, lockout, password policy)");
+        // ADR-0037 — canonical replacements for the retired R5.2 P0.9 dot-notation ids.
+        // These gate the MFA-admin, audit, impersonation-session and retention surfaces.
+        yield return P("system:mfa:manage", "system", "mfa", "manage",
+            "Administer other users' MFA: list enrollment status, reset TOTP secrets, revoke sessions");
+        yield return P("system:audit:export", "system", "audit", "export",
+            "Bulk-export audit log entries (CSV/JSON)",
+            ["system:audit:view"]);
+        yield return P("system:impersonation:manage", "system", "impersonation", "manage",
+            "Administer impersonation sessions: list active sessions, revoke them, read session history");
+        yield return P("system:retention:view", "system", "retention", "view",
+            "View data-retention configuration and the per-target retention overview");
+        yield return P("system:retention:manage", "system", "retention", "manage",
+            "Change data-retention configuration (DryRun toggle) and trigger a manual retention run",
+            ["system:retention:view"]);
 
         // ── agentassist (2) ──
         yield return P("agentassist:session:view", "agentassist", "session", "view",
@@ -292,7 +311,7 @@ internal static class PermissionSeeder
         return new PermissionRow(id, category, resource, action, description, implies ?? Array.Empty<string>());
     }
 
-    private sealed record PermissionRow(
+    internal sealed record PermissionRow(
         string PermissionId,
         string Category,
         string Resource,

@@ -5,14 +5,31 @@ using Npgsql;
 namespace Verbara.Platform.Storage.Postgres.Tests.Seeds;
 
 /// <summary>
-/// Testcontainers-backed Postgres fixture used by
-/// <see cref="RoleTemplateSeederReseedTests"/>. Spins up <c>postgres:16-alpine</c>
-/// and creates the minimal subset of tables touched by
-/// <c>RoleTemplateSeeder.ReseedExistingTenantsAsync</c>: <c>permissions</c>,
-/// <c>role_templates</c>, <c>role_template_permissions</c>, <c>tenant_roles</c>,
-/// <c>tenant_role_permissions</c>. Avoids dragging in the entire
-/// platform schema.
+/// Testcontainers-backed Postgres fixture shared by <see cref="RoleTemplateSeederReseedTests"/> and
+/// <see cref="RbacSeedIntegrityTests"/>. Spins up <c>postgres:16-alpine</c> and creates the minimal
+/// subset of tables touched by the RBAC seeding path — <c>permissions</c>, <c>role_templates</c>,
+/// <c>role_template_permissions</c>, <c>tenant_roles</c>, <c>tenant_role_permissions</c>,
+/// <c>user_roles</c> and <c>users</c> — rather than dragging in the entire platform schema.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Fidelity over minimalism where constraints are concerned.</b> The point of running against a
+/// real Postgres is that the real <em>constraints</em> fire, so every table here reproduces its
+/// baseline primary keys, foreign keys <b>and unique indexes</b> verbatim. In particular
+/// <c>idx_tenant_roles_name</c> — the second unique index on <c>tenant_roles</c>, over
+/// <c>(tenant_id, lower(name))</c> — is load-bearing: while it was missing from this fixture, a
+/// <c>tenant_roles</c> insert that conflicted on the role <em>name</em> rather than on the role
+/// <em>id</em> could not be reproduced at all, and the production defect it causes in
+/// <c>RbacMigrationSeeder.MigrateExistingUsersAsync</c> was invisible to the suite. Do not drop it.
+/// </para>
+/// <para>
+/// The <c>users</c> table is deliberately a narrow projection of its baseline counterpart:
+/// <c>MigrateExistingUsersAsync</c> reads only <c>tenant_id</c>, <c>user_id</c> and the integer
+/// <c>role</c> enum (0=Agent, 1=Supervisor, 2=Admin, 3=Api). The other ~20 baseline columns
+/// (credentials, MFA, OIDC, audit stamps) carry no RBAC meaning and would only couple this fixture
+/// to unrelated schema churn.
+/// </para>
+/// </remarks>
 public sealed class PostgresRbacFixture : IAsyncLifetime
 {
     private IContainer? _container;
@@ -55,13 +72,13 @@ public sealed class PostgresRbacFixture : IAsyncLifetime
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "TRUNCATE tenant_role_permissions, user_roles, tenant_roles, " +
-            "role_template_permissions, role_templates, permissions RESTART IDENTITY CASCADE";
+            "role_template_permissions, role_templates, permissions, users RESTART IDENTITY CASCADE";
         await cmd.ExecuteNonQueryAsync();
     }
 
     // Subset of the consolidated 001_Baseline.sql limited to the RBAC tables exercised by
-    // ReseedExistingTenantsAsync. Keeping it inline avoids coupling the test
-    // to the full migration pipeline + the ProMultiTenant deps.
+    // ReseedExistingTenantsAsync and RbacMigrationSeeder.MigrateExistingUsersAsync. Keeping it
+    // inline avoids coupling the test to the full migration pipeline + the ProMultiTenant deps.
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS permissions (
             permission_id TEXT PRIMARY KEY,
@@ -98,6 +115,13 @@ public sealed class PostgresRbacFixture : IAsyncLifetime
             PRIMARY KEY (tenant_id, role_id)
         );
 
+        -- Second unique index on tenant_roles, verbatim from 001_Baseline.sql. Role names are
+        -- unique per tenant case-insensitively, INDEPENDENTLY of role_id, so an insert can conflict
+        -- here while missing a (tenant_id, role_id) conflict target entirely. Omitting it makes
+        -- name-collision defects unreproducible; see the fixture remarks.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_roles_name
+            ON tenant_roles (tenant_id, lower(name));
+
         CREATE TABLE IF NOT EXISTS tenant_role_permissions (
             tenant_id TEXT NOT NULL,
             role_id TEXT NOT NULL,
@@ -114,6 +138,17 @@ public sealed class PostgresRbacFixture : IAsyncLifetime
             assigned_by TEXT,
             PRIMARY KEY (tenant_id, user_id, role_id),
             FOREIGN KEY (tenant_id, role_id) REFERENCES tenant_roles(tenant_id, role_id) ON DELETE CASCADE
+        );
+
+        -- Narrow projection of baseline `users`: RbacMigrationSeeder.MigrateExistingUsersAsync
+        -- drives its whole loop off "SELECT DISTINCT tenant_id FROM users" plus
+        -- "SELECT user_id, role FROM users WHERE tenant_id = @TenantId". `role` is the UserRole
+        -- enum stored as an integer: 0=Agent, 1=Supervisor, 2=Admin, 3=Api.
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            role INTEGER NOT NULL,
+            PRIMARY KEY (tenant_id, user_id)
         );
         """;
 }

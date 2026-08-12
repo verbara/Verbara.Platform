@@ -12,7 +12,8 @@ namespace Verbara.Platform.Api.Tests.Multitenancy;
 /// Regression suite for the P1 finding <c>PREPUB-2026-05-09-MFA-001</c>:
 /// the legacy <c>ResolveTargetTenant</c> in <c>MfaAdminEndpoints</c> trusted any
 /// caller-supplied <c>?targetTenant=</c> value. A Partner Admin with the
-/// <c>security.mfa.admin</c> permission could therefore reset MFA on, and revoke
+/// MFA-admin permission (<c>system:mfa:manage</c> since ADR-0037; then spelled
+/// <c>security.mfa.admin</c>) could therefore reset MFA on, and revoke
 /// sessions of, any user whose id existed in an unrelated foreign tenant.
 ///
 /// The fix is <c>ResolveTargetTenantAsync</c>: mirrors the impersonation

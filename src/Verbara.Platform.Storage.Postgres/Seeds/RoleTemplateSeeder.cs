@@ -73,8 +73,9 @@ public static class RoleTemplateSeeder
     /// </summary>
     /// <remarks>
     /// Used by the <c>tools/RbacReseed</c> CLI to migrate existing tenants when
-    /// the canonical permission catalog expands (e.g. R5.2 P0.9 added 7 new keys
-    /// that fresh tenants pick up via <see cref="SeedAsync"/> + the migration
+    /// the canonical permission list changes (e.g. ADR-0037 retired the R5.2 P0.9
+    /// dot-notation ids in favour of canonical <c>domain:resource:action</c> ones;
+    /// fresh tenants pick the new set up via <see cref="SeedAsync"/> + the migration
     /// seeder, but existing tenants do not). The method is idempotent: a second
     /// invocation against an already-aligned tenant returns
     /// <c>PermissionsAdded == 0</c> and <c>PermissionsRemoved == 0</c>.
@@ -397,16 +398,17 @@ public static class RoleTemplateSeeder
             "platform:tenant:impersonate", "platform:server:manage",
             "platform:license:manage", "platform:cluster:manage",
             "features:agent-assist:manage",
-            // R5.2 Phase 0 P0.9 — Security Admin + Audit + Impersonation + Retention
-            // permissions seeded ahead of Phase A/B/C feature subagents that consume them.
-            // Per ADR-0002 + ADR-0004 conventions; Web placeholder pages will tighten
-            // their permission gates from existing fallbacks (system:auth:configure etc.)
-            // to these new keys once the features land.
-            "security.mfa.admin", "audit.read", "audit.export",
-            "security.impersonation.manage",
-            "retention.read", "retention.manage",
-            "tenant.settings.write",
+            // ADR-0037 — MFA admin / audit export / impersonation-session admin / retention.
+            // These replace the retired R5.2 P0.9 dot-notation ids, which were granted here but
+            // never catalogued by PermissionSeeder: role_template_permissions' FK onto
+            // permissions then aborted the whole seed with 23503. Every id in this list MUST
+            // exist in PermissionSeeder — that is a test-enforced invariant.
+            "system:mfa:manage", "system:audit:export",
+            "system:impersonation:manage",
+            "system:retention:view", "system:retention:manage",
             // R5.4 S5.9 — JWT signing-key rotation. Gates POST /api/v1/management/security/jwt/rotate-key.
+            // Keeps its dot spelling: it is the one dot-notation id that IS catalogued, so renaming
+            // it would churn live tenant_role_permissions rows for no behavioural gain (ADR-0037).
             "security.jwt.rotate",
             "partner:customer:view", "partner:customer:create",
             "partner:customer:manage", "partner:customer:delete",
