@@ -128,6 +128,15 @@
          10.0.10 is the latest .NET 10 servicing patch, clearing all four. Advisory drift — published
          after the last green main run (01560e4); pinned here to unblock every Platform build. -->
     <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+    <!-- Transitive-pin override (CentralPackageTransitivePinningEnabled=true): Testcontainers
+         pulls SSH.NET transitively into the container-backed test projects. 2025.1.0 carries
+         GHSA-q939-rpr3-3284 — a HIGH (CVSS 7.1) arbitrary-file-write via server-controlled
+         filenames in ScpClient's recursive download. 2026.0.0 is the first patched release.
+         Testcontainers 4.13.0 (latest) still depends on 2025.1.0, so upgrading it does not clear
+         the advisory — the pin is the only fix. Real exposure is nil: SSH.NET is loaded only for
+         Testcontainers' host-port forwarding, which no suite here uses. Advisory drift — published
+         2026-08-12, after the last green main run (90eecc7e); every .NET repo went red on it. -->
+    <PackageVersion Include="SSH.NET" Version="2026.0.0" />
   </ItemGroup>
 
   <ItemGroup>
