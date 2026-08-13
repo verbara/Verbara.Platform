@@ -439,7 +439,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Validate specs and changes (strict)
-        run: npx -y @fission-ai/openspec@1.6.0 validate --all --strict --no-interactive
+        run: npx -y @fission-ai/openspec@1.8.0 validate --all --strict --no-interactive
 
   # AOT-at-PR gate (verbara-meta/ADR-0012 gate #1): run the REAL Native AOT publish
   # of Verbara.Platform.Api on every PR and fail on any IL trim/AOT warning. Until now
