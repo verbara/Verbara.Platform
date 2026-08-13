@@ -10,7 +10,7 @@ foreign key onto `permissions` and the seeders insert row-by-row without a trans
 uncatalogued grant aborted RBAC seeding on every boot — silently, behind a `Console.WriteLine` —
 leaving 5 of 11 role templates in place, zero partner roles across 103 tenants, and six admin
 surfaces reachable only through the `Admin`/`SystemAdmin` role shortcut that skips the permission
-check. See [ADR-0037](../../docs/decisions/0037-canonical-rbac-permission-vocabulary.md).
+check. See [ADR-0037](../../../docs/decisions/0037-canonical-rbac-permission-vocabulary.md).
 
 This spec therefore covers four things together, because each one hid the next: a single
 `domain:resource:action` vocabulary; catalog membership enforced at build time for both template
