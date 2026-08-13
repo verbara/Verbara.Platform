@@ -1,5 +1,38 @@
 # Plan: Documentación viva — manuales generados desde tests E2E (Playwright + híbrido)
 
+## Execution status (live)
+
+**Revisado 2026-08-13 (stale-plans review). El track sigue vivo.** Este archivo no se había tocado
+desde 2026-07-05 y `/xr:doctor` lo reportaba como plan rancio — pero el retraso era **documental, no
+de ejecución**: las Fases 0 y 1 shippearon el 2026-05-28 y nunca se registraron aquí. El caso
+"shipped-but-unfiled", no "abandonado".
+
+**Ojo con dónde buscar:** la infra vive en `Verbara.Platform.Web` (`tests/manuales/`), no en este
+repo. Este plan vive aquí porque el consumidor (`docs/manuales/`) y la Fase 2 (`Verbara.Platform.Renderer`)
+son de Platform. Verificar el estado contra el árbol de Platform da un falso "sin empezar".
+
+- ✅ **Fase 0 — Scaffolding** — shipped 2026-05-28 (`ba76cc1e`, Web). `tests/manuales/playwright.docs.config.ts`,
+  el renderer TS completo (`manual-renderer/render.ts` + `allure-adapter.ts` + `template-engine.ts`),
+  `personas/smb-owner/00-smoke.{spec.ts,md.tpl}` y el devDep `allure-playwright`. Criterio de salida
+  cumplido: `docs/manuales/auto/v2.5.4/es-419/smb-owner/00-smoke.md` existe y es legible.
+- ✅ **Fase 1 — SMB Owner Día 1 walking skeleton** — shipped 2026-05-28 (`2fc0bb52`, Web).
+  `01-day1-setup-and-webchat.{spec.ts,md.tpl}` → `docs/manuales/auto/v2.5.4/es-419/smb-owner/01-day1-setup-and-webchat.md`.
+- ⏸ **Fase 2 — Multi-render** — **no empezada, y es la siguiente rebanada.** Verificado ausente:
+  no hay `docs-site/` ni `mkdocs.yml` en ningún repo, `package.json` de Web no tiene script
+  `docs:build`, y `Verbara.Platform.Renderer` no expone `POST /render/manual`.
+- 🚧 **Fase 3 — Expandir SMB Owner persona** — 1 journey más allá del Día 1, pero **no de la lista de
+  esta fase**: `02-agent-channel-routing` (`899594dd`, Web) salió del tren de ADR-0026 Phase A.6.7
+  ("Día 2 — restringir agente a WebChat"), no del "Día 2 — Email channel" que esta fase enumera. De
+  los 5 journeys planificados siguen faltando 4, y `docs/manuales/smb/` conserva sus 12 archivos a
+  mano sin deprecar.
+- ⏸ **Fases 4–6** — sin cambios respecto al plan (escalonadas / deferred).
+
+**Salida generada, aún local por diseño:** `docs/manuales/auto/v2.5.4/` y `v2.5.5/` existen en este
+repo con sus screenshots reales, **untracked** — exactamente lo que el plan especifica ("no commit
+hasta Fase 3 — antes solo local"). El pipeline funciona end-to-end hoy.
+
+<!-- doctor:stale-exempt: track confirmado vivo en la revision 2026-08-13; Fases 0-1 shipped en Web y registradas arriba, Fase 2 es la siguiente rebanada. Archivo narrativo, no cola de trabajo. Re-revisar disposicion en el proximo tren de release. -->
+
 ## Contexto
 
 **Por qué este plan ahora.** Tras el cierre de R5.5 (PRR firmada 2026-05-26) y el pivot estratégico 2026-05-25 ("no cloud hasta primer cliente pagando"), el track primario de Verbara.Platform es **SMB Docker product polish** — el camino para conseguir el primer cliente real. Hoy los manuales SMB se escriben a mano (12 archivos en [`docs/manuales/smb/`](../../manuales/smb/)) y cada release requiere re-sync manual (PR #37 lo hizo para v2.5.4: 28 referencias de versión + 12 comandos cosign actualizados a mano). El producto se mueve rápido (22 días v2.0 → v2.5.4); el costo recurrente de mantener docs a mano es deuda que crece con cada release.
