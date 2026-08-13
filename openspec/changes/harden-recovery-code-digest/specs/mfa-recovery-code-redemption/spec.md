@@ -36,7 +36,7 @@ Argon2id for an existing user is a **regenerate**, which mints a fresh set. Lega
 remain verifiable indefinitely, and no requirement here may be read as implying they drain on their
 own.
 
-#### Scenario: A three-family array verifies each element on its own terms
+#### Scenario: A mixed-family array verifies each element on its own terms
 
 - **GIVEN** a stored array holding one Argon2id digest, one BCrypt digest and one salted SHA-256
   digest
@@ -58,9 +58,9 @@ own.
 - **THEN** verification succeeds
 - **AND** no stored element was rewritten or invalidated by the deploy
 
-#### Scenario: A wrong code is rejected cleanly in every family
+#### Scenario: A wrong code is rejected cleanly in either family
 
-- **GIVEN** a stored array in any of the three digest families
+- **GIVEN** a stored array in any digest family, legacy or Argon2id
 - **WHEN** a code that matches no element is submitted
 - **THEN** the response is **401**, not 200 and not 500
 - **AND** no element is removed from the stored array
