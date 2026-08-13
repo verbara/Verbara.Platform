@@ -11,6 +11,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **`SSH.NET` pinned to `2026.0.0` to clear [GHSA-q939-rpr3-3284](https://github.com/advisories/GHSA-q939-rpr3-3284)**
+  — HIGH, CVSS 7.1, arbitrary file write via server-controlled filenames in `ScpClient`'s recursive
+  download (#230). **Advisory drift, not a change of ours**: `main` had been red since `43bdedfc`
+  (2026-08-12 23:03Z) with the advisory published in the window after the last green run
+  (`90eecc7e`, 20:55Z), and under `TreatWarningsAsErrors` NuGet audit's `NU1903` is a build error, so
+  every restore failed across 4 projects here — `Verbara.Sdk` and `Verbara.Sdk.Pro` went red on the
+  same advisory. **CodeQL surfaced it, not CI**, which looks alarming but is not a defect: the
+  docs-only PRs merged in that window correctly took ADR-0016's fast path and skipped the .NET jobs,
+  while CodeQL builds the solution unconditionally; the break predates those PRs either way. **Real
+  exposure is nil** — `SSH.NET` arrives transitively via `Testcontainers` and is loaded only for
+  host-port forwarding. **Upgrading `Testcontainers` does not fix it**: `4.13.0`, the latest, still
+  depends on `SSH.NET 2025.1.0`, so the transitive pin is the only available remedy and `2026.0.0` is
+  the first patched release. This is the **fourth** entry in the existing transitive-pin override
+  block and the second of the advisory-drift class specifically (after
+  `System.Security.Cryptography.Xml`), so the mechanism was already enabled here and this change is
+  the pin plus its comment — nothing else. Every project's `project.assets.json` was diffed before
+  and after: **344 → 345 resolved pairs**, the only movements being `SSH.NET 2025.1.0 → 2026.0.0` and
+  the `BouncyCastle.Cryptography 2.7.0` that comes with it. Verified: `dotnet restore` exit 0 with
+  **0** `NU1903` / `NU1109` / `NU1605`, `dotnet build -c Release` **0 warnings 0 errors**,
+  `dotnet test` under the CI filter **3515 passed, 0 failed**.
 - **MFA enrollment material is now DataProtection-encrypted at rest** (`decision_ref`
   Platform/ADR-0003, change `encrypt-mfa-secrets-at-rest`). `users.mfa_secret` held the **raw Base32
   TOTP shared secret verbatim** — anyone who could read the column could mint valid codes for that
@@ -126,7 +146,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   test can catch this class of miss**: those hosts keep reflection enabled and answer 200 regardless,
   which is why the new `FlowEndpointsTests` asserts on `ApiJsonContext.Default.GetTypeInfo` directly —
   the same guard `SseEndpointsTests` grew over the `PlatformEvent` hierarchy after the ADR-0009 W4
-  registration miss. Reproduced against the lab stack and confirmed fixed there.
+  registration miss. Reproduced against the lab stack and confirmed fixed there. (#222)
 - **`DELETE /api/v1/admin/skills/{name}` deleted the skill and *then* answered HTTP 500** —
   `PostgresAuditStore.SerializeChange` passed every `string` through untouched on the assumption that
   a string caller had already serialised its payload. `SkillEndpoints.DeleteSkill` passes the deleted
@@ -140,7 +160,52 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posture as the existing `NotSupportedException` / `InvalidOperationException` fallbacks. The fix
   sits in the store, so it covers **every** audit call site rather than just this one. Verified
   against the lab stack: create+delete now returns 201/204 and the audit row lands with
-  `jsonb_typeof(before_json) = 'string'`.
+  `jsonb_typeof(before_json) = 'string'`. (#222)
+- **`GET /api/v1/admin/audit` answered HTTP 500 on every call, for every tenant** — `ApiJsonContext`
+  registers `PagedResult<AuditEventDto>`, the shape returned by the newer `/admin/audit/events`, but
+  the **legacy** `/admin/audit` deliberately keeps returning the store's entry shape
+  (`PagedResult<AuditEntry>`) for back-compat, as its own doc comment states, and that root type was
+  never registered. Because `Verbara.Platform.Api` sets
+  `JsonSerializerIsReflectionEnabledByDefault=false` (ADR-0022 Phase D) there is no reflection
+  fallback, so an unregistered root type is a hard runtime failure rather than a slow path:
+  `JsonTypeInfo metadata for type 'PagedResult\`1[Verbara.Platform.Audit.AuditEntry]' was not
+  provided by TypeInfoResolver`. The Web's admin audit page was therefore permanently empty. Fixed by
+  registering `AuditEntry` and `PagedResult<AuditEntry>`. (#218)
+- **Token refresh stripped every permission mid-session** — for the same user, seconds apart against
+  a freshly seeded stack, `POST /api/v1/auth/login` returned 57 permissions and
+  `POST /api/v1/auth/refresh` returned `[]`. Both paths resolve permissions best-effort and swallow
+  resolver failures, but only the login path compensated with the role-based default fallback its own
+  comment describes; refresh serialised `permissions?.ToArray() ?? []`, collapsing "could not
+  resolve" (`null`) and "genuinely has none" into the same empty array. Since the response body is
+  what the Web's route guards consume, every refresh dropped the user on `/unauthorized`.
+  **Server-side authorization was never affected** — the API resolves permissions per request and the
+  JWT carries no permission claims on either path; this was purely the client-facing projection. A
+  shared `EffectivePermissions(resolved, role)` helper now backs **both** paths so they cannot
+  diverge again, with unit tests over resolved / null / empty and every privileged role — the
+  complete absence of coverage on this projection is why the asymmetry survived since `c1e390ca`
+  (2026-06-07). No behaviour change on the login path: the extracted helper is its existing logic
+  verbatim. Surfaced while bringing the full stack up for the Web E2E suite against a change that
+  stops persisting credentials in the browser, which routes every page reload through
+  `/auth/refresh` and turned an intermittent failure into a deterministic one. (#213)
+- **`docker/docker-compose.full.yml` never reached a running stack** — three independent gaps, each
+  fatal on its own (#214). **(1) Builds could not restore the private Pro packages.** The .NET
+  Dockerfiles mount a `nuget_auth_token` BuildKit secret but the compose file never declared it, so
+  every build failed with `NU1301 ... 401 (Unauthorized)`. It is now declared as an **env-sourced**
+  secret (`NUGET_AUTH_TOKEN`, a GitHub PAT with `read:packages`), so no token ever lands in the repo;
+  the Dockerfile mounts stay `required=false`, so builds needing only public packages still work
+  without it. **(2) `mail` took the whole stack down.** `AddPlatformMail` resolves
+  `HmacCsatReplyTokenSigner` eagerly, so a missing signing secret throws at `Host.StartAsync` — and
+  `platform-api` health-gates on `mail`. Now defaulted via `CSAT_REPLY_TOKEN_SECRET`. (This is the
+  eager-seam-at-`Host.StartAsync` pattern the workspace guidance already warns about; whether the
+  signer should resolve lazily is left as a separate question.) **(3) `realtime` crash-looped**, for
+  two reasons: no Postgres connection string (`ConnectionStrings:Cluster`, or the `:Postgres`
+  fallback, is required for leader election), and a hard dependency on Redis — StackExchange.Redis
+  aborts on connect failure — while Redis was profile-gated behind `cluster` / `identity-redis` with
+  **no `depends_on`**, even though `realtime` itself is in the default set. Redis is now a default
+  service, and the stale comment claiming *"single-pod compose works without them"* is corrected: it
+  does not. Verified: the full stack builds from source and reaches all-healthy across `asterisk`,
+  `postgres`, `redis`, `renderer`, `mail`, `platform-api`, `realtime`, `web` and `nginx-gateway`,
+  with the app answering 200 on `:80` and the API `Healthy` on `:5000`.
 - **MFA recovery codes minted by the enrollment wizard could never be redeemed** —
   `POST /api/v1/auth/mfa/verify` answered **HTTP 500** with the crypto library's raw
   `"Invalid salt version"` message in `ProblemDetails.Detail`. `users.mfa_recovery_codes` carries two
