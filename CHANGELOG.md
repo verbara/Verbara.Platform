@@ -87,6 +87,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed — CI
 
+- **The patch-coverage mis-wiring trip now arms from the report, not from the line text** (verbatim
+  replication of `Verbara.Sdk.Pro` PR #95; the script is byte-identical across the four repos that
+  adopt verbara-meta/ADR-0013, and nothing enforces that identity). `check-patch-coverage.py`'s
+  second liveness self-test asks *"diff-cover measured 0 lines — did this diff add something it was
+  supposed to measure?"* and answered from a prefix heuristic modelling only comment and TypeScript
+  shapes. It therefore reads a C# `[LoggerMessage(…)]` attribute line and a `Message = "…"` string
+  continuation as executable, and **neither is ever a Cobertura sequence point** — so a
+  documentation-only PR failed as `mis-wired` while the report it accused was correct (measured on
+  the Pro PR that exposed it: 85 added `src/**/*.cs` lines, 5 arming the trip, **0** instrumented).
+  The trip now asks the report: for a file the report carries, an added line arms it only when that
+  line's **number** is in the file's instrumented set. The coordinate systems are one — the report is
+  built by that job from HEAD, and `@@ -a,b +c,d @@` seeds a HEAD-side counter that `+` lines advance
+  and `-` lines do not. A file the report does **not** carry and that did not exist at the merge base
+  keeps the text heuristic, so the path-normalization break this trip exists to catch — which puts
+  *every* file outside the report — still fires on the first added file. Suite 7 → 10 cases
+  (`python3 -m unittest discover scripts/tests`: 62 passed). No version bump, no image rebuild — CI
+  machinery only. Rationale, alternatives and the rule as a spec: Pro
+  `openspec/specs/patch-coverage-liveness/`.
+
 - **`release.yml` now creates the GitHub Release object itself.** The workflow built and
   cosign-signed the four images on every `v*` tag but never created the Release, so each version
   reopened the gap — `v2.18.0` shipped tagged + signed but release-less and was backfilled by hand
