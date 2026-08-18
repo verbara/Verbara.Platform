@@ -1,0 +1,3 @@
+# Packed output is machine-local; the directory itself stays tracked via .gitkeep.
+*.nupkg
+*.snupkg
