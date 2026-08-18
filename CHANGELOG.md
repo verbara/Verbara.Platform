@@ -127,6 +127,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Dependencies
 
+- **Verbara.Sdk.Pro `2.13.1-pro` → `2.14.1-pro`** — all 22 `Verbara.Sdk.Pro.*` pins in
+  `Directory.Packages.props`. The `Verbara.Sdk.*` half does **not** move: `2.14.1-pro` is still
+  compiled against Sdk `2.4.0`, the floor the cascade in the next entry already established, so this
+  is a one-sided advance with no `NU1605` exposure. **It is a behaviour change on this host, not a
+  version-number move.** The payload is `2.14.0-pro`, which completed Pro's `ActivitySource` and
+  `Meter` catalogs and made them build-enforced set-equal to what its `src/` tree instruments
+  (`Pro/ADR-0018`). Before this pin `AddVerbaraProOpenTelemetry()` (`Program.cs:417`) enrolled **10
+  sources and 15 meters**, so this host exported **neither** `Verbara.Sdk.Pro.Cluster.Leadership`
+  (leader-election / lease instruments, emitting since `2.5.1-pro`) **nor**
+  `Verbara.Sdk.Pro.Push.SignalR` (PlatformHub connection / group / presence counters, emitting since
+  the package shipped) — both instrumented, both with nothing listening — and dropped **every**
+  CsatRunner dispatch span, whose source was never in `SourceNames`. The one-liner now enrols **12
+  sources and 19 meters**; the comment above it is corrected from `10`/`15` to match, which is the
+  only `src/` movement in the change. **Operator note:** two meters newly reach `/metrics` —
+  `Cluster.Leadership` tags on `resource` + `instance`, `Push.SignalR` on connection/group scope — so
+  budget the added cardinality before scraping a large deployment. `2.14.1-pro` rides along: an
+  ADR-citation qualification pass that reaches a consumer only through the published `.xml` docs and
+  the compiled `[LoggerMessage]` templates. Neither release changes an API. Verified: `dotnet
+  restore` clean (**0** `NU1605`), `dotnet build -c Release` **0 warnings 0 errors**. decision_ref
+  `Pro/ADR-0018`. (#237)
 - **Verbara.Sdk `2.3.2` → `2.4.0`** and **Verbara.Sdk.Pro `2.13.0-pro` → `2.13.1-pro`** — all 29
   consumed packages cascaded across `Directory.Packages.props` (7 `Verbara.Sdk.*` pins + 22
   `Verbara.Sdk.Pro.*` pins). Sdk `2.4.0` (tag `v2.4.0`, 2026-07-26) is a **dependency-bump release
