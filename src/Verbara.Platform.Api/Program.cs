@@ -409,7 +409,7 @@ builder.Services.AddProLicensing(o =>
 
 // ─── Observability — OpenTelemetry tracing + metrics providers ──────────────
 // Enrols every SDK ActivitySource + Meter (incl. Verbara.Sdk.Resilience) plus
-// the 10 Pro ActivitySources + 15 Pro meters. Prometheus scraping endpoint
+// the 12 Pro ActivitySources + 19 Pro meters. Prometheus scraping endpoint
 // mapped below via app.MapPrometheusScrapingEndpoint(). OTLP exporter opt-in
 // via OTEL_EXPORTER_OTLP_ENDPOINT environment variable at runtime.
 builder.Services.AddVerbaraOpenTelemetry(b => b
