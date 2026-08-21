@@ -196,7 +196,7 @@ internal sealed partial class CallbackRescueWorker : BackgroundService
             await ClearPendingAsync(conv, ct).ConfigureAwait(false);
             return;
         }
-        if (now - evalSince < TimeSpan.FromSeconds(grace))
+        if (now - evalSince.ToUtcInstant() < TimeSpan.FromSeconds(grace))
             return;                                   // not ready yet
 
         var attempts = conv.Metadata.TryGetValue("callbackAttempts", out var a) && int.TryParse(

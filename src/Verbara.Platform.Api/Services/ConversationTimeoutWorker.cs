@@ -168,7 +168,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             if (!DateTimeOffset.TryParse(offeredAtStr, out var offeredAt))
                 continue;
 
-            if ((now - offeredAt).TotalSeconds <= _options.OfferTimeoutSeconds)
+            if ((now - offeredAt.ToUtcInstant()).TotalSeconds <= _options.OfferTimeoutSeconds)
                 continue;
 
             var agentId = conv.Metadata.TryGetValue("_offeredTo", out var agentIdStr)

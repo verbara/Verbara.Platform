@@ -18,14 +18,17 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- live-postgres-ci-lane grounding: ~13 fixture classes each start their own
-         Testcontainers Postgres container. xUnit parallelizes test collections
-         (one per class) by default, so all containers start concurrently — under
-         host contention (constrained CI runners, or a busy shared dev box) this
-         intermittently surfaces as Npgsql "Connection reset by peer" during the
-         post-pg_isready SSL handshake, a container-startup race rather than a
-         test-logic bug. Serializing collections bounds concurrent container starts
-         at the cost of wall-clock time; see design.md's Grounding-resolution note. -->
+    <!-- 17 fixture classes each start their own Testcontainers Postgres container,
+         and xUnit parallelizes collections (one per class), so they start together.
+         That used to surface as Npgsql "Connection reset by peer" — NOT a test-logic
+         bug and NOT contention: `pg_isready` without `-h` probes the container's
+         internal Unix socket, which greens while the entrypoint's temporary
+         `listen_addresses=''` server is still bootstrapping and nothing is listening
+         on 5432 yet. Collection serialization was the original mitigation and never
+         eliminated it; the probe fix (`-h 127.0.0.1`, in every fixture) did.
+         `parallelizeTestCollections` is therefore back to `true` — measured 262/262
+         over six consecutive runs at ~33s versus ~79s serialized. Do not re-serialize
+         without a measurement; see fix-testcontainers-tcp-readiness design D4. -->
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

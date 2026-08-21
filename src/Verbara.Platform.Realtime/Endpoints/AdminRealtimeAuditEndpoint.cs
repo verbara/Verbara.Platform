@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
+using Verbara.Platform.Core;
 using Verbara.Platform.Realtime.Contracts;
 using Verbara.Platform.Realtime.Services;
 
@@ -50,7 +51,7 @@ public static class AdminRealtimeAuditEndpoint
                         statusCode: StatusCodes.Status400BadRequest,
                         title: "Bad Request");
                 }
-                sinceTs = parsed;
+                sinceTs = parsed.ToUtcInstant();
             }
 
             var requestedLimit = limit ?? 1_000;

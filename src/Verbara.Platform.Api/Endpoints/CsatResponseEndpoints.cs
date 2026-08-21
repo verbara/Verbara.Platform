@@ -217,6 +217,7 @@ internal static class CsatResponseEndpoints
 
         var responseId = EntityId.New();
         var conversationId = EntityId.From(body.ConversationId);
+        var capturedAt = body.CapturedAt.ToUtcInstant();
 
         var response = new SurveyResponse
         {
@@ -229,12 +230,12 @@ internal static class CsatResponseEndpoints
             // CDR can join the recorded rating to the call; digital captures leave it null.
             CallId = setCallId ? conversationId : null,
             Answers = [new SurveyAnswer(EntityId.From(SurveyQuestionIds.CsatRating), body.Rating.ToString(System.Globalization.CultureInfo.InvariantCulture))],
-            SubmittedAt = body.CapturedAt,
+            SubmittedAt = capturedAt,
             Channel = body.Channel,
             QueueName = body.QueueName,
             Rating = body.Rating,
             Comment = body.Comment,
-            CapturedAt = body.CapturedAt,
+            CapturedAt = capturedAt,
         };
 
         await responseStore.SaveAsync(response, ct).ConfigureAwait(false);
@@ -248,7 +249,7 @@ internal static class CsatResponseEndpoints
             QueueName: body.QueueName,
             Rating: body.Rating,
             Comment: body.Comment,
-            CapturedAt: body.CapturedAt));
+            CapturedAt: capturedAt));
 
         await audit.RecordAsync(
             tenantId,
@@ -273,8 +274,8 @@ internal static class CsatResponseEndpoints
             Channel: body.Channel,
             TotalResponses: 1,
             AverageRating: body.Rating,
-            RangeStart: body.CapturedAt,
-            RangeEnd: body.CapturedAt));
+            RangeStart: capturedAt,
+            RangeEnd: capturedAt));
     }
 
     // ─── Analytics read (SupervisorPlus) ────────────────────────────────────────

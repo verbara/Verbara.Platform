@@ -116,7 +116,7 @@ internal sealed class PostgresBotConfigStore : IBotConfigStore
             ConfidenceThreshold = confidence_threshold,
             MaxTurnsBeforeHandoff = max_turns_before_handoff,
             IsActive = is_active,
-            CreatedAt = new DateTimeOffset(DateTime.SpecifyKind(created_at, DateTimeKind.Utc)),
+            CreatedAt = new DateTimeOffset(created_at, TimeSpan.Zero),
         };
     }
 }

@@ -83,6 +83,68 @@ public sealed class SetupEndpointTests : IClassFixture<PlatformApiFactory>
     }
 
     [Fact]
+    public async Task Setup_ShouldSucceed_WhenRetriedOverAHostTenantLeftByAFailedRun()
+    {
+        // Reproduces the wedged first-run install: a fault after the host tenant is
+        // written but before any user exists. The old guard checked for the tenant, so
+        // every retry returned 409 "Platform already initialized." with no in-product
+        // recovery. Setup must now adopt the orphaned tenant and complete.
+        using var factory = new PlatformApiFactory();
+        var tenantStore = factory.Services.GetRequiredService<ITenantStore>();
+        await tenantStore.UpsertAsync(
+            new Tenant
+            {
+                TenantId = "platform",
+                Name = "Verbara",
+                Status = TenantStatus.Active,
+                Type = TenantType.Platform,
+                ParentTenantId = null,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            },
+            default);
+
+        var userStore = factory.Services.GetRequiredService<IUserStore>();
+        var before = await userStore.ListAsync(new TenantId("platform"), new PagedQuery(1, 1), default);
+        before.Items.Should().BeEmpty("the half-written state has a tenant but no user");
+
+        var client = factory.CreateClient();
+        var response = await client.PostAsJsonAsync("/api/setup", ValidBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created,
+            "a leftover host tenant must not wedge the install");
+
+        var body = await response.Content.ReadFromJsonAsync<SetupResponseDto>();
+        body.Should().NotBeNull();
+        body!.TenantId.Should().Be("platform");
+
+        var platformAdmin = await userStore.GetByEmailAsync(
+            new TenantId("platform"), "admin@setup-test.com", default);
+        platformAdmin.Should().NotBeNull("the retry must create the platform admin the failed run never wrote");
+
+        // The leftover tenant was adopted, not duplicated or replaced by a Customer.
+        var platform = await tenantStore.GetAsync("platform", default);
+        platform.Should().NotBeNull();
+        platform!.Type.Should().Be(TenantType.Platform);
+        platform.ParentTenantId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Setup_ShouldReturn409_WhenPlatformUserAlreadyExists()
+    {
+        // The positive control for the test above: once a platform USER exists, setup
+        // really is done and must still refuse to run a second time.
+        using var factory = new PlatformApiFactory();
+        var client = factory.CreateClient();
+
+        var first = await client.PostAsJsonAsync("/api/setup", ValidBody());
+        first.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var second = await client.PostAsJsonAsync("/api/setup", ValidBody());
+        second.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
     public async Task Setup_ShouldReturn400_WhenEmailMissing()
     {
         using var factory = new PlatformApiFactory();

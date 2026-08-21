@@ -44,14 +44,6 @@
     <InternalsVisibleTo Include="Verbara.Platform.Api.Tests" />
   </ItemGroup>
 
-  <!-- ADR-0022 Phase D: PublishAot does not support runtimeconfig.template.json, so the
-       Npgsql legacy-timestamp feature switch is declared as a host config option (emitted
-       into runtimeconfig.json for both JIT and AOT publish). Trim="false" keeps the switch
-       name string from being trimmed under AOT. Preserves the prior runtimeconfig.template.json. -->
-  <ItemGroup>
-    <RuntimeHostConfigurationOption Include="Npgsql.EnableLegacyTimestampBehavior" Value="true" Trim="false" />
-  </ItemGroup>
-
 <ItemGroup>
     <ProjectReference Include="..\Verbara.Platform.Core\Verbara.Platform.Core.csproj" />
     <ProjectReference Include="..\Verbara.Platform.Identity\Verbara.Platform.Identity.csproj" />

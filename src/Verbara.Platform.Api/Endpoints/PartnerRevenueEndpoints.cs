@@ -34,7 +34,7 @@ internal static class PartnerRevenueEndpoints
         if (callerTenantId is null)
             return TypedResults.Forbid();
 
-        var records = await revenueStore.ListAsync(new TenantId(callerTenantId), from, until, ct);
+        var records = await revenueStore.ListAsync(new TenantId(callerTenantId), from.ToUtcInstant(), until.ToUtcInstant(), ct);
 
         var summary = new PartnerRevenueSummaryDto(
             TotalGross: records.Sum(r => r.GrossAmount),
@@ -60,7 +60,7 @@ internal static class PartnerRevenueEndpoints
         if (callerTenantId is null)
             return TypedResults.Forbid();
 
-        var records = await revenueStore.ListAsync(new TenantId(callerTenantId), from, until, ct);
+        var records = await revenueStore.ListAsync(new TenantId(callerTenantId), from.ToUtcInstant(), until.ToUtcInstant(), ct);
 
         var details = records.Select(r => new PartnerRevenueDetailDto(
             RevenueId: r.RevenueId.Value,

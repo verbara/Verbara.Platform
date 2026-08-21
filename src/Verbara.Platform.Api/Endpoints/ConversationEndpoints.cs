@@ -692,7 +692,7 @@ internal static class ConversationEndpoints
                     long.TryParse(contactIdStr, out var contactId))
                 {
                     await campaignStore.SaveCallbackAsync(
-                        tenantStr, campaignId, contactId, scheduledAt, agentSubId, ct);
+                        tenantStr, campaignId, contactId, scheduledAt.ToUtcInstant(), agentSubId, ct);
                 }
 
                 eventBus.Publish(new CampaignDispositionSubmittedEvent(

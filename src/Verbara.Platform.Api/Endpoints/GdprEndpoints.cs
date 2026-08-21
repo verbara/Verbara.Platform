@@ -156,7 +156,7 @@ internal static class GdprEndpoints
         [FromServices] IPurgeLogStore store,
         CancellationToken ct)
     {
-        var result = await store.ListAsync(tenantId, from, to, page: 1, pageSize: 50, ct);
+        var result = await store.ListAsync(tenantId, from.ToUtcInstant(), to.ToUtcInstant(), page: 1, pageSize: 50, ct);
         return Results.Ok(result);
     }
 

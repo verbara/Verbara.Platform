@@ -137,8 +137,8 @@ internal static class CampaignEndpoints
         if (body.PowerRatio.HasValue) campaign.PowerRatio = body.PowerRatio.Value;
         if (body.TargetAbandonRate.HasValue) campaign.TargetAbandonRate = body.TargetAbandonRate.Value;
         if (body.Timezone is not null) campaign.ContactTimezone = body.Timezone;
-        if (body.CampaignStart is not null) campaign.StartsAt = DateTimeOffset.Parse(body.CampaignStart, CultureInfo.InvariantCulture);
-        if (body.CampaignEnd is not null) campaign.EndsAt = DateTimeOffset.Parse(body.CampaignEnd, CultureInfo.InvariantCulture);
+        if (body.CampaignStart is not null) campaign.StartsAt = DateTimeOffset.Parse(body.CampaignStart, CultureInfo.InvariantCulture).ToUtcInstant();
+        if (body.CampaignEnd is not null) campaign.EndsAt = DateTimeOffset.Parse(body.CampaignEnd, CultureInfo.InvariantCulture).ToUtcInstant();
         if (body.DncEnabled.HasValue) campaign.CheckGlobalDnc = body.DncEnabled.Value;
         if (body.MaxAttemptsPerContact.HasValue) campaign.MaxAttemptsPerContact = body.MaxAttemptsPerContact.Value;
         if (body.RetryIntervalMinutes.HasValue) campaign.DefaultRetryDelayMinutes = body.RetryIntervalMinutes.Value;
@@ -443,7 +443,7 @@ internal static class CampaignEndpoints
         var tenantId = GetTenantId(context);
         if (!DateTimeOffset.TryParse(request.ScheduledAt, out var scheduledAt))
             return Results.BadRequest("Invalid date format");
-        await store.SaveCallbackAsync(tenantId, id, request.ContactId, scheduledAt, request.AgentId, ct);
+        await store.SaveCallbackAsync(tenantId, id, request.ContactId, scheduledAt.ToUtcInstant(), request.AgentId, ct);
         return Results.Created($"/admin/campaigns/{id}/callbacks", null);
     }
 
@@ -550,8 +550,8 @@ internal static class CampaignEndpoints
             PowerRatio = req.PowerRatio ?? 1.0,
             TargetAbandonRate = req.TargetAbandonRate ?? 0.03,
             ContactTimezone = req.Timezone,
-            StartsAt = req.CampaignStart is not null ? DateTimeOffset.Parse(req.CampaignStart, CultureInfo.InvariantCulture) : null,
-            EndsAt = req.CampaignEnd is not null ? DateTimeOffset.Parse(req.CampaignEnd, CultureInfo.InvariantCulture) : null,
+            StartsAt = req.CampaignStart is not null ? DateTimeOffset.Parse(req.CampaignStart, CultureInfo.InvariantCulture).ToUtcInstant() : null,
+            EndsAt = req.CampaignEnd is not null ? DateTimeOffset.Parse(req.CampaignEnd, CultureInfo.InvariantCulture).ToUtcInstant() : null,
             CheckGlobalDnc = req.DncEnabled,
             MaxAttemptsPerContact = req.MaxAttemptsPerContact,
             DefaultRetryDelayMinutes = req.RetryIntervalMinutes,

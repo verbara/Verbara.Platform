@@ -21,10 +21,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- live-postgres-ci-lane grounding: same rationale as
-         Storage.Postgres.Tests.csproj — multiple Testcontainers-backed Redis
-         fixture classes starting concurrently under xUnit's default test-collection
-         parallelism can race under host contention. Serialize for determinism. -->
+    <!-- This project has ONE Testcontainers Redis fixture, and Redis's image has no
+         analogous bootstrap-then-restart cycle, so it never showed the readiness race
+         that Storage.Postgres.Tests did (34/34 in every configuration measured).
+         `parallelizeTestCollections` stays `false` here deliberately: nothing measured
+         justified changing it, and with a single fixture there is no wall-clock gain
+         to win. Do not "align" it with the Postgres projects without a measurement. -->
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

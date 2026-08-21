@@ -70,8 +70,8 @@ internal static class ManagementBillingEndpoints
             TenantId = new TenantId(tenantId),
             Name = body.Name,
             Currency = body.Currency,
-            EffectiveFrom = body.EffectiveFrom,
-            EffectiveTo = body.EffectiveTo,
+            EffectiveFrom = body.EffectiveFrom.ToUtcInstant(),
+            EffectiveTo = body.EffectiveTo.ToUtcInstant(),
             IsDefault = body.IsDefault,
             Rates = body.Rates.Select(MapDtoToRateEntry).ToList(),
         };
@@ -117,8 +117,8 @@ internal static class ManagementBillingEndpoints
             TenantId = existing.TenantId,
             Name = body.Name,
             Currency = body.Currency,
-            EffectiveFrom = body.EffectiveFrom,
-            EffectiveTo = body.EffectiveTo,
+            EffectiveFrom = body.EffectiveFrom.ToUtcInstant(),
+            EffectiveTo = body.EffectiveTo.ToUtcInstant(),
             IsDefault = body.IsDefault,
             Rates = body.Rates.Select(MapDtoToRateEntry).ToList(),
         };
@@ -203,7 +203,7 @@ internal static class ManagementBillingEndpoints
         Invoice invoice;
         try
         {
-            invoice = await generator.GenerateAsync(new TenantId(tenantId), body.PeriodStart, body.PeriodEnd, ct);
+            invoice = await generator.GenerateAsync(new TenantId(tenantId), body.PeriodStart.ToUtcInstant(), body.PeriodEnd.ToUtcInstant(), ct);
         }
         catch (InvalidOperationException ex)
         {
@@ -304,8 +304,8 @@ internal static class ManagementBillingEndpoints
         CancellationToken ct)
     {
         var now = clock.UtcNow;
-        var effectiveFrom = from ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        var effectiveUntil = until ?? now;
+        var effectiveFrom = from.ToUtcInstant() ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var effectiveUntil = until.ToUtcInstant() ?? now;
 
         var summaries = await store.GetSummaryAsync(new TenantId(tenantId), effectiveFrom, effectiveUntil, ct);
         return TypedResults.Ok(summaries.Select(MapSummaryToDto).ToList());
@@ -323,8 +323,8 @@ internal static class ManagementBillingEndpoints
         CancellationToken ct)
     {
         var now = clock.UtcNow;
-        var effectiveFrom = from ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        var effectiveUntil = until ?? now;
+        var effectiveFrom = from.ToUtcInstant() ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var effectiveUntil = until.ToUtcInstant() ?? now;
 
         UsageType? typeFilter = null;
         if (!string.IsNullOrEmpty(type))

@@ -80,7 +80,15 @@ The access token returned remains the **Platform Admin's** token (the operator l
 
 ### Validation (order)
 
-1. Guard: `GetHostTenantAsync` non-null → `409 Conflict` (existing).
+1. Guard: a platform **user** exists → `409 Conflict`.
+
+   > **Amended 2026-08-21 by `fix-local-kind-datetimeoffset` (design D6).** This was
+   > `GetHostTenantAsync` non-null. The host tenant is the FIRST write, so any fault after
+   > it left the tenant behind and made every retry 409 — a first-run install wedged with no
+   > in-product recovery. The sentinel is now `IUserStore.ListAsync(platform, page 1×1)`
+   > returning any user: the platform admin is exactly the boundary between "wedged" and
+   > "recoverable", because with one the operator can authenticate and create anything still
+   > missing through the normal API.
 2. Required fields: `Email`, `Password`, `CustomerTenantId`, `CustomerName`, `CustomerAdminEmail`, `CustomerAdminPassword` all non-blank → else `400 BadRequest`.
 3. `CustomerTenantId` must be a valid slug and **`!= "platform"`** → else `400`.
 4. `CustomerAdminEmail` (normalized, case-insensitive) **`!=`** `Email` → else `400` ("Platform admin and customer admin must use different emails").
@@ -97,7 +105,16 @@ The access token returned remains the **Platform Admin's** token (the operator l
 5. Create Customer Admin user (in the Customer tenant, `UserRole.Admin`) + best-effort clone the tenant `admin` role template (same try/catch tolerance as the Platform Admin RBAC wiring).
 6. Return extended `SetupResponse`.
 
-Failure semantics: steps 2–6 are sequential `UpsertAsync`/`SaveAsync` calls against the same stores as today; no transaction wrapper exists in the current setup and none is added (consistent with existing behavior — the 409 guard prevents re-entry, and a partial failure surfaces as a 500 the operator can diagnose). RBAC role-clone steps remain best-effort (the `UserRole.Admin` fallback grants day-1 admin perms).
+Failure semantics: steps 2–6 are sequential `UpsertAsync`/`SaveAsync` calls against the same stores as today; no transaction wrapper exists in the current setup and none is added. A partial failure still surfaces as a 500 the operator can diagnose. RBAC role-clone steps remain best-effort (the `UserRole.Admin` fallback grants day-1 admin perms).
+
+> **Amended 2026-08-21 by `fix-local-kind-datetimeoffset` (design D6).** The original text said "the
+> 409 guard prevents re-entry". That guard is now the platform user rather than the host tenant, and
+> re-entry is deliberately ALLOWED: a re-POST repairs a half-written install instead of dead-ending.
+> Both tenant writes are upserts keyed on a deterministic id (`platform`, and the supplied customer
+> slug), so a retry adopts what already exists rather than colliding. The residual window is a fault
+> AFTER the platform admin is written (mgmt key, customer tenant, customer admin) — bounded and
+> recoverable in-product, since the operator can log in and finish through the API. A fully
+> transactional first-run remains a possible follow-up.
 
 ### Tests (backend)
 
@@ -108,7 +125,11 @@ Update [`SetupEndpointTests.cs`](../../tests/Verbara.Platform.Api.Tests/SetupEnd
 - `Setup_ShouldReturn400_WhenCustomerTenantIdIsPlatform`.
 - `Setup_ShouldReturn400_WhenEmailsMatch`.
 - `Setup_ShouldReturn400_WhenPasswordBelowPolicy` (e.g. 8-char password fails MinLength=12).
-- Existing `Setup_ShouldReturn409_WhenHostTenantAlreadyExists` unchanged.
+- Existing `Setup_ShouldReturn409_WhenHostTenantAlreadyExists` unchanged (its fixture seeds a platform
+  admin as well as the tenant, so it still asserts the 409 under the amended guard).
+- Added by `fix-local-kind-datetimeoffset`: `Setup_ShouldSucceed_WhenRetriedOverAHostTenantLeftByAFailedRun`
+  (seeds a tenant with no users, asserts `201` and that the platform admin is created) and its positive
+  control `Setup_ShouldReturn409_WhenPlatformUserAlreadyExists`.
 
 Target: Api.Tests green (1017 → ~1023), 0 warnings, AOT-clean.
 

@@ -1,5 +1,6 @@
 using System.Globalization;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.CallAnalytics.Domain;
 using Verbara.Sdk.Pro.CallAnalytics.Store;
 using Verbara.Sdk.Pro.Licensing;
@@ -42,8 +43,8 @@ internal static class CallAnalyticsEndpoints
 
         topN = Math.Min(topN, 50);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-30);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-30);
 
         var query = new CallAnalyticsQuery
         {
@@ -119,8 +120,8 @@ internal static class CallAnalyticsEndpoints
 
         var tenantId = GetTenantId(context);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
 
         var query = new CallAnalyticsQuery
         {
@@ -201,8 +202,8 @@ internal static class CallAnalyticsEndpoints
 
         var tenantId = GetTenantId(context);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
 
         var query = new CallAnalyticsQuery
         {

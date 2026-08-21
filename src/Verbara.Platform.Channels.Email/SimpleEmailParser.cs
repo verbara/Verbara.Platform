@@ -1,4 +1,5 @@
 using System.Text;
+using Verbara.Platform.Core;
 
 namespace Verbara.Platform.Channels.Email;
 
@@ -32,7 +33,7 @@ public sealed class SimpleEmailParser : IEmailParser
         if (headers.TryGetValue("date", out var dateStr))
         {
             if (DateTimeOffset.TryParse(dateStr.Trim(), out var parsed))
-                receivedAt = parsed;
+                receivedAt = parsed.ToUtcInstant();
         }
 
         var contentType = headers.TryGetValue("content-type", out var ct) ? ct : "text/plain";

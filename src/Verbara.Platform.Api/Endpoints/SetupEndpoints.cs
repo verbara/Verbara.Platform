@@ -11,6 +11,9 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class SetupEndpoints
 {
+    /// <summary>The DB-enforced unique root tenant id. Deterministic, so first-run is re-entrant.</summary>
+    private const string HostTenantId = "platform";
+
     public static void MapSetupEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapPost("/setup", Setup).AllowAnonymous();
@@ -27,9 +30,25 @@ internal static class SetupEndpoints
         [FromServices] IClock clock,
         CancellationToken ct)
     {
-        // Guard: only works if no host tenant exists
-        var existing = await tenantStore.GetHostTenantAsync(ct);
-        if (existing is not null)
+        // Guard: setup counts as DONE only once a platform admin USER exists.
+        //
+        // It used to check for the host tenant, which is written FIRST — so any
+        // fault after that write (the original report: a timezone defect that threw
+        // on the very next step) left the tenant behind and made every retry return
+        // 409, wedging a first-run install with no documented recovery short of
+        // deleting the row by hand.
+        //
+        // The platform user is the right sentinel because it is exactly the boundary
+        // between "wedged" and "recoverable through the product": with a platform
+        // admin the operator can log in and mint anything still missing (management
+        // key, customer tenant) through the normal API; without one they cannot
+        // authenticate at all. The writes after it are therefore allowed to be the
+        // narrow remaining window, and the sequence below is re-entrant so a retry
+        // repairs a partial state rather than colliding with it.
+        var platformTenant = new TenantId(HostTenantId);
+        var existingPlatformUsers = await userStore.ListAsync(
+            platformTenant, new PagedQuery(Page: 1, PageSize: 1), ct);
+        if (existingPlatformUsers.Items.Count > 0)
             return Results.Conflict(new ErrorResponse("Platform already initialized."));
 
         // Validate platform admin input
@@ -46,7 +65,7 @@ internal static class SetupEndpoints
 
         // Customer tenant id must be a valid slug and must not collide with the host tenant
         var customerTenantIdNormalized = body.CustomerTenantId.Trim().ToLowerInvariant();
-        if (!IsValidSlug(customerTenantIdNormalized) || customerTenantIdNormalized == "platform")
+        if (!IsValidSlug(customerTenantIdNormalized) || customerTenantIdNormalized == HostTenantId)
             return Results.BadRequest(new ErrorResponse(
                 "Customer tenant id must be a lowercase slug (letters, digits, hyphens) and cannot be 'platform'."));
 
@@ -66,7 +85,7 @@ internal static class SetupEndpoints
                 "Platform admin and customer admin must use different emails."));
 
         // Enforce the password policy on BOTH passwords (platform defaults: min 12, upper, number)
-        var policyConfig = new TenantAuthConfig { TenantId = "platform" };
+        var policyConfig = new TenantAuthConfig { TenantId = HostTenantId };
         var platformPwdCheck = PasswordService.ValidatePolicy(body.Password, policyConfig);
         if (!platformPwdCheck.IsValid)
             return Results.BadRequest(new ErrorDetailResponse(
@@ -76,20 +95,28 @@ internal static class SetupEndpoints
             return Results.BadRequest(new ErrorDetailResponse(
                 "Customer admin password does not meet policy", customerPwdCheck.Errors));
 
-        // NON-ATOMIC FIRST-RUN WINDOW: the writes below (host tenant → orphan
-        // adoption → platform admin → mgmt key → customer tenant → customer admin)
-        // run as sequential awaited calls with NO surrounding transaction. A storage
-        // fault mid-sequence can leave a partially-initialized install (e.g. host
-        // tenant persisted but customer admin missing). Because the host tenant is
-        // the 409 sentinel checked at the top of this handler, a re-POST to /api/setup
-        // cannot repair such a partial state — it just returns "already initialized".
-        // This is an accepted trade-off per the spec
-        // (docs/specs/2026-05-30-setup-multitenant-platform-customer.md): a partial
-        // failure surfaces as a 500. A future follow-up may make first-run
-        // idempotent/transactional.
+        // NON-ATOMIC BUT RE-ENTRANT FIRST-RUN WINDOW: the writes below (host tenant →
+        // orphan adoption → platform admin → mgmt key → customer tenant → customer
+        // admin) run as sequential awaited calls with NO surrounding transaction, so a
+        // storage fault mid-sequence still leaves a partially-initialized install and
+        // surfaces as a 500.
+        //
+        // What changed: a re-POST now REPAIRS that state instead of dead-ending on
+        // "already initialized". Both tenant writes are upserts keyed on a
+        // deterministic id (`platform` and the supplied customer slug), so a retry
+        // adopts whatever already exists rather than colliding; and the 409 sentinel
+        // is the platform admin user rather than the host tenant, so every fault
+        // BEFORE that user is written stays retryable.
+        //
+        // The residual window is a fault AFTER the platform admin is written (mgmt
+        // key, customer tenant, customer admin). That is deliberate and bounded: the
+        // operator can authenticate as the platform admin and create the remainder
+        // through the normal API, so it is recoverable in-product. Making the whole
+        // sequence transactional remains a possible follow-up.
+        // Spec: docs/specs/2026-05-30-setup-multitenant-platform-customer.md
 
-        // 1. Create host tenant
-        var hostTenantId = "platform";
+        // 1. Create host tenant (upsert — a retry over a half-written install adopts it)
+        var hostTenantId = HostTenantId;
         var hostTenant = new Tenant
         {
             TenantId = hostTenantId,

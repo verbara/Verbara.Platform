@@ -102,8 +102,8 @@ internal static class AuthAdminEndpoints
         var query = new AuthEventQuery(
             UserId: userId,
             EventType: eventType,
-            StartDate: startDate,
-            EndDate: endDate,
+            StartDate: startDate.ToUtcInstant(),
+            EndDate: endDate.ToUtcInstant(),
             Page: page,
             PageSize: pageSize);
 

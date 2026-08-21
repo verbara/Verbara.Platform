@@ -178,7 +178,7 @@ internal static class DncListEndpoints
             PhoneNumber = body.PhoneNumber,
             Reason = body.Reason,
             CreatedAt = DateTimeOffset.UtcNow,
-            ExpiresAt = body.ExpiresAt,
+            ExpiresAt = body.ExpiresAt.ToUtcInstant(),
         };
         await store.AddEntryAsync(id, tenantId, entry, ct);
         return Results.Created($"/admin/dnc-lists/{id}/entries/{body.PhoneNumber}", MapEntryToDto(entry));
