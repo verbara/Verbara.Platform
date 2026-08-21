@@ -45,7 +45,7 @@
 - [x] 2.3 If any `NpgsqlException` startup failure survives, **stop and re-open the design** — that
   is the D2 trigger to reconsider the `Testcontainers.PostgreSql` module's log-based double-ready
   strategy. Do not paper over a residual failure with a retry loop.
-- [ ] 2.4 Record the measured before/after in the PR body — the numbers are the whole argument for
+- [x] 2.4 Record the measured before/after in the PR body — the numbers are the whole argument for
   promoting the lane later.
 
 ## 3. Phase C — Integration: the CI comment
@@ -102,6 +102,15 @@
 
 - [ ] 5.1 After the fix lands, observe `Live-DB Tests (Postgres)` on **two consecutive** runs —
   this PR's own run and the next unrelated PR's.
+
+  **Run 1/2 — GREEN.** PR #255, run 32480208475, job 96764724449 (2026-08-21). Read from the job
+  log, not the check-run badge (which passes unconditionally under `continue-on-error`):
+  `Storage.Postgres.Tests` 262 total / **262 passed** in 29.4s; `Identity.Redis.Tests` 34/34 in
+  8.9s; **zero** occurrences of `reset by peer` / `read past the end` / `NpgsqlException` in the
+  whole job. Note the CI runner ran the parallel configuration in 29.4s — faster than the ~79s the
+  serialized configuration took locally — so the D4 decision holds on CI hardware too.
+
+  Run 2/2 is the next unrelated PR's run; it is what unblocks 5.2.
 - [ ] 5.2 Only then, in its own PR, drop `continue-on-error: true` from **both** test steps in the
   `live-db-tests` job and cite the two green runs that justified it (design D5, the graduation
   discipline `released-image-smoke` already uses).
@@ -118,10 +127,10 @@
 - [x] 6.3 `tests/Verbara.Platform.Storage.Postgres.Tests` **fully green and repeatably so** (task
   2.1). This is the task that closes out `encrypt-mfa-secrets-at-rest` 6.2, which was closed at
   archive carrying this change as its destination.
-- [ ] 6.4 Patch coverage is **not** expected to apply — this change touches only `tests/` and
+- [x] 6.4 Patch coverage is **not** expected to apply — this change touches only `tests/` and
   `.github/`, and `check-patch-coverage.py` scopes its liveness trip to instrumented projects, so a
   zero measurement here is honest rather than a mis-wiring. Confirm the gate reports that, rather
   than assuming it.
 - [x] 6.5 `openspec validate --all --strict` green.
-- [ ] 6.6 CI green on the PR, with the `Live-DB Tests (Postgres)` job's **underlying run** green —
+- [x] 6.6 CI green on the PR, with the `Live-DB Tests (Postgres)` job's **underlying run** green —
   not merely its `continue-on-error` check-run. Read the log, not the badge.
