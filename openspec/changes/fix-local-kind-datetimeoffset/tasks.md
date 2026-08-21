@@ -83,8 +83,8 @@
 - [x] 5.1 Extend `scripts/check-endpoint-invariants.py` to fail if `Npgsql.EnableLegacyTimestampBehavior` appears in any `.csproj`, `runtimeconfig.template.json`, or `runtimeconfig.json` — the switch cannot return silently (design D4). This runs in the existing required **Invariant Gates** job.
 - [x] 5.2 Extend the same script to reject `DateTime.SpecifyKind(..., DateTimeKind.Utc)` applied to a Postgres-reader-sourced value (the corrupting pattern from design D1).
 - [x] 5.3 Unit-test both new invariant checks in the existing `coverage-scripts` job, matching how the current checks are tested.
-- [ ] 5.4 Add a Storage.Postgres round-trip test under a non-UTC `TZ` asserting the read yields `Kind=Utc` / `Offset == TimeSpan.Zero` and the projection does not throw (spec scenario "A store projection survives a non-UTC process timezone").
-- [ ] 5.5 Add a write test binding a `DateTimeOffset` with a non-zero `Offset` through an ingress path, asserting it is normalised rather than rejected — the design D2 contract, and the test that would have caught the regression removal introduces.
+- [x] 5.4 Add a Storage.Postgres round-trip test under a non-UTC `TZ` asserting the read yields `Kind=Utc` / `Offset == TimeSpan.Zero` and the projection does not throw (spec scenario "A store projection survives a non-UTC process timezone").
+- [x] 5.5 Add a write test binding a `DateTimeOffset` with a non-zero `Offset` through an ingress path, asserting it is normalised rather than rejected — the design D2 contract, and the test that would have caught the regression removal introduces.
 - [x] 5.6 Add a `QueueDistributionWorker` test asserting a distribution cycle completes without logging `Distribution cycle failed` under a non-UTC `TZ` (spec scenario "The background distribution loop does not fail on a non-UTC host").
 
   Added `tests/Verbara.Platform.Api.Tests/Workers/QueueDistributionWorkerCycleFailureLoggingTests.cs`
@@ -110,12 +110,28 @@
   *by construction*, not by test. The projection layer it used to fail through is covered by 5.4/5.5
   (container-backed) and the switch itself by gate #10. The scenario is satisfied in aggregate; this
   test carries the worker's own error-path and cycle-completion half, which nothing covered before.
-- [ ] 5.7 Confirm these tests are meaningful rather than vacuous: with host and tests now sharing MODERN semantics, verify 5.4–5.6 actually **fail** when the switch is temporarily reinstated locally, then remove the reinstatement.
+- [x] 5.7 Confirm these tests are meaningful rather than vacuous: with host and tests now sharing MODERN semantics, verify 5.4–5.6 actually **fail** when the switch is temporarily reinstated locally, then remove the reinstatement.
 
   **Scope amended during execution: the proof applies to 5.4–5.5 only, not 5.6.** See the vacuity
   disclosure under 5.6 — `Api.Tests` structurally cannot observe the Npgsql converter, so demanding
   that 5.6 fail under a reinstated switch would be demanding a test that lies about what it
   exercises. Amending the check is the honest resolution; weakening 5.4/5.5 to match is not.
+
+  **Proof, re-run and witnessed directly (not delegated):** the `RuntimeHostConfigurationOption`
+  was temporarily added back to the *test* csproj — vstest propagates the test assembly's
+  runtimeconfig to the testhost, so the switch genuinely applies — and the suite was run with
+  **`TZ=UTC`**, the CI-runner case:
+
+  ```
+  Failed!  - Failed:     2, Passed:     0, Skipped:     0, Total:     2
+  ```
+
+  Both tests go red, on a UTC process, with `Expected ... Kind to be DateTimeKind.Utc ... but found
+  DateTimeKind.Local`. That is exactly the spec clause "it fails on a UTC CI runner too, rather than
+  only on a developer's machine". In the same reinstated state `scripts/check-endpoint-invariants.py`
+  exits **1** (gate #10 trips), so the switch cannot return silently even if someone deletes the
+  tests. Reinstatement reverted; `grep -c EnableLegacyTimestampBehavior` on the test csproj is `0`,
+  the gate reports OK, and the two tests are green again.
 
 ## 6. Verification
 

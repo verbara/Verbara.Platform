@@ -20,9 +20,10 @@
 
   <ItemGroup>
     <!-- csat-runner Phase D — the CsatSmsCorrelator fixture starts a Testcontainers Postgres
-         container; serialize test collections so concurrent container starts do not race the
-         post-pg_isready SSL handshake ("Connection reset by peer"), matching the mitigation in
-         Verbara.Platform.Storage.Postgres.Tests. -->
+         container. The "Connection reset by peer" race that motivated serializing collections
+         here was fixed at its source (the fixture's `pg_isready -h 127.0.0.1` probe), so
+         `parallelizeTestCollections` is `true`, matching Storage.Postgres.Tests. This project is
+         in the REQUIRED fast lane, so its fixture must stay in step with that fix. -->
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
