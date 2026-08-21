@@ -38,7 +38,38 @@
 - [x] 3.1 Delete the `ItemGroup` at `src/Verbara.Platform.Api/Verbara.Platform.Api.csproj:50-53` (the `RuntimeHostConfigurationOption` and its ADR-0022 comment block).
 - [x] 3.2 Confirm no other declaration survives anywhere: `grep -rn EnableLegacyTimestampBehavior` across `src/`, `tests/`, `docker/`, and any `runtimeconfig.template.json` must return 0 hits, and the built `Verbara.Platform.Api.runtimeconfig.json` must not contain the key.
 - [x] 3.3 Simplify `Storage.Postgres/Stores/PostgresBotConfigStore.cs:119` — `new DateTimeOffset(DateTime.SpecifyKind(created_at, DateTimeKind.Utc))` was silently shifting `CreatedAt` by the host offset under LEGACY. It becomes correct automatically under MODERN, but must not be left as a misleading artefact. It is the repo's only `SpecifyKind` site.
-- [ ] 3.4 Spot-check that the 54 `new DateTimeOffset(x, TimeSpan.Zero)` sites now compile and behave correctly without edits (design D1: correct by construction under `Kind=Utc`). No mechanical patch to those sites is in scope.
+- [x] 3.4 Spot-check that the 54 `new DateTimeOffset(x, TimeSpan.Zero)` sites now compile and behave correctly without edits (design D1: correct by construction under `Kind=Utc`). No mechanical patch to those sites is in scope.
+
+  **Result: D1 holds. Zero edits required. Two corrections to this change's own framing:**
+
+  - **The count is 50, not 54.** The "54" was a line-grep that over-counted by 5 *seven-argument*
+    `DateTimeOffset(y, m, d, h, m, s, offset)` constructions, which take no `DateTime` and cannot
+    throw on any `Kind` (`PartnerBillingEndpoints.cs:181`, `ManagementBillingEndpoints.cs:307,326`,
+    `CreditLedgerEndpoints.cs:260`, `Billing/BillingPeriod.cs:25`), and under-counted by 1 — the
+    site this change itself created at `PostgresBotConfigStore.cs:119`. No multi-line constructor
+    forms exist, so the grep is complete.
+  - **Classification of the 50:** 46 are Postgres store projections, every one resolved
+    mechanically to its `GetDateTime`/`GetDateTimeOrNull` call, its table, and its column type.
+    **Category (b) — a `timestamp without time zone` column — is EMPTY:** all 135 timestamp columns
+    across the 17 migrations are `TIMESTAMPTZ`, including the two added by `ALTER TABLE`
+    (`audit_entries.retain_until`, `typification_submissions.corrected_at`). The remaining 4 are
+    `ScheduledReportEndpoints.cs:84,156` and `ReportSchedulerService.cs:231,290`, all
+    `new DateTimeOffset(schedule.GetNextOccurrence(now.UtcDateTime), TimeSpan.Zero)`. Those are
+    safe, but **not for D1's reason** — no Npgsql read is involved; NCrontab 3.3.3 propagates
+    `baseTime.Kind` (verified by decompilation, not assumed), and the input is `IClock.UtcNow
+    .UtcDateTime`. They were never part of the bug and would break only if the argument changed to
+    `now.DateTime`/`now.LocalDateTime`.
+
+  **`SpecifyKind` verification:** the fix at `PostgresBotConfigStore.cs:119` is the only one that
+  ever existed. `grep -rn "SpecifyKind" src/` now returns a single hit, and it is prose inside the
+  XML doc comment on `UtcInstantExtensions.cs:27`. Nothing in `Verbara.Sdk` or `Verbara.Sdk.Pro`.
+
+  **Wider population D1 does not name (no action needed, recorded so the next reader is not
+  surprised):** ~60 further store projections assign a reader-sourced `DateTime` straight to a
+  `DateTimeOffset` property via the implicit conversion, which accepts any `Kind` and therefore
+  never threw. Under LEGACY they silently produced `Offset=-05:00` on a UTC-5 host — the correct
+  instant with the wrong wire string. The same removal fixes them to `+00:00`. This is the concrete
+  instance of the wire-format change already recorded in `CHANGELOG.md` under 6.7.
 
 ## 4. Phase D — `/setup` retryability (orthogonal, any order)
 

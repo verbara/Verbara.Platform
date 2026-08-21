@@ -361,6 +361,41 @@ class EndpointInvariantsTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout)
             self.assertIn("Gate #11", result.stdout)
 
+    def test_fails_when_specify_kind_utc_in_reader_file_outside_store_paths(self):
+        # The path markers alone under-scope the gate: Postgres readers are not
+        # confined to Storage.Postgres/Stores (Channels.Sms/CsatSmsCorrelator.cs
+        # reads an NpgsqlDataReader directly). A file that touches a reader is in
+        # scope wherever it lives — otherwise the gate follows the directory
+        # layout instead of the hazard.
+        with tempfile.TemporaryDirectory() as root:
+            self._store_tree(
+                root,
+                "class S {\n"
+                "  void M(NpgsqlDataReader r) {\n"
+                "    " + _SPECIFY_KIND_LINE + "\n"
+                "  }\n"
+                "}\n",
+                rel="src/Verbara.Platform.Channels.Sms/CsatSmsCorrelator.cs")
+            result = _run(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("CsatSmsCorrelator.cs:3", result.stdout)
+
+    def test_fails_when_specify_kind_utc_in_get_datetime_file_outside_store_paths(self):
+        # Same scoping rule via the other reader marker — a bare GetDateTime call
+        # is enough to source a value whose Kind must not be relabelled.
+        with tempfile.TemporaryDirectory() as root:
+            self._store_tree(
+                root,
+                "class S {\n"
+                "  void M() { var raw = r.GetDateTime(0);\n"
+                "    " + _SPECIFY_KIND_LINE + "\n"
+                "  }\n"
+                "}\n",
+                rel="src/Verbara.Platform.Audit/Reader.cs")
+            result = _run(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("Reader.cs:3", result.stdout)
+
     def test_ignores_specify_kind_utc_in_line_comment(self):
         with tempfile.TemporaryDirectory() as root:
             self._store_tree(

@@ -123,6 +123,13 @@ _SPECIFY_KIND_UTC = re.compile(
     r"DateTime\.SpecifyKind\s*\([^)]*,\s*DateTimeKind\.Utc\s*\)"
 )
 _SPECIFY_KIND_SCOPE_MARKERS = ("Storage.Postgres", "Stores")
+# A path marker alone under-scopes the gate: Postgres readers are not confined to
+# Storage.Postgres/Stores (e.g. Channels.Sms/CsatSmsCorrelator.cs reads an
+# NpgsqlDataReader directly). Any file that TOUCHES a reader is in scope too, so
+# the gate follows the hazard rather than the directory layout. A file that never
+# reads from Npgsql cannot produce a reader-sourced value to mislabel, so a
+# SpecifyKind there is a different question and stays out of scope deliberately.
+_NPGSQL_READER_MARKERS = ("NpgsqlDataReader", "GetDateTimeOrNull", "GetDateTime(")
 
 
 def _comment_spans(text):
@@ -214,15 +221,18 @@ def find_legacy_timestamp_switch(root):
 
 def find_specify_kind_utc(root):
     """Repo-relative `path:line` for every DateTime.SpecifyKind(..., Utc) (in
-    code, not a comment) in Postgres store code."""
+    code, not a comment) in code that can hold a Postgres-reader-sourced value —
+    a Storage.Postgres/Stores path, OR any file that touches an Npgsql reader."""
     violations = []
     for path in sorted(root.glob("src/**/*.cs")):
         if "obj" in path.parts or "bin" in path.parts:
             continue
-        if not any(marker in part for part in path.parts
-                   for marker in _SPECIFY_KIND_SCOPE_MARKERS):
-            continue
         text = path.read_text(encoding="utf-8")
+        in_scope = any(marker in part for part in path.parts
+                       for marker in _SPECIFY_KIND_SCOPE_MARKERS) \
+            or any(marker in text for marker in _NPGSQL_READER_MARKERS)
+        if not in_scope:
+            continue
         spans = _comment_spans(text)
         for match in _SPECIFY_KIND_UTC.finditer(text):
             if any(start <= match.start() < end for start, end in spans):
