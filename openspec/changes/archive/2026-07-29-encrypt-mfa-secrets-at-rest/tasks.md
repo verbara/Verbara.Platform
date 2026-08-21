@@ -200,7 +200,8 @@
   to the ~13 sibling fixtures is a **separate change** (it would likely also retire
   `parallelizeTestCollections: false`).
   **CLOSED AT ARCHIVE — carried, not abandoned.** The back-port is now a tracked open change,
-  `openspec/changes/fix-testcontainers-tcp-readiness/`, landed by this change's closing routine so
+  `openspec/changes/archive/2026-08-21-fix-testcontainers-tcp-readiness/` (open when this line was
+  written; archived 2026-08-21), landed by this change's closing routine so
   the follow-up is visible in the backlog rather than only in this prose. Its spec also carries the
   two-consecutive-green-runs condition for promoting the `Live-DB Tests (Postgres)` lane out of
   report-only. Nothing about this change is blocked by it: every failure is a fixture-startup
