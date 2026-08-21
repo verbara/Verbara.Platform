@@ -232,35 +232,49 @@ jobs:
           --filter "FullyQualifiedName!~Storage.Postgres.Tests&FullyQualifiedName!~Identity.Redis.Tests"
           --logger "console;verbosity=normal"
 
-  # live-postgres-ci-lane: runs the two genuinely container-backed test projects
-  # build-and-test excludes above (Storage.Postgres.Tests, Identity.Redis.Tests)
-  # against real Postgres/Redis Testcontainers. Own job (not a filter flip on
-  # build-and-test) so the fast unit lane stays fast and this lane's container
-  # startup cost is isolated and easy to size independently.
+  # live-postgres-ci-lane: runs the two container-backed test projects build-and-test
+  # excludes above (Storage.Postgres.Tests, Identity.Redis.Tests) against real
+  # Postgres/Redis Testcontainers. Own job (not a filter flip on build-and-test) so
+  # the fast unit lane stays fast and this lane's container startup cost is isolated
+  # and easy to size independently.
   #
-  # REPORT-ONLY, not a required check (see the change's design.md
-  # Grounding-resolution note, openspec/changes/live-postgres-ci-lane/design.md):
-  # `continue-on-error: true` on both test steps means a red run does NOT block
-  # merge. This is a deliberate, evidence-based call, not a placeholder — local
-  # grounding reproduced a REAL, repeatable flake in Storage.Postgres.Tests, root-
-  # caused to the official postgres:16-alpine image's bootstrap-then-restart
-  # entrypoint sequence: pg_isready (checked over the container's internal Unix
-  # socket) can report "accepting connections" a moment before the container's
-  # published TCP port (what the host-side Npgsql client actually dials) is
-  # reliably reachable, surfacing as "Connection reset by peer" on the fixture's
-  # first NpgsqlConnection.OpenAsync() — inside InitializeAsync(), never mid-test.
-  # xunit.runner.json (parallelizeTestCollections:false, added to both projects)
-  # reduces concurrent-container pressure (each of the ~13/~8 fixture classes owns
-  # its own container; xUnit parallelizes collections by default) and the two
-  # projects run as separate sequential steps below rather than one combined
-  # invocation — but serialization alone did NOT eliminate the race in repeated
-  # local runs (it is a per-container timing issue, not purely contention), so
-  # promoting this to required now would intermittently block unrelated PRs.
-  # Identity.Redis.Tests was 100% clean in every local configuration (Redis's
-  # image has no analogous restart cycle). Promotion trigger: a fixture-level fix
-  # (bounded connect-retry, or adopting the Testcontainers.PostgreSql module's
-  # log-based double-ready wait strategy) across the ~13 Postgres fixtures,
-  # tracked as an OpenSpec follow-up once this lane ships.
+  # This is NOT "the container lane" — container-backed tests are not confined to it.
+  # FOUR test projects start real containers: Storage.Postgres.Tests (17 Postgres
+  # fixtures), Identity.Redis.Tests (1 Redis fixture), Channels.Sms.Tests (1 Postgres
+  # fixture) and Mail.Tests (1 MailHog fixture). Only the first two are excluded from
+  # build-and-test; the other two run inside the REQUIRED fast lane. So a fixture-level
+  # change made "for this lane" must be applied everywhere or the required lane keeps
+  # the defect (fix-testcontainers-tcp-readiness, design D6).
+  #
+  # The readiness race this lane was created report-only FOR IS FIXED
+  # (fix-testcontainers-tcp-readiness, 2026-08-21). Root cause, for the record: the
+  # official postgres image's entrypoint bootstraps against a TEMPORARY server started
+  # with listen_addresses='' and then restarts it, so `pg_isready -U postgres` — which
+  # probes the container's internal Unix socket — reports "accepting connections" while
+  # nothing is listening on 5432 yet. Testcontainers declares the container ready,
+  # docker's port proxy accepts the host-side connection and immediately closes it, and
+  # Npgsql surfaces "Connection reset by peer" / "Attempted to read past the end of the
+  # stream" inside the fixture's InitializeAsync(), never mid-test. The fix is one
+  # argument — `-h 127.0.0.1` — which forces the probe over TCP and skips the window
+  # (measured: the socket greened ~4s before TCP). Applied to all 18 Postgres fixtures;
+  # 17 needed it, UserMfaEncryptionFixture already had it and was the reference shape.
+  # Measured locally: Storage.Postgres.Tests went from a VARYING subset failing
+  # (27 / 136 / 11 / 207 failures over four runs) to 262/262 on six consecutive runs.
+  #
+  # parallelizeTestCollections was then re-decided BY MEASUREMENT (design D4): with the
+  # probe fixed, Storage.Postgres.Tests is 262/262 on six consecutive PARALLEL runs at
+  # ~33s, versus ~79s serialized — on a 24-core host, i.e. more simultaneous container
+  # starts than a 2-4 core CI runner can produce. Both Postgres-backed projects now set
+  # it to true explicitly. Identity.Redis.Tests keeps false: its single Redis fixture
+  # has no analogous restart cycle, it was 34/34 in every configuration, and nothing in
+  # that change touched it.
+  #
+  # STILL REPORT-ONLY (`continue-on-error: true` on both test steps): promotion is gated
+  # on EVIDENCE, not on the diff — two consecutive green runs of this job on real CI,
+  # and only then does `continue-on-error` come off, in its own PR (design D5, the same
+  # graduation discipline released-image-smoke uses). Promoting on the strength of the
+  # fix would risk intermittently blocking unrelated PRs, which is the exact outcome
+  # report-only exists to avoid.
   live-db-tests:
     name: Live-DB Tests (Postgres)
     # Non-required (report-only), but gated too — safe per ADR-0016 §4 Platform row: a
@@ -268,11 +282,12 @@ jobs:
     needs: gate
     if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
-    # Sized from local grounding: Storage.Postgres.Tests alone (~13 sequential
-    # Testcontainers Postgres containers with parallelizeTestCollections:false)
-    # ran in ~60-70s; Identity.Redis.Tests (~8 sequential Redis containers) in
-    # ~7-10s. 15 minutes leaves generous headroom for CI-runner variance (slower
-    # image pulls, noisier neighbors) without masking a real hang.
+    # Sized from local measurement: Storage.Postgres.Tests (17 Testcontainers Postgres
+    # containers, collection-parallel since the probe fix) runs in ~33s on a 24-core
+    # host and ran ~79s serialized; Identity.Redis.Tests (1 Redis container) in ~7-10s.
+    # A CI runner has far fewer cores, so expect something closer to the serialized
+    # figure. 15 minutes leaves generous headroom for runner variance (slower image
+    # pulls, noisy neighbours) without masking a real hang.
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -298,11 +313,11 @@ jobs:
         run: dotnet build Verbara.Platform.slnx -c Release
 
       - name: Live-DB tests — Storage.Postgres.Tests
-        # Run as its own step/project (not combined with Identity.Redis.Tests
-        # below) — see the job-level grounding note: combining both projects into
-        # one dotnet test/vstest invocation reintroduces cross-project container
-        # concurrency that per-project collection-serialization alone doesn't
-        # cover, and reproduced real "Connection reset by peer" flake locally.
+        # Run as its own step/project (not combined with Identity.Redis.Tests below)
+        # so a failure names the project that produced it without reading the log.
+        # This originally also limited cross-project container concurrency, which
+        # mattered while the readiness race was open; that reason is now historical
+        # (see the job-level note) but per-project attribution still is not.
         # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): the container-backed
         # test run is the heavy part of this job; skipped on a bot PR so the
         # required check-run NAME ("Live-DB Tests (Postgres)") still reports.
