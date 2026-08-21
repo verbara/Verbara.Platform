@@ -45,8 +45,15 @@
 - [x] 2.3 If any `NpgsqlException` startup failure survives, **stop and re-open the design** — that
   is the D2 trigger to reconsider the `Testcontainers.PostgreSql` module's log-based double-ready
   strategy. Do not paper over a residual failure with a retry loop.
-- [ ] 2.4 Record the measured before/after in the PR body — the numbers are the whole argument for
+- [x] 2.4 Record the measured before/after in the PR body — the numbers are the whole argument for
   promoting the lane later.
+
+> **2.4 result — shipped in PR #255's body**, as the measurement table that D4 requires:
+> `Storage.Postgres.Tests` before/serialized over 4 runs → `27 / 136 / 11 / 207` failures;
+> after with `parallelizeTestCollections: false` over 5 runs → `262/262` every run, ~79s;
+> after with `parallelizeTestCollections: true` over 6 runs → `262/262` every run, ~31–34s.
+> Those are the numbers cited back in 5.1/5.2 to justify the promotion, so the argument is
+> on the record rather than reconstructed after the fact.
 
 ## 3. Phase C — Integration: the CI comment
 
@@ -100,12 +107,12 @@
 
 ## 5. Promotion to gating — a SEPARATE follow-up PR
 
-- [ ] 5.1 After the fix lands, observe `Live-DB Tests (Postgres)` on **two consecutive** runs —
+- [x] 5.1 After the fix lands, observe `Live-DB Tests (Postgres)` on **two consecutive** runs —
   this PR's own run and the next unrelated PR's.
-- [ ] 5.2 Only then, in its own PR, drop `continue-on-error: true` from **both** test steps in the
+- [x] 5.2 Only then, in its own PR, drop `continue-on-error: true` from **both** test steps in the
   `live-db-tests` job and cite the two green runs that justified it (design D5, the graduation
   discipline `released-image-smoke` already uses).
-- [ ] 5.3 Update the job comment again at that point so it reflects a gating lane rather than a
+- [x] 5.3 Update the job comment again at that point so it reflects a gating lane rather than a
   report-only one.
 
 ## 6. Verification
@@ -118,10 +125,52 @@
 - [x] 6.3 `tests/Verbara.Platform.Storage.Postgres.Tests` **fully green and repeatably so** (task
   2.1). This is the task that closes out `encrypt-mfa-secrets-at-rest` 6.2, which was closed at
   archive carrying this change as its destination.
-- [ ] 6.4 Patch coverage is **not** expected to apply — this change touches only `tests/` and
+- [x] 6.4 Patch coverage is **not** expected to apply — this change touches only `tests/` and
   `.github/`, and `check-patch-coverage.py` scopes its liveness trip to instrumented projects, so a
   zero measurement here is honest rather than a mis-wiring. Confirm the gate reports that, rather
   than assuming it.
 - [x] 6.5 `openspec validate --all --strict` green.
-- [ ] 6.6 CI green on the PR, with the `Live-DB Tests (Postgres)` job's **underlying run** green —
+
+> **5.1 evidence — two consecutive green runs, read at STEP level.** A `continue-on-error`
+> job reports `success` even when its steps fail, so the check-run badge proves nothing here;
+> these are the `steps[].conclusion` values pulled from the Actions API, not the badge.
+> - **Run 1/2 — `32480208475`**, branch `fix/testcontainers-tcp-readiness` (this change's own
+>   PR #255): `Live-DB tests — Storage.Postgres.Tests=success`,
+>   `Live-DB tests — Identity.Redis.Tests=success`.
+> - **Run 2/2 — `32484193801`**, branch `fix/local-kind-datetimeoffset` (PR #256, an
+>   **unrelated** change — the requirement was the next unrelated PR's run, not a re-run of
+>   this one): both steps `success`, job 3m40s.
+>
+> Corroborated by two post-merge merge-queue runs on `main` after #255 landed —
+> `32482194226` (pr-251) and `32482656879` (pr-254) — both `success+success` at step level.
+> Four green step-level observations in total, none of them a repeat of the same tree.
+
+> **5.2 / 5.3 shipped in `ci/promote-live-db-to-gating`.** `continue-on-error: true` removed
+> from **both** test steps (`grep -c continue-on-error` over the `live-db-tests` job → 0;
+> confirmed by parsing the YAML, not by reading the diff). Three stale comments rewritten
+> rather than one:
+> - the **file header** (`ci.yml:10-13`) still described the lane as "report-only pending
+>   promotion";
+> - the **block above the job**, whose `STILL REPORT-ONLY` paragraph was replaced with the
+>   promotion record — the four run IDs above, why step-level reading was necessary, and the
+>   D5 rationale;
+> - the **job-level comment**, trimmed to a pointer at that block so the evidence lives in
+>   exactly one place instead of being duplicated.
+>
+> The rewrite states explicitly that **gating is not the same as required**: the check-run is
+> still absent from ruleset `17662679`, so a red job is visible on the PR and blocks nothing
+> automatically. Adding it to the required list is a separate, deliberate repo-config change
+> and is *not* part of this promotion — D5 asks only for `continue-on-error` to come off.
+
+> **6.4 result — the gate reported it, it was not assumed.** From PR #255's Coverage Ratchet
+> job, step `Enforce patch coverage (diff-cover)`:
+> `Patch coverage: no measurable cobertura lines in this diff (no instrumented line added). floor 85.0% — n/a, pass.`
+> That is `check-patch-coverage.py` explicitly recognising an uninstrumented diff, which is
+> exactly the honest-zero path — not a silent skip and not a mis-wiring.
+
+> **6.6 result.** PR #255's CI was green with the Live-DB job's **underlying steps** green,
+> read from the API rather than the badge (run `32480208475`, both test steps `success`) —
+> the distinction 6.6 was written to force.
+
+- [x] 6.6 CI green on the PR, with the `Live-DB Tests (Postgres)` job's **underlying run** green —
   not merely its `continue-on-error` check-run. Read the log, not the badge.
