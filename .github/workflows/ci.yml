@@ -8,9 +8,9 @@ name: CI
 # this gate is the fast feedback loop.
 #
 # 4 jobs: build-and-test (Build + Unit Tests, Release) · live-db-tests (Postgres/Redis
-# Testcontainers, report-only pending promotion — see docs/decisions and the
-# live-postgres-ci-lane change) · coverage (blocking line-coverage ratchet) ·
-# openspec (OpenSpec Validate, strict).
+# Testcontainers — gating since the readiness-probe fix graduated it, though still not
+# a required check; see the promotion note on the job) · coverage (blocking
+# line-coverage ratchet) · openspec (OpenSpec Validate, strict).
 #
 # NOTE (private Pro packages): Verbara.Sdk.Pro.* live on the private GitHub Packages
 # NuGet feed (source `github` in NuGet.Config). Restore authenticates with the
@@ -269,15 +269,26 @@ jobs:
   # has no analogous restart cycle, it was 34/34 in every configuration, and nothing in
   # that change touched it.
   #
-  # STILL REPORT-ONLY (`continue-on-error: true` on both test steps): promotion is gated
-  # on EVIDENCE, not on the diff — two consecutive green runs of this job on real CI,
-  # and only then does `continue-on-error` come off, in its own PR (design D5, the same
-  # graduation discipline released-image-smoke uses). Promoting on the strength of the
-  # fix would risk intermittently blocking unrelated PRs, which is the exact outcome
-  # report-only exists to avoid.
+  # PROMOTED TO GATING — `continue-on-error: true` is off both test steps as of this
+  # change. Promotion was gated on EVIDENCE, not on the diff (design D5, the same
+  # graduation discipline released-image-smoke uses): two consecutive green runs of this
+  # job on real CI, read at STEP level, because a `continue-on-error` job reports success
+  # even when its steps fail — the badge proves nothing, only the step conclusions do.
+  #   · run 32480208475 — fix/testcontainers-tcp-readiness (the fix's own PR, #255)
+  #   · run 32484193801 — fix/local-kind-datetimeoffset (an unrelated PR, #256)
+  # Corroborated by post-merge merge-queue runs 32482194226 and 32482656879, green at
+  # step level too. Promoting on the strength of the fix alone would have risked
+  # intermittently blocking unrelated PRs, which is the exact outcome report-only existed
+  # to avoid.
+  #
+  # Gating is NOT the same as required: this check-run is still absent from the
+  # required-checks ruleset (17662679). Adding it there is a separate, deliberate
+  # repo-config change — a red job here is visible on the PR and blocks nothing
+  # automatically.
   live-db-tests:
     name: Live-DB Tests (Postgres)
-    # Non-required (report-only), but gated too — safe per ADR-0016 §4 Platform row: a
+    # Gating (see the promotion note above for the evidence), but still not a required
+    # check. Gated on the docs-only fast path too — safe per ADR-0016 §4 Platform row: a
     # non-required job skipping on a docs diff strands nothing.
     needs: gate
     if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.docs_only != 'true') }}
@@ -322,7 +333,6 @@ jobs:
         # test run is the heavy part of this job; skipped on a bot PR so the
         # required check-run NAME ("Live-DB Tests (Postgres)") still reports.
         if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
-        continue-on-error: true
         run: >-
           dotnet test tests/Verbara.Platform.Storage.Postgres.Tests/Verbara.Platform.Storage.Postgres.Tests.csproj
           --no-build -c Release --logger "console;verbosity=normal"
@@ -330,7 +340,6 @@ jobs:
       - name: Live-DB tests — Identity.Redis.Tests
         # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): as above.
         if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
-        continue-on-error: true
         run: >-
           dotnet test tests/Verbara.Platform.Identity.Redis.Tests/Verbara.Platform.Identity.Redis.Tests.csproj
           --no-build -c Release --logger "console;verbosity=normal"
