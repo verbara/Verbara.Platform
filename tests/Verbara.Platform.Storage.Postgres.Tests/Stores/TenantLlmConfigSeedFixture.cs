@@ -42,7 +42,17 @@ public sealed class TenantLlmConfigSeedFixture : IAsyncLifetime
             .WithPortBinding(5432, true)
             .WithWaitStrategy(
                 Wait.ForUnixContainer()
-                    .UntilCommandIsCompleted("pg_isready", "-U", "postgres"))
+                    // `-h 127.0.0.1` forces the readiness probe over TCP. The
+                    // official entrypoint runs initdb against a *temporary*
+                    // server started with `listen_addresses=''`, so a
+                    // socket-only `pg_isready -U postgres` greens for a window
+                    // while nothing is listening on 5432 yet — Testcontainers
+                    // then reports ready, docker's port proxy accepts the
+                    // mapped-port connection and immediately closes it, and
+                    // Npgsql surfaces "Attempted to read past the end of the
+                    // stream" mid-authentication. Probing TCP skips that
+                    // window (measured: socket ready ~4s before TCP).
+                    .UntilCommandIsCompleted("pg_isready", "-U", "postgres", "-h", "127.0.0.1"))
             .Build();
 
         await _container.StartAsync();
