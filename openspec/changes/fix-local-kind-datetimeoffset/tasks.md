@@ -215,7 +215,25 @@
 > `Host: localhost:5199` (no dot → the subdomain branch returns null → the header is honoured).
 
 - [x] 6.5 `openspec validate --all --strict` exit 0.
-- [ ] 6.6 CI green on the PR, all 5 required checks.
+- [x] 6.6 CI green on the PR, all 5 required checks.
+
+> **6.6 result — PR #256, run `32484193801`: every check green.** The five required contexts:
+> `Build + Unit Tests (Release)` 3m31s · `Live-DB Tests (Postgres)` 3m40s · `AOT Publish (Api)`
+> 6m12s · `Coverage Ratchet` 5m7s · `Analyze (C#)` 16m30s (plus `CodeQL`, `Coverage Script Tests`,
+> `Dependency Review`, `Docs-only gate`, `Invariant Gates`, `OpenSpec Validate` — all pass).
+> `Auto-merge safe Dependabot PRs` reports `skipping`, which is its correct state on a non-bot PR.
+>
+> Two of those deserve calling out rather than being read as a row in a table:
+> - **`Invariant Gates` passes** with the widened gate #11 — the scope change from path-based to
+>   reader-content-based did not trip on the existing tree, which is what it must not do.
+> - **`Live-DB Tests (Postgres)` passes at STEP level**, not merely as a `continue-on-error`
+>   badge: `Live-DB tests — Storage.Postgres.Tests=success`,
+>   `Live-DB tests — Identity.Redis.Tests=success` read from the Actions API. This run is also
+>   what closes run 2/2 of `fix-testcontainers-tcp-readiness` 5.1 — it is an *unrelated* PR by
+>   that change's definition, which is exactly what its graduation bar asked for.
+>
+> This entry was written after that run and pushed on top of it, so the run recorded here is the
+> one that validated the code; the push re-runs CI against the added prose.
 - [x] 6.7 Record the `timestamptz` wire-format change (`-05:00` → `+00:00` on non-UTC hosts; no-op on UTC containers) in `CHANGELOG.md` under `[Unreleased]`, and confirm with `Verbara.Platform.Web` that no view parses the offset suffix literally.
 
 > **6.7 Web check result:** no view parses the offset suffix. A grep for literal-suffix handling
