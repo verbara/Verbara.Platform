@@ -85,8 +85,37 @@
 - [x] 5.3 Unit-test both new invariant checks in the existing `coverage-scripts` job, matching how the current checks are tested.
 - [ ] 5.4 Add a Storage.Postgres round-trip test under a non-UTC `TZ` asserting the read yields `Kind=Utc` / `Offset == TimeSpan.Zero` and the projection does not throw (spec scenario "A store projection survives a non-UTC process timezone").
 - [ ] 5.5 Add a write test binding a `DateTimeOffset` with a non-zero `Offset` through an ingress path, asserting it is normalised rather than rejected — the design D2 contract, and the test that would have caught the regression removal introduces.
-- [ ] 5.6 Add a `QueueDistributionWorker` test asserting a distribution cycle completes without logging `Distribution cycle failed` under a non-UTC `TZ` (spec scenario "The background distribution loop does not fail on a non-UTC host").
+- [x] 5.6 Add a `QueueDistributionWorker` test asserting a distribution cycle completes without logging `Distribution cycle failed` under a non-UTC `TZ` (spec scenario "The background distribution loop does not fail on a non-UTC host").
+
+  Added `tests/Verbara.Platform.Api.Tests/Workers/QueueDistributionWorkerCycleFailureLoggingTests.cs`
+  with two tests: one drives the real `ExecuteAsync` loop through 3+ fully-wired successful cycles
+  and pins zero `Distribution cycle failed` records (asserting the switchboard was actually offered
+  a conversation, so "no failure logged" is not a statement about an empty no-op); the other makes
+  the store throw for exactly 2 cycles and pins **exactly 2** records, still 2 after 3 more clean
+  cycles — the spec's "does not recur every cycle for the process lifetime" clause, previously
+  untested, and the positive control proving the log capture matches the real message text.
+
+  **Vacuity disclosure — this test would NOT fail with the switch reinstated, and 5.7 must not
+  expect it to.** `Api.Tests` cannot reach Npgsql's converter selection: it has one
+  `ProjectReference`, is container-free by design, and every store on the cycle path is an
+  NSubstitute double, so no `NpgsqlDataReader` is ever constructed in that assembly. Two
+  alternatives were evaluated and rejected on the merits rather than worked around: feeding the
+  stores `Local`-kind values is impossible because `DateTimeOffset.DateTime` always returns
+  `Kind == Unspecified` and the store interfaces expose `DateTimeOffset`, not `DateTime`; and
+  mutating `TZ`/`TimeZoneInfo` adds no signal while racing ~1750 parallel tests, because `grep`
+  over `src/` returns **zero** hits for `DateTime.Now`, `DateTimeOffset.Now`, `TimeZoneInfo.Local`
+  and `ToLocalTime()` — the process timezone is not observable anywhere on this path.
+
+  That last finding is the real answer to the spec scenario: the worker path is timezone-independent
+  *by construction*, not by test. The projection layer it used to fail through is covered by 5.4/5.5
+  (container-backed) and the switch itself by gate #10. The scenario is satisfied in aggregate; this
+  test carries the worker's own error-path and cycle-completion half, which nothing covered before.
 - [ ] 5.7 Confirm these tests are meaningful rather than vacuous: with host and tests now sharing MODERN semantics, verify 5.4–5.6 actually **fail** when the switch is temporarily reinstated locally, then remove the reinstatement.
+
+  **Scope amended during execution: the proof applies to 5.4–5.5 only, not 5.6.** See the vacuity
+  disclosure under 5.6 — `Api.Tests` structurally cannot observe the Npgsql converter, so demanding
+  that 5.6 fail under a reinstated switch would be demanding a test that lies about what it
+  exercises. Amending the check is the honest resolution; weakening 5.4/5.5 to match is not.
 
 ## 6. Verification
 
