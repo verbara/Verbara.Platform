@@ -109,7 +109,7 @@ internal static class CreditLedgerEndpoints
             EntryType = CreditEntryType.Grant,
             Source = CreditSource.Promo,
             Amount = req.Amount,
-            ExpiresAt = req.ExpiresAt,
+            ExpiresAt = req.ExpiresAt.ToUtcInstant(),
             ExternalRef = req.IdempotencyKey,
             CreatedAt = clock.UtcNow,
         };
@@ -257,8 +257,8 @@ internal static class CreditLedgerEndpoints
         var partnerTenantId = GetVerifiedPartnerTenantId(context);
 
         var now = clock.UtcNow;
-        var periodStart = from ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        var periodEnd = to ?? now;
+        var periodStart = from.ToUtcInstant() ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = to.ToUtcInstant() ?? now;
 
         return TypedResults.Ok(await AggregatePartnerAttributionAsync(
             partnerTenantId, periodStart, periodEnd, ledger, tenantStore, ct));

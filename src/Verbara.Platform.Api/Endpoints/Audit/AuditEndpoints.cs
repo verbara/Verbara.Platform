@@ -79,8 +79,8 @@ internal static class AuditAdminEndpoints
             ActionPrefix = NullIfEmpty(actionPrefix),
             Actor = NullIfEmpty(actor),
             Target = NullIfEmpty(target),
-            From = from,
-            To = to,
+            From = from.ToUtcInstant(),
+            To = to.ToUtcInstant(),
             TenantId = effectiveTenant.Value,
             Page = page > 0 ? page : 1,
             PageSize = ClampPageSize(pageSize),
@@ -122,8 +122,8 @@ internal static class AuditAdminEndpoints
             ActionPrefix = NullIfEmpty(actionPrefix),
             Actor = NullIfEmpty(actor),
             Target = NullIfEmpty(target),
-            From = from,
-            To = to,
+            From = from.ToUtcInstant(),
+            To = to.ToUtcInstant(),
             TenantId = effectiveTenant.Value,
         };
 

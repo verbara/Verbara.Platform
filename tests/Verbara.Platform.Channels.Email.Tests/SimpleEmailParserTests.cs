@@ -162,4 +162,23 @@ public class SimpleEmailParserTests
         result.Attachments[0].FileName.Should().Be("report.pdf");
         result.Attachments[0].ContentType.Should().Be("application/pdf");
     }
+
+    [Fact]
+    public void Parse_ShouldNormaliseReceivedAtToUtc_WhenDateHeaderCarriesNonZeroOffset()
+    {
+        var raw = """
+            Message-ID: <tz@example.com>
+            From: alice@example.com
+            Subject: Offset header
+            Date: Mon, 01 Jan 2024 10:00:00 -0500
+
+            Body
+            """;
+
+        var result = _sut.Parse(ToBytes(raw));
+
+        result.ReceivedAt.Offset.Should().Be(TimeSpan.Zero);
+        result.ReceivedAt.UtcTicks.Should()
+            .Be(new DateTimeOffset(2024, 1, 1, 15, 0, 0, TimeSpan.Zero).UtcTicks);
+    }
 }

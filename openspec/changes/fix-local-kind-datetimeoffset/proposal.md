@@ -1,5 +1,5 @@
 ---
-tier: PEQUEÑO
+tier: MEDIANO
 owner: Harol A. Reina H.
 approver: Harol A. Reina H.
 stakeholder: Any operator whose host is not on UTC — which includes this project's own developer machine (UTC-5)
@@ -35,6 +35,17 @@ is likely why this has not been reported; it fires on host-run binaries, dev mac
 container given a `TZ`.
 
 ## What Changes
+
+> ⚠️ **The first two bullets below are SUPERSEDED by [`design.md`](design.md) — read it before
+> implementing.** Investigation resolved the "establish why" bullet to a single root cause (the
+> process-wide `Npgsql.EnableLegacyTimestampBehavior` switch at
+> `Verbara.Platform.Api.csproj:52`), which makes the site-patching approach unnecessary **and
+> unsafe**: `DateTime.SpecifyKind(x, DateTimeKind.Utc)` — offered below as one of two equivalent
+> options — is the variant that silently *shifts the instant* under legacy semantics. It is
+> already corrupting `CreatedAt` at `PostgresBotConfigStore.cs:119`, the repo's only such site.
+> The count is also 54 sites, not ~12. Design D1/D3 supersede this with: remove the switch, and
+> normalise with `.ToUniversalTime()` at every untrusted ingress. The original text is preserved
+> below as the historical record of what was believed when the proposal was approved.
 
 - **Audit every `new DateTimeOffset(x, TimeSpan.Zero)` in the repo** (~12 sites, all in
   `Verbara.Platform.Storage.Postgres` row projections) and make each robust to a `Local`-kind input.
@@ -73,6 +84,13 @@ container given a `TZ`.
   because CI runners are UTC.
 - **Docs:** an operator note if any residual requirement to set `TZ` remains.
 - **No schema change. No API contract change. No cross-repo impact.**
+  > **Amended by [`design.md`](design.md).** No schema change holds. Two corrections: (a) there IS a
+  > wire-format change on non-UTC hosts — `DateTimeOffset` response fields serialise `+00:00`
+  > instead of the host offset (same instant, no-op on UTC containers, which is every shipped
+  > image); (b) "no cross-repo impact" is only true of the *fix location*. Platform feeds
+  > un-normalised `DateTimeOffset` values into `Verbara.Sdk.Pro`'s **compiled** Postgres stores
+  > (Dialer, DNC, analytics), so the switch removal does reach across the boundary — but it is
+  > fixed entirely Platform-side, with **no Sdk/Pro release required**.
 
 ### Out of Scope (explicit)
 

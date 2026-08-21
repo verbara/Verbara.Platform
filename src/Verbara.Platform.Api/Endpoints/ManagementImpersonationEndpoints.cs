@@ -500,7 +500,7 @@ internal static class ManagementImpersonationEndpoints
         if (error is not null)
             return error;
 
-        var paged = await sessionStore.ListHistoryAsync(scopeTenant, from, to, page, pageSize, ct);
+        var paged = await sessionStore.ListHistoryAsync(scopeTenant, from.ToUtcInstant(), to.ToUtcInstant(), page, pageSize, ct);
         var dtos = paged.Items.Select(s => MapSession(s, autoTimeoutMinutes: 0, now: clock.GetUtcNow())).ToList();
         return TypedResults.Ok(new PagedResult<ImpersonationSessionDto>(
             dtos, paged.TotalCount, paged.Page, paged.PageSize));

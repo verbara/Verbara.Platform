@@ -67,8 +67,8 @@ internal static class PartnerBillingEndpoints
             TenantId = new TenantId(callerTenantId),
             Name = body.Name,
             Currency = body.Currency,
-            EffectiveFrom = body.EffectiveFrom,
-            EffectiveTo = body.EffectiveTo,
+            EffectiveFrom = body.EffectiveFrom.ToUtcInstant(),
+            EffectiveTo = body.EffectiveTo.ToUtcInstant(),
             IsDefault = body.IsDefault,
             Rates = body.Rates.Select(MapDtoToRateEntry).ToList(),
         };
@@ -100,8 +100,8 @@ internal static class PartnerBillingEndpoints
             TenantId = existing.TenantId,
             Name = body.Name,
             Currency = body.Currency,
-            EffectiveFrom = body.EffectiveFrom,
-            EffectiveTo = body.EffectiveTo,
+            EffectiveFrom = body.EffectiveFrom.ToUtcInstant(),
+            EffectiveTo = body.EffectiveTo.ToUtcInstant(),
             IsDefault = body.IsDefault,
             Rates = body.Rates.Select(MapDtoToRateEntry).ToList(),
         };
@@ -178,8 +178,8 @@ internal static class PartnerBillingEndpoints
             return Results.NotFound();
 
         var now = clock.UtcNow;
-        var periodStart = from ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        var periodEnd = to ?? now;
+        var periodStart = from.ToUtcInstant() ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = to.ToUtcInstant() ?? now;
 
         var partnerTid = new TenantId(callerTenantId);
         var customerTid = new TenantId(customerId);

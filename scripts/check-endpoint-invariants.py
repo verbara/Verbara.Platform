@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""ADR-0012 endpoint-invariant gates for Verbara.Platform (deterministic, no model).
+"""Endpoint + host invariant gates for Verbara.Platform (deterministic, no model).
 
-Three gates, all freeze-current / ratchet posture (fail only on regression):
+Five gates, all freeze-current / ratchet posture (fail only on regression):
 
   #6 No silent error-swallowing — an empty `catch {}` (including multi-line and
      `catch (SomeException) {}`) anywhere under an `Endpoints/` directory is
@@ -29,6 +29,27 @@ Three gates, all freeze-current / ratchet posture (fail only on regression):
      credential mint the audit found was the `$"prefix_{Guid.NewGuid}"` shape,
      every legit use was `.ToString()`-shaped. No allowlist; the positive control
      is that every mint routes through SecretTokenGenerator (floor is zero).
+
+  #10 The Npgsql legacy-timestamp switch never returns — the
+     `Npgsql.EnableLegacyTimestampBehavior` switch may not appear in any .csproj,
+     MSBuild props/targets, or runtimeconfig(.template).json in SOURCE. bin/ and
+     obj/ are not scanned — a built runtimeconfig is derived, so clean source
+     guarantees a clean artefact, whereas a stale local build would fire the gate
+     against already-correct code. That single
+     process-wide switch was the root cause of the non-UTC-host failures fixed by
+     `fix-local-kind-datetimeoffset` (design D4): under LEGACY, timestamptz reads
+     come back as `DateTimeKind.Local`, which makes
+     `new DateTimeOffset(x, TimeSpan.Zero)` throw on any host whose offset is not
+     zero. It was declared in exactly one place and is invisible on UTC CI
+     runners, so nothing but a gate stops it drifting back in.
+
+  #11 No relabelling of Postgres reader values — `DateTime.SpecifyKind(x,
+     DateTimeKind.Utc)` is forbidden in Postgres store code. SpecifyKind relabels
+     the Kind WITHOUT converting, so applied to a `Local`-kind reader value it
+     silently shifts the stored instant by the host offset — corruption that no
+     test on a UTC runner can see. This is the pattern that was live at
+     PostgresBotConfigStore.cs:119. Convert with `.ToUniversalTime()` (or the
+     `ToUtcInstant()` helper in Verbara.Platform.Core) instead. Floor is zero.
 
 Exit 0 = all gates pass; 1 = at least one violation (with ::error:: annotations
 so GitHub renders them inline). Run from the repo root:
@@ -70,6 +91,38 @@ _GUID_CRED_MINT = re.compile(
     re.IGNORECASE,
 )
 _GUID_GATE_SCOPE = "src/Verbara.Platform.Api"
+
+# --- Gate #10 config: the Npgsql legacy-timestamp switch stays gone ------------
+# The switch name as it appears in a RuntimeHostConfigurationOption / a
+# runtimeconfig "configProperties" key. Matched as a literal — there is no
+# legitimate occurrence in any of the scanned file types, so no discriminator is
+# needed and there is no allowlist.
+_LEGACY_TS_SWITCH = "Npgsql.EnableLegacyTimestampBehavior"
+# Only places a human can DECLARE the switch. bin/ and obj/ are deliberately NOT
+# scanned: a built `<Assembly>.runtimeconfig.json` is derived output, so a clean
+# source tree provably yields a clean artefact and scanning it adds no protection
+# — while a STALE local build (e.g. an old Release output left over from before
+# the switch was deleted) would fire the gate red against already-correct source.
+# The built artefact was verified by hand once, when the switch was removed.
+_LEGACY_TS_GLOBS = (
+    "**/*.csproj",
+    "**/*.props",
+    "**/*.targets",
+    "**/runtimeconfig.template.json",
+    # A hand-authored runtimeconfig.json in source is unusual but legal; both the
+    # bare and `<Assembly>.`-prefixed forms are matched so a rename cannot dodge it.
+    "**/runtimeconfig.json",
+    "**/*.runtimeconfig.json",
+)
+
+# --- Gate #11 config: no SpecifyKind relabelling in Postgres stores ------------
+# `DateTime.SpecifyKind(x, DateTimeKind.Utc)` — the relabel-without-convert that
+# shifts the instant. Scoped to Postgres store code, which is where reader-sourced
+# DateTime values live; elsewhere SpecifyKind on a value of known Kind is fine.
+_SPECIFY_KIND_UTC = re.compile(
+    r"DateTime\.SpecifyKind\s*\([^)]*,\s*DateTimeKind\.Utc\s*\)"
+)
+_SPECIFY_KIND_SCOPE_MARKERS = ("Storage.Postgres", "Stores")
 
 
 def _comment_spans(text):
@@ -135,6 +188,50 @@ def find_guid_credential_mints(root):
     return violations
 
 
+def find_legacy_timestamp_switch(root):
+    """Repo-relative `path:line` for every declaration of the Npgsql legacy
+    timestamp switch, in any build file or runtimeconfig."""
+    violations = []
+    seen = set()
+    for pattern in _LEGACY_TS_GLOBS:
+        for path in sorted(root.glob(pattern)):
+            if path in seen or not path.is_file():
+                continue
+            seen.add(path)
+            if "obj" in path.parts or "bin" in path.parts:
+                continue  # derived build output — see _LEGACY_TS_GLOBS
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if _LEGACY_TS_SWITCH not in text:
+                continue
+            for number, line in enumerate(text.splitlines(), start=1):
+                if _LEGACY_TS_SWITCH in line:
+                    violations.append(f"{path.relative_to(root).as_posix()}:{number}")
+    return violations
+
+
+def find_specify_kind_utc(root):
+    """Repo-relative `path:line` for every DateTime.SpecifyKind(..., Utc) (in
+    code, not a comment) in Postgres store code."""
+    violations = []
+    for path in sorted(root.glob("src/**/*.cs")):
+        if "obj" in path.parts or "bin" in path.parts:
+            continue
+        if not any(marker in part for part in path.parts
+                   for marker in _SPECIFY_KIND_SCOPE_MARKERS):
+            continue
+        text = path.read_text(encoding="utf-8")
+        spans = _comment_spans(text)
+        for match in _SPECIFY_KIND_UTC.finditer(text):
+            if any(start <= match.start() < end for start, end in spans):
+                continue  # the match is inside a comment
+            line = text.count("\n", 0, match.start()) + 1
+            violations.append(f"{path.relative_to(root).as_posix()}:{line}")
+    return violations
+
+
 def main(root=None):
     root = root or Path.cwd()
     failed = False
@@ -166,6 +263,28 @@ def main(root=None):
             print(f"  {violation}")
     else:
         print("Gate #7 (no Guid.NewGuid in credential mints): OK.")
+
+    legacy_switch = find_legacy_timestamp_switch(root)
+    if legacy_switch:
+        failed = True
+        print("::error::Npgsql.EnableLegacyTimestampBehavior is banned (gate #10) — "
+              "the legacy switch makes timestamptz reads Kind=Local and breaks every "
+              "non-UTC host; delete the declaration:")
+        for violation in legacy_switch:
+            print(f"  {violation}")
+    else:
+        print("Gate #10 (no Npgsql legacy-timestamp switch): OK.")
+
+    specify_kinds = find_specify_kind_utc(root)
+    if specify_kinds:
+        failed = True
+        print("::error::DateTime.SpecifyKind(..., DateTimeKind.Utc) forbidden in Postgres "
+              "store code (gate #11) — it relabels without converting and shifts the "
+              "instant; use .ToUniversalTime() / ToUtcInstant():")
+        for violation in specify_kinds:
+            print(f"  {violation}")
+    else:
+        print("Gate #11 (no SpecifyKind relabel in Postgres stores): OK.")
 
     return 1 if failed else 0
 

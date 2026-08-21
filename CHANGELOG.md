@@ -9,6 +9,36 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Platform host no longer depends on running in UTC** (`decision_ref` Platform/ADR-0002, change
+  `fix-local-kind-datetimeoffset`). On a host whose local timezone is not UTC, `QueueDistributionWorker`
+  failed **every cycle in a loop** and `POST /api/setup` half-completed and then refused to retry — a
+  first-run SMB install wedged with no documented recovery. Root cause was a **single line**: the
+  process-wide `Npgsql.EnableLegacyTimestampBehavior` switch declared as a `RuntimeHostConfigurationOption`
+  in `Verbara.Platform.Api.csproj`. Under that switch, `timestamptz` reads come back as
+  `DateTimeKind.Local`, which makes the repo's 54 `new DateTimeOffset(x, TimeSpan.Zero)` projections throw
+  on any non-zero-offset host. The switch is removed; those 54 sites are correct by construction under
+  modern semantics and were **not** patched. Removal also flips the *write* contract — modern Npgsql
+  **rejects** a `DateTimeOffset` carrying a non-zero `Offset` — so all **61** untrusted `DateTimeOffset`
+  ingress points (30 `Parse`/`TryParse`, 24 query parameters, 7 request-body properties) now normalise via
+  a new `ToUtcInstant()` helper in `Verbara.Platform.Core`. Two CI gates were added to
+  `scripts/check-endpoint-invariants.py` so neither can regress: **#10** bans the switch from source, and
+  **#11** bans `DateTime.SpecifyKind(…, DateTimeKind.Utc)` in Postgres store code — the relabel-without-convert
+  that was silently shifting `CreatedAt` by the host offset at `PostgresBotConfigStore.cs:119`.
+
+  > **Wire-format note:** on a **non-UTC host**, `DateTimeOffset` response fields now serialise with a
+  > `+00:00` suffix instead of the host's offset. The instant is unchanged, and this is a **no-op on every
+  > shipped image** (containers run UTC). Confirm no `Verbara.Platform.Web` view parses the offset suffix
+  > literally before relying on it.
+
+- **`POST /api/setup` is retryable after a mid-way failure.** The "already initialized" guard checked for
+  the host tenant, which is the **first** write — so any fault after it left the tenant behind and made
+  every retry return `409`. The guard is now the existence of a platform **user**, the boundary between a
+  wedged install and one the operator can repair in-product: with a platform admin they can authenticate
+  and create anything still missing through the normal API. Both tenant writes are upserts on deterministic
+  ids, so a retry adopts a half-written install rather than colliding with it.
+
 ### Security
 
 - **`SSH.NET` pinned to `2026.0.0` to clear [GHSA-q939-rpr3-3284](https://github.com/advisories/GHSA-q939-rpr3-3284)**

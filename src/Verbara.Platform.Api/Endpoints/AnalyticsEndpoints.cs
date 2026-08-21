@@ -45,8 +45,8 @@ internal static class AnalyticsEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
         var period = toDate - fromDate;
 
         // Current period snapshots
@@ -124,8 +124,8 @@ internal static class AnalyticsEndpoints
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
 
         var query = new CompletedSessionQuery
         {
@@ -311,8 +311,8 @@ internal static class AnalyticsEndpoints
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
 
         // minScore arrives as 0-100; QaResult scores are stored as 0-1 fractions
         var query = new CallAnalyticsQuery
@@ -458,8 +458,8 @@ internal static class AnalyticsEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var fromDt = DateTimeOffset.TryParse(from, out var f) ? f : DateTimeOffset.UtcNow.AddDays(-1);
-        var toDt = DateTimeOffset.TryParse(to, out var t) ? t : DateTimeOffset.UtcNow;
+        var fromDt = DateTimeOffset.TryParse(from, out var f) ? f.ToUtcInstant() : DateTimeOffset.UtcNow.AddDays(-1);
+        var toDt = DateTimeOffset.TryParse(to, out var t) ? t.ToUtcInstant() : DateTimeOffset.UtcNow;
 
         var snapshots = await svc.GetAgentIntervalsAsync(tenantId, fromDt, toDt, agentId, ct);
         var dtos = snapshots.Select(s => new AgentIntervalDto(
@@ -488,8 +488,8 @@ internal static class AnalyticsEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-7);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
 
         var snapshots = await snapshotStore.QueryAsync(tenantId, fromDate, toDate, queue, null, ct);
 
@@ -519,8 +519,8 @@ internal static class AnalyticsEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture) : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture) : toDate.AddDays(-30);
+        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
+        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-30);
 
         var summary = await botAnalyticsStore.GetSummaryAsync(new TenantId(tenantId), fromDate, toDate, ct);
         return Results.Ok(summary);
