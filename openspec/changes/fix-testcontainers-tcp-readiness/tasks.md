@@ -161,6 +161,21 @@
 > still absent from ruleset `17662679`, so a red job is visible on the PR and blocks nothing
 > automatically. Adding it to the required list is a separate, deliberate repo-config change
 > and is *not* part of this promotion — D5 asks only for `continue-on-error` to come off.
+>
+> **Observed cost of gating, on the very first gated run — recorded rather than forgotten.**
+> PR #257's own `Live-DB Tests (Postgres)` went **red** on run `32485793699`, and the failing
+> step was **`Build (Release, warnings-as-errors)`** — *not* either test step; both of those
+> were `skipped`. Cause: GitHub Packages answered **HTTP 500** ("Operation could not be
+> completed within the specified time") downloading `Verbara.Sdk.Pro.Push.2.14.1-pro`. A
+> transient private-feed flake, unrelated to Testcontainers and unrelated to this change —
+> `Build + Unit Tests (Release)` passed in the same run, so it was per-job. `gh run rerun
+> --failed` came back green with both test steps `success`.
+>
+> This is the honest trade-off the promotion buys: **a transient feed 500 in this job now
+> produces a red PR instead of being swallowed.** It is tolerable precisely because gating is
+> not the same as required — the check-run stays out of ruleset `17662679`, so a red job is
+> visible and blocks nothing automatically. If private-feed 500s prove frequent rather than
+> occasional, the fix is a restore retry on the build step, not walking the promotion back.
 
 > **6.4 result — the gate reported it, it was not assumed.** From PR #255's Coverage Ratchet
 > job, step `Enforce patch coverage (diff-cover)`:
