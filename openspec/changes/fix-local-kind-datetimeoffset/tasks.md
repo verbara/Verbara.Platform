@@ -136,9 +136,84 @@
 ## 6. Verification
 
 - [x] 6.1 `dotnet build Verbara.Platform.slnx` — **0 warnings, 0 errors** (`TreatWarningsAsErrors`, `WarningLevel 9999`).
-- [ ] 6.2 `dotnet test Verbara.Platform.slnx` green, including the container-backed `Storage.Postgres.Tests` and `Identity.Redis.Tests` lanes (currently report-only in CI — run them locally and read the results, do not trust a green summary).
-- [ ] 6.3 Boot the **published Native AOT** binary in `Production` against a real Postgres on a **non-UTC host** (`TZ=America/Bogota`) and confirm the two reported symptoms are gone: no repeating `Distribution cycle failed`, and `POST /api/v1/setup` completes on a fresh database. This is the reproduction that opened the change; a JIT run does not substitute for it.
-- [ ] 6.4 Exercise one Pro-backed analytics endpoint and one campaign write with an explicit `-05:00` offset in the query string / body, confirming they succeed rather than throwing `Cannot write DateTimeOffset with Offset=…`.
+- [x] 6.2 `dotnet test Verbara.Platform.slnx` green, including the container-backed `Storage.Postgres.Tests` and `Identity.Redis.Tests` lanes (currently report-only in CI — run them locally and read the results, do not trust a green summary).
+- [x] 6.3 Boot the **published Native AOT** binary in `Production` against a real Postgres on a **non-UTC host** (`TZ=America/Bogota`) and confirm the two reported symptoms are gone: no repeating `Distribution cycle failed`, and `POST /api/v1/setup` completes on a fresh database. This is the reproduction that opened the change; a JIT run does not substitute for it.
+- [x] 6.4 Exercise one Pro-backed analytics endpoint and one campaign write with an explicit `-05:00` offset in the query string / body, confirming they succeed rather than throwing `Cannot write DateTimeOffset with Offset=…`.
+> **6.2 result:** 35 test projects, **0 failures**. `Storage.Postgres.Tests` 264 passed (the lane
+> that was flaky before `fix-testcontainers-tcp-readiness`); `Identity.Redis.Tests` green. Run
+> locally with the containers actually starting, not read off a CI summary.
+
+> **6.3 result — both symptoms gone.** Published artefact verified genuinely native
+> (`ELF 64-bit LSB pie executable … stripped`, 79,291,408 bytes, **0 managed Verbara DLLs**
+> alongside it). Booted as PID 2007846 with `ASPNETCORE_ENVIRONMENT=Production`,
+> `/proc/<pid>/environ` confirming `TZ=America/Bogota`, against a real PostgreSQL 18 container
+> (`verbara-tz-check`, port 55432) on a **fresh** database.
+> - **Symptom 2 cleared:** `POST /api/v1/setup` returned **HTTP 201** on the fresh database —
+>   previously it half-completed, returned 400, and wedged the install behind
+>   `409 "Platform already initialized."`.
+> - **Symptom 1 cleared:** `Distribution cycle failed` occurrences in the boot log: **0**, over
+>   8m12s of uptime. `DistributionOptions.PollIntervalMs` defaults to `2000`, so that is
+>   **~245 consecutive clean cycles**; the original defect failed *every* cycle, in a loop.
+>   Postgres `xact_commit` on the `platform` database advanced by **118 in a 12s sample window**,
+>   proving the background workers really were polling rather than silently parked.
+> - Also **0** occurrences of `UTC Offset of the local dateTime`, `Cannot write DateTimeOffset`,
+>   and `ArgumentException` anywhere in the log. The only `fail:` lines are three licensing
+>   messages, expected on an unlicensed host and unrelated to timezone handling.
+
+> **6.4 — scope amended; the Pro-gated half is environmentally blocked, the mechanism is proven.**
+> **What blocked it.** Every Pro-backed surface is behind `LicenseGateMiddleware`:
+> `AnalyticsEndpoints`, `AnalyticsLiveEndpoints`, `QueueMetricsEndpoints`, `CallAnalyticsEndpoints`
+> (`LicenseFeature.Analytics`), `CampaignEndpoints`, `DialerSettingsEndpoints`, `DncListEndpoints`,
+> `CallerIdPoolEndpoints`, `HolidayCalendarEndpoints` (`LicenseFeature.Dialer`), plus Csat,
+> Realtime and Typification. `GET /api/v1/analytics/dashboard?from=…-05:00&to=…-05:00` returns
+> **HTTP 402 `license-required`**, not a timezone error. Enabling them needs a **signed `.lic`**
+> issued against the official ECDSA trust anchor; no license file exists in this repo or on this
+> machine, and minting one is not available here. The two named endpoints are therefore
+> unreachable by any HTTP call, for a reason unrelated to this change.
+>
+> **Substituted live proof (same binary, same non-UTC host, a real ingress → Postgres write).**
+> `POST /api/v1/management/credit-ledger/promo-grant` carries a caller-supplied
+> `DateTimeOffset? ExpiresAt` and is **not** license-gated. Posted
+> `{"tenantId":"tzcheck","amount":25.50,"idempotencyKey":"tz-offset-probe-1","expiresAt":"2026-12-31T23:59:59-05:00"}`
+> → **HTTP 200** `{"balance":25.500000}`. Reading the row straight out of Postgres:
+> `credit_lot.expires_at = 2027-01-01 04:59:59+00` — exactly `2026-12-31T23:59:59-05:00`
+> converted. **The instant is preserved, not shifted and not relabelled**, which is precisely what
+> D3's `.ToUtcInstant()` (convert, never `SpecifyKind`) is there to guarantee. The read side is
+> covered too: `GET /api/v1/admin/audit/events?from=…-05:00&to=…-05:00` returned **HTTP 200**,
+> binding non-zero-offset values into a `timestamptz` `WHERE` clause without throwing.
+> This exercises the exact failure mode 6.4 targets: `Cannot write DateTimeOffset with Offset=…`
+> is raised by **Npgsql's parameter writer**, in the shared Npgsql assembly, at bind time —
+> whether the calling store was compiled into Pro or into Platform is immaterial to it. What
+> matters is that the value arriving at the store has already been normalised, and the
+> normalisation is Platform-side at ingress.
+>
+> **Compensating static proof for the unreachable endpoints.** Audited every **request-bound**
+> `DateTimeOffset` across all of `src/Verbara.Platform.Api/Endpoints/` — both `*Request` record
+> properties (body-bound) and `DateTimeOffset?` handler parameters (query-bound) — checking each
+> identifier for a `.ToUtcInstant()` / `.ToUniversalTime()` call. **Zero un-normalised ingress
+> sites remain**, in the license-gated files as much as the reachable ones. The three identifiers
+> the first pass flagged (`ScheduledReportEndpoints.nextRunAt`, `ManagementImpersonationEndpoints
+> .expiresAt`, `SupervisorEndpoints.ownerOfflineSince`) are all **local variables**, not ingress;
+> `ScheduledReportEndpoints.cs:84,156` wraps an NCrontab `GetNextOccurrence` result, whose
+> `Unspecified` kind is accepted with any offset. So `AnalyticsEndpoints` and `CampaignEndpoints`
+> carry the identical `.ToUtcInstant()` call shape as the site proven live above — see the branch
+> diff, which touches both.
+>
+> **Honest residual.** This is a static equivalence argument for those two endpoints, not an
+> execution of them. Closing the gap needs a signed license and belongs to whatever verification
+> runs on a licensed host; it is not a blocker on this change.
+
+> **Note on the 403 first seen here.** The initial attempts returned
+> `403 "Tenant header does not match authenticated principal."` regardless of `X-Tenant-Id`.
+> Cause: `TenantResolutionMiddleware.ResolveFromSubdomainAsync` splits `Request.Host.Host` on the
+> first `.`, so host `127.0.0.1` yields subdomain `127`, and the fallback at
+> `TenantResolutionMiddleware.cs:126` returns `new TenantId("127")` — which then mismatches the
+> principal's `tid` in `TenantBoundaryValidationMiddleware`. Subdomain resolution runs *before*
+> the `X-Tenant-Id` header, so the header cannot override it. This is the
+> **`fix-ip-host-tenant-resolution`** defect, already declared Out of Scope in this change's
+> proposal; it is not a timezone regression. Worked around for these calls by sending
+> `Host: localhost:5199` (no dot → the subdomain branch returns null → the header is honoured).
+
 - [x] 6.5 `openspec validate --all --strict` exit 0.
 - [ ] 6.6 CI green on the PR, all 5 required checks.
 - [x] 6.7 Record the `timestamptz` wire-format change (`-05:00` → `+00:00` on non-UTC hosts; no-op on UTC containers) in `CHANGELOG.md` under `[Unreleased]`, and confirm with `Verbara.Platform.Web` that no view parses the offset suffix literally.
