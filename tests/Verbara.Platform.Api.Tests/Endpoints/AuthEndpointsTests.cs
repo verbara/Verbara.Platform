@@ -527,7 +527,7 @@ public sealed class AuthEndpointsTests
         user.MfaRecoveryCodes.Should().NotContain("old1");
         user.MfaRecoveryCodes.Should().NotContain("old2");
         await authEventStore.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.RecoveryCodesRegenerated),
+            Arg.Is<AuthEvent>(e => e != null && e.EventType == AuthEventTypes.RecoveryCodesRegenerated),
             Arg.Any<CancellationToken>());
     }
 

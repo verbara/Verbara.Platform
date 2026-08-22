@@ -174,7 +174,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         await bridge.HandleEventAsync(new CallQueuedEvent("s-link-1", "primary", _clock.UtcNow, "acme-Support", 1));
 
         await _conversations.Received(1).SaveAsync(
-            Arg.Is<Conversation>(c =>
+            Arg.Is<Conversation>(c => c != null &&
                 c.Channel == ChannelType.Voice &&
                 c.TenantId.Value == Tenant &&
                 c.VoiceLinkedId == "link-1" &&
@@ -184,7 +184,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         // No participant on the test session ⇒ null CallerIdNum ⇒ documented 'anonymous' voice contact.
         await _contacts.Received(1).ResolveAsync(
             Arg.Is<TenantId>(t => t.Value == Tenant),
-            Arg.Is<ChannelAddress>(a => a.Channel == ChannelType.Voice && a.Address == "anonymous"),
+            Arg.Is<ChannelAddress>(a => a != null && a.Channel == ChannelType.Voice && a.Address == "anonymous"),
             Arg.Any<CancellationToken>());
         events.OfType<ConversationStateChangedEvent>()
             .Should().Contain(ev => ev.OldState == "" && ev.NewState == nameof(ConversationState.Queued));
@@ -253,7 +253,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         conversation.Owner!.OwnerId!.Value.Value.Should().Be(AgentGuid);
         await _capacity.Received(1).ReserveAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), ChannelType.Voice, Arg.Any<CancellationToken>());
         agent.State.Should().Be(AgentState.Busy);
-        await _agents.Received(1).SaveAsync(Arg.Is<Agent>(a => a.State == AgentState.Busy), Arg.Any<CancellationToken>());
+        await _agents.Received(1).SaveAsync(Arg.Is<Agent>(a => a != null && a.State == AgentState.Busy), Arg.Any<CancellationToken>());
         events.OfType<AgentStateChangedEvent>().Should().Contain(ev => ev.NewState == nameof(AgentState.Busy));
         events.OfType<ConversationStateChangedEvent>()
             .Should().Contain(ev => ev.OldState == nameof(ConversationState.Queued) && ev.NewState == nameof(ConversationState.Active));
@@ -288,7 +288,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         conversation.State.Should().Be(ConversationState.WrapUp);
         await _capacity.Received(1).ReleaseAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), ChannelType.Voice, Arg.Any<CancellationToken>());
         agent.State.Should().Be(AgentState.ACW);
-        await _agents.Received(1).SaveAsync(Arg.Is<Agent>(a => a.State == AgentState.ACW), Arg.Any<CancellationToken>());
+        await _agents.Received(1).SaveAsync(Arg.Is<Agent>(a => a != null && a.State == AgentState.ACW), Arg.Any<CancellationToken>());
         events.OfType<AgentStateChangedEvent>().Should().Contain(ev => ev.NewState == nameof(AgentState.ACW));
     }
 
@@ -525,7 +525,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
 
         // The reason taxonomy path is stamped onto the freshly-created Conversation, in the SAME save.
         await _conversations.Received(1).SaveAsync(
-            Arg.Is<Conversation>(c =>
+            Arg.Is<Conversation>(c => c != null &&
                 c.VoiceLinkedId == "link-reason" &&
                 c.Metadata.ContainsKey("reasonPath") &&
                 c.Metadata["reasonPath"] == ReasonPath),
@@ -549,7 +549,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
 
         // Conversation still created (voice tracking never depends on a reason), but no reasonPath stamped.
         await _conversations.Received(1).SaveAsync(
-            Arg.Is<Conversation>(c => c.VoiceLinkedId == "link-noreason" && !c.Metadata.ContainsKey("reasonPath")),
+            Arg.Is<Conversation>(c => c != null && c.VoiceLinkedId == "link-noreason" && !c.Metadata.ContainsKey("reasonPath")),
             Arg.Any<CancellationToken>());
     }
 
@@ -599,7 +599,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         await bridge.LinkOutboundCallAsync(session, "PJSIP/acme-agent-x");
 
         await _conversations.Received().SaveAsync(
-            Arg.Is<Conversation>(c => c.ConversationId == conv.ConversationId && c.VoiceLinkedId == "link-out-1"),
+            Arg.Is<Conversation>(c => c != null && c.ConversationId == conv.ConversationId && c.VoiceLinkedId == "link-out-1"),
             Arg.Any<CancellationToken>());
         events.OfType<VoiceScreenPopEvent>().Should().ContainSingle(ev =>
             ev.ConversationId == conv.ConversationId.Value
@@ -688,7 +688,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
 
         // Linked + saved with the call's LinkedId.
         await _conversations.Received().SaveAsync(
-            Arg.Is<Conversation>(c => c.ConversationId == conv.ConversationId && c.VoiceLinkedId == "link-rescue-1"),
+            Arg.Is<Conversation>(c => c != null && c.ConversationId == conv.ConversationId && c.VoiceLinkedId == "link-rescue-1"),
             Arg.Any<CancellationToken>());
         // Owner=null ⇒ the agent screen-pop / capacity-reserve block is intentionally skipped.
         events.OfType<VoiceScreenPopEvent>().Should().BeEmpty();
@@ -875,7 +875,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         // Existing behavior preserved: answered call → WrapUp + capacity released + ACW.
         conversation.State.Should().Be(ConversationState.WrapUp);
         await _capacity.Received(1).ReleaseAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), ChannelType.Voice, Arg.Any<CancellationToken>());
-        await _agents.Received(1).SaveAsync(Arg.Is<Agent>(a => a.State == AgentState.ACW), Arg.Any<CancellationToken>());
+        await _agents.Received(1).SaveAsync(Arg.Is<Agent>(a => a != null && a.State == AgentState.ACW), Arg.Any<CancellationToken>());
     }
 
     [Fact]

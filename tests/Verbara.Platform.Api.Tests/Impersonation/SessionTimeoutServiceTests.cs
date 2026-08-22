@@ -118,7 +118,7 @@ public sealed class SessionTimeoutServiceTests
             "ImpersonationSession",
             Arg.Any<Guid?>(),
             Arg.Any<AuditChanges?>(),
-            Arg.Is<IReadOnlyDictionary<string, string>>(m =>
+            Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null &&
                 m["actor_tenant_id"] == ActorTenant
                 && m["target_tenant_id"] == TargetTenant
                 && m["timeout_minutes"] == "60"),

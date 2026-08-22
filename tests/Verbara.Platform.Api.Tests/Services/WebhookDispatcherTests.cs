@@ -39,7 +39,7 @@ public class WebhookDispatcherTests : IDisposable
         await _dispatcher.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
 
         await _deliveryStore.Received(1).SaveAsync(
-            Arg.Is<WebhookDelivery>(d =>
+            Arg.Is<WebhookDelivery>(d => d != null &&
                 d.SubscriptionId == "s1" &&
                 d.EventType == "conversation.message" &&
                 d.Status == WebhookDeliveryStatus.Pending),

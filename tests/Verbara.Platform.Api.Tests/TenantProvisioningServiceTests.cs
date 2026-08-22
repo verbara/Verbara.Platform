@@ -58,7 +58,7 @@ public class TenantProvisioningServiceTests
         await _sut.OnTenantCreatedAsync(tenant);
 
         await _surveyStore.Received(1).SaveAsync(
-            Arg.Is<Survey>(s => s.Type == SurveyType.Csat),
+            Arg.Is<Survey>(s => s != null && s.Type == SurveyType.Csat),
             Arg.Any<CancellationToken>());
     }
 
@@ -71,7 +71,7 @@ public class TenantProvisioningServiceTests
 
         // 3 locales (en-US / es-419 / pt-BR) × 3 templatable channels (email / sms / voice).
         await _csatTemplateStore.Received(9).SaveAsync(
-            Arg.Is<CsatTemplateEntry>(t => t.IsDefault && t.TenantId == tenant.TenantId),
+            Arg.Is<CsatTemplateEntry>(t => t != null && t.IsDefault && t.TenantId == tenant.TenantId),
             Arg.Any<CancellationToken>());
     }
 
@@ -83,7 +83,7 @@ public class TenantProvisioningServiceTests
         await _sut.OnTenantCreatedAsync(tenant);
 
         await _csatTemplateStore.Received(1).SaveAsync(
-            Arg.Is<CsatTemplateEntry>(t =>
+            Arg.Is<CsatTemplateEntry>(t => t != null &&
                 t.Channel == "voice" && t.Locale == "en-US" && t.IsDefault && t.Subject == null),
             Arg.Any<CancellationToken>());
     }
@@ -96,7 +96,7 @@ public class TenantProvisioningServiceTests
         await _sut.OnTenantCreatedAsync(tenant);
 
         await _retentionStore.Received(1).SaveAsync(
-            Arg.Is<TenantRetentionPolicy>(p =>
+            Arg.Is<TenantRetentionPolicy>(p => p != null &&
                 p.TenantId == tenant.TenantId &&
                 p.ConversationRetentionDays == 365),
             Arg.Any<CancellationToken>());
@@ -110,7 +110,7 @@ public class TenantProvisioningServiceTests
         await _sut.OnTenantCreatedAsync(tenant);
 
         await _queueStore.Received(1).SaveAsync(
-            Arg.Is<Queue>(q => q.Name == "General Support"),
+            Arg.Is<Queue>(q => q != null && q.Name == "General Support"),
             Arg.Any<CancellationToken>());
     }
 

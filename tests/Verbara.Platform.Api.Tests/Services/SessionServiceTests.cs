@@ -79,7 +79,7 @@ public sealed class SessionServiceTests
         remaining.Should().BeEmpty();
 
         await _eventStore.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.SessionRevoked),
+            Arg.Is<AuthEvent>(e => e != null && e.EventType == AuthEventTypes.SessionRevoked),
             Arg.Any<CancellationToken>());
     }
 

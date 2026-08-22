@@ -84,7 +84,7 @@ public sealed class ChangePasswordMfaStepUpTests
 
         // Failure event must be logged
         await authEventStore.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.PasswordChangeFailure),
+            Arg.Is<AuthEvent>(e => e != null && e.EventType == AuthEventTypes.PasswordChangeFailure),
             Arg.Any<CancellationToken>());
 
         // No notification for an unsuccessful change
@@ -124,7 +124,7 @@ public sealed class ChangePasswordMfaStepUpTests
         user.PasswordHash.Should().Be(originalHash);
 
         await authEventStore.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.PasswordChangeFailure),
+            Arg.Is<AuthEvent>(e => e != null && e.EventType == AuthEventTypes.PasswordChangeFailure),
             Arg.Any<CancellationToken>());
     }
 
@@ -163,7 +163,7 @@ public sealed class ChangePasswordMfaStepUpTests
         PasswordService.VerifyPassword(NewValidPassword, user.PasswordHash!).Should().BeTrue();
 
         await authEventStore.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.PasswordChange),
+            Arg.Is<AuthEvent>(e => e != null && e.EventType == AuthEventTypes.PasswordChange),
             Arg.Any<CancellationToken>());
         await notifications.Received(1).CreateAsync(
             TestTenantId,

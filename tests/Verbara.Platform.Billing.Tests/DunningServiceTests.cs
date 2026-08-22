@@ -91,7 +91,7 @@ public class DunningServiceTests
         await svc.ProcessDunningCycleAsync(CancellationToken.None);
 
         await dunningStore.Received(1).UpsertAsync(
-            Arg.Is<DunningRecord>(r => r.TenantId == "tenant-1" && r.CurrentStage == TenantStatus.Warning),
+            Arg.Is<DunningRecord>(r => r != null && r.TenantId == "tenant-1" && r.CurrentStage == TenantStatus.Warning),
             Arg.Any<CancellationToken>());
         await tenantStore.Received(1).UpdateStatusAsync("tenant-1", TenantStatus.Warning, Arg.Any<CancellationToken>());
     }
@@ -116,7 +116,7 @@ public class DunningServiceTests
         await svc.ProcessDunningCycleAsync(CancellationToken.None);
 
         await dunningStore.Received(1).UpsertAsync(
-            Arg.Is<DunningRecord>(r => r.TenantId == "tenant-2" && r.CurrentStage == TenantStatus.Degraded),
+            Arg.Is<DunningRecord>(r => r != null && r.TenantId == "tenant-2" && r.CurrentStage == TenantStatus.Degraded),
             Arg.Any<CancellationToken>());
         await tenantStore.Received(1).UpdateStatusAsync("tenant-2", TenantStatus.Degraded, Arg.Any<CancellationToken>());
     }
@@ -149,7 +149,7 @@ public class DunningServiceTests
         await svc.ProcessDunningCycleAsync(CancellationToken.None);
 
         await dunningStore.Received(1).UpsertAsync(
-            Arg.Is<DunningRecord>(r => r.TenantId == "tenant-3" && r.CurrentStage == TenantStatus.Suspended),
+            Arg.Is<DunningRecord>(r => r != null && r.TenantId == "tenant-3" && r.CurrentStage == TenantStatus.Suspended),
             Arg.Any<CancellationToken>());
         await tenantStore.Received(1).UpdateStatusAsync("tenant-3", TenantStatus.Suspended, Arg.Any<CancellationToken>());
         invoice.PaymentStatus.Should().Be(PaymentStatus.Delinquent);
@@ -183,7 +183,7 @@ public class DunningServiceTests
         await svc.ProcessDunningCycleAsync(CancellationToken.None);
 
         await dunningStore.Received(1).UpsertAsync(
-            Arg.Is<DunningRecord>(r => r.TenantId == "tenant-4" && r.CurrentStage == TenantStatus.PendingDeletion),
+            Arg.Is<DunningRecord>(r => r != null && r.TenantId == "tenant-4" && r.CurrentStage == TenantStatus.PendingDeletion),
             Arg.Any<CancellationToken>());
         await tenantStore.Received(1).UpdateStatusAsync("tenant-4", TenantStatus.PendingDeletion, Arg.Any<CancellationToken>());
         invoice.PaymentStatus.Should().Be(PaymentStatus.WrittenOff);

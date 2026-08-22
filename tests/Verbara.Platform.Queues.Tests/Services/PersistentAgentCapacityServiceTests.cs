@@ -54,7 +54,7 @@ public class PersistentAgentCapacityServiceTests
         await sut.ReserveAsync(Tenant, AgentId, ChannelType.Voice, CancellationToken.None);
 
         await store.Received(1).UpsertAsync(
-            Arg.Is<AgentCapacityRecord>(r =>
+            Arg.Is<AgentCapacityRecord>(r => r != null &&
                 r.TenantId == Tenant.Value &&
                 r.AgentId == AgentId.Value &&
                 r.VoiceLoad == 1),
@@ -73,7 +73,7 @@ public class PersistentAgentCapacityServiceTests
         await sut.ReleaseAsync(Tenant, AgentId, ChannelType.Voice, CancellationToken.None);
 
         await store.Received(1).UpsertAsync(
-            Arg.Is<AgentCapacityRecord>(r =>
+            Arg.Is<AgentCapacityRecord>(r => r != null &&
                 r.TenantId == Tenant.Value &&
                 r.AgentId == AgentId.Value &&
                 r.VoiceLoad == 0),
@@ -109,7 +109,7 @@ public class PersistentAgentCapacityServiceTests
         // The persisted record's ChatLoad reflects the POOLED chat total (2), not 0 — even though
         // the work is WhatsApp-typed, the inner pools it onto the canonical WebChat bucket.
         await store.Received(1).UpsertAsync(
-            Arg.Is<AgentCapacityRecord>(r =>
+            Arg.Is<AgentCapacityRecord>(r => r != null &&
                 r.TenantId == Tenant.Value &&
                 r.AgentId == AgentId.Value &&
                 r.ChatLoad == 2),

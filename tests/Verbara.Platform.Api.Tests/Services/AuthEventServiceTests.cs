@@ -20,7 +20,7 @@ public sealed class AuthEventServiceTests
         await _sut.LogAsync("t1", "u1", AuthEventTypes.LoginSuccess, "127.0.0.1", "TestAgent", null, CancellationToken.None);
 
         await _store.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e =>
+            Arg.Is<AuthEvent>(e => e != null &&
                 e.TenantId == "t1" &&
                 e.UserId == "u1" &&
                 e.EventType == AuthEventTypes.LoginSuccess &&
@@ -37,7 +37,7 @@ public sealed class AuthEventServiceTests
         await _sut.LogAsync("t1", "u1", AuthEventTypes.LoginFailure, null, null, details, CancellationToken.None);
 
         await _store.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e =>
+            Arg.Is<AuthEvent>(e => e != null &&
                 e.Details != null &&
                 e.Details.RootElement.GetProperty("reason").GetString() == "bad password"),
             Arg.Any<CancellationToken>());

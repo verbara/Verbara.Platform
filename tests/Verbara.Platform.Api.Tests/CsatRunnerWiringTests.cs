@@ -219,7 +219,7 @@ public sealed class CsatRunnerWiringTests : IClassFixture<UnifiedPlatformApiFact
             await conversationService.Received(1).SendMessageAsync(
                 Arg.Is<EntityId>(id => id.Value == conversationId.Value),
                 Arg.Is<TenantId>(t => t.Value == UnifiedPlatformApiFactory.TestTenantId),
-                Arg.Is<MessageEnvelope>(e =>
+                Arg.Is<MessageEnvelope>(e => e != null &&
                     e.Blocks.Count == 1 &&
                     e.Blocks[0] is TextBlock &&
                     ((TextBlock)e.Blocks[0]).Text == "csat_requested"),

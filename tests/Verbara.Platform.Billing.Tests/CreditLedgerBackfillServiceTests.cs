@@ -181,7 +181,7 @@ public class CreditLedgerBackfillServiceTests
 
         var ledger = Substitute.For<ICreditLedgerStore>();
         ledger.PostGrantAsync(
-                Arg.Is<CreditLedgerEntry>(e => e.TenantId == failingTenant),
+                Arg.Is<CreditLedgerEntry>(e => e != null && e.TenantId == failingTenant),
                 Arg.Any<CancellationToken>())
             .Returns(Task.FromException(new InvalidOperationException("ledger error")));
 
@@ -207,7 +207,7 @@ public class CreditLedgerBackfillServiceTests
 
         await act.Should().NotThrowAsync();
         await ledger.Received(1).PostGrantAsync(
-            Arg.Is<CreditLedgerEntry>(e => e.TenantId == okTenant && e.Amount == 2000m),
+            Arg.Is<CreditLedgerEntry>(e => e != null && e.TenantId == okTenant && e.Amount == 2000m),
             Arg.Any<CancellationToken>());
         await ledger.Received(1).PostBackfillConsumptionAsync(
             okTenant, Arg.Any<decimal>(), PeriodKey, Arg.Any<CancellationToken>());

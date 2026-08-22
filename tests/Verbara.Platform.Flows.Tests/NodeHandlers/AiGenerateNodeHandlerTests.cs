@@ -50,7 +50,7 @@ public sealed class AiGenerateNodeHandlerTests
         await handler.ExecuteAsync(node, execution, null, CancellationToken.None);
 
         await llm.Received(1).CompleteAsync(
-            Arg.Is<LlmRequest>(r => r.Messages[0].Content == "Help Alice with their issue."),
+            Arg.Is<LlmRequest>(r => r != null && r.Messages[0].Content == "Help Alice with their issue."),
             Arg.Any<CancellationToken>());
     }
 }

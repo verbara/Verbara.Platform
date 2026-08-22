@@ -206,12 +206,12 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
         var seenUsers = new System.Collections.Generic.Dictionary<string, User>(StringComparer.OrdinalIgnoreCase);
         userStore.ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
                  .Returns(ci => Task.FromResult(PagedResult<User>.Empty(
-                     ((PagedQuery)ci[1]).Page,
-                     ((PagedQuery)ci[1]).PageSize)));
+                     ci.ArgAt<PagedQuery>(1).Page,
+                     ci.ArgAt<PagedQuery>(1).PageSize)));
         userStore.ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
                  .Returns(ci =>
                  {
-                     var query = (PagedQuery)ci[1];
+                     var query = ci.ArgAt<PagedQuery>(1);
                      var emailFilter = (string?)ci[2];
                      IEnumerable<User> pool = seenUsers.Values;
                      if (!string.IsNullOrWhiteSpace(emailFilter))
@@ -224,7 +224,7 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
         userStore.SaveAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
                  .Returns(ci =>
                  {
-                     var u = (User)ci[0];
+                     var u = ci.ArgAt<User>(0);
                      // Emulate idx_users_email UNIQUE: same email + different user_id ⇒ 409.
                      if (!string.IsNullOrEmpty(u.Email)
                          && seenUsers.TryGetValue(u.Email, out var existing)

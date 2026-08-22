@@ -34,7 +34,7 @@ public class SurveyDeliveryTests
 
         await _conversationService.Received(1).SendMessageAsync(
             _conversationId, _tenant,
-            Arg.Is<MessageEnvelope>(e => e.Blocks[0] is InteractiveBlock),
+            Arg.Is<MessageEnvelope>(e => e != null && e.Blocks[0] is InteractiveBlock),
             _senderId, ConversationOwnerKind.Bot, Arg.Any<CancellationToken>());
     }
 
@@ -67,7 +67,7 @@ public class SurveyDeliveryTests
 
         await _conversationService.Received(1).SendMessageAsync(
             _conversationId, _tenant,
-            Arg.Is<MessageEnvelope>(e => e.Blocks[0] is TextBlock),
+            Arg.Is<MessageEnvelope>(e => e != null && e.Blocks[0] is TextBlock),
             _senderId, ConversationOwnerKind.Bot, Arg.Any<CancellationToken>());
     }
 
@@ -81,7 +81,7 @@ public class SurveyDeliveryTests
 
         await _conversationService.Received(1).SendMessageAsync(
             _conversationId, _tenant,
-            Arg.Is<MessageEnvelope>(e => e.Blocks[0] is InteractiveBlock),
+            Arg.Is<MessageEnvelope>(e => e != null && e.Blocks[0] is InteractiveBlock),
             _senderId, ConversationOwnerKind.Bot, Arg.Any<CancellationToken>());
     }
 

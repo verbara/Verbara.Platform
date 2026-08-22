@@ -134,7 +134,7 @@ public class AutomationEngineTests
         _actionExecutor.ExecuteAsync(Arg.Any<AutomationAction>(), Arg.Any<AutomationEvent>(), Arg.Any<CancellationToken>())
             .Returns(callInfo =>
             {
-                var action = (AutomationAction)callInfo[0];
+                var action = callInfo.ArgAt<AutomationAction>(0);
                 executionOrder.Add(action.Config.GetValueOrDefault("_ruleId", "?"));
                 return Task.FromResult(true);
             });
@@ -210,7 +210,7 @@ public class AutomationEngineTests
         await _sut.ProcessEventAsync(BuildEvent(), default);
 
         await _logStore.Received(1).SaveAsync(
-            Arg.Is<AutomationExecutionLog>(l => l.ConditionsMatched && l.RuleId == rule.RuleId),
+            Arg.Is<AutomationExecutionLog>(l => l != null && l.ConditionsMatched && l.RuleId == rule.RuleId),
             Arg.Any<CancellationToken>());
     }
 
@@ -229,7 +229,7 @@ public class AutomationEngineTests
         await _sut.ProcessEventAsync(BuildEvent(), default);
 
         await _logStore.Received(1).SaveAsync(
-            Arg.Is<AutomationExecutionLog>(l => !l.ConditionsMatched),
+            Arg.Is<AutomationExecutionLog>(l => l != null && !l.ConditionsMatched),
             Arg.Any<CancellationToken>());
     }
 

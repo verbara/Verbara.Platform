@@ -31,7 +31,7 @@ public class DefaultMeteringServiceTests
         await service.RecordUsageAsync(Tenant1, UsageType.VoiceInbound, 3.5m, UsageUnit.Minutes, "voice", "call-1", CancellationToken.None);
 
         await store.Received(1).SaveAsync(
-            Arg.Is<UsageRecord>(r =>
+            Arg.Is<UsageRecord>(r => r != null &&
                 r.TenantId == Tenant1 &&
                 r.UsageType == UsageType.VoiceInbound &&
                 r.Quantity == 3.5m &&
@@ -107,7 +107,7 @@ public class DefaultMeteringServiceTests
         await service.RecordUsageAsync(Tenant1, UsageType.WebChatSession, 1m, UsageUnit.Conversations, null, null, CancellationToken.None);
 
         await store.Received(1).SaveAsync(
-            Arg.Is<UsageRecord>(r => r.Channel == null && r.ReferenceId == null),
+            Arg.Is<UsageRecord>(r => r != null && r.Channel == null && r.ReferenceId == null),
             Arg.Any<CancellationToken>());
     }
 }

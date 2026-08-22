@@ -114,7 +114,7 @@ public class SmsConnectorTests
 
         await provider.Received(1).SendAsync(
             Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Is<string>(s => s.Length == 160),
+            Arg.Is<string>(s => s != null && s.Length == 160),
             Arg.Any<CancellationToken>());
     }
 

@@ -265,7 +265,7 @@ public sealed class AuthAdminSessionListingTests : IClassFixture<AuthAdminSessio
                 userStore.GetByIdsAsync(TenantId, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
                     .Returns(ci =>
                     {
-                        var ids = (IReadOnlyCollection<string>)ci[1];
+                        var ids = ci.ArgAt<IReadOnlyCollection<string>>(1);
                         var found = new List<User>();
                         foreach (var id in ids)
                         {
@@ -278,8 +278,8 @@ public sealed class AuthAdminSessionListingTests : IClassFixture<AuthAdminSessio
 
                 userStore.ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
                     .Returns(ci => Task.FromResult(PagedResult<User>.Empty(
-                        ((PagedQuery)ci[1]).Page,
-                        ((PagedQuery)ci[1]).PageSize)));
+                        ci.ArgAt<PagedQuery>(1).Page,
+                        ci.ArgAt<PagedQuery>(1).PageSize)));
 
                 services.AddSingleton(userStore);
 

@@ -93,7 +93,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", false);
         await _ami.Received(1).SendActionAsync(
-            Arg.Is<QueuePauseAction>(a => a.Paused == false && a.Interface == "PJSIP/t1-agent-a1" && a.Reason == "Available"));
+            Arg.Is<QueuePauseAction>(a => a != null && a.Paused == false && a.Interface == "PJSIP/t1-agent-a1" && a.Reason == "Available"));
     }
 
     // ─── Test 2: Break → pause ────────────────────────────────────────────────
@@ -109,7 +109,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
         await _ami.Received(1).SendActionAsync(
-            Arg.Is<QueuePauseAction>(a => a.Paused == true && a.Reason == "Break"));
+            Arg.Is<QueuePauseAction>(a => a != null && a.Paused == true && a.Reason == "Break"));
     }
 
     // ─── Test 3: All 8 states ─────────────────────────────────────────────────
@@ -133,7 +133,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", expectedPaused);
         await _ami.Received(1).SendActionAsync(
-            Arg.Is<QueuePauseAction>(a => a.Paused == expectedPaused));
+            Arg.Is<QueuePauseAction>(a => a != null && a.Paused == expectedPaused));
     }
 
     // ─── Test 4: DB failure — AMI still called ────────────────────────────────
@@ -222,7 +222,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
         await _ami.Received(1).SendActionAsync(
-            Arg.Is<QueuePauseAction>(a => a.Paused == true && a.Interface == "PJSIP/t1-agent-a1" && a.Reason == "Break"));
+            Arg.Is<QueuePauseAction>(a => a != null && a.Paused == true && a.Interface == "PJSIP/t1-agent-a1" && a.Reason == "Break"));
     }
 
     [Fact]
@@ -236,7 +236,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", false);
         await _ami.Received(1).SendActionAsync(
-            Arg.Is<QueuePauseAction>(a => a.Paused == false && a.Interface == "PJSIP/t1-agent-a1" && a.Reason == "pause_cancelled"));
+            Arg.Is<QueuePauseAction>(a => a != null && a.Paused == false && a.Interface == "PJSIP/t1-agent-a1" && a.Reason == "pause_cancelled"));
     }
 
     [Fact]
@@ -250,7 +250,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", true);
         await _ami.Received(1).SendActionAsync(
-            Arg.Is<QueuePauseAction>(a => a.Paused == true && a.Reason == "Break"));
+            Arg.Is<QueuePauseAction>(a => a != null && a.Paused == true && a.Reason == "Break"));
     }
 
     [Fact]
@@ -264,7 +264,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
 
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", false);
         await _ami.Received(1).SendActionAsync(
-            Arg.Is<QueuePauseAction>(a => a.Paused == false && a.Reason == "Available"));
+            Arg.Is<QueuePauseAction>(a => a != null && a.Paused == false && a.Reason == "Available"));
     }
 
     public void Dispose()

@@ -39,7 +39,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
         (await inner.GetByIdAsync(queue.TenantId, queue.QueueId, CancellationToken.None))
             .Should().NotBeNull("the write must delegate to the inner store");
         await sync.Received(1).SyncQueueAsync(Tenant, queue.Name,
-            Arg.Is<RealtimeQueueOptions>(o => o.Maxlen == 7), Arg.Any<CancellationToken>());
+            Arg.Is<RealtimeQueueOptions>(o => o != null && o.Maxlen == 7), Arg.Any<CancellationToken>());
     }
 
     [Fact]

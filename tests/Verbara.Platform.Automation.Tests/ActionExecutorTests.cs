@@ -148,7 +148,7 @@ public class ActionExecutorTests
 
         result.Should().BeTrue();
         await _timerStore.Received(1).SaveAsync(
-            Arg.Is<ScheduledTimer>(t =>
+            Arg.Is<ScheduledTimer>(t => t != null &&
                 t.ConversationId == ConvId &&
                 t.FireAt == Now.AddSeconds(300)),
             Arg.Any<CancellationToken>());

@@ -57,7 +57,7 @@ public sealed class AccountLockoutServiceTests
         user.LockedUntil.Should().NotBeNull();
         user.LockedUntil.Should().BeCloseTo(DateTimeOffset.UtcNow.AddMinutes(15), TimeSpan.FromSeconds(5));
         await _eventStore.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.Lockout),
+            Arg.Is<AuthEvent>(e => e != null && e.EventType == AuthEventTypes.Lockout),
             Arg.Any<CancellationToken>());
     }
 
@@ -90,7 +90,7 @@ public sealed class AccountLockoutServiceTests
         user.LockedUntil.Should().BeNull();
         await _userStore.Received(1).SaveAsync(user, Arg.Any<CancellationToken>());
         await _eventStore.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e => e.EventType == "admin_unlock"),
+            Arg.Is<AuthEvent>(e => e != null && e.EventType == "admin_unlock"),
             Arg.Any<CancellationToken>());
     }
 }

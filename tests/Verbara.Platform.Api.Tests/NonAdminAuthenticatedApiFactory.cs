@@ -103,8 +103,8 @@ public sealed class NonAdminAuthenticatedApiFactory : WebApplicationFactory<Prog
                  .Returns(Task.FromResult<User?>(testUser));
         userStore.ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
                  .Returns(ci => Task.FromResult(PagedResult<User>.Empty(
-                     ((PagedQuery)ci[1]).Page,
-                     ((PagedQuery)ci[1]).PageSize)));
+                     ci.ArgAt<PagedQuery>(1).Page,
+                     ci.ArgAt<PagedQuery>(1).PageSize)));
         services.AddSingleton(userStore);
     }
 

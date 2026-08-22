@@ -94,7 +94,7 @@ public sealed class WorkFailoverWorkerTests
             "Conversation",
             Arg.Any<Guid?>(),
             Arg.Any<AuditChanges?>(),
-            Arg.Is<IReadOnlyDictionary<string, string>>(m => m["reason"] == "no_origin_queue"),
+            Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null && m["reason"] == "no_origin_queue"),
             Arg.Any<DateTimeOffset?>(),
             Arg.Any<CancellationToken>());
     }
@@ -124,7 +124,7 @@ public sealed class WorkFailoverWorkerTests
             "Conversation",
             Arg.Any<Guid?>(),
             Arg.Any<AuditChanges?>(),
-            Arg.Is<IReadOnlyDictionary<string, string>>(m => m["reason"] == "max_attempts"),
+            Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null && m["reason"] == "max_attempts"),
             Arg.Any<DateTimeOffset?>(),
             Arg.Any<CancellationToken>());
     }
@@ -195,7 +195,7 @@ public sealed class WorkFailoverWorkerTests
             "Conversation",
             Arg.Any<Guid?>(),
             Arg.Any<AuditChanges?>(),
-            Arg.Is<IReadOnlyDictionary<string, string>>(m =>
+            Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null &&
                 m["former_agent"] == agent.AgentId.Value
                 && m["origin_queue"] == OriginQueue
                 && m["attempt"] == "1"),

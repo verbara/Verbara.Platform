@@ -90,7 +90,7 @@ internal sealed class AuthHandlerFixture
         RefreshTokenStore.GetByHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
-                storedTokens.TryGetValue(ci.Arg<string>(), out var t);
+                storedTokens.TryGetValue(ci.ArgAt<string>(0), out var t);
                 return Task.FromResult<RefreshToken?>(t);
             });
         RefreshTokenStore.RevokeAsync(Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())

@@ -145,7 +145,7 @@ public sealed class AgentOutboundDialServiceTests
         var outcome = await sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
 
         await _conversations.Received(1).SaveAsync(
-            Arg.Is<Conversation>(c =>
+            Arg.Is<Conversation>(c => c != null &&
                 c.ConversationId.Value == outcome.CorrelationId
                 && c.Channel == ChannelType.Voice
                 && c.Owner!.Kind == ConversationOwnerKind.Agent

@@ -48,7 +48,7 @@ public class DefaultMediaServiceTests
         file.StoragePath.Should().Be("/storage/path/file.jpg");
         file.TenantId.Should().Be(Tenant1);
         file.UploadedAt.Should().Be(FixedNow);
-        await store.Received(1).SaveAsync(Arg.Is<MediaFile>(f => f.FileId == file.FileId), Arg.Any<CancellationToken>());
+        await store.Received(1).SaveAsync(Arg.Is<MediaFile>(f => f != null && f.FileId == file.FileId), Arg.Any<CancellationToken>());
     }
 
     [Fact]
