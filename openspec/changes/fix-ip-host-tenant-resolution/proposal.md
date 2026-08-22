@@ -3,21 +3,31 @@ tier: PEQUEÑO
 owner: Harol A. Reina H.
 approver: Harol A. Reina H.
 stakeholder: SMB self-host operators reaching the box by IP address; anyone running the host locally
-decision_ref: Platform/ADR-0002
+decision_ref: Platform/ADR-0038
 ---
 
 ## Why
 
-**A Platform host reached over a bare IPv4 address resolves a bogus tenant, and every authenticated
-request then fails with 403.**
+**A Platform host reached over a bare IPv4 address resolves a phantom tenant. Customer callers then get
+403 on everything; Platform and Partner callers get something worse — they are let through, still scoped
+to the phantom tenant.**
 
 `TenantResolutionMiddleware.ResolveFromSubdomainAsync` splits the request host on its first `.` and
 treats the leading label as a subdomain. For `127.0.0.1` that label is **`127`**, which is not in
 the `www` / `api` / `localhost` exclusion list, so resolution returns `TenantId("127")`. Crucially
 this runs **before** the `X-Tenant-Id` header is consulted, so the header cannot correct it.
-`TenantBoundaryValidationMiddleware` then compares the JWT's `tid` against `127`, finds a mismatch,
-and — because the caller's tenant is a `Customer`, not `Platform`/`Partner` — returns
-`403 "Tenant header does not match authenticated principal."`
+
+What happens next depends on who is calling, and only one of the two outcomes was originally reported:
+
+- **Customer principals — 403.** `TenantBoundaryValidationMiddleware` compares the JWT's `tid` against
+  `127`, finds a mismatch, and returns `403 "Tenant header does not match authenticated principal."`
+  Noisy, but the door closes.
+- **Platform / Partner principals — silent mis-scoping.** `TenantBoundaryValidationMiddleware:91-97`
+  lets those two tenant types through on a mismatch, because operating on another tenant is legitimate
+  for them — but it does **not** correct `Items["TenantId"]`. Every endpoint downstream then reads
+  `TenantId("127")` and reads *and writes* data scoped to a tenant that does not exist, **even when the
+  caller sent a correct `X-Tenant-Id`**. This is a cross-tenant data-scoping defect in the present tense,
+  not a hypothetical one, and it is the more serious of the two outcomes.
 
 Observed live while verifying `encrypt-mfa-secrets-at-rest`: every authenticated call to a host
 bound on `127.0.0.1` returned 403, **with and without** an explicit and correct `X-Tenant-Id`
@@ -28,11 +38,12 @@ The same logic applies to any dotted IPv4 address, so it is not a loopback quirk
 reaches their self-host box at `192.168.1.50` resolves tenant `192`.
 
 **Why it matters.** The primary product track is SMB self-host, where reaching the box by LAN IP
-before DNS exists is the normal first step. The symptom — everything authenticated 403s while login
-itself succeeds — is maximally confusing, and the workaround (use a hostname) is undiscoverable
-from the error message. It also silently costs developer time locally; it was already folded into
-this project's operational notes as a "use localhost, not 127.0.0.1" rule of thumb, but without the
-mechanism, so it kept being rediscovered.
+before DNS exists is the normal first step. For a Customer the symptom — everything authenticated 403s
+while login itself succeeds — is maximally confusing, and the workaround (use a hostname) is
+undiscoverable from the error message. For a Platform admin there is no symptom at all until the data
+turns up under the wrong tenant. It also silently costs developer time locally; it is already recorded
+in this project's operational notes (`.project-memory/reference_local_infra_gotchas.md:50`), mechanism
+and all, which is why the diagnosis was quick this time — but a documented trap is still a trap.
 
 ## What Changes
 
@@ -40,17 +51,20 @@ mechanism, so it kept being rediscovered.
   `null` when the request host parses as an `IPAddress` (v4 or v6), before any label splitting. The
   request then falls through to the `X-Tenant-Id` header, which is the correct source in exactly
   this deployment shape.
-- **Reconsider the resolution order, or justify it.** The header currently loses to the subdomain.
-  That may well be deliberate — a white-label subdomain arguably should pin the tenant — but it is
-  undocumented, and it is what makes the IP case unrecoverable by the caller. Either document the
-  precedence as intentional or invert it; do not leave it implicit.
+- **Stop matching the reserved labels case-sensitively.** `www` / `api` / `localhost` are compared
+  ordinally today, so `WWW.platform.example` resolves tenant `WWW` — the same defect class, on the
+  same three lines.
+- **Document the resolution order rather than inverting it.** The header currently loses to the
+  subdomain, which is what makes the IP case unrecoverable by the caller. Keeping that order is
+  defensible (a white-label subdomain should pin the tenant) but it is nowhere stated, and an
+  undocumented precedence is indistinguishable from an accident. A new ADR-0038 becomes its home.
 - **Make the 403 explain itself.** The response says the header does not match the principal
   without saying what was resolved or from where. Naming the resolved tenant and its source
-  (subdomain / header / path) turns a dead end into a one-line diagnosis. Weigh this against not
-  leaking tenant existence to an unauthenticated caller — the caller here is authenticated, so the
-  information is about their own request.
-- **Regression coverage:** a test per resolution source, including a host that is a bare IPv4
-  address with a valid `X-Tenant-Id` header, asserting the header wins.
+  (subdomain / header / path) turns a dead end into a one-line diagnosis. The caller at that point is
+  authenticated, so the information is about their own request.
+- **Regression coverage:** a test per resolution source, including a bare IPv4 host with a valid
+  `X-Tenant-Id` asserting the header wins, and a Platform-principal case asserting the resolved tenant
+  is the real one rather than the phantom.
 
 ## Capabilities
 
@@ -65,20 +79,35 @@ mechanism, so it kept being rediscovered.
 ## Impact
 
 - **Source:** `src/Verbara.Platform.Api/Middleware/TenantResolutionMiddleware.cs`
-  (`ResolveFromSubdomainAsync` and possibly the resolution order in `ResolveTenantIdAsync`);
-  optionally `TenantBoundaryValidationMiddleware`'s 403 body.
+  (`ResolveFromSubdomainAsync`, and `ResolveTenantIdAsync` to carry the resolution source);
+  `TenantBoundaryValidationMiddleware`'s 403 body; the two auth-time writers of `Items["TenantId"]`
+  so the source they imply is not stale.
 - **Tests:** resolution-source coverage in `Verbara.Platform.Api.Tests`.
-- **Docs:** the operational note that currently says "use `localhost`, not `127.0.0.1`" can state
-  the mechanism, or be deleted once the fix lands.
+- **Docs:** ADR-0038 plus the seven live documents that state or imply the precedence today. The
+  operational note at `.project-memory/reference_local_infra_gotchas.md:50` already states the full
+  mechanism correctly; once the fix lands it becomes **redundant**, so it is retitled or deleted — not
+  "completed".
 - **No schema change. No cross-repo impact.**
-- **Behavioural note:** any deployment that today relies on a *numeric* leading label resolving as a
-  tenant id would change behaviour. No such tenant naming exists in this product (tenant ids are
-  slugs like `platform`, `acme`), so the risk is theoretical — but the change must confirm it rather
-  than assume.
+- **Behavioural note:** any deployment relying on a *numeric* leading label resolving as a tenant id
+  changes behaviour. The naming audit found none: no seeder, migration, fixture, test, compose file,
+  demo script or doc creates or expects one. State that as **"nothing in the product uses numeric tenant
+  ids"**, *not* "the system prevents them" — `SetupEndpoints.IsValidSlug:280-291` permits digits and
+  `ManagementTenantEndpoints.CreateTenant:76-137` applies no format validation at all, so an admin who
+  tries can create `"999"`.
 
 ### Out of Scope (explicit)
 
-- **The `DateTimeOffset` `Local`-kind crash** found in the same session — separate defect, tracked
-  as `fix-local-kind-datetimeoffset`.
+- **The `DateTimeOffset` `Local`-kind crash** found in the same session — separate defect, shipped as
+  `fix-local-kind-datetimeoffset`.
 - **Reworking white-label subdomain resolution.** The branding-store lookup stays as it is; this
   change only stops an IP literal from entering that path at all.
+- **The backward-compat fallback for dotted non-IP hostnames** (`TenantResolutionMiddleware.cs:126`,
+  "unknown subdomain becomes the tenant id"). A box reached at `verbara.acme-corp.lan`,
+  `platform-api.internal`, or a Kubernetes service name still resolves a phantom tenant the same way,
+  and there `localhost` is not an available workaround. Removing the fallback is a live behavioural
+  change for real deployments — `SubdomainResolutionTests.cs:69` pins it deliberately — so it needs an
+  operator escape hatch and its own decision. Recorded here as **accepted residual risk**, carried into
+  ADR-0038, with a follow-up change to be opened.
+- **The rate-limiting defects** surfaced while scoping this change: the `"per-tenant"` and
+  `"global-safety"` policies are defined but attached to no endpoint, and the `Items["TenantId"]`
+  string type-test is wrong at three sites. Independent, larger, and security-relevant — its own change.
