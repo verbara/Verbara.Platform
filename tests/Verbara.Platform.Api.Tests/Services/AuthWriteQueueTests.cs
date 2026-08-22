@@ -84,7 +84,7 @@ public sealed class AuthWriteQueueTests
             Arg.Is<EntityId>(u => u.Value == "u1"),
             Arg.Any<CancellationToken>());
         await userStore.Received(1).SaveAsync(
-            Arg.Is<User>(u =>
+            Arg.Is<User>(u => u != null &&
                 u.LastLoginAt == third &&
                 u.FailedLoginAttempts == 0 &&
                 u.LockedUntil == null),
@@ -144,7 +144,7 @@ public sealed class AuthWriteQueueTests
         await StartAndDrain(sut);
 
         await userStore.Received(1).SaveAsync(
-            Arg.Is<User>(u => u.PasswordHash == newArgon2idHash),
+            Arg.Is<User>(u => u != null && u.PasswordHash == newArgon2idHash),
             Arg.Any<CancellationToken>());
     }
 
@@ -166,7 +166,7 @@ public sealed class AuthWriteQueueTests
         await userStore.Received(1).GetByIdAsync(
             Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>());
         await userStore.Received(1).SaveAsync(
-            Arg.Is<User>(u =>
+            Arg.Is<User>(u => u != null &&
                 u.PasswordHash == newHash &&
                 u.LastLoginAt == loginAt &&
                 u.FailedLoginAttempts == 0 &&
@@ -225,10 +225,10 @@ public sealed class AuthWriteQueueTests
         // path that runs when shutdown pre-empts the main loop entirely).
         var okPersisted = new TaskCompletionSource();
         authEventStore
-            .SaveAsync(Arg.Is<AuthEvent>(e => e.UserId == "u_ok"), Arg.Any<CancellationToken>())
+            .SaveAsync(Arg.Is<AuthEvent>(e => e != null && e.UserId == "u_ok"), Arg.Any<CancellationToken>())
             .Returns(_ => { okPersisted.TrySetResult(); return Task.CompletedTask; });
         authEventStore
-            .SaveAsync(Arg.Is<AuthEvent>(e => e.UserId == "u_cancel"), Arg.Any<CancellationToken>())
+            .SaveAsync(Arg.Is<AuthEvent>(e => e != null && e.UserId == "u_cancel"), Arg.Any<CancellationToken>())
             .Returns(Task.FromException(new OperationCanceledException()));
         using var sut = NewQueue(services: services, flushInterval: TimeSpan.FromSeconds(5));
 
@@ -242,7 +242,7 @@ public sealed class AuthWriteQueueTests
 
         // The already-persisted event must be written EXACTLY once (no drain re-run).
         await authEventStore.Received(1).SaveAsync(
-            Arg.Is<AuthEvent>(e => e.UserId == "u_ok"), Arg.Any<CancellationToken>());
+            Arg.Is<AuthEvent>(e => e != null && e.UserId == "u_ok"), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -286,7 +286,7 @@ public sealed class AuthWriteQueueTests
     {
         var userStore = Substitute.For<IUserStore>();
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult<User?>(MakeUser(((EntityId)ci[1]).Value, ((TenantId)ci[0]).Value)));
+            .Returns(ci => Task.FromResult<User?>(MakeUser(ci.ArgAt<EntityId>(1).Value, ci.ArgAt<TenantId>(0).Value)));
         userStore.SaveAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
         var authEventStore = Substitute.For<IAuthEventStore>();

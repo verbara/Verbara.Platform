@@ -215,7 +215,7 @@ public class InboundMessagePipelineTests
         await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
 
         await _messageStore.Received(1).SaveAsync(
-            Arg.Is<Message>(m =>
+            Arg.Is<Message>(m => m != null &&
                 m.Direction == MessageDirection.Inbound &&
                 m.DeliveryStatus == MessageDeliveryStatus.Delivered &&
                 m.Channel == Channel &&

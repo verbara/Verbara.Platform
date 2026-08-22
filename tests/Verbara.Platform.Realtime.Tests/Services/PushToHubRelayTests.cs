@@ -148,7 +148,7 @@ public sealed class PushToHubRelayTests
 
         mocks.HubClients.Received(1).Group("tenant:acme");
         await mocks.GroupClient.Received(1).OnConversationStateChanged(
-            Arg.Is<ConversationStatePayload>(p =>
+            Arg.Is<ConversationStatePayload>(p => p != null &&
                 p.ConversationId == "conv-1" &&
                 p.TenantId == "acme" &&
                 p.PreviousState == "queued" &&
@@ -178,7 +178,7 @@ public sealed class PushToHubRelayTests
 
         mocks.HubClients.Received(1).Group("tenant:acme");
         await mocks.GroupClient.Received(1).OnAgentStateChanged(
-            Arg.Is<AgentStatePayload>(p =>
+            Arg.Is<AgentStatePayload>(p => p != null &&
                 p.AgentId == "agent-42" &&
                 p.TenantId == "acme" &&
                 p.ReasonCode == "break" &&
@@ -213,7 +213,7 @@ public sealed class PushToHubRelayTests
 
         mocks.HubClients.Received(1).Group("supervisor:acme");
         await mocks.GroupClient.Received(1).OnCsatResponseRecorded(
-            Arg.Is<CsatResponseRecordedPayload>(p =>
+            Arg.Is<CsatResponseRecordedPayload>(p => p != null &&
                 p.TenantId == "acme" &&
                 p.Rating == 5 &&
                 p.QueueName == "support-tier1" &&
@@ -245,7 +245,7 @@ public sealed class PushToHubRelayTests
         await WaitForDispatch(relay);
 
         await mocks.GroupClient.Received(1).OnCsatResponseRecorded(
-            Arg.Is<CsatResponseRecordedPayload>(p =>
+            Arg.Is<CsatResponseRecordedPayload>(p => p != null &&
                 p.Channel == "voice" &&
                 p.Rating == 4 &&
                 p.QueueName == "support-tier1" &&
@@ -342,7 +342,7 @@ public sealed class PushToHubRelayTests
 
         mocks.HubClients.Received(1).Group("admins:platform");
         await mocks.GroupClient.Received(1).OnClusterNodeStateChanged(
-            Arg.Is<ClusterNodeStatePayload>(p =>
+            Arg.Is<ClusterNodeStatePayload>(p => p != null &&
                 p.NodeId == "node-1" &&
                 p.PreviousState == "Healthy" &&
                 p.NewState == "Degraded"));

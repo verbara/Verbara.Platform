@@ -50,7 +50,7 @@ public sealed class TimerPollingServiceTests : IDisposable
         await _sut.PollAsync(default);
 
         await _automationEngine.Received(1).ProcessEventAsync(
-            Arg.Is<AutomationEvent>(e =>
+            Arg.Is<AutomationEvent>(e => e != null &&
                 e.Trigger == AutomationTrigger.TimerElapsed &&
                 e.ConversationId == ConvId &&
                 e.TenantId == Tenant),
@@ -126,7 +126,7 @@ public sealed class TimerPollingServiceTests : IDisposable
         await _sut.PollAsync(default);
 
         await _automationEngine.Received(1).ProcessEventAsync(
-            Arg.Is<AutomationEvent>(e => e.OccurredAt == Now),
+            Arg.Is<AutomationEvent>(e => e != null && e.OccurredAt == Now),
             Arg.Any<CancellationToken>());
     }
 

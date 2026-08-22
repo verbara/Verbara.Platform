@@ -143,7 +143,7 @@ public sealed class NotificationServiceTests : IDisposable
 
         // Assert
         await _notificationStore.Received(1)
-            .SaveAsync(Arg.Is<Notification>(n =>
+            .SaveAsync(Arg.Is<Notification>(n => n != null &&
                 n.TenantId == "t1" &&
                 n.UserId == "u1" &&
                 n.Type == "billing.dunning_escalated" &&
@@ -193,7 +193,7 @@ public sealed class NotificationServiceTests : IDisposable
 
         // Assert
         await _emailService.Received(1)
-            .SendAsync(Arg.Is<EmailMessage>(m =>
+            .SendAsync(Arg.Is<EmailMessage>(m => m != null &&
                 m.Subject == "[Critical] Dunning escalated" &&
                 m.Recipients.Count == 1 &&
                 m.Recipients[0].Email == "admin@acme.com"),
@@ -244,11 +244,11 @@ public sealed class NotificationServiceTests : IDisposable
 
         // Assert — notifications in both tenants
         await _notificationStore.Received(1)
-            .SaveAsync(Arg.Is<Notification>(n => n.TenantId == "customer-1"),
+            .SaveAsync(Arg.Is<Notification>(n => n != null && n.TenantId == "customer-1"),
                 Arg.Any<CancellationToken>());
 
         await _notificationStore.Received(1)
-            .SaveAsync(Arg.Is<Notification>(n =>
+            .SaveAsync(Arg.Is<Notification>(n => n != null &&
                 n.TenantId == "partner-1" &&
                 n.Title.Contains("[CustomerCo]")),
                 Arg.Any<CancellationToken>());

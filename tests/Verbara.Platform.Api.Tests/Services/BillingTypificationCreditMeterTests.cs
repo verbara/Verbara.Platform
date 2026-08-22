@@ -75,7 +75,7 @@ public sealed class BillingTypificationCreditMeterTests
         await sut.RecordAsync(new TenantId("t1"), "conv1", promptTokens: 30, completionTokens: 70, totalTokens: 100, "gpt-x", CancellationToken.None);
 
         await metering.Received(1).RecordBatchAsync(
-            Arg.Is<IReadOnlyList<UsageRecord>>(r =>
+            Arg.Is<IReadOnlyList<UsageRecord>>(r => r != null &&
                 r.Count == 1 &&
                 r[0].UsageType == UsageType.AiAnalysis &&
                 r[0].Unit == UsageUnit.Tokens &&

@@ -60,7 +60,7 @@ public class WebhookDeliveryServiceTests
 
         handler.Attempts.Should().Be(1);
         await deliveryStore.Received(1).UpdateAsync(
-            Arg.Is<WebhookDelivery>(d => d.Status == WebhookDeliveryStatus.Delivered),
+            Arg.Is<WebhookDelivery>(d => d != null && d.Status == WebhookDeliveryStatus.Delivered),
             Arg.Any<CancellationToken>());
     }
 
@@ -77,7 +77,7 @@ public class WebhookDeliveryServiceTests
 
         handler.Attempts.Should().Be(2, "first attempt threw, policy retried and succeeded");
         await deliveryStore.Received(1).UpdateAsync(
-            Arg.Is<WebhookDelivery>(d => d.Status == WebhookDeliveryStatus.Delivered),
+            Arg.Is<WebhookDelivery>(d => d != null && d.Status == WebhookDeliveryStatus.Delivered),
             Arg.Any<CancellationToken>());
     }
 

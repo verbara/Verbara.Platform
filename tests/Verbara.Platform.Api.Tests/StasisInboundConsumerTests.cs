@@ -454,7 +454,7 @@ public sealed class StasisInboundConsumerTests
         await consumer.EvaluateLeadershipAsync(CancellationToken.None);
 
         await factory.Received(1).CreateAndConnectAsync(
-            Arg.Is<AriClientOptions>(o => o.BaseUrl == "http://asterisk:8088" && o.Application == "verbara"),
+            Arg.Is<AriClientOptions>(o => o != null && o.BaseUrl == "http://asterisk:8088" && o.Application == "verbara"),
             Arg.Any<CancellationToken>());
         client.Received(1).Subscribe(Arg.Any<IObserver<AriEvent>>());
     }

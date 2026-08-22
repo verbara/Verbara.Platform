@@ -48,7 +48,7 @@ public sealed class TrunkConnectivityTesterTests : IDisposable
     /// </summary>
     private void StubCommand(string commandContains, string output) =>
         _ami.SendActionAsync<CommandResponse>(
-                Arg.Is<CommandAction>(a => a.Command != null && a.Command.Contains(commandContains)),
+                Arg.Is<CommandAction>(a => a != null && a.Command != null && a.Command.Contains(commandContains)),
                 Arg.Any<CancellationToken>())
             .Returns(CommandResponseWith(output));
 

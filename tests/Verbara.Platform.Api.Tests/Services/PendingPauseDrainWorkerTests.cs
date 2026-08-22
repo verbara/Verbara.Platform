@@ -102,7 +102,7 @@ public sealed class PendingPauseDrainWorkerTests
             "Agent",
             Arg.Any<Guid?>(),
             Arg.Any<AuditChanges?>(),
-            Arg.Is<IReadOnlyDictionary<string, string>>(m =>
+            Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null &&
                 m["applied_state"] == "Break"
                 && int.Parse(m["stuck_active_work_count"], System.Globalization.CultureInfo.InvariantCulture) > 0
                 && m["pending_since"].Length > 0),

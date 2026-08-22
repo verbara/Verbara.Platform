@@ -32,7 +32,7 @@ public class DefaultAuditServiceTests
         await service.LogAsync(Tenant1, "conversation.created", "Conversation", "conv-1", "user-42", details, CancellationToken.None);
 
         await store.Received(1).SaveAsync(
-            Arg.Is<AuditEntry>(e =>
+            Arg.Is<AuditEntry>(e => e != null &&
                 e.TenantId == Tenant1 &&
                 e.Action == "conversation.created" &&
                 e.TargetType == "Conversation" &&
@@ -51,7 +51,7 @@ public class DefaultAuditServiceTests
         await service.LogAsync(Tenant1, "message.sent", "Message", "msg-1", ct: CancellationToken.None);
 
         await store.Received(1).SaveAsync(
-            Arg.Is<AuditEntry>(e => !string.IsNullOrWhiteSpace(e.EntryId.Value)),
+            Arg.Is<AuditEntry>(e => e != null && !string.IsNullOrWhiteSpace(e.EntryId.Value)),
             Arg.Any<CancellationToken>());
     }
 
@@ -63,7 +63,7 @@ public class DefaultAuditServiceTests
         await service.LogAsync(Tenant1, "message.sent", "Message", "msg-1", ct: CancellationToken.None);
 
         await store.Received(1).SaveAsync(
-            Arg.Is<AuditEntry>(e => e.ActorId == "system"),
+            Arg.Is<AuditEntry>(e => e != null && e.ActorId == "system"),
             Arg.Any<CancellationToken>());
     }
 
@@ -75,7 +75,7 @@ public class DefaultAuditServiceTests
         await service.LogAsync(Tenant1, "agent.state_changed", "Agent", "agent-1", ct: CancellationToken.None);
 
         await store.Received(1).SaveAsync(
-            Arg.Is<AuditEntry>(e => e.OccurredAt == FixedNow),
+            Arg.Is<AuditEntry>(e => e != null && e.OccurredAt == FixedNow),
             Arg.Any<CancellationToken>());
     }
 
@@ -137,7 +137,7 @@ public class DefaultAuditServiceTests
 #pragma warning restore CS0618
 
         await store.Received(1).SaveAsync(
-            Arg.Is<AuditEntry>(e => e.Category == expectedCategory),
+            Arg.Is<AuditEntry>(e => e != null && e.Category == expectedCategory),
             Arg.Any<CancellationToken>());
     }
 
@@ -157,7 +157,7 @@ public class DefaultAuditServiceTests
             metadata: metadata, ct: CancellationToken.None);
 
         await store.Received(1).SaveAsync(
-            Arg.Is<AuditEntry>(e =>
+            Arg.Is<AuditEntry>(e => e != null &&
                 e.TenantId == Tenant1 &&
                 e.Action == "login.success" &&
                 e.Category == "auth" &&

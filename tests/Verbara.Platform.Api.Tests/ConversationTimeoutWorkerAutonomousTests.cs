@@ -167,7 +167,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
         await _conversationStore.DidNotReceive().SaveAsync(conv, Arg.Any<CancellationToken>());
 
         await _submissionStore.Received(1).SaveAsync(
-            Arg.Is<TypificationSubmission>(s =>
+            Arg.Is<TypificationSubmission>(s => s != null &&
                 s.Source == SubmissionSource.AutoAi
                 && s.AutonomousActorId == AutonomousActorId
                 && s.AgentId.Value == AutonomousActorId
@@ -259,7 +259,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
             "Conversation",
             Arg.Any<Guid?>(),
             Arg.Any<AuditChanges?>(),
-            Arg.Is<IReadOnlyDictionary<string, string>>(m => m["reason"] == "SchemaMutation"),
+            Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null && m["reason"] == "SchemaMutation"),
             Arg.Any<DateTimeOffset?>(),
             Arg.Any<CancellationToken>());
     }
@@ -295,7 +295,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
             "Conversation",
             Arg.Any<Guid?>(),
             Arg.Any<AuditChanges?>(),
-            Arg.Is<IReadOnlyDictionary<string, string>>(m => m["reason"] == "LicenseMissing"),
+            Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null && m["reason"] == "LicenseMissing"),
             Arg.Any<DateTimeOffset?>(),
             Arg.Any<CancellationToken>());
     }

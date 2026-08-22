@@ -90,7 +90,7 @@ public sealed class DefaultConversationServiceTests : IDisposable
 
         result.Direction.Should().Be(MessageDirection.Outbound);
         await _messageStore.Received(1).SaveAsync(
-            Arg.Is<Message>(m => m.Direction == MessageDirection.Outbound), Arg.Any<CancellationToken>());
+            Arg.Is<Message>(m => m != null && m.Direction == MessageDirection.Outbound), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public sealed class DefaultConversationServiceTests : IDisposable
             EntityId.From("system"), ConversationOwnerKind.System, CancellationToken.None);
 
         await _connector.Received(1).SendAsync(
-            Arg.Is<OutboundMessage>(m => m.To == address && m.Content == _envelope),
+            Arg.Is<OutboundMessage>(m => m != null && m.To == address && m.Content == _envelope),
             Arg.Any<CancellationToken>());
     }
 

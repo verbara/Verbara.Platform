@@ -107,7 +107,7 @@ public sealed class CallbackOriginatorTests
         await sut.OriginateCallbackAsync(TenantId, "+15551234567", _queueId, _rescuedFrom, 2, CancellationToken.None);
 
         await _conversations.Received(1).SaveAsync(
-            Arg.Is<Conversation>(c =>
+            Arg.Is<Conversation>(c => c != null &&
                 c.Channel == ChannelType.Voice
                 && c.State == ConversationState.Queued
                 && c.Owner == null
@@ -131,7 +131,7 @@ public sealed class CallbackOriginatorTests
         await sut.OriginateCallbackAsync(TenantId, "+15551234567", _queueId, _rescuedFrom, 1, CancellationToken.None);
 
         await _conversations.Received(1).SaveAsync(
-            Arg.Is<Conversation>(c => c.ContactId == resolvedContactId), Arg.Any<CancellationToken>());
+            Arg.Is<Conversation>(c => c != null && c.ContactId == resolvedContactId), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public sealed class CallbackOriginatorTests
         await sut.OriginateCallbackAsync(TenantId, "+15551234567", _queueId, _rescuedFrom, attempts, CancellationToken.None);
 
         await _conversations.Received(1).SaveAsync(
-            Arg.Is<Conversation>(c => c.Metadata["callbackAttempts"] == attempts.ToString(CultureInfo.InvariantCulture)),
+            Arg.Is<Conversation>(c => c != null && c.Metadata["callbackAttempts"] == attempts.ToString(CultureInfo.InvariantCulture)),
             Arg.Any<CancellationToken>());
     }
 

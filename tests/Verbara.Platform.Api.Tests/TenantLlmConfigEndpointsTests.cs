@@ -257,7 +257,7 @@ public sealed class TenantLlmConfigEndpointsTests
 
         // The resolver built a transient provider from the draft config (in-memory only).
         factory.Resolver.Received().BuildTransient(
-            Arg.Is<TenantLlmConfig>(c => c.ApiKey == "sk-draft-3333" && c.Model == "gpt-4o-mini"));
+            Arg.Is<TenantLlmConfig>(c => c != null && c.ApiKey == "sk-draft-3333" && c.Model == "gpt-4o-mini"));
     }
 
     [Fact]
@@ -317,7 +317,7 @@ public sealed class TenantLlmConfigEndpointsTests
 
         // The probe reused the stored key for the same-destination draft.
         factory.Resolver.Received().BuildTransient(
-            Arg.Is<TenantLlmConfig>(c => c.ApiKey == "sk-stored-8888" && c.Model == "gpt-4o"));
+            Arg.Is<TenantLlmConfig>(c => c != null && c.ApiKey == "sk-stored-8888" && c.Model == "gpt-4o"));
     }
 
     // ─── Azure required-field validation ──────────────────────────────────────────────

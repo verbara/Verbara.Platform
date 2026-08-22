@@ -115,11 +115,11 @@ public sealed class VoiceCallControlServiceTests : IDisposable
 
         outcome.Accepted.Should().BeTrue();
         await _ami.Received().SendActionAsync(
-            Arg.Is<SetVarAction>(v => v.Channel == CustomerChannel
+            Arg.Is<SetVarAction>(v => v != null && v.Channel == CustomerChannel
                 && v.Variable == "QUEUE_NAME" && v.Value == "acme-Sales"),
             Arg.Any<CancellationToken>());
         await _ami.Received().SendActionAsync(
-            Arg.Is<RedirectAction>(r => r.Channel == CustomerChannel
+            Arg.Is<RedirectAction>(r => r != null && r.Channel == CustomerChannel
                 && r.Context == "stasis-queue" && r.Exten == "s"),
             Arg.Any<CancellationToken>());
     }
@@ -142,11 +142,11 @@ public sealed class VoiceCallControlServiceTests : IDisposable
 
         outcome.Accepted.Should().BeTrue();
         await _ami.Received().SendActionAsync(
-            Arg.Is<SetVarAction>(v => v.Variable == "TRANSFER_TARGET"
+            Arg.Is<SetVarAction>(v => v != null && v.Variable == "TRANSFER_TARGET"
                 && v.Value == $"PJSIP/acme-agent-{agentId.Value}"),
             Arg.Any<CancellationToken>());
         await _ami.Received().SendActionAsync(
-            Arg.Is<RedirectAction>(r => r.Context == "transfer-agent" && r.Exten == "s"),
+            Arg.Is<RedirectAction>(r => r != null && r.Context == "transfer-agent" && r.Exten == "s"),
             Arg.Any<CancellationToken>());
     }
 
@@ -176,13 +176,13 @@ public sealed class VoiceCallControlServiceTests : IDisposable
 
         outcome.Accepted.Should().BeTrue();
         await _ami.Received().SendActionAsync(
-            Arg.Is<SetVarAction>(v => v.Channel == CustomerChannel && v.Variable == "TRUNK" && v.Value == "pstn-default"),
+            Arg.Is<SetVarAction>(v => v != null && v.Channel == CustomerChannel && v.Variable == "TRUNK" && v.Value == "pstn-default"),
             Arg.Any<CancellationToken>());
         await _ami.Received().SendActionAsync(
-            Arg.Is<SetVarAction>(v => v.Variable == "OUTBOUND_CALLERID" && v.Value == "+15558675309"),
+            Arg.Is<SetVarAction>(v => v != null && v.Variable == "OUTBOUND_CALLERID" && v.Value == "+15558675309"),
             Arg.Any<CancellationToken>());
         await _ami.Received().SendActionAsync(
-            Arg.Is<RedirectAction>(r => r.Channel == CustomerChannel
+            Arg.Is<RedirectAction>(r => r != null && r.Channel == CustomerChannel
                 && r.Context == "outbound-agent" && r.Exten == "+15559998888"), // normalized
             Arg.Any<CancellationToken>());
     }
@@ -199,7 +199,7 @@ public sealed class VoiceCallControlServiceTests : IDisposable
 
         outcome.Accepted.Should().BeTrue();
         await _ami.Received().SendActionAsync(
-            Arg.Is<SetVarAction>(v => v.Variable == "TRUNK" && v.Value == "premium-sip"),
+            Arg.Is<SetVarAction>(v => v != null && v.Variable == "TRUNK" && v.Value == "premium-sip"),
             Arg.Any<CancellationToken>());
     }
 
@@ -232,13 +232,13 @@ public sealed class VoiceCallControlServiceTests : IDisposable
 
         outcome.Accepted.Should().BeTrue();
         await _ami.Received().SendActionAsync(
-            Arg.Is<SetVarAction>(v => v.Channel == CustomerChannel && v.Variable == "SURVEY_ID" && v.Value == "srv-csat-v1"),
+            Arg.Is<SetVarAction>(v => v != null && v.Channel == CustomerChannel && v.Variable == "SURVEY_ID" && v.Value == "srv-csat-v1"),
             Arg.Any<CancellationToken>());
         await _ami.Received().SendActionAsync(
-            Arg.Is<SetVarAction>(v => v.Variable == "SURVEY_TOKEN" && v.Value == "v1.payload.sig"),
+            Arg.Is<SetVarAction>(v => v != null && v.Variable == "SURVEY_TOKEN" && v.Value == "v1.payload.sig"),
             Arg.Any<CancellationToken>());
         await _ami.Received().SendActionAsync(
-            Arg.Is<RedirectAction>(r => r.Channel == CustomerChannel
+            Arg.Is<RedirectAction>(r => r != null && r.Channel == CustomerChannel
                 && r.Context == "survey-ivr" && r.Exten == "s"),
             Arg.Any<CancellationToken>());
     }

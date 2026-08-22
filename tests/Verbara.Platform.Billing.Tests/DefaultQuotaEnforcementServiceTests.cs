@@ -464,7 +464,7 @@ public class DefaultQuotaEnforcementServiceTests
 
         // The rollover-window miss falls through to the mint, reusing PostGrantAsync, BEFORE the balance read.
         await ledger.Received(1).PostGrantAsync(
-            Arg.Is<CreditLedgerEntry>(e =>
+            Arg.Is<CreditLedgerEntry>(e => e != null &&
                 e.TenantId == Tenant1
                 && e.Source == CreditSource.Subscription
                 && e.PeriodKey == "2026-03"

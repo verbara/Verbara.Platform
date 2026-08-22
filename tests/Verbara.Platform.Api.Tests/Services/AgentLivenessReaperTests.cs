@@ -127,7 +127,7 @@ public sealed class AgentLivenessReaperTests
             "Agent",
             Arg.Any<Guid?>(),
             Arg.Any<AuditChanges?>(),
-            Arg.Is<IReadOnlyDictionary<string, string>>(m =>
+            Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null &&
                 m["old_state"] == "Available"
                 && m["reason"] == "missing_presence_key"),
             Arg.Any<DateTimeOffset?>(),

@@ -344,7 +344,7 @@ public sealed class CallbackRescueWorkerTests
                 "Conversation",
                 Arg.Any<Guid?>(),
                 Arg.Any<AuditChanges?>(),
-                Arg.Is<IReadOnlyDictionary<string, string>>(m => m["reason"] == reason),
+                Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null && m["reason"] == reason),
                 Arg.Any<DateTimeOffset?>(),
                 Arg.Any<CancellationToken>());
 
@@ -360,7 +360,7 @@ public sealed class CallbackRescueWorkerTests
                 "Conversation",
                 Arg.Any<Guid?>(),
                 Arg.Any<AuditChanges?>(),
-                Arg.Is<IReadOnlyDictionary<string, string>>(m =>
+                Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null &&
                     m["attempt"] == attempt.ToString(CultureInfo.InvariantCulture)),
                 Arg.Any<DateTimeOffset?>(),
                 Arg.Any<CancellationToken>());

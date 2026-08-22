@@ -52,7 +52,7 @@ public sealed class AiClassifyNodeHandlerTests
         await handler.ExecuteAsync(node, MakeExecution(), FlowTestHelpers.TextMessage("help"), CancellationToken.None);
 
         await llm.Received(1).CompleteAsync(
-            Arg.Is<LlmRequest>(r => r.Messages[0].Role == "system" && r.Messages[0].Content == "Classify this message"),
+            Arg.Is<LlmRequest>(r => r != null && r.Messages[0].Role == "system" && r.Messages[0].Content == "Classify this message"),
             Arg.Any<CancellationToken>());
     }
 }
