@@ -86,7 +86,7 @@
 
   <ItemGroup>
     <PackageVersion Include="QuestPDF" Version="2026.7.3" />
-    <PackageVersion Include="ScottPlot" Version="5.0.55" />
+    <PackageVersion Include="ScottPlot" Version="5.1.59" />
     <PackageVersion Include="MailKit" Version="4.16.0" />
     <PackageVersion Include="MimeKit" Version="4.16.0" />
     <PackageVersion Include="NCrontab" Version="3.4.0" />
