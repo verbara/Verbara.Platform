@@ -99,7 +99,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="StackExchange.Redis" Version="3.1.13" />
+    <PackageVersion Include="StackExchange.Redis" Version="3.1.31" />
     <!-- Pinned same version as Microsoft.AspNetCore.Authentication.JwtBearer to keep the
          ASP.NET Core 10.x band consistent across Verbara.Platform.Realtime (ADR-0022 Phase A). -->
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.5" />
