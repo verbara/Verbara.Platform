@@ -9,6 +9,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [2.23.0] - 2026-08-26
+
 ### Fixed
 
 - **The Platform host no longer depends on running in UTC** (`decision_ref` Platform/ADR-0002, change
@@ -25,7 +29,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a new `ToUtcInstant()` helper in `Verbara.Platform.Core`. Two CI gates were added to
   `scripts/check-endpoint-invariants.py` so neither can regress: **#10** bans the switch from source, and
   **#11** bans `DateTime.SpecifyKind(…, DateTimeKind.Utc)` in Postgres store code — the relabel-without-convert
-  that was silently shifting `CreatedAt` by the host offset at `PostgresBotConfigStore.cs:119`.
+  that was silently shifting `CreatedAt` by the host offset at `PostgresBotConfigStore.cs:119` (#256).
 
   > **Wire-format note:** on a **non-UTC host**, `DateTimeOffset` response fields now serialise with a
   > `+00:00` suffix instead of the host's offset. The instant is unchanged, and this is a **no-op on every
@@ -38,6 +42,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wedged install and one the operator can repair in-product: with a platform admin they can authenticate
   and create anything still missing through the normal API. Both tenant writes are upserts on deterministic
   ids, so a retry adopts a half-written install rather than colliding with it.
+
+- **`dotnet restore` no longer depends on the maintainer's machine layout.** The `local` package
+  source pointed at `../local-nuget-feed/`, a path that exists on one machine only. `NU1301` ("the
+  local source doesn't exist") is fatal under `TreatWarningsAsErrors` and fires on a **missing**
+  directory, never on an empty one — so an empty `./.local-feed/` is now committed, and off that
+  machine restore falls through to the remaining sources instead of failing. Every clone was one
+  absent parent directory away from a restore break that nothing announced. (#239)
 
 ### Security
 
@@ -134,7 +145,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   *every* file outside the report — still fires on the first added file. Suite 7 → 10 cases
   (`python3 -m unittest discover scripts/tests`: 62 passed). No version bump, no image rebuild — CI
   machinery only. Rationale, alternatives and the rule as a spec: Pro
-  `openspec/specs/patch-coverage-liveness/`.
+  `openspec/specs/patch-coverage-liveness/`. (#236)
 
 - **`release.yml` now creates the GitHub Release object itself.** The workflow built and
   cosign-signed the four images on every `v*` tag but never created the Release, so each version
@@ -201,6 +212,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resolution plus Native AOT publish behaviour, both covered by the existing required gates —
   notably `AOT Publish (Api)`, which fails on any `warning ILxxxx`. decision_ref
   `Verbara.Sdk/ADR-0040`. (#210)
+
+- **Third-party pins swept forward — 22 Dependabot merges, four of them majors that reach the
+  shipped image.** These landed as individual PRs across the cycle and are recorded here as one
+  movement, because that is how they ship. The majors, and why each matters on this host:
+  **`StackExchange.Redis` `2.12.14` → `3.1.13`** (sessions, cache and the SignalR backplane all sit
+  on it), **`AWSSDK.S3` `3.7.414.3` → `4.0.102.1`** (media storage), **`System.Reactive` `6.1.0` →
+  `7.0.0`**, and **`Asp.Versioning.Http` `10.0.0-preview.2` → `10.2.2`**, which retires the last
+  preview pin from the API surface. Also moved: `Azure.Identity` `1.13.2` → `1.21.0`,
+  `BCrypt.Net-Next` `4.0.3` → `4.2.0` (password hashing), `Otp.NET` `1.4.0` → `1.4.1` (TOTP),
+  `QuestPDF` `2025.1.1` → `2026.7.3`, `Scalar.AspNetCore` `2.13.11` → `2.16.20`, `ScottPlot`
+  `5.0.55` → `5.1.59`, `NCrontab` `3.3.3` → `3.4.0`, the three `Microsoft.AspNetCore.*` pins
+  (`JwtBearer`, `OpenIdConnect`, `OpenApi`) `10.0.5` → `10.0.11`, and the `microsoft-extensions`
+  group in two waves (#240, #246). Test-only, never in the image: `NSubstitute` `5.3.0` → `6.0.0`,
+  `Testcontainers` `4.11.0` → `4.14.0`, `Microsoft.AspNetCore.Mvc.Testing` `10.0.5` → `10.0.11`.
+  **No source change accompanies any of them** — no API moved and no behaviour was adopted; the
+  baseline advanced underneath. Verified on `e7f01ba3` (`origin/main`): all eight required CI jobs
+  green, **`AOT Publish (Api)` included**, which fails on any `warning ILxxxx` and is the gate that
+  makes a major bump safe to ship in a Native AOT image. (#240, #241, #242, #243, #244, #245, #246,
+  #247, #248, #249, #250, #251, #252, #253, #254, #260, #261, #262, #263, #264, #265, #266)
 
 ### Fixed
 
