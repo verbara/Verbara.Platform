@@ -1,7 +1,14 @@
 # tenant-auth-config-surface Specification
 
 ## Purpose
-TBD - created by archiving change surface-agent-presence-admin-controls. Update Purpose after archive.
+The admin tenant auth-config API surface, and specifically the part of it that lets an operator see
+and set the pending-pause timeout: `pendingPauseTimeoutMinutes` as an optional partial-update field
+on `PUT /api/v1/admin/auth/config`, echoed back on read, carried by typed sealed records registered
+in `ApiJsonContext` (no reflection, no anonymous `new {}`), with omitted-or-null leaving the
+persisted value untouched exactly as every sibling field does. This capability owns the surface, not
+the behaviour behind it: surfacing the value changes nothing about how the pending-pause sweep
+runs.
+
 ## Requirements
 ### Requirement: The tenant auth-config update request accepts pendingPauseTimeoutMinutes as a partial-update field
 

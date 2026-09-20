@@ -1,7 +1,17 @@
 # typed-response-schemas Specification
 
 ## Purpose
-TBD - created by archiving change openapi-response-schemas. Update Purpose after archive.
+Makes Platform's consumer-facing endpoint groups (`admin-remainder`, `agent`, `analytics`,
+`operations`) describe themselves accurately in `/openapi/v1.json`, so the Web client can be
+generated rather than hand-written. Handlers return the typed `Task<Results<Ok<TDto>, ...>>` shape
+and produce their body through `TypedResults.*` — the `CsatResponseEndpoints.cs` pattern — instead
+of an untyped `Task<IResult>`, which is what makes each success DTO surface as a named
+`components/schemas` entry. Conversion is phased by consumer need, response bodies stay
+byte-identical at runtime, and the build stays warning-clean and AOT-safe (every DTO already lives
+in `ApiJsonContext`). Also owns the emitted schema's shape where it was wrong: one JSON type per
+numeric field, `ComplianceRuleSummaryDto.severity` as a closed enum, and `TopicTrendsResponse`
+spelling its collection `trends`.
+
 ## Requirements
 ### Requirement: Consumer-facing endpoint groups return typed results that surface named response schemas
 
