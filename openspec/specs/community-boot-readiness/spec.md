@@ -1,7 +1,14 @@
 # community-boot-readiness Specification
 
 ## Purpose
-TBD - created by archiving change license-gated-engine-health-degraded. Update Purpose after archive.
+Platform's consumer-side contract for an unlicensed / community (self-host) boot: `GET
+/health/ready` returns HTTP **200**, so the pod joins the load balancer instead of being held
+permanently un-ready. Platform adds no health check of its own to get there — it pins the behaviour
+that falls out of the Pro producer fix (`Verbara.Sdk.Pro/ADR-0017`, spec `engine-health-semantics`):
+a license-blocked `dialer-engine` settles `Degraded`, the aggregate degrades rather than fails, and
+the ASP.NET Core health middleware maps that to 200 rather than 503. Pinned at the consumer by an
+integration test and asserted on the real artifact by the released-image smoke leg.
+
 ## Requirements
 ### Requirement: An unlicensed community boot is READY (HTTP 200) at `/health/ready`
 
