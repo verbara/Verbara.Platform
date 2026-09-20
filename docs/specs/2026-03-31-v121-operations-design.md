@@ -1,6 +1,13 @@
 # v1.2.1 "Operations" Design Spec
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
+> **Superseded — execution procedure.** This is a dated design record, preserved as written on its
+> date. The banner that stood here ordered a sub-skill of a third-party process plugin that is **not
+> installed** in the active Claude config, so the instruction could not be carried out;
+> **verbara-meta/ADR-0023** retired it. How a `tasks.md` is shaped now lives in this repo's own
+> `openspec/config.yaml` — `rules.tasks` (three phases: A foundation batched, B critical components one
+> focused subagent each, C integration batched, a fresh subagent per task) — and the verification gate
+> lives in its `context:`, delivered verbatim by `openspec instructions`. Read the body below as
+> history, not as instruction.
 
 **Goal:** Deliver runtime cluster management, tenant impersonation, and AOT hardening for production multi-instance deployments.
 
