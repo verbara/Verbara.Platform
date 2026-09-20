@@ -15,6 +15,7 @@ CLAUDE.md
 .claude/
 .project-memory/
 .superpowers/
+docs/superpowers/
 **/data/jwt-signing-key.xml
 local-nuget-feed/
 docker/asterisk-config/keys/

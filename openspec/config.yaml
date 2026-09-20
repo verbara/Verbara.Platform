@@ -21,6 +21,11 @@ context: |
   -> RateLimiter -> Authentication -> Authorization (invariant: tenant resolution MUST precede rate limiting
   so per-tenant buckets partition correctly — Program.cs is authoritative; post-auth middlewares follow).
 
+  Verification gate (verbara-meta/ADR-0023, non-negotiable):
+  - Before any commit or push, run the fast, deterministic, non-service steps of this repo's own
+    .github/workflows/ci.yml on the integrated branch — build plus the touched tests plus `openspec validate`
+    is a strict subset, because a tree-scanning guard is tripped by a change anywhere.
+
   Cross-repo standards (CI gating, context hygiene, branch protection) live in the private verbara-meta repo as ADRs.
 
 rules:
@@ -41,7 +46,8 @@ rules:
   tasks:
     - "When the change spans repos, spell out the cross-repo sequence: edit Sdk/Pro -> dotnet pack to local-nuget-feed -> clear NuGet cache -> dotnet restore the consumer."
     - "Verification tasks MUST include `dotnet test` green and CI green, with zero warnings (TreatWarningsAsErrors). EXCEPTION — frontend-only changes hosted here under the hub rule (verbara-meta/ADR-0005): verification is the Web gate set instead (`npm run build`, `npx vitest run`, `npx eslint .`, i18n parity green)."
-    - "Use Subagent-Driven Development with FCM batching: Phase A foundation (batch) -> Phase B critical components (focused) -> Phase C integration (batch)."
+    - "Order execution in three phases — A foundation (batched), B critical components (one focused subagent each), C integration (batched) — with a fresh subagent per task, never inline in the main session."
+    - "For a bug fix, write the failing regression test first, against the unfixed code, and paste its failure verbatim into `tasks.md`. For new capability, tests may batch into Phase C."
 
 operations:
   apply:
