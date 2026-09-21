@@ -44,8 +44,4 @@ Re-verified 2026-07-12 with `grep -n '/media/Data/Source/'`:
 - [x] 3.2 `grep -rn '/media/Data/Source/' docs/specs/` returns no matches across the 8 in-scope
       files (the `tests/**` load-test transcripts stay leaked by design — out of scope).
 - [x] 3.3 `npx -y @fission-ai/openspec@1.6.0 validate --all --strict --no-interactive` — MUST pass.
-- [ ] 3.4 `/xr:doctor` re-scan confirms the `path-leak:Verbara.Platform` WARN family clears for the
-      authored `docs/specs/` prose. — ORCHESTRATOR post-train step: the doctor re-scan runs after the
-      full cross-repo train (Sdk + Pro child legs + this host) lands, not at host archive time. Left
-      unchecked here by design; the host in-scope precondition is met (task 3.2 confirms the 8 files
-      grep-clean of `/media/Data/Source/`).
+- [x] 3.4 `/xr:doctor` re-scan confirms the `path-leak:Verbara.Platform` WARN family clears for the authored `docs/specs/` prose — CONFIRMED 2026-09-20: `bash ../verbara-meta/scripts/xr-doctor.sh` names exactly 2 offending tracked files, `openspec/changes/fix-ip-host-tenant-resolution/design.md` + `tasks.md`, **neither under `docs/specs/`**, and a maintainer-path grep over `docs/specs/` returns 0 matches across all 39 files; the sibling train legs cleared too (`PASS path-leak:Verbara.Sdk`, `PASS path-leak:Verbara.Sdk.Pro`), which is the post-train precondition this box was left open for. The check still WARNs, but on prose authored 2026-08-22 (PR #267) — 40 days after this change archived, outside its scope — and both hits cite the workspace-root `CLAUDE.md`, which sits outside any git repo and has no repo-relative form. Keeping the check green needs a standing in-repo guard (Platform has none today) rather than another sweep; that is a separate concern from this box.

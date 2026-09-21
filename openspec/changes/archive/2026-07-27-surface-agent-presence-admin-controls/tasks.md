@@ -57,9 +57,19 @@
 
 ## 6. Cross-repo handoff (Web child change — NOT this host's edit)
 
-- [ ] 6.1 After this host surfaces the field and CI is green, the Web child change
+- [x] 6.1 After this host surfaces the field and CI is green, the Web child change
   (`web/surface-agent-presence-admin-controls`, buildOrder 2 per `impact.yaml`) regenerates its typed
   client, adds a `pendingPauseTimeoutMinutes` number `Input` on `admin/system/auth-config-page.tsx`
   (mirroring `sessionIdleTimeoutMinutes`), and adds a `useForceOffline` hook + button over the
   already-shipped force-offline endpoint. Web gate: `npm run build`, `npx vitest run`, `npx eslint .`,
   i18n parity green. Driven by `/xr:propagate` then `/xr:apply` — NOT this host.
+  Evidencia (verificada 2026-09-20 en el árbol de Verbara.Platform.Web, no sólo en su registro):
+  change hijo archivado en `openspec/changes/archive/2026-07-27-surface-agent-presence-admin-controls/`
+  (9/9 cajas tildadas); PR Web #229 MERGED 2026-07-27T07:23:11Z con `build`/`test`/`lint`/`i18n` en
+  SUCCESS (archivado por #230, 7ead63c5; liberado en `v3.18.0-web`, 00d06156). Código:
+  `src/core/api/hooks/use-agents.ts:278-286` (`useForceOffline` → `POST
+  /api/v1/admin/agents/{id}/force-offline` con `{ revokeSessions }`); `src/admin/agents/agent-detail.tsx:196`
+  (`data-testid="agent-detail-force-offline"`), `:485` (`confirmationWord="FORCE"`), `:456-469` (toggle
+  de revocación); `src/admin/system/auth-config-page.tsx:231-233` (`auth-config-pendingPauseTimeout`,
+  `value={form.pendingPauseTimeoutMinutes ?? 30}`); `src/core/api/hooks/use-auth-admin.ts:28`
+  (`pendingPauseTimeoutMinutes: number`). Lado host: PR #198 (53ce7cbb), `CHANGELOG.md:430-441`.

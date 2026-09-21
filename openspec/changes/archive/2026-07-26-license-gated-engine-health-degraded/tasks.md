@@ -33,12 +33,16 @@
   `Degraded` and a `description` starting with `dialer license blocked:` (reuse the existing
   `python3` stdlib `json` parse; assert the prefix, never the suffix). Fail the smoke if the entry
   is missing, not `Degraded`, or the prefix is absent.
-- [ ] 3.2 (FOLLOW-UP — NOT shipped in this change) After the sharpened community smoke leg has run
-  green **twice consecutively** while report-only, graduate it in `.github/workflows/release.yml`
-  from report-only (`continue-on-error: true`) to **gating** — drop `continue-on-error` from that
-  leg and/or make a later step `needs:` it. (Follow-up after the first two green runs; not merged
-  with 3.1. Left unticked on purpose: the leg is still `continue-on-error: true` in `release.yml`,
-  gated on two green runs against images carrying the fix — design D5, tasks.md 6.4.)
+- 3.2 (FOLLOW-UP — NOT shipped in this change) Graduate the sharpened community smoke leg in
+  `.github/workflows/release.yml` from report-only (`continue-on-error: true`) to **gating** — drop
+  `continue-on-error` from that leg and/or make a later step `needs:` it (design D5, pre-condition
+  6.4). — **LEFT THIS CHANGE; NOT DONE.** Still report-only as of 2026-09-20: `release.yml:476`
+  `continue-on-error: true` on the `smoke` job, `:472` `name: Post-release functional smoke
+  (report-only)`, and no `needs: smoke` edge anywhere. The 6.4 pre-condition is now **satisfied**
+  (three consecutive greens — see 6.4), so this is unblocked work, not a wait. It is tracked in the
+  open Platform change `openspec/changes/promote-community-smoke-to-gating` (proposed by PR #221,
+  merged 2026-08-02), whose `tasks.md` 2.1–2.3 is this graduation verbatim and whose proposal cites
+  this box by path and line.
 
 ## 4. CHANGELOG
 
@@ -63,5 +67,14 @@
 - [x] 6.2 `openspec validate --all --strict` green.
 - [x] 6.3 CI green on the PR (Platform gate set: build, tests, OpenSpec validation, and any
   invariant scripts). (Feature PR #194 merged green.)
-- [ ] 6.4 (FOLLOW-UP pre-condition for 3.2 — NOT satisfied yet) The released-image smoke community
-  leg is green twice consecutively before the gating promotion in 3.2 lands.
+- [x] 6.4 (FOLLOW-UP pre-condition for 3.2) The released-image smoke community leg is green twice
+  consecutively before the gating promotion in 3.2 lands. — **SATISFIED 2026-07-28; re-verified
+  2026-09-20.** Three consecutive green `smoke` jobs against images carrying the `2.13.0-pro` fix,
+  each logging `Community-boot readiness contract OK (dialer-engine Degraded, 'dialer license
+  blocked:' prefix present).` followed by `=== SMOKE PASSED: … ===`: run `30228537971` (`v2.21.2`,
+  job `89863734271`, 2026-07-27), run `30324647348` (`v2.22.0`, job `90168452552`, 2026-07-28), run
+  `32946067672` (`v2.23.0`, job `98108744545`, 2026-08-26). Non-vacuous: the sharpened assertion
+  landed with commit `258dfbbc` (#194) and is absent from `v2.21.1`, whose smoke job is the
+  counter-example red (run `30184375138`, job conclusion `failure` while the workflow concluded
+  `success` — proof the job conclusion is reported faithfully under `continue-on-error: true`). The
+  promotion this gates is tracked in the open change `promote-community-smoke-to-gating` (#221).
