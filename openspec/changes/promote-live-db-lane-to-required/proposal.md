@@ -54,7 +54,7 @@ reverse it:
 ### But gating is not required, and nobody owns the difference
 
 The promoting change said so in its own words, in the note that still sits above the job
-(`ci.yml:285-288`):
+(`ci.yml:284-287`):
 
 > Gating is NOT the same as required: this check-run is still absent from the required-checks
 > ruleset (17662679). Adding it there is a separate, deliberate repo-config change — a red job here
@@ -81,7 +81,7 @@ operators) that the `Storage.InMemory` mirror can silently diverge from.
   ruleset is not stored in this repo. The context name is the job's `name:` value
   (`ci.yml:289`), which must be matched verbatim.
 - **Rewrite the "gating is NOT the same as required" paragraph of the promotion note**
-  (`ci.yml:285-288`) and the job-level comment (`ci.yml:290-292`), both of which assert a posture
+  (`ci.yml:284-287`) and the job-level comment (`ci.yml:290-292`), both of which assert a posture
   that this change makes false. The note becomes the record of the completed two-step promotion and
   cites the archived change and task this discharges.
 - **Record the three operational consequences, each verified before proposing** (detail in
@@ -89,7 +89,7 @@ operators) that the `Storage.InMemory` mirror can silently diverge from.
   1. **The docs-only fast path stays safe.** `live-db-tests` carries `needs: gate` and the
      byte-identical `if:` guard used by `build-and-test`, `coverage` and `aot-probe` — three jobs
      that are *already* required contexts. A required job that skips under that guard satisfies
-     protection (verbara-meta/ADR-0016 §3.3, field-proven for this repo's ruleset in §4).
+     protection (verbara-meta/ADR-0016 §1, field-proven for this repo's ruleset in §4).
   2. **Dependabot PRs stay mergeable.** The CI-load skip on this job is **step**-level
      (`ci.yml:333-335`, `:340-341`), so the check-run *name* still reports on a bot PR. A
      job-level skip would collapse the context; it is not used here and must not be introduced.

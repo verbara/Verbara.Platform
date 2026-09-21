@@ -65,7 +65,7 @@
   i18n parity green. Driven by `/xr:propagate` then `/xr:apply` — NOT this host.
   Evidencia (verificada 2026-09-20 en el árbol de Verbara.Platform.Web, no sólo en su registro):
   change hijo archivado en `openspec/changes/archive/2026-07-27-surface-agent-presence-admin-controls/`
-  (10/10 cajas tildadas); PR Web #229 MERGED 2026-07-27T07:23:11Z con `build`/`test`/`lint`/`i18n` en
+  (9/9 cajas tildadas); PR Web #229 MERGED 2026-07-27T07:23:11Z con `build`/`test`/`lint`/`i18n` en
   SUCCESS (archivado por #230, 7ead63c5; liberado en `v3.18.0-web`, 00d06156). Código:
   `src/core/api/hooks/use-agents.ts:278-286` (`useForceOffline` → `POST
   /api/v1/admin/agents/{id}/force-offline` con `{ revokeSessions }`); `src/admin/agents/agent-detail.tsx:196`

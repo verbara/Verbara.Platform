@@ -91,7 +91,7 @@ mechanically rather than assumed.
 it adds a fourth job of a shape this repo's ruleset and merge queue have been living with since the
 fast path shipped.
 
-The normative basis is verbara-meta/ADR-0016 §3.3 (a skipped required job satisfies protection,
+The normative basis is verbara-meta/ADR-0016 §1 (a skipped required job satisfies protection,
 which is what makes the job-level fast-path skip legal for required contexts at all) and its §4
 per-repo matrix, whose Platform row anticipated exactly this move — it records the Live-DB lane as
 non-required and notes it may be gated by the fast path too. The field evidence is this repo's own

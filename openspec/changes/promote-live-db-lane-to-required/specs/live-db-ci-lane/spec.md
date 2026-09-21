@@ -70,7 +70,7 @@ Two skips exist and their levels are therefore normative, not stylistic:
 
 - The **docs-only fast path** SHALL remain a job-level condition of the same shape already used by
   the other heavy required jobs in this workflow. A required job skipped under branch protection
-  satisfies protection, which is what makes a job-level skip legal here (verbara-meta/ADR-0016 §3.3,
+  satisfies protection, which is what makes a job-level skip legal here (verbara-meta/ADR-0016 §1,
   with the per-repo applicability recorded in its §4 matrix).
 - The **automated-dependency-PR CI-load skip** SHALL remain **step**-level, applied to the live-DB
   test steps and never to the job. A job-level skip would collapse the check-run context and leave

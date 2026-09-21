@@ -56,7 +56,7 @@ file and no ruleset has been touched yet.
 Do this **before** 2B. The comment edit is what the PR reviews; the ruleset edit is a
 repository-configuration act that must land on a branch already proven green (design D2).
 
-- [ ] 2.1 Rewrite the closing paragraph of the promotion note (`ci.yml:285-288`), which currently
+- [ ] 2.1 Rewrite the closing paragraph of the promotion note (`ci.yml:284-287`), which currently
   reads *"Gating is NOT the same as required: this check-run is still absent from the
   required-checks ruleset (17662679). Adding it there is a separate, deliberate repo-config change
   — a red job here is visible on the PR and blocks nothing automatically."* Replace it with the
@@ -72,7 +72,7 @@ repository-configuration act that must land on a branch already proven green (de
   **non-required** job skipping on a docs diff strands nothing."* The conclusion survives; the
   reason does not. State instead that the job is a required context and that the fast-path skip is
   safe because a **skipped required check satisfies branch protection** (verbara-meta/ADR-0016
-  §3.3), the same way it already does for `build-and-test`, `coverage` and `aot-probe`, which carry
+  §1), the same way it already does for `build-and-test`, `coverage` and `aot-probe`, which carry
   the identical guard and are already required.
 - [ ] 2.3 Reinforce the two step-level dependency-PR skip comments (`ci.yml:333-335` and
   `:340-341`) from rationale into invariant: now that the context is required, a **job**-level skip
