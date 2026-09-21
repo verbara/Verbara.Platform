@@ -146,7 +146,7 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
       ✅ `docs/roadmap.md` — baseline header notes the CSAT train (Pro `2.9.0-pro`); new Shipped rows for
       `v2.17.0` (backfilled) and `v2.18.0 + Web v3.13.0-web` (digital-first, voice deferred, the 5 seams,
       `[Obsolete]` removal at v2.19.0, untyped-Hub follow-up).
-- [ ] 7.4 `git mv docs/plans/active/2026-05-18-platform-240-csat-consumer.md docs/plans/completed/` on ship
+- [x] 7.4 `git mv docs/plans/active/2026-05-18-platform-240-csat-consumer.md docs/plans/completed/` on ship — ✅ hecho en el commit de archivo `58a1b978` (PR **#144**, merged 2026-07-12T02:34:30Z): `git show --name-status --find-renames 58a1b978` → `R100 docs/plans/active/2026-05-18-platform-240-csat-consumer.md → docs/plans/completed/2026-05-18-platform-240-csat-consumer.md`; hoy el fichero está en `docs/plans/completed/` y `docs/plans/active/` solo conserva `2026-05-27-living-docs-from-e2e-tests.md`. (El barrido de referrers que el move exigía llegó tarde, en PR **#148** — ya registrado en verbara-meta `docs/workflows/openspec-guide.md` § Closing routine.)
       ⏭️ Release/archive stage — OUT OF SCOPE for this task (done at ship, alongside 8.3/8.4).
 
 ## 8. Pack + tag + ship (Phase H)
@@ -159,7 +159,7 @@ Translated from the frozen execution plan `docs/plans/active/2026-05-18-platform
       ✅ NuGet cache clear NOT needed (feed unchanged since 5b.0's restore). Full `dotnet build
       Verbara.Platform.slnx -c Release` (rebuild from the version change) → 0 warnings / 0 errors; fast/unit
       suite (`Category!=Integration&FullyQualifiedName!~Postgres`) green. Evidence in the change report.
-- [ ] 8.3 Commit + push + `git tag -a v2.18.0` + push tag; CI (`release.yml`) publishes the signed AOT image to `ghcr.io/verbara/platform/api`
+- [x] 8.3 Commit + push + `git tag -a v2.18.0` + push tag; CI (`release.yml`) publica la imagen AOT firmada en `ghcr.io/verbara/platform/api` — ✅ commit `58a1b978` en `main` vía PR **#144** (merged 2026-07-12T02:34:30Z); tag **anotado** (`git cat-file -t v2.18.0` → `tag`; tagger Harol A. Reina H., «Platform v2.18.0 — CSAT consumer») y empujado (`git ls-remote --tags origin` → `refs/tags/v2.18.0^{}` = `58a1b978`); `release.yml` run **`29186371733`** (`v2.18.0`) **success**, job «Build, push, and sign api image» con «Build and push final image» + «Sign final image with cosign» + «Verify cosign signature against committed public key» en success → `ghcr.io/verbara/platform/api:v2.18.0` @ `sha256:dcf565b5…`, registrado en `verbara-website/data/authorized-digests.json` (`released_at 2026-07-12T08:52:51Z`). GH Release publicado 2026-07-12T14:32:07Z.
       ⏭️ Release/archive stage — OUT OF SCOPE for this task (no tag/push/publish/`dotnet pack` here).
-- [ ] 8.4 Archive this OpenSpec change (sync → archive) and update roadmap / project memory per the closing routine
+- [x] 8.4 Archive this OpenSpec change (sync → archive) and update roadmap / project memory per the closing routine — ✅ commit `58a1b978` (PR **#144**): siete `R100` de `openspec/changes/csat-runner/*` → `openspec/changes/archive/2026-07-12-csat-runner/*` **más** `A openspec/specs/csat/spec.md` (el sync; spec viva hoy, 27.8 KB); roadmap actualizado en `docs/roadmap.md:80` (fila Shipped «Platform v2.18.0 + Web v3.13.0-web "CSAT consumer (digital-first)"», 2026-07-11) y en la cabecera L3 (digests api `dcf565b5…` / realtime `75691a53…`). «Project memory»: este repo no tiene `MEMORY.md` — la superficie de memoria versionada **es** `docs/roadmap.md`; el vault citado en `docs/plans/completed/2026-04-25-r5.1-post-ship-triage.md:26` vive fuera del repo y no es un artefacto rastreado.
       ⏭️ Release/archive stage — OUT OF SCOPE for this task.

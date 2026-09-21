@@ -47,24 +47,46 @@
 
 ## 4. Records
 
-- [ ] 4.1 (Optional) Author ADR-0037 (`docs/decisions/0037-*.md`) recording the "severity as a
-  document-only enum" ruling and the "PagedResult monomorphization is by-design" ruling — amends/extends
-  Platform/ADR-0036. Skip only if the operator confirms ADR-0036 suffices.
+- 4.1 (NO ES TAREA — opcional, omitida deliberadamente) Author ADR-0037 recording the "severity as a
+  document-only enum" ruling and the "PagedResult monomorphization is by-design" ruling. Nunca se
+  autoró y no se debe: ambos fallos quedan registrados en `design.md` (D1 §57-85, D3 §96-100), en la
+  tarea 3.2 y en `CHANGELOG.md:515-521` ("Document-only, no runtime change", #191); el change lleva
+  `decision_ref: Platform/ADR-0036` y su propio Open Questions ya lo marca "Deferred". Verificado
+  2026-09-20: ADR-0036 no menciona `severity` ni `PagedResult` (grep: cero hits), y el hueco 0037 lo
+  ocupa `docs/decisions/0037-canonical-rbac-permission-vocabulary.md` (2026-08-12) — si alguien
+  elevara estos fallos a ADR necesitaría un número NUEVO, jamás el 0037. No reabrir.
   <!-- deferred — ADR-0036 covers this class (operator proceeded to apply without requesting a new ADR). -->
 - [x] 4.2 Add the `[Unreleased]` CHANGELOG entry.
 
 ## 5. Verification gate
 
-- [ ] 5.1 `dotnet build Verbara.Platform.slnx -c Release` and `dotnet test` green — zero warnings
+- [x] 5.1 `dotnet build Verbara.Platform.slnx -c Release` and `dotnet test` green — zero warnings
   (`TreatWarningsAsErrors=true`, `WarningLevel=9999`), no new AOT (`IL2026`/`IL3050`/`IL207x`)
   diagnostics; `openspec validate --change openapi-residual-contract-shapes --strict` green; CI green.
+  Evidencia (verificada 2026-09-20): PR #191 `fix(openapi): declare ComplianceRuleSummaryDto.severity as
+  closed enum`, MERGED 2026-07-25T19:21:08Z con todo el rollup en SUCCESS — `Build + Unit Tests
+  (Release)` (build+tests, cero warnings), `AOT Publish (Api)` (sin nuevos IL2026/IL3050/IL207x),
+  `OpenSpec Validate` (`--strict`), `Invariant Gates`, `Coverage Ratchet`, `Live-DB Tests (Postgres)`,
+  `CodeQL` (`gh pr view 191 --json statusCheckRollup`). Archivado por PR #192 (9db56949).
 
 ## 6. Cross-repo handoff (Web child change — NOT this host's edit)
 
-- [ ] 6.1 After this host lands and CI re-captures the corrected document, the Web child change
+- [x] 6.1 After this host lands and CI re-captures the corrected document, the Web child change
   (`web/openapi-residual-contract-shapes`, buildOrder 2 per `impact.yaml`) regenerates
   `src/core/api/generated/openapi.d.ts` (`npm run generate:api-types`), retires the `TopicTrendsResponse`
   and `ComplianceRuleSummaryDto` hand-written shadows in `src/core/api/hooks/use-analytics.ts`, and
   repoints the `speech-analytics-page.tsx` consumers (`topics`→`trends`; severity display/filter/sort).
   Web verification gate: `npm run build`, `npx vitest run`, `npx eslint .`, i18n parity green. Driven by
   `/xr:apply` (staged after this host — hard contract barrier). `PagedResult`: NO Web action here.
+  Evidencia (verificada 2026-09-20 en el árbol de Verbara.Platform.Web, no sólo en su registro):
+  change hijo archivado en `openspec/changes/archive/2026-07-25-openapi-residual-contract-shapes/`;
+  PR Web #226 MERGED 2026-07-25T18:59:09Z con `build`/`test`/`lint`/`i18n` en SUCCESS (archivado por
+  #227, 114dd07a). Código: `src/core/api/generated/openapi.d.ts:16763` emite
+  `severity: 'Info' | 'Warning' | 'Critical'`; `use-analytics.ts:335,346,351` ya son alias de
+  `components['schemas'][…]` (shadows retirados); `speech-analytics-page.tsx:71` lee `data?.trends`,
+  `:290` filtra sobre la unión generada. `PagedResult`: sin acción Web, según lo dictaminado.
+  Anomalía de orden registrada: el PR Web entró 22 min ANTES del host #191 (19:21) — regeneró contra el
+  documento de la rama del host, no tras su merge; el estado final es el correcto.
+  Consistencia con el registro Web: su propia caja 5.4 (spec Playwright de speech-analytics) volvió NO
+  HECHA y está cosechada en el change abierto Web `analytics-contract-residue` (tarea 2.5) — queda fuera
+  de la puerta que esta caja enumera, que no pide Playwright.
