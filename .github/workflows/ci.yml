@@ -465,6 +465,12 @@ jobs:
       - name: Validate specs and changes (strict)
         run: npx -y @fission-ai/openspec@1.13.1 validate --all --strict --no-interactive
 
+      # Archived changes must carry no unticked task. ADR-0023 §7 deferred this gate
+      # until this repo reached rc=0, which it did on 2026-09-21; before that the repo
+      # carried closed changes with work still outstanding, invisible to every gate.
+      - name: Validate archived changes (no unticked tasks)
+        run: npx -y @fission-ai/openspec@1.13.1 validate --archived --no-interactive
+
   # AOT-at-PR gate (verbara-meta/ADR-0012 gate #1): run the REAL Native AOT publish
   # of Verbara.Platform.Api on every PR and fail on any IL trim/AOT warning. Until now
   # this gate only ran at release (the Dockerfile publishes AOT) — a dependency bump or
