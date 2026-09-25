@@ -28,6 +28,14 @@ context: |
 
   Cross-repo standards (CI gating, context hygiene, branch protection) live in the private verbara-meta repo as ADRs.
 
+  Where work runs (verbara-meta/ADR-0006): a change whose commits land only in this repo is
+  proposed, applied and archived here. A change that needs a commit in another repo is hosted from
+  the verbara-meta cockpit via `/xr:change`, not here — if a change turns out to need one, record
+  the finding in `tasks.md` and recommend `/xr:change` before capturing more.
+  The hub rule (verbara-meta/ADR-0005) is unchanged and is not a cross-repo change for this rule: a
+  Web-behaviour change keeps its OpenSpec change in Verbara.Platform while its code lands in
+  Verbara.Platform.Web.
+
 rules:
   proposal:
     - "Set a `tier` in frontmatter: GRANDE (cross-repo, >3 days, or a product decision), MEDIANO (one repo, 1-3 days), or PEQUEÑO (bug fix, <1 day). PEQUEÑO may keep the proposal light."
@@ -44,7 +52,7 @@ rules:
     - "Honor the AOT constraint: no reflection, [JsonSerializable] source-gen for every DTO, NO Dapper — use Verbara.Sdk.Data.Npgsql."
     - "Record any durable architectural decision as an ADR in docs/decisions/, not only in this design."
   tasks:
-    - "When the change spans repos, spell out the cross-repo sequence: edit Sdk/Pro -> dotnet pack to local-nuget-feed -> clear NuGet cache -> dotnet restore the consumer."
+    - "When a change here must be verified against a locally built Sdk/Pro, spell out the local sequence: dotnet pack the producer to local-nuget-feed -> clear NuGet cache -> dotnet restore here. Verification only — a change that needs a commit in Sdk or Pro is hosted via `/xr:change` (verbara-meta/ADR-0006)."
     - "Verification tasks MUST include `dotnet test` green and CI green, with zero warnings (TreatWarningsAsErrors). EXCEPTION — frontend-only changes hosted here under the hub rule (verbara-meta/ADR-0005): verification is the Web gate set instead (`npm run build`, `npx vitest run`, `npx eslint .`, i18n parity green)."
     - "Order execution in three phases — A foundation (batched), B critical components (one focused subagent each), C integration (batched) — with a fresh subagent per task, never inline in the main session."
     - "For a bug fix, write the failing regression test first, against the unfixed code, and paste its failure verbatim into `tasks.md`. For new capability, tests may batch into Phase C."
