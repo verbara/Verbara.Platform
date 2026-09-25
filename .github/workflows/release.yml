@@ -115,7 +115,7 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.retro.outputs.skip != 'true'
-        uses: docker/setup-buildx-action@v4.3.0
+        uses: docker/setup-buildx-action@v4.4.1
 
       - name: Log in to GitHub Container Registry
         if: steps.retro.outputs.skip != 'true'
@@ -128,7 +128,7 @@ jobs:
       - name: Build and push final image
         if: steps.retro.outputs.skip != 'true'
         id: build
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           file: ${{ matrix.dockerfile }}
