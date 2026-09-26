@@ -7,7 +7,7 @@ coverage-gate guards (`python3 -m unittest discover scripts/tests`).
 
 Guards the strict, fail-closed allowlist so a mis-widened rule (e.g. a blanket **/*.md) is
 caught before it can mis-skip a code PR:
-  * docs/** · openspec/** · CHANGELOG.md · top-level *.md · **/README.md  => docs_only=true
+  * docs/** · CHANGELOG.md · top-level *.md · **/README.md               => docs_only=true
   * ANY other path (src, .github, scripts, a nested non-README .md)       => docs_only=false
   * empty diff / classifier error                                         => docs_only=false
   * a rename touching a code path                                         => docs_only=false
@@ -69,8 +69,8 @@ class ClassifyDocsOnlyTests(unittest.TestCase):
     def test_ShouldBeDocsOnly_WhenOnlyDocsDirChanged(self):
         self._run_case(lambda r: _write(r, "docs/adr/0016.md", "text\n"), "docs_only=true")
 
-    def test_ShouldBeDocsOnly_WhenOnlyOpenspecChanged(self):
-        self._run_case(lambda r: _write(r, "openspec/changes/x/proposal.md"), "docs_only=true")
+    def test_ShouldBeDocsOnly_WhenOnlyNestedDocsPathChanged(self):
+        self._run_case(lambda r: _write(r, "docs/operations/x/notes.md"), "docs_only=true")
 
     def test_ShouldBeDocsOnly_WhenOnlyChangelogChanged(self):
         self._run_case(lambda r: _write(r, "CHANGELOG.md", "## x\n"), "docs_only=true")
@@ -84,7 +84,7 @@ class ClassifyDocsOnlyTests(unittest.TestCase):
     def test_ShouldBeDocsOnly_WhenMixOfAllowlistedPathsChanged(self):
         def mutate(r):
             _write(r, "docs/x.md")
-            _write(r, "openspec/y.md")
+            _write(r, "docs/y/z.md")
             _write(r, "CHANGELOG.md", "## y\n")
             _write(r, "lib/README.md")
         self._run_case(mutate, "docs_only=true")
@@ -100,6 +100,11 @@ class ClassifyDocsOnlyTests(unittest.TestCase):
     def test_ShouldNotBeDocsOnly_WhenNestedNonReadmeMarkdownChanged(self):
         # NOT a blanket **/*.md — a nested non-README .md is a code-adjacent doc, fail-closed.
         self._run_case(lambda r: _write(r, "src/App/NOTES.md"), "docs_only=false")
+
+    def test_ShouldNotBeDocsOnly_WhenUntrackedProcessDirPathChanged(self):
+        # openspec/ is no longer an allowlisted (or tracked) path — a nested non-README .md
+        # there is classified like any other nested markdown: fail-closed.
+        self._run_case(lambda r: _write(r, "openspec/changes/x/proposal.md"), "docs_only=false")
 
     def test_ShouldNotBeDocsOnly_WhenTopLevelNonMarkdownChanged(self):
         self._run_case(lambda r: _write(r, "Directory.Build.props", "<Project/>\n"), "docs_only=false")

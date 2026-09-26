@@ -7,10 +7,10 @@ name: CI
 # ~40 projects. Full Native AOT publish stays in release.yml (slow, tag-triggered);
 # this gate is the fast feedback loop.
 #
-# 4 jobs: build-and-test (Build + Unit Tests, Release) · live-db-tests (Postgres/Redis
+# Jobs: build-and-test (Build + Unit Tests, Release) · live-db-tests (Postgres/Redis
 # Testcontainers — gating since the readiness-probe fix graduated it, though still not
 # a required check; see the promotion note on the job) · coverage (blocking
-# line-coverage ratchet) · openspec (OpenSpec Validate, strict).
+# line-coverage ratchet) · coverage-scripts · aot-probe · invariant-gates.
 #
 # NOTE (private Pro packages): Verbara.Sdk.Pro.* live on the private GitHub Packages
 # NuGet feed (source `github` in NuGet.Config). Restore authenticates with the
@@ -42,8 +42,8 @@ jobs:
   # Docs/data-only CI fast-path gate (verbara-meta/ADR-0016 §1). Classifies the PR /
   # merge_group diff and exposes outputs.docs_only. The HEAVY required jobs (build-and-test,
   # coverage, aot-probe) gate on it and report a satisfying `skipped` when the diff is
-  # docs/data-only; the ALWAYS-RUN required jobs (openspec, invariant-gates) carry NO edge to
-  # this gate and validate the docs diff unconditionally (§3.3). live-db-tests is non-required
+  # docs/data-only; the ALWAYS-RUN required job (invariant-gates) carries NO edge to
+  # this gate and validates the docs diff unconditionally (§3.3). live-db-tests is non-required
   # but also gated (safe — §4 Platform row). This is the ONLY merge-queue-safe AND
   # required-check-safe pattern — a workflow-level paths-ignore on ci.yml is BANNED (it would
   # strand the ruleset 17662679 required contexts in `Expected` forever). Triggers stay
@@ -189,7 +189,7 @@ jobs:
         run: >-
           python3 scripts/verify-openapi-fixture.py
           artifacts/openapi/openapi-document.json
-          openspec/changes/archive/2026-07-19-openapi-response-schemas/fixtures/response-schema-manifest.v1.json
+          tests/fixtures/openapi/response-schema-manifest.v1.json
 
       - name: Verify residual contract shapes against the exported document
         # openapi-residual-contract-shapes (decision_ref Platform/ADR-0036): assert the three residual
@@ -202,7 +202,7 @@ jobs:
         run: >-
           python3 scripts/verify-residual-shapes.py
           artifacts/openapi/openapi-document.json
-          openspec/changes/archive/2026-07-25-openapi-residual-contract-shapes/fixtures
+          tests/fixtures/openapi/residual-shapes
 
       - name: Upload OpenAPI document artifact
         # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): no document is
@@ -453,23 +453,6 @@ jobs:
         run: pip install --disable-pip-version-check diff_cover==10.3.0
       - name: Run coverage-script unit tests
         run: python3 -m unittest discover scripts/tests
-
-  # OpenSpec docs gate (2026-07-04 ecosystem audit): the living specs + changes are
-  # agent-edited markdown with a strict parser — validate them like code. Pinned CLI
-  # version (upgrade deliberately). Runs on PR + merge_group like every other gate.
-  openspec:
-    name: OpenSpec Validate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Validate specs and changes (strict)
-        run: npx -y @fission-ai/openspec@1.13.1 validate --all --strict --no-interactive
-
-      # Archived changes must carry no unticked task. ADR-0023 §7 deferred this gate
-      # until this repo reached rc=0, which it did on 2026-09-21; before that the repo
-      # carried closed changes with work still outstanding, invisible to every gate.
-      - name: Validate archived changes (no unticked tasks)
-        run: npx -y @fission-ai/openspec@1.13.1 validate --archived --no-interactive
 
   # AOT-at-PR gate (verbara-meta/ADR-0012 gate #1): run the REAL Native AOT publish
   # of Verbara.Platform.Api on every PR and fail on any IL trim/AOT warning. Until now

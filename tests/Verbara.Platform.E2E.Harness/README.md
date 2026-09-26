@@ -1,7 +1,7 @@
 # Verbara.Platform.E2E.Harness
 
 Walking-skeleton end-to-end harness for the Realtime SignalR exactly-once
-delivery contract introduced by [ADR-0022 Phase A.5](../../docs/decisions/0022-platform-api-aot-shipping-path.md).
+delivery contract introduced by ADR-0022 Phase A.5.
 
 ## Why it exists
 
@@ -25,7 +25,7 @@ ONE scenario: `exactly-once`. ONE topology: `talos`.
 
 The full framework with source-generated scenario registry, Spectre.Console.Cli,
 Aspire dev-loop topology, and CI cascade lands in subsequent PRs — see
-[`docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md`](../../docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md).
+`docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md`.
 
 ## Prereqs
 

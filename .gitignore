@@ -78,3 +78,11 @@ docker/asterisk-config/http.conf
 # Python bytecode (from the coverage-gate-v2 check scripts + their unittests, ADR-0013)
 __pycache__/
 *.pyc
+
+# Agent instructions and internal development records are kept locally and are not tracked.
+AGENTS.md
+openspec/
+docs/decisions/
+docs/plans/
+docs/research/
+docs/specs/

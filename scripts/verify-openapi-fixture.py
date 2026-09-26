@@ -4,7 +4,7 @@
 Usage: verify-openapi-fixture.py <real-openapi-document.json> <response-schema-manifest.json>
 
 Part of openapi-response-schemas (Platform/ADR-0035). The manifest
-(openspec/changes/openapi-response-schemas/fixtures/response-schema-manifest.v1.json) is the
+(tests/fixtures/openapi/response-schema-manifest.v1.json) is the
 golden, cross-repo contract: per consumer group, the EMITTED components/schemas name plus the
 verbatim field names Platform surfaces for every wire shape the Platform.Web typed-client consumes.
 This check is the CI guard that the emitted document still carries every named schema with the exact

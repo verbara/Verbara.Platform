@@ -8,7 +8,7 @@
 repo: Verbara.Platform
 role: leaf
 visibility: public
-charter: docs/specs/architecture.md
+charter: README.md
 decision_ref: verbara-meta/ADR-0014
 gates:
   - id: G1

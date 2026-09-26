@@ -52,7 +52,7 @@ Open a GitHub Discussion (or Issue with the `enhancement` label) describing:
 - Any prior art or links to similar features in other tools.
 - Whether it depends on Pro overlays (most enterprise features do; check `Pro.*` package usage).
 
-Larger features (multi-week) require a `docs/specs/<YYYY-MM-DD>-<topic>.md` proposal before code review. The `docs/` tree is the authoritative workstream — open new plans there.
+Larger features (multi-week) should be agreed in an issue before code review.
 
 ## Pull request process
 
@@ -105,7 +105,7 @@ public void RouteAsync_ShouldFallbackToBusinessHours_WhenAllAgentsOffline() { ..
 - **Conventional Commits**, no `Co-Authored-By` lines.
 - **TreatWarningsAsErrors must remain ON** across all repos — zero tolerance for warnings.
 - **DI extension per package**: each `Verbara.Platform.X` package has a single `AddVerbaraX(this IServiceCollection)` extension method.
-- **Multi-tenant safety**: every persistence operation must respect tenant scoping. See [ADR-0002](docs/decisions/0002-tenant-stamping-pipeline-end-to-end.md).
+- **Multi-tenant safety**: every persistence operation must respect tenant scoping. See ADR-0002.
 - **Spanish for conversation, English for code/commits/docs.**
 
 ## i18n (server-side messages)
