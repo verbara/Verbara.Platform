@@ -157,7 +157,7 @@ Exit code:               0 ✅
 - `Verbara.Platform.Realtime/Endpoints/AdminRealtimeAuditEndpoint.cs` (PR #18) — single source of truth for harness assertions
 - `Verbara.Platform.E2E.Harness/*` (PR #19) — reusable walking-skeleton harness for current + future SignalR/cluster scenarios
 
-The plan [docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md](../../docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md) closes with this run and moved to `docs/plans/completed/` in this same commit.
+The plan docs/plans/completed/2026-05-24-e2e-harness-realtime-signalr.md closes with this run and moved to `docs/plans/completed/` in this same commit.
 
 ### What this session DID validate
 

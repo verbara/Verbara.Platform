@@ -163,7 +163,7 @@ jobs:
           3. PR against \`verbara-website/data/authorized-digests.json\` if revoking.
           4. Re-run this workflow to confirm.
 
-          Cross-references: [Pro/ADR-0011 Layer C — image-digest binding](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0011-image-digest-binding-in-license-keys.md), [ADR-0023 — non-AOT microservice publishing](docs/decisions/0023-publishing-non-aot-microservices.md), [ADR-0024 — v2.4.2 anomaly + process hardening](docs/decisions/0024-v242-shipping-anomaly-and-process-hardening.md).
+          Cross-references: [Pro/ADR-0011 Layer C — image-digest binding](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0011-image-digest-binding-in-license-keys.md), ADR-0023 (non-AOT microservice publishing), ADR-0024 (v2.4.2 anomaly + process hardening).
           EOF
           )
           gh issue create \

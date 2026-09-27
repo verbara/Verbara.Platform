@@ -903,7 +903,7 @@ Patch over v2.9.0. Migration **034**. No API behaviour change beyond audit persi
 
 ## [2.9.0] — 2026-06-07 — Session/Auth overhaul: agent presence, liveness & work continuity (ADR-0009 W1–W6)
 
-The complete [ADR-0009](docs/decisions/0009-agent-presence-session-work-continuity.md) north-star, shipped as six sequenced tracks (W1–W6, 2026-06-05→06-07) over PRs #41–#46. Native AOT preserved; no new cross-pod event escaped its `[JsonSerializable]` context. Migrations **029–033**. Ships with **Web v3.5.0-web**.
+The complete ADR-0009 north-star, shipped as six sequenced tracks (W1–W6, 2026-06-05→06-07) over PRs #41–#46. Native AOT preserved; no new cross-pod event escaped its `[JsonSerializable]` context. Migrations **029–033**. Ships with **Web v3.5.0-web**.
 
 ### Added
 - **W3 — server-side agent liveness / anti-zombie.** Web heartbeat `POST /agents/me/heartbeat` (~20s) → Redis `presence:agent:{tenant}:{agent}` with per-tenant TTL `AgentLivenessTimeoutSeconds`; leader-gated `AgentLivenessReaper` reconciles "Postgres-routable AND Redis-dead → ForceOffline → AMI QueuePause". `pagehide` departure beacon `POST /agents/me/offline`; admin `POST /admin/agents/{id}/force-offline`. Migration 029.
@@ -936,7 +936,7 @@ Patch over v2.8.0. No code change to the API — same binaries.
 
 ## [2.8.0] — 2026-06-01 — Telephony admin: usable SIP trunk + DID configuration
 
-Closes the trunk/DID configuration gaps from the [trunk & DID audit](docs/research/2026-06-01-trunk-did-audit.md). Consumes **Pro 2.7.4-pro**. Ships with **Web v3.4.0-web** (the trunk form, DID module, wizard and connectivity-test UI). Native AOT preserved.
+Closes the trunk/DID configuration gaps from the trunk & DID audit. Consumes **Pro 2.7.4-pro**. Ships with **Web v3.4.0-web** (the trunk form, DID module, wizard and connectivity-test UI). Native AOT preserved.
 
 ### Fixed
 - **Trunk `match_host` (IP-ACL) now persists** (Pro 2.7.4-pro). It previously flowed only to Asterisk realtime, so `GET` returned null and an edit that omitted it silently dropped the inbound identify.
@@ -969,9 +969,9 @@ Closes the *Inbound Conversation Delivery* epic — a visitor's chat **and** an 
 
 ---
 
-## [2.4.0-rc] — 2026-05-18 — Pro v2.5.0-pro consumer migration (drops EnforcementMode); **NOT PUBLICLY SHIPPED** ([ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md))
+## [2.4.0-rc] — 2026-05-18 — Pro v2.5.0-pro consumer migration (drops EnforcementMode); **NOT PUBLICLY SHIPPED** (ADR-0022)
 
-Internal RC tag for the Pro v2.5.0-pro consumer migration ([ADR-0012](../Verbara.Sdk.Pro/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md)). The `-rc` suffix signals that the code is correct + tests pass (958/958 Api.Tests green, 0 warnings, 0 errors) BUT the canonical `ghcr.io/verbara/platform/api:*` image cannot be published from this commit per [ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md) — the current Dockerfile produces a non-AOT image that ships 68 closed-source `Verbara.Sdk.Pro.*` DLLs as decompilable IL. Public image cutover blocked on ADR-0022 Phases A+B+C (SignalR Hub extraction + EF Core DataProtection migration + AOT publish), estimated 3–4 maintainer-days.
+Internal RC tag for the Pro v2.5.0-pro consumer migration (ADR-0012). The `-rc` suffix signals that the code is correct + tests pass (958/958 Api.Tests green, 0 warnings, 0 errors) BUT the canonical `ghcr.io/verbara/platform/api:*` image cannot be published from this commit per ADR-0022 — the current Dockerfile produces a non-AOT image that ships 68 closed-source `Verbara.Sdk.Pro.*` DLLs as decompilable IL. Public image cutover blocked on ADR-0022 Phases A+B+C (SignalR Hub extraction + EF Core DataProtection migration + AOT publish), estimated 3–4 maintainer-days.
 
 ### Changed (consumer migration)
 
@@ -984,7 +984,7 @@ Internal RC tag for the Pro v2.5.0-pro consumer migration ([ADR-0012](../Verbara
 
 ### Added
 
-- [ADR-0022](docs/decisions/0022-platform-api-aot-shipping-path.md) — Platform.Api Native AOT shipping path. Empirical AOT publish attempt 2026-05-18 produced 8 errors (5× IL3050, 3× IL2026) in two classes: SignalR `IHubContext.Clients.get` (`PushToHubRelay.cs:163,179,195`) + EF Core DataProtection (`Program.cs:515,523,525`). Roadmap Phases A-E documented (~3-4 maintainer-days).
+- ADR-0022 — Platform.Api Native AOT shipping path. Empirical AOT publish attempt 2026-05-18 produced 8 errors (5× IL3050, 3× IL2026) in two classes: SignalR `IHubContext.Clients.get` (`PushToHubRelay.cs:163,179,195`) + EF Core DataProtection (`Program.cs:515,523,525`). Roadmap Phases A-E documented (~3-4 maintainer-days).
 - [`docs/operations/compressed-validation-report-v250pro.md`](docs/operations/compressed-validation-report-v250pro.md) — Pro v2.5.0-pro compressed-validation evidence + verdict (**NO-GO** for public release until ADR-0022 closed).
 - [`docs/operations/compressed-validation-evidence/`](docs/operations/compressed-validation-evidence/) — Scenario E baseline metrics + boot logs captured against `v2.3.1` + valid license + `WarnOnly` mode in the K8s preview namespace.
 - [`infra/k8s/helm/platform/values-preview-warnonly.yaml`](infra/k8s/helm/platform/values-preview-warnonly.yaml) — Helm overlay for compressed-validation preview deploys.
@@ -1069,7 +1069,7 @@ Adds regression test `tests/Verbara.Platform.Api.Tests/Licensing/LicenseTrustAnc
 
 MINOR bump because this release wires a new host-level switch (`HostOptions.BackgroundServiceExceptionBehavior = StopHost`) and applies the outer try-catch + LogWorkerCrash + rethrow discipline to **all 14 Platform `BackgroundService` implementations**. The pair with Pro v2.4.1-pro (ADR-0013) closes the silent-worker-death architectural bug exposed by the D-LK 24h K8s soak (2026-05-17/18) when `QueueDistributionWorker` stopped heart-beating at T+16h36m and the pod stayed "Running" for 21 h.
 
-Canonical spec: [`docs/specs/2026-05-18-worker-resilience-pattern-hardening.md`](docs/specs/2026-05-18-worker-resilience-pattern-hardening.md). Execution plan: [`docs/plans/completed/2026-05-18-platform-v230-worker-resilience.md`](docs/plans/completed/2026-05-18-platform-v230-worker-resilience.md). Decision: [ADR-0021](docs/decisions/0021-stophost-on-worker-crash-house-style.md). Pro counterpart: [Verbara.Sdk.Pro ADR-0013](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0013-stophost-on-worker-crash-house-style.md).
+Canonical spec: `docs/specs/2026-05-18-worker-resilience-pattern-hardening.md`. Execution plan: `docs/plans/completed/2026-05-18-platform-v230-worker-resilience.md`. Decision: ADR-0021. Pro counterpart: [Verbara.Sdk.Pro ADR-0013](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0013-stophost-on-worker-crash-house-style.md).
 
 **Coordinated cross-repo:** SDK `2.1.2` (unchanged) · Pro **`2.4.1-pro`** (cascade) · Web `3.0.3-web` (unchanged — no client-side worker-resilience surface).
 
@@ -1219,7 +1219,7 @@ Canonical execution plan: `~/.claude/plans/si-refactored-pascal.md`. Platform-si
 
 Minor bump because this release introduces operator-visible new surface: Helm chart values default to `ghcr.io/verbara/platform/{api,web}` (was local KVM registry), new admission-policy template, new docker-compose verification toolkit, new CI workflow that publishes signed OCI images to GitHub Container Registry, and the consumed Pro v2.3.0-pro adds `LicenseValidator.UnauthorizedImage` semantics. Coordinated cross-repo with **Pro 2.3.0-pro** + **verbara-website Worker integration** that ships license-issuance with `AuthorizedImageDigests` claims.
 
-This is the Platform-side closure of [ADR-0018](docs/decisions/0018-visibility-decision-3-private-now-public-on-trigger.md) Trigger 5 (last visibility-flip gate). Once the first signed Platform image is published to `ghcr.io/verbara/platform/api` (by tagging this version) AND the digest is registered in `verbara-website/data/authorized-digests.json`, Trigger 5 flips to ✅ GREEN and the dashboard reaches 7/7.
+This is the Platform-side closure of ADR-0018 Trigger 5 (last visibility-flip gate). Once the first signed Platform image is published to `ghcr.io/verbara/platform/api` (by tagging this version) AND the digest is registered in `verbara-website/data/authorized-digests.json`, Trigger 5 flips to ✅ GREEN and the dashboard reaches 7/7.
 
 ### Cosign image-signing machinery
 
@@ -1297,7 +1297,7 @@ First patch since the v2.0.0 rebrand release. Closes the 6 grep-able-from-source
 - **MFA-001 — `?targetTenant=` on `/management/mfa/users/*` accepts arbitrary tenant id without ownership check** (`baa7aaef`). New async `ResolveTargetTenantAsync` mirrors the impersonation-hierarchy pattern from `ManagementImpersonationEndpoints.IsTenantInCallerHierarchyAsync`. Foreign-hierarchy attempts emit a new `MfaPrivilegeEscalationAttempted` audit event and return 403.
 - **BILL-001 — 8 of 9 billing mutations emitted no audit entries** (`2b83604a`). New `BillingAuditEventTypes` constants + `IAuditService.AppendAsync` emissions added to `CreateRateCard`, `UpdateRateCard`, `DeleteRateCard`, `GenerateInvoice`, `IssueInvoice`, `PayInvoice`, `UpdateQuota`, `PauseDunning`. `PayInvoice` records both `payment_status_before/after` and `tenant_status_before/after`.
 - **BILL-002 — `PayInvoice` derived tenant from path-supplied invoice id without caller cross-check** (`2b83604a` — bundled). `PayInvoice` now requires an explicit `?tenantId=` query parameter and asserts it matches the dunning record's tenant; rejects mismatched IDs with `400` + audit-emit. Validates `invoiceId` shape via new `EntityId.IsValid` before the store call.
-- **ADMIN-002 — Management API keys short-circuited every `PlatformAdminRequirement` permission check** (`c35a0d17`). `PlatformAdminAuthorizationHandler` now reads the API key's `scopes` array and succeeds iff the requested `requirement.Permission` is contained. Legacy `platform:*` wildcard kept working for back-compat through v2.0.x patches; deprecation warning v2.1.0; wildcard removal v3.0.0 per [ADR-0019](docs/decisions/0019-scope-aware-management-api-keys.md).
+- **ADMIN-002 — Management API keys short-circuited every `PlatformAdminRequirement` permission check** (`c35a0d17`). `PlatformAdminAuthorizationHandler` now reads the API key's `scopes` array and succeeds iff the requested `requirement.Permission` is contained. Legacy `platform:*` wildcard kept working for back-compat through v2.0.x patches; deprecation warning v2.1.0; wildcard removal v3.0.0 per ADR-0019.
 
 ### Tests
 
@@ -1328,7 +1328,7 @@ Visibility flip is now gated **only** by Trigger 5 (Pro v2.3.x image binding exe
 
 ## [2.0.0] — 2026-05-05 — Verbara rebrand + R5.5 K8s Phase 0LK
 
-**Major release.** Closes the brand transition from `Asterisk.Platform` to `Verbara.Platform` per [ADR-0016 license + rebrand](docs/decisions/0016-license-and-rebrand-to-verbara.md) (Accepted 2026-05-03) and [ADR-0017 rebrand execution](docs/decisions/0017-verbara-rebrand-execution.md) (Accepted 2026-05-05). Coordinated cross-repo with **SDK 2.1.0** + **Pro 2.0.0-pro**. Pre-rebrand artefacts archived under the `pre-rebrand` git tag.
+**Major release.** Closes the brand transition from `Asterisk.Platform` to `Verbara.Platform` per ADR-0016 license + rebrand (Accepted 2026-05-03) and ADR-0017 rebrand execution (Accepted 2026-05-05). Coordinated cross-repo with **SDK 2.1.0** + **Pro 2.0.0-pro**. Pre-rebrand artefacts archived under the `pre-rebrand` git tag.
 
 ### License
 

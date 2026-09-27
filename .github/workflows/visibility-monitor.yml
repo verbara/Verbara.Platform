@@ -245,7 +245,7 @@ jobs:
           1. Verify \`verbara-website/public/keys/cosign.pub\` exists and matches \`Verbara.Platform/.github/cosign.pub\`.
           2. Check CF Workers deployment for \`verbara-website\` succeeded.
 
-          Cross-references: [ADR-0023](docs/decisions/0023-publishing-non-aot-microservices.md), [ADR-0024 (anomaly + hardening)](docs/decisions/0024-v242-shipping-anomaly-and-process-hardening.md), [Deep IP-exposure analysis](docs/research/2026-05-23-pro-ip-exposure-deep-analysis.md).
+          Cross-references: ADR-0023 (non-AOT microservice publishing), ADR-0024 (anomaly + hardening).
           EOF
           )
           gh issue create \

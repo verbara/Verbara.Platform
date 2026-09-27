@@ -1,9 +1,9 @@
 # Verbara Platform
 
 > Backend for the **Verbara** open-core contact-center platform.
-> Formerly `Verbara.Platform` — rebranded to **Verbara** per [ADR-0016](docs/decisions/0016-license-and-rebrand-to-verbara.md).
+> Formerly `Verbara.Platform` — rebranded to **Verbara** per ADR-0016.
 >
-> **Visibility status (2026-05-10):** This repository is **public**. Licensed under Apache 2.0 (see [ADR-0016](docs/decisions/0016-license-and-rebrand-to-verbara.md)); the visibility flip executed once all triggers in [ADR-0018](docs/decisions/0018-visibility-decision-3-private-now-public-on-trigger.md) went green. Tier 0 (Community) self-host is available.
+> **Visibility status (2026-05-10):** This repository is **public**. Licensed under Apache 2.0 (see ADR-0016); the visibility flip executed once all triggers in ADR-0018 went green. Tier 0 (Community) self-host is available.
 
 Composition-root host + REST API for an omnichannel contact center built on the
 Asterisk PBX (Sangoma/Digium) + .NET 10 Native AOT. Consumes [Verbara Sdk](https://github.com/verbara/Verbara.Sdk)
@@ -58,7 +58,7 @@ This is the open-source backend of the **Verbara** open-core contact-center stac
 | **Verbara Platform** (this repository) | **Apache 2.0** | Backend application — full contact-center engine |
 | **Verbara Sdk Pro** | Commercial | Enterprise overlays (multi-tenant, analytics, cluster, licensing) |
 
-**Why Apache 2.0 + commercial Pro:** the engineering moat is the runtime ECDSA license-key validation in `Pro.Licensing` (`LicenseGateMiddleware`), not source-license restrictions. Apache maximizes adoption and trial-to-Pro conversion. See [ADR-0016](docs/decisions/0016-license-and-rebrand-to-verbara.md) for the full rationale (license decision + rebrand to Verbara).
+**Why Apache 2.0 + commercial Pro:** the engineering moat is the runtime ECDSA license-key validation in `Pro.Licensing` (`LicenseGateMiddleware`), not source-license restrictions. Apache maximizes adoption and trial-to-Pro conversion. See ADR-0016 for the full rationale (license decision + rebrand to Verbara).
 
 **Pro is runtime-required for production:** without a valid Pro license key, the `LicenseGateMiddleware` rejects requests requiring multi-tenant, advanced analytics, cluster mode, and licensed plan features. Self-host single-tenant evaluation is supported under Apache 2.0 alone.
 
