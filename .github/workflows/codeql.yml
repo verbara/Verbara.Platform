@@ -71,7 +71,40 @@ jobs:
       - name: Build solution
         run: dotnet build Verbara.Platform.slnx -c Release --no-incremental
 
+      # Results in code the .NET SDK's own source generators write under obj/**/generated/ (System.Text.Json,
+      # the ASP.NET Core request-delegate generator, …) are notes on code no change here can reach — 3,772 of
+      # the 4,359 on main at d1c8c49e. paths-ignore is not honoured for a compiled language analysed from a
+      # traced build, so analyze writes its SARIF without uploading it, scripts/ci/filter-codeql-sarif.sh drops
+      # those results (never a security one), and upload-sarif sends the rest under the SAME category: every
+      # other alert keeps its history, and the generator ones close as fixed. The wiring is asserted by
+      # scripts/tests/test_filter_codeql_sarif.sh in ci.yml's Coverage Script Tests job.
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4.38.1
         with:
+          category: "/language:csharp"
+          upload: failure-only
+          output: ${{ runner.temp }}/codeql-sarif
+
+      # Fails closed: a file the filter cannot read as one SARIF 2.1.0 log exits 2 and writes nothing, so this job
+      # goes red and the upload below never runs — the baseline is never replaced by an unfiltered log.
+      - name: Drop results in .NET source-generator output
+        env:
+          RAW_SARIF_DIR: ${{ runner.temp }}/codeql-sarif
+          FILTERED_SARIF_DIR: ${{ runner.temp }}/codeql-sarif-filtered
+        run: |
+          shopt -s nullglob
+          sarifs=("$RAW_SARIF_DIR"/*.sarif)
+          if [ "${#sarifs[@]}" -eq 0 ]; then
+            echo "::error::analyze wrote no .sarif file to $RAW_SARIF_DIR — nothing to filter, so nothing is uploaded."
+            exit 1
+          fi
+          mkdir -p "$FILTERED_SARIF_DIR"
+          for sarif in "${sarifs[@]}"; do
+            bash ./scripts/ci/filter-codeql-sarif.sh "$sarif" "$FILTERED_SARIF_DIR/$(basename "$sarif")"
+          done
+
+      - name: Upload filtered CodeQL results
+        uses: github/codeql-action/upload-sarif@v4.38.1
+        with:
+          sarif_file: ${{ runner.temp }}/codeql-sarif-filtered
           category: "/language:csharp"

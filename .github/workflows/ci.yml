@@ -453,6 +453,11 @@ jobs:
         run: pip install --disable-pip-version-check diff_cover==10.3.0
       - name: Run coverage-script unit tests
         run: python3 -m unittest discover scripts/tests
+      # CodeQL SARIF filter unit tests. The filter runs only inside codeql.yml's Analyze (C#) job, between
+      # analysis and upload, and a wrong rule turns nothing red: it closes alerts about our own code as
+      # "fixed", or lets the .NET generator ones back. Same job, same reason as the guards above.
+      - name: Run CodeQL SARIF filter unit tests
+        run: bash scripts/tests/test_filter_codeql_sarif.sh
 
   # AOT-at-PR gate (verbara-meta/ADR-0012 gate #1): run the REAL Native AOT publish
   # of Verbara.Platform.Api on every PR and fail on any IL trim/AOT warning. Until now

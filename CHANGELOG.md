@@ -9,6 +9,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **CodeQL no longer reports notes on code the .NET SDK generates.** 3,772 of the 4,359 CodeQL results on
+  `main` at `d1c8c49e` were in code the .NET SDK's own source generators write under `obj/**/generated/`
+  (System.Text.Json 3,501, the ASP.NET Core request-delegate generator 227, and four others), all
+  maintainability notes no change here can reach. A CodeQL `paths-ignore` cannot exclude them, because it
+  is not honoured for a compiled language analysed from a traced build. So `Analyze (C#)` now writes its
+  SARIF without uploading it, filters it with `scripts/ci/filter-codeql-sarif.sh` (the same filter
+  Verbara.Sdk uses), and uploads the rest under the same `/language:csharp` category. Every other alert
+  keeps its history. The filter never removes a security result, and it fails closed: input it cannot
+  read writes nothing, so nothing unfiltered is uploaded. `scripts/tests/test_filter_codeql_sarif.sh`
+  (448 checks) runs in `Coverage Script Tests`.
+
 ---
 
 ## [2.23.0] - 2026-08-26
