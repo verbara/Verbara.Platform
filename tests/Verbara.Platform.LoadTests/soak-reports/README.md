@@ -9,7 +9,6 @@ Run window: **2026-04-29 05:07:39 -05:00 → 2026-04-30 05:00 -05:00** (24h cont
 | `soak-drift-2026-04-29.csv` | `scripts/soak-drift-snapshot.sh` | Hourly metrics snapshot (api_rss_mb, api_cpu_pct, pg_rss_mb, pg_conns, p99_ms, rps, kestrel_conns, disk_free_gb, prom_tsdb_mb) — 25 rows (T0 baseline + 24 hourly + final idle reading). |
 | `soak-24h-presence-2026-04-29.log` | `scripts/scenario-sweep.sh presence` | NBomber driver loop: 144 steps × 600s @ VU=500. Per-step: ok count, fail count, latency p50/p75/p95/p99, status code distribution. |
 | `soak-log-watchdog-2026-04-29.log` | `scripts/soak-log-watchdog.sh` | Truncate-loop journal: every 5 min, list of containers truncated + freed bytes + post-truncate `df /` snapshot. ~262 truncations across 24h. |
-| `soak-drift-snapshot-2026-04-29.log` | `scripts/soak-drift-snapshot.sh` | Drift collector journal: human-readable echo of each CSV row appended (hourly cadence). |
 
 ## Headline numbers
 

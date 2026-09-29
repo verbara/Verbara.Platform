@@ -14,7 +14,6 @@ cd "$(dirname "$SCRIPT_DIR")"
 
 echo "=== 1. Restore wiped v1.14.6 baseline files (no longer at risk now sweeps done) ==="
 git restore tests/Verbara.Platform.LoadTests/load-test-reports/k8s-blk1-baseline/ 2>&1 || true
-git restore tests/Verbara.Platform.LoadTests/load-test-reports/nbomber-log-2026043004.txt tests/Verbara.Platform.LoadTests/load-test-reports/nbomber-log-2026043005.txt 2>&1 || true
 git restore tests/Verbara.Platform.LoadTests/load-test-reports/nbomber_report_2026-04-30--10-02-52.{csv,html,md} 2>&1 || true
 git restore tests/Verbara.Platform.LoadTests/load-test-reports/nbomber_report_2026-05-22--12-02-10.{csv,html,md} 2>&1 || true
 
