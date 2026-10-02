@@ -9,8 +9,48 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [2.24.0] - 2026-10-02
+
+### Security
+
+- **Partner-tenant administrators are confined to their own tenant hierarchy**
+  ([GHSA-fxfp-76v2-xjg2](https://github.com/verbara/Verbara.Platform/security/advisories/GHSA-fxfp-76v2-xjg2),
+  critical). Before this release an Admin of a Partner tenant passed every `PlatformAdminOnly` check and
+  could set `X-Tenant-Id` to any tenant, so it could read and change any tenant's data, mint a host
+  `platform:*` management key, and update, suspend or delete any tenant. `PlatformAdminRequirement` is now
+  host-tenant-only by default; a surface opts into Partner delegation only when it resolves the target
+  tenant and checks the hierarchy itself (`/management/impersonate`, `/management/mfa/*`). The tenant
+  boundary middleware walks the parent chain instead of reading the tenant type, through one shared
+  `TenantHierarchy`. Deployments without Partner tenants were not exposed. (#323)
+- **Suspended and deactivated accounts can no longer authenticate**
+  ([GHSA-757c-652x-p67g](https://github.com/verbara/Verbara.Platform/security/advisories/GHSA-757c-652x-p67g),
+  moderate). Only the OIDC login used to read `User.Status`; password login, MFA completion, refresh and
+  user-bound API keys ignored it, and changing the status revoked nothing. One rule,
+  `User.CanAuthenticate` (`Status == Active`), now guards every sign-in path, user-bound API keys on every
+  request, impersonation start, the SSE stream and Realtime hub connections (a once-per-connect lookup
+  through a service-key internal endpoint). Moving an account away from `Active` revokes its
+  refresh-token lineage, writes an audit entry (every status change is audited) and ends its live hub and
+  SSE connections on every node through a `user.access_revoked` push event; deleting or GDPR-purging a
+  user ends them too. Impersonation tokens are checked against the impersonating admin's status on every
+  request. A stale user save can no longer undo a status or role change: `SetStatusAsync` and
+  `SetRoleAsync` are their only writers. Access tokens already issued stay valid until they expire (at
+  most 15 minutes). (#323)
+
 ### Changed
 
+- **Live connections close when the credential that opened them expires.** Every Realtime hub
+  connection and every `/api/v1/events/stream` SSE stream now closes at its token's `exp`; the hub closes
+  with `allowReconnect: true`, so clients reconnect with their current token. Realtime and the SSE open
+  refuse a token at `exp` (no 30-second clock-skew grace). API keys get an `exp` stamped by the handler
+  (15 minutes, or the key's own `ExpiresAt` if sooner), so an API-key SSE stream ends normally at least
+  every 15 minutes and must reconnect. Non-Web SignalR clients reconnect once per token lifetime. (#323)
+- **Deployment prerequisites for the Realtime half of the account-status fix:** set `Services:ServiceKey`
+  on both Api and Realtime, enable the Redis push backplane, and deploy Api before Realtime. Without
+  them Realtime's status lookup fails open, bounded by the token's expiry. (#323)
+- **Offboarding a platform admin:** management (`mgmt_`) API keys belong to the tenant, not to the admin
+  who minted them — rotate them when you suspend or remove a platform admin.
 - **CodeQL no longer reports notes on code the .NET SDK generates.** 3,772 of the 4,359 CodeQL results on
   `main` at `d1c8c49e` were in code the .NET SDK's own source generators write under `obj/**/generated/`
   (System.Text.Json 3,501, the ASP.NET Core request-delegate generator 227, and four others), all
