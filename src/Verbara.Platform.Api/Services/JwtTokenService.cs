@@ -60,7 +60,12 @@ internal sealed partial class JwtTokenService
     // Verbara.Platform.Api (AuthWriteQueue, ResilienceStateObserver).
     private const string MeterName = "verbara.platform.jwt";
 
-    private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
+    /// <summary>
+    /// How long an access token authenticates. Also the longest an API-key authentication is held
+    /// to (<see cref="ApiKeyAuthenticationHandler"/>), so a live connection opened with either is
+    /// re-authenticated at least this often.
+    /// </summary>
+    internal static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan ImpersonationTokenLifetime = TimeSpan.FromMinutes(30);
 
     // 5 min — large enough to amortize Redis SCAN+N×GET cost across HPA scale

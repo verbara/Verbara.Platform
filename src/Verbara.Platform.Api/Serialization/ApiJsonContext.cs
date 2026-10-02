@@ -173,6 +173,9 @@ namespace Verbara.Platform.Api.Serialization;
 // csat-completion (Platform/ADR-0020) — voice agent-hangup domain event. In-process (PlatformEventBus)
 // but every PlatformEvent is registered so the SSE relay's runtime-type serialization never crashes.
 [JsonSerializable(typeof(VoiceAgentHangupEvent))]
+// Account access revoked — ends the user's live connections. The SSE stream never delivers it
+// (it is a signal, not content); registered so every PlatformEvent serializes by runtime type.
+[JsonSerializable(typeof(UserAccessRevokedEvent))]
 // SSE: Agent Assist events
 [JsonSerializable(typeof(AgentAssistSuggestionEvent))]
 [JsonSerializable(typeof(AgentAssistSentimentEvent))]

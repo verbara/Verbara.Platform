@@ -1,6 +1,7 @@
 using Verbara.Platform.Api.Authz;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
 using Verbara.Platform.Realtime.Contracts.Dtos;
 using Microsoft.AspNetCore.Http;
 
@@ -9,8 +10,9 @@ namespace Verbara.Platform.Api.Endpoints.Internal;
 /// <summary>
 /// Service-to-service endpoints consumed by Verbara.Platform.Realtime over
 /// HTTP+JSON (X-Service-Key gated). Surfaces the two facades the Platform
-/// Hub used to consume in-process (pre-ADR-0022): cached agent→tenant
-/// resolution and the hub audit sink.
+/// Hub used to consume in-process (pre-ADR-0022) — cached agent→tenant
+/// resolution and the hub audit sink — plus the account-status lookup the
+/// hub's connect filter makes for every connection.
 /// </summary>
 internal static class InternalIntegrationEndpoints
 {
@@ -50,6 +52,28 @@ internal static class InternalIntegrationEndpoints
             return Results.Json(
                 new AgentTenantResponse(agentId, tenantId, DateTimeOffset.UtcNow),
                 Verbara.Platform.Realtime.Contracts.RealtimeContractsJsonContext.Default.AgentTenantResponse);
+        });
+
+        // Account-status lookup Realtime makes once per hub connection: the JWT it validates can
+        // outlive a suspension by up to its lifetime, so only the Api can say whether the account
+        // may still connect. The decision is User.CanAuthenticate, evaluated here, never re-derived
+        // by the caller. A well-formed request always gets 200 with a decision — an unknown user is
+        // "not allowed" — so Realtime can tell a definite refusal from an unreachable or older Api.
+        group.MapGet("/user-access/{tenantId}/{userId}", async (
+            string tenantId,
+            string userId,
+            IUserStore userStore,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(userId))
+                return Results.BadRequest();
+
+            var user = await userStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(userId), ct)
+                .ConfigureAwait(false);
+
+            return Results.Json(
+                new UserAccessResponse(tenantId, userId, Allowed: user is { CanAuthenticate: true }),
+                Verbara.Platform.Realtime.Contracts.RealtimeContractsJsonContext.Default.UserAccessResponse);
         });
 
         group.MapPost("/hub-audit", async (

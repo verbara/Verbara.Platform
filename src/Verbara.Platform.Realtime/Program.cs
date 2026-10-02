@@ -56,6 +56,15 @@ builder.Services.AddVerbaraProPushSignalR(o =>
         o.NodeId = clusterNodeId;
 });
 
+// ─── Account status on hub connections ───────────────────────────────────────
+// The JWT is validated once, at connect, and can outlive a suspension by up to its
+// lifetime. UserAccessHubFilter asks Platform.Api once per connection whether the
+// account may still authenticate, registers every admitted connection so
+// UserAccessRevokedEvent (decoded by RemoteEventDispatcher below, delivered to EVERY
+// pod over the push backplane) aborts it on whichever pod holds it, and closes every
+// connection when its token expires (the client reconnects with its current token).
+builder.Services.AddUserAccessEnforcement();
+
 // SignalR Redis backplane — REQUIRED for multi-pod scaling so a broadcast in
 // pod-A reaches a client connected to pod-B. No-op in single-pod / compose
 // deployments, but adding it now keeps the K8s HPA path open.
@@ -134,6 +143,9 @@ builder.Services
                 }
                 return Task.CompletedTask;
             },
+            // A connection is closed when its token expires; a reconnect on that token is refused
+            // here rather than admitted and closed again inside the clock-skew grace.
+            OnTokenValidated = JwtValidationConfigurator.RejectExpiredToken,
         };
     });
 

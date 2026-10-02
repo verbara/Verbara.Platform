@@ -197,6 +197,19 @@ internal static class ManagementImpersonationEndpoints
         if (adminUser is null)
             return TypedResults.NotFound(new ErrorResponse("Admin user not found."));
 
+        // The caller's access token can outlive a suspension by up to its lifetime; it must not be
+        // traded for a fresh impersonation token. (Every request made with one re-checks its
+        // impersonator, so such a token would fail on first use; refusing here also opens no
+        // session and records the attempt.)
+        if (!adminUser.CanAuthenticate)
+        {
+            await AccountStatusGate.RecordRefusedSignInAsync(authEventService, adminUser, "impersonation", context, ct);
+            return TypedResults.Problem(
+                title: "Account is not active",
+                detail: AccountStatusGate.DeniedMessage,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
         // Target permissions: caller's permissions minus platform:* scoped ones
         var nonPlatformPerms = callerPermissions
             .Where(p => !p.StartsWith("platform:", StringComparison.Ordinal));

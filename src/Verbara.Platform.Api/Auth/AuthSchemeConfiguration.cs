@@ -1,5 +1,6 @@
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 
@@ -83,8 +84,22 @@ internal static class AuthSchemeConfiguration
                         }
                         return Task.CompletedTask;
                     },
-                    OnTokenValidated = context =>
+                    OnTokenValidated = async context =>
                     {
+                        // An impersonation token (Admin in another tenant, 30 minutes) is held to
+                        // its impersonator's account status on every request; an ordinary access
+                        // token is not looked up (its <=15-minute lifetime is the accepted residual).
+                        if (context.Principal is { } principal
+                            && AccountStatusGate.IsImpersonation(principal)
+                            && !await AccountStatusGate.ImpersonatorMayAuthenticateAsync(
+                                principal,
+                                context.HttpContext.RequestServices.GetRequiredService<IUserStore>(),
+                                context.HttpContext.RequestAborted))
+                        {
+                            context.Fail(AccountStatusGate.DeniedMessage);
+                            return;
+                        }
+
                         // Only set tenant from JWT if middleware didn't already resolve one
                         // (X-Tenant-Id header / subdomain takes precedence for cross-tenant access)
                         if (!context.HttpContext.Items.ContainsKey("TenantId"))
@@ -93,8 +108,6 @@ internal static class AuthSchemeConfiguration
                             if (tenantClaim is not null)
                                 context.HttpContext.Items["TenantId"] = new TenantId(tenantClaim);
                         }
-
-                        return Task.CompletedTask;
                     },
                 };
             })

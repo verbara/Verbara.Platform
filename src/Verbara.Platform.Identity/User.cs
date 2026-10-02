@@ -33,6 +33,20 @@ public sealed class User : ITenantScoped, IAuditable
     public bool IsLockedOut(DateTimeOffset now) =>
         LockedUntil.HasValue && now < LockedUntil.Value;
 
+    /// <summary>
+    /// Whether this account may authenticate at all: obtain tokens, refresh them, use a user-bound
+    /// API key, open a live connection. Only <see cref="UserStatus.Active"/> may; Suspended and
+    /// Deactivated — and any status added later — are refused.
+    /// </summary>
+    /// <remarks>
+    /// The single account-status rule. Every authentication path (password login, MFA completion,
+    /// refresh, API-key login and per-request API keys, OIDC, impersonation start and every request
+    /// made with an impersonation token, the SSE stream and the Realtime hub connect check) asks
+    /// this property instead of comparing <see cref="Status"/> itself, so the paths cannot disagree
+    /// about which statuses get in.
+    /// </remarks>
+    public bool CanAuthenticate => Status == UserStatus.Active;
+
     private static readonly Dictionary<UserRole, Permission> s_rolePermissions =
         new Dictionary<UserRole, Permission>
         {
@@ -44,7 +58,7 @@ public sealed class User : ITenantScoped, IAuditable
 
     public bool HasPermission(Permission permission)
     {
-        if (Status != UserStatus.Active)
+        if (!CanAuthenticate)
             return false;
 
         return s_rolePermissions.TryGetValue(Role, out var granted) &&

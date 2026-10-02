@@ -1,0 +1,147 @@
+using System.Security.Claims;
+using Verbara.Platform.Api.Endpoints;
+using Verbara.Platform.Api.Services;
+using Verbara.Platform.Audit;
+using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
+using NSubstitute;
+
+namespace Verbara.Platform.Api.Tests.Auth;
+
+/// <summary>
+/// PUT /admin/users/{id} when the account changes between the handler's read and its own role or
+/// status write. The store's targeted write reports what it replaced, and that answer — not the
+/// snapshot the request read — decides whether access is revoked and what the audit entry says.
+/// </summary>
+/// <remarks>
+/// The handler is invoked directly (InternalsVisibleTo) with a substituted store, the only way to
+/// put a concurrent change between its read and its write deterministically.
+/// </remarks>
+public sealed class UpdateUserStatusWriteTests : IDisposable
+{
+    private const string Tenant = "t-update-user";
+    private const string TargetId = "u-target";
+    private const string AdminId = "u-admin";
+
+    private readonly IUserStore _store = Substitute.For<IUserStore>();
+    private readonly IRefreshTokenStore _refreshTokens = Substitute.For<IRefreshTokenStore>();
+    private readonly IAuditService _audit = Substitute.For<IAuditService>();
+    private readonly PlatformEventBus _eventBus = new();
+    private readonly List<PlatformEvent> _published = [];
+    private readonly IDisposable _subscription;
+    private readonly IClock _clock = Substitute.For<IClock>();
+
+    public UpdateUserStatusWriteTests()
+    {
+        // Every read returns a fresh Active snapshot, as PostgresUserStore does.
+        _store.GetByIdAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>())
+            .Returns(_ => NewTarget());
+        _clock.UtcNow.Returns(new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero));
+        _subscription = _eventBus.Events.Subscribe(_published.Add);
+    }
+
+    public void Dispose()
+    {
+        _subscription.Dispose();
+        _eventBus.Dispose();
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldReturn404WithoutRevoking_WhenTheUserIsDeletedBeforeTheStatusWrite()
+    {
+        StatusWriteReturns(UserStatus.Suspended, replaced: null);
+
+        var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: null, Status: UserStatus.Suspended));
+
+        result.Result.Should().BeOfType<NotFound>();
+        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllForUserAsync(default!, default!, default, default);
+        _audit.ReceivedCalls().Should().BeEmpty(because: "no status changed, so there is nothing to audit");
+        _published.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldReturn404_WhenTheUserIsDeletedBeforeTheRoleWrite()
+    {
+        _store.SetRoleAsync(new TenantId(Tenant), EntityId.From(TargetId), UserRole.Admin,
+                Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<UserRole?>(null));
+
+        var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: UserRole.Admin, Status: null));
+
+        result.Result.Should().BeOfType<NotFound>();
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldAuditTheStatusTheStoreReplaced_WhenAnotherAdminChangedItFirst()
+    {
+        // This request read Active; another admin suspended the account before this deactivation
+        // was written, so the transition that actually happened is Suspended -> Deactivated.
+        StatusWriteReturns(UserStatus.Deactivated, replaced: UserStatus.Suspended);
+
+        var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: null, Status: UserStatus.Deactivated));
+
+        result.Result.Should().BeOfType<Ok<UserDto>>();
+        await _audit.Received(1).RecordAsync(
+            new TenantId(Tenant),
+            "auth",
+            "user.status_changed",
+            "warning",
+            AdminId,
+            "user",
+            TargetId,
+            "User",
+            Arg.Any<Guid?>(),
+            Arg.Any<AuditChanges?>(),
+            Arg.Is<IReadOnlyDictionary<string, string>?>(m =>
+                m != null && m["old_status"] == "Suspended" && m["new_status"] == "Deactivated"),
+            Arg.Any<DateTimeOffset?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldNotRevokeOrAuditAgain_WhenTheStoreAlreadyHeldTheRequestedStatus()
+    {
+        // Two admins suspend the account at once: the later write replaces Suspended with
+        // Suspended, and the revocation and audit entry belong to the earlier one only.
+        StatusWriteReturns(UserStatus.Suspended, replaced: UserStatus.Suspended);
+
+        var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: null, Status: UserStatus.Suspended));
+
+        result.Result.Should().BeOfType<Ok<UserDto>>()
+            .Which.Value!.Status.Should().Be("suspended");
+        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllForUserAsync(default!, default!, default, default);
+        _audit.ReceivedCalls().Should().BeEmpty();
+        _published.Should().BeEmpty();
+    }
+
+    private void StatusWriteReturns(UserStatus status, UserStatus? replaced) =>
+        _store.SetStatusAsync(new TenantId(Tenant), EntityId.From(TargetId), status,
+                Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(replaced);
+
+    private Task<Results<Ok<UserDto>, NotFound>> InvokeAsync(UpdateUserRequest body)
+    {
+        var context = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", AdminId)], "test")),
+        };
+        context.Items["TenantId"] = new TenantId(Tenant);
+        var sessions = new SessionService(_refreshTokens, _store, new AuthEventService(Substitute.For<IAuthEventStore>()));
+
+        return AdminEndpoints.UpdateUser(
+            TargetId, context, body, _store, sessions, _audit, _eventBus, _clock, CancellationToken.None);
+    }
+
+    private static User NewTarget() => new()
+    {
+        UserId = EntityId.From(TargetId),
+        TenantId = new TenantId(Tenant),
+        Email = "target@update-user.test",
+        DisplayName = "Target",
+        Role = UserRole.Agent,
+        Status = UserStatus.Active,
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
+}

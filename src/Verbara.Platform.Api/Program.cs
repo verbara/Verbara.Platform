@@ -14,6 +14,7 @@ using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.DependencyInjection;
+using Verbara.Platform.Core.Push;
 using Verbara.Platform.Flows;
 using Verbara.Platform.Llm;
 using Verbara.Platform.Routing.Inbound;
@@ -114,6 +115,8 @@ builder.Services.AddVerbaraSessionsMultiServer();
 // for the PlatformEventBus DI ctor and the platform-specific delivery filter
 // can override the SDK default.
 builder.Services.AddVerbaraPush();
+// Open SSE streams, cut on UserAccessRevokedEvent from this replica or another (via the backplane).
+builder.Services.AddLiveConnectionRevocation();
 
 // ADR-0022 Phase A — The SignalR Hub itself (MapHub, PresenceTracker,
 // PushToHubRelay) moved to Verbara.Platform.Realtime. Platform.Api KEEPS the

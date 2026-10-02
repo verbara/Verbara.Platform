@@ -5,7 +5,10 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Core;
+using Verbara.Platform.Core.Push;
+using Verbara.Platform.Identity;
 using Verbara.Sdk.Push.Delivery;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
 
@@ -20,16 +23,57 @@ internal static partial class SseEndpoints
         HttpContext context,
         PlatformEventBus eventBus,
         IEventDeliveryFilter deliveryFilter,
+        [FromServices] IUserStore userStore,
+        [FromServices] LiveConnectionRegistry liveConnections,
+        [FromServices] TimeProvider time,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var logger = loggerFactory.CreateLogger("Verbara.Platform.Api.Endpoints.Sse");
 
+        // The stream is authenticated once, here, and then lives as long as the client keeps it
+        // open — while the access token that opened it can outlive a suspension by up to its
+        // lifetime. So: register the stream under its owner (before the status read, so a
+        // revocation landing during the read still finds it), refuse an account that may not
+        // authenticate, let UserAccessRevokedEvent end the stream later, and end it at the latest
+        // when the credential that opened it expires — the bound for any revocation it misses.
+        // A credential already past that point (JwtBearer grants a clock-skew grace) opens nothing:
+        // the stream would end at once, and the client's reconnect would loop through it.
+        var owner = LiveConnectionOwner.FromPrincipal(context.User);
+        var expiresAt = LiveConnectionExpiry.Of(context.User);
+        if (expiresAt <= time.GetUtcNow())
+        {
+            LogStreamRefusedExpired(logger, owner?.TenantId, owner?.UserId);
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+
+        using var streamCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var liveRegistration = owner is { } o
+            ? liveConnections.Register(o.TenantId, o.UserId, streamCts.Cancel)
+            : null;
+        if (owner is { } account && !await CanAuthenticateAsync(userStore, account, ct))
+        {
+            LogStreamRefused(logger, account.TenantId, account.UserId);
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+
+        // Ending the stream is an ordinary end of the response: the client reconnects with the
+        // credential it holds by then, and that request is authenticated and checked afresh.
+        using var expiry = LiveConnectionExpiry.ScheduleClose(time, expiresAt, () =>
+        {
+            LogStreamExpired(logger, owner?.TenantId, owner?.UserId);
+            streamCts.Cancel();
+        }, logger);
+
+        var streamToken = streamCts.Token;
+
         context.Response.ContentType = "text/event-stream";
         context.Response.Headers.CacheControl = "no-cache";
         context.Response.Headers.Connection = "keep-alive";
 
-        await context.Response.Body.FlushAsync(ct);
+        await context.Response.Body.FlushAsync(streamToken);
 
         var tenantId = context.Items.TryGetValue("TenantId", out var tid)
             ? tid as TenantId?
@@ -58,7 +102,8 @@ internal static partial class SseEndpoints
         });
 
         using var subscription = eventBus.Events
-            .Where(e => deliveryFilter.IsDeliverableToSubscriber(
+            // The revocation signal ends streams (via the registry above); it is never content.
+            .Where(e => e is not UserAccessRevokedEvent && deliveryFilter.IsDeliverableToSubscriber(
                 e,
                 tenantId is null
                     // Anonymous / unscoped stream: align subscriber tenant to the event's so the
@@ -73,16 +118,16 @@ internal static partial class SseEndpoints
                 }
             });
 
-        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(streamToken);
         var heartbeatTask = SendHeartbeatsAsync(context.Response, logger, heartbeatCts.Token);
 
         try
         {
-            await foreach (var evt in channel.Reader.ReadAllAsync(ct))
+            await foreach (var evt in channel.Reader.ReadAllAsync(streamToken))
             {
                 try
                 {
-                    await WriteEventAsync(context.Response, evt.Type, evt, ct);
+                    await WriteEventAsync(context.Response, evt.Type, evt, streamToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -97,7 +142,7 @@ internal static partial class SseEndpoints
         }
         catch (OperationCanceledException)
         {
-            // Client disconnected — expected.
+            // Client disconnected, or the owner's access was revoked — expected either way.
         }
         finally
         {
@@ -108,6 +153,13 @@ internal static partial class SseEndpoints
             catch (OperationCanceledException) { /* expected */ }
             catch (Exception ex) { LogHeartbeatCleanupFailed(logger, ex); }
         }
+    }
+
+    private static async Task<bool> CanAuthenticateAsync(
+        IUserStore userStore, LiveConnectionOwner owner, CancellationToken ct)
+    {
+        var user = await userStore.GetByIdAsync(new TenantId(owner.TenantId), EntityId.From(owner.UserId), ct);
+        return user is { CanAuthenticate: true };
     }
 
     /// <summary>
@@ -165,6 +217,18 @@ internal static partial class SseEndpoints
     [LoggerMessage(EventId = 7105, Level = LogLevel.Debug,
         Message = "SSE heartbeat cleanup failed")]
     private static partial void LogHeartbeatCleanupFailed(ILogger logger, Exception ex);
+
+    [LoggerMessage(EventId = 7106, Level = LogLevel.Information,
+        Message = "SSE stream refused: account is not active (tenant={TenantId}, user={UserId})")]
+    private static partial void LogStreamRefused(ILogger logger, string tenantId, string userId);
+
+    [LoggerMessage(EventId = 7107, Level = LogLevel.Information,
+        Message = "SSE stream refused: the credential presented has expired (tenant={TenantId}, user={UserId})")]
+    private static partial void LogStreamRefusedExpired(ILogger logger, string? tenantId, string? userId);
+
+    [LoggerMessage(EventId = 7108, Level = LogLevel.Information,
+        Message = "SSE stream ended: the credential that opened it expired (tenant={TenantId}, user={UserId}); the client may reconnect with a current one")]
+    private static partial void LogStreamExpired(ILogger logger, string? tenantId, string? userId);
 
     private static async Task SendHeartbeatsAsync(HttpResponse response, ILogger logger, CancellationToken ct)
     {

@@ -1,3 +1,5 @@
+using Verbara.Platform.Api.Auth;
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
@@ -146,11 +148,16 @@ internal static class AdminEndpoints
         return Results.Created($"/admin/users/{user.UserId}", ToUserDto(user));
     }
 
-    private static async Task<Results<Ok<UserDto>, NotFound>> UpdateUser(
+    // internal (not private) so Api.Tests can invoke it with a store that changes underneath it,
+    // the way AuthEndpoints.Login is exercised directly.
+    internal static async Task<Results<Ok<UserDto>, NotFound>> UpdateUser(
         string id,
         HttpContext context,
         [FromBody] UpdateUserRequest body,
         [FromServices] IUserStore store,
+        [FromServices] SessionService sessions,
+        [FromServices] IAuditService audit,
+        PlatformEventBus eventBus,
         IClock clock,
         CancellationToken ct)
     {
@@ -159,12 +166,94 @@ internal static class AdminEndpoints
         if (user is null)
             return TypedResults.NotFound();
 
-        user.DisplayName = body.DisplayName ?? user.DisplayName;
-        if (body.Role.HasValue) user.Role = body.Role.Value;
-        if (body.Status.HasValue) user.Status = body.Status.Value;
-        user.UpdatedAt = clock.UtcNow;
-        await store.SaveAsync(user, ct);
+        var now = clock.UtcNow;
+        if (body.DisplayName is not null && body.DisplayName != user.DisplayName)
+        {
+            user.DisplayName = body.DisplayName;
+            user.UpdatedAt = now;
+            await store.SaveAsync(user, ct);
+        }
+
+        // Role and status each have their own write: SaveAsync never writes them for an existing
+        // user, so a request still holding an object read before this change (a failed sign-in
+        // recording its attempt, a password change) cannot put the old value back when it saves.
+        // Only a value that differs from what this request read is written.
+        if (body.Role is { } role && role != user.Role)
+        {
+            if (await store.SetRoleAsync(tenantId, user.UserId, role, now, ct) is null)
+                return TypedResults.NotFound();
+            user.Role = role;
+        }
+
+        if (body.Status is { } status && status != user.Status)
+        {
+            // The store returns the status it replaced, so the revocation and the audit entry follow
+            // the transition that was actually written, not the one this request expected.
+            var previousStatus = await store.SetStatusAsync(tenantId, user.UserId, status, now, ct);
+            if (previousStatus is null)
+                return TypedResults.NotFound();
+            user.Status = status;
+            if (previousStatus != status)
+                await ApplyStatusChangeAsync(user, previousStatus.Value, context, sessions, audit, eventBus, ct);
+        }
+
         return TypedResults.Ok(ToUserDto(user));
+    }
+
+    // A status change is a security event, applied AFTER the new status is persisted (so a client
+    // reconnecting after its connection is cut already meets the new status).
+    //  • Leaving Active ends the access the account still holds: its refresh-token lineage is
+    //    revoked, so no further access token can be minted, and UserAccessRevokedEvent aborts its
+    //    live Realtime hub connections and SSE streams on every node.
+    //  • User-bound API keys are NOT revoked: they stop authenticating through the status check on
+    //    every request, and work again if the account is re-activated (revoking would force
+    //    re-issuing every integration key after a temporary suspension).
+    //  • Access tokens already issued stay valid until they expire (at most 15 minutes) — there is
+    //    deliberately no per-request status lookup for them. Impersonation tokens (30 minutes, Admin
+    //    in another tenant) are the exception: the bearer pipeline checks their impersonator's status
+    //    on every request (AccountStatusGate), so they stop working here, with nothing to revoke.
+    //  • Every change, re-activation included, is audited.
+    private static async Task ApplyStatusChangeAsync(
+        User user,
+        UserStatus previousStatus,
+        HttpContext context,
+        SessionService sessions,
+        IAuditService audit,
+        PlatformEventBus eventBus,
+        CancellationToken ct)
+    {
+        var actorId = CallerIdentity.ResolveUserIdOrSystem(context.User);
+        var ip = context.Connection.RemoteIpAddress?.ToString();
+        var revoke = !user.CanAuthenticate;
+        var revokedSessions = 0;
+
+        if (revoke)
+        {
+            revokedSessions = await sessions.RevokeAllSessionsForUserAsync(
+                user.TenantId.Value, actorId, user.UserId.Value,
+                ip, context.Request.Headers.UserAgent.FirstOrDefault(), ct);
+            eventBus.Publish(new UserAccessRevokedEvent(
+                user.TenantId.Value, user.UserId.Value, AccountStatusGate.StatusName(user.Status)));
+        }
+
+        await audit.RecordAsync(
+            user.TenantId,
+            category: "auth",
+            action: "user.status_changed",
+            severity: revoke ? "warning" : "info",
+            actorId: actorId,
+            actorType: "user",
+            targetId: user.UserId.Value,
+            targetType: "User",
+            metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["old_status"] = previousStatus.ToString(),
+                ["new_status"] = user.Status.ToString(),
+                ["revoked_sessions"] = revokedSessions.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["ip"] = ip ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
     }
 
     private static UserDto ToUserDto(User u) =>
@@ -180,10 +269,15 @@ internal static class AdminEndpoints
         string id,
         HttpContext context,
         [FromServices] IUserStore store,
+        PlatformEventBus eventBus,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+
+        // Refresh and API keys already fail once the user is gone, but hub connections and SSE
+        // streams were authenticated once and would stay open: cut them on every node.
+        eventBus.Publish(new UserAccessRevokedEvent(tenantId.Value, id, UserAccessRevokedEvent.DeletedReason));
         return Results.NoContent();
     }
 

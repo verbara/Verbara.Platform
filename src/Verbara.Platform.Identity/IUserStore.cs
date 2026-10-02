@@ -29,6 +29,42 @@ public interface IUserStore
                 $"{GetType().Name} does not support filtering by email. Override IUserStore.ListAsync(TenantId, PagedQuery, string?, CancellationToken).");
 
     Task<IReadOnlyList<User>> GetByIdsAsync(string tenantId, IReadOnlyCollection<string> userIds, CancellationToken ct);
+
+    /// <summary>
+    /// Inserts <paramref name="user"/> with every field, or updates an existing user with every
+    /// field except <see cref="User.Role"/> and <see cref="User.Status"/>, which keep their stored
+    /// values.
+    /// </summary>
+    /// <remarks>
+    /// Callers load a user, change their own fields and save the whole object, with no concurrency
+    /// check. If this save wrote role and status, a caller holding an object read before an admin
+    /// suspended or demoted the account would put the old value back — a failed sign-in recording
+    /// its attempt is enough. Only <see cref="SetStatusAsync"/> and <see cref="SetRoleAsync"/>
+    /// change them, so a role or status change sticks.
+    /// </remarks>
     Task SaveAsync(User user, CancellationToken ct);
+
+    /// <summary>
+    /// Sets the account status of an existing user, and its <see cref="User.UpdatedAt"/>, and writes
+    /// nothing else.
+    /// </summary>
+    /// <returns>
+    /// The status the user held immediately before this write (equal to <paramref name="status"/>
+    /// when nothing changed), or <see langword="null"/> when there is no such user.
+    /// </returns>
+    Task<UserStatus?> SetStatusAsync(
+        TenantId tenantId, EntityId userId, UserStatus status, DateTimeOffset updatedAt, CancellationToken ct);
+
+    /// <summary>
+    /// Sets the role of an existing user, and its <see cref="User.UpdatedAt"/>, and writes nothing
+    /// else.
+    /// </summary>
+    /// <returns>
+    /// The role the user held immediately before this write, or <see langword="null"/> when there is
+    /// no such user.
+    /// </returns>
+    Task<UserRole?> SetRoleAsync(
+        TenantId tenantId, EntityId userId, UserRole role, DateTimeOffset updatedAt, CancellationToken ct);
+
     Task DeleteAsync(TenantId tenantId, EntityId userId, CancellationToken ct);
 }

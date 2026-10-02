@@ -274,6 +274,9 @@ internal sealed class PostgresUserStore : IUserStore
     {
         try
         {
+            // role and status are written on INSERT only. The update branch leaves them alone, so a
+            // caller saving an object it read before a suspension or a role change cannot put the old
+            // value back; SetStatusAsync / SetRoleAsync are their only writers (see IUserStore).
             await _dataSource.ExecuteAsync(
                 "INSERT INTO users (user_id, tenant_id, email, display_name, role, status, created_at, updated_at, created_by, updated_by, " +
                 "password_hash, mfa_enabled, mfa_secret, mfa_recovery_codes, mfa_confirmed_at, email_verified, " +
@@ -282,7 +285,7 @@ internal sealed class PostgresUserStore : IUserStore
                 "@PasswordHash, @MfaEnabled, @MfaSecret, @MfaRecoveryCodes, @MfaConfirmedAt, @EmailVerified, " +
                 "@FailedLoginAttempts, @LockedUntil, @PasswordChangedAt, @LastLoginAt, @AuthProvider, @ExternalId, @OidcSubject) " +
                 "ON CONFLICT (tenant_id, user_id) DO UPDATE SET " +
-                "  display_name = EXCLUDED.display_name, role = EXCLUDED.role, status = EXCLUDED.status, " +
+                "  display_name = EXCLUDED.display_name, " +
                 "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by, " +
                 "  password_hash = EXCLUDED.password_hash, mfa_enabled = EXCLUDED.mfa_enabled, " +
                 "  mfa_secret = EXCLUDED.mfa_secret, mfa_recovery_codes = EXCLUDED.mfa_recovery_codes, " +
@@ -338,6 +341,50 @@ internal sealed class PostgresUserStore : IUserStore
             throw new EntityAlreadyExistsException("user", field, ex);
         }
     }
+
+    // One statement writes the column and returns the value it replaced. The sub-select locks the
+    // row first, so under READ COMMITTED a concurrent writer's committed value is what comes back as
+    // `previous`, never a value read before it. No row (no such user) → no result → null.
+    private const string SetStatusSql =
+        "UPDATE users AS u SET status = @Value, updated_at = @UpdatedAt " +
+        "FROM (SELECT tenant_id, user_id, status FROM users " +
+        "      WHERE tenant_id = @TenantId AND user_id = @UserId FOR UPDATE) AS previous " +
+        "WHERE u.tenant_id = previous.tenant_id AND u.user_id = previous.user_id " +
+        "RETURNING previous.status";
+
+    private const string SetRoleSql =
+        "UPDATE users AS u SET role = @Value, updated_at = @UpdatedAt " +
+        "FROM (SELECT tenant_id, user_id, role FROM users " +
+        "      WHERE tenant_id = @TenantId AND user_id = @UserId FOR UPDATE) AS previous " +
+        "WHERE u.tenant_id = previous.tenant_id AND u.user_id = previous.user_id " +
+        "RETURNING previous.role";
+
+    public async Task<UserStatus?> SetStatusAsync(
+        TenantId tenantId, EntityId userId, UserStatus status, DateTimeOffset updatedAt, CancellationToken ct)
+    {
+        var previous = await SetColumnAsync(SetStatusSql, tenantId, userId, (int)status, updatedAt, ct);
+        return previous is { } value ? (UserStatus)value : null;
+    }
+
+    public async Task<UserRole?> SetRoleAsync(
+        TenantId tenantId, EntityId userId, UserRole role, DateTimeOffset updatedAt, CancellationToken ct)
+    {
+        var previous = await SetColumnAsync(SetRoleSql, tenantId, userId, (int)role, updatedAt, ct);
+        return previous is { } value ? (UserRole)value : null;
+    }
+
+    private Task<int?> SetColumnAsync(
+        string sql, TenantId tenantId, EntityId userId, int value, DateTimeOffset updatedAt, CancellationToken ct) =>
+        _dataSource.ExecuteScalarAsync<int?>(
+            sql,
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("UserId", userId.Value));
+                p.Add(new NpgsqlParameter("Value", NpgsqlDbType.Integer) { Value = value });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = updatedAt });
+            },
+            ct);
 
     public async Task DeleteAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
     {

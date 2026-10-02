@@ -9,8 +9,8 @@ namespace Verbara.Platform.Api.Services;
 /// AHH Phase 1 — IMemoryCache decorator over <see cref="IUserStore"/>. Caches
 /// <see cref="GetByEmailAsync"/> and <see cref="GetByIdAsync"/> reads keyed by
 /// <c>(tenantId, email)</c> / <c>(tenantId, userId)</c> respectively;
-/// <see cref="SaveAsync"/> + <see cref="DeleteAsync"/> pass through and
-/// invalidate cache entries for the affected user.
+/// <see cref="SaveAsync"/>, <see cref="SetStatusAsync"/>, <see cref="SetRoleAsync"/> and
+/// <see cref="DeleteAsync"/> pass through and invalidate cache entries for the affected user.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -125,6 +125,42 @@ internal sealed class CachedUserStore : IUserStore, ILocalAuthCacheInvalidationS
         _cache.Remove(ByEmailKey(user.TenantId.Value, user.Email));
         if (_invalidator is not null)
             await _invalidator.PublishUserAsync(user.TenantId.Value, user.UserId.Value, user.Email, ct).ConfigureAwait(false);
+    }
+
+    public async Task<UserStatus?> SetStatusAsync(
+        TenantId tenantId, EntityId userId, UserStatus status, DateTimeOffset updatedAt, CancellationToken ct)
+    {
+        var email = await EmailOfAsync(tenantId, userId, ct).ConfigureAwait(false);
+        var previous = await _inner.SetStatusAsync(tenantId, userId, status, updatedAt, ct).ConfigureAwait(false);
+        await InvalidateAfterWriteAsync(tenantId, userId, email, ct).ConfigureAwait(false);
+        return previous;
+    }
+
+    public async Task<UserRole?> SetRoleAsync(
+        TenantId tenantId, EntityId userId, UserRole role, DateTimeOffset updatedAt, CancellationToken ct)
+    {
+        var email = await EmailOfAsync(tenantId, userId, ct).ConfigureAwait(false);
+        var previous = await _inner.SetRoleAsync(tenantId, userId, role, updatedAt, ct).ConfigureAwait(false);
+        await InvalidateAfterWriteAsync(tenantId, userId, email, ct).ConfigureAwait(false);
+        return previous;
+    }
+
+    // The by-email entry holds the same object as the by-id one; leaving it behind would let a
+    // password sign-in read the pre-change status for up to the TTL. The targeted writes do not
+    // carry the email, so it comes from the cached user, or from the inner store on a miss.
+    private async Task<string?> EmailOfAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
+    {
+        if (_cache.TryGetValue<User?>(ByIdKey(tenantId.Value, userId.Value), out var cached) && cached is not null)
+            return cached.Email;
+        var fresh = await _inner.GetByIdAsync(tenantId, userId, ct).ConfigureAwait(false);
+        return fresh?.Email;
+    }
+
+    private async Task InvalidateAfterWriteAsync(TenantId tenantId, EntityId userId, string? email, CancellationToken ct)
+    {
+        InvalidateUser(tenantId.Value, userId.Value, email);
+        if (_invalidator is not null)
+            await _invalidator.PublishUserAsync(tenantId.Value, userId.Value, email, ct).ConfigureAwait(false);
     }
 
     public async Task DeleteAsync(TenantId tenantId, EntityId userId, CancellationToken ct)

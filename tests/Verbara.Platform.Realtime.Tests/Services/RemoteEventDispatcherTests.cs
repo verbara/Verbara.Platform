@@ -197,4 +197,26 @@ public sealed class RemoteEventDispatcherTests
 
         await dispatcher.StopAsync(CancellationToken.None);
     }
+
+    [Fact]
+    public async Task Dispatch_ShouldRepublishUserAccessRevokedEvent_WhenOriginalEventTypeMatches()
+    {
+        using var bus = new FakePushEventBus();
+        var dispatcher = new RemoteEventDispatcher(bus, NullLogger<RemoteEventDispatcher>.Instance);
+        await dispatcher.StartAsync(CancellationToken.None);
+
+        var typed = new UserAccessRevokedEvent("acme", "user-7", "suspended");
+        var envelope = MakeEnvelope(
+            JsonSerializer.Serialize(typed, PlatformPushJsonContext.Default.UserAccessRevokedEvent),
+            typed.EventType);
+
+        bus.Emit(envelope);
+
+        var decoded = bus.Published.OfType<UserAccessRevokedEvent>().Should().ContainSingle().Subject;
+        decoded.TenantId.Should().Be("acme");
+        decoded.UserId.Should().Be("user-7");
+        decoded.Reason.Should().Be("suspended");
+
+        await dispatcher.StopAsync(CancellationToken.None);
+    }
 }
