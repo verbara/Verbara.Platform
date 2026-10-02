@@ -65,10 +65,23 @@ internal sealed class PlatformAdminAuthorizationHandler : AuthorizationHandler<P
 
         if (!isHostTenant)
         {
-            // Check if user's tenant is a Partner (can manage its own children)
+            // A PlatformAdminRequirement is a host-tenant gate unless the surface
+            // explicitly delegates to Partners AND checks the target tenant against the
+            // caller's hierarchy itself (see PlatformAdminRequirement.AllowPartnerDelegation).
+            // The previous version admitted any Partner-tenant caller on EVERY gate, which
+            // is how a Partner admin reached /management/api-keys, /management/security/jwt,
+            // /management/cluster and the installation-wide tenant list.
+            if (!requirement.AllowPartnerDelegation)
+                return;
+
             var userTenant = await _tenantStore.GetAsync(tenantIdClaim);
             if (userTenant is null || userTenant.Type != TenantType.Partner)
                 return; // Not host, not partner — deny
+
+            // Parity with PartnerAdminAuthorizationHandler: a Partner whose own tenant is
+            // suspended or being deleted administers nothing, including its children.
+            if (userTenant.Status is TenantStatus.Suspended or TenantStatus.Deleted or TenantStatus.PendingDeletion)
+                return;
         }
 
         // If a specific permission is required, check it

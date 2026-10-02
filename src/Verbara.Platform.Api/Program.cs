@@ -1429,25 +1429,37 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("AdminOnly", p => p.RequireRole("Admin"));
     options.AddPolicy("SupervisorPlus", p => p.RequireRole("Admin", "Supervisor"));
     options.AddPolicy("Authenticated", p => p.RequireAuthenticatedUser());
-    options.AddPolicy("PlatformAdminOnly", p =>
+    // Host-tenant gate. Partner-tenant callers do NOT satisfy it — their surface is
+    // /partner/* under PartnerAdminOnly, every handler of which scopes to their own
+    // children. See PlatformAdminRequirement.AllowPartnerDelegation.
+    options.AddPolicy(PlatformAdminRequirement.HostOnlyPolicy, p =>
         p.AddRequirements(new PlatformAdminRequirement()));
     options.AddPolicy("PartnerAdminOnly", p =>
         p.AddRequirements(new PartnerAdminRequirement()));
 
+    // The one gate a Partner may also satisfy: /management/impersonate resolves its
+    // target tenant from the request body and rejects anything outside the caller's
+    // hierarchy (ManagementImpersonationEndpoints.StartImpersonation), so the policy
+    // is deliberately not the last line of defence there.
+    options.AddPolicy(PlatformAdminRequirement.PartnerDelegatedPolicy, p =>
+        p.AddRequirements(new PlatformAdminRequirement(allowPartnerDelegation: true)));
+
     // ─── Permission-gated admin surfaces (ADR-0037) ──────────────────────────
     // Each of these double-locks a surface: PlatformAdminRequirement combines the
-    // host/partner-tenant gate with an explicit RBAC permission, so only platform
-    // admins (or partner admins managing their children) holding that permission
-    // get through. The ids come from PlatformAdminPermissions rather than string
-    // literals: PermissionResolver.HasPermission is an exact set-membership test,
-    // so a gate naming an id that PermissionSeeder does not catalogue can never be
-    // satisfied on its permission — a guard test asserts every constant here is a
-    // catalog member.
+    // host-tenant gate with an explicit RBAC permission, so only platform admins
+    // holding that permission get through. The ids come from PlatformAdminPermissions
+    // rather than string literals: PermissionResolver.HasPermission is an exact
+    // set-membership test, so a gate naming an id that PermissionSeeder does not
+    // catalogue can never be satisfied on its permission — a guard test asserts every
+    // constant here is a catalog member.
 
     // R5.2 PA.1 — MFA admin surface (list users / reset MFA / revoke sessions).
+    // Partner-delegated: MfaAdminEndpoints resolves ?targetTenant= and enforces the
+    // caller's hierarchy itself (MFA-001), auditing the rejected attempt.
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.Mfa.MfaAdminEndpoints.AuthorizationPolicy,
-        p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.MfaManage)));
+        p => p.AddRequirements(new PlatformAdminRequirement(
+            PlatformAdminPermissions.MfaManage, allowPartnerDelegation: true)));
 
     // c1 (credit-ledger-topups) — top-up mint, enforced against both management-key
     // scopes and user JWT permissions (minting AI credits is money creation, so the
