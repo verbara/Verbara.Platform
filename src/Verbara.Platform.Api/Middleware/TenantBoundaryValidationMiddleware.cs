@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Core;
@@ -30,8 +31,13 @@ namespace Verbara.Platform.Api.Middleware;
 ///   <item><description><b>Management API key</b>
 ///   (<c>key_type=management</c>) — the bypass is intentional; scope-aware
 ///   enforcement is tracked separately as <c>PREPUB-2026-05-09-ADMIN-002</c>.</description></item>
-///   <item><description><b>Platform / Partner tenants</b> — these manage
-///   downstream tenants by design (R5.2 PA, ADR-0002).</description></item>
+///   <item><description><b>The Platform host tenant</b> — it operates the whole
+///   installation.</description></item>
+///   <item><description><b>A Partner tenant reaching into its own subtree</b> —
+///   verified with <see cref="TenantHierarchy.IsInCallerHierarchyAsync"/>. The
+///   original fix checked the tenant TYPE only, so any Partner admin could read and
+///   write any OTHER Partner's customers by naming them in the header; the parent
+///   chain, not the type, is what authorises the reach.</description></item>
 /// </list>
 /// </para>
 /// <para>
@@ -39,8 +45,11 @@ namespace Verbara.Platform.Api.Middleware;
 /// <see cref="HttpContext.RequestServices"/> rather than constructor-injected
 /// so the middleware itself stays cheap to instantiate (singleton lifetime
 /// with no captured store reference). The store lookup only fires when the
-/// header was actually overridden (small fraction of requests in steady
-/// state) and is hot-cached behind <c>CachedTenantStore</c> in production.
+/// header was actually overridden, a small fraction of requests in steady
+/// state — and a Partner's parent-chain walk only on top of that. (An earlier
+/// version of this note claimed the lookup was "hot-cached behind
+/// <c>CachedTenantStore</c>"; no such type exists — production binds
+/// <c>PostgresTenantStore</c> directly.)
 /// </para>
 /// </remarks>
 internal sealed class TenantBoundaryValidationMiddleware
@@ -86,11 +95,22 @@ internal sealed class TenantBoundaryValidationMiddleware
             return;
         }
 
-        // Mismatch: only Platform / Partner callers may legitimately operate on
-        // a different tenant via header / subdomain.
+        // Mismatch: only the Platform host tenant may operate on any tenant. A Partner
+        // may only reach INTO ITS OWN SUBTREE — the tenant-TYPE check this replaces let
+        // Partner A read and write Partner B's customers through X-Tenant-Id.
         var store = context.RequestServices.GetRequiredService<ITenantStore>();
         var callerTenant = await store.GetAsync(jwtTid, context.RequestAborted);
-        if (callerTenant?.Type is TenantType.Platform or TenantType.Partner)
+
+        if (callerTenant?.Type is TenantType.Platform)
+        {
+            await _next(context);
+            return;
+        }
+
+        if (callerTenant?.Type is TenantType.Partner
+            && callerTenant.Status is not (TenantStatus.Suspended or TenantStatus.Deleted or TenantStatus.PendingDeletion)
+            && await TenantHierarchy.IsInCallerHierarchyAsync(
+                store, jwtTid, resolved.Value, context.RequestAborted))
         {
             await _next(context);
             return;

@@ -77,4 +77,49 @@ public class UserTests
 
         user.HasPermission(Permission.ManageUsers).Should().BeFalse();
     }
+
+    // ─── CanAuthenticate: the one account-status rule every auth path applies ──
+
+    [Fact]
+    public void CanAuthenticate_ShouldBeTrue_WhenStatusIsActive()
+    {
+        UserWith(UserStatus.Active).CanAuthenticate.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(UserStatus.Suspended)]
+    [InlineData(UserStatus.Deactivated)]
+    public void CanAuthenticate_ShouldBeFalse_WhenStatusIsNotActive(UserStatus status)
+    {
+        UserWith(status).CanAuthenticate.Should().BeFalse();
+    }
+
+    [Fact]
+    public void CanAuthenticate_ShouldAdmitOnlyActive_WhenCheckedAcrossEveryDefinedStatus()
+    {
+        // Allow-list, not deny-list: a status added to the enum later is refused everywhere until
+        // someone deliberately decides otherwise here.
+        foreach (var status in Enum.GetValues<UserStatus>())
+        {
+            UserWith(status).CanAuthenticate.Should().Be(status == UserStatus.Active,
+                because: $"only Active may authenticate, and {status} is {(status == UserStatus.Active ? "" : "not ")}Active");
+        }
+    }
+
+    [Fact]
+    public void CanAuthenticate_ShouldBeFalse_WhenStatusIsUndefinedValue()
+    {
+        UserWith((UserStatus)99).CanAuthenticate.Should().BeFalse();
+    }
+
+    private static User UserWith(UserStatus status) => new()
+    {
+        UserId = EntityId.From("u-status"),
+        TenantId = new TenantId("t1"),
+        Email = "status@example.com",
+        DisplayName = "Status",
+        Role = UserRole.Agent,
+        Status = status,
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
 }

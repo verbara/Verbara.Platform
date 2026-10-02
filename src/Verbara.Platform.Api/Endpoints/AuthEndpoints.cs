@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
@@ -114,6 +115,15 @@ internal static class AuthEndpoints
             return Results.Unauthorized();
         }
 
+        // Account status is checked only once the password is proven: a caller who does not know
+        // the password learns nothing about the account, and the refusal never counts toward lockout.
+        // Refused before any MFA challenge, rehash or token is produced.
+        if (!user.CanAuthenticate)
+        {
+            await AccountStatusGate.RecordRefusedSignInAsync(authEvents, user, "password", context, ct);
+            return AccountStatusGate.Forbidden();
+        }
+
         // AHH Phase 4 — on successful login, if the stored hash is still
         // legacy BCrypt, recompute it as Argon2id and enqueue the upsert.
         // The hash is computed synchronously inside the request to avoid
@@ -195,6 +205,15 @@ internal static class AuthEndpoints
         var user = await userStore.GetByIdAsync(tenantId, EntityId.From(pending.UserId), ct);
         if (user is null)
             return Results.Unauthorized();
+
+        // The challenge was minted while the account could sign in; it may have been suspended in
+        // the minutes since. Refused before the factor is evaluated, so no recovery code is burned
+        // and no lockout attempt is recorded.
+        if (!user.CanAuthenticate)
+        {
+            await AccountStatusGate.RecordRefusedSignInAsync(authEvents, user, "mfa", context, ct);
+            return AccountStatusGate.Forbidden();
+        }
 
         // Try TOTP code first, then recovery code
         var verified = false;
@@ -287,6 +306,23 @@ internal static class AuthEndpoints
 
         if (user is null)
             return Results.Unauthorized();
+
+        // An account that left Active loses its whole refresh lineage. RotateAsync has already
+        // revoked the presented token and minted a replacement, so revoke that and every sibling —
+        // the same teardown as the MFA-policy branch below.
+        if (!user.CanAuthenticate)
+        {
+            await refreshTokenStore.RevokeAllForUserAsync(
+                user.TenantId.Value, user.UserId.Value, DateTimeOffset.UtcNow, ct);
+            DeleteRefreshCookie(context);
+            await authEvents.LogAsync(user.TenantId.Value, user.UserId.Value,
+                AuthEventTypes.SessionRevoked, ip, ua,
+                new Dictionary<string, string> { ["reason"] = AccountStatusGate.DenialReason(user) }, ct);
+            return Results.Json(
+                new ErrorResponse(AccountStatusGate.DeniedMessage),
+                ApiJsonContext.Default.ErrorResponse,
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
 
         // v1.9.0 P0 — Tenant MFA policy re-evaluation on refresh (Gap 2).
         // If tenant admin flipped the policy (optional → required_all, or added
@@ -430,6 +466,14 @@ internal static class AuthEndpoints
         var user = await userStore.GetByIdAsync(apiKey.TenantId, linkedUserId, ct);
         if (user is null)
             return Results.Unauthorized();
+
+        // A user-bound key acts as its owner, so it mints nothing for an owner who may not sign in.
+        if (!user.CanAuthenticate)
+        {
+            await AccountStatusGate.RecordRefusedSignInAsync(
+                authEvents, user, "api_key", context, ct, apiKeyId: apiKey.KeyId.Value);
+            return AccountStatusGate.Forbidden();
+        }
 
         // v1.9.0 P0 — Tenant MFA policy enforcement on user-bound API keys (Gap 4).
         // Machine-to-machine Management keys (ApiKeyType.Management) are exempt by

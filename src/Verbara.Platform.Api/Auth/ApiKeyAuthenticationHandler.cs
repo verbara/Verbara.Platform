@@ -1,8 +1,11 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
+using Verbara.Platform.Core.Push;
 using Verbara.Platform.Identity;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
@@ -52,7 +55,8 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
         if (apiKey.IsRevoked)
             return AuthenticateResult.Fail("API key has been revoked");
 
-        if (apiKey.IsExpired(DateTimeOffset.UtcNow))
+        var now = TimeProvider.GetUtcNow();
+        if (apiKey.IsExpired(now))
             return AuthenticateResult.Fail("API key has expired");
 
         var claims = new List<Claim>
@@ -60,6 +64,14 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
             new Claim(ClaimTypes.NameIdentifier, apiKey.KeyId.Value),
             new Claim("tenant_id", apiKey.TenantId.Value),
             new Claim("key_name", apiKey.Name),
+            // A key is re-checked on every request, so it carries no expiry a live connection (the
+            // event stream) could be bounded by: this authentication gets an access token's lifetime,
+            // or the key's own expiry when that comes first. Such a connection then closes no later
+            // than an access token would, and its reconnect runs every check here again.
+            new Claim(
+                LiveConnectionExpiry.ClaimType,
+                AuthenticatedUntil(apiKey, now).ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture),
+                ClaimValueTypes.Integer64),
         };
 
         // ADMIN-002 (PREPUB-2026-05-09): emit one "scope" claim per scope so
@@ -78,12 +90,16 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
 
         if (apiKey.UserId is { } userId)
         {
+            // A user-bound key acts as its owner, so it authenticates only while the owner may —
+            // checked on every request (the owner is loaded here anyway, for its role). The key is
+            // not revoked when the owner is suspended: it stops working now and works again if the
+            // owner is re-activated. An owner that no longer exists leaves the key no one to act as.
             var user = await _userStore.GetByIdAsync(apiKey.TenantId, userId, Context.RequestAborted);
-            if (user is not null)
-            {
-                claims.Add(new Claim(ClaimTypes.Role, user.Role.ToString()));
-                claims.Add(new Claim("user_id", user.UserId.Value));
-            }
+            if (user is null || !user.CanAuthenticate)
+                return AuthenticateResult.Fail("API key owner is not active");
+
+            claims.Add(new Claim(ClaimTypes.Role, user.Role.ToString()));
+            claims.Add(new Claim("user_id", user.UserId.Value));
         }
 
         var identity = new ClaimsIdentity(claims, Scheme.Name);
@@ -103,6 +119,12 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
         }
 
         return AuthenticateResult.Success(ticket);
+    }
+
+    private static DateTimeOffset AuthenticatedUntil(ApiKey apiKey, DateTimeOffset now)
+    {
+        var until = now + JwtTokenService.AccessTokenLifetime;
+        return apiKey.ExpiresAt is { } keyExpiry && keyExpiry < until ? keyExpiry : until;
     }
 
     private static string HashKey(string rawKey)

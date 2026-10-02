@@ -132,6 +132,9 @@ internal sealed class RemoteEventDispatcher : IHostedService
             ["agent.pending_state_changed"] = PlatformPushJsonContext.Default.AgentPendingStateChangedEvent,
             ["conversation.state_changed"] = PlatformPushJsonContext.Default.ConversationStateChangedEvent,
             ["typification.submitted"] = PlatformPushJsonContext.Default.TypificationSubmittedEvent,
+            // Consumed by UserAccessRevocationListener, which aborts the user's hub connections on
+            // this pod. Not leader-gated: every pod must cut the connections it holds.
+            [UserAccessRevokedEvent.EventTypeName] = PlatformPushJsonContext.Default.UserAccessRevokedEvent,
         }.ToFrozenDictionary();
 
     /// <summary>The CLR event types this dispatcher decodes cross-pod — derived from

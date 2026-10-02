@@ -1,4 +1,6 @@
+using Verbara.Platform.Core.Push;
 using Verbara.Platform.Identity.Auth.Jwt;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Verbara.Platform.Realtime.Auth;
@@ -30,6 +32,21 @@ internal static class JwtValidationConfigurator
             RoleClaimType = "role",
             NameClaimType = "sub",
         };
+    }
+
+    /// <summary>
+    /// Refuses a token whose <c>exp</c> has passed, inside the clock-skew grace lifetime validation
+    /// otherwise grants. Every hub connection is closed when its token expires
+    /// (<see cref="LiveConnectionExpiry"/>); were the client's reconnect on that same token admitted,
+    /// it would be closed again at once, over and over until the grace ran out. Refused, the
+    /// reconnect fails like any 401 and the client backs off until it holds a current token.
+    /// </summary>
+    public static Task RejectExpiredToken(TokenValidatedContext context)
+    {
+        var now = (context.Options.TimeProvider ?? TimeProvider.System).GetUtcNow();
+        if (LiveConnectionExpiry.Of(context.Principal) <= now)
+            context.Fail("The access token has expired.");
+        return Task.CompletedTask;
     }
 
     private static List<SecurityKey> ResolveKeys(IServiceProvider services)

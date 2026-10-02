@@ -20,6 +20,14 @@
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="System.Reactive" />
+    <!-- In-process hub round-trips for the account-status enforcement tests. -->
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <!-- Drives the hub filter's token-expiry abort deterministically. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <!-- RealtimeHostCompositionTests boots the real Realtime Program (WebApplicationFactory)
+         against a Testcontainers Postgres: the host runs its cluster-lock migration at startup. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers" />
   </ItemGroup>
 
   <ItemGroup>

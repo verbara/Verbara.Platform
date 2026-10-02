@@ -30,4 +30,19 @@ public sealed class PlatformPushJsonContextTests
         deserialized.AgentId.Should().Be("agent-5");
         deserialized.EventType.Should().Be("typification.submitted");
     }
+
+    [Fact]
+    public void UserAccessRevokedEvent_ShouldRoundtrip_WhenSerializedWithContext()
+    {
+        var evt = new UserAccessRevokedEvent(TenantId: "acme", UserId: "user-9", Reason: "suspended");
+
+        var json = JsonSerializer.Serialize(evt, PlatformPushJsonContext.Default.UserAccessRevokedEvent);
+        var deserialized = JsonSerializer.Deserialize(json, PlatformPushJsonContext.Default.UserAccessRevokedEvent);
+
+        deserialized.Should().NotBeNull();
+        deserialized!.TenantId.Should().Be("acme");
+        deserialized.UserId.Should().Be("user-9");
+        deserialized.Reason.Should().Be("suspended");
+        deserialized.EventType.Should().Be("user.access_revoked");
+    }
 }

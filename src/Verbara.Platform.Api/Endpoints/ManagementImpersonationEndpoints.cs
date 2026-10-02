@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
@@ -31,14 +32,6 @@ internal static class ManagementImpersonationEndpoints
     /// </summary>
     public const string AdminAuthorizationPolicy = "ImpersonationAdminGate";
 
-
-    /// <summary>
-    /// Max depth walked when verifying target is in caller's descendant tree.
-    /// Prevents pathological cycles in corrupt stores from hanging the endpoint.
-    /// Platform → Partner → Customer → Sub-Customer is 3 levels; 16 gives plenty
-    /// of slack for deeper hierarchies we might introduce later.
-    /// </summary>
-    private const int MaxHierarchyWalkDepth = 16;
 
     private static readonly HashSet<string> ReadOnlyPermissions = new(StringComparer.Ordinal)
     {
@@ -94,7 +87,11 @@ internal static class ManagementImpersonationEndpoints
 
     public static void MapManagementImpersonationEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/management").RequireAuthorization("PlatformAdminOnly");
+        // Partner-delegated gate: StartImpersonation resolves the target tenant from the
+        // body and rejects anything outside the caller's hierarchy (auditing the attempt),
+        // so this is the one /management surface a Partner admin may legitimately reach.
+        var group = app.MapGroup("/management")
+            .RequireAuthorization(PlatformAdminRequirement.PartnerDelegatedPolicy);
 
         group.MapPost("/impersonate", StartImpersonation);
         group.MapDelete("/impersonate", EndImpersonation);
@@ -199,6 +196,19 @@ internal static class ManagementImpersonationEndpoints
             new TenantId(callerTenantId), EntityId.From(callerUserId), ct);
         if (adminUser is null)
             return TypedResults.NotFound(new ErrorResponse("Admin user not found."));
+
+        // The caller's access token can outlive a suspension by up to its lifetime; it must not be
+        // traded for a fresh impersonation token. (Every request made with one re-checks its
+        // impersonator, so such a token would fail on first use; refusing here also opens no
+        // session and records the attempt.)
+        if (!adminUser.CanAuthenticate)
+        {
+            await AccountStatusGate.RecordRefusedSignInAsync(authEventService, adminUser, "impersonation", context, ct);
+            return TypedResults.Problem(
+                title: "Account is not active",
+                detail: AccountStatusGate.DeniedMessage,
+                statusCode: StatusCodes.Status403Forbidden);
+        }
 
         // Target permissions: caller's permissions minus platform:* scoped ones
         var nonPlatformPerms = callerPermissions
@@ -317,43 +327,19 @@ internal static class ManagementImpersonationEndpoints
     /// upward and returns <see langword="true"/> iff the caller's tenant is reached.
     /// Caller's own tenant counts as "in hierarchy" (self-impersonation is a degenerate
     /// but not-a-privilege-escalation case; filtered elsewhere if undesirable).
-    /// Uses a cycle-guard bounded by <see cref="MaxHierarchyWalkDepth"/> to defend
-    /// against corrupt parent pointers.
     /// </summary>
-    internal static async Task<bool> IsTenantInCallerHierarchyAsync(
+    /// <remarks>
+    /// The walk now lives in <see cref="TenantHierarchy"/> so the authorization handler and the
+    /// tenant-boundary middleware share this exact answer instead of re-deciding it from
+    /// <see cref="TenantType"/>. This wrapper stays because it is part of this class's tested
+    /// surface and is called by <c>MfaAdminEndpoints</c>.
+    /// </remarks>
+    internal static Task<bool> IsTenantInCallerHierarchyAsync(
         ITenantStore tenantStore,
         string callerTenantId,
         string targetTenantId,
         CancellationToken ct)
-    {
-        // Self-impersonation short-circuit
-        if (string.Equals(callerTenantId, targetTenantId, StringComparison.Ordinal))
-            return true;
-
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        var current = targetTenantId;
-
-        for (var i = 0; i < MaxHierarchyWalkDepth; i++)
-        {
-            if (!visited.Add(current))
-                return false; // cycle detected — fail closed
-
-            var tenant = await tenantStore.GetAsync(current, ct);
-            if (tenant is null)
-                return false; // broken chain — fail closed
-
-            if (string.IsNullOrEmpty(tenant.ParentTenantId))
-                return false; // reached root without matching caller
-
-            if (string.Equals(tenant.ParentTenantId, callerTenantId, StringComparison.Ordinal))
-                return true;
-
-            current = tenant.ParentTenantId;
-        }
-
-        // Walked past MaxHierarchyWalkDepth without finding caller — fail closed
-        return false;
-    }
+        => TenantHierarchy.IsInCallerHierarchyAsync(tenantStore, callerTenantId, targetTenantId, ct);
 
     private static async Task<IResult> EndImpersonation(
         HttpContext context,

@@ -111,6 +111,7 @@ internal static class GdprEndpoints
         HttpContext context,
         [FromBody] GdprUserPurgeRequest body,
         [FromServices] IGdprPurgeService purgeService,
+        [FromServices] PlatformEventBus eventBus,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.UserId))
@@ -127,6 +128,11 @@ internal static class GdprEndpoints
 
         var result = await purgeService.PurgeUserDataAsync(
             tenantId.Value, body.UserId, performedBy, body.Reason, ct);
+
+        // The purge deletes the account, so it ends the account's live connections exactly as
+        // DELETE /admin/users/{id} does: hub connections and SSE streams were authenticated once
+        // and would otherwise stay open on every node.
+        eventBus.Publish(new UserAccessRevokedEvent(tenantId.Value, body.UserId, UserAccessRevokedEvent.DeletedReason));
 
         return TypedResults.Ok(result);
     }

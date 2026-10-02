@@ -1,6 +1,7 @@
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Identity.Redis;
 using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 
@@ -168,16 +169,104 @@ public sealed class CachedUserStoreTests : IDisposable
         await inner.Received(2).GetByIdAsync(t1, u1, Arg.Any<CancellationToken>());
     }
 
+    // ─── Targeted role / status writes ──────────────────────────────────────
+
+    [Fact]
+    public async Task SetStatusAsync_ShouldDropTheByEmailEntry_WhenTheStatusIsWritten()
+    {
+        // A password sign-in reads by email: a by-email entry left behind would keep serving the
+        // Active user for up to the TTL after the suspension.
+        var inner = Substitute.For<IUserStore>();
+        var t1 = new TenantId("t1");
+        var u1 = EntityId.From("u1");
+        inner.GetByEmailAsync(t1, "u@example.com", Arg.Any<CancellationToken>())
+            .Returns(MakeUser("u1", "t1", "u@example.com"), MakeUser("u1", "t1", "u@example.com", status: UserStatus.Suspended));
+        inner.SetStatusAsync(t1, u1, UserStatus.Suspended, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(UserStatus.Active);
+        var sut = new CachedUserStore(inner, _cache);
+        _ = await sut.GetByEmailAsync(t1, "u@example.com", CancellationToken.None);
+
+        var previous = await sut.SetStatusAsync(t1, u1, UserStatus.Suspended, DateTimeOffset.UtcNow, CancellationToken.None);
+        var afterWrite = await sut.GetByEmailAsync(t1, "u@example.com", CancellationToken.None);
+
+        previous.Should().Be(UserStatus.Active, because: "the inner store's answer is passed through");
+        afterWrite!.Status.Should().Be(UserStatus.Suspended);
+        await inner.Received(2).GetByEmailAsync(t1, "u@example.com", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SetRoleAsync_ShouldDropBothIndexes_WhenTheRoleIsWritten()
+    {
+        var inner = Substitute.For<IUserStore>();
+        var t1 = new TenantId("t1");
+        var u1 = EntityId.From("u1");
+        inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>())
+            .Returns(MakeUser("u1", "t1", "u@example.com", role: UserRole.Admin), MakeUser("u1", "t1", "u@example.com"));
+        inner.SetRoleAsync(t1, u1, UserRole.Agent, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(UserRole.Admin);
+        var sut = new CachedUserStore(inner, _cache);
+        _ = await sut.GetByIdAsync(t1, u1, CancellationToken.None);
+
+        var previous = await sut.SetRoleAsync(t1, u1, UserRole.Agent, DateTimeOffset.UtcNow, CancellationToken.None);
+
+        previous.Should().Be(UserRole.Admin);
+        _cache.TryGetValue(CachedUserStore.ByIdKey("t1", "u1"), out _).Should().BeFalse();
+        _cache.TryGetValue(CachedUserStore.ByEmailKey("t1", "u@example.com"), out _).Should().BeFalse(
+            because: "the by-email entry holds the same pre-change user");
+        (await sut.GetByIdAsync(t1, u1, CancellationToken.None))!.Role.Should().Be(UserRole.Agent);
+    }
+
+    [Fact]
+    public async Task SetStatusAsync_ShouldPublishTheInvalidationWithTheEmail_WhenTheUserIsNotCached()
+    {
+        // Other replicas drop their entries only on this message, and their by-email key needs the
+        // email, which the targeted write does not carry: it comes from the inner store on a miss.
+        var inner = Substitute.For<IUserStore>();
+        var publisher = Substitute.For<IAuthCachePublisher>();
+        var t1 = new TenantId("t1");
+        var u1 = EntityId.From("u1");
+        inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>()).Returns(MakeUser("u1", "t1", "u@example.com"));
+        var sut = new CachedUserStore(inner, _cache, publisher);
+
+        await sut.SetStatusAsync(t1, u1, UserStatus.Deactivated, DateTimeOffset.UtcNow, CancellationToken.None);
+
+        await inner.Received(1).SetStatusAsync(t1, u1, UserStatus.Deactivated, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        await publisher.Received(1).PublishUserAsync("t1", "u1", "u@example.com", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SetRoleAsync_ShouldPublishTheInvalidationWithTheCachedEmail_WhenTheUserIsCached()
+    {
+        var inner = Substitute.For<IUserStore>();
+        var publisher = Substitute.For<IAuthCachePublisher>();
+        var t1 = new TenantId("t1");
+        var u1 = EntityId.From("u1");
+        inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>()).Returns(MakeUser("u1", "t1", "u@example.com"));
+        var sut = new CachedUserStore(inner, _cache, publisher);
+        _ = await sut.GetByIdAsync(t1, u1, CancellationToken.None);
+
+        await sut.SetRoleAsync(t1, u1, UserRole.Supervisor, DateTimeOffset.UtcNow, CancellationToken.None);
+
+        await inner.Received(1).GetByIdAsync(t1, u1, Arg.Any<CancellationToken>());
+        await publisher.Received(1).PublishUserAsync("t1", "u1", "u@example.com", Arg.Any<CancellationToken>());
+    }
+
     public void Dispose() => _cache.Dispose();
 
-    private static User MakeUser(string userId, string tenantId, string email, string display = "Test User") => new()
+    private static User MakeUser(
+        string userId,
+        string tenantId,
+        string email,
+        string display = "Test User",
+        UserRole role = UserRole.Agent,
+        UserStatus status = UserStatus.Active) => new()
     {
         UserId = EntityId.From(userId),
         TenantId = new TenantId(tenantId),
         Email = email,
         DisplayName = display,
-        Role = UserRole.Agent,
-        Status = UserStatus.Active,
+        Role = role,
+        Status = status,
         CreatedAt = DateTimeOffset.UtcNow,
     };
 }

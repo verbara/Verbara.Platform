@@ -16,4 +16,6 @@ namespace Verbara.Platform.Realtime.Contracts;
 [JsonSerializable(typeof(RelayOutcomePage))]
 // csat-runner Phase B — CSAT recorded payload forwarded to supervisor:{tenantId}.
 [JsonSerializable(typeof(CsatResponseRecordedPayload))]
+// Account-status lookup Realtime performs on every hub connect.
+[JsonSerializable(typeof(UserAccessResponse))]
 public partial class RealtimeContractsJsonContext : JsonSerializerContext;

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
@@ -166,12 +167,8 @@ internal static class OidcEndpoints
             return Results.Unauthorized();
         }
 
-        if (user.Status != UserStatus.Active)
-        {
-            await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginFailure, ip, ua, null, ct);
-            return Results.Unauthorized();
-        }
-
+        // The account-status check lives in CompleteOidcLoginAsync, the step that issues tokens or
+        // an MFA challenge, so no caller of that step can skip it.
         return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, mfaCache, user, flowState, ip, ua, ct);
     }
 
@@ -211,6 +208,15 @@ internal static class OidcEndpoints
         User user, OidcFlowState flowState, string? ip, string? ua, CancellationToken ct)
     {
         var tenantId = flowState.TenantId;
+
+        // An IdP vouching for the identity says nothing about the account here: one that may not
+        // authenticate gets neither tokens nor an MFA challenge.
+        if (!user.CanAuthenticate)
+        {
+            await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginFailure, ip, ua,
+                new Dictionary<string, string> { ["reason"] = AccountStatusGate.DenialReason(user) }, ct);
+            return Results.Unauthorized();
+        }
 
         // v1.9.2 Frente C — P0: enforce tenant MFA policy on OIDC callback.
         // OIDC SSO was previously exempt from MFA policy enforcement that already
