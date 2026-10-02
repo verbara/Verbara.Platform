@@ -58,7 +58,7 @@ jobs:
             --store-password-in-clear-text
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.38.1
+        uses: github/codeql-action/init@v4.38.2
         with:
           languages: csharp
           # Trace exactly the `dotnet build` step below. Without build-mode the
@@ -79,7 +79,7 @@ jobs:
       # other alert keeps its history, and the generator ones close as fixed. The wiring is asserted by
       # scripts/tests/test_filter_codeql_sarif.sh in ci.yml's Coverage Script Tests job.
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v4.38.1
+        uses: github/codeql-action/analyze@v4.38.2
         with:
           category: "/language:csharp"
           upload: failure-only
@@ -104,7 +104,7 @@ jobs:
           done
 
       - name: Upload filtered CodeQL results
-        uses: github/codeql-action/upload-sarif@v4.38.1
+        uses: github/codeql-action/upload-sarif@v4.38.2
         with:
           sarif_file: ${{ runner.temp }}/codeql-sarif-filtered
           category: "/language:csharp"
