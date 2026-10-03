@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Verbara.Platform.Api.Endpoints;
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
@@ -160,18 +161,68 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
         _published.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task UpdateUser_ShouldReturn412AndChangeNothingElse_WhenTheUserChangesBetweenTheReadAndTheConditionalWrite()
+    {
+        // The form's tag names what this request read, but another admin changes the user before the
+        // write, so the write that expects those values finds others.
+        WriteReturns(AdminFieldsWriteResult.Stale);
+
+        var result = await InvokeAsync(
+            new UpdateUserRequest(DisplayName: null, Role: UserRole.Admin, Status: null),
+            ifMatch: UserAdminFieldsTag.For(NewTarget()));
+
+        result.Result.Should().BeOfType<ProblemHttpResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status412PreconditionFailed);
+        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllForUserAsync(default!, default!, default, default);
+        _audit.ReceivedCalls().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldWriteOnlyWhileTheUserHoldsTheValuesRead_WhenIfMatchNamesThem()
+    {
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Target", UserRole.Agent, UserStatus.Active), NewTarget(role: UserRole.Supervisor)));
+
+        var result = await InvokeAsync(
+            new UpdateUserRequest(DisplayName: null, Role: UserRole.Supervisor, Status: null),
+            ifMatch: UserAdminFieldsTag.For(NewTarget()));
+
+        result.Result.Should().BeOfType<Ok<UserDto>>();
+        await _store.Received(1).UpdateAdminFieldsAsync(
+            new TenantId(Tenant), EntityId.From(TargetId),
+            Arg.Is<AdminFieldsChange>(c => c.Role == UserRole.Supervisor
+                && c.Expected == new AdminFields("Target", UserRole.Agent, UserStatus.Active)),
+            Arg.Any<DateTimeOffset>(), AdminId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldWriteWithoutExpectingValues_WhenIfMatchIsTheWildcard()
+    {
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Target", UserRole.Agent, UserStatus.Active), NewTarget(role: UserRole.Supervisor)));
+
+        await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: UserRole.Supervisor, Status: null), ifMatch: "*");
+
+        await _store.Received(1).UpdateAdminFieldsAsync(
+            Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Is<AdminFieldsChange>(c => c.Expected == null),
+            Arg.Any<DateTimeOffset>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
     private void WriteReturns(AdminFieldsWriteResult result) =>
         _store.UpdateAdminFieldsAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<AdminFieldsChange>(),
                 Arg.Any<DateTimeOffset>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(result);
 
-    private Task<Results<Ok<UserDto>, NotFound>> InvokeAsync(UpdateUserRequest body)
+    private Task<Results<Ok<UserDto>, NotFound, ProblemHttpResult>> InvokeAsync(UpdateUserRequest body, string? ifMatch = null)
     {
         var context = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", AdminId)], "test")),
         };
         context.Items["TenantId"] = new TenantId(Tenant);
+        if (ifMatch is not null)
+            context.Request.Headers.IfMatch = ifMatch;
         var sessions = new SessionService(_refreshTokens, _store, new AuthEventService(Substitute.For<IAuthEventStore>()));
 
         return AdminEndpoints.UpdateUser(

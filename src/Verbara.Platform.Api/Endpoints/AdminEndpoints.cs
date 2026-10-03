@@ -32,7 +32,8 @@ internal static partial class AdminEndpoints
         neutralGroup.MapGet("/users", ListUsers);
         neutralGroup.MapGet("/users/{id}", GetUser);
         neutralGroup.MapPost("/users", CreateUser);
-        neutralGroup.MapPut("/users/{id}", UpdateUser);
+        neutralGroup.MapPut("/users/{id}", UpdateUser)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
         neutralGroup.MapDelete("/users/{id}", DeleteUser);
 
         // Queues — OPERATIONAL
@@ -105,7 +106,12 @@ internal static partial class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var user = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return user is null ? TypedResults.NotFound() : TypedResults.Ok(ToUserDto(user));
+        if (user is null)
+            return TypedResults.NotFound();
+
+        // The tag an edit form sends back in If-Match (UpdateUser).
+        UserAdminFieldsTag.SetOn(context.Response, user);
+        return TypedResults.Ok(ToUserDto(user));
     }
 
     private static async Task<IResult> CreateUser(
@@ -189,7 +195,13 @@ internal static partial class AdminEndpoints
 
     // internal (not private) so Api.Tests can invoke it with a store that changes underneath it,
     // the way AuthEndpoints.Login is exercised directly.
-    internal static async Task<Results<Ok<UserDto>, NotFound>> UpdateUser(
+    //
+    // If-Match (optional): the tag GET returned for the form being saved. When it no longer names the
+    // user's display name, role and status, the edit was made from a form someone else's change made
+    // stale, and it is refused with 412 before anything is written; when it does, the write itself
+    // only lands while the user still holds the values this request read (also 412 otherwise). Without
+    // If-Match the edit is applied as before: only the fields that differ from what this request read.
+    internal static async Task<Results<Ok<UserDto>, NotFound, ProblemHttpResult>> UpdateUser(
         string id,
         HttpContext context,
         [FromBody] UpdateUserRequest body,
@@ -205,6 +217,11 @@ internal static partial class AdminEndpoints
         if (user is null)
             return TypedResults.NotFound();
 
+        var read = new AdminFields(user.DisplayName, user.Role, user.Status);
+        var precondition = UserAdminFieldsTag.Evaluate(context.Request.Headers.IfMatch, read);
+        if (precondition == IfMatchOutcome.NotMatched)
+            return UserChangedSinceRead();
+
         // Only a value that differs from what this request read is written, and all of them in one
         // statement that changes an existing user only: a user deleted meanwhile is not recreated,
         // and no other column — password, MFA, lockout — is written from what this request read.
@@ -213,12 +230,18 @@ internal static partial class AdminEndpoints
             DisplayName = body.DisplayName is { } displayName && displayName != user.DisplayName ? displayName : null,
             Role = body.Role is { } role && role != user.Role ? role : null,
             Status = body.Status is { } status && status != user.Status ? status : null,
+            Expected = precondition == IfMatchOutcome.Matched ? read : null,
         };
         if (change is { DisplayName: null, Role: null, Status: null })
+        {
+            UserAdminFieldsTag.SetOn(context.Response, user);
             return TypedResults.Ok(ToUserDto(user));
+        }
 
         var written = await store.UpdateAdminFieldsAsync(
             tenantId, user.UserId, change, clock.UtcNow, CallerIdentity.ResolveUserId(context.User), ct);
+        if (written.Outcome == AdminFieldsWriteOutcome.Stale)
+            return UserChangedSinceRead();
         if (written is not { Outcome: AdminFieldsWriteOutcome.Written, Previous: { } previous, User: { } stored })
             return TypedResults.NotFound();
 
@@ -227,8 +250,16 @@ internal static partial class AdminEndpoints
         if (previous.Status != stored.Status)
             await ApplyStatusChangeAsync(stored, previous.Status, context, sessions, audit, eventBus, ct);
 
+        UserAdminFieldsTag.SetOn(context.Response, stored);
         return TypedResults.Ok(ToUserDto(stored));
     }
+
+    private static ProblemHttpResult UserChangedSinceRead() =>
+        TypedResults.Problem(
+            title: "User changed",
+            detail: "The user's display name, role or status changed after the version named in If-Match was read. Read the user again and reapply the change.",
+            statusCode: StatusCodes.Status412PreconditionFailed,
+            type: "https://verbara.platform/errors/precondition-failed");
 
     // A status change is a security event, applied AFTER the new status is persisted (so a client
     // reconnecting after its connection is cut already meets the new status).
