@@ -89,11 +89,13 @@ cd /path/to/Verbara.Sdk.Pro
 # Build the CLI from current source (or use `--no-build` if already built)
 dotnet build tools/Verbara.Sdk.Pro.LicenseGenerator -c Release
 
-# Issue (adjust --tier, --expires, --licensee per your scenario)
+# Issue (adjust --tier, --expires, --licensee per your scenario). WhiteLabel requires
+# --max-agents: the licensed-agent band signed into the .lic (Pro >= the release after 2.16.2-pro).
 dotnet run --project tools/Verbara.Sdk.Pro.LicenseGenerator -c Release --no-build -- --create \
   --licensee "Your Org Name — Lab" \
   --email "ops@example.com" \
   --tier WhiteLabel \
+  --max-agents 25 \
   --expires 2027-05-18 \
   --authorized-digests $DIGEST \
   --private-key /path/to/your/private.pem \
