@@ -53,9 +53,13 @@ internal static partial class PublicBaseUrl
         return origins is [var single] && single != "*" ? Normalize(single) : null;
     }
 
-    /// <summary>The reset link for <paramref name="token"/> under <paramref name="baseUrl"/>.</summary>
+    /// <summary>
+    /// The reset link for <paramref name="token"/> under <paramref name="baseUrl"/>. The token is
+    /// percent-encoded: it is standard Base64, and a browser reads a bare <c>+</c> in a query
+    /// string as a space, which turned it into a token no cache holds.
+    /// </summary>
     internal static string ResetPasswordLink(string baseUrl, string token) =>
-        $"{baseUrl}{ResetPasswordPath}?token={token}";
+        $"{baseUrl}{ResetPasswordPath}?token={Uri.EscapeDataString(token)}";
 
     /// <summary>The OIDC <c>redirect_uri</c> under <paramref name="baseUrl"/>.</summary>
     internal static string OidcRedirectUri(string baseUrl) => baseUrl + OidcCallbackPath;

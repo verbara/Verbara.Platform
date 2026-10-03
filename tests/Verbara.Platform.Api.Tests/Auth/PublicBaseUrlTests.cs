@@ -83,6 +83,14 @@ public sealed class PublicBaseUrlTests
     }
 
     [Fact]
+    public void ResetPasswordLink_ShouldPercentEncodeTheToken_WhenItHoldsBase64ReservedCharacters()
+    {
+        var link = PublicBaseUrl.ResetPasswordLink("https://console.example.test", "ab+c/d=");
+
+        link.Should().Be("https://console.example.test/reset-password?token=ab%2Bc%2Fd%3D");
+    }
+
+    [Fact]
     public void OidcRedirectUri_ShouldBeTheUnversionedCallback_WhenGivenABaseUrl()
     {
         var redirectUri = PublicBaseUrl.OidcRedirectUri("https://console.example.test");

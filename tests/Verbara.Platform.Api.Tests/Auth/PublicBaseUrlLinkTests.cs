@@ -99,6 +99,23 @@ public sealed class PublicBaseUrlLinkTests
         factory.SingleResetLink().Should().StartWith($"{PublicBaseUrl}/reset-password?token=");
     }
 
+    [Fact]
+    public async Task ForgotPassword_ShouldPercentEncodeTheTokenInTheResetLink_WhenTheLinkIsMailed()
+    {
+        using var factory = new LinkFactory(new() { ["Platform:PublicBaseUrl"] = PublicBaseUrl });
+        using var request = ForgotPasswordRequest(TenantId);
+
+        var response = await factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var token = factory.StoredTokens.Should().ContainSingle().Subject;
+        var link = factory.SingleResetLink();
+        link.Should().Be($"{PublicBaseUrl}/reset-password?token={Uri.EscapeDataString(token)}",
+            because: "the token is standard Base64, whose '+', '/' and '=' are not literal in a query string");
+        QueryHelpers.ParseQuery(new Uri(link).Query)["token"].ToString().Should().Be(token,
+            because: "the console reads the token back the way a browser parses a query string, where a bare '+' is a space");
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("*")]
