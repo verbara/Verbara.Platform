@@ -68,3 +68,42 @@ clients that edit users should send it.
 `GET /api/v1/partner/credit-ledger/attribution` requires `partner:billing:view`, like
 `/api/v1/partner/revenue`. The Admin, Partner Admin, Partner Billing and Partner Viewer templates carry
 it; other users of a Partner tenant get 403.
+
+## Password-reset links and the OIDC redirect URI use the configured public address
+
+Platform.Api no longer builds the password-reset link or the OIDC `redirect_uri` from the request's
+`Host` header. It uses `Platform:PublicBaseUrl` (environment variable `Platform__PublicBaseUrl`),
+the absolute `http` or `https` address users open the console at, and while that is unset, the
+origin `CORS_ORIGINS` names when it names exactly one:
+
+- An installation whose `CORS_ORIGINS` names only the console's origin, as
+  `docker/.env.production.example` shows, needs no change.
+- Any other installation should set `Platform__PublicBaseUrl` when it upgrades. Until it does, the
+  API sends no password-reset email (`POST /api/v1/auth/forgot-password` still answers 200),
+  answers OIDC sign-in with 500, and logs a warning naming the setting each time (event ids 7520
+  and 7521). This covers a `CORS_ORIGINS` that lists several origins, such as the
+  `docker-compose.reference-smb.yml` default (`http://localhost,https://localhost`); set
+  `PUBLIC_BASE_URL` in `.env.reference-smb`. The Helm chart derives the address from
+  `ingress.hostnameWeb` and `ingress.tlsEnabled` unless `api.publicBaseUrl` is set.
+- A value that is not an absolute `http` or `https` URL, or that carries a query, a fragment or user
+  information, counts as unset, and is not replaced by `CORS_ORIGINS`.
+
+### OIDC single sign-on: check the registered redirect URI
+
+The `redirect_uri` is now `<address>/api/auth/oidc/callback`, scheme included, from the configured
+address. Before, it took the scheme and host of the sign-in request, which behind a proxy that
+terminates TLS without `ForwardedHeaders:TrustedProxies` came out as `http://`. Check that the
+redirect URI registered with each tenant's identity provider matches the new value exactly, and
+register the new value where it does not. Users must start single sign-on from the console at the
+configured address: the sign-in state cookie belongs to the host the sign-in started on.
+
+### The reset link's token is percent-encoded
+
+The token in the reset link is now percent-encoded. The console's reset page could not use a token
+that contained `+` (about half of them), and now can; links mailed before the upgrade are unchanged.
+
+### Host filtering stays off
+
+No shipped configuration sets ASP.NET Core's `AllowedHosts`, so the API still answers on any
+`Host`. If you set it, `docker/README.md` lists the names it must include so that health checks,
+Kubernetes probes and Platform.Realtime keep reaching the API.

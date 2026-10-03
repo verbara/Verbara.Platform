@@ -193,3 +193,14 @@ reverse proxy) and CORS is blocking it. The bundled `docker-compose.full.yml`
 sets `CORS_ORIGINS=http://localhost`. If you are accessing the UI under a
 different origin (e.g. `http://192.168.x.x`), add it to that env var and
 restart `platform-api`.
+
+### Password-reset emails never arrive, or single sign-on answers 500
+
+The API builds password-reset links and the OIDC redirect URI from the
+console's public address: `PUBLIC_BASE_URL` for `docker-compose.full.yml`
+or, while that is unset, the one origin `CORS_ORIGINS` names. If you added
+a second origin to `CORS_ORIGINS` (see above), set `PUBLIC_BASE_URL` to the
+address you open the console at and recreate `platform-api`. The API logs
+a warning naming the setting whenever it skips a reset email or refuses a
+sign-in for this reason. See
+[docker/README.md](../docker/README.md#public-address-of-the-console-platform__publicbaseurl).

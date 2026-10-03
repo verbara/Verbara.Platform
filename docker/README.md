@@ -111,3 +111,51 @@ same. The shipped services therefore keep query strings out of their logs:
   ingress, a load balancer, an APM agent or a log shipper records these requests,
   configure it to drop query strings (and the query part of the Referer) from what
   it keeps.
+
+## Public address of the console (`Platform__PublicBaseUrl`)
+
+Platform.Api builds the links that bring a user back to the console from configuration, never
+from the request: the password-reset link it mails (`<address>/reset-password?token=…`) and the
+OIDC `redirect_uri` (`<address>/api/auth/oidc/callback`). A request's `Host` header, and
+`X-Forwarded-Host`, are whatever the client sends. The address is, in order:
+
+1. `Platform__PublicBaseUrl` (`Platform:PublicBaseUrl`): the absolute `http` or `https` address
+   users open the console at, such as `https://contact.example.com`, or
+   `https://example.com/console` when the console is served under a path. A trailing `/` is
+   ignored; a query, a fragment or user information makes the value unusable.
+2. Otherwise, the origin `CORS_ORIGINS` names, when it names exactly one.
+
+With neither, or with an unusable `Platform__PublicBaseUrl` (which is never replaced by
+`CORS_ORIGINS`), the API sends no reset email — `POST /api/v1/auth/forgot-password` still answers
+200 — and answers OIDC sign-in with 500, and it logs a warning naming the setting each time
+(event ids 7520 and 7521).
+
+| Reference | Where to set it |
+|---|---|
+| `docker-compose.full.yml`, `docker-compose.scale.yml` | `PUBLIC_BASE_URL`; unset, `CORS_ORIGINS=http://localhost` is used |
+| `docker-compose.reference-smb.yml` | `PUBLIC_BASE_URL` in `.env.reference-smb`; needed unless `CORS_ORIGINS` names one origin (its default names two) |
+| `docker-compose.production.yml` | `Platform__PublicBaseUrl` in `.env.production`; unset, the single `CORS_ORIGINS` origin is used |
+| `docker-compose.verified.yml` | `PUBLIC_BASE_URL` |
+| Helm chart | `api.publicBaseUrl`; empty, it is derived from `ingress.hostnameWeb` and `ingress.tlsEnabled` while the ingress is enabled |
+
+For OIDC single sign-on, the redirect URI registered with each identity provider must be exactly
+`<address>/api/auth/oidc/callback`, and users must start sign-in from the console at that
+address: the sign-in state cookie belongs to the host the sign-in started on.
+
+### Optional: refuse unknown Host headers
+
+Platform.Api honours ASP.NET Core's `AllowedHosts` setting (host names separated by `;`, without
+ports). No shipped reference sets it, so every `Host` is admitted. Setting it makes the API answer
+any other `Host` with 400; the links above do not depend on it. If you set it, list every name the
+API is reached by, not only the public one:
+
+- the public host name(s);
+- `localhost`: the compose health checks (`curl http://localhost:5000/health`) and the examples in
+  [`docs/operations/first-deploy.md`](../docs/operations/first-deploy.md);
+- `platform-api` (on Kubernetes, `platform-api.<namespace>.svc.cluster.local`): Platform.Realtime's
+  calls to `Services__PlatformApi__BaseUrl`;
+- on Kubernetes, the `httpGet` probes send the pod IP as `Host`, which cannot be listed: give them
+  `httpHeaders: [{ name: Host, value: localhost }]` first.
+
+The reference gateway (`nginx-gateway.conf`) passes the `Host` header through unchanged: the API
+resolves a tenant from the first label of a subdomain host.

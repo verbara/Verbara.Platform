@@ -12,7 +12,7 @@ any node handling the follow-up request:
 | Token | Issued by | Verified by | TTL |
 |--|--|--|--|
 | MFA pending challenge | `POST /auth/login` (pwd OK) and `/auth/oidc/callback` | `POST /auth/mfa/verify` | 5 minutes |
-| Password-reset token | `POST /auth/forgot-password` | `POST /auth/reset-password` | 15 minutes |
+| Password-reset token | `POST /auth/forgot-password` | `POST /auth/reset-password` | 1 hour |
 
 In a single-instance deploy the default `InMemory*Cache` impls keep tokens in
 a `ConcurrentDictionary` and both endpoints are served by the same process —
@@ -85,7 +85,7 @@ After the corresponding verify / reset endpoint fires, the key should be gone
 | Purpose | Key | TTL |
 |--|--|--|
 | MFA pending challenge | `{prefix}mfa:pending:{challengeToken}` | `ExpiresAt - UtcNow` (~5 min) |
-| Password-reset token | `{prefix}mfa:passwordreset:{resetToken}` | `ExpiresAt - UtcNow` (~15 min) |
+| Password-reset token | `{prefix}mfa:passwordreset:{resetToken}` | `ExpiresAt - UtcNow` (~1 h) |
 
 Redis TTL handles natural expiry. `TakeAsync` additionally re-checks
 `ExpiresAt` after read so a clock-skewed node never returns a technically

@@ -85,6 +85,11 @@ CORS_ORIGINS=http://localhost                  # ← agregar el dominio real
 CORS_ORIGINS=http://localhost,https://verbara.tu-dominio.com,https://app.tu-dominio.com
 ```
 
+Con más de un origen en `CORS_ORIGINS`, definí también `PUBLIC_BASE_URL` con la dirección con la
+que los usuarios abren la consola (por ejemplo `PUBLIC_BASE_URL=https://verbara.tu-dominio.com`):
+sin ella la API no envía el correo de restablecer contraseña y rechaza el inicio de sesión OIDC
+con un 500, y deja en el log una advertencia que nombra la variable.
+
 ```bash
 $ dc up -d           # aplica el cambio
 ```
