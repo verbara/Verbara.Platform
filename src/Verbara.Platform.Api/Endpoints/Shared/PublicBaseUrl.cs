@@ -61,8 +61,13 @@ internal static partial class PublicBaseUrl
     internal static string ResetPasswordLink(string baseUrl, string token) =>
         $"{baseUrl}{ResetPasswordPath}?token={Uri.EscapeDataString(token)}";
 
-    /// <summary>The OIDC <c>redirect_uri</c> under <paramref name="baseUrl"/>.</summary>
-    internal static string OidcRedirectUri(string baseUrl) => baseUrl + OidcCallbackPath;
+    /// <summary>
+    /// The OIDC <c>redirect_uri</c> for <paramref name="baseUrl"/>: the callback at its origin. A path in
+    /// the address is the console's, not the API's (the reference gateway routes <c>/api/</c> at the
+    /// host's root), and the redirect URI has always been built from the scheme and host alone.
+    /// </summary>
+    internal static string OidcRedirectUri(string baseUrl) =>
+        new Uri(baseUrl).GetLeftPart(UriPartial.Authority) + OidcCallbackPath;
 
     /// <summary>
     /// Where a completed sign-in may send the browser: <paramref name="returnUrl"/> when it is a path on

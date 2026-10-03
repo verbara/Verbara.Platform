@@ -177,6 +177,33 @@ public sealed class PublicBaseUrlLinkTests
     }
 
     [Fact]
+    public async Task OidcLogin_ShouldSendTheCallbackAtTheOriginAsRedirectUri_WhenPublicBaseUrlHasAPath()
+    {
+        using var factory = new LinkFactory(new() { ["Platform:PublicBaseUrl"] = "https://example.test/console" });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var response = await client.GetAsync($"/api/v1/auth/oidc/login?tenant_id={TenantId}&return_url=%2F");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        QueryHelpers.ParseQuery(response.Headers.Location!.Query)["redirect_uri"].ToString()
+            .Should().Be($"https://example.test{OidcCallbackPath}",
+                because: "the console's path is not the API's: the callback is answered at the host's root");
+    }
+
+    [Fact]
+    public async Task ForgotPassword_ShouldKeepTheConsolePathInTheResetLink_WhenPublicBaseUrlHasAPath()
+    {
+        using var factory = new LinkFactory(new() { ["Platform:PublicBaseUrl"] = "https://example.test/console" });
+        using var request = ForgotPasswordRequest(TenantId);
+
+        var response = await factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        factory.SingleResetLink().Should().StartWith("https://example.test/console/reset-password?token=",
+            because: "the reset page is a console page, under the console's path");
+    }
+
+    [Fact]
     public async Task OidcCallback_ShouldExchangeTheCodeWithTheCallbackUnderPublicBaseUrl_WhenHostHeaderIsForged()
     {
         using var factory = new LinkFactory(new() { ["Platform:PublicBaseUrl"] = PublicBaseUrl });

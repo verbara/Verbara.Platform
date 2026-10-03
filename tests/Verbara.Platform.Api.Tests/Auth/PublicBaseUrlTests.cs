@@ -99,6 +99,16 @@ public sealed class PublicBaseUrlTests
             because: "identity providers hold this exact value as the registered redirect URI");
     }
 
+    [Fact]
+    public void OidcRedirectUri_ShouldBeTheCallbackAtTheOrigin_WhenTheBaseUrlHasAPath()
+    {
+        // The path is the console's; the API answers at the host's root, as the reference gateway
+        // routes /api/, and as the redirect URI has always been built (scheme and host only).
+        var redirectUri = PublicBaseUrl.OidcRedirectUri("https://example.test:8443/console");
+
+        redirectUri.Should().Be("https://example.test:8443/api/auth/oidc/callback");
+    }
+
     [Theory]
     [InlineData("/", "/")]
     [InlineData("/login", "/login")]
