@@ -177,19 +177,45 @@ public sealed class RealtimeHostFixture : WebApplicationFactory<Program>, IAsync
     /// An access token shaped like the ones Platform.Api mints, signed with the pool key the host
     /// validates against, expiring at <paramref name="expiresAt"/> (which may already have passed).
     /// </summary>
-    internal string MintAccessToken(string tenantId, string userId, DateTimeOffset expiresAt)
+    internal string MintAccessToken(string tenantId, string userId, DateTimeOffset expiresAt) =>
+        MintToken(
+            [
+                new Claim("sub", userId),
+                new Claim("tid", tenantId),
+                new Claim("role", "Agent"),
+            ],
+            expiresAt);
+
+    /// <summary>
+    /// An impersonation token shaped like the ones Platform.Api mints — role Admin in
+    /// <paramref name="targetTenantId"/>, the impersonator named, <c>impersonation=true</c> — with
+    /// <paramref name="tokenId"/> as its <c>jti</c> (none when null), signed with the pool key.
+    /// </summary>
+    internal string MintImpersonationToken(
+        string targetTenantId, string impersonatorId, string impersonatorTenantId, string? tokenId, DateTimeOffset expiresAt)
+    {
+        List<Claim> claims =
+        [
+            new Claim("sub", impersonatorId),
+            new Claim("tid", targetTenantId),
+            new Claim("role", "Admin"),
+            new Claim("impersonator_id", impersonatorId),
+            new Claim("impersonator_tenant", impersonatorTenantId),
+            new Claim("impersonation", "true"),
+        ];
+        if (tokenId is not null)
+            claims.Add(new Claim("jti", tokenId));
+        return MintToken(claims, expiresAt);
+    }
+
+    private string MintToken(IEnumerable<Claim> claims, DateTimeOffset expiresAt)
     {
         var now = DateTime.UtcNow;
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
             Issuer = Issuer,
             Audience = Issuer,
-            Subject = new ClaimsIdentity(
-            [
-                new Claim("sub", userId),
-                new Claim("tid", tenantId),
-                new Claim("role", "Agent"),
-            ]),
+            Subject = new ClaimsIdentity(claims),
             IssuedAt = now.AddMinutes(-1),
             NotBefore = now.AddMinutes(-1),
             Expires = expiresAt.UtcDateTime,

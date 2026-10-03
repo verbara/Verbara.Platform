@@ -108,6 +108,9 @@ builder.Services.AddSingleton<IHubAuditSink, HubAuditSinkClient>();
 // dev/compose deployments can omit the connection string; Realtime falls back
 // to the in-memory IJwtKeyStore and ends up rejecting tokens from Platform.Api
 // — so for any non-trivial setup the connection string MUST be set.
+// The same registration brings the jti revocation store the Api writes when an
+// impersonation session ends, so the connect-time check below sees the Api's
+// revocations whenever Realtime can validate the Api's tokens at all.
 var identityRedis = builder.Configuration.GetConnectionString("IdentityRedis")
     ?? redisConnectionString;
 if (!string.IsNullOrWhiteSpace(identityRedis))
@@ -122,6 +125,8 @@ else
 {
     builder.Services.AddSingleton<Verbara.Platform.Identity.Auth.Jwt.IJwtKeyStore,
         Verbara.Platform.Identity.Auth.Jwt.InMemoryJwtKeyStore>();
+    builder.Services.AddSingleton<Verbara.Platform.Identity.Auth.IJtiRevocationCache,
+        Verbara.Platform.Identity.Auth.InMemoryJtiRevocationCache>();
 }
 
 // ─── JWT authentication ──────────────────────────────────────────────────────
@@ -149,8 +154,9 @@ builder.Services
                 return Task.CompletedTask;
             },
             // A connection is closed when its token expires; a reconnect on that token is refused
-            // here rather than admitted and closed again inside the clock-skew grace.
-            OnTokenValidated = JwtValidationConfigurator.RejectExpiredToken,
+            // here rather than admitted and closed again inside the clock-skew grace. So is an
+            // impersonation token whose session the Api has ended, revoked or timed out.
+            OnTokenValidated = JwtValidationConfigurator.RejectExpiredOrRevokedToken,
         };
     });
 
