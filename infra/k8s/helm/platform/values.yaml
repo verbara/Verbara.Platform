@@ -70,6 +70,12 @@ api:
     keyField: key
   serviceKey: r55-staging-service-key-change-in-prod
   corsOrigins: "http://r55.local,http://api.r55.local"
+  # Public address of the console, as users open it (Platform__PublicBaseUrl).
+  # Password-reset links and the OIDC redirect_uri are built from it, never from a
+  # request's Host header. Empty = derived from ingress.hostnameWeb and
+  # ingress.tlsEnabled while the ingress is enabled (http://r55.local here). The
+  # API cannot fall back to corsOrigins above: it names two origins.
+  publicBaseUrl: ""
   asterisk:
     ami:
       hostname: asterisk-sip.r55-asterisk.svc.cluster.local

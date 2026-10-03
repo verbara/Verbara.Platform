@@ -79,6 +79,10 @@ services:
       # endpoints (auth, queues, conversations, channels) are unaffected.
       # Migration docs: https://verbara.io/docs/migration/pro-v240-v250-licensing
       CORS_ORIGINS: http://localhost
+      # Public address of the console (the gateway, as users open it). Password-reset
+      # links and the OIDC redirect_uri are built from it, never from a request's Host.
+      # Left empty, the API uses CORS_ORIGINS above, which names exactly one origin.
+      Platform__PublicBaseUrl: ${PUBLIC_BASE_URL:-}
       Services__Renderer__BaseUrl: http://renderer:5010
       Services__Mail__BaseUrl: http://mail:5020
       Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}

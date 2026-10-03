@@ -139,6 +139,16 @@ spec:
               value: {{ .Values.api.serviceKey }}
             - name: CORS_ORIGINS
               value: {{ .Values.api.corsOrigins | quote }}
+            {{- $publicBaseUrl := .Values.api.publicBaseUrl }}
+            {{- if and (not $publicBaseUrl) .Values.ingress.enabled .Values.ingress.hostnameWeb }}
+            {{- $publicBaseUrl = printf "%s://%s" (ternary "https" "http" (.Values.ingress.tlsEnabled | default false)) .Values.ingress.hostnameWeb }}
+            {{- end }}
+            {{- if $publicBaseUrl }}
+            # Public address of the console: password-reset links and the OIDC
+            # redirect_uri are built from it, never from a request's Host header.
+            - name: Platform__PublicBaseUrl
+              value: {{ $publicBaseUrl | quote }}
+            {{- end }}
             - name: Asterisk__Ami__Hostname
               value: {{ .Values.api.asterisk.ami.hostname }}
             - name: Asterisk__Ami__Port

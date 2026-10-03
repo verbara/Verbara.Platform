@@ -57,6 +57,10 @@ services:
       # Connection strings — populate from your secrets manager / .env file.
       ConnectionStrings__Postgres: ${PG_CONNECTION_STRING}
       ConnectionStrings__Redis: ${REDIS_CONNECTION_STRING}
+      # Public address of the console, as users open it (e.g. https://contact.example.com).
+      # Password-reset links and the OIDC redirect_uri are built from it, never from a
+      # request's Host header.
+      Platform__PublicBaseUrl: ${PUBLIC_BASE_URL}
     ports:
       - "5000:5000"
     volumes:
