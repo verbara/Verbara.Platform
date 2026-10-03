@@ -116,19 +116,26 @@ same. The shipped services therefore keep query strings out of their logs:
 
 Platform.Api builds the links that bring a user back to the console from configuration, never
 from the request: the password-reset link it mails (`<address>/reset-password?token=…`) and the
-OIDC `redirect_uri` (`<address>/api/auth/oidc/callback`). A request's `Host` header, and
-`X-Forwarded-Host`, are whatever the client sends. The address is, in order:
+OIDC `redirect_uri` (the callback at the address's origin, `<scheme>://<host>[:<port>]/api/auth/oidc/callback`).
+A sign-in's `return_url` is honoured only on that origin, or as a path; anything else sends the
+browser to `/`. A request's `Host` header, and `X-Forwarded-Host`, are whatever the client sends.
+The address is, in order:
 
 1. `Platform__PublicBaseUrl` (`Platform:PublicBaseUrl`): the absolute `http` or `https` address
    users open the console at, such as `https://contact.example.com`, or
-   `https://example.com/console` when the console is served under a path. A trailing `/` is
-   ignored; a query, a fragment or user information makes the value unusable.
+   `https://example.com/console` when the console is served under a path (the reset link keeps the
+   path; the OIDC callback stays at the host's root, where `/api/` is routed). A trailing `/` is
+   ignored; a query, a fragment or user information makes the value unusable. When each tenant opens
+   the console at its own host, write it with `{tenant}`, as in `https://{tenant}.example.com`: each
+   link fills it with the label its tenant is reached at, the tenant's branding subdomain or else its
+   id, which must be a lowercase DNS label. The tenant is the user's for a reset and the sign-in's for
+   OIDC, never the request's `Host`.
 2. Otherwise, the origin `CORS_ORIGINS` names, when it names exactly one.
 
 With neither, or with an unusable `Platform__PublicBaseUrl` (which is never replaced by
 `CORS_ORIGINS`), the API sends no reset email — `POST /api/v1/auth/forgot-password` still answers
-200 — and answers OIDC sign-in with 500, and it logs a warning naming the setting each time
-(event ids 7520 and 7521).
+200 — and answers OIDC sign-in with 500. It logs a warning naming the setting once at startup, with
+the reason (event id 7522), and on each refused request (7520 and 7521).
 
 | Reference | Where to set it |
 |---|---|
@@ -139,8 +146,9 @@ With neither, or with an unusable `Platform__PublicBaseUrl` (which is never repl
 | Helm chart | `api.publicBaseUrl`; empty, it is derived from `ingress.hostnameWeb` and `ingress.tlsEnabled` while the ingress is enabled |
 
 For OIDC single sign-on, the redirect URI registered with each identity provider must be exactly
-`<address>/api/auth/oidc/callback`, and users must start sign-in from the console at that
-address: the sign-in state cookie belongs to the host the sign-in started on.
+the callback at the address's origin (with `{tenant}`, at the tenant's host), and users must start
+sign-in from the console at that address: the sign-in state cookie belongs to the host the sign-in
+started on.
 
 ### Optional: refuse unknown Host headers
 
