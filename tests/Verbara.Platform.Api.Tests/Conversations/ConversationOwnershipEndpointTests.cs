@@ -450,6 +450,33 @@ public sealed class ConversationOwnershipEndpointTests : IClassFixture<Conversat
     }
 
     [Fact]
+    public async Task Unhold_ShouldReturn403AndKeepState_WhenTheOwnerIsTheCallersUserId()
+    {
+        var (user, _) = _factory.NewAgent("phantom");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(user.UserId), ConversationState.OnHold);
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsync(Route(conversation, "unhold"), content: null);
+
+        await ShouldBeErrorAsync(response, HttpStatusCode.Forbidden, "not-owner");
+        _factory.Load(conversation.ConversationId)!.State.Should().Be(ConversationState.OnHold);
+    }
+
+    [Fact]
+    public async Task Unhold_ShouldReturn403AndKeepState_WhenCallerIsNotTheOwner()
+    {
+        var (_, owner) = _factory.NewAgent("owner");
+        var (other, _) = _factory.NewAgent("other");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(owner.AgentId), ConversationState.OnHold);
+        using var client = _factory.ClientFor(other);
+
+        var response = await client.PostAsync(Route(conversation, "unhold"), content: null);
+
+        await ShouldBeErrorAsync(response, HttpStatusCode.Forbidden, "not-owner");
+        _factory.Load(conversation.ConversationId)!.State.Should().Be(ConversationState.OnHold);
+    }
+
+    [Fact]
     public async Task CreateConversation_ShouldReturn403AndCreateNothing_WhenACallerWithoutAnAgentProfileSendsAnInitialMessage()
     {
         var admin = _factory.NewUser(UserRole.Admin, "admin");

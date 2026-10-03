@@ -545,6 +545,21 @@ public sealed class ConversationSwitchboardTests : IDisposable
     }
 
     [Fact]
+    public async Task Unhold_ShouldFailAndKeepState_WhenCallerIsNotTheAssignedAgent()
+    {
+        var conversation = BuildConversation(ConversationState.OnHold, ConversationOwner.ForAgent(EntityId.From("agent-other")));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.UnholdAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        conversation.State.Should().Be(ConversationState.OnHold);
+        await _store.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Unhold_ShouldFail_WhenNotOnHold()
     {
         var conversation = BuildConversation(ConversationState.Active, ConversationOwner.ForAgent(_agentId));
