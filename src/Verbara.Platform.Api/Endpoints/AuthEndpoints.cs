@@ -751,7 +751,10 @@ internal static class AuthEndpoints
 
     // ─── MFA Setup ──────────────────────────────────────────────────────────────
 
-    private static async Task<IResult> MfaSetup(
+    // Visibility elevated from `private` to `internal` so the Api.Tests project
+    // (which has InternalsVisibleTo) can invoke this handler directly, as it does
+    // MfaConfirm and MfaDisable.
+    internal static async Task<IResult> MfaSetup(
         HttpContext context,
         [FromServices] IUserStore userStore,
         CancellationToken ct)
@@ -763,6 +766,13 @@ internal static class AuthEndpoints
         var user = await userStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(userId), ct);
         if (user is null)
             return Results.Unauthorized();
+
+        // An enrolled factor is never replaced here: this endpoint takes only an access token, and
+        // replacing the secret and recovery codes with ones handed back in the response would give
+        // whoever holds the token the account's second factor. Re-enrolling goes through
+        // DELETE /auth/mfa first, which asks for the password — the profile wizard's rule too.
+        if (user.MfaEnabled)
+            return Results.BadRequest(new ErrorResponse(MfaAlreadyEnrolledMessage));
 
         var (secret, qrUri) = MfaService.GenerateSetup(user.Email);
         var recoveryCodes = MfaService.GenerateRecoveryCodes();
@@ -792,6 +802,9 @@ internal static class AuthEndpoints
             return Results.Unauthorized();
 
         var user = await userStore.GetByIdAsync(new TenantId(tenantId), EntityId.From(userId), ct);
+        if (user is not null && user.MfaEnabled)
+            return Results.BadRequest(new ErrorResponse(MfaAlreadyEnrolledMessage));
+
         if (user is null || string.IsNullOrEmpty(user.MfaSecret))
             return Results.BadRequest(new ErrorResponse("MFA setup not initiated"));
 
