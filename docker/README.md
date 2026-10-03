@@ -84,3 +84,30 @@ docker-compose equivalent.
 After every Verbara Platform tagged release, the maintainer must update
 the digest registry that powers `verbara-quickstart.sh`. See
 [`docs/operations/2026-05-10-update-authorized-digests-after-release.md`](../docs/operations/2026-05-10-update-authorized-digests-after-release.md).
+
+## Request logs and query strings
+
+A browser `EventSource` or `WebSocket` cannot send an `Authorization` header, so the
+SSE event stream (`/api/v1/events/stream?token=…`) and the SignalR hub
+(`/hubs/platform?…&access_token=…`) carry the user's access token in the query
+string. The OIDC callback (`?code=…`) and the password-reset link
+(`/reset-password?token=…`, which a browser may later send on as a `Referer`) do the
+same. The shipped services therefore keep query strings out of their logs:
+
+- **The .NET services write no per-request lines.** Platform.Api, Platform.Realtime
+  and Platform.Mail set the `Microsoft.AspNetCore.Hosting.Diagnostics` category
+  (the "Request starting …" / "Request finished …" lines) to `Warning` in code, so a
+  `Logging__LogLevel__*` variable cannot turn those lines back on. A provider-specific
+  key such as `Logging__Console__LogLevel__Microsoft.AspNetCore.Hosting.Diagnostics`
+  can, and would write every request's full URL, token included: do not set one
+  in production.
+- **The gateway logs paths, not queries.** `nginx-gateway.conf` writes its access log
+  in the `verbara_noquery` format: client address, time, method, path, protocol,
+  status, size, the path part of the Referer, and the User-Agent. That is where
+  per-request records come from. nginx's error log still writes the full request
+  line when a proxied request fails (for example while a service restarts), so keep
+  access to it restricted.
+- **Your own proxy must do the same.** If another reverse proxy, a Kubernetes
+  ingress, a load balancer, an APM agent or a log shipper records these requests,
+  configure it to drop query strings (and the query part of the Referer) from what
+  it keeps.
