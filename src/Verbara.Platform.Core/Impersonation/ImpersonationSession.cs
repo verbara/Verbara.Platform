@@ -40,6 +40,15 @@ public sealed class ImpersonationSession
     /// <summary>User id of the impersonation target (when known — empty for tenant-wide impersonation).</summary>
     public string? TargetUserId { get; init; }
 
+    /// <summary>
+    /// The <c>jti</c> of the impersonation token this session issued: what revoking or timing out the
+    /// session revokes, so the token stops authenticating before it expires. Never sent to clients.
+    /// </summary>
+    public required string TokenId { get; init; }
+
+    /// <summary>When that token expires; its revocation is kept at least this long.</summary>
+    public required DateTimeOffset TokenExpiresAt { get; init; }
+
     /// <summary>Tenant id being impersonated.</summary>
     public required string TargetTenantId { get; init; }
 

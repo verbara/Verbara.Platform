@@ -2,6 +2,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Impersonation;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Identity.Auth;
 
 namespace Verbara.Platform.Api.Services;
 
@@ -22,6 +23,11 @@ namespace Verbara.Platform.Api.Services;
 /// <c>RevokeAsync</c> call short-circuits when the session is already closed,
 /// so a duplicate sweep (or a manual revoke racing the periodic tick) cannot
 /// double-emit audit events for the same session.
+///
+/// Timing a session out revokes the token it issued first
+/// (<see cref="ImpersonationTokenRevocation"/>), so the token stops
+/// authenticating with the session; when that write fails the session is left
+/// Active and the next tick retries it.
 /// </summary>
 public sealed partial class ImpersonationSessionTimeoutService : BackgroundService
 {
@@ -31,6 +37,7 @@ public sealed partial class ImpersonationSessionTimeoutService : BackgroundServi
     private readonly IImpersonationSessionStore _store;
     private readonly ITenantAuthConfigStore _authConfigStore;
     private readonly IAuditService _audit;
+    private readonly IJtiRevocationCache _revocationCache;
     private readonly TimeProvider _clock;
     private readonly ILogger<ImpersonationSessionTimeoutService> _logger;
     private readonly TimeSpan _sweepInterval;
@@ -39,6 +46,7 @@ public sealed partial class ImpersonationSessionTimeoutService : BackgroundServi
         IImpersonationSessionStore store,
         ITenantAuthConfigStore authConfigStore,
         IAuditService audit,
+        IJtiRevocationCache revocationCache,
         ILogger<ImpersonationSessionTimeoutService> logger,
         TimeProvider? clock = null,
         TimeSpan? sweepInterval = null)
@@ -46,11 +54,13 @@ public sealed partial class ImpersonationSessionTimeoutService : BackgroundServi
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(authConfigStore);
         ArgumentNullException.ThrowIfNull(audit);
+        ArgumentNullException.ThrowIfNull(revocationCache);
         ArgumentNullException.ThrowIfNull(logger);
 
         _store = store;
         _authConfigStore = authConfigStore;
         _audit = audit;
+        _revocationCache = revocationCache;
         _logger = logger;
         _clock = clock ?? TimeProvider.System;
         _sweepInterval = sweepInterval ?? DefaultSweepInterval;
@@ -117,6 +127,20 @@ public sealed partial class ImpersonationSessionTimeoutService : BackgroundServi
             if (elapsed.TotalMinutes < timeoutMinutes)
                 continue;
 
+            // The token first: closing the session while its token still works is the one outcome
+            // a partial failure must never leave. If the write fails, the session stays Active and
+            // the next tick retries it; the other sessions of this pass are still swept.
+            try
+            {
+                await ImpersonationTokenRevocation.RevokeAsync(
+                    _revocationCache, session.TokenId, session.TokenExpiresAt, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                LogTokenRevocationFailed(session.Id, ex);
+                continue;
+            }
+
             var revoked = await _store.RevokeAsync(
                 session.Id,
                 ImpersonationSessionStatus.AutoTimedOut,
@@ -164,6 +188,10 @@ public sealed partial class ImpersonationSessionTimeoutService : BackgroundServi
     [LoggerMessage(EventId = 9101, Level = LogLevel.Warning,
         Message = "Impersonation auto-timeout revoke succeeded but audit emission failed for session {SessionId}.")]
     partial void LogAuditWriteFailed(string sessionId, Exception ex);
+
+    [LoggerMessage(EventId = 9102, Level = LogLevel.Error,
+        Message = "Impersonation session {SessionId} timed out but its token could not be revoked; the session stays active and the next sweep retries it.")]
+    partial void LogTokenRevocationFailed(string sessionId, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Critical,
         Message = "[WORKER] {WorkerName} crashed fatally — host will shut down for restart. Reason: {Reason}")]

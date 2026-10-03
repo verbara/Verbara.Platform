@@ -55,13 +55,13 @@ public sealed class JwtTokenServiceRotationTests
         // Pre-rotate so the pool has at least one active HS256 entry.
         _ = await rotation.RotateAsync();
 
-        var sut = new JwtTokenService(rotation, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(rotation);
 
         var (token, _) = sut.GenerateAccessToken(MakeUser());
-        var principal = await sut.ValidateTokenAsync(token, CancellationToken.None);
+        var principal = await TokenValidation.ValidateAsync(sut, token);
 
         principal.Should().NotBeNull();
-        principal!.FindFirst(JwtRegisteredClaimNames.Sub)?.Value.Should().Be("user1");
+        principal!.FindFirst(JwtRegisteredClaimNames.Sub)!.Value.Should().Be("user1");
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class JwtTokenServiceRotationTests
         using var rotation = NewRotationService();
         var entry = await rotation.RotateAsync();
 
-        var sut = new JwtTokenService(rotation, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(rotation);
 
         var (token, _) = sut.GenerateAccessToken(MakeUser());
 
@@ -88,7 +88,7 @@ public sealed class JwtTokenServiceRotationTests
         using var rotation = NewRotationService(store);
 
         var firstKey = await rotation.RotateAsync();
-        var sut = new JwtTokenService(rotation, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(rotation);
 
         var (firstToken, _) = sut.GenerateAccessToken(MakeUser());
 
@@ -97,16 +97,16 @@ public sealed class JwtTokenServiceRotationTests
 
         // Issue a fresh JwtTokenService to bypass the 60 s active-key cache so
         // the next sign uses the second key.
-        var sutAfterRotation = new JwtTokenService(rotation, new InMemoryJtiRevocationCache());
+        var sutAfterRotation = new JwtTokenService(rotation);
         var (secondToken, _) = sutAfterRotation.GenerateAccessToken(MakeUser());
 
         // The original token (signed by firstKey) MUST still validate because
         // firstKey is in the grace window.
-        var firstPrincipal = await sutAfterRotation.ValidateTokenAsync(firstToken, CancellationToken.None);
+        var firstPrincipal = await TokenValidation.ValidateAsync(sutAfterRotation, firstToken);
         firstPrincipal.Should().NotBeNull();
 
         // And the new token validates too.
-        var secondPrincipal = await sutAfterRotation.ValidateTokenAsync(secondToken, CancellationToken.None);
+        var secondPrincipal = await TokenValidation.ValidateAsync(sutAfterRotation, secondToken);
         secondPrincipal.Should().NotBeNull();
 
         // The two tokens use different kids.
@@ -138,13 +138,13 @@ public sealed class JwtTokenServiceRotationTests
         await store.UpsertAsync(entry);
 
         using var rotation = NewRotationService(store);
-        var sut = new JwtTokenService(rotation, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(rotation);
 
         var (token, _) = sut.GenerateAccessToken(MakeUser());
-        var principal = await sut.ValidateTokenAsync(token, CancellationToken.None);
+        var principal = await TokenValidation.ValidateAsync(sut, token);
 
         principal.Should().NotBeNull();
-        principal!.FindFirst(JwtRegisteredClaimNames.Sub)?.Value.Should().Be("user1");
+        principal!.FindFirst(JwtRegisteredClaimNames.Sub)!.Value.Should().Be("user1");
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
         jwt.Header.Alg.Should().Be(SecurityAlgorithms.RsaSha256);
@@ -157,17 +157,27 @@ public sealed class JwtTokenServiceRotationTests
         using var rotation = NewRotationService();
         _ = await rotation.RotateAsync();
 
-        var sut = new JwtTokenService(rotation, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(rotation);
 
         var admin = MakeUser();
         var permissions = new HashSet<string>(["platform:tenant:impersonate"], StringComparer.Ordinal);
-        var (token, _) = sut.GenerateImpersonationToken(admin, "target-tenant", permissions, readOnly: true);
-        var principal = await sut.ValidateTokenAsync(token, CancellationToken.None);
+        var (token, _, tokenId) = sut.GenerateImpersonationToken(admin, "target-tenant", permissions, readOnly: true);
+        var principal = await TokenValidation.ValidateAsync(sut, token);
 
         principal.Should().NotBeNull();
-        principal!.FindFirst("tid")?.Value.Should().Be("target-tenant");
-        principal.FindFirst("impersonation")?.Value.Should().Be("true");
-        principal.FindFirst("readonly")?.Value.Should().Be("true");
+        principal!.FindFirst("tid")!.Value.Should().Be("target-tenant");
+        principal.FindFirst("impersonation")!.Value.Should().Be("true");
+        principal.FindFirst("readonly")!.Value.Should().Be("true");
+        principal.FindFirst(JwtRegisteredClaimNames.Jti)!.Value.Should().Be(tokenId);
+    }
+
+    [Fact]
+    public void ValidationParameters_ShouldGrantNoMoreClockSkewThanARevocationOutlivesExpiry_WhenPoolBacked()
+    {
+        using var rotation = NewRotationService();
+        var sut = new JwtTokenService(rotation);
+
+        sut.ValidationParameters.ClockSkew.Should().BeLessThanOrEqualTo(ImpersonationTokenRevocation.MaxClockSkew);
     }
 
     [Fact]
@@ -194,8 +204,8 @@ public sealed class JwtTokenServiceRotationTests
         };
         var foreignToken = new JwtSecurityTokenHandler().CreateEncodedJwt(descriptor);
 
-        var sut = new JwtTokenService(pool, new InMemoryJtiRevocationCache());
-        var principal = await sut.ValidateTokenAsync(foreignToken, CancellationToken.None);
+        var sut = new JwtTokenService(pool);
+        var principal = await TokenValidation.ValidateAsync(sut, foreignToken);
 
         principal.Should().BeNull();
     }
@@ -210,7 +220,7 @@ public sealed class JwtTokenServiceRotationTests
             // Seed a legacy file using the file-based JwtTokenService — this
             // is exactly the artifact the migration shim should pick up.
             var dp = DataProtectionProvider.Create("Verbara.Platform.Tests");
-            var fileSeeded = new JwtTokenService(tempDir, dp, new InMemoryJtiRevocationCache());
+            var fileSeeded = new JwtTokenService(tempDir, dp);
             _ = fileSeeded.GenerateAccessToken(MakeUser()); // sanity
             File.Exists(Path.Combine(tempDir, "jwt-signing-key.xml")).Should().BeTrue();
 
@@ -250,7 +260,7 @@ public sealed class JwtTokenServiceRotationTests
             var pre = await rotation.RotateAsync(); // pool now has HS256 active
 
             // Seed a legacy file too — the migration should ignore it.
-            var fileSeeded = new JwtTokenService(tempDir, dp, new InMemoryJtiRevocationCache());
+            var fileSeeded = new JwtTokenService(tempDir, dp);
             _ = fileSeeded.GenerateAccessToken(MakeUser());
 
             var migration = new JwtLegacyKeyMigrationService(
@@ -360,11 +370,11 @@ public sealed class JwtTokenServiceRotationTests
         _ = await realRotation.RotateAsync();
         var toggleable = new ToggleableRotationService(realRotation);
 
-        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(toggleable);
 
         // First call populates _cachedValidation via successful refresh.
         var (token, _) = sut.GenerateAccessToken(MakeUser());
-        var firstPrincipal = await sut.ValidateTokenAsync(token, CancellationToken.None);
+        var firstPrincipal = await TokenValidation.ValidateAsync(sut, token);
         firstPrincipal.Should().NotBeNull(because: "the cache should be warm after first validation");
 
         // Force the validation cache stale + arm the rotation service to throw.
@@ -373,7 +383,7 @@ public sealed class JwtTokenServiceRotationTests
 
         // Second validation: refresh path will throw → catch path returns the
         // stale-but-valid cached keys → token still validates successfully.
-        var secondPrincipal = await sut.ValidateTokenAsync(token, CancellationToken.None);
+        var secondPrincipal = await TokenValidation.ValidateAsync(sut, token);
         secondPrincipal.Should().NotBeNull(because: "stale-cache fallback should keep token validation working through transient Redis failures");
     }
 
@@ -384,7 +394,7 @@ public sealed class JwtTokenServiceRotationTests
         _ = await realRotation.RotateAsync();
         var toggleable = new ToggleableRotationService(realRotation);
 
-        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(toggleable);
 
         // First token populates _cachedActive.
         var (firstToken, _) = sut.GenerateAccessToken(MakeUser());
@@ -416,7 +426,7 @@ public sealed class JwtTokenServiceRotationTests
         using var realRotation = NewRotationService();
         var toggleable = new ToggleableRotationService(realRotation) { ThrowOnNext = true };
 
-        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(toggleable);
 
         Action act = () => sut.GenerateAccessToken(MakeUser());
         act.Should().Throw<InvalidOperationException>()
@@ -459,18 +469,18 @@ public sealed class JwtTokenServiceRotationTests
         _ = await realRotation.RotateAsync();
         var toggleable = new ToggleableRotationService(realRotation);
 
-        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(toggleable);
 
         // Warm the validation cache (1 cache-miss expected during this call).
         var (token, _) = sut.GenerateAccessToken(MakeUser());
-        _ = await sut.ValidateTokenAsync(token, CancellationToken.None);
+        _ = await TokenValidation.ValidateAsync(sut, token);
 
         MarkCacheFieldStale(sut, "_cachedValidation");
         toggleable.ThrowOnNext = true;
 
         // Trigger refresh → throws → catch → stale fallback (1 cache-miss +
         // 1 stale-cache-fallback expected).
-        _ = await sut.ValidateTokenAsync(token, CancellationToken.None);
+        _ = await TokenValidation.ValidateAsync(sut, token);
 
         // Allow the meter listener to flush its callback queue.
         listener.Counters.Should().ContainKey("jwt.key.cache_misses");
@@ -486,7 +496,7 @@ public sealed class JwtTokenServiceRotationTests
         using var realRotation = NewRotationService();
         var toggleable = new ToggleableRotationService(realRotation) { ThrowOnNext = true };
 
-        var sut = new JwtTokenService(toggleable, new InMemoryJtiRevocationCache());
+        var sut = new JwtTokenService(toggleable);
 
         Action act = () => sut.GenerateAccessToken(MakeUser());
         act.Should().Throw<InvalidOperationException>();

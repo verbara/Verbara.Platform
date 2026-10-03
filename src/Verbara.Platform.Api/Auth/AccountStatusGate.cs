@@ -19,7 +19,7 @@ internal static class AccountStatusGate
 
     /// <summary>Whether <paramref name="principal"/> was authenticated by an impersonation token.</summary>
     internal static bool IsImpersonation(ClaimsPrincipal principal) =>
-        string.Equals(principal.FindFirst("impersonation")?.Value, "true", StringComparison.Ordinal);
+        Verbara.Platform.Identity.Auth.ImpersonationTokenRevocation.IsImpersonation(principal);
 
     /// <summary>
     /// The per-request half of the rule, for impersonation tokens only: whether the admin an

@@ -825,7 +825,6 @@ if (useRotationPool)
 {
     builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
         sp.GetRequiredService<Verbara.Platform.Identity.Auth.Jwt.IJwtKeyRotationService>(),
-        sp.GetRequiredService<IJtiRevocationCache>(),
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JwtTokenService>>(),
         sp.GetService<System.Diagnostics.Metrics.IMeterFactory>()));
 
@@ -844,7 +843,6 @@ else
     builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
         jwtKeyDirectory,
         sp.GetRequiredService<IDataProtectionProvider>(),
-        sp.GetRequiredService<IJtiRevocationCache>(),
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JwtTokenService>>(),
         sp.GetService<System.Diagnostics.Metrics.IMeterFactory>()));
 }

@@ -3,7 +3,6 @@ using Verbara.Platform.Api.Endpoints;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
-using Verbara.Platform.Identity.Auth;
 using Verbara.Platform.Identity.Mfa;
 using Verbara.Platform.Storage.InMemory;
 using FluentAssertions;
@@ -228,8 +227,7 @@ public sealed class MfaVerifyBookkeepingTests
             Directory.CreateDirectory(keyDir);
             _jwtService = new JwtTokenService(
                 keyDir,
-                DataProtectionProvider.Create("Verbara.Platform.MfaVerifyBookkeepingTests"),
-                new InMemoryJtiRevocationCache());
+                DataProtectionProvider.Create("Verbara.Platform.MfaVerifyBookkeepingTests"));
         }
 
         /// <summary>

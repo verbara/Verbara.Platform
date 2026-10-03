@@ -4,6 +4,7 @@ using System.Text.Json;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Impersonation;
+using Verbara.Platform.Identity.Auth;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -81,6 +82,10 @@ public sealed class ImpersonationAdminEndpointsTests : IClassFixture<PlatformAdm
         refreshed!.Status.Should().Be(ImpersonationSessionStatus.ManuallyRevoked);
         refreshed.CloseReason.Should().Be("support_workflow_complete");
 
+        // ...and the token it issued is revoked, so it stops authenticating with the session.
+        var revocations = scope.ServiceProvider.GetRequiredService<IJtiRevocationCache>();
+        (await revocations.IsRevokedAsync(session.TokenId, CancellationToken.None)).Should().BeTrue();
+
         // Audit entry written with the canonical action name.
         var audit = scope.ServiceProvider.GetRequiredService<IAuditStore>();
         var hits = await audit.SearchAsync(
@@ -117,6 +122,8 @@ public sealed class ImpersonationAdminEndpointsTests : IClassFixture<PlatformAdm
         var session = new ImpersonationSession
         {
             Id = id,
+            TokenId = $"jti-{id}",
+            TokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30),
             ActorUserId = PlatformAdminApiFactory.TestPlatformAdminUserId,
             ActorTenantId = PlatformAdminApiFactory.HostTenantId,
             TargetTenantId = targetTenant,
@@ -136,6 +143,8 @@ public sealed class ImpersonationAdminEndpointsTests : IClassFixture<PlatformAdm
         var session = new ImpersonationSession
         {
             Id = id,
+            TokenId = $"jti-{id}",
+            TokenExpiresAt = DateTimeOffset.UtcNow,
             ActorUserId = PlatformAdminApiFactory.TestPlatformAdminUserId,
             ActorTenantId = PlatformAdminApiFactory.HostTenantId,
             TargetTenantId = targetTenant,
