@@ -19,6 +19,11 @@ using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// No per-request log: ASP.NET Core's "Request starting/finished" lines record the full URL, query
+// included, and every SignalR negotiate and connect carries the access token there (?access_token=).
+// Set in code, after the configuration-based rules, so no Logging:LogLevel key can lift it.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+
 // Worker resilience parity with Platform.Api (ADR-0021): a crashing
 // BackgroundService stops the host so K8s restarts the pod with a clear
 // failure reason instead of silently swallowing the exception.

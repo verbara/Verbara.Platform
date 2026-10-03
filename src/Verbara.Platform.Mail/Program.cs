@@ -12,6 +12,12 @@ using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ── Logging ──
+// No per-request log: ASP.NET Core's "Request starting/finished" lines record the full URL, query
+// included, and the Microsoft OAuth redirect delivers its authorization code there (?code=).
+// Set in code, after the configuration-based rules, so no Logging:LogLevel key can lift it.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+
 // ── JSON serialization ──
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
