@@ -165,7 +165,7 @@ internal static class SetupEndpoints
             PasswordHash = PasswordService.HashPassword(body.Password),
             CreatedAt = clock.UtcNow,
         };
-        await userStore.SaveAsync(user, ct);
+        await userStore.CreateAsync(user, ct);
 
         // 3.5. Clone the `platform_admin` role template into a tenant role and
         //      assign it to the new platform admin user. Without this the user
@@ -245,7 +245,7 @@ internal static class SetupEndpoints
             PasswordHash = PasswordService.HashPassword(body.CustomerAdminPassword),
             CreatedAt = clock.UtcNow,
         };
-        await userStore.SaveAsync(customerAdmin, ct);
+        await userStore.CreateAsync(customerAdmin, ct);
 
         // 7.5. Best-effort: clone the tenant `admin` role template for the Customer admin.
         //      Same tolerance as the platform admin RBAC wiring — UserRole.Admin

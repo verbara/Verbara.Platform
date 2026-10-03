@@ -130,7 +130,7 @@ public class AccountStatusApiFactory : WebApplicationFactory<Program>
             PasswordHash = password is null ? null : PasswordService.HashPassword(password),
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        store.SaveAsync(user, CancellationToken.None).GetAwaiter().GetResult();
+        store.CreateAsync(user, CancellationToken.None).GetAwaiter().GetResult();
         return user;
     }
 
@@ -142,6 +142,17 @@ public class AccountStatusApiFactory : WebApplicationFactory<Program>
     {
         using var scope = Services.CreateScope();
         return SaveUser(scope.ServiceProvider.GetRequiredService<IUserStore>(), userId, tenantId, role, status, password);
+    }
+
+    /// <summary>
+    /// Creates <paramref name="user"/> exactly as given (MFA material, lockout state and all) through
+    /// the host's real <see cref="IUserStore"/>.
+    /// </summary>
+    public User SeedUser(User user)
+    {
+        using var scope = Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IUserStore>().CreateAsync(user, CancellationToken.None).GetAwaiter().GetResult();
+        return user;
     }
 
     /// <summary>Loads a user through the host's <see cref="IUserStore"/>.</summary>

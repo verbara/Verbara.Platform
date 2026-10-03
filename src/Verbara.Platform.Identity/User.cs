@@ -34,6 +34,18 @@ public sealed class User : ITenantScoped, IAuditable
         LockedUntil.HasValue && now < LockedUntil.Value;
 
     /// <summary>
+    /// A copy that shares nothing a caller can change with this instance, the way a fresh read of
+    /// the row is a separate object. Stores hand out copies so that one caller changing the object
+    /// it read never changes what another caller, or the store itself, holds.
+    /// </summary>
+    public User Clone()
+    {
+        var copy = (User)MemberwiseClone();
+        copy.MfaRecoveryCodes = MfaRecoveryCodes?.ToArray();
+        return copy;
+    }
+
+    /// <summary>
     /// Whether this account may authenticate at all: obtain tokens, refresh them, use a user-bound
     /// API key, open a live connection. Only <see cref="UserStatus.Active"/> may; Suspended and
     /// Deactivated — and any status added later — are refused.

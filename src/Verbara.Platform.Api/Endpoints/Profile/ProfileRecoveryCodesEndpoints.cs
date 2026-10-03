@@ -89,9 +89,10 @@ internal static class ProfileRecoveryCodesEndpoints
 
         var codes = recoveryCodes.Generate();
         var salt = user.UserId.Value;
-        user.MfaRecoveryCodes = codes.Select(c => recoveryCodes.Hash(c, salt)).ToList();
-        user.UpdatedAt = DateTimeOffset.UtcNow;
-        await userStore.SaveAsync(user, ct);
+        // Only while MFA is still on: codes are never written for an account whose MFA was just disabled.
+        if (!await userStore.SetRecoveryCodesAsync(
+                user.TenantId, user.UserId, codes.Select(c => recoveryCodes.Hash(c, salt)).ToList(), DateTimeOffset.UtcNow, ct))
+            return Results.BadRequest(new ErrorResponse("MFA is not enabled for this user."));
 
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.RecoveryCodesRegenerated,
             GetIpAddress(context), GetUserAgent(context), null, ct);

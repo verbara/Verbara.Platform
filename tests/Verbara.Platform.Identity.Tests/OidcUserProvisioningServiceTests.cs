@@ -3,6 +3,7 @@ using Verbara.Platform.Identity.OidcTokenExchange;
 using Verbara.Platform.Storage.InMemory;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 
 namespace Verbara.Platform.Identity.Tests;
 
@@ -67,7 +68,7 @@ public sealed class OidcUserProvisioningServiceTests
             AuthProvider = "oidc",
             OidcSubject = "oidc-sub-1",
         };
-        await _userStore.SaveAsync(existing, CancellationToken.None);
+        await _userStore.CreateAsync(existing, CancellationToken.None);
 
         var claims = new OidcClaimsResult("oidc-sub-1", "user@example.com", "New Name", true);
 
@@ -93,7 +94,7 @@ public sealed class OidcUserProvisioningServiceTests
             CreatedAt = DateTimeOffset.UtcNow.AddDays(-30),
             AuthProvider = "local",
         };
-        await _userStore.SaveAsync(existing, CancellationToken.None);
+        await _userStore.CreateAsync(existing, CancellationToken.None);
 
         var claims = new OidcClaimsResult("oidc-sub-new", "user@example.com", "Admin User", true);
 
@@ -150,5 +151,96 @@ public sealed class OidcUserProvisioningServiceTests
 
         user.Should().NotBeNull();
         user!.DisplayName.Should().Be("user@example.com");
+    }
+
+    // ─── Only the IdP-vouched profile fields are written ─────────────────────
+
+    [Fact]
+    public async Task ProvisionOrUpdateAsync_ShouldWriteOnlyTheProfileAndLastLogin_WhenTheSubjectMatches()
+    {
+        var existing = new User
+        {
+            UserId = EntityId.New(),
+            TenantId = new TenantId("tenant-1"),
+            Email = "user@example.com",
+            DisplayName = "Old Name",
+            Role = UserRole.Supervisor,
+            Status = UserStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-30),
+            AuthProvider = "oidc",
+            OidcSubject = "oidc-sub-1",
+            PasswordHash = "stored-hash",
+            FailedLoginAttempts = 2,
+        };
+        await _userStore.CreateAsync(existing, CancellationToken.None);
+
+        await _sut.ProvisionOrUpdateAsync(
+            "tenant-1", new OidcClaimsResult("oidc-sub-1", "user@example.com", "New Name", true), DefaultConfig(), CancellationToken.None);
+
+        var stored = (await _userStore.GetByIdAsync(existing.TenantId, existing.UserId, CancellationToken.None))!;
+        stored.DisplayName.Should().Be("New Name");
+        stored.EmailVerified.Should().BeTrue();
+        stored.LastLoginAt.Should().NotBeNull();
+        stored.Role.Should().Be(UserRole.Supervisor);
+        stored.PasswordHash.Should().Be("stored-hash", because: "a sign-in writes no credential column");
+        stored.FailedLoginAttempts.Should().Be(2, because: "a sign-in writes no lockout column");
+    }
+
+    [Fact]
+    public async Task ProvisionOrUpdateAsync_ShouldLinkWithoutTouchingMfaOrRole_WhenMatchedByEmail()
+    {
+        var existing = new User
+        {
+            UserId = EntityId.New(),
+            TenantId = new TenantId("tenant-1"),
+            Email = "user@example.com",
+            DisplayName = "Admin User",
+            Role = UserRole.Admin,
+            Status = UserStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-30),
+            MfaEnabled = true,
+            MfaSecret = "SECRET",
+            MfaRecoveryCodes = ["digest"],
+        };
+        await _userStore.CreateAsync(existing, CancellationToken.None);
+
+        await _sut.ProvisionOrUpdateAsync(
+            "tenant-1", new OidcClaimsResult("oidc-sub-new", "user@example.com", "Admin User", true), DefaultConfig(), CancellationToken.None);
+
+        var stored = (await _userStore.GetByIdAsync(existing.TenantId, existing.UserId, CancellationToken.None))!;
+        stored.OidcSubject.Should().Be("oidc-sub-new");
+        stored.AuthProvider.Should().Be("oidc");
+        stored.EmailVerified.Should().BeTrue();
+        stored.Role.Should().Be(UserRole.Admin);
+        stored.MfaEnabled.Should().BeTrue();
+        stored.MfaSecret.Should().Be("SECRET");
+        stored.MfaRecoveryCodes.Should().Equal("digest");
+    }
+
+    [Fact]
+    public async Task ProvisionOrUpdateAsync_ShouldReturnNullAndCreateNothing_WhenTheMatchedUserIsDeletedBeforeTheWrite()
+    {
+        // The subject matched a user that was deleted before this sign-in wrote to it: the writes are
+        // update-only, so the user stays deleted and the sign-in is refused.
+        var store = Substitute.For<IUserStore>();
+        var matched = new User
+        {
+            UserId = EntityId.New(),
+            TenantId = new TenantId("tenant-1"),
+            Email = "user@example.com",
+            DisplayName = "Old Name",
+            Role = UserRole.Admin,
+            Status = UserStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+            OidcSubject = "oidc-sub-1",
+        };
+        store.FindByOidcSubjectAsync(Arg.Any<TenantId>(), "oidc-sub-1", Arg.Any<CancellationToken>()).Returns(matched);
+        var sut = new OidcUserProvisioningService(store, NullLogger<OidcUserProvisioningService>.Instance);
+
+        var user = await sut.ProvisionOrUpdateAsync(
+            "tenant-1", new OidcClaimsResult("oidc-sub-1", "user@example.com", "New Name", true), DefaultConfig(), CancellationToken.None);
+
+        user.Should().BeNull();
+        await store.DidNotReceiveWithAnyArgs().CreateAsync(default!, default);
     }
 }

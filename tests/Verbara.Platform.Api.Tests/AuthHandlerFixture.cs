@@ -138,6 +138,8 @@ internal sealed class AuthHandlerFixture
             .Returns(Task.FromResult<User?>(User));
         UserStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(User));
+        // The handlers' writes (failed-attempt count, password, MFA) land on this same instance.
+        SubstituteUserWrites.ApplyTo(UserStore, User);
         return this;
     }
 

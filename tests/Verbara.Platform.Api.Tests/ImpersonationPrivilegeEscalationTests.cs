@@ -314,7 +314,7 @@ public sealed class ImpersonationPrivilegeEscalationTests
             }).AsTask().GetAwaiter().GetResult();
 
             // Admin users — one per tenant-of-interest.
-            userStore.SaveAsync(new User
+            userStore.CreateAsync(new User
             {
                 UserId = EntityId.From(PlatformAdminUserId),
                 TenantId = new TenantId(PlatformTenantId),
@@ -325,7 +325,7 @@ public sealed class ImpersonationPrivilegeEscalationTests
                 CreatedAt = DateTimeOffset.UtcNow,
             }, CancellationToken.None).GetAwaiter().GetResult();
 
-            userStore.SaveAsync(new User
+            userStore.CreateAsync(new User
             {
                 UserId = EntityId.From(PartnerAlphaUserId),
                 TenantId = new TenantId(PartnerAlphaTenantId),

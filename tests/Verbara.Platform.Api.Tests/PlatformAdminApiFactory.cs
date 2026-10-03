@@ -61,7 +61,7 @@ public sealed class PlatformAdminApiFactory : WebApplicationFactory<Program>
         }).AsTask().GetAwaiter().GetResult();
 
         // Platform admin user
-        userStore.SaveAsync(new User
+        userStore.CreateAsync(new User
         {
             UserId = EntityId.From(TestPlatformAdminUserId),
             TenantId = tenantId,

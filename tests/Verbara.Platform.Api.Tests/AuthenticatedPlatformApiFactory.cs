@@ -221,20 +221,17 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
                      var page = all.Skip(query.Offset).Take(query.PageSize).ToList();
                      return Task.FromResult(new PagedResult<User>(page, all.Count, query.Page, query.PageSize));
                  });
-        userStore.SaveAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
+        userStore.CreateAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
                  .Returns(ci =>
                  {
                      var u = ci.ArgAt<User>(0);
-                     // Emulate idx_users_email UNIQUE: same email + different user_id ⇒ 409.
-                     if (!string.IsNullOrEmpty(u.Email)
-                         && seenUsers.TryGetValue(u.Email, out var existing)
-                         && existing.UserId != u.UserId)
-                     {
+                     // Emulate idx_users_email UNIQUE: an email already taken ⇒ 409.
+                     if (!string.IsNullOrEmpty(u.Email) && seenUsers.ContainsKey(u.Email))
                          return Task.FromException(new EntityAlreadyExistsException("user", "email"));
-                     }
                      seenUsers[u.Email ?? Guid.NewGuid().ToString()] = u;
                      return Task.CompletedTask;
                  });
+        SubstituteUserWrites.ApplyTo(userStore, testUser);
         services.AddSingleton(userStore);
     }
 

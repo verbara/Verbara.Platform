@@ -54,6 +54,7 @@ public sealed class GdprPurgePreviewTests
             new InMemoryMessageStore(),
             authEventStore,
             new InMemoryUserStore(),
+            new InMemoryRefreshTokenStore(),
             new InMemoryPurgeLogStore(),
             auditStore);
 
@@ -72,6 +73,7 @@ public sealed class GdprPurgePreviewTests
             new InMemoryMessageStore(),
             new InMemoryAuthEventStore(),
             new InMemoryUserStore(),
+            new InMemoryRefreshTokenStore(),
             new InMemoryPurgeLogStore(),
             auditStore);
 
@@ -100,6 +102,7 @@ public sealed class GdprPurgePreviewTests
             new InMemoryMessageStore(),
             new InMemoryAuthEventStore(),
             new InMemoryUserStore(),
+            new InMemoryRefreshTokenStore(),
             new InMemoryPurgeLogStore(),
             auditStore);
 

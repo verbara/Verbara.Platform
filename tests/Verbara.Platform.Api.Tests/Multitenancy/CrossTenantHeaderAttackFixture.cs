@@ -156,7 +156,7 @@ public sealed class CrossTenantHeaderAttackFixture : WebApplicationFactory<Progr
 
     private static void SaveAdmin(IUserStore store, string userId, string tenantId, string email)
     {
-        store.SaveAsync(new User
+        store.CreateAsync(new User
         {
             UserId = EntityId.From(userId),
             TenantId = new TenantId(tenantId),

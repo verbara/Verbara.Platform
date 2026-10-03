@@ -57,6 +57,7 @@ public sealed class ChangePasswordMfaStepUpTests
 
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
         tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TenantAuthConfig?>(new TenantAuthConfig { TenantId = TestTenantId }));
 
@@ -107,6 +108,7 @@ public sealed class ChangePasswordMfaStepUpTests
 
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
         tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TenantAuthConfig?>(new TenantAuthConfig { TenantId = TestTenantId }));
 
@@ -143,6 +145,7 @@ public sealed class ChangePasswordMfaStepUpTests
 
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
         tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TenantAuthConfig?>(new TenantAuthConfig { TenantId = TestTenantId }));
 
@@ -189,6 +192,7 @@ public sealed class ChangePasswordMfaStepUpTests
 
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
         tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TenantAuthConfig?>(new TenantAuthConfig { TenantId = TestTenantId }));
 
@@ -220,6 +224,7 @@ public sealed class ChangePasswordMfaStepUpTests
 
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
         tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TenantAuthConfig?>(new TenantAuthConfig { TenantId = TestTenantId }));
 

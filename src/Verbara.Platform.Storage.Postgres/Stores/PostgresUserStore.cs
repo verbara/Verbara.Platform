@@ -270,30 +270,23 @@ internal sealed class PostgresUserStore : IUserStore
         return rows.Select(r => r.ToUser(this)).ToList();
     }
 
-    public async Task SaveAsync(User user, CancellationToken ct)
+    private const string InsertSql =
+        "INSERT INTO users (user_id, tenant_id, email, display_name, role, status, created_at, updated_at, created_by, updated_by, " +
+        "password_hash, mfa_enabled, mfa_secret, mfa_recovery_codes, mfa_confirmed_at, email_verified, " +
+        "failed_login_attempts, locked_until, password_changed_at, last_login_at, auth_provider, external_id, oidc_subject) " +
+        "VALUES (@UserId, @TenantId, @Email, @DisplayName, @Role, @Status, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy, " +
+        "@PasswordHash, @MfaEnabled, @MfaSecret, @MfaRecoveryCodes, @MfaConfirmedAt, @EmailVerified, " +
+        "@FailedLoginAttempts, @LockedUntil, @PasswordChangedAt, @LastLoginAt, @AuthProvider, @ExternalId, @OidcSubject)";
+
+    public async Task CreateAsync(User user, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(user);
         try
         {
-            // role and status are written on INSERT only. The update branch leaves them alone, so a
-            // caller saving an object it read before a suspension or a role change cannot put the old
-            // value back; SetStatusAsync / SetRoleAsync are their only writers (see IUserStore).
+            // A plain INSERT: no ON CONFLICT clause, so a write can never land on — or bring back —
+            // a row it did not create. Every change to an existing user goes through a writer below.
             await _dataSource.ExecuteAsync(
-                "INSERT INTO users (user_id, tenant_id, email, display_name, role, status, created_at, updated_at, created_by, updated_by, " +
-                "password_hash, mfa_enabled, mfa_secret, mfa_recovery_codes, mfa_confirmed_at, email_verified, " +
-                "failed_login_attempts, locked_until, password_changed_at, last_login_at, auth_provider, external_id, oidc_subject) " +
-                "VALUES (@UserId, @TenantId, @Email, @DisplayName, @Role, @Status, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy, " +
-                "@PasswordHash, @MfaEnabled, @MfaSecret, @MfaRecoveryCodes, @MfaConfirmedAt, @EmailVerified, " +
-                "@FailedLoginAttempts, @LockedUntil, @PasswordChangedAt, @LastLoginAt, @AuthProvider, @ExternalId, @OidcSubject) " +
-                "ON CONFLICT (tenant_id, user_id) DO UPDATE SET " +
-                "  display_name = EXCLUDED.display_name, " +
-                "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by, " +
-                "  password_hash = EXCLUDED.password_hash, mfa_enabled = EXCLUDED.mfa_enabled, " +
-                "  mfa_secret = EXCLUDED.mfa_secret, mfa_recovery_codes = EXCLUDED.mfa_recovery_codes, " +
-                "  mfa_confirmed_at = EXCLUDED.mfa_confirmed_at, email_verified = EXCLUDED.email_verified, " +
-                "  failed_login_attempts = EXCLUDED.failed_login_attempts, locked_until = EXCLUDED.locked_until, " +
-                "  password_changed_at = EXCLUDED.password_changed_at, last_login_at = EXCLUDED.last_login_at, " +
-                "  auth_provider = EXCLUDED.auth_provider, external_id = EXCLUDED.external_id, " +
-                "  oidc_subject = EXCLUDED.oidc_subject",
+                InsertSql,
                 p =>
                 {
                     p.Add(new NpgsqlParameter("UserId", user.UserId.Value));
@@ -328,13 +321,10 @@ internal sealed class PostgresUserStore : IUserStore
         }
         catch (PostgresException ex) when (ex.SqlState == "23505")
         {
-            // v1.14.3 (R5.5 P0 finding #4 fix). The UPSERT clause handles
-            // (tenant_id, user_id) collisions, but `idx_users_email` is a
-            // separate UNIQUE constraint on (tenant_id, lower(email)) — when
-            // an admin posts a brand-new user with an existing email, that
-            // index fires 23505 and bubbled to ASP.NET's default 500
-            // problem-handler. Translate to a domain exception so the
-            // endpoint can return a structured 409 Conflict.
+            // v1.14.3 (R5.5 P0 finding #4 fix). Both the primary key (tenant_id, user_id) and
+            // `idx_users_email` — UNIQUE on (tenant_id, lower(email)) — raise 23505. Translate to a
+            // domain exception so the endpoint can return a structured 409 Conflict instead of a 500
+            // carrying the raw constraint name.
             var field = ex.ConstraintName?.Contains("email", StringComparison.OrdinalIgnoreCase) == true
                 ? "email"
                 : null;
@@ -342,60 +332,340 @@ internal sealed class PostgresUserStore : IUserStore
         }
     }
 
-    // One statement writes the column and returns the value it replaced. The sub-select locks the
-    // row first, so under READ COMMITTED a concurrent writer's committed value is what comes back as
-    // `previous`, never a value read before it. No row (no such user) → no result → null.
-    private const string SetStatusSql =
-        "UPDATE users AS u SET status = @Value, updated_at = @UpdatedAt " +
-        "FROM (SELECT tenant_id, user_id, status FROM users " +
-        "      WHERE tenant_id = @TenantId AND user_id = @UserId FOR UPDATE) AS previous " +
-        "WHERE u.tenant_id = previous.tenant_id AND u.user_id = previous.user_id " +
-        "RETURNING previous.status";
+    private const string UpdateProfileSql =
+        "UPDATE users SET " +
+        "  display_name = COALESCE(@DisplayName, display_name), " +
+        "  email_verified = COALESCE(@EmailVerified, email_verified), " +
+        "  auth_provider = COALESCE(@AuthProvider, auth_provider), " +
+        "  oidc_subject = COALESCE(@OidcSubject, oidc_subject), " +
+        "  updated_at = @UpdatedAt " +
+        "WHERE tenant_id = @TenantId AND user_id = @UserId";
 
-    private const string SetRoleSql =
-        "UPDATE users AS u SET role = @Value, updated_at = @UpdatedAt " +
-        "FROM (SELECT tenant_id, user_id, role FROM users " +
-        "      WHERE tenant_id = @TenantId AND user_id = @UserId FOR UPDATE) AS previous " +
-        "WHERE u.tenant_id = previous.tenant_id AND u.user_id = previous.user_id " +
-        "RETURNING previous.role";
-
-    public async Task<UserStatus?> SetStatusAsync(
-        TenantId tenantId, EntityId userId, UserStatus status, DateTimeOffset updatedAt, CancellationToken ct)
+    public async Task<bool> UpdateProfileAsync(
+        TenantId tenantId, EntityId userId, UserProfileChange change, DateTimeOffset updatedAt, CancellationToken ct)
     {
-        var previous = await SetColumnAsync(SetStatusSql, tenantId, userId, (int)status, updatedAt, ct);
-        return previous is { } value ? (UserStatus)value : null;
-    }
-
-    public async Task<UserRole?> SetRoleAsync(
-        TenantId tenantId, EntityId userId, UserRole role, DateTimeOffset updatedAt, CancellationToken ct)
-    {
-        var previous = await SetColumnAsync(SetRoleSql, tenantId, userId, (int)role, updatedAt, ct);
-        return previous is { } value ? (UserRole)value : null;
-    }
-
-    private Task<int?> SetColumnAsync(
-        string sql, TenantId tenantId, EntityId userId, int value, DateTimeOffset updatedAt, CancellationToken ct) =>
-        _dataSource.ExecuteScalarAsync<int?>(
-            sql,
+        ArgumentNullException.ThrowIfNull(change);
+        var rows = await _dataSource.ExecuteAsync(
+            UpdateProfileSql,
             p =>
             {
-                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
-                p.Add(new NpgsqlParameter("UserId", userId.Value));
-                p.Add(new NpgsqlParameter("Value", NpgsqlDbType.Integer) { Value = value });
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("DisplayName", NpgsqlDbType.Text) { Value = (object?)change.DisplayName ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("EmailVerified", NpgsqlDbType.Boolean) { Value = (object?)change.EmailVerified ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("AuthProvider", NpgsqlDbType.Text) { Value = (object?)change.AuthProvider ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("OidcSubject", NpgsqlDbType.Text) { Value = (object?)change.OidcSubject ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = updatedAt });
             },
             ct);
+        return rows > 0;
+    }
 
-    public async Task DeleteAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
+    // One statement writes the admin fields and returns the values it replaced. The sub-select locks
+    // the row first, so under READ COMMITTED a concurrent writer's committed value is what comes back
+    // as `previous`, never a value read before it — and the expectation, when there is one, is checked
+    // against that same locked row. No row (no such user, or a failed expectation) → no result.
+    private static readonly string UpdateAdminFieldsSql =
+        "UPDATE users AS u SET " +
+        "  display_name = COALESCE(@DisplayName, u.display_name), " +
+        "  role = COALESCE(@Role, u.role), " +
+        "  status = COALESCE(@Status, u.status), " +
+        "  updated_at = @UpdatedAt, " +
+        "  updated_by = COALESCE(@UpdatedBy, u.updated_by) " +
+        "FROM (SELECT tenant_id, user_id, display_name, role, status FROM users " +
+        "      WHERE tenant_id = @TenantId AND user_id = @UserId FOR UPDATE) AS previous " +
+        "WHERE u.tenant_id = previous.tenant_id AND u.user_id = previous.user_id " +
+        "  AND (NOT @CheckExpected OR (previous.display_name = @ExpectedDisplayName " +
+        "       AND previous.role = @ExpectedRole AND previous.status = @ExpectedStatus)) " +
+        "RETURNING previous.display_name AS previous_display_name, previous.role AS previous_role, " +
+        "  previous.status AS previous_status, " +
+        string.Join(", ", SelectColumns.Split(", ").Select(column => "u." + column));
+
+    public async Task<AdminFieldsWriteResult> UpdateAdminFieldsAsync(
+        TenantId tenantId, EntityId userId, AdminFieldsChange change, DateTimeOffset updatedAt, string? updatedBy,
+        CancellationToken ct)
     {
-        await _dataSource.ExecuteAsync(
-            "DELETE FROM users WHERE tenant_id = @TenantId AND user_id = @UserId",
+        ArgumentNullException.ThrowIfNull(change);
+        var expected = change.Expected;
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
+            UpdateAdminFieldsSql,
             p =>
             {
-                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
-                p.Add(new NpgsqlParameter("UserId", userId.Value));
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("DisplayName", NpgsqlDbType.Text) { Value = (object?)change.DisplayName ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("Role", NpgsqlDbType.Integer) { Value = change.Role is { } role ? (object)(int)role : DBNull.Value });
+                p.Add(new NpgsqlParameter("Status", NpgsqlDbType.Integer) { Value = change.Status is { } status ? (object)(int)status : DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = updatedAt });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)updatedBy ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("CheckExpected", NpgsqlDbType.Boolean) { Value = expected is not null });
+                p.Add(new NpgsqlParameter("ExpectedDisplayName", NpgsqlDbType.Text) { Value = (object?)expected?.DisplayName ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("ExpectedRole", NpgsqlDbType.Integer) { Value = expected is { } e1 ? (object)(int)e1.Role : DBNull.Value });
+                p.Add(new NpgsqlParameter("ExpectedStatus", NpgsqlDbType.Integer) { Value = expected is { } e2 ? (object)(int)e2.Status : DBNull.Value });
+            },
+            AdminFieldsRow.Map, ct);
+
+        if (row is not null)
+            return AdminFieldsWriteResult.Written(
+                new AdminFields(row.previous_display_name, (UserRole)row.previous_role, (UserStatus)row.previous_status),
+                row.User.ToUser(this));
+
+        if (expected is null)
+            return AdminFieldsWriteResult.NotFound;
+
+        // Nothing was written: tell a missing row from a failed expectation. Not atomic with the write
+        // above, and it need not be — neither outcome changed anything.
+        var exists = await _dataSource.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE tenant_id = @TenantId AND user_id = @UserId)",
+            p => AddKey(p, tenantId, userId),
+            ct);
+        return exists ? AdminFieldsWriteResult.Stale : AdminFieldsWriteResult.NotFound;
+    }
+
+    private const string SetPasswordHashSql =
+        "UPDATE users SET password_hash = @NewHash, password_changed_at = @ChangedAt, " +
+        "  failed_login_attempts = CASE WHEN @ClearLockout THEN 0 ELSE failed_login_attempts END, " +
+        "  locked_until = CASE WHEN @ClearLockout THEN NULL ELSE locked_until END " +
+        "WHERE tenant_id = @TenantId AND user_id = @UserId " +
+        "  AND (@ExpectedHash IS NULL OR password_hash = @ExpectedHash)";
+
+    public async Task<bool> SetPasswordHashAsync(
+        TenantId tenantId, EntityId userId, string newHash, DateTimeOffset changedAt, bool clearLockout,
+        string? expectedCurrentHash, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(newHash);
+        var rows = await _dataSource.ExecuteAsync(
+            SetPasswordHashSql,
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("NewHash", NpgsqlDbType.Text) { Value = newHash });
+                p.Add(new NpgsqlParameter("ChangedAt", NpgsqlDbType.TimestampTz) { Value = changedAt });
+                p.Add(new NpgsqlParameter("ClearLockout", NpgsqlDbType.Boolean) { Value = clearLockout });
+                p.Add(new NpgsqlParameter("ExpectedHash", NpgsqlDbType.Text) { Value = (object?)expectedCurrentHash ?? DBNull.Value });
             },
             ct);
+        return rows > 0;
+    }
+
+    public async Task<bool> RehashPasswordAsync(
+        TenantId tenantId, EntityId userId, string expectedHash, string newHash, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(expectedHash);
+        ArgumentException.ThrowIfNullOrEmpty(newHash);
+        var rows = await _dataSource.ExecuteAsync(
+            "UPDATE users SET password_hash = @NewHash " +
+            "WHERE tenant_id = @TenantId AND user_id = @UserId AND password_hash = @ExpectedHash",
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("NewHash", NpgsqlDbType.Text) { Value = newHash });
+                p.Add(new NpgsqlParameter("ExpectedHash", NpgsqlDbType.Text) { Value = expectedHash });
+            },
+            ct);
+        return rows > 0;
+    }
+
+    // `failed_login_attempts + 1` on the right-hand side reads the row as it stands when this statement
+    // gets it (after waiting for any concurrent writer), so concurrent failures never lose a count and
+    // the one that reaches the threshold sets the lock.
+    private const string RecordFailedSignInSql =
+        "UPDATE users SET failed_login_attempts = failed_login_attempts + 1, " +
+        "  locked_until = CASE WHEN failed_login_attempts + 1 >= @Threshold THEN @LockUntil ELSE locked_until END " +
+        "WHERE tenant_id = @TenantId AND user_id = @UserId " +
+        "RETURNING failed_login_attempts, locked_until";
+
+    public async Task<FailedSignInResult?> RecordFailedSignInAsync(
+        TenantId tenantId, EntityId userId, int threshold, DateTimeOffset lockUntil, CancellationToken ct)
+    {
+        var row = await _dataSource.QuerySingleOrDefaultAsync(
+            RecordFailedSignInSql,
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("Threshold", NpgsqlDbType.Integer) { Value = threshold });
+                p.Add(new NpgsqlParameter("LockUntil", NpgsqlDbType.TimestampTz) { Value = lockUntil });
+            },
+            FailedSignInRow.Map, ct);
+        return row is null ? null : new FailedSignInResult(row.failed_login_attempts, row.locked_until);
+    }
+
+    public async Task<bool> ResetLockoutAsync(
+        TenantId tenantId, EntityId userId, DateTimeOffset now, bool onlyIfUnlocked, CancellationToken ct)
+    {
+        var rows = await _dataSource.ExecuteAsync(
+            "UPDATE users SET failed_login_attempts = 0, locked_until = NULL " +
+            "WHERE tenant_id = @TenantId AND user_id = @UserId " +
+            "  AND (NOT @OnlyIfUnlocked OR locked_until IS NULL OR locked_until <= @Now)",
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("OnlyIfUnlocked", NpgsqlDbType.Boolean) { Value = onlyIfUnlocked });
+                p.Add(new NpgsqlParameter("Now", NpgsqlDbType.TimestampTz) { Value = now });
+            },
+            ct);
+        return rows > 0;
+    }
+
+    public async Task<bool> SetLastLoginAtAsync(TenantId tenantId, EntityId userId, DateTimeOffset at, CancellationToken ct)
+    {
+        // GREATEST ignores NULL, so a first sign-in sets the column and a late write never moves it back.
+        var rows = await _dataSource.ExecuteAsync(
+            "UPDATE users SET last_login_at = GREATEST(last_login_at, @At) " +
+            "WHERE tenant_id = @TenantId AND user_id = @UserId",
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("At", NpgsqlDbType.TimestampTz) { Value = at });
+            },
+            ct);
+        return rows > 0;
+    }
+
+    public async Task<bool> SetPendingMfaAsync(
+        TenantId tenantId, EntityId userId, string secret, IReadOnlyList<string> recoveryCodeDigests,
+        DateTimeOffset updatedAt, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(secret);
+        ArgumentNullException.ThrowIfNull(recoveryCodeDigests);
+        var rows = await _dataSource.ExecuteAsync(
+            "UPDATE users SET mfa_secret = @MfaSecret, mfa_recovery_codes = @MfaRecoveryCodes, updated_at = @UpdatedAt " +
+            "WHERE tenant_id = @TenantId AND user_id = @UserId AND mfa_enabled = false",
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("MfaSecret", NpgsqlDbType.Text) { Value = ProtectMfaSecret(secret)! });
+                p.Add(new NpgsqlParameter("MfaRecoveryCodes", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = ProtectRecoveryCodes(recoveryCodeDigests)! });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = updatedAt });
+            },
+            ct);
+        return rows > 0;
+    }
+
+    public async Task<bool> EnableMfaAsync(TenantId tenantId, EntityId userId, DateTimeOffset confirmedAt, CancellationToken ct)
+    {
+        var rows = await _dataSource.ExecuteAsync(
+            "UPDATE users SET mfa_enabled = true, mfa_confirmed_at = @ConfirmedAt, updated_at = @ConfirmedAt " +
+            "WHERE tenant_id = @TenantId AND user_id = @UserId AND mfa_enabled = false AND mfa_secret IS NOT NULL",
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("ConfirmedAt", NpgsqlDbType.TimestampTz) { Value = confirmedAt });
+            },
+            ct);
+        return rows > 0;
+    }
+
+    public async Task<bool> ClearMfaAsync(
+        TenantId tenantId, EntityId userId, bool clearLockout, DateTimeOffset updatedAt, CancellationToken ct)
+    {
+        var rows = await _dataSource.ExecuteAsync(
+            "UPDATE users SET mfa_enabled = false, mfa_secret = NULL, mfa_recovery_codes = NULL, " +
+            "  mfa_confirmed_at = NULL, updated_at = @UpdatedAt, " +
+            "  failed_login_attempts = CASE WHEN @ClearLockout THEN 0 ELSE failed_login_attempts END, " +
+            "  locked_until = CASE WHEN @ClearLockout THEN NULL ELSE locked_until END " +
+            "WHERE tenant_id = @TenantId AND user_id = @UserId",
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("ClearLockout", NpgsqlDbType.Boolean) { Value = clearLockout });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = updatedAt });
+            },
+            ct);
+        return rows > 0;
+    }
+
+    public async Task<bool> SetRecoveryCodesAsync(
+        TenantId tenantId, EntityId userId, IReadOnlyList<string> recoveryCodeDigests, DateTimeOffset updatedAt,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(recoveryCodeDigests);
+        var rows = await _dataSource.ExecuteAsync(
+            "UPDATE users SET mfa_recovery_codes = @MfaRecoveryCodes, updated_at = @UpdatedAt " +
+            "WHERE tenant_id = @TenantId AND user_id = @UserId AND mfa_enabled = true",
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("MfaRecoveryCodes", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = ProtectRecoveryCodes(recoveryCodeDigests)! });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = updatedAt });
+            },
+            ct);
+        return rows > 0;
+    }
+
+    public async Task<bool> ConsumeRecoveryCodeAsync(
+        TenantId tenantId, EntityId userId, string recoveryCodeDigest, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(recoveryCodeDigest);
+
+        // Each element is wrapped with a fresh DataProtection nonce, so the stored element cannot be
+        // computed from the digest: find it by unwrapping (a legacy element still unwrapped by the
+        // migrator matches as itself), then remove exactly that stored value — only while it is still
+        // there, so of two redemptions of one code the second removes nothing and fails.
+        var stored = await _dataSource.QuerySingleOrDefaultAsync<string[]?>(
+            "SELECT mfa_recovery_codes FROM users WHERE tenant_id = @TenantId AND user_id = @UserId",
+            p => AddKey(p, tenantId, userId),
+            r => r.IsDBNull(0) ? null : r.GetFieldValue<string[]>(0),
+            ct);
+        if (stored is null)
+            return false;
+
+        var unwrapped = UnprotectRecoveryCodes(stored)!;
+        var index = Array.IndexOf(unwrapped, recoveryCodeDigest);
+        if (index < 0)
+            return false;
+
+        var rows = await _dataSource.ExecuteAsync(
+            "UPDATE users SET mfa_recovery_codes = array_remove(mfa_recovery_codes, @Stored) " +
+            "WHERE tenant_id = @TenantId AND user_id = @UserId AND @Stored = ANY(mfa_recovery_codes)",
+            p =>
+            {
+                AddKey(p, tenantId, userId);
+                p.Add(new NpgsqlParameter("Stored", NpgsqlDbType.Text) { Value = stored[index] });
+            },
+            ct);
+        return rows > 0;
+    }
+
+    public async Task<bool> DeleteAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
+    {
+        var rows = await _dataSource.ExecuteAsync(
+            "DELETE FROM users WHERE tenant_id = @TenantId AND user_id = @UserId",
+            p => AddKey(p, tenantId, userId),
+            ct);
+        return rows > 0;
+    }
+
+    private static void AddKey(NpgsqlParameterCollection p, TenantId tenantId, EntityId userId)
+    {
+        p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+        p.Add(new NpgsqlParameter("UserId", NpgsqlDbType.Text) { Value = userId.Value });
+    }
+
+    private sealed class AdminFieldsRow
+    {
+        public UserRow User { get; init; } = null!;
+        public string previous_display_name { get; init; } = null!;
+        public int previous_role { get; init; }
+        public int previous_status { get; init; }
+
+        public static AdminFieldsRow Map(NpgsqlDataReader r) => new()
+        {
+            User = UserRow.Map(r),
+            previous_display_name = r.GetString("previous_display_name"),
+            previous_role = r.GetInt32("previous_role"),
+            previous_status = r.GetInt32("previous_status"),
+        };
+    }
+
+    private sealed class FailedSignInRow
+    {
+        public int failed_login_attempts { get; init; }
+        public DateTime? locked_until { get; init; }
+
+        public static FailedSignInRow Map(NpgsqlDataReader r) => new()
+        {
+            failed_login_attempts = r.GetInt32("failed_login_attempts"),
+            locked_until = r.GetDateTimeOrNull("locked_until"),
+        };
     }
 
     private sealed class UserRow

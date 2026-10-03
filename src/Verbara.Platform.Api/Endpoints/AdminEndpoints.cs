@@ -129,7 +129,7 @@ internal static class AdminEndpoints
         };
         try
         {
-            await store.SaveAsync(user, ct);
+            await store.CreateAsync(user, ct);
         }
         catch (EntityAlreadyExistsException ex)
         {
@@ -166,38 +166,29 @@ internal static class AdminEndpoints
         if (user is null)
             return TypedResults.NotFound();
 
-        var now = clock.UtcNow;
-        if (body.DisplayName is not null && body.DisplayName != user.DisplayName)
+        // Only a value that differs from what this request read is written, and all of them in one
+        // statement that changes an existing user only: a user deleted meanwhile is not recreated,
+        // and no other column — password, MFA, lockout — is written from what this request read.
+        var change = new AdminFieldsChange
         {
-            user.DisplayName = body.DisplayName;
-            user.UpdatedAt = now;
-            await store.SaveAsync(user, ct);
-        }
+            DisplayName = body.DisplayName is { } displayName && displayName != user.DisplayName ? displayName : null,
+            Role = body.Role is { } role && role != user.Role ? role : null,
+            Status = body.Status is { } status && status != user.Status ? status : null,
+        };
+        if (change is { DisplayName: null, Role: null, Status: null })
+            return TypedResults.Ok(ToUserDto(user));
 
-        // Role and status each have their own write: SaveAsync never writes them for an existing
-        // user, so a request still holding an object read before this change (a failed sign-in
-        // recording its attempt, a password change) cannot put the old value back when it saves.
-        // Only a value that differs from what this request read is written.
-        if (body.Role is { } role && role != user.Role)
-        {
-            if (await store.SetRoleAsync(tenantId, user.UserId, role, now, ct) is null)
-                return TypedResults.NotFound();
-            user.Role = role;
-        }
+        var written = await store.UpdateAdminFieldsAsync(
+            tenantId, user.UserId, change, clock.UtcNow, CallerIdentity.ResolveUserId(context.User), ct);
+        if (written is not { Outcome: AdminFieldsWriteOutcome.Written, Previous: { } previous, User: { } stored })
+            return TypedResults.NotFound();
 
-        if (body.Status is { } status && status != user.Status)
-        {
-            // The store returns the status it replaced, so the revocation and the audit entry follow
-            // the transition that was actually written, not the one this request expected.
-            var previousStatus = await store.SetStatusAsync(tenantId, user.UserId, status, now, ct);
-            if (previousStatus is null)
-                return TypedResults.NotFound();
-            user.Status = status;
-            if (previousStatus != status)
-                await ApplyStatusChangeAsync(user, previousStatus.Value, context, sessions, audit, eventBus, ct);
-        }
+        // The store returns the values it replaced, so the revocation and the audit entry follow the
+        // transition that was actually written, not the one this request expected.
+        if (previous.Status != stored.Status)
+            await ApplyStatusChangeAsync(stored, previous.Status, context, sessions, audit, eventBus, ct);
 
-        return TypedResults.Ok(ToUserDto(user));
+        return TypedResults.Ok(ToUserDto(stored));
     }
 
     // A status change is a security event, applied AFTER the new status is persisted (so a client
@@ -265,19 +256,54 @@ internal static class AdminEndpoints
             u.Status.ToString().ToLowerInvariant(),
             u.CreatedAt);
 
+    // Deleting an account ends every access it still holds, and is audited.
+    //  • The refresh-token lineage is revoked after the delete (so a token minted by a sign-in racing
+    //    the delete is caught too). refresh_tokens has no foreign key to users: without this, the
+    //    lineage would be refused only for as long as no row with this id exists.
+    //  • Hub connections and SSE streams were authenticated once and would stay open: cut on every
+    //    node. User-bound API keys stop on their own — they authenticate only while the owner exists.
+    //  • Access tokens already issued stay valid until they expire (at most 15 minutes).
     private static async Task<IResult> DeleteUser(
         string id,
         HttpContext context,
         [FromServices] IUserStore store,
+        [FromServices] SessionService sessions,
+        [FromServices] IAuditService audit,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        var deleted = await store.DeleteAsync(tenantId, EntityId.From(id), ct);
 
-        // Refresh and API keys already fail once the user is gone, but hub connections and SSE
-        // streams were authenticated once and would stay open: cut them on every node.
+        var actorId = CallerIdentity.ResolveUserIdOrSystem(context.User);
+        var ip = context.Connection.RemoteIpAddress?.ToString();
+        var revokedSessions = await sessions.RevokeAllSessionsForUserAsync(
+            tenantId.Value, actorId, id, ip, context.Request.Headers.UserAgent.FirstOrDefault(), ct);
+
         eventBus.Publish(new UserAccessRevokedEvent(tenantId.Value, id, UserAccessRevokedEvent.DeletedReason));
+
+        if (deleted)
+        {
+            var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["revoked_sessions"] = revokedSessions.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["ip"] = ip ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            };
+            CallerIdentity.AddImpersonationContext(metadata, context.User);
+            await audit.RecordAsync(
+                tenantId,
+                category: "auth",
+                action: "user.deleted",
+                severity: "warning",
+                actorId: actorId,
+                actorType: "user",
+                targetId: id,
+                targetType: "User",
+                metadata: metadata,
+                ct: ct);
+        }
+
         return Results.NoContent();
     }
 

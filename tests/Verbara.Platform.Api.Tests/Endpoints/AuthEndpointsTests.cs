@@ -145,6 +145,7 @@ public sealed class AuthEndpointsTests
         var user = BuildUser(mfaEnabled: false, role: UserRole.Admin);
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
 
         // Policy now requires MFA for this role; user is not enrolled → revoke branch.
         mfaPolicyEvaluator.RequiresMfaAsync(TestTenantId, Arg.Any<UserRole>(), Arg.Any<CancellationToken>())
@@ -181,6 +182,7 @@ public sealed class AuthEndpointsTests
         var user = BuildUser(mfaEnabled: true, role: UserRole.Agent);
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
 
         var authConfig = new TenantAuthConfig
         {
@@ -214,6 +216,7 @@ public sealed class AuthEndpointsTests
         var user = BuildUser(mfaEnabled: true, role: UserRole.Admin);
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
 
         var authConfig = new TenantAuthConfig
         {
@@ -365,6 +368,7 @@ public sealed class AuthEndpointsTests
         var user = BuildUser(mfaEnabled: true, role: UserRole.Agent);
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
 
         var authConfig = new TenantAuthConfig
         {
@@ -403,6 +407,7 @@ public sealed class AuthEndpointsTests
         user.MfaSecret = secret;
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
 
         var validCode = new Totp(secretBytes).ComputeTotp(DateTime.UtcNow);
 
@@ -437,6 +442,7 @@ public sealed class AuthEndpointsTests
         var user = BuildUser(mfaEnabled: true, role: UserRole.Agent);
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
 
         var authConfig = new TenantAuthConfig { TenantId = TestTenantId, MfaPolicy = "optional" };
         tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
@@ -473,6 +479,7 @@ public sealed class AuthEndpointsTests
         var user = BuildUser();
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
 
         tenantAuthConfigStore.GetAsync(TestTenantId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TenantAuthConfig?>(new TenantAuthConfig { TenantId = TestTenantId }));
@@ -509,6 +516,7 @@ public sealed class AuthEndpointsTests
         user.MfaRecoveryCodes = originalCodes;
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
 
         var request = new RegenerateRecoveryCodesRequest(TestPassword);
 
@@ -539,6 +547,7 @@ public sealed class AuthEndpointsTests
         var user = BuildUser(mfaEnabled: false);
         userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(user));
+        SubstituteUserWrites.ApplyTo(userStore, user);
 
         var request = new RegenerateRecoveryCodesRequest(TestPassword);
 

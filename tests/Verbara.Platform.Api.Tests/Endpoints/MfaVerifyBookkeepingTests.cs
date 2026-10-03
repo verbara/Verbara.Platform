@@ -5,6 +5,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Identity.Auth;
 using Verbara.Platform.Identity.Mfa;
+using Verbara.Platform.Storage.InMemory;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -160,7 +161,11 @@ public sealed class MfaVerifyBookkeepingTests
 
     private sealed class MfaVerifyFixture
     {
-        private readonly IUserStore _userStore = Substitute.For<IUserStore>();
+        // A real store: the handler's writes (the atomic failed-attempt count, the single-use recovery
+        // code, the lockout reset) are store-side, so a substitute would only echo what a test told it.
+        private readonly InMemoryUserStore _userStore = new();
+        private readonly User _seed;
+        private bool _seeded;
         private readonly ITenantAuthConfigStore _configStore = Substitute.For<ITenantAuthConfigStore>();
         private readonly IAuthEventStore _authEventStore = Substitute.For<IAuthEventStore>();
         private readonly IRefreshTokenStore _refreshTokenStore = Substitute.For<IRefreshTokenStore>();
@@ -176,7 +181,13 @@ public sealed class MfaVerifyBookkeepingTests
         /// <summary>The real service — the salted-SHA-256 branch is only meaningful against real digests.</summary>
         public readonly RecoveryCodeService RecoveryCodes = new();
 
-        public User User { get; }
+        /// <summary>
+        /// The user as configured, until the first call seeds it; from then on, the user as stored.
+        /// </summary>
+        public User User => _seeded
+            ? _userStore.GetByIdAsync(new TenantId(TenantId), EntityId.From(UserId), CancellationToken.None)
+                .GetAwaiter().GetResult()!
+            : _seed;
 
         public string MfaSecret => User.MfaSecret!;
 
@@ -184,7 +195,7 @@ public sealed class MfaVerifyBookkeepingTests
 
         public MfaVerifyFixture()
         {
-            User = new User
+            _seed = new User
             {
                 UserId = EntityId.From(UserId),
                 TenantId = new TenantId(TenantId),
@@ -197,11 +208,6 @@ public sealed class MfaVerifyBookkeepingTests
                 MfaSecret = "JBSWY3DPEHPK3PXP",
                 MfaConfirmedAt = DateTimeOffset.UtcNow,
             };
-
-            _userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult<User?>(User));
-            _userStore.SaveAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
-                .Returns(Task.CompletedTask);
 
             _configStore.GetAsync(TenantId, Arg.Any<CancellationToken>())
                 .Returns(_ => Task.FromResult<TenantAuthConfig?>(_config));
@@ -233,7 +239,7 @@ public sealed class MfaVerifyBookkeepingTests
         public MfaVerifyFixture WithSha256RecoveryCodes()
         {
             PlaintextCodes = RecoveryCodes.Generate();
-            User.MfaRecoveryCodes = PlaintextCodes.Select(c => RecoveryCodes.Hash(c, RecoverySalt)).ToList();
+            _seed.MfaRecoveryCodes = PlaintextCodes.Select(c => RecoveryCodes.Hash(c, RecoverySalt)).ToList();
             return this;
         }
 
@@ -254,6 +260,12 @@ public sealed class MfaVerifyBookkeepingTests
         /// </summary>
         public async Task<IResult> InvokeAsync(string? code = null, string? recoveryCode = null)
         {
+            if (!_seeded)
+            {
+                await _userStore.CreateAsync(_seed, CancellationToken.None);
+                _seeded = true;
+            }
+
             var mfaToken = await AuthEndpoints.GenerateMfaChallengeTokenAndStoreAsync(
                 UserId, TenantId, _mfaCache, CancellationToken.None);
 

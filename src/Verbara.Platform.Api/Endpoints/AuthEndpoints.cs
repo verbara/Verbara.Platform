@@ -22,6 +22,9 @@ internal static class AuthEndpoints
     private static readonly TimeSpan MfaPendingTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PasswordResetTtl = TimeSpan.FromHours(1);
 
+    // Same wording as the profile wizard (MfaEnrollEndpoints) gives for the same refusal.
+    internal const string MfaAlreadyEnrolledMessage = "MFA already enrolled. Disable first to re-enroll.";
+
 
     public static void MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
@@ -133,8 +136,11 @@ internal static class AuthEndpoints
         if (authWriteQueue is not null && PasswordService.IsBcryptHash(user.PasswordHash))
         {
             var newHash = PasswordService.HashPassword(body.Password);
+            // The verified hash travels with the rehash: it lands only while that is still the
+            // stored hash, so a password changed before the queue drains is never replaced by a
+            // hash of this (old) password.
             authWriteQueue.TryEnqueue(new PasswordRehashCommand(
-                user.TenantId.Value, user.UserId.Value, newHash));
+                user.TenantId.Value, user.UserId.Value, user.PasswordHash, newHash));
         }
 
         // v1.9.0 P0 — Tenant MFA policy enforcement (Gap 1).
@@ -228,13 +234,12 @@ internal static class AuthEndpoints
             // with it, so verification cannot reconstruct it from anything else.
             var (isValid, index) = MfaService.ValidateRecoveryCode(
                 recoveryCodes, body.RecoveryCode, user.MfaRecoveryCodes, user.UserId.Value);
-            if (isValid)
+            // A code is single-use: it counts only if this request is the one that removes it from
+            // the stored set. Of two redemptions racing on one code, the second removes nothing and
+            // fails like any invalid factor.
+            if (isValid && await userStore.ConsumeRecoveryCodeAsync(
+                    tenantId, user.UserId, user.MfaRecoveryCodes[index], ct))
             {
-                // Remove used recovery code
-                var codes = user.MfaRecoveryCodes.ToList();
-                codes.RemoveAt(index);
-                user.MfaRecoveryCodes = codes;
-                await userStore.SaveAsync(user, ct);
                 verified = true;
             }
         }
@@ -573,9 +578,13 @@ internal static class AuthEndpoints
         if (!validation.IsValid)
             return Results.BadRequest(new ErrorDetailResponse("Password does not meet policy", validation.Errors));
 
-        user.PasswordHash = PasswordService.HashPassword(body.NewPassword);
-        user.PasswordChangedAt = DateTimeOffset.UtcNow;
-        await userStore.SaveAsync(user, ct);
+        // Written only while the hash the current password was just verified against is still the
+        // stored one: a change proven with a password that was replaced meanwhile (a reset, another
+        // change) does not land.
+        if (!await userStore.SetPasswordHashAsync(
+                user.TenantId, user.UserId, PasswordService.HashPassword(body.NewPassword), DateTimeOffset.UtcNow,
+                clearLockout: false, expectedCurrentHash: user.PasswordHash, ct))
+            return Results.BadRequest(new ErrorResponse("Current password is incorrect"));
 
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.PasswordChange,
             GetIpAddress(context), GetUserAgent(context), null, ct);
@@ -701,11 +710,10 @@ internal static class AuthEndpoints
         if (!validation.IsValid)
             return Results.BadRequest(new ErrorDetailResponse("Password does not meet policy", validation.Errors));
 
-        user.PasswordHash = PasswordService.HashPassword(body.NewPassword);
-        user.PasswordChangedAt = DateTimeOffset.UtcNow;
-        user.FailedLoginAttempts = 0;
-        user.LockedUntil = null;
-        await userStore.SaveAsync(user, ct);
+        if (!await userStore.SetPasswordHashAsync(
+                user.TenantId, user.UserId, PasswordService.HashPassword(body.NewPassword), DateTimeOffset.UtcNow,
+                clearLockout: true, expectedCurrentHash: null, ct))
+            return Results.BadRequest(new ErrorResponse("Invalid reset token"));
 
         await authEvents.LogAsync(entry.TenantId, entry.UserId, AuthEventTypes.PasswordReset,
             null, null, null, ct);
@@ -759,10 +767,12 @@ internal static class AuthEndpoints
         var (secret, qrUri) = MfaService.GenerateSetup(user.Email);
         var recoveryCodes = MfaService.GenerateRecoveryCodes();
 
-        // Store secret temporarily — will be confirmed by /mfa/confirm
-        user.MfaSecret = secret;
-        user.MfaRecoveryCodes = MfaService.HashRecoveryCodes(recoveryCodes).ToList();
-        await userStore.SaveAsync(user, ct);
+        // Store secret temporarily — will be confirmed by /mfa/confirm. The store re-checks that MFA
+        // is still off in the same statement, so an enrollment completed meanwhile is not replaced.
+        if (!await userStore.SetPendingMfaAsync(
+                user.TenantId, user.UserId, secret, MfaService.HashRecoveryCodes(recoveryCodes).ToList(),
+                DateTimeOffset.UtcNow, ct))
+            return Results.BadRequest(new ErrorResponse(MfaAlreadyEnrolledMessage));
 
         return Results.Ok(new MfaSetupResponse(secret, qrUri, recoveryCodes));
     }
@@ -788,9 +798,13 @@ internal static class AuthEndpoints
         if (!MfaService.VerifyCode(user.MfaSecret, body.Code))
             return Results.BadRequest(new ErrorResponse("Invalid verification code"));
 
-        user.MfaEnabled = true;
-        user.MfaConfirmedAt = DateTimeOffset.UtcNow;
-        await userStore.SaveAsync(user, ct);
+        if (!await userStore.EnableMfaAsync(user.TenantId, user.UserId, DateTimeOffset.UtcNow, ct))
+        {
+            // Enabled by another request meanwhile, or the pending secret was cleared.
+            var current = await userStore.GetByIdAsync(user.TenantId, user.UserId, ct);
+            return Results.BadRequest(new ErrorResponse(
+                current is { MfaEnabled: true } ? MfaAlreadyEnrolledMessage : "MFA setup not initiated"));
+        }
 
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.MfaEnroll,
             GetIpAddress(context), GetUserAgent(context), null, ct);
@@ -842,11 +856,8 @@ internal static class AuthEndpoints
         if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(body.Password, user.PasswordHash))
             return Results.BadRequest(new ErrorResponse("Invalid password"));
 
-        user.MfaEnabled = false;
-        user.MfaSecret = null;
-        user.MfaRecoveryCodes = null;
-        user.MfaConfirmedAt = null;
-        await userStore.SaveAsync(user, ct);
+        if (!await userStore.ClearMfaAsync(user.TenantId, user.UserId, clearLockout: false, DateTimeOffset.UtcNow, ct))
+            return Results.Unauthorized();
 
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.MfaDisable,
             GetIpAddress(context), GetUserAgent(context), null, ct);
@@ -885,11 +896,12 @@ internal static class AuthEndpoints
         if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(request.Password, user.PasswordHash))
             return Results.BadRequest(new ErrorResponse("Invalid password"));
 
-        // Generate fresh plaintext codes to return to the caller, store hashed copies.
+        // Generate fresh plaintext codes to return to the caller, store hashed copies — only while
+        // MFA is still on, so codes are never written for an account whose MFA was just disabled.
         var newCodes = MfaService.GenerateRecoveryCodes();
-        user.MfaRecoveryCodes = MfaService.HashRecoveryCodes(newCodes).ToList();
-        user.UpdatedAt = DateTimeOffset.UtcNow;
-        await userStore.SaveAsync(user, ct);
+        if (!await userStore.SetRecoveryCodesAsync(
+                user.TenantId, user.UserId, MfaService.HashRecoveryCodes(newCodes).ToList(), DateTimeOffset.UtcNow, ct))
+            return Results.BadRequest(new ErrorResponse("MFA is not enabled for this user."));
 
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.RecoveryCodesRegenerated,
             GetIpAddress(context), GetUserAgent(context), null, ct);

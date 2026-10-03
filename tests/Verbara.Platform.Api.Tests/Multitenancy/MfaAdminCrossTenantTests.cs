@@ -169,7 +169,7 @@ public sealed class MfaAdminCrossTenantTests
     {
         using var scope = _fixture.Services.CreateScope();
         var userStore = scope.ServiceProvider.GetRequiredService<IUserStore>();
-        await userStore.SaveAsync(new User
+        await userStore.CreateAsync(new User
         {
             UserId = EntityId.From(userId),
             TenantId = new TenantId(tenantId),

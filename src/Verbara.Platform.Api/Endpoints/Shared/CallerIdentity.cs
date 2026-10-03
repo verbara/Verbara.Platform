@@ -42,4 +42,26 @@ internal static class CallerIdentity
     /// </summary>
     public static string ResolveUserIdOrSystem(ClaimsPrincipal user)
         => ResolveUserId(user) ?? "system";
+
+    /// <summary>
+    /// Adds the impersonation context of <paramref name="caller"/> to an audit entry's metadata:
+    /// under impersonation the resolved actor id is the impersonating admin's, from another tenant,
+    /// so the entry also names that tenant and the impersonation session. Adds nothing otherwise.
+    /// </summary>
+    public static void AddImpersonationContext(IDictionary<string, string> metadata, ClaimsPrincipal caller)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!string.Equals(caller.FindFirstValue("impersonation"), "true", StringComparison.Ordinal))
+            return;
+        foreach (var claimType in s_impersonationClaims)
+        {
+            if (caller.FindFirstValue(claimType) is { Length: > 0 } value)
+                metadata[claimType] = value;
+        }
+    }
+
+    private static readonly string[] s_impersonationClaims =
+        ["impersonator_id", "impersonator_tenant", "impersonation_session_id"];
 }

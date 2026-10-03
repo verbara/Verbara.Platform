@@ -134,7 +134,7 @@ public sealed class MfaAdminEndpointsTests : IClassFixture<PlatformAdminApiFacto
     {
         using var scope = _factory.Services.CreateScope();
         var userStore = scope.ServiceProvider.GetRequiredService<IUserStore>();
-        await userStore.SaveAsync(new User
+        await userStore.CreateAsync(new User
         {
             UserId = EntityId.From(userId),
             TenantId = new TenantId(PlatformAdminApiFactory.HostTenantId),

@@ -11,9 +11,10 @@ using NSubstitute;
 namespace Verbara.Platform.Api.Tests.Auth;
 
 /// <summary>
-/// PUT /admin/users/{id} when the account changes between the handler's read and its own role or
-/// status write. The store's targeted write reports what it replaced, and that answer — not the
-/// snapshot the request read — decides whether access is revoked and what the audit entry says.
+/// PUT /admin/users/{id} when the account changes between the handler's read and its write. The
+/// changed fields go to the store in one write, which reports the values it replaced — and that
+/// answer, not the snapshot the request read, decides whether access is revoked and what the audit
+/// entry says.
 /// </summary>
 /// <remarks>
 /// The handler is invoked directly (InternalsVisibleTo) with a substituted store, the only way to
@@ -49,9 +50,9 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateUser_ShouldReturn404WithoutRevoking_WhenTheUserIsDeletedBeforeTheStatusWrite()
+    public async Task UpdateUser_ShouldReturn404WithoutRevoking_WhenTheUserIsDeletedBeforeTheWrite()
     {
-        StatusWriteReturns(UserStatus.Suspended, replaced: null);
+        WriteReturns(AdminFieldsWriteResult.NotFound);
 
         var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: null, Status: UserStatus.Suspended));
 
@@ -64,9 +65,7 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
     [Fact]
     public async Task UpdateUser_ShouldReturn404_WhenTheUserIsDeletedBeforeTheRoleWrite()
     {
-        _store.SetRoleAsync(new TenantId(Tenant), EntityId.From(TargetId), UserRole.Admin,
-                Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<UserRole?>(null));
+        WriteReturns(AdminFieldsWriteResult.NotFound);
 
         var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: UserRole.Admin, Status: null));
 
@@ -74,11 +73,54 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateUser_ShouldWriteOnlyTheChangedFieldsInOneWrite_WhenSeveralFieldsAreSent()
+    {
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Target", UserRole.Agent, UserStatus.Active),
+            NewTarget(displayName: "Renamed", role: UserRole.Supervisor)));
+
+        // Platform.Web sends every field on each edit; the status here is the one already stored.
+        await InvokeAsync(new UpdateUserRequest(DisplayName: "Renamed", Role: UserRole.Supervisor, Status: UserStatus.Active));
+
+        await _store.Received(1).UpdateAdminFieldsAsync(
+            new TenantId(Tenant), EntityId.From(TargetId),
+            Arg.Is<AdminFieldsChange>(c => c.DisplayName == "Renamed" && c.Role == UserRole.Supervisor
+                && c.Status == null && c.Expected == null),
+            Arg.Any<DateTimeOffset>(), AdminId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldNotWrite_WhenNothingDiffersFromWhatWasRead()
+    {
+        var result = await InvokeAsync(new UpdateUserRequest(DisplayName: "Target", Role: UserRole.Agent, Status: UserStatus.Active));
+
+        result.Result.Should().BeOfType<Ok<UserDto>>();
+        await _store.DidNotReceiveWithAnyArgs().UpdateAdminFieldsAsync(default, default, default!, default, default, default);
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldReturnTheUserAsStored_WhenAnotherWriteLandedFirst()
+    {
+        // Another admin renamed the user between this request's read and its role write.
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Renamed elsewhere", UserRole.Agent, UserStatus.Active),
+            NewTarget(displayName: "Renamed elsewhere", role: UserRole.Supervisor)));
+
+        var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: UserRole.Supervisor, Status: null));
+
+        var dto = result.Result.Should().BeOfType<Ok<UserDto>>().Which.Value!;
+        dto.DisplayName.Should().Be("Renamed elsewhere");
+        dto.Role.Should().Be("supervisor");
+    }
+
+    [Fact]
     public async Task UpdateUser_ShouldAuditTheStatusTheStoreReplaced_WhenAnotherAdminChangedItFirst()
     {
         // This request read Active; another admin suspended the account before this deactivation
         // was written, so the transition that actually happened is Suspended -> Deactivated.
-        StatusWriteReturns(UserStatus.Deactivated, replaced: UserStatus.Suspended);
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Target", UserRole.Agent, UserStatus.Suspended),
+            NewTarget(status: UserStatus.Deactivated)));
 
         var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: null, Status: UserStatus.Deactivated));
 
@@ -105,7 +147,9 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
     {
         // Two admins suspend the account at once: the later write replaces Suspended with
         // Suspended, and the revocation and audit entry belong to the earlier one only.
-        StatusWriteReturns(UserStatus.Suspended, replaced: UserStatus.Suspended);
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Target", UserRole.Agent, UserStatus.Suspended),
+            NewTarget(status: UserStatus.Suspended)));
 
         var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: null, Status: UserStatus.Suspended));
 
@@ -116,10 +160,10 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
         _published.Should().BeEmpty();
     }
 
-    private void StatusWriteReturns(UserStatus status, UserStatus? replaced) =>
-        _store.SetStatusAsync(new TenantId(Tenant), EntityId.From(TargetId), status,
-                Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(replaced);
+    private void WriteReturns(AdminFieldsWriteResult result) =>
+        _store.UpdateAdminFieldsAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<AdminFieldsChange>(),
+                Arg.Any<DateTimeOffset>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(result);
 
     private Task<Results<Ok<UserDto>, NotFound>> InvokeAsync(UpdateUserRequest body)
     {
@@ -134,14 +178,15 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
             TargetId, context, body, _store, sessions, _audit, _eventBus, _clock, CancellationToken.None);
     }
 
-    private static User NewTarget() => new()
+    private static User NewTarget(
+        string displayName = "Target", UserRole role = UserRole.Agent, UserStatus status = UserStatus.Active) => new()
     {
         UserId = EntityId.From(TargetId),
         TenantId = new TenantId(Tenant),
         Email = "target@update-user.test",
-        DisplayName = "Target",
-        Role = UserRole.Agent,
-        Status = UserStatus.Active,
+        DisplayName = displayName,
+        Role = role,
+        Status = status,
         CreatedAt = DateTimeOffset.UtcNow,
     };
 }

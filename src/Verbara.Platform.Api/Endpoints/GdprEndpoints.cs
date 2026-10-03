@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -112,6 +113,7 @@ internal static class GdprEndpoints
         [FromBody] GdprUserPurgeRequest body,
         [FromServices] IGdprPurgeService purgeService,
         [FromServices] PlatformEventBus eventBus,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.UserId))
@@ -131,8 +133,30 @@ internal static class GdprEndpoints
 
         // The purge deletes the account, so it ends the account's live connections exactly as
         // DELETE /admin/users/{id} does: hub connections and SSE streams were authenticated once
-        // and would otherwise stay open on every node.
+        // and would otherwise stay open on every node. (The purge itself revoked its refresh tokens.)
         eventBus.Publish(new UserAccessRevokedEvent(tenantId.Value, body.UserId, UserAccessRevokedEvent.DeletedReason));
+
+        // Audited as the account deletion it is, alongside the purge log's tombstone. No personal
+        // data: the user id, the purge id and who acted.
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["via"] = "gdpr_purge",
+            ["purge_id"] = result.PurgeId,
+            ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            ["endpoint"] = context.Request.Path.Value ?? "",
+        };
+        CallerIdentity.AddImpersonationContext(metadata, context.User);
+        await audit.RecordAsync(
+            tenantId,
+            category: "auth",
+            action: "user.deleted",
+            severity: "warning",
+            actorId: CallerIdentity.ResolveUserIdOrSystem(context.User),
+            actorType: "user",
+            targetId: body.UserId,
+            targetType: "User",
+            metadata: metadata,
+            ct: ct);
 
         return TypedResults.Ok(result);
     }
