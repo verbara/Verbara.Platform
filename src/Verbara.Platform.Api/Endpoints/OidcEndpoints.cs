@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
@@ -33,6 +34,7 @@ internal static class OidcEndpoints
         HttpContext context,
         [FromServices] ITenantAuthConfigStore configStore,
         [FromServices] IDataProtectionProvider dataProtection,
+        [FromServices] IConfiguration configuration,
         string? tenant_id,
         string? return_url,
         CancellationToken ct)
@@ -43,6 +45,12 @@ internal static class OidcEndpoints
         var config = await configStore.GetAsync(tenant_id, ct);
         if (config is null || !config.OidcEnabled || string.IsNullOrEmpty(config.OidcAuthority))
             return Results.BadRequest(new ErrorResponse("OIDC is not enabled for this tenant"));
+
+        // The provider sends the user, and the authorization code, back to redirect_uri: it is the
+        // configured console address, never the request's Host, which the sender chooses.
+        var publicBaseUrl = PublicBaseUrl.Resolve(configuration);
+        if (publicBaseUrl is null)
+            return SignInUnavailable(context, configuration);
 
         var codeVerifier = OidcTokenExchangeService.GenerateCodeVerifier();
         var codeChallenge = OidcTokenExchangeService.ComputeCodeChallenge(codeVerifier);
@@ -71,7 +79,7 @@ internal static class OidcEndpoints
             MaxAge = FlowTimeout,
         });
 
-        var redirectUri = $"{context.Request.Scheme}://{context.Request.Host}/api/auth/oidc/callback";
+        var redirectUri = PublicBaseUrl.OidcRedirectUri(publicBaseUrl);
         var authorizationUrl = $"{config.OidcAuthority.TrimEnd('/')}/authorize" +
             $"?client_id={Uri.EscapeDataString(config.OidcClientId ?? "")}" +
             $"&response_type=code" +
@@ -94,6 +102,7 @@ internal static class OidcEndpoints
         [FromServices] IDataProtectionProvider dataProtection,
         [FromServices] IMfaPolicyEvaluator mfaEvaluator,
         [FromServices] IMfaPendingCache mfaCache,
+        [FromServices] IConfiguration configuration,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
@@ -132,7 +141,15 @@ internal static class OidcEndpoints
             return Results.BadRequest(new ErrorResponse("OIDC is not enabled for this tenant"));
         }
 
-        var redirectUri = $"{context.Request.Scheme}://{context.Request.Host}/api/auth/oidc/callback";
+        // The token request repeats the redirect_uri the authorization request sent (OidcLogin).
+        var publicBaseUrl = PublicBaseUrl.Resolve(configuration);
+        if (publicBaseUrl is null)
+        {
+            await authEvents.LogAsync(tenantId, null, AuthEventTypes.OidcLoginFailure, ip, ua, null, ct);
+            return SignInUnavailable(context, configuration);
+        }
+
+        var redirectUri = PublicBaseUrl.OidcRedirectUri(publicBaseUrl);
 
         OidcTokenResponse tokenResponse;
         try
@@ -170,6 +187,20 @@ internal static class OidcEndpoints
         // The account-status check lives in CompleteOidcLoginAsync, the step that issues tokens or
         // an MFA challenge, so no caller of that step can skip it.
         return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, mfaCache, user, flowState, ip, ua, ct);
+    }
+
+    /// <summary>
+    /// Refuses a sign-in step that has no configured console address to put in redirect_uri; the
+    /// request's Host is never used in its place.
+    /// </summary>
+    private static IResult SignInUnavailable(HttpContext context, IConfiguration configuration)
+    {
+        PublicBaseUrl.LogOidcSignInRefused(context, configuration);
+        return Results.Json(
+            new ErrorResponse(
+                $"Single sign-on is unavailable: the platform's public address ({PublicBaseUrl.ConfigurationKey}) is not set to a valid URL."),
+            ApiJsonContext.Default.ErrorResponse,
+            statusCode: StatusCodes.Status500InternalServerError);
     }
 
     private static (OidcFlowState? State, IResult? Error) DecryptFlowState(

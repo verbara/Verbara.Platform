@@ -607,6 +607,7 @@ internal static class AuthEndpoints
         HttpContext context,
         [FromServices] IUserStore userStore,
         [FromServices] IPasswordResetCache resetCache,
+        [FromServices] IConfiguration configuration,
         CancellationToken ct)
     {
         var forgotTenantId = body.TenantId;
@@ -614,11 +615,21 @@ internal static class AuthEndpoints
             forgotTenantId = ctxForgotTenant?.ToString();
 
         // Always return 200 to prevent email enumeration
+        var accepted = Results.Ok(new MessageResponse("If the email exists, a reset link has been sent"));
         if (!string.IsNullOrWhiteSpace(forgotTenantId) && !string.IsNullOrWhiteSpace(body.Email))
         {
             var user = await userStore.GetByEmailAsync(new TenantId(forgotTenantId!), body.Email, ct);
             if (user is not null)
             {
+                // The link points at the configured console address, never at the request's Host,
+                // which the sender chooses. Without one, no token is minted and nothing is sent.
+                var publicBaseUrl = PublicBaseUrl.Resolve(configuration);
+                if (publicBaseUrl is null)
+                {
+                    PublicBaseUrl.LogResetEmailNotSent(context, configuration);
+                    return accepted;
+                }
+
                 var resetToken = GenerateToken();
                 await resetCache.StoreAsync(resetToken, new PasswordResetEntry
                 {
@@ -653,7 +664,7 @@ internal static class AuthEndpoints
                             FromName: tenantBranding?.EmailFromName ?? smtpOpts.Value.FromName,
                             FromAddress: tenantBranding?.EmailFromAddress ?? smtpOpts.Value.FromAddress);
 
-                        var resetLink = $"{context.Request.Scheme}://{context.Request.Host}/reset-password?token={resetToken}";
+                        var resetLink = PublicBaseUrl.ResetPasswordLink(publicBaseUrl, resetToken);
                         var variables = new Dictionary<string, string>
                         {
                             ["UserEmail"] = body.Email,
@@ -681,7 +692,7 @@ internal static class AuthEndpoints
             }
         }
 
-        return Results.Ok(new MessageResponse("If the email exists, a reset link has been sent"));
+        return accepted;
     }
 
     // ─── Reset Password ─────────────────────────────────────────────────────────
