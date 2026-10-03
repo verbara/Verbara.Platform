@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Verbara.Platform.Core;
+using Verbara.Platform.Core.Branding;
 using Verbara.Platform.Core.Email;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Identity.Mfa;
@@ -39,6 +40,8 @@ public sealed class PublicBaseUrlLinkTests
     private const string ForgedHostTenant = "attacker";
     private const string IdpAuthority = "https://idp.example.test";
     private const string OidcCallbackPath = "/api/auth/oidc/callback";
+    // A public address per tenant: {tenant} is filled with the tenant's host label.
+    private const string TenantPublicBaseUrl = "https://{tenant}.example.test";
 
     // ─── Password-reset link ─────────────────────────────────────────────────
 
@@ -261,6 +264,69 @@ public sealed class PublicBaseUrlLinkTests
         factory.ExchangeRedirectUris.Should().BeEmpty();
     }
 
+    // ─── A public address per tenant ({tenant}) ─────────────────────────────
+
+    [Fact]
+    public async Task ForgotPassword_ShouldMailTheLinkOnTheTenantsHost_WhenPublicBaseUrlNamesTheTenant()
+    {
+        using var factory = new LinkFactory(new() { ["Platform:PublicBaseUrl"] = TenantPublicBaseUrl });
+        using var request = ForgotPasswordRequest(TenantId);
+        request.Headers.Host = ForgedHost;
+
+        var response = await factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        factory.SingleResetLink().Should().StartWith($"https://{TenantId}.example.test/reset-password?token=",
+            because: "{tenant} is filled from the tenant the user was found in, never from the Host");
+    }
+
+    [Fact]
+    public async Task ForgotPassword_ShouldMailTheLinkOnTheBrandingSubdomain_WhenTheTenantHasOne()
+    {
+        using var factory = new LinkFactory(new() { ["Platform:PublicBaseUrl"] = TenantPublicBaseUrl });
+        await factory.SeedBrandingSubdomainAsync("brand");
+        using var request = ForgotPasswordRequest(TenantId);
+
+        var response = await factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        factory.SingleResetLink().Should().StartWith("https://brand.example.test/reset-password?token=",
+            because: "a white-label tenant is reached at its branding subdomain, which resolves to it");
+    }
+
+    [Fact]
+    public async Task OidcLogin_ShouldSendTheCallbackOnTheTenantsHostAsRedirectUri_WhenPublicBaseUrlNamesTheTenant()
+    {
+        using var factory = new LinkFactory(new() { ["Platform:PublicBaseUrl"] = TenantPublicBaseUrl });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/auth/oidc/login?tenant_id={TenantId}&return_url=%2F");
+        request.Headers.Host = ForgedHost;
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        QueryHelpers.ParseQuery(response.Headers.Location!.Query)["redirect_uri"].ToString()
+            .Should().Be($"https://{TenantId}.example.test{OidcCallbackPath}",
+                because: "each tenant keeps the redirect URI it registered on its own host");
+    }
+
+    [Fact]
+    public async Task OidcCallback_ShouldExchangeTheCodeWithTheCallbackOnTheTenantsHost_WhenPublicBaseUrlNamesTheTenant()
+    {
+        using var factory = new LinkFactory(new() { ["Platform:PublicBaseUrl"] = TenantPublicBaseUrl });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{OidcCallbackPath}?code=authorization-code");
+        request.Headers.Host = ForgedHost;
+        request.Headers.Add("Cookie", $"oidc_state={factory.ProtectFlowState()}");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        factory.ExchangeRedirectUris.Should().ContainSingle()
+            .Which.Should().Be($"https://{TenantId}.example.test{OidcCallbackPath}",
+                because: "the token request repeats the redirect_uri the authorization request sent");
+    }
+
     // ─── Optional host filtering (ASP.NET Core's AllowedHosts) ───────────────
 
     [Theory]
@@ -321,6 +387,10 @@ public sealed class PublicBaseUrlLinkTests
 
         public string SingleResetLink() =>
             TemplateVariables.Should().ContainSingle().Subject["ResetLink"];
+
+        public ValueTask SeedBrandingSubdomainAsync(string subdomain) =>
+            Services.GetRequiredService<ITenantBrandingStore>().UpsertAsync(
+                new TenantBranding { TenantId = TenantId, Subdomain = subdomain });
 
         public string ProtectFlowState()
         {

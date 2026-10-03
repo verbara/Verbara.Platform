@@ -623,10 +623,10 @@ internal static class AuthEndpoints
             {
                 // The link points at the configured console address, never at the request's Host,
                 // which the sender chooses. Without one, no token is minted and nothing is sent.
-                var publicBaseUrl = PublicBaseUrl.Resolve(configuration);
+                var publicBaseUrl = await PublicBaseUrl.ResolveForTenantAsync(context, configuration, forgotTenantId!, ct);
                 if (publicBaseUrl is null)
                 {
-                    PublicBaseUrl.LogResetEmailNotSent(context, configuration);
+                    PublicBaseUrl.LogResetEmailNotSent(context, configuration, forgotTenantId!);
                     return accepted;
                 }
 

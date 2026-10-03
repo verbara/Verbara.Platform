@@ -1,3 +1,6 @@
+using System.Text.RegularExpressions;
+using Verbara.Platform.Core.Branding;
+
 namespace Verbara.Platform.Api.Endpoints.Shared;
 
 /// <summary>
@@ -20,11 +23,22 @@ namespace Verbara.Platform.Api.Endpoints.Shared;
 /// fragment or user information counts as missing; it does not fall back to <c>CORS_ORIGINS</c>,
 /// because the operator meant another address.
 /// </para>
+/// <para>
+/// An installation whose tenants open the console at their own host names that host in the setting
+/// with <c>{tenant}</c> (<c>https://{tenant}.example.com</c>). It is filled with the host label the
+/// tenant is reached at, as <c>TenantResolutionMiddleware</c> resolves it back: the tenant's branding
+/// subdomain, or else its id. The tenant is the one the server already trusts (the user's, or the
+/// OIDC flow's), never the request's Host, and the label must be a lowercase DNS label, so the address
+/// stays under the configured domain.
+/// </para>
 /// </remarks>
 internal static partial class PublicBaseUrl
 {
     /// <summary>The setting (environment variable <c>Platform__PublicBaseUrl</c>).</summary>
     internal const string ConfigurationKey = "Platform:PublicBaseUrl";
+
+    /// <summary>Stands, in the setting, for the host label of the tenant a link is built for.</summary>
+    internal const string TenantPlaceholder = "{tenant}";
 
     private const string CorsOriginsKey = "CORS_ORIGINS";
     private const string LoggerCategory = "Verbara.Platform.Api.PublicBaseUrl";
@@ -40,17 +54,42 @@ internal static partial class PublicBaseUrl
 
     /// <summary>
     /// The configured address — scheme, host, port and any path, without a trailing slash — or
-    /// <see langword="null"/> when none is usable.
+    /// <see langword="null"/> when none is usable. A <see cref="TenantPlaceholder"/> in the setting is
+    /// filled with <paramref name="tenantLabel"/>, and without a usable label there is no address.
     /// </summary>
-    internal static string? Resolve(IConfiguration configuration)
+    internal static string? Resolve(IConfiguration configuration, string? tenantLabel = null)
     {
         var configured = configuration[ConfigurationKey];
         if (!string.IsNullOrWhiteSpace(configured))
-            return Normalize(configured);
+        {
+            if (!configured.Contains(TenantPlaceholder, StringComparison.Ordinal))
+                return Normalize(configured);
+
+            return tenantLabel is not null && HostLabel().IsMatch(tenantLabel)
+                ? Normalize(configured.Replace(TenantPlaceholder, tenantLabel, StringComparison.Ordinal))
+                : null;
+        }
 
         var origins = configuration[CorsOriginsKey]?.Split(
             ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return origins is [var single] && single != "*" ? Normalize(single) : null;
+    }
+
+    /// <summary>
+    /// The address for the users of <paramref name="tenantId"/>, a tenant the caller already trusts:
+    /// <see cref="Resolve"/>, with a <see cref="TenantPlaceholder"/> filled with the label the tenant is
+    /// reached at (its branding subdomain, or else its id, whichever is a lowercase DNS label first).
+    /// </summary>
+    internal static async ValueTask<string?> ResolveForTenantAsync(
+        HttpContext context, IConfiguration configuration, string tenantId, CancellationToken ct)
+    {
+        if (configuration[ConfigurationKey]?.Contains(TenantPlaceholder, StringComparison.Ordinal) != true)
+            return Resolve(configuration);
+
+        var branding = context.RequestServices.GetService<ITenantBrandingStore>();
+        var subdomain = branding is null ? null : (await branding.GetAsync(tenantId, ct))?.Subdomain;
+        var label = subdomain is not null && HostLabel().IsMatch(subdomain) ? subdomain : tenantId;
+        return Resolve(configuration, label);
     }
 
     /// <summary>
@@ -106,13 +145,13 @@ internal static partial class PublicBaseUrl
                 : ConsoleRoot;
     }
 
-    /// <summary>Records that a reset email was not sent because no address is usable.</summary>
-    internal static void LogResetEmailNotSent(HttpContext context, IConfiguration configuration) =>
-        LogResetEmailNotSent(Logger(context), configuration[ConfigurationKey], configuration[CorsOriginsKey]);
+    /// <summary>Records that a reset email for <paramref name="tenantId"/> was not sent because no address is usable.</summary>
+    internal static void LogResetEmailNotSent(HttpContext context, IConfiguration configuration, string tenantId) =>
+        LogResetEmailNotSent(Logger(context), tenantId, configuration[ConfigurationKey], configuration[CorsOriginsKey]);
 
-    /// <summary>Records that an OIDC sign-in step was refused because no address is usable.</summary>
-    internal static void LogOidcSignInRefused(HttpContext context, IConfiguration configuration) =>
-        LogOidcSignInRefused(Logger(context), configuration[ConfigurationKey], configuration[CorsOriginsKey]);
+    /// <summary>Records that an OIDC sign-in step for <paramref name="tenantId"/> was refused because no address is usable.</summary>
+    internal static void LogOidcSignInRefused(HttpContext context, IConfiguration configuration, string tenantId) =>
+        LogOidcSignInRefused(Logger(context), tenantId, configuration[ConfigurationKey], configuration[CorsOriginsKey]);
 
     private static string? Normalize(string value)
     {
@@ -129,11 +168,15 @@ internal static partial class PublicBaseUrl
     private static ILogger Logger(HttpContext context) =>
         context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(LoggerCategory);
 
+    /// <summary>A lowercase DNS label: what a host's first label can be, and nothing that leaves the domain.</summary>
+    [GeneratedRegex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", RegexOptions.CultureInvariant)]
+    private static partial Regex HostLabel();
+
     [LoggerMessage(EventId = 7520, Level = LogLevel.Warning,
-        Message = "Password-reset email not sent: no usable public base URL. Set Platform:PublicBaseUrl to the absolute http(s) address users open the console at; CORS_ORIGINS stands in only when it names exactly one origin. Platform:PublicBaseUrl='{PublicBaseUrl}', CORS_ORIGINS='{CorsOrigins}'.")]
-    private static partial void LogResetEmailNotSent(ILogger logger, string? publicBaseUrl, string? corsOrigins);
+        Message = "Password-reset email not sent for tenant '{TenantId}': no usable public base URL. Set Platform:PublicBaseUrl to the absolute http(s) address users open the console at, where {{tenant}} stands for the tenant's branding subdomain or, without one, its id, which must be a lowercase DNS label; CORS_ORIGINS stands in only when it names exactly one origin. Platform:PublicBaseUrl='{PublicBaseUrl}', CORS_ORIGINS='{CorsOrigins}'.")]
+    private static partial void LogResetEmailNotSent(ILogger logger, string tenantId, string? publicBaseUrl, string? corsOrigins);
 
     [LoggerMessage(EventId = 7521, Level = LogLevel.Warning,
-        Message = "OIDC sign-in refused: no usable public base URL to build the redirect_uri from. Set Platform:PublicBaseUrl to the absolute http(s) address users open the console at; CORS_ORIGINS stands in only when it names exactly one origin. Platform:PublicBaseUrl='{PublicBaseUrl}', CORS_ORIGINS='{CorsOrigins}'.")]
-    private static partial void LogOidcSignInRefused(ILogger logger, string? publicBaseUrl, string? corsOrigins);
+        Message = "OIDC sign-in refused for tenant '{TenantId}': no usable public base URL to build the redirect_uri from. Set Platform:PublicBaseUrl to the absolute http(s) address users open the console at, where {{tenant}} stands for the tenant's branding subdomain or, without one, its id, which must be a lowercase DNS label; CORS_ORIGINS stands in only when it names exactly one origin. Platform:PublicBaseUrl='{PublicBaseUrl}', CORS_ORIGINS='{CorsOrigins}'.")]
+    private static partial void LogOidcSignInRefused(ILogger logger, string tenantId, string? publicBaseUrl, string? corsOrigins);
 }

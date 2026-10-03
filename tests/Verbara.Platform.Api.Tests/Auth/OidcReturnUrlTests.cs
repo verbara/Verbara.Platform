@@ -68,6 +68,22 @@ public sealed class OidcReturnUrlTests
             because: "the notice carries the user's email and must stay on the console");
     }
 
+    [Theory]
+    [InlineData("https://oidc-signin-tenant.example.test/login", "https://oidc-signin-tenant.example.test/login")]
+    [InlineData("https://other-tenant.example.test/login", "/")]
+    public async Task OidcCallback_ShouldHoldReturnUrlToTheTenantsHost_WhenPublicBaseUrlNamesTheTenant(string returnUrl, string expected)
+    {
+        using var factory = new OidcSignInApiFactory(configuration: new Dictionary<string, string?>
+        {
+            ["Platform:PublicBaseUrl"] = "https://{tenant}.example.test",
+        });
+
+        var location = await factory.SignInAsync(returnUrl);
+
+        location.Should().StartWith($"{expected}#oidc_callback&access_token=",
+            because: "the console of the tenant signing in is its own host, and another tenant's host is another origin");
+    }
+
     [Fact]
     public async Task OidcCallback_ShouldSendTheAccessTokenToTheConsoleRoot_WhenTheFlowStateCarriesAnotherOrigin()
     {

@@ -48,9 +48,9 @@ internal static class OidcEndpoints
 
         // The provider sends the user, and the authorization code, back to redirect_uri: it is the
         // configured console address, never the request's Host, which the sender chooses.
-        var publicBaseUrl = PublicBaseUrl.Resolve(configuration);
+        var publicBaseUrl = await PublicBaseUrl.ResolveForTenantAsync(context, configuration, tenant_id, ct);
         if (publicBaseUrl is null)
-            return SignInUnavailable(context, configuration);
+            return SignInUnavailable(context, configuration, tenant_id);
 
         var codeVerifier = OidcTokenExchangeService.GenerateCodeVerifier();
         var codeChallenge = OidcTokenExchangeService.ComputeCodeChallenge(codeVerifier);
@@ -143,11 +143,11 @@ internal static class OidcEndpoints
         }
 
         // The token request repeats the redirect_uri the authorization request sent (OidcLogin).
-        var publicBaseUrl = PublicBaseUrl.Resolve(configuration);
+        var publicBaseUrl = await PublicBaseUrl.ResolveForTenantAsync(context, configuration, tenantId, ct);
         if (publicBaseUrl is null)
         {
             await authEvents.LogAsync(tenantId, null, AuthEventTypes.OidcLoginFailure, ip, ua, null, ct);
-            return SignInUnavailable(context, configuration);
+            return SignInUnavailable(context, configuration, tenantId);
         }
 
         var redirectUri = PublicBaseUrl.OidcRedirectUri(publicBaseUrl);
@@ -194,9 +194,9 @@ internal static class OidcEndpoints
     /// Refuses a sign-in step that has no configured console address to put in redirect_uri; the
     /// request's Host is never used in its place.
     /// </summary>
-    private static IResult SignInUnavailable(HttpContext context, IConfiguration configuration)
+    private static IResult SignInUnavailable(HttpContext context, IConfiguration configuration, string tenantId)
     {
-        PublicBaseUrl.LogOidcSignInRefused(context, configuration);
+        PublicBaseUrl.LogOidcSignInRefused(context, configuration, tenantId);
         return Results.Json(
             new ErrorResponse(
                 $"Single sign-on is unavailable: the platform's public address ({PublicBaseUrl.ConfigurationKey}) is not set to a valid URL."),

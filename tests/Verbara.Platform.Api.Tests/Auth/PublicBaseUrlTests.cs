@@ -74,6 +74,47 @@ public sealed class PublicBaseUrlTests
         resolved.Should().BeNull();
     }
 
+    [Theory]
+    [InlineData("https://{tenant}.example.test", "acme", "https://acme.example.test")]
+    [InlineData("https://{tenant}.example.test/console/", "acme-2", "https://acme-2.example.test/console")]
+    [InlineData("https://example.test/{tenant}", "acme", "https://example.test/acme")]
+    [InlineData("https://{tenant}.example.test", "a", "https://a.example.test")]
+    public void Resolve_ShouldFillTheTenantPlaceholder_WhenTheLabelIsALowercaseDnsLabel(
+        string configured, string label, string expected)
+    {
+        var resolved = PublicBaseUrl.Resolve(Configuration(configured, corsOrigins: null), label);
+
+        resolved.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Acme")]
+    [InlineData("acme_corp")]
+    [InlineData("acme.attacker.example")]
+    [InlineData("attacker.example/")]
+    [InlineData("-acme")]
+    [InlineData("acme-")]
+    [InlineData("acme:8443")]
+    [InlineData("a234567890123456789012345678901234567890123456789012345678901234")] // 64 characters
+    public void Resolve_ShouldReturnNull_WhenTheTenantPlaceholderHasNoUsableLabel(string? label)
+    {
+        // A usable single CORS origin is present on purpose: the setting names the tenant, so no other
+        // address stands in for it.
+        var resolved = PublicBaseUrl.Resolve(Configuration("https://{tenant}.example.test", "https://app.example.test"), label);
+
+        resolved.Should().BeNull(because: "the tenant fills one DNS label, so the address cannot leave the configured domain");
+    }
+
+    [Fact]
+    public void Resolve_ShouldIgnoreTheLabel_WhenTheSettingHasNoTenantPlaceholder()
+    {
+        var resolved = PublicBaseUrl.Resolve(Configuration("https://console.example.test", corsOrigins: null), "acme");
+
+        resolved.Should().Be("https://console.example.test");
+    }
+
     [Fact]
     public void ResetPasswordLink_ShouldPointAtTheConsoleResetPage_WhenGivenABaseUrl()
     {
