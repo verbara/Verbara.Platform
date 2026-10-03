@@ -6,13 +6,22 @@ namespace Verbara.Platform.Identity.OidcTokenExchange;
 public sealed partial class OidcUserProvisioningService : IOidcUserProvisioningService
 {
     private readonly IUserStore _userStore;
+    private readonly ITenantRoleStore _tenantRoles;
+    private readonly IRoleTemplateStore _roleTemplates;
+    private readonly IUserRoleStore _userRoles;
     private readonly ILogger<OidcUserProvisioningService> _logger;
 
     public OidcUserProvisioningService(
         IUserStore userStore,
+        ITenantRoleStore tenantRoles,
+        IRoleTemplateStore roleTemplates,
+        IUserRoleStore userRoles,
         ILogger<OidcUserProvisioningService> logger)
     {
         _userStore = userStore;
+        _tenantRoles = tenantRoles;
+        _roleTemplates = roleTemplates;
+        _userRoles = userRoles;
         _logger = logger;
     }
 
@@ -114,7 +123,27 @@ public sealed partial class OidcUserProvisioningService : IOidcUserProvisioningS
 
         LogOidcUserCreated(_logger, newUser.UserId.Value, claims.Email, role, tenantId);
 
+        await GrantDefaultRoleAsync(newUser, ct);
+
         return newUser;
+    }
+
+    // The new user's server-side permissions come from its RBAC role, which would otherwise be attached
+    // only by the role migration at the next start. Best-effort: the user exists either way, and that
+    // migration grants what this could not.
+    private async Task GrantDefaultRoleAsync(User user, CancellationToken ct)
+    {
+        try
+        {
+            var roleId = await DefaultTenantRole.GrantAsync(
+                _tenantRoles, _roleTemplates, _userRoles, user.TenantId, user.UserId, user.Role, ct);
+            if (roleId is null)
+                LogDefaultRoleUnavailable(_logger, user.UserId.Value, user.TenantId.Value, user.Role);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogDefaultRoleGrantFailed(_logger, ex, user.UserId.Value, user.TenantId.Value, user.Role);
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "OIDC user {Subject} matched existing user {UserId} in tenant {TenantId}")]
@@ -128,4 +157,10 @@ public sealed partial class OidcUserProvisioningService : IOidcUserProvisioningS
 
     [LoggerMessage(Level = LogLevel.Information, Message = "OIDC auto-created user {UserId} ({Email}) with role {Role} in tenant {TenantId}")]
     private static partial void LogOidcUserCreated(ILogger logger, string userId, string email, UserRole role, string tenantId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "OIDC auto-created user {UserId} in tenant {TenantId} holds no RBAC role yet: the tenant has no role for {Role} and its role template is unknown. The role migration at the next start grants it.")]
+    private static partial void LogDefaultRoleUnavailable(ILogger logger, string userId, string tenantId, UserRole role);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "OIDC auto-created user {UserId} in tenant {TenantId} could not be granted the RBAC role for {Role}; the role migration at the next start grants it.")]
+    private static partial void LogDefaultRoleGrantFailed(ILogger logger, Exception exception, string userId, string tenantId, UserRole role);
 }

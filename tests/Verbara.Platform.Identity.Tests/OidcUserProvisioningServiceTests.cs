@@ -10,12 +10,18 @@ namespace Verbara.Platform.Identity.Tests;
 public sealed class OidcUserProvisioningServiceTests
 {
     private readonly InMemoryUserStore _userStore = new();
+    private readonly InMemoryTenantRoleStore _tenantRoles = new();
+    private readonly InMemoryUserRoleStore _userRoles = new();
+    private readonly IRoleTemplateStore _roleTemplates = Substitute.For<IRoleTemplateStore>();
     private readonly OidcUserProvisioningService _sut;
 
     public OidcUserProvisioningServiceTests()
     {
         _sut = new OidcUserProvisioningService(
             _userStore,
+            _tenantRoles,
+            _roleTemplates,
+            _userRoles,
             NullLogger<OidcUserProvisioningService>.Instance);
     }
 
@@ -235,7 +241,8 @@ public sealed class OidcUserProvisioningServiceTests
             OidcSubject = "oidc-sub-1",
         };
         store.FindByOidcSubjectAsync(Arg.Any<TenantId>(), "oidc-sub-1", Arg.Any<CancellationToken>()).Returns(matched);
-        var sut = new OidcUserProvisioningService(store, NullLogger<OidcUserProvisioningService>.Instance);
+        var sut = new OidcUserProvisioningService(
+            store, _tenantRoles, _roleTemplates, _userRoles, NullLogger<OidcUserProvisioningService>.Instance);
 
         var user = await sut.ProvisionOrUpdateAsync(
             "tenant-1", new OidcClaimsResult("oidc-sub-1", "user@example.com", "New Name", true), DefaultConfig(), CancellationToken.None);
@@ -243,4 +250,86 @@ public sealed class OidcUserProvisioningServiceTests
         user.Should().BeNull();
         await store.DidNotReceiveWithAnyArgs().CreateAsync(default!, default);
     }
+
+    // ─── A provisioned user holds its role's permissions from the first sign-in ─
+
+    [Fact]
+    public async Task ProvisionOrUpdateAsync_ShouldGrantTheTenantRoleOfItsRole_WhenItCreatesTheUser()
+    {
+        // A tenant provisioned with its own role ids: its Supervisor role is found by the template's name.
+        _roleTemplates.GetByIdAsync("supervisor", Arg.Any<CancellationToken>()).Returns(new RoleTemplate
+        {
+            TemplateId = "supervisor",
+            Name = "Supervisor",
+            Description = "Team supervisor",
+            IsSystem = true,
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await _tenantRoles.SaveAsync(TenantRoleOf("role_supervisor_tenant-1", "Supervisor", "supervisor"), CancellationToken.None);
+        var config = new TenantAuthConfig
+        {
+            TenantId = "tenant-1",
+            OidcAutoCreateUsers = true,
+            OidcDefaultRole = "Supervisor",
+        };
+
+        var user = await _sut.ProvisionOrUpdateAsync(
+            "tenant-1", new OidcClaimsResult("oidc-sub-1", "sup@example.com", "Sup", true), config, CancellationToken.None);
+
+        user.Should().NotBeNull();
+        var grants = await _userRoles.GetRolesForUserAsync(new TenantId("tenant-1"), user!.UserId, CancellationToken.None);
+        grants.Should().ContainSingle().Which.RoleId.Should().Be("role_supervisor_tenant-1");
+        grants[0].AssignedBy.Should().Be(DefaultTenantRole.AssignedBy);
+    }
+
+    [Fact]
+    public async Task ProvisionOrUpdateAsync_ShouldGrantNothingNew_WhenTheSubjectMatchesAnExistingUser()
+    {
+        await _tenantRoles.SaveAsync(TenantRoleOf("agent", "Agent", "agent"), CancellationToken.None);
+        var existing = new User
+        {
+            UserId = EntityId.New(),
+            TenantId = new TenantId("tenant-1"),
+            Email = "user@example.com",
+            DisplayName = "User",
+            Role = UserRole.Agent,
+            Status = UserStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-30),
+            AuthProvider = "oidc",
+            OidcSubject = "oidc-sub-1",
+        };
+        await _userStore.CreateAsync(existing, CancellationToken.None);
+
+        await _sut.ProvisionOrUpdateAsync(
+            "tenant-1", new OidcClaimsResult("oidc-sub-1", "user@example.com", "User", true), DefaultConfig(), CancellationToken.None);
+
+        (await _userRoles.GetRolesForUserAsync(existing.TenantId, existing.UserId, CancellationToken.None)).Should().BeEmpty(
+            because: "only a user this sign-in creates is granted a role; an existing user's grants are its own");
+    }
+
+    [Fact]
+    public async Task ProvisionOrUpdateAsync_ShouldStillReturnTheCreatedUser_WhenGrantingItsRoleFails()
+    {
+        var failingRoles = Substitute.For<IUserRoleStore>();
+        failingRoles.AssignAsync(default, default, default!, default, default)
+            .ReturnsForAnyArgs(Task.FromException(new InvalidOperationException("role store unavailable")));
+        await _tenantRoles.SaveAsync(TenantRoleOf("agent", "Agent", "agent"), CancellationToken.None);
+        var sut = new OidcUserProvisioningService(
+            _userStore, _tenantRoles, _roleTemplates, failingRoles, NullLogger<OidcUserProvisioningService>.Instance);
+
+        var user = await sut.ProvisionOrUpdateAsync(
+            "tenant-1", new OidcClaimsResult("oidc-sub-1", "user@example.com", "User", true), DefaultConfig(), CancellationToken.None);
+
+        user.Should().NotBeNull(because: "the user is created; the next start's role migration grants what this sign-in could not");
+        (await _userStore.GetByIdAsync(new TenantId("tenant-1"), user!.UserId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    private static TenantRole TenantRoleOf(string roleId, string name, string templateId) => new()
+    {
+        RoleId = roleId,
+        TenantId = new TenantId("tenant-1"),
+        Name = name,
+        SourceTemplateId = templateId,
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
 }

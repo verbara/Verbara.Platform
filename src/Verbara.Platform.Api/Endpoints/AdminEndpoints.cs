@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
 
-internal static class AdminEndpoints
+internal static partial class AdminEndpoints
 {
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
@@ -112,6 +112,10 @@ internal static class AdminEndpoints
         HttpContext context,
         [FromBody] CreateUserRequest body,
         [FromServices] IUserStore store,
+        [FromServices] ITenantRoleStore tenantRoles,
+        [FromServices] IRoleTemplateStore roleTemplates,
+        [FromServices] IUserRoleStore userRoles,
+        ILoggerFactory loggerFactory,
         IClock clock,
         CancellationToken ct)
     {
@@ -145,8 +149,43 @@ internal static class AdminEndpoints
                 statusCode: StatusCodes.Status409Conflict,
                 type: "https://verbara.platform/errors/entity-already-exists");
         }
+
+        await GrantDefaultRoleAsync(user, tenantRoles, roleTemplates, userRoles, loggerFactory, ct);
         return Results.Created($"/admin/users/{user.UserId}", ToUserDto(user));
     }
+
+    // Server-side permissions come from the user's RBAC roles, which the role migration would otherwise
+    // attach only at the next start: grant the role the user's role maps to now (DefaultTenantRole).
+    // Best-effort — the user exists either way, and that migration grants what this could not.
+    private static async Task GrantDefaultRoleAsync(
+        User user,
+        ITenantRoleStore tenantRoles,
+        IRoleTemplateStore roleTemplates,
+        IUserRoleStore userRoles,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!);
+        try
+        {
+            var roleId = await DefaultTenantRole.GrantAsync(
+                tenantRoles, roleTemplates, userRoles, user.TenantId, user.UserId, user.Role, ct);
+            if (roleId is null)
+                LogDefaultRoleUnavailable(logger, user.UserId.Value, user.TenantId.Value, user.Role);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogDefaultRoleGrantFailed(logger, ex, user.UserId.Value, user.TenantId.Value, user.Role);
+        }
+    }
+
+    [LoggerMessage(EventId = 7500, Level = LogLevel.Warning,
+        Message = "User {UserId} in tenant {TenantId} holds no RBAC role yet: the tenant has no role for {Role} and its role template is unknown. The role migration at the next start grants it.")]
+    private static partial void LogDefaultRoleUnavailable(ILogger logger, string userId, string tenantId, UserRole role);
+
+    [LoggerMessage(EventId = 7501, Level = LogLevel.Warning,
+        Message = "User {UserId} in tenant {TenantId} could not be granted the RBAC role for {Role}; the role migration at the next start grants it.")]
+    private static partial void LogDefaultRoleGrantFailed(ILogger logger, Exception exception, string userId, string tenantId, UserRole role);
 
     // internal (not private) so Api.Tests can invoke it with a store that changes underneath it,
     // the way AuthEndpoints.Login is exercised directly.
