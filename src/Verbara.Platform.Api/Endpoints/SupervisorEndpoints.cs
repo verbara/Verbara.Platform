@@ -148,26 +148,38 @@ internal static class SupervisorEndpoints
         return TypedResults.Ok(messages);
     }
 
-    private static async Task<Results<Ok<OwnershipResult>, UnauthorizedHttpResult, BadRequest<ErrorResponse>>> TakeoverConversation(
+    // The supervisor's own Agent profile becomes the owner, as for any owner: a supervisor without one
+    // cannot own a conversation. The switchboard announces the assignment; the takeover is audited.
+    private static async Task<Results<Ok<OwnershipResult>, NotFound, JsonHttpResult<ErrorResponse>>> TakeoverConversation(
         string id,
         HttpContext context,
         [FromServices] IConversationSwitchboard switchboard,
-        [FromServices] PlatformEventBus eventBus,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var supervisorId = context.User.FindFirst("sub")?.Value;
-        if (supervisorId is null)
-            return TypedResults.Unauthorized();
+        var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return TypedResults.NotFound();
 
-        var result = await switchboard.TransferToAgentAsync(
-            EntityId.From(id), tenantId, EntityId.From(supervisorId), ct);
+        var actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+        if (actor.Agent is null)
+            return ConversationActor.Forbidden(ConversationActor.NotAnAgent);
 
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["agent_id"] = actor.Agent.AgentId.Value,
+        };
+        ConversationActor.AddOwner(metadata, "previous_owner", conversation.Owner);
+
+        var result = await switchboard.TransferToAgentAsync(conversation.ConversationId, tenantId, actor.Agent.AgentId, ct);
         if (!result.Success)
-            return TypedResults.BadRequest(new ErrorResponse(result.FailureReason ?? "Takeover failed"));
+            return ConversationActor.Conflict(result.FailureReason ?? "Takeover failed");
 
-        eventBus.Publish(new ConversationAssignedEvent(
-            tenantId.Value, id, supervisorId, "", "", ""));
+        await ConversationAudit.TryRecordAsync(
+            context, audit, tenantId, "conversation.taken_over", conversation.ConversationId, metadata, ct);
 
         return TypedResults.Ok(result);
     }
@@ -325,6 +337,8 @@ internal static class SupervisorEndpoints
         HttpContext context,
         [FromServices] IConversationStore conversationStore,
         [FromServices] IConversationSwitchboard switchboard,
+        [FromServices] IAgentStore agentStore,
+        [FromServices] IQueueStore queueStore,
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
@@ -341,6 +355,13 @@ internal static class SupervisorEndpoints
         var conv = await conversationStore.GetByIdAsync(tenantId, convId, ct);
         if (conv is null)
             return Results.NotFound();
+
+        // The target must exist in this tenant, checked before anything is changed: a target that
+        // names nothing would strand the conversation with no one able to work it.
+        if (hasQueue && await queueStore.GetByIdAsync(tenantId, EntityId.From(body.TargetQueueId!), ct) is null)
+            return Results.BadRequest(new ErrorResponse(ConversationActor.TargetQueueNotFound));
+        if (hasAgent && await agentStore.GetByIdAsync(tenantId, EntityId.From(body.TargetAgentId!), ct) is null)
+            return Results.BadRequest(new ErrorResponse(ConversationActor.TargetAgentNotFound));
 
         // Clear failover markers BEFORE the transfer so the transfer's re-load+save carries
         // the cleared state (setting them "false" is not enough — ContainsKey must go false).

@@ -13,6 +13,7 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using Verbara.Platform.Llm;
+using Verbara.Platform.Queues;
 using Verbara.Platform.Switchboard;
 using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Ai;
@@ -37,7 +38,10 @@ internal static class ConversationEndpoints
         group.MapPost("/{id}/messages", SendMessage);
         group.MapPost("/{id}/accept", AcceptConversation);
         group.MapPost("/{id}/reject", RejectConversation);
-        group.MapPost("/{id}/transfer", TransferConversation);
+        // Every Agent, Supervisor and Manager holds contacts:conversation:transfer; the handler then
+        // requires the owner or a supervisor, and a target that exists.
+        group.MapPost("/{id}/transfer", TransferConversation)
+            .RequireAuthorization("Permission:contacts:conversation:transfer");
         group.MapPost("/{id}/close", CloseConversation);
         group.MapGet("/{id}/typification-form", GetTypificationForm);
         group.MapPost("/{id}/typify", TypifyConversation);
@@ -109,15 +113,26 @@ internal static class ConversationEndpoints
         return TypedResults.Ok(messages);
     }
 
-    private static async Task<Ok<Message>> SendMessage(
+    // Only the owner sends on a conversation, as its Agent profile.
+    private static async Task<Results<Ok<Message>, NotFound, JsonHttpResult<ErrorResponse>>> SendMessage(
         string id,
         HttpContext context,
         [FromBody] SendMessageRequest body,
         IConversationService conversationService,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var agentId = GetCurrentAgentId(context);
+        var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return TypedResults.NotFound();
+
+        var actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+        if (actor.Agent is null)
+            return ConversationActor.Forbidden(ConversationActor.NotAnAgent);
+        if (!actor.Owns(conversation))
+            return ConversationActor.Forbidden(ConversationActor.NotOwner);
 
         var envelope = new MessageEnvelope(
         [
@@ -125,64 +140,136 @@ internal static class ConversationEndpoints
         ]);
 
         var message = await conversationService.SendMessageAsync(
-            EntityId.From(id),
+            conversation.ConversationId,
             tenantId,
             envelope,
-            agentId,
+            actor.Agent.AgentId,
             ConversationOwnerKind.Agent,
             ct);
 
         return TypedResults.Ok(message);
     }
 
-    private static async Task<Ok<OwnershipResult>> AcceptConversation(
+    // An offer is accepted only by the agent it was made to, which then owns the conversation.
+    private static async Task<Results<Ok<OwnershipResult>, NotFound, JsonHttpResult<ErrorResponse>>> AcceptConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var agentId = GetCurrentAgentId(context);
-        var result = await switchboard.AcceptAsync(EntityId.From(id), tenantId, agentId, ct);
-        return TypedResults.Ok(result);
+        var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return TypedResults.NotFound();
+
+        var actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+        if (actor.Agent is null)
+            return ConversationActor.Forbidden(ConversationActor.NotAnAgent);
+        if (!actor.IsOfferedTo(conversation))
+            return ConversationActor.Forbidden(ConversationActor.NotOfferedToYou);
+
+        var result = await switchboard.AcceptAsync(conversation.ConversationId, tenantId, actor.Agent.AgentId, ct);
+        return result.Success
+            ? TypedResults.Ok(result)
+            : ConversationActor.Conflict(result.FailureReason ?? "The conversation could not be accepted.");
     }
 
-    private static async Task<Ok<OwnershipResult>> RejectConversation(
+    // An offer is rejected only by the agent it was made to; the conversation returns to its queue.
+    private static async Task<Results<Ok<OwnershipResult>, NotFound, JsonHttpResult<ErrorResponse>>> RejectConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var agentId = GetCurrentAgentId(context);
-        var result = await switchboard.RejectAsync(EntityId.From(id), tenantId, agentId, ct);
-        return TypedResults.Ok(result);
+        var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return TypedResults.NotFound();
+
+        var actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+        if (actor.Agent is null)
+            return ConversationActor.Forbidden(ConversationActor.NotAnAgent);
+        if (!actor.IsOfferedTo(conversation))
+            return ConversationActor.Forbidden(ConversationActor.NotOfferedToYou);
+
+        var result = await switchboard.RejectAsync(conversation.ConversationId, tenantId, actor.Agent.AgentId, ct);
+        return result.Success
+            ? TypedResults.Ok(result)
+            : ConversationActor.Conflict(result.FailureReason ?? "The offer could not be rejected.");
     }
 
-    private static async Task<Results<Ok<OwnershipResult>, BadRequest<ErrorResponse>>> TransferConversation(
+    // The route requires contacts:conversation:transfer. The owner, or a supervisor acting on a
+    // conversation it does not own, moves it to an agent or a queue of the tenant; every transfer is
+    // audited, a supervisor's with by_supervisor.
+    private static async Task<Results<Ok<OwnershipResult>, NotFound, BadRequest<ErrorResponse>, JsonHttpResult<ErrorResponse>>> TransferConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
+        [FromServices] IQueueStore queues,
+        [FromServices] IAuditService audit,
         [FromBody] TransferRequest body,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        OwnershipResult result;
-
-        if (body.TargetQueueId is not null)
-            result = await switchboard.TransferToQueueAsync(EntityId.From(id), tenantId, EntityId.From(body.TargetQueueId), ct);
-        else if (body.TargetAgentId is not null)
-            result = await switchboard.TransferToAgentAsync(EntityId.From(id), tenantId, EntityId.From(body.TargetAgentId), ct);
-        else
+        if (body.TargetQueueId is null && body.TargetAgentId is null)
             return TypedResults.BadRequest(new ErrorResponse("Either targetQueueId or targetAgentId must be specified"));
+
+        var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return TypedResults.NotFound();
+
+        var actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+        var bySupervisor = !actor.Owns(conversation);
+        if (bySupervisor && !await ConversationActor.IsSupervisorAsync(context))
+            return ConversationActor.Forbidden(ConversationActor.NotOwner);
+
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
+        ConversationActor.AddOwner(metadata, "from_owner", conversation.Owner);
+
+        OwnershipResult result;
+        if (body.TargetQueueId is not null)
+        {
+            var queueId = EntityId.From(body.TargetQueueId);
+            if (await queues.GetByIdAsync(tenantId, queueId, ct) is null)
+                return TypedResults.BadRequest(new ErrorResponse(ConversationActor.TargetQueueNotFound));
+
+            result = await switchboard.TransferToQueueAsync(conversation.ConversationId, tenantId, queueId, ct);
+            metadata["target_queue"] = queueId.Value;
+        }
+        else
+        {
+            var agentId = EntityId.From(body.TargetAgentId!);
+            if (await agents.GetByIdAsync(tenantId, agentId, ct) is null)
+                return TypedResults.BadRequest(new ErrorResponse(ConversationActor.TargetAgentNotFound));
+
+            result = await switchboard.TransferToAgentAsync(conversation.ConversationId, tenantId, agentId, ct);
+            metadata["target_agent"] = agentId.Value;
+        }
+
+        if (!result.Success)
+            return ConversationActor.Conflict(result.FailureReason ?? "The conversation could not be transferred.");
+
+        if (bySupervisor)
+            metadata[ConversationAudit.BySupervisor] = CallerIdentity.ResolveUserIdOrSystem(context.User);
+        await ConversationAudit.TryRecordAsync(
+            context, audit, tenantId, "conversation.transferred", conversation.ConversationId, metadata, ct);
 
         return TypedResults.Ok(result);
     }
 
-    private static async Task<Results<Ok<Conversation>, NotFound>> CloseConversation(
+    // The owner, or a supervisor (audited with by_supervisor), closes a conversation.
+    private static async Task<Results<Ok<Conversation>, NotFound, JsonHttpResult<ErrorResponse>>> CloseConversation(
         string id,
         HttpContext context,
         [FromServices] IConversationStore store,
+        [FromServices] IAgentStore agents,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -190,8 +277,26 @@ internal static class ConversationEndpoints
         if (conversation is null)
             return TypedResults.NotFound();
 
+        var actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+        var bySupervisor = !actor.Owns(conversation);
+        if (bySupervisor && !await ConversationActor.IsSupervisorAsync(context))
+            return ConversationActor.Forbidden(ConversationActor.NotOwner);
+
+        var owner = conversation.Owner;
         conversation.TransitionTo(ConversationState.Closed);
         await store.SaveAsync(conversation, ct);
+
+        if (bySupervisor)
+        {
+            var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [ConversationAudit.BySupervisor] = CallerIdentity.ResolveUserIdOrSystem(context.User),
+            };
+            ConversationActor.AddOwner(metadata, "owner", owner);
+            await ConversationAudit.TryRecordAsync(
+                context, audit, tenantId, "conversation.closed", conversation.ConversationId, metadata, ct);
+        }
+
         return TypedResults.Ok(conversation);
     }
 
@@ -503,10 +608,13 @@ internal static class ConversationEndpoints
     private static readonly TypificationSuggestionResponse EmptySuggestion =
         new(SuggestedNodePath: null, SuggestedFieldValues: null, Confidence: null, Sentiment: null);
 
-    private static async Task<Results<Ok<TypificationSubmission>, NotFound, BadRequest<ErrorResponse>, BadRequest<TypifyErrorResponse>>> TypifyConversation(
+    // The owner, or a supervisor (audited with by_supervisor), types and wraps up a conversation. The
+    // submission is attributed to the calling user, as before.
+    private static async Task<Results<Ok<TypificationSubmission>, NotFound, BadRequest<ErrorResponse>, BadRequest<TypifyErrorResponse>, JsonHttpResult<ErrorResponse>>> TypifyConversation(
         string id,
         HttpContext context,
         [FromServices] IConversationStore conversationStore,
+        [FromServices] IAgentStore agents,
         [FromServices] ITypificationResolver resolver,
         [FromServices] ITypificationValidator validator,
         [FromServices] ITypificationSubmissionStore submissionStore,
@@ -520,13 +628,19 @@ internal static class ConversationEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var agentId = GetCurrentAgentId(context);
+        var agentId = EntityId.From(CallerIdentity.ResolveUserIdOrSystem(context.User));
         var conversationId = EntityId.From(id);
 
         // 1. Load conversation + resolve the bound published schema.
         var conversation = await conversationStore.GetByIdAsync(tenantId, conversationId, ct);
         if (conversation is null)
             return TypedResults.NotFound();
+
+        var actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+        var bySupervisor = !actor.Owns(conversation);
+        if (bySupervisor && !await ConversationActor.IsSupervisorAsync(context))
+            return ConversationActor.Forbidden(ConversationActor.NotOwner);
+        var owner = conversation.Owner;
 
         var resolved = await resolver.ResolveForConversationAsync(conversation, ct);
         if (resolved is null)
@@ -709,6 +823,18 @@ internal static class ConversationEndpoints
             leafNodeId.Value,
             agentId.Value));
 
+        if (bySupervisor)
+        {
+            var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [ConversationAudit.BySupervisor] = agentId.Value,
+                ["leaf_node_id"] = leafNodeId.Value,
+            };
+            ConversationActor.AddOwner(metadata, "owner", owner);
+            await ConversationAudit.TryRecordAsync(
+                context, auditService, tenantId, "conversation.typified", conversationId, metadata, ct);
+        }
+
         return TypedResults.Ok(submission);
     }
 
@@ -762,13 +888,22 @@ internal static class ConversationEndpoints
         [FromBody] CreateConversationRequest body,
         IConversationService conversationService,
         [FromServices] IContactStore contactStore,
+        [FromServices] IAgentStore agents,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var agentId = GetCurrentAgentId(context);
 
         if (!Enum.TryParse<ChannelType>(body.Channel, ignoreCase: true, out var channelType))
             return Results.BadRequest(new ErrorResponse($"Unknown channel: {body.Channel}"));
+
+        // An initial message is sent as the caller's Agent profile, so a caller without one cannot send it.
+        Agent? sender = null;
+        if (body.InitialMessage is not null)
+        {
+            sender = (await ConversationActor.ResolveAsync(context, tenantId, agents, ct)).Agent;
+            if (sender is null)
+                return ConversationActor.Forbidden(ConversationActor.NotAnAgent);
+        }
 
         var contactId = EntityId.From(body.ContactId);
 
@@ -779,41 +914,64 @@ internal static class ConversationEndpoints
         var conversation = await conversationService.GetOrCreateForContactAsync(
             tenantId, contactId, channelType, ct);
 
-        if (body.InitialMessage is not null)
+        if (body.InitialMessage is not null && sender is not null)
         {
             var envelope = new MessageEnvelope([new TextBlock(body.InitialMessage)]);
             await conversationService.SendMessageAsync(
                 conversation.ConversationId, tenantId, envelope,
-                agentId, ConversationOwnerKind.Agent, ct);
+                sender.AgentId, ConversationOwnerKind.Agent, ct);
         }
 
         return Results.Created($"/conversations/{conversation.ConversationId.Value}", conversation);
     }
 
-    private static async Task<Results<Ok<OwnershipResult>, BadRequest<ErrorResponse>>> HoldConversation(
+    // Only the owner holds or resumes a conversation, as its Agent profile.
+    private static async Task<Results<Ok<OwnershipResult>, NotFound, BadRequest<ErrorResponse>, JsonHttpResult<ErrorResponse>>> HoldConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var agentId = GetCurrentAgentId(context);
-        var result = await switchboard.HoldAsync(EntityId.From(id), tenantId, agentId, ct);
+        var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return TypedResults.NotFound();
+
+        var actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+        if (actor.Agent is null)
+            return ConversationActor.Forbidden(ConversationActor.NotAnAgent);
+        if (!actor.Owns(conversation))
+            return ConversationActor.Forbidden(ConversationActor.NotOwner);
+
+        var result = await switchboard.HoldAsync(conversation.ConversationId, tenantId, actor.Agent.AgentId, ct);
 
         return result.Success
             ? TypedResults.Ok(result)
             : TypedResults.BadRequest(new ErrorResponse(result.FailureReason ?? "Cannot hold conversation"));
     }
 
-    private static async Task<Results<Ok<OwnershipResult>, BadRequest<ErrorResponse>>> UnholdConversation(
+    private static async Task<Results<Ok<OwnershipResult>, NotFound, BadRequest<ErrorResponse>, JsonHttpResult<ErrorResponse>>> UnholdConversation(
         string id,
         HttpContext context,
         IConversationSwitchboard switchboard,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var agentId = GetCurrentAgentId(context);
-        var result = await switchboard.UnholdAsync(EntityId.From(id), tenantId, agentId, ct);
+        var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return TypedResults.NotFound();
+
+        var actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+        if (actor.Agent is null)
+            return ConversationActor.Forbidden(ConversationActor.NotAnAgent);
+        if (!actor.Owns(conversation))
+            return ConversationActor.Forbidden(ConversationActor.NotOwner);
+
+        var result = await switchboard.UnholdAsync(conversation.ConversationId, tenantId, actor.Agent.AgentId, ct);
 
         return result.Success
             ? TypedResults.Ok(result)
@@ -973,20 +1131,6 @@ internal static class ConversationEndpoints
             return tid;
 
         throw new InvalidOperationException("Tenant ID not resolved");
-    }
-
-    private static EntityId GetCurrentAgentId(HttpContext context)
-    {
-        // Same `sub`-first ordering as AgentEndpoints.GetCurrentUserId — the JWT
-        // emitted by JwtTokenService carries the user id in `sub`, and
-        // MapInboundClaims=false on the JwtBearerOptions means it is NOT
-        // auto-remapped to NameIdentifier. Without `sub` first, every
-        // /conversations/{id}/* call from a JWT-authenticated agent gets a
-        // fresh random EntityId and downstream Switchboard guards (e.g.
-        // AcceptAsync's "only the assigned agent can accept") reject the call.
-        var nameId = context.User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
-            ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        return nameId is not null ? EntityId.From(nameId) : EntityId.New();
     }
 }
 

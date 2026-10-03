@@ -233,7 +233,7 @@ public sealed class SupervisorStuckWorkEndpointTests : IClassFixture<Authenticat
     {
         var offlineAgent = await SeedAgentAsync(AgentState.Offline, "Owner Q");
         var conv = await SeedConversationAsync(offlineAgent.AgentId, ConversationState.Active);
-        var queueId = EntityId.New();
+        var queueId = await SeedQueueAsync();
 
         var response = await _client.PostAsJsonAsync(
             $"/api/v1/supervisor/conversations/{conv.ConversationId.Value}/reassign",
@@ -252,7 +252,7 @@ public sealed class SupervisorStuckWorkEndpointTests : IClassFixture<Authenticat
     {
         var offlineAgent = await SeedAgentAsync(AgentState.Offline, "Owner A");
         var conv = await SeedConversationAsync(offlineAgent.AgentId, ConversationState.Active);
-        var targetAgentId = EntityId.New();
+        var targetAgentId = (await SeedAgentAsync(AgentState.Available, "Target A")).AgentId;
 
         var response = await _client.PostAsJsonAsync(
             $"/api/v1/supervisor/conversations/{conv.ConversationId.Value}/reassign",
@@ -282,7 +282,7 @@ public sealed class SupervisorStuckWorkEndpointTests : IClassFixture<Authenticat
 
         var response = await _client.PostAsJsonAsync(
             $"/api/v1/supervisor/conversations/{conv.ConversationId.Value}/reassign",
-            new { targetQueueId = EntityId.New().Value });
+            new { targetQueueId = (await SeedQueueAsync()).Value });
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
@@ -298,7 +298,7 @@ public sealed class SupervisorStuckWorkEndpointTests : IClassFixture<Authenticat
     {
         var offlineAgent = await SeedAgentAsync(AgentState.Offline, "Owner Audit");
         var conv = await SeedConversationAsync(offlineAgent.AgentId, ConversationState.Active);
-        var queueId = EntityId.New();
+        var queueId = await SeedQueueAsync();
 
         var response = await _client.PostAsJsonAsync(
             $"/api/v1/supervisor/conversations/{conv.ConversationId.Value}/reassign",
@@ -380,6 +380,20 @@ public sealed class SupervisorStuckWorkEndpointTests : IClassFixture<Authenticat
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var list = await response.Content.ReadFromJsonAsync<List<StuckDto>>(s_json);
         return list ?? [];
+    }
+
+    private async Task<EntityId> SeedQueueAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var queue = new Queue
+        {
+            QueueId = EntityId.New(),
+            TenantId = s_tenantId,
+            Name = $"Reassign target {Guid.NewGuid():N}",
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await scope.ServiceProvider.GetRequiredService<IQueueStore>().SaveAsync(queue, CancellationToken.None);
+        return queue.QueueId;
     }
 
     private async Task<Agent> SeedAgentAsync(AgentState state, string displayName)
