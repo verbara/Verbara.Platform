@@ -115,8 +115,8 @@ dotnet run --project tools/Verbara.Sdk.Pro.LicenseGenerator -c Release --no-buil
 |---|---|---|---|
 | `Developer` | Public free trial (Tier 0.5) — issued automatically by `verbara.io/api/developer-license` | 5 / 1 | Yes for evaluators; 30-day expiry forces hot-reload validation |
 | `SelfHostStartup` | Small commercial deployments | 25 / 1 | Yes for small lab |
-| `SelfHostBusiness` | Mid-market commercial | 500 / 10 | Yes for general lab |
-| `WhiteLabel` | Top tier, all features unlocked, no `.lic`-enforced caps | 0 / 0 (externally managed) | Best for "exercise everything" labs |
+| `SelfHostBusiness` | Mid-market commercial | declared with `--max-agents` (required) / 10 | Yes for general lab |
+| `WhiteLabel` | Top tier, all features unlocked | declared with `--max-agents` (required) / 0 | Best for "exercise everything" labs |
 
 For Tier 0.5 via the public issuer (if you don't have the production signing key):
 
