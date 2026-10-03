@@ -76,8 +76,9 @@ removes for roles the user no longer has (see [Role changes move RBAC roles](#ro
    `docker-compose.reference-smb.yml` ship the platform-api line commented out and set no prefix.
    Without both, a revoked impersonation token is refused only by the process that revoked it, and
    the revocation is lost when that process restarts.
-8. **Logs:** the per-request lines are gone and the gateway access-log format changes (see
-   [Request logging](#request-logging)). Update dashboards, alerts and parsers.
+8. **Logs:** the per-request lines are gone, the gateway access-log format changes, and the
+   gateway's error log no longer records requests (see [Request logging](#request-logging)). Update
+   dashboards, alerts and parsers.
 9. **Stop, then start.** Do not run 2.24.x and 2.25.0 side by side. Until the last 2.24.x process
    stops, it still accepts what 2.25.0 refuses, and its user writes can recreate an account a 2.25.0
    node deleted. With Helm, scale platform-api to 0 first, or use `strategy: Recreate` for this
@@ -86,10 +87,14 @@ removes for roles the user no longer has (see [Role changes move RBAC roles](#ro
 ## During the upgrade
 
 1. Stop every 2.24.x platform-api and realtime process, then start 2.25.0.
-2. Wait for `RBAC seeder: permissions, role templates, and per-tenant role migration complete.` If
+2. With the compose files, recreate the gateway:
+   `docker compose -f <compose file> up -d --force-recreate nginx-gateway`. `docker compose up -d`
+   leaves it running, since neither its image nor its settings change, and a running container keeps
+   reading the `nginx-gateway.conf` it started with, so it would go on logging as 2.24.x did.
+3. Wait for `RBAC seeder: permissions, role templates, and per-tenant role migration complete.` If
    you see `RBAC seeder FAILED`, stale grants were not removed: fix the cause and restart.
-3. Repair conversation owners (below) before agents resume work.
-4. Impersonation sessions open at the upgrade end (401). Start new ones.
+4. Repair conversation owners (below) before agents resume work.
+5. Impersonation sessions open at the upgrade end (401). Start new ones.
 
 ### Conversations owned by a user id
 
@@ -144,8 +149,9 @@ rolling back does not undo it.
      `rbac_roles_moved=false` in `user.role_changed`);
    - 7510: a conversation audit entry was not written;
    - 9102: the impersonation sweep could not revoke a token.
-4. Purge request logs kept from 2.24.x and earlier. They hold bearer tokens, OIDC codes and reset
-   tokens in URLs and Referers, and the access tokens of single sign-on users. All have expired:
+4. Purge request logs kept from 2.24.x and earlier, the gateway's error log and the web container's
+   log included. They hold bearer tokens, OIDC codes and reset tokens in URLs and Referers, and the
+   access tokens of single sign-on users. All have expired:
    access tokens after 15 minutes, impersonation tokens after 30, reset tokens and codes after an
    hour. No key rotation is needed.
 
@@ -381,9 +387,23 @@ Kubernetes probes and Platform.Realtime keep reaching the API.
   `$remote_addr - $remote_user [$time_local] "$request_method $uri $server_protocol" $status $body_bytes_sent "<referer path>" "$http_user_agent"`.
   Parsers written for `combined` (fail2ban, GoAccess, Promtail) need updating. If you mount your own
   gateway configuration, apply the same format.
-- nginx's error log still writes full request lines when an upstream fails. Restrict access to it.
+- The gateway's error log no longer records requests: its server block sends it to `/dev/null`.
+  nginx writes the request line, the upstream URL and the Referer, query strings included, with every
+  message about a request, at any level, so this was the only way to keep tokens out of it. Messages
+  such as `connect() failed`, `upstream timed out` or `upstream prematurely closed connection` no
+  longer appear in the gateway's `docker logs`; the request still appears in the access log with its
+  status (502, 504) and path, which names the service. Alerts that read the error log for those
+  messages must read the access log's status instead. The messages of nginx's master process
+  (start-up, configuration errors, reloads, a worker that exits) are still written; those about a
+  connection, such as `worker_connections are not enough`, are not. If you mount your own gateway
+  configuration, add `error_log /dev/null;` to each server block. `docker/nginx-loadbalancer.conf`
+  (the `docker-compose.scale.yml` benchmark balancer) does the same.
+- Requests for the console reach the web image without their query string and with only the scheme,
+  host and path of the Referer, because the web image's nginx logs both raw. `/api/` and `/hubs/`
+  requests keep their query.
 - Your own ingress, load balancer, APM agent or log shipper must drop query strings, including the
-  query part of the Referer.
+  query part of the Referer. On Kubernetes the Helm chart routes `/` to the web image directly, so its
+  log receives each password-reset link's token; restrict access to it.
 
 ## Platform.Web 3.20.0 against 2.25.0
 

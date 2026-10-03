@@ -104,13 +104,39 @@ same. The shipped services therefore keep query strings out of their logs:
 - **The gateway logs paths, not queries.** `nginx-gateway.conf` writes its access log
   in the `verbara_noquery` format: client address, time, method, path, protocol,
   status, size, the path part of the Referer, and the User-Agent. That is where
-  per-request records come from. nginx's error log still writes the full request
-  line when a proxied request fails (for example while a service restarts), so keep
-  access to it restricted.
+  per-request records come from, failed requests included: a 502 or 504 there names
+  the path, and the path names the service (`/api/` and `/health` platform-api,
+  `/hubs/` realtime, anything else web).
+- **The gateway's error log records no requests.** nginx adds the request line, the
+  upstream URL and the Referer, query strings included, to every message it logs
+  while it handles a request, at every level (a failed proxied request, a response
+  buffered to a temporary file, a temporary file it cannot write), and no setting
+  changes that text. The gateway's server block therefore sends its error log to
+  `/dev/null`. `docker logs` still shows the messages of nginx's master process
+  (start-up, configuration errors, reloads, a worker that exits), but none about
+  connections or requests, `worker_connections are not enough` included. To find out
+  why requests fail, read the failing service's own log. If you turn the error log
+  back on to troubleshoot (`error_log /var/log/nginx/error.log;` in the server
+  block), it writes the token of every failing request: turn it off again afterwards
+  and recreate the container (last point below), which also discards its log.
+  `nginx-loadbalancer.conf`, the benchmark balancer of `docker-compose.scale.yml`,
+  discards its error log the same way.
+- **The web image gets no query.** The gateway passes `/api/` and `/hubs/` requests on
+  with their query (the event stream and the hub authenticate with it), but sends
+  requests for the console to the web image without the query and with only the
+  scheme, host and path of the Referer: the web image's nginx logs the raw request
+  line and Referer, and the console reads the reset link's token in the browser.
+  Where the web image is reached without this gateway (the Helm chart routes `/`
+  straight to it), its log receives each reset link's token: restrict access to it.
 - **Your own proxy must do the same.** If another reverse proxy, a Kubernetes
   ingress, a load balancer, an APM agent or a log shipper records these requests,
   configure it to drop query strings (and the query part of the Referer) from what
-  it keeps.
+  it keeps. A server block you add to `nginx-gateway.conf` (for TLS on port 443, say)
+  needs the same `access_log … verbara_noquery;` and `error_log /dev/null;` lines.
+- **Changes to `nginx-gateway.conf` need a recreated container.** A running container
+  keeps reading the file it started with, and `docker compose up -d` does not
+  recreate the gateway when only that file changed: run
+  `docker compose -f <compose file> up -d --force-recreate nginx-gateway`.
 
 ## Public address of the console (`Platform__PublicBaseUrl`)
 

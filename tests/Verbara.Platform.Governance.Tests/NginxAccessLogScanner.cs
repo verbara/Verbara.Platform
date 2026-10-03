@@ -7,20 +7,25 @@ namespace Verbara.Platform.Governance.Tests;
 internal sealed record NginxDirective(string Name, IReadOnlyList<string> Args, IReadOnlyList<NginxDirective>? Children, int Line);
 
 /// <summary>
-/// Pure, I/O-free check that an nginx configuration only writes access logs in formats that carry no
-/// credential. The SSE stream (<c>?token=</c>), the SignalR hub (<c>id=</c>, <c>access_token=</c>), the
-/// OIDC callback (<c>code=</c>) and the reset link (<c>/reset-password?token=</c>, also seen later as a
-/// Referer) all put a secret in the query string, so a format may log the path but never the query, the
-/// raw request line, the raw Referer, or a credential-bearing header, cookie or body.
+/// Pure, I/O-free check that an nginx configuration writes no credential to its logs. The SSE stream
+/// (<c>?token=</c>), the SignalR hub (<c>id=</c>, <c>access_token=</c>), the OIDC callback (<c>code=</c>)
+/// and the reset link (<c>/reset-password?token=</c>, also seen later as a Referer) all put a secret in the
+/// query string. An access-log format may therefore log the path but never the query, the raw request
+/// line, the raw Referer, or a credential-bearing header, cookie or body (<see cref="Scan"/>); and an error
+/// log, whose text no directive can change, must write nowhere (<see cref="ScanErrorLogs"/>).
 /// </summary>
 /// <remarks>
 /// The file is included inside the http block of the image's own <c>nginx.conf</c>, whose
-/// <c>access_log … main</c> logs <c>$request</c> (the raw request line, query included). nginx inherits an
-/// access_log only into a level that declares none, and several access_log directives on one level all
-/// write, so the only way to replace <c>main</c> is for every server block to declare its own.
+/// <c>access_log … main</c> logs <c>$request</c> (the raw request line, query included) and whose main-level
+/// <c>error_log … notice</c> receives every message logged while a request is handled. nginx inherits either
+/// log only into a level that declares none, and several directives on one level all write, so the only
+/// way to replace the image's is for every server block to declare its own.
 /// </remarks>
 internal static partial class NginxAccessLogScanner
 {
+    /// <summary>The one error-log destination that writes nothing.</summary>
+    private const string Discard = "/dev/null";
+
     private static readonly HashSet<string> BannedVariables = new(StringComparer.Ordinal)
     {
         "request",            // the raw request line: method, path AND query
@@ -88,6 +93,49 @@ internal static partial class NginxAccessLogScanner
 
         return violations;
     }
+
+    /// <summary>
+    /// Every way the configuration can write a request line to an error log; empty when it cannot. nginx adds
+    /// the request line, the upstream URL and the Referer, query strings included, to every message it logs
+    /// while it handles a request, at every level, so an error log is safe only when it writes nowhere.
+    /// </summary>
+    public static IReadOnlyList<string> ScanErrorLogs(string config)
+    {
+        var directives = Parse(config);
+
+        var violations = Descendants(directives)
+            .Where(d => d.Name == "error_log" && d.Args is not [Discard, ..])
+            .Select(errorLog =>
+            {
+                var destination = errorLog.Args.Count > 0 ? errorLog.Args[0] : "(none)";
+                var level = errorLog.Args.Count > 1 ? errorLog.Args[1] : "error";
+                return $"error_log '{destination}' at level '{level}' (line {errorLog.Line}) writes the request line, " +
+                    $"the upstream URL and the Referer, query strings included, with {RequestMessagesAt(level)}.";
+            })
+            .ToList();
+
+        violations.AddRange(Descendants(directives)
+            .Where(d => d.Name == "server" && d.Children is not null && !d.Children.Any(c => c.Name == "error_log"))
+            .Select(server =>
+                $"server block (line {server.Line}) declares no error_log of its own, so it inherits the image's " +
+                "'error_log /var/log/nginx/error.log notice', which writes the request line whenever a proxied " +
+                "request fails."));
+
+        return violations;
+    }
+
+    /// <summary>The messages about a request that an error log at <paramref name="level"/> still writes.</summary>
+    private static string RequestMessagesAt(string level) => level switch
+    {
+        "crit" => "a temporary file nginx cannot write (crit) and worker_connections exhausted while it connects " +
+            "to an upstream (alert)",
+        "alert" => "worker_connections exhausted while nginx connects to an upstream (alert)",
+        "emerg" => "a memory allocation that fails while nginx handles a request (emerg)",
+        "error" => "every failed proxied request: connection refused or reset, a timeout, an upstream that closes " +
+            "without answering (error)",
+        _ => "every failed proxied request (error) and every response or request body buffered to a temporary " +
+            "file (warn)",
+    };
 
     /// <summary>Parses nginx configuration text into its directive tree.</summary>
     public static IReadOnlyList<NginxDirective> Parse(string config)
