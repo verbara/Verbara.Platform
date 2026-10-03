@@ -144,7 +144,7 @@ public sealed class OidcRefreshCookieTests
 
             var result = await OidcEndpoints.CompleteOidcLoginAsync(
                 context, _jwtService, _refreshService, _authEvents,
-                _mfaEvaluator, _mfaCache, _user, flowState,
+                _mfaEvaluator, _mfaCache, _user, flowState, publicBaseUrl: "https://app.example.com",
                 ip: null, ua: null, ct: CancellationToken.None);
 
             return (result, context);

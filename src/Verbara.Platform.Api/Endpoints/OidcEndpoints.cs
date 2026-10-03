@@ -62,7 +62,8 @@ internal static class OidcEndpoints
             CodeVerifier = codeVerifier,
             Nonce = nonce,
             TenantId = tenant_id,
-            ReturnUrl = return_url,
+            // The sign-in's result goes back to this URL: it must be on the console (see SignInReturnUrl).
+            ReturnUrl = PublicBaseUrl.SignInReturnUrl(return_url, publicBaseUrl),
             ExpiresAtUnix = DateTimeOffset.UtcNow.Add(FlowTimeout).ToUnixTimeSeconds(),
         };
 
@@ -186,7 +187,7 @@ internal static class OidcEndpoints
 
         // The account-status check lives in CompleteOidcLoginAsync, the step that issues tokens or
         // an MFA challenge, so no caller of that step can skip it.
-        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, mfaCache, user, flowState, ip, ua, ct);
+        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, mfaCache, user, flowState, publicBaseUrl, ip, ua, ct);
     }
 
     /// <summary>
@@ -236,9 +237,13 @@ internal static class OidcEndpoints
     internal static async Task<IResult> CompleteOidcLoginAsync(
         HttpContext context, JwtTokenService jwtService, RefreshTokenService refreshService,
         AuthEventService authEvents, IMfaPolicyEvaluator mfaEvaluator, IMfaPendingCache mfaCache,
-        User user, OidcFlowState flowState, string? ip, string? ua, CancellationToken ct)
+        User user, OidcFlowState flowState, string publicBaseUrl, string? ip, string? ua, CancellationToken ct)
     {
         var tenantId = flowState.TenantId;
+
+        // Every redirect below carries the result in its fragment. The login endpoint already held
+        // return_url to the console; a state cookie issued before it did is checked here again.
+        var returnUrl = PublicBaseUrl.SignInReturnUrl(flowState.ReturnUrl, publicBaseUrl);
 
         // An IdP vouching for the identity says nothing about the account here: one that may not
         // authenticate gets neither tokens nor an MFA challenge.
@@ -262,9 +267,8 @@ internal static class OidcEndpoints
         {
             await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginFailure, ip, ua,
                 new Dictionary<string, string> { ["reason"] = "mfa_enrollment_required" }, ct);
-            var enrollReturnUrl = flowState.ReturnUrl ?? "/";
             return Results.Redirect(
-                $"{enrollReturnUrl}#oidc_mfa_enrollment_required" +
+                $"{returnUrl}#oidc_mfa_enrollment_required" +
                 $"&tenant_id={Uri.EscapeDataString(tenantId)}" +
                 $"&email={Uri.EscapeDataString(user.Email)}");
         }
@@ -275,9 +279,8 @@ internal static class OidcEndpoints
         {
             var challengeToken = await AuthEndpoints.GenerateMfaChallengeTokenAndStoreAsync(
                 user.UserId.Value, tenantId, mfaCache, ct);
-            var challengeReturnUrl = flowState.ReturnUrl ?? "/";
             return Results.Redirect(
-                $"{challengeReturnUrl}#oidc_mfa_challenge" +
+                $"{returnUrl}#oidc_mfa_challenge" +
                 $"&challenge_token={Uri.EscapeDataString(challengeToken)}" +
                 $"&tenant_id={Uri.EscapeDataString(tenantId)}");
         }
@@ -299,7 +302,6 @@ internal static class OidcEndpoints
 
         await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginSuccess, ip, ua, null, ct);
 
-        var returnUrl = flowState.ReturnUrl ?? "/";
         var callbackUrl = $"{returnUrl}#oidc_callback" +
             $"&access_token={Uri.EscapeDataString(accessToken)}" +
             $"&expires_at={Uri.EscapeDataString(expiresAt.ToString("O"))}" +

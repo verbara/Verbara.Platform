@@ -3,7 +3,7 @@ namespace Verbara.Platform.Api.Endpoints.Shared;
 /// <summary>
 /// The address users open the console at, which the links that bring a user back to it are built
 /// from: the password-reset link mailed by <c>POST /auth/forgot-password</c> and the OIDC
-/// <c>redirect_uri</c>.
+/// <c>redirect_uri</c>. An OIDC sign-in's <c>return_url</c> must be on its origin.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -63,6 +63,43 @@ internal static partial class PublicBaseUrl
 
     /// <summary>The OIDC <c>redirect_uri</c> under <paramref name="baseUrl"/>.</summary>
     internal static string OidcRedirectUri(string baseUrl) => baseUrl + OidcCallbackPath;
+
+    /// <summary>
+    /// Where a completed sign-in may send the browser: <paramref name="returnUrl"/> when it is a path on
+    /// the console (a single <c>/</c> first) or an absolute URL whose scheme, host and port are those of
+    /// <paramref name="baseUrl"/>, and <c>/</c> otherwise.
+    /// </summary>
+    /// <remarks>
+    /// The sign-in's result travels in the fragment of that URL (an access token, an MFA challenge
+    /// token, the user's email), and the fragment is readable by whatever origin the URL names. The
+    /// <c>return_url</c> is chosen by whoever sends the user a link to the login endpoint, so it may not
+    /// name another origin. Hosts are compared as parsed URI components, never as string prefixes
+    /// (<c>https://console.example.test.attacker.example</c> begins with <c>https://console.example.test</c>),
+    /// and an accepted absolute URL is returned in its parsed form. Whitespace, control characters and
+    /// backslashes are refused outright: browsers drop or rewrite them before resolving a URL, which
+    /// turns <c>/\host</c> or <c>/&lt;tab&gt;/host</c> into a URL on another host.
+    /// </remarks>
+    internal static string SignInReturnUrl(string? returnUrl, string baseUrl)
+    {
+        const string ConsoleRoot = "/";
+        if (string.IsNullOrEmpty(returnUrl)
+            || returnUrl.Any(c => char.IsWhiteSpace(c) || char.IsControl(c) || c == '\\'))
+            return ConsoleRoot;
+
+        // A path: "//host" is a URL on another host, not a path.
+        if (returnUrl[0] == '/')
+            return returnUrl.Length > 1 && returnUrl[1] == '/' ? ConsoleRoot : returnUrl;
+
+        return Uri.TryCreate(returnUrl, UriKind.Absolute, out var target)
+            && Uri.TryCreate(baseUrl, UriKind.Absolute, out var console)
+            && (target.Scheme == Uri.UriSchemeHttps || target.Scheme == Uri.UriSchemeHttp)
+            && target.UserInfo.Length == 0
+            && string.Equals(target.Scheme, console.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(target.IdnHost, console.IdnHost, StringComparison.OrdinalIgnoreCase)
+            && target.Port == console.Port
+                ? target.AbsoluteUri
+                : ConsoleRoot;
+    }
 
     /// <summary>Records that a reset email was not sent because no address is usable.</summary>
     internal static void LogResetEmailNotSent(HttpContext context, IConfiguration configuration) =>

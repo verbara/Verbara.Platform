@@ -204,6 +204,7 @@ public sealed class OidcMfaEnforcementTests
                 MfaCache,
                 _user,
                 flowState,
+                publicBaseUrl: "https://app.example.com",
                 ip: null,
                 ua: null,
                 ct: CancellationToken.None);

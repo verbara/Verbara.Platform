@@ -99,6 +99,49 @@ public sealed class PublicBaseUrlTests
             because: "identity providers hold this exact value as the registered redirect URI");
     }
 
+    [Theory]
+    [InlineData("/", "/")]
+    [InlineData("/login", "/login")]
+    [InlineData("/admin/tenants/acme?tab=sso", "/admin/tenants/acme?tab=sso")]
+    [InlineData("https://console.example.test/login", "https://console.example.test/login")]
+    [InlineData("https://console.example.test:443/login", "https://console.example.test/login")]
+    [InlineData("HTTPS://CONSOLE.EXAMPLE.TEST/login", "https://console.example.test/login")]
+    public void SignInReturnUrl_ShouldKeepTheUrl_WhenItIsOnTheConsoleOrigin(string returnUrl, string expected)
+    {
+        PublicBaseUrl.SignInReturnUrl(returnUrl, "https://console.example.test").Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("login")]
+    [InlineData("//attacker.example/")]
+    [InlineData("/\\attacker.example/")]
+    [InlineData("/\t/attacker.example/")]
+    [InlineData("/\n/attacker.example/")]
+    [InlineData(" /login")]
+    [InlineData("https://attacker.example/")]
+    [InlineData("https://console.example.test.attacker.example/")]
+    [InlineData("https://console.example.test@attacker.example/")]
+    [InlineData("https://user@console.example.test/")]
+    [InlineData("http://console.example.test/")]
+    [InlineData("https://console.example.test:8443/")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("data:text/html,hello")]
+    [InlineData("file:///etc/passwd")]
+    public void SignInReturnUrl_ShouldReturnTheConsoleRoot_WhenTheUrlIsNotOnTheConsoleOrigin(string? returnUrl)
+    {
+        PublicBaseUrl.SignInReturnUrl(returnUrl, "https://console.example.test").Should().Be("/");
+    }
+
+    [Fact]
+    public void SignInReturnUrl_ShouldCompareOriginsOnly_WhenTheBaseUrlHasAPath()
+    {
+        // The console under /console and its API at the host's root share one origin.
+        PublicBaseUrl.SignInReturnUrl("https://example.test/login", "https://example.test/console")
+            .Should().Be("https://example.test/login");
+    }
+
     private static IConfiguration Configuration(string? configured, string? corsOrigins) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
