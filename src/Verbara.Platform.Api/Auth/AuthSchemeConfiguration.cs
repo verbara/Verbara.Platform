@@ -1,3 +1,4 @@
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
@@ -15,6 +16,10 @@ internal static class AuthSchemeConfiguration
 
     public static AuthenticationBuilder AddDynamicAuth(this IServiceCollection services)
     {
+        // OIDC sign-in and password-reset links need the console's public address: say at startup
+        // when none resolves, instead of only on each refused request.
+        services.AddTransient<IStartupFilter, PublicBaseUrlStartupCheck>();
+
         // Wire JWT validation parameters via post-configure so JwtTokenService is resolved
         // from DI (it requires IDataProtectionProvider, registered as a factory singleton).
         services.AddOptions<JwtBearerOptions>(JwtScheme)

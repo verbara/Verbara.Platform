@@ -43,6 +43,9 @@ internal static partial class PublicBaseUrl
     private const string CorsOriginsKey = "CORS_ORIGINS";
     private const string LoggerCategory = "Verbara.Platform.Api.PublicBaseUrl";
 
+    /// <summary>A label that stands in for a tenant's when checking a setting that names <see cref="TenantPlaceholder"/>.</summary>
+    private const string SampleTenantLabel = "tenant";
+
     /// <summary>The console's reset-password page.</summary>
     private const string ResetPasswordPath = "/reset-password";
 
@@ -73,6 +76,41 @@ internal static partial class PublicBaseUrl
         var origins = configuration[CorsOriginsKey]?.Split(
             ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return origins is [var single] && single != "*" ? Normalize(single) : null;
+    }
+
+    /// <summary>
+    /// Why no address resolves, or <see langword="null"/> when one does. A setting that names
+    /// <see cref="TenantPlaceholder"/> resolves when it is usable once a label fills it.
+    /// </summary>
+    internal static string? UnresolvableReason(IConfiguration configuration)
+    {
+        if (!string.IsNullOrWhiteSpace(configuration[ConfigurationKey]))
+            return Resolve(configuration, SampleTenantLabel) is null
+                ? $"{ConfigurationKey} is not an absolute http(s) URL without query, fragment or user information"
+                : null;
+
+        var origins = configuration[CorsOriginsKey]?.Split(
+            ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
+        return origins switch
+        {
+            [] => $"{ConfigurationKey} is not set, and neither is {CorsOriginsKey}",
+            ["*"] => $"{ConfigurationKey} is not set, and {CorsOriginsKey} is '*'",
+            [var single] => Normalize(single) is null
+                ? $"{ConfigurationKey} is not set, and {CorsOriginsKey}' one origin is not an absolute http(s) URL"
+                : null,
+            _ => $"{ConfigurationKey} is not set, and {CorsOriginsKey} names {origins.Length} origins",
+        };
+    }
+
+    /// <summary>
+    /// Records, once at startup, that reset links and OIDC sign-in are off because no address resolves;
+    /// nothing when one does.
+    /// </summary>
+    internal static void LogIfUnresolvable(ILoggerFactory loggerFactory, IConfiguration configuration)
+    {
+        if (UnresolvableReason(configuration) is { } reason)
+            LogNoPublicBaseUrl(loggerFactory.CreateLogger(LoggerCategory), reason,
+                configuration[ConfigurationKey], configuration[CorsOriginsKey]);
     }
 
     /// <summary>
@@ -175,6 +213,10 @@ internal static partial class PublicBaseUrl
     [LoggerMessage(EventId = 7520, Level = LogLevel.Warning,
         Message = "Password-reset email not sent for tenant '{TenantId}': no usable public base URL. Set Platform:PublicBaseUrl to the absolute http(s) address users open the console at, where {{tenant}} stands for the tenant's branding subdomain or, without one, its id, which must be a lowercase DNS label; CORS_ORIGINS stands in only when it names exactly one origin. Platform:PublicBaseUrl='{PublicBaseUrl}', CORS_ORIGINS='{CorsOrigins}'.")]
     private static partial void LogResetEmailNotSent(ILogger logger, string tenantId, string? publicBaseUrl, string? corsOrigins);
+
+    [LoggerMessage(EventId = 7522, Level = LogLevel.Warning,
+        Message = "No usable public base URL ({Reason}): password-reset emails are not sent and OIDC sign-in is refused. Set Platform:PublicBaseUrl to the absolute http(s) address users open the console at; CORS_ORIGINS stands in only when it names exactly one origin. Platform:PublicBaseUrl='{PublicBaseUrl}', CORS_ORIGINS='{CorsOrigins}'.")]
+    private static partial void LogNoPublicBaseUrl(ILogger logger, string reason, string? publicBaseUrl, string? corsOrigins);
 
     [LoggerMessage(EventId = 7521, Level = LogLevel.Warning,
         Message = "OIDC sign-in refused for tenant '{TenantId}': no usable public base URL to build the redirect_uri from. Set Platform:PublicBaseUrl to the absolute http(s) address users open the console at, where {{tenant}} stands for the tenant's branding subdomain or, without one, its id, which must be a lowercase DNS label; CORS_ORIGINS stands in only when it names exactly one origin. Platform:PublicBaseUrl='{PublicBaseUrl}', CORS_ORIGINS='{CorsOrigins}'.")]
