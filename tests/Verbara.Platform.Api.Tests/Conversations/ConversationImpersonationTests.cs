@@ -8,8 +8,15 @@ namespace Verbara.Platform.Api.Tests.Conversations;
 /// The conversation routes under impersonation, with impersonation tokens this host mints: the transfer
 /// permission gate passes only on a permission minted into the token; a full session then acts with the
 /// supervisor override its Admin role grants, audited with the impersonation context; a read-only session
-/// writes nothing; and a takeover needs an Agent profile the impersonator does not have in the tenant.
+/// writes nothing; and a takeover needs an Agent profile in the tenant, which the impersonator does not
+/// hold to begin with.
 /// </summary>
+/// <remarks>
+/// The missing profile is not a limit on a full session. Its Admin role passes the AdminOnly
+/// <c>POST /admin/agents</c>, which binds a profile to whatever user id it is given, the impersonator's
+/// included; with that profile the session takes over and sends like any agent. Role-gated routes do not
+/// read the permissions minted into the token. Only a read-only session is stopped, by the guard.
+/// </remarks>
 public sealed class ConversationImpersonationTests : IClassFixture<ConversationOwnershipApiFactory>
 {
     private const string TransferPermission = "contacts:conversation:transfer";
@@ -95,6 +102,8 @@ public sealed class ConversationImpersonationTests : IClassFixture<ConversationO
     [Fact]
     public async Task Takeover_ShouldReturn403AndKeepOwner_WhenAFullSessionsImpersonatorHasNoAgentProfileInTheTenant()
     {
+        // The refusal is the one any caller without a profile gets; see the class remarks for why it
+        // does not hold a full session back.
         var admin = _factory.NewPlatformAdmin();
         var (_, owner) = _factory.NewAgent("owner");
         var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(owner.AgentId), ConversationState.Active);
