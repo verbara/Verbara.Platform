@@ -88,6 +88,7 @@ $ ${EDITOR:-nano} docker/.env.reference-smb
 | `EXTERNAL_IP` | tu IP pública (Escenario B/C) | Asterisk reescribe SDP con esto — sin esto no hay audio bidireccional con peers externos |
 | `JWT_ISSUER` | `https://verbara.tu-dominio.com` | URL canonical del Web UI |
 | `CORS_ORIGINS` | `https://verbara.tu-dominio.com` | Single origin permitido para la SPA |
+| `PUBLIC_BASE_URL` | `https://verbara.tu-dominio.com` | Dirección con la que los usuarios abren la consola: con ella se arman el enlace de restablecer contraseña y el `redirect_uri` de OIDC, nunca con la cabecera `Host`. Si `CORS_ORIGINS` nombra un solo origen podés dejarla comentada; con varios es obligatoria |
 
 **Atajo: generar todos los secrets a la vez** y pegarlos al `.env`:
 

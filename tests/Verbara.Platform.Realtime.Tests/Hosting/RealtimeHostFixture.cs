@@ -7,12 +7,14 @@ using Verbara.Platform.Realtime.Clients;
 using Verbara.Sdk.Pro.Push.SignalR.Events;
 using Verbara.Sdk.Push.Bus;
 using Verbara.Sdk.Push.Events;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -24,17 +26,24 @@ namespace Verbara.Platform.Realtime.Tests.Hosting;
 /// booted once per test class. Program.cs runs the cluster-lock migration before it serves, so the
 /// host gets a Testcontainers Postgres. Only two seams are replaced: the Platform.Api
 /// account-status lookup (a switchable stub; the test chooses the verdict) and the JWT key pool,
-/// seeded with a key the fixture signs with.
+/// seeded with a key the fixture signs with. Every log record the host writes is captured.
 /// </summary>
 public sealed class RealtimeHostFixture : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private const string Issuer = "verbara-platform";
 
     private IContainer? _postgres;
+    private JwtKeyEntry? _signingKey;
     private SigningCredentials? _signing;
 
     /// <summary>The verdict the host's account-status lookup returns.</summary>
     internal SwitchableStatusClient Status { get; } = new();
+
+    /// <summary>
+    /// Every record the host (and any host derived from it with <c>WithWebHostBuilder</c>) logs,
+    /// attached with <c>AddProvider</c> only, so the host's own filter rules decide what reaches it.
+    /// </summary>
+    internal LogRecordCapture Logs { get; } = new();
 
     private string ConnectionString =>
         $"Host={_postgres!.Hostname};Port={_postgres.GetMappedPublicPort(5432)};" +
@@ -65,11 +74,21 @@ public sealed class RealtimeHostFixture : WebApplicationFactory<Program>, IAsync
             ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
             IsActive = true,
         };
-        await Services.GetRequiredService<IJwtKeyStore>().UpsertAsync(key);
+        _signingKey = key;
+        await TrustSigningKeyAsync(Services);
         _signing = new SigningCredentials(
             new SymmetricSecurityKey(Convert.FromBase64String(key.Key)) { KeyId = key.KeyId },
             SecurityAlgorithms.HmacSha256);
     }
+
+    /// <summary>
+    /// Seeds the fixture's signing key into <paramref name="services"/>' JWT key pool, so a host derived
+    /// from this one (<c>WithWebHostBuilder</c>, which boots its own Program and its own in-memory pool)
+    /// accepts the tokens <see cref="MintAccessToken"/> signs.
+    /// </summary>
+    internal Task TrustSigningKeyAsync(IServiceProvider services) =>
+        services.GetRequiredService<IJwtKeyStore>().UpsertAsync(
+            _signingKey ?? throw new InvalidOperationException("The host is not started."));
 
     async Task IAsyncLifetime.DisposeAsync()
     {
@@ -139,6 +158,9 @@ public sealed class RealtimeHostFixture : WebApplicationFactory<Program>, IAsync
     internal PresenceWatch WatchPresence(string agentId) =>
         new(Services.GetRequiredService<IPushEventBus>(), agentId);
 
+    protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+        builder.ConfigureLogging(logging => logging.AddProvider(Logs));
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         // Host configuration reaches the entry point as arguments, so Program.cs sees it while
@@ -155,19 +177,45 @@ public sealed class RealtimeHostFixture : WebApplicationFactory<Program>, IAsync
     /// An access token shaped like the ones Platform.Api mints, signed with the pool key the host
     /// validates against, expiring at <paramref name="expiresAt"/> (which may already have passed).
     /// </summary>
-    internal string MintAccessToken(string tenantId, string userId, DateTimeOffset expiresAt)
+    internal string MintAccessToken(string tenantId, string userId, DateTimeOffset expiresAt) =>
+        MintToken(
+            [
+                new Claim("sub", userId),
+                new Claim("tid", tenantId),
+                new Claim("role", "Agent"),
+            ],
+            expiresAt);
+
+    /// <summary>
+    /// An impersonation token shaped like the ones Platform.Api mints — role Admin in
+    /// <paramref name="targetTenantId"/>, the impersonator named, <c>impersonation=true</c> — with
+    /// <paramref name="tokenId"/> as its <c>jti</c> (none when null), signed with the pool key.
+    /// </summary>
+    internal string MintImpersonationToken(
+        string targetTenantId, string impersonatorId, string impersonatorTenantId, string? tokenId, DateTimeOffset expiresAt)
+    {
+        List<Claim> claims =
+        [
+            new Claim("sub", impersonatorId),
+            new Claim("tid", targetTenantId),
+            new Claim("role", "Admin"),
+            new Claim("impersonator_id", impersonatorId),
+            new Claim("impersonator_tenant", impersonatorTenantId),
+            new Claim("impersonation", "true"),
+        ];
+        if (tokenId is not null)
+            claims.Add(new Claim("jti", tokenId));
+        return MintToken(claims, expiresAt);
+    }
+
+    private string MintToken(IEnumerable<Claim> claims, DateTimeOffset expiresAt)
     {
         var now = DateTime.UtcNow;
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
             Issuer = Issuer,
             Audience = Issuer,
-            Subject = new ClaimsIdentity(
-            [
-                new Claim("sub", userId),
-                new Claim("tid", tenantId),
-                new Claim("role", "Agent"),
-            ]),
+            Subject = new ClaimsIdentity(claims),
             IssuedAt = now.AddMinutes(-1),
             NotBefore = now.AddMinutes(-1),
             Expires = expiresAt.UtcDateTime,

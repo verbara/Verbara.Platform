@@ -19,6 +19,11 @@ using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// No per-request log: ASP.NET Core's "Request starting/finished" lines record the full URL, query
+// included, and every SignalR negotiate and connect carries the access token there (?access_token=).
+// Set in code, after the configuration-based rules, so no Logging:LogLevel key can lift it.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+
 // Worker resilience parity with Platform.Api (ADR-0021): a crashing
 // BackgroundService stops the host so K8s restarts the pod with a clear
 // failure reason instead of silently swallowing the exception.
@@ -103,6 +108,9 @@ builder.Services.AddSingleton<IHubAuditSink, HubAuditSinkClient>();
 // dev/compose deployments can omit the connection string; Realtime falls back
 // to the in-memory IJwtKeyStore and ends up rejecting tokens from Platform.Api
 // — so for any non-trivial setup the connection string MUST be set.
+// The same registration brings the jti revocation store the Api writes when an
+// impersonation session ends, so the connect-time check below sees the Api's
+// revocations whenever Realtime can validate the Api's tokens at all.
 var identityRedis = builder.Configuration.GetConnectionString("IdentityRedis")
     ?? redisConnectionString;
 if (!string.IsNullOrWhiteSpace(identityRedis))
@@ -117,6 +125,8 @@ else
 {
     builder.Services.AddSingleton<Verbara.Platform.Identity.Auth.Jwt.IJwtKeyStore,
         Verbara.Platform.Identity.Auth.Jwt.InMemoryJwtKeyStore>();
+    builder.Services.AddSingleton<Verbara.Platform.Identity.Auth.IJtiRevocationCache,
+        Verbara.Platform.Identity.Auth.InMemoryJtiRevocationCache>();
 }
 
 // ─── JWT authentication ──────────────────────────────────────────────────────
@@ -144,8 +154,9 @@ builder.Services
                 return Task.CompletedTask;
             },
             // A connection is closed when its token expires; a reconnect on that token is refused
-            // here rather than admitted and closed again inside the clock-skew grace.
-            OnTokenValidated = JwtValidationConfigurator.RejectExpiredToken,
+            // here rather than admitted and closed again inside the clock-skew grace. So is an
+            // impersonation token whose session the Api has ended, revoked or timed out.
+            OnTokenValidated = JwtValidationConfigurator.RejectExpiredOrRevokedToken,
         };
     });
 

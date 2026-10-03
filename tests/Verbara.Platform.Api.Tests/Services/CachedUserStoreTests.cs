@@ -30,7 +30,7 @@ public sealed class CachedUserStoreTests : IDisposable
         var second = await sut.GetByEmailAsync(tenantId, "u@example.com", CancellationToken.None);
 
         first.Should().NotBeNull();
-        second.Should().Be(first);
+        second.Should().BeEquivalentTo(first);
         await inner.Received(1).GetByEmailAsync(tenantId, "u@example.com", Arg.Any<CancellationToken>());
     }
 
@@ -48,7 +48,7 @@ public sealed class CachedUserStoreTests : IDisposable
         var second = await sut.GetByIdAsync(tenantId, userId, CancellationToken.None);
 
         first.Should().NotBeNull();
-        second.Should().Be(first);
+        second.Should().BeEquivalentTo(first);
         await inner.Received(1).GetByIdAsync(tenantId, userId, Arg.Any<CancellationToken>());
     }
 
@@ -109,24 +109,48 @@ public sealed class CachedUserStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveAsync_ShouldInvalidateBothIndexes_WhenWriteCompletes()
+    public async Task GetByIdAsync_ShouldHandOutACopy_WhenTheCacheIsWarm()
+    {
+        // A request changes the user it read (a failed sign-in, a login's lockout reset); a change made
+        // to the cached object itself would reach every other request on this replica unwritten.
+        var inner = Substitute.For<IUserStore>();
+        var t1 = new TenantId("t1");
+        var u1 = EntityId.From("u1");
+        inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>()).Returns(MakeUser("u1", "t1", "u@example.com"));
+        var sut = new CachedUserStore(inner, _cache);
+
+        _ = await sut.GetByIdAsync(t1, u1, CancellationToken.None); // miss: fills both entries
+        var fromHit = await sut.GetByIdAsync(t1, u1, CancellationToken.None);
+        fromHit!.FailedLoginAttempts = 4;
+        fromHit.Status = UserStatus.Suspended;
+        var fromEmailHit = await sut.GetByEmailAsync(t1, "u@example.com", CancellationToken.None);
+        fromEmailHit!.LockedUntil = DateTimeOffset.UtcNow.AddMinutes(15);
+        var later = await sut.GetByIdAsync(t1, u1, CancellationToken.None);
+
+        later.Should().NotBeSameAs(fromHit);
+        later!.FailedLoginAttempts.Should().Be(0, because: "a change to one request's copy is not a write");
+        later.Status.Should().Be(UserStatus.Active);
+        later.LockedUntil.Should().BeNull(because: "the by-email entry is not handed out either");
+        await inner.Received(1).GetByIdAsync(t1, u1, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateAsync_ShouldDropACachedMiss_WhenTheUserIsCreated()
     {
         var inner = Substitute.For<IUserStore>();
         var t1 = new TenantId("t1");
         var u1 = EntityId.From("u1");
-        var v1 = MakeUser("u1", "t1", "u@example.com", display: "Initial");
-        var v2 = MakeUser("u1", "t1", "u@example.com", display: "Updated");
-        inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>()).Returns(v1, v2);
+        var created = MakeUser("u1", "t1", "u@example.com");
+        inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<User?>(null), Task.FromResult<User?>(created));
         var sut = new CachedUserStore(inner, _cache);
+        (await sut.GetByIdAsync(t1, u1, CancellationToken.None)).Should().BeNull(); // caches the miss
 
-        var initial = await sut.GetByIdAsync(t1, u1, CancellationToken.None);
-        initial!.DisplayName.Should().Be("Initial");
+        await sut.CreateAsync(created, CancellationToken.None);
 
-        await sut.SaveAsync(v2, CancellationToken.None);
-
-        var afterSave = await sut.GetByIdAsync(t1, u1, CancellationToken.None);
-        afterSave!.DisplayName.Should().Be("Updated");
-        await inner.Received(2).GetByIdAsync(t1, u1, Arg.Any<CancellationToken>());
+        await inner.Received(1).CreateAsync(created, Arg.Any<CancellationToken>());
+        (await sut.GetByIdAsync(t1, u1, CancellationToken.None)).Should().NotBeNull(
+            because: "a lookup made before the user existed must not hide it for the TTL");
     }
 
     [Fact]
@@ -169,58 +193,53 @@ public sealed class CachedUserStoreTests : IDisposable
         await inner.Received(2).GetByIdAsync(t1, u1, Arg.Any<CancellationToken>());
     }
 
-    // ─── Targeted role / status writes ──────────────────────────────────────
+    // ─── Every write ─────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task SetStatusAsync_ShouldDropTheByEmailEntry_WhenTheStatusIsWritten()
+    public static TheoryData<string> Writes => new()
     {
-        // A password sign-in reads by email: a by-email entry left behind would keep serving the
-        // Active user for up to the TTL after the suspension.
+        nameof(IUserStore.UpdateProfileAsync),
+        nameof(IUserStore.UpdateAdminFieldsAsync),
+        nameof(IUserStore.SetPasswordHashAsync),
+        nameof(IUserStore.RehashPasswordAsync),
+        nameof(IUserStore.RecordFailedSignInAsync),
+        nameof(IUserStore.ResetLockoutAsync),
+        nameof(IUserStore.SetLastLoginAtAsync),
+        nameof(IUserStore.SetPendingMfaAsync),
+        nameof(IUserStore.EnableMfaAsync),
+        nameof(IUserStore.ClearMfaAsync),
+        nameof(IUserStore.SetRecoveryCodesAsync),
+        nameof(IUserStore.ConsumeRecoveryCodeAsync),
+        nameof(IUserStore.DeleteAsync),
+    };
+
+    [Theory]
+    [MemberData(nameof(Writes))]
+    public async Task Write_ShouldPassThroughAndDropBothIndexes_WhenTheUserIsCached(string write)
+    {
+        // A password sign-in reads by email: an entry left behind under either key would keep serving
+        // the pre-write user (its MFA state, lock, password hash) for up to the TTL.
         var inner = Substitute.For<IUserStore>();
         var t1 = new TenantId("t1");
         var u1 = EntityId.From("u1");
-        inner.GetByEmailAsync(t1, "u@example.com", Arg.Any<CancellationToken>())
-            .Returns(MakeUser("u1", "t1", "u@example.com"), MakeUser("u1", "t1", "u@example.com", status: UserStatus.Suspended));
-        inner.SetStatusAsync(t1, u1, UserStatus.Suspended, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(UserStatus.Active);
-        var sut = new CachedUserStore(inner, _cache);
-        _ = await sut.GetByEmailAsync(t1, "u@example.com", CancellationToken.None);
-
-        var previous = await sut.SetStatusAsync(t1, u1, UserStatus.Suspended, DateTimeOffset.UtcNow, CancellationToken.None);
-        var afterWrite = await sut.GetByEmailAsync(t1, "u@example.com", CancellationToken.None);
-
-        previous.Should().Be(UserStatus.Active, because: "the inner store's answer is passed through");
-        afterWrite!.Status.Should().Be(UserStatus.Suspended);
-        await inner.Received(2).GetByEmailAsync(t1, "u@example.com", Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task SetRoleAsync_ShouldDropBothIndexes_WhenTheRoleIsWritten()
-    {
-        var inner = Substitute.For<IUserStore>();
-        var t1 = new TenantId("t1");
-        var u1 = EntityId.From("u1");
-        inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>())
-            .Returns(MakeUser("u1", "t1", "u@example.com", role: UserRole.Admin), MakeUser("u1", "t1", "u@example.com"));
-        inner.SetRoleAsync(t1, u1, UserRole.Agent, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(UserRole.Admin);
+        inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>()).Returns(MakeUser("u1", "t1", "u@example.com"));
         var sut = new CachedUserStore(inner, _cache);
         _ = await sut.GetByIdAsync(t1, u1, CancellationToken.None);
 
-        var previous = await sut.SetRoleAsync(t1, u1, UserRole.Agent, DateTimeOffset.UtcNow, CancellationToken.None);
+        await InvokeAsync(sut, write, t1, u1);
 
-        previous.Should().Be(UserRole.Admin);
+        inner.ReceivedCalls().Should().Contain(c => c.GetMethodInfo().Name == write,
+            because: "every write goes to the inner store");
         _cache.TryGetValue(CachedUserStore.ByIdKey("t1", "u1"), out _).Should().BeFalse();
         _cache.TryGetValue(CachedUserStore.ByEmailKey("t1", "u@example.com"), out _).Should().BeFalse(
-            because: "the by-email entry holds the same pre-change user");
-        (await sut.GetByIdAsync(t1, u1, CancellationToken.None))!.Role.Should().Be(UserRole.Agent);
+            because: "the by-email entry holds the same pre-write user");
     }
 
-    [Fact]
-    public async Task SetStatusAsync_ShouldPublishTheInvalidationWithTheEmail_WhenTheUserIsNotCached()
+    [Theory]
+    [MemberData(nameof(Writes))]
+    public async Task Write_ShouldPublishTheInvalidationWithTheEmail_WhenTheUserIsNotCached(string write)
     {
         // Other replicas drop their entries only on this message, and their by-email key needs the
-        // email, which the targeted write does not carry: it comes from the inner store on a miss.
+        // email, which no targeted write carries: it comes from the inner store on a miss.
         var inner = Substitute.For<IUserStore>();
         var publisher = Substitute.For<IAuthCachePublisher>();
         var t1 = new TenantId("t1");
@@ -228,27 +247,48 @@ public sealed class CachedUserStoreTests : IDisposable
         inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>()).Returns(MakeUser("u1", "t1", "u@example.com"));
         var sut = new CachedUserStore(inner, _cache, publisher);
 
-        await sut.SetStatusAsync(t1, u1, UserStatus.Deactivated, DateTimeOffset.UtcNow, CancellationToken.None);
+        await InvokeAsync(sut, write, t1, u1);
 
-        await inner.Received(1).SetStatusAsync(t1, u1, UserStatus.Deactivated, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
         await publisher.Received(1).PublishUserAsync("t1", "u1", "u@example.com", Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task SetRoleAsync_ShouldPublishTheInvalidationWithTheCachedEmail_WhenTheUserIsCached()
+    public async Task UpdateAdminFieldsAsync_ShouldReturnTheInnerResult_WhenTheWriteIsRefused()
     {
         var inner = Substitute.For<IUserStore>();
-        var publisher = Substitute.For<IAuthCachePublisher>();
         var t1 = new TenantId("t1");
         var u1 = EntityId.From("u1");
-        inner.GetByIdAsync(t1, u1, Arg.Any<CancellationToken>()).Returns(MakeUser("u1", "t1", "u@example.com"));
-        var sut = new CachedUserStore(inner, _cache, publisher);
-        _ = await sut.GetByIdAsync(t1, u1, CancellationToken.None);
+        inner.UpdateAdminFieldsAsync(t1, u1, Arg.Any<AdminFieldsChange>(), Arg.Any<DateTimeOffset>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(AdminFieldsWriteResult.Stale);
+        var sut = new CachedUserStore(inner, _cache);
 
-        await sut.SetRoleAsync(t1, u1, UserRole.Supervisor, DateTimeOffset.UtcNow, CancellationToken.None);
+        var result = await sut.UpdateAdminFieldsAsync(
+            t1, u1, new AdminFieldsChange { Role = UserRole.Agent }, DateTimeOffset.UtcNow, "admin", CancellationToken.None);
 
-        await inner.Received(1).GetByIdAsync(t1, u1, Arg.Any<CancellationToken>());
-        await publisher.Received(1).PublishUserAsync("t1", "u1", "u@example.com", Arg.Any<CancellationToken>());
+        result.Outcome.Should().Be(AdminFieldsWriteOutcome.Stale);
+    }
+
+    private static Task InvokeAsync(CachedUserStore store, string write, TenantId t, EntityId u)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var ct = CancellationToken.None;
+        return write switch
+        {
+            nameof(IUserStore.UpdateProfileAsync) => store.UpdateProfileAsync(t, u, new UserProfileChange { DisplayName = "x" }, now, ct),
+            nameof(IUserStore.UpdateAdminFieldsAsync) => store.UpdateAdminFieldsAsync(t, u, new AdminFieldsChange { Status = UserStatus.Suspended }, now, "admin", ct),
+            nameof(IUserStore.SetPasswordHashAsync) => store.SetPasswordHashAsync(t, u, "new-hash", now, clearLockout: false, expectedCurrentHash: null, ct),
+            nameof(IUserStore.RehashPasswordAsync) => store.RehashPasswordAsync(t, u, "old-hash", "new-hash", ct),
+            nameof(IUserStore.RecordFailedSignInAsync) => store.RecordFailedSignInAsync(t, u, 5, now.AddMinutes(15), ct),
+            nameof(IUserStore.ResetLockoutAsync) => store.ResetLockoutAsync(t, u, now, onlyIfUnlocked: true, ct),
+            nameof(IUserStore.SetLastLoginAtAsync) => store.SetLastLoginAtAsync(t, u, now, ct),
+            nameof(IUserStore.SetPendingMfaAsync) => store.SetPendingMfaAsync(t, u, "SECRET", ["digest"], now, ct),
+            nameof(IUserStore.EnableMfaAsync) => store.EnableMfaAsync(t, u, now, ct),
+            nameof(IUserStore.ClearMfaAsync) => store.ClearMfaAsync(t, u, clearLockout: true, now, ct),
+            nameof(IUserStore.SetRecoveryCodesAsync) => store.SetRecoveryCodesAsync(t, u, ["digest"], now, ct),
+            nameof(IUserStore.ConsumeRecoveryCodeAsync) => store.ConsumeRecoveryCodeAsync(t, u, "digest", ct),
+            nameof(IUserStore.DeleteAsync) => store.DeleteAsync(t, u, ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(write), write, "not a user-store write"),
+        };
     }
 
     public void Dispose() => _cache.Dispose();

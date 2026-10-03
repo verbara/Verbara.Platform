@@ -166,6 +166,11 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-verbara-api}
       # CORS — allow only the front-end origin you ship to customers.
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,https://localhost}
+      # Public address of the console (nginx-gateway, as users open it). Password-reset
+      # links and the OIDC redirect_uri are built from it, never from a request's Host.
+      # Left empty, the API uses CORS_ORIGINS when that names exactly one origin; the
+      # default above names two, so set PUBLIC_BASE_URL (see .env.reference-smb.example).
+      Platform__PublicBaseUrl: ${PUBLIC_BASE_URL:-}
       # Licensing — point Licensing__FilePath at your signed .lic to enable Pro
       # features. Empty / unset = community/OSS mode (Pro endpoints respond with
       # HTTP 402 PaymentRequired + RFC 9457 ProblemDetails carrying actionable

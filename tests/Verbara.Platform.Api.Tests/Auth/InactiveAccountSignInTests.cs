@@ -277,6 +277,7 @@ public sealed class InactiveAccountSignInTests
                 Nonce = "nonce",
                 ExpiresAtUnix = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds(),
             },
+            publicBaseUrl: "https://app.example.test",
             ip: null,
             ua: null,
             ct: CancellationToken.None);

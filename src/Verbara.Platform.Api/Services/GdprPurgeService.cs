@@ -13,6 +13,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
     private readonly IMessageStore _messageStore;
     private readonly IAuthEventStore _authEventStore;
     private readonly IUserStore _userStore;
+    private readonly IRefreshTokenStore _refreshTokenStore;
     private readonly IPurgeLogStore _purgeLogStore;
     private readonly IAuditStore _auditStore;
 
@@ -22,6 +23,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         IMessageStore messageStore,
         IAuthEventStore authEventStore,
         IUserStore userStore,
+        IRefreshTokenStore refreshTokenStore,
         IPurgeLogStore purgeLogStore,
         IAuditStore auditStore)
     {
@@ -30,6 +32,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         _messageStore = messageStore;
         _authEventStore = authEventStore;
         _userStore = userStore;
+        _refreshTokenStore = refreshTokenStore;
         _purgeLogStore = purgeLogStore;
         _auditStore = auditStore;
     }
@@ -130,6 +133,11 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         // 2. Delete the user record itself
         await _userStore.DeleteAsync(tid, uid, ct);
         entitiesDeleted["user"] = 1;
+
+        // 2b. End the account's refresh-token lineage, after the delete so a token minted by a sign-in
+        //     racing the purge is caught too. refresh_tokens has no foreign key to users: without
+        //     this the lineage would be refused only for as long as no row with this id exists.
+        await _refreshTokenStore.RevokeAllForUserAsync(tenantId, userId, DateTimeOffset.UtcNow, ct);
 
         // 3. Write tombstone (NO PII — only metadata)
         var purgeId = Guid.NewGuid().ToString("N");

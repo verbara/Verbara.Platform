@@ -22,21 +22,34 @@ internal sealed class AccountLockoutService
         _queue = queue;
     }
 
+    /// <summary>
+    /// Records one failed sign-in for <paramref name="user"/>. The store adds it to the stored count
+    /// atomically and sets the lock when the count reaches the tenant's threshold, so failures that
+    /// read separate copies of the account — parallel guesses — never lose a count. The
+    /// <paramref name="user"/> snapshot is updated from what the store returned.
+    /// </summary>
     public async Task RecordFailedAttemptAsync(
         User user,
         string? ipAddress,
         string? userAgent,
         CancellationToken ct)
     {
-        user.FailedLoginAttempts++;
+        ArgumentNullException.ThrowIfNull(user);
 
         var config = await _configStore.GetAsync(user.TenantId.Value, ct)
             ?? new TenantAuthConfig { TenantId = user.TenantId.Value };
 
-        if (user.FailedLoginAttempts >= config.LockoutThreshold)
-        {
-            user.LockedUntil = DateTimeOffset.UtcNow.AddMinutes(config.LockoutDurationMinutes);
+        var recorded = await _userStore.RecordFailedSignInAsync(
+            user.TenantId, user.UserId, config.LockoutThreshold,
+            DateTimeOffset.UtcNow.AddMinutes(config.LockoutDurationMinutes), ct);
+        if (recorded is not { } stored)
+            return; // the account no longer exists: there is nothing to count against
 
+        user.FailedLoginAttempts = stored.FailedAttempts;
+        user.LockedUntil = stored.LockedUntil;
+
+        if (stored.FailedAttempts >= config.LockoutThreshold)
+        {
             await _authEvents.LogAsync(
                 user.TenantId.Value,
                 user.UserId.Value,
@@ -46,8 +59,6 @@ internal sealed class AccountLockoutService
                 new Dictionary<string, string> { ["threshold"] = config.LockoutThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture) },
                 ct);
         }
-
-        await _userStore.SaveAsync(user, ct);
     }
 
     /// <summary>
@@ -56,7 +67,9 @@ internal sealed class AccountLockoutService
     /// the rest of the request path (JWT issuance, response shaping) sees
     /// the post-reset state, but the persistence is deferred to
     /// <see cref="AuthWriteQueue"/>. When the queue is not registered (tests
-    /// / single-process bootstrap) the original synchronous DB save is used.
+    /// / single-process bootstrap) the store is written directly. Either way the
+    /// reset lifts no lock that is in force when it is written: a lock set after
+    /// this sign-in succeeded stays.
     /// </summary>
     public async Task ResetAttemptsAsync(User user, CancellationToken ct)
     {
@@ -71,15 +84,15 @@ internal sealed class AccountLockoutService
             return;
         }
 
-        await _userStore.SaveAsync(user, ct);
+        await _userStore.ResetLockoutAsync(user.TenantId, user.UserId, DateTimeOffset.UtcNow, onlyIfUnlocked: true, ct);
     }
 
     /// <summary>
-    /// AHH Phase 2 — defer the <c>users.last_login_at</c> upsert to
+    /// AHH Phase 2 — defer the <c>users.last_login_at</c> write to
     /// <see cref="AuthWriteQueue"/>. The in-memory <paramref name="user"/>
     /// snapshot is updated synchronously so the request can ship its
-    /// response with the new timestamp; persistence is async. Idempotent
-    /// when the queue is not registered (tests fall back to sync save).
+    /// response with the new timestamp; persistence is async. When the queue
+    /// is not registered (tests) the store is written directly.
     /// </summary>
     public async Task EnqueueLastLoginAtUpdateAsync(User user, DateTimeOffset at, CancellationToken ct)
     {
@@ -92,7 +105,7 @@ internal sealed class AccountLockoutService
             return;
         }
 
-        await _userStore.SaveAsync(user, ct);
+        await _userStore.SetLastLoginAtAsync(user.TenantId, user.UserId, at, ct);
     }
 
     public async Task UnlockAsync(
@@ -102,12 +115,8 @@ internal sealed class AccountLockoutService
         string? adminUserAgent,
         CancellationToken ct)
     {
-        var user = await _userStore.GetByIdAsync(tenantId, userId, ct);
-        if (user is null) return;
-
-        user.FailedLoginAttempts = 0;
-        user.LockedUntil = null;
-        await _userStore.SaveAsync(user, ct);
+        if (!await _userStore.ResetLockoutAsync(tenantId, userId, DateTimeOffset.UtcNow, onlyIfUnlocked: false, ct))
+            return;
 
         await _authEvents.LogAsync(
             tenantId.Value,

@@ -8,8 +8,9 @@ namespace Verbara.Platform.Api.Tests.Auth;
 
 /// <summary>
 /// The per-request account-status rule for impersonation tokens (the bearer pipeline applies it;
-/// <see cref="ImpersonationTokenStatusTests"/> covers it end to end). It reads the impersonator's
-/// home account, never the target tenant the token's <c>tid</c> names.
+/// <see cref="ImpersonationTokenStatusTests"/> and <see cref="ImpersonatorRoleTests"/> cover it end to
+/// end). It reads the impersonator's home account, never the target tenant the token's <c>tid</c>
+/// names, and holds the token to the role its impersonator had when it was minted.
 /// </summary>
 public sealed class AccountStatusGateTests
 {
@@ -58,35 +59,59 @@ public sealed class AccountStatusGateTests
     [Theory]
     [InlineData("impersonator_tenant")]
     [InlineData("impersonator_id")]
+    [InlineData("impersonator_role")]
     public async Task ImpersonatorMayAuthenticateAsync_ShouldBeFalseWithoutALookup_WhenTheTokenNamesNoImpersonator(string missingClaim)
     {
         var users = UsersHolding(Admin(UserStatus.Active));
         var claims = ImpersonationToken().Claims.Where(c => c.Type != missingClaim).ToArray();
 
         (await AccountStatusGate.ImpersonatorMayAuthenticateAsync(Principal(claims), users, CancellationToken.None))
-            .Should().BeFalse(because: "every impersonation token Platform.Api mints names its impersonator");
+            .Should().BeFalse(because: "every impersonation token Platform.Api mints names its impersonator and that one's role");
         await users.DidNotReceiveWithAnyArgs().GetByIdAsync(default, default, default);
+    }
+
+    [Theory]
+    [InlineData(UserRole.Supervisor)]
+    [InlineData(UserRole.Agent)]
+    [InlineData(UserRole.Api)]
+    public async Task ImpersonatorMayAuthenticateAsync_ShouldBeFalse_WhenTheImpersonatorNoLongerHoldsTheMintedRole(UserRole currentRole)
+    {
+        var users = UsersHolding(Admin(UserStatus.Active, currentRole));
+
+        (await AccountStatusGate.ImpersonatorMayAuthenticateAsync(ImpersonationToken(), users, CancellationToken.None))
+            .Should().BeFalse(because: "the token was minted for an Admin, and its impersonator is not one any more");
+    }
+
+    [Fact]
+    public async Task ImpersonatorMayAuthenticateAsync_ShouldBeTrue_WhenTheImpersonatorStillHoldsTheMintedRole()
+    {
+        // A management key's owner need not be an Admin: the token is held to the role it was minted for.
+        var users = UsersHolding(Admin(UserStatus.Active, UserRole.Supervisor));
+
+        (await AccountStatusGate.ImpersonatorMayAuthenticateAsync(ImpersonationToken("Supervisor"), users, CancellationToken.None))
+            .Should().BeTrue();
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private static ClaimsPrincipal ImpersonationToken() =>
+    private static ClaimsPrincipal ImpersonationToken(string impersonatorRole = "Admin") =>
         Principal(
             new Claim("sub", AdminId),
             new Claim("tid", "customer-x"),
             new Claim("impersonation", "true"),
             new Claim("impersonator_id", AdminId),
-            new Claim("impersonator_tenant", HomeTenant));
+            new Claim("impersonator_tenant", HomeTenant),
+            new Claim("impersonator_role", impersonatorRole));
 
     private static ClaimsPrincipal Principal(params Claim[] claims) => new(new ClaimsIdentity(claims, "test"));
 
-    private static User Admin(UserStatus status) => new()
+    private static User Admin(UserStatus status, UserRole role = UserRole.Admin) => new()
     {
         UserId = EntityId.From(AdminId),
         TenantId = new TenantId(HomeTenant),
         Email = "admin@example.com",
         DisplayName = "Admin",
-        Role = UserRole.Admin,
+        Role = role,
         Status = status,
         CreatedAt = DateTimeOffset.UtcNow,
     };

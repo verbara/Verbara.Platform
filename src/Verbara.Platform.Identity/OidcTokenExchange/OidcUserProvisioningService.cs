@@ -6,13 +6,22 @@ namespace Verbara.Platform.Identity.OidcTokenExchange;
 public sealed partial class OidcUserProvisioningService : IOidcUserProvisioningService
 {
     private readonly IUserStore _userStore;
+    private readonly ITenantRoleStore _tenantRoles;
+    private readonly IRoleTemplateStore _roleTemplates;
+    private readonly IUserRoleStore _userRoles;
     private readonly ILogger<OidcUserProvisioningService> _logger;
 
     public OidcUserProvisioningService(
         IUserStore userStore,
+        ITenantRoleStore tenantRoles,
+        IRoleTemplateStore roleTemplates,
+        IUserRoleStore userRoles,
         ILogger<OidcUserProvisioningService> logger)
     {
         _userStore = userStore;
+        _tenantRoles = tenantRoles;
+        _roleTemplates = roleTemplates;
+        _userRoles = userRoles;
         _logger = logger;
     }
 
@@ -27,25 +36,30 @@ public sealed partial class OidcUserProvisioningService : IOidcUserProvisioningS
 
         if (user is not null)
         {
-            var needsUpdate = false;
-
-            if (claims.Name is not null && !string.Equals(user.DisplayName, claims.Name, StringComparison.Ordinal))
+            // Only the profile fields the IdP vouches for, only when they differ, and only on the
+            // existing row: this sign-in neither recreates a user deleted since the lookup nor writes
+            // back anything else it read.
+            var change = new UserProfileChange
             {
-                user.DisplayName = claims.Name;
-                needsUpdate = true;
+                DisplayName = claims.Name is not null && !string.Equals(user.DisplayName, claims.Name, StringComparison.Ordinal)
+                    ? claims.Name
+                    : null,
+                EmailVerified = claims.EmailVerified && !user.EmailVerified ? true : null,
+            };
+
+            var now = DateTimeOffset.UtcNow;
+            if (change.DisplayName is not null || change.EmailVerified is not null)
+            {
+                if (!await _userStore.UpdateProfileAsync(tid, user.UserId, change, now, ct))
+                    return null; // deleted since the lookup
+                user.DisplayName = change.DisplayName ?? user.DisplayName;
+                user.EmailVerified = change.EmailVerified ?? user.EmailVerified;
+                user.UpdatedAt = now;
             }
 
-            if (claims.EmailVerified && user.EmailVerified != claims.EmailVerified)
-            {
-                user.EmailVerified = true;
-                needsUpdate = true;
-            }
-
-            if (needsUpdate)
-                user.UpdatedAt = DateTimeOffset.UtcNow;
-
-            user.LastLoginAt = DateTimeOffset.UtcNow;
-            await _userStore.SaveAsync(user, ct);
+            if (!await _userStore.SetLastLoginAtAsync(tid, user.UserId, now, ct))
+                return null;
+            user.LastLoginAt = now;
 
             LogOidcUserMatched(_logger, claims.Subject, user.UserId.Value, tenantId);
 
@@ -57,12 +71,22 @@ public sealed partial class OidcUserProvisioningService : IOidcUserProvisioningS
 
         if (user is not null)
         {
+            var now = DateTimeOffset.UtcNow;
+            var link = new UserProfileChange
+            {
+                OidcSubject = claims.Subject,
+                AuthProvider = "oidc",
+                EmailVerified = claims.EmailVerified ? true : null,
+            };
+            if (!await _userStore.UpdateProfileAsync(tid, user.UserId, link, now, ct)
+                || !await _userStore.SetLastLoginAtAsync(tid, user.UserId, now, ct))
+                return null; // deleted since the lookup
+
             user.OidcSubject = claims.Subject;
             user.AuthProvider = "oidc";
             user.EmailVerified = user.EmailVerified || claims.EmailVerified;
-            user.LastLoginAt = DateTimeOffset.UtcNow;
-            user.UpdatedAt = DateTimeOffset.UtcNow;
-            await _userStore.SaveAsync(user, ct);
+            user.LastLoginAt = now;
+            user.UpdatedAt = now;
 
             LogOidcUserLinked(_logger, claims.Subject, user.UserId.Value, tenantId);
 
@@ -95,11 +119,31 @@ public sealed partial class OidcUserProvisioningService : IOidcUserProvisioningS
             LastLoginAt = DateTimeOffset.UtcNow,
         };
 
-        await _userStore.SaveAsync(newUser, ct);
+        await _userStore.CreateAsync(newUser, ct);
 
         LogOidcUserCreated(_logger, newUser.UserId.Value, claims.Email, role, tenantId);
 
+        await GrantDefaultRoleAsync(newUser, ct);
+
         return newUser;
+    }
+
+    // The new user's server-side permissions come from its RBAC role, which would otherwise be attached
+    // only by the role migration at the next start. Best-effort: the user exists either way, and that
+    // migration grants what this could not.
+    private async Task GrantDefaultRoleAsync(User user, CancellationToken ct)
+    {
+        try
+        {
+            var roleId = await DefaultTenantRole.GrantAsync(
+                _tenantRoles, _roleTemplates, _userRoles, user.TenantId, user.UserId, user.Role, ct);
+            if (roleId is null)
+                LogDefaultRoleUnavailable(_logger, user.UserId.Value, user.TenantId.Value, user.Role);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogDefaultRoleGrantFailed(_logger, ex, user.UserId.Value, user.TenantId.Value, user.Role);
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "OIDC user {Subject} matched existing user {UserId} in tenant {TenantId}")]
@@ -113,4 +157,10 @@ public sealed partial class OidcUserProvisioningService : IOidcUserProvisioningS
 
     [LoggerMessage(Level = LogLevel.Information, Message = "OIDC auto-created user {UserId} ({Email}) with role {Role} in tenant {TenantId}")]
     private static partial void LogOidcUserCreated(ILogger logger, string userId, string email, UserRole role, string tenantId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "OIDC auto-created user {UserId} in tenant {TenantId} holds no RBAC role yet: the tenant has no role for {Role} and its role template is unknown. The role migration at the next start grants it.")]
+    private static partial void LogDefaultRoleUnavailable(ILogger logger, string userId, string tenantId, UserRole role);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "OIDC auto-created user {UserId} in tenant {TenantId} could not be granted the RBAC role for {Role}; the role migration at the next start grants it.")]
+    private static partial void LogDefaultRoleGrantFailed(ILogger logger, Exception exception, string userId, string tenantId, UserRole role);
 }

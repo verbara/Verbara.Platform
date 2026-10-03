@@ -125,7 +125,7 @@ public sealed class ManagementClusterLicenseGateTests
                 ParentTenantId = null,
             }).AsTask().GetAwaiter().GetResult();
 
-            userStore.SaveAsync(new User
+            userStore.CreateAsync(new User
             {
                 UserId = EntityId.From("platform-admin-user-enforced"),
                 TenantId = tenantId,

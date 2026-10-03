@@ -87,6 +87,9 @@ using Verbara.Sdk.Pro.OpenTelemetry;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
+// No per-request log (the query: SSE ?token=, hub ?access_token=), no redirect log (an OIDC sign-in's token). In code, so no Logging:LogLevel key lifts them.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.AspNetCore.Http.Result.RedirectResult", LogLevel.Warning);
 
 // ─── Host-level worker resilience (ADR-0021) ─────────────────────────────────
 // Verbara house-style: any BackgroundService that throws out of ExecuteAsync
@@ -823,7 +826,6 @@ if (useRotationPool)
 {
     builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
         sp.GetRequiredService<Verbara.Platform.Identity.Auth.Jwt.IJwtKeyRotationService>(),
-        sp.GetRequiredService<IJtiRevocationCache>(),
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JwtTokenService>>(),
         sp.GetService<System.Diagnostics.Metrics.IMeterFactory>()));
 
@@ -842,7 +844,6 @@ else
     builder.Services.AddSingleton<JwtTokenService>(sp => new JwtTokenService(
         jwtKeyDirectory,
         sp.GetRequiredService<IDataProtectionProvider>(),
-        sp.GetRequiredService<IJtiRevocationCache>(),
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JwtTokenService>>(),
         sp.GetService<System.Diagnostics.Metrics.IMeterFactory>()));
 }
@@ -1720,10 +1721,12 @@ app.UseCors();
 // so the "per-tenant" partition resolver sees Items["TenantId"] (otherwise every request
 // collapses to the shared "__global__" bucket). UseRateLimiter() MUST stay BEFORE
 // UseAuthentication() so throttling happens before the (expensive) auth work.
+// ImpersonationGuardMiddleware MUST run AFTER UseAuthentication() (it reads the principal).
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseRateLimiter();
 app.UseMiddleware<RateLimitHeadersMiddleware>();
 app.UseAuthentication();
+app.UseMiddleware<ImpersonationGuardMiddleware>();
 app.UseAuthorization();
 // MT-001 (PREPUB-2026-05-09): rejects header/subdomain-driven tenant overrides
 // when the principal's tid claim does not match. Must run AFTER UseAuthorization

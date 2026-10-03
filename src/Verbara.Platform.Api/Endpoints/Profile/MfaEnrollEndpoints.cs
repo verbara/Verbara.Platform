@@ -116,12 +116,13 @@ internal static class MfaEnrollEndpoints
         var salt = user.UserId.Value;
         var hashed = codes.Select(c => recoveryCodes.Hash(c, salt)).ToList();
 
-        user.MfaSecret = body.Secret;
-        user.MfaRecoveryCodes = hashed;
         // Don't flip MfaEnabled yet — that happens in /complete after the
-        // user acknowledges saving the codes.
-        user.UpdatedAt = DateTimeOffset.UtcNow;
-        await userStore.SaveAsync(user, ct);
+        // user acknowledges saving the codes. The store re-checks that MFA is
+        // still off in the same statement, so a factor enrolled meanwhile is
+        // never replaced.
+        if (!await userStore.SetPendingMfaAsync(
+                user.TenantId, user.UserId, body.Secret, hashed, DateTimeOffset.UtcNow, ct))
+            return Results.BadRequest(new ErrorResponse("MFA already enrolled."));
 
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.MfaEnroll,
             GetIpAddress(context), GetUserAgent(context), null, ct);
@@ -157,10 +158,15 @@ internal static class MfaEnrollEndpoints
         // Idempotent: if already enabled, just return the same status.
         if (!user.MfaEnabled)
         {
-            user.MfaEnabled = true;
-            user.MfaConfirmedAt = DateTimeOffset.UtcNow;
-            user.UpdatedAt = DateTimeOffset.UtcNow;
-            await userStore.SaveAsync(user, ct);
+            if (!await userStore.EnableMfaAsync(user.TenantId, user.UserId, DateTimeOffset.UtcNow, ct))
+            {
+                // Completed by a concurrent replay (still idempotent), or the pending secret was
+                // cleared meanwhile.
+                var current = await userStore.GetByIdAsync(user.TenantId, user.UserId, ct);
+                return current is { MfaEnabled: true }
+                    ? Results.NoContent()
+                    : Results.BadRequest(new ErrorResponse("Enrollment not initialised. Call /init then /verify first."));
+            }
 
             await authEvents.LogAsync(tenantId, userId, AuthEventTypes.MfaEnroll,
                 GetIpAddress(context), GetUserAgent(context), null, ct);

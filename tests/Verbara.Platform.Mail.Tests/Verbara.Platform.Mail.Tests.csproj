@@ -18,6 +18,9 @@
     <PackageReference Include="MailKit" />
     <!-- csat-runner Phase C — Testcontainers MailHog for the email reply end-to-end. -->
     <PackageReference Include="Testcontainers" />
+    <!-- Hosting/QueryCredentialLoggingTests boots the real Mail Program (WebApplicationFactory)
+         to capture every log record the host writes for a request. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
 
 </Project>

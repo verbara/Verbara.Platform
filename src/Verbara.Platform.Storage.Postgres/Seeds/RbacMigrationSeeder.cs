@@ -1,4 +1,5 @@
 using Npgsql;
+using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Seeds;
@@ -85,7 +86,7 @@ internal static class RbacMigrationSeeder
                         // RoleDefaultPermissions fallback ADR-0037 exists to eliminate.
                         // Selecting from tenant_roles also subsumes the EXISTS guard: no candidate
                         // row means no insert.
-                        "SELECT @TenantId, @UserId, tr.role_id, now(), 'migration' " +
+                        "SELECT @TenantId, @UserId, tr.role_id, now(), @Migration " +
                         "FROM tenant_roles tr " +
                         "WHERE tr.tenant_id = @TenantId " +
                         "  AND (tr.role_id = @RoleId OR lower(tr.name) = lower(" +
@@ -99,10 +100,49 @@ internal static class RbacMigrationSeeder
                             p.Add(new NpgsqlParameter("TenantId", tenantId));
                             p.Add(new NpgsqlParameter("UserId", userId));
                             p.Add(new NpgsqlParameter("RoleId", templateId));
+                            p.Add(new NpgsqlParameter("Migration", MigrationAssigner));
                         },
                         ct);
                 }
             }
+
+            // 4. Take back the grants step 3 or user creation made for a role the user no longer has.
+            await dataSource.ExecuteAsync(
+                RemoveGrantsOfFormerRolesSql,
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", tenantId));
+                    p.Add(new NpgsqlParameter("Migration", MigrationAssigner));
+                    p.Add(new NpgsqlParameter("DefaultRole", DefaultTenantRole.AssignedBy));
+                },
+                ct);
         }
     }
+
+    private const string MigrationAssigner = "migration";
+
+    // A grant this migration (assigned_by 'migration') or a user-creation path ('default-role') made
+    // follows from users.role, so once users.role changes it is stale. A role change used to write
+    // users.role only, and step 3 then added the new role's grant beside the old one, at every start.
+    // Removed: such a grant on the role step 3 resolves for another UserRole (the template's id, or the
+    // role named like the template), unless that role is also the one it resolves for the user's own.
+    // Kept: grants anyone else made — an administrator's (its id), and setup's (no assigner) — which
+    // say nothing about following users.role, and roles no UserRole resolves to. Idempotent.
+    private const string RemoveGrantsOfFormerRolesSql =
+        "WITH role_templates_of (role, template_id) AS (" +
+        "  VALUES (0, 'agent'), (1, 'supervisor'), (2, 'admin'), (3, 'api')), " +
+        "default_roles AS (" +
+        "  SELECT m.role, tr.role_id " +
+        "  FROM role_templates_of m " +
+        "  JOIN role_templates rt ON rt.template_id = m.template_id " +
+        "  JOIN tenant_roles tr ON tr.tenant_id = @TenantId " +
+        "   AND (tr.role_id = m.template_id OR lower(tr.name) = lower(rt.name))) " +
+        "DELETE FROM user_roles ur " +
+        "USING users u " +
+        "WHERE ur.tenant_id = @TenantId " +
+        "  AND u.tenant_id = ur.tenant_id AND u.user_id = ur.user_id " +
+        "  AND u.role IN (0, 1, 2, 3) " +
+        "  AND ur.assigned_by IN (@Migration, @DefaultRole) " +
+        "  AND EXISTS (SELECT 1 FROM default_roles d WHERE d.role_id = ur.role_id AND d.role <> u.role) " +
+        "  AND NOT EXISTS (SELECT 1 FROM default_roles d WHERE d.role_id = ur.role_id AND d.role = u.role)";
 }

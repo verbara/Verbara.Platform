@@ -16,7 +16,8 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 /// <c>tenants</c> table (FK target, mirrors the convention from
 /// <c>TenantAuthConfigEncryptionFixture</c>) plus exactly the <c>users</c>
 /// columns the store's <c>SelectColumns</c> list touches, keyed on
-/// <c>(tenant_id, user_id)</c> so the store's UPSERT clause resolves. We do NOT
+/// <c>(tenant_id, user_id)</c>, with the production <c>idx_users_email</c> unique
+/// index so a duplicate email raises the same 23505 it does in production. We do NOT
 /// replay the production migration ledger here — that would drag in 24+
 /// migration files for what is effectively a one-table test.
 ///
@@ -279,6 +280,8 @@ public sealed class UserMfaEncryptionFixture : IAsyncLifetime
             oidc_subject TEXT,
             PRIMARY KEY (tenant_id, user_id)
         );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (tenant_id, lower(email));
         """;
 }
 

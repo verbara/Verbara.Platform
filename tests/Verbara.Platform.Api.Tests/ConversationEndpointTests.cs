@@ -49,12 +49,13 @@ public sealed class ConversationEndpointTests : IClassFixture<AuthenticatedPlatf
     }
 
     [Fact]
-    public async Task AcceptConversation_ShouldReturn200_WhenSwitchboardCallSucceeds()
+    public async Task AcceptConversation_ShouldReturn404_WhenConversationDoesNotExist()
     {
-        // Switchboard will throw if conversation doesn't exist — expect 400 or 200 depending on impl
+        // Who may accept an offer, and what accepting does, is covered over real offers in
+        // Conversations/ConversationOwnershipEndpointTests.
         var response = await _client.PostAsync("/api/conversations/some-id/accept", null);
 
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.BadRequest, HttpStatusCode.InternalServerError);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -17,15 +18,13 @@ public sealed class JwtTokenServiceTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly IDataProtectionProvider _dataProtection;
-    private readonly InMemoryJtiRevocationCache _cache;
     private readonly JwtTokenService _sut;
 
     public JwtTokenServiceTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"jwt-test-{Guid.NewGuid():N}");
         _dataProtection = DataProtectionProvider.Create("Verbara.Platform.Tests");
-        _cache = new InMemoryJtiRevocationCache();
-        _sut = new JwtTokenService(_tempDir, _dataProtection, _cache);
+        _sut = new JwtTokenService(_tempDir, _dataProtection);
     }
 
     public void Dispose()
@@ -67,34 +66,34 @@ public sealed class JwtTokenServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ValidateTokenAsync_ShouldReturnPrincipal_WhenTokenIsValid()
+    public async Task ValidationParameters_ShouldAcceptToken_WhenIssuedByTheSameService()
     {
         var (token, _) = _sut.GenerateAccessToken(MakeUser());
 
-        var principal = await _sut.ValidateTokenAsync(token, CancellationToken.None);
+        var principal = await TokenValidation.ValidateAsync(_sut, token);
 
         principal.Should().NotBeNull();
-        principal!.FindFirst(JwtRegisteredClaimNames.Sub)?.Value.Should().Be("user1");
+        principal!.FindFirst(JwtRegisteredClaimNames.Sub)!.Value.Should().Be("user1");
     }
 
     [Fact]
-    public async Task ValidateTokenAsync_ShouldReturnNull_WhenTokenIsInvalid()
+    public async Task ValidationParameters_ShouldRejectToken_WhenItIsNotAJwt()
     {
-        var result = await _sut.ValidateTokenAsync("not-a-valid-jwt", CancellationToken.None);
+        var result = await TokenValidation.ValidateAsync(_sut, "not-a-valid-jwt");
 
         result.Should().BeNull();
     }
 
     [Fact]
-    public async Task ValidateTokenAsync_ShouldReturnNull_WhenTokenSignedByDifferentKey()
+    public async Task ValidationParameters_ShouldRejectToken_WhenSignedByDifferentKey()
     {
         var otherDir = Path.Combine(Path.GetTempPath(), $"jwt-other-{Guid.NewGuid():N}");
         try
         {
-            var otherService = new JwtTokenService(otherDir, _dataProtection, new InMemoryJtiRevocationCache());
+            var otherService = new JwtTokenService(otherDir, _dataProtection);
             var (token, _) = otherService.GenerateAccessToken(MakeUser());
 
-            var result = await _sut.ValidateTokenAsync(token, CancellationToken.None);
+            var result = await TokenValidation.ValidateAsync(_sut, token);
 
             result.Should().BeNull();
         }
@@ -108,10 +107,10 @@ public sealed class JwtTokenServiceTests : IDisposable
     [Fact]
     public async Task Constructor_ShouldReuseExistingKey_WhenKeyFileExists()
     {
-        var secondService = new JwtTokenService(_tempDir, _dataProtection, new InMemoryJtiRevocationCache());
+        var secondService = new JwtTokenService(_tempDir, _dataProtection);
 
         var (token, _) = _sut.GenerateAccessToken(MakeUser());
-        var principal = await secondService.ValidateTokenAsync(token, CancellationToken.None);
+        var principal = await TokenValidation.ValidateAsync(secondService, token);
 
         principal.Should().NotBeNull();
     }
@@ -135,7 +134,7 @@ public sealed class JwtTokenServiceTests : IDisposable
     public void GenerateImpersonationToken_ShouldIncludeJtiClaim_WhenCalled()
     {
         var permissions = new HashSet<string> { "read:agents" };
-        var (token, _) = _sut.GenerateImpersonationToken(MakeUser(), "t2", permissions);
+        var (token, _, _) = _sut.GenerateImpersonationToken(MakeUser(), "t2", permissions);
 
         var handler = new JwtSecurityTokenHandler();
         var jwt = handler.ReadJwtToken(token);
@@ -143,6 +142,56 @@ public sealed class JwtTokenServiceTests : IDisposable
         var jti = jwt.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti);
         jti.Should().NotBeNull();
         jti!.Value.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void GenerateImpersonationToken_ShouldReturnTokenIdMatchingJtiClaim()
+    {
+        // The session keeps this handle; revoking the session revokes exactly this jti.
+        var (token, expiresAt, tokenId) = _sut.GenerateImpersonationToken(
+            MakeUser(), "t2", new HashSet<string> { "read:agents" });
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        tokenId.Should().Be(jwt.Claims.Single(c => c.Type == JwtRegisteredClaimNames.Jti).Value);
+        expiresAt.ToUnixTimeSeconds().Should().Be(
+            long.Parse(jwt.Claims.Single(c => c.Type == JwtRegisteredClaimNames.Exp).Value, CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void GenerateImpersonationToken_ShouldMintADistinctTokenId_WhenCalledTwice()
+    {
+        var permissions = new HashSet<string> { "read:agents" };
+
+        var (_, _, first) = _sut.GenerateImpersonationToken(MakeUser(), "t2", permissions);
+        var (_, _, second) = _sut.GenerateImpersonationToken(MakeUser(), "t2", permissions);
+
+        first.Should().NotBe(second, because: "revoking one session must never revoke another session's token");
+    }
+
+    [Theory]
+    [InlineData(UserRole.Admin)]
+    [InlineData(UserRole.Supervisor)]
+    public void GenerateImpersonationToken_ShouldRecordTheImpersonatorRole_WhenCalled(UserRole role)
+    {
+        // Every request that presents the token is held to this role (AccountStatusGate); the token's
+        // own role claim stays Admin whatever the impersonator's role.
+        var admin = MakeUser();
+        admin.Role = role;
+
+        var (token, _, _) = _sut.GenerateImpersonationToken(admin, "t2", new HashSet<string> { "read:agents" });
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        jwt.Claims.Single(c => c.Type == "impersonator_role").Value.Should().Be(role.ToString());
+        jwt.Claims.Single(c => c.Type == "role").Value.Should().Be("Admin");
+    }
+
+    [Fact]
+    public void ValidationParameters_ShouldGrantNoMoreClockSkewThanARevocationOutlivesExpiry()
+    {
+        // A revoked token is denylisted until its exp + MaxClockSkew; any larger skew here would let
+        // it validate again after its revocation was dropped.
+        _sut.ValidationParameters.ClockSkew.Should().BeLessThanOrEqualTo(ImpersonationTokenRevocation.MaxClockSkew);
     }
 
     [Fact]
@@ -168,26 +217,6 @@ public sealed class JwtTokenServiceTests : IDisposable
         _sut.KeyId.Should().MatchRegex(@"^platform-jwt-[0-9a-f]{16}$");
     }
 
-    // ── New B.5 test — jti revocation ─────────────────────────────────────────
-
-    [Fact]
-    public async Task ValidateTokenAsync_ShouldReturnNull_WhenJtiRevoked()
-    {
-        var (token, expiresAt) = _sut.GenerateAccessToken(MakeUser());
-
-        // Extract jti from the issued token
-        var handler = new JwtSecurityTokenHandler();
-        var jwt = handler.ReadJwtToken(token);
-        var jti = jwt.Claims.First(c => c.Type == JwtRegisteredClaimNames.Jti).Value;
-
-        // Revoke the jti before validation
-        await _cache.RevokeAsync(jti, expiresAt, CancellationToken.None);
-
-        var principal = await _sut.ValidateTokenAsync(token, CancellationToken.None);
-
-        principal.Should().BeNull();
-    }
-
     // ── New B.3 test — DataProtection migration of legacy plaintext key ───────
 
     [Fact]
@@ -204,7 +233,7 @@ public sealed class JwtTokenServiceTests : IDisposable
             File.WriteAllText(keyPath, plaintextXml);
 
             // Act: construct service with the legacy plaintext file
-            _ = new JwtTokenService(legacyDir, _dataProtection, new InMemoryJtiRevocationCache());
+            _ = new JwtTokenService(legacyDir, _dataProtection);
 
             // Assert: the file is now encrypted (raw bytes are NOT valid XML)
             var rawBytes = File.ReadAllBytes(keyPath);

@@ -7,7 +7,6 @@ using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
-using Verbara.Platform.Identity.Auth;
 using Verbara.Platform.Identity.Mfa;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
@@ -80,8 +79,7 @@ internal sealed class AuthHandlerFixture
         Directory.CreateDirectory(_tempKeyDir);
         JwtService = new JwtTokenService(
             _tempKeyDir,
-            DataProtectionProvider.Create("Verbara.Platform.Tests"),
-            new InMemoryJtiRevocationCache());
+            DataProtectionProvider.Create("Verbara.Platform.Tests"));
 
         // In-memory refresh-token backing store so rotation round-trips.
         var storedTokens = new System.Collections.Concurrent.ConcurrentDictionary<string, RefreshToken>();
@@ -138,6 +136,8 @@ internal sealed class AuthHandlerFixture
             .Returns(Task.FromResult<User?>(User));
         UserStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<User?>(User));
+        // The handlers' writes (failed-attempt count, password, MFA) land on this same instance.
+        SubstituteUserWrites.ApplyTo(UserStore, User);
         return this;
     }
 

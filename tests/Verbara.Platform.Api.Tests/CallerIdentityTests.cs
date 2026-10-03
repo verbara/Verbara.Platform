@@ -69,4 +69,38 @@ public sealed class CallerIdentityTests
 
         CallerIdentity.ResolveUserIdOrSystem(principal).Should().Be("jwt-subject-42");
     }
+
+    [Fact]
+    public void AddImpersonationContext_ShouldAddTheImpersonatorTenantAndSession_WhenTheCallerIsImpersonating()
+    {
+        var principal = PrincipalWith(
+            ("sub", "platform-admin"),
+            ("impersonation", "true"),
+            ("impersonator_id", "platform-admin"),
+            ("impersonator_tenant", "platform"),
+            ("impersonation_session_id", "session-7"));
+        var metadata = new Dictionary<string, string> { ["ip"] = "10.0.0.1" };
+
+        CallerIdentity.AddImpersonationContext(metadata, principal);
+
+        metadata.Should().Equal(new Dictionary<string, string>
+        {
+            ["ip"] = "10.0.0.1",
+            ["impersonator_id"] = "platform-admin",
+            ["impersonator_tenant"] = "platform",
+            ["impersonation_session_id"] = "session-7",
+        });
+    }
+
+    [Fact]
+    public void AddImpersonationContext_ShouldAddNothing_WhenTheCallerIsNotImpersonating()
+    {
+        // A claim that merely looks like impersonation context, without the impersonation flag, is ignored.
+        var principal = PrincipalWith(("sub", "tenant-admin"), ("impersonator_tenant", "forged"));
+        var metadata = new Dictionary<string, string>();
+
+        CallerIdentity.AddImpersonationContext(metadata, principal);
+
+        metadata.Should().BeEmpty();
+    }
 }

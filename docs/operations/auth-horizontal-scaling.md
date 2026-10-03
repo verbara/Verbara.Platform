@@ -21,7 +21,14 @@ Before flipping the deployment to N>1 replicas:
 - [ ] `ConnectionStrings:Postgres` includes pool sizing (see §"Postgres pool tuning")
 - [ ] DataProtection wired to `PlatformDataProtectionDbContext` (ADR-0003)
 - [ ] All Identity Redis caches registered: `IJwtKeyStore`, `IJtiRevocationCache`,
-      `IMfaPendingCache`, `IPasswordResetCache` (verified by `AddVerbaraPlatformIdentityRedis`)
+      `IMfaPendingCache`, `IPasswordResetCache` (verified by `AddVerbaraPlatformIdentityRedis`).
+      `IJtiRevocationCache` holds revoked impersonation tokens (an impersonation session that is
+      ended, revoked or timed out revokes its token); with the in-memory default a revocation holds
+      only on the replica that wrote it and is lost when that replica restarts
+- [ ] Platform.Realtime: `ConnectionStrings:IdentityRedis` and `Identity:Redis:KeyPrefix` set to the
+      same values as the Api. Realtime validates Api tokens with the shared key pool and refuses, at
+      connect, an impersonation token revoked in the shared `IJtiRevocationCache`; without the shared
+      store only the Api refuses it
 - [ ] `RedisAuthCacheInvalidator` listening on `asterisk:auth:invalidate` (ADR-0010)
 - [ ] AuthWriteQueue registered as `IHostedService` (ADR-0011)
 - [ ] Server GC enabled in `Verbara.Platform.Api.csproj`:

@@ -1,6 +1,8 @@
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Identity.Auth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 
@@ -14,6 +16,10 @@ internal static class AuthSchemeConfiguration
 
     public static AuthenticationBuilder AddDynamicAuth(this IServiceCollection services)
     {
+        // OIDC sign-in and password-reset links need the console's public address: say at startup
+        // when none resolves, instead of only on each refused request.
+        services.AddTransient<IStartupFilter, PublicBaseUrlStartupCheck>();
+
         // Wire JWT validation parameters via post-configure so JwtTokenService is resolved
         // from DI (it requires IDataProtectionProvider, registered as a factory singleton).
         services.AddOptions<JwtBearerOptions>(JwtScheme)
@@ -86,18 +92,32 @@ internal static class AuthSchemeConfiguration
                     },
                     OnTokenValidated = async context =>
                     {
-                        // An impersonation token (Admin in another tenant, 30 minutes) is held to
-                        // its impersonator's account status on every request; an ordinary access
-                        // token is not looked up (its <=15-minute lifetime is the accepted residual).
-                        if (context.Principal is { } principal
-                            && AccountStatusGate.IsImpersonation(principal)
-                            && !await AccountStatusGate.ImpersonatorMayAuthenticateAsync(
-                                principal,
-                                context.HttpContext.RequestServices.GetRequiredService<IUserStore>(),
-                                context.HttpContext.RequestAborted))
+                        // An impersonation token (Admin in another tenant, 30 minutes) is checked on
+                        // every request: it must not have been revoked (ending, revoking or timing
+                        // out its session revokes it), and its impersonator must still be allowed to
+                        // authenticate. An ordinary access token is not looked up (its <=15-minute
+                        // lifetime is the accepted residual). Neither lookup catches: a store outage
+                        // fails an impersonation request as a server error rather than admitting it.
+                        if (context.Principal is { } principal && AccountStatusGate.IsImpersonation(principal))
                         {
-                            context.Fail(AccountStatusGate.DeniedMessage);
-                            return;
+                            var services = context.HttpContext.RequestServices;
+                            if (await ImpersonationTokenRevocation.IsRevokedAsync(
+                                    services.GetRequiredService<IJtiRevocationCache>(),
+                                    principal,
+                                    context.HttpContext.RequestAborted))
+                            {
+                                context.Fail(ImpersonationTokenRevocation.RevokedMessage);
+                                return;
+                            }
+
+                            if (!await AccountStatusGate.ImpersonatorMayAuthenticateAsync(
+                                    principal,
+                                    services.GetRequiredService<IUserStore>(),
+                                    context.HttpContext.RequestAborted))
+                            {
+                                context.Fail(AccountStatusGate.DeniedMessage);
+                                return;
+                            }
                         }
 
                         // Only set tenant from JWT if middleware didn't already resolve one

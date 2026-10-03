@@ -45,8 +45,10 @@ internal static class CreditLedgerEndpoints
         tg.MapGet("/remaining-by-source", GetRemainingBySource).RequireAuthorization("billing:credits:read");
 
         // ── Partner-facing derive-on-read attribution (scoped to the caller's Partner tenant) ──
+        // PartnerAdminOnly alone admits every user of an operational Partner tenant: the per-customer
+        // credit attribution is billing data, read with partner:billing:view like /partner/revenue.
         var pg = app.MapGroup("/partner/credit-ledger").RequireAuthorization("PartnerAdminOnly");
-        pg.MapGet("/attribution", GetPartnerAttribution);
+        pg.MapGet("/attribution", GetPartnerAttribution).RequireAuthorization("partner:billing:view");
     }
 
     // ─── Operator mint ────────────────────────────────────────────────────────────

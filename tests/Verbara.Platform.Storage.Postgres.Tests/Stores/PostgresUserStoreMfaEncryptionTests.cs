@@ -45,12 +45,12 @@ public sealed class PostgresUserStoreMfaEncryptionTests
     // ---------------------------------------------------------------- store
 
     [Fact]
-    public async Task Save_ShouldPersistEncryptedSecret_WhenMfaSecretProvided()
+    public async Task Create_ShouldPersistEncryptedSecret_WhenMfaSecretProvided()
     {
         const string userId = "u-secret";
         const string rawSecret = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
-        await _sut.SaveAsync(NewUser(userId, rawSecret, recoveryCodes: null), default);
+        await _sut.CreateAsync(NewUser(userId, rawSecret, recoveryCodes: null), default);
 
         var stored = await _fixture.ReadRawMfaSecretAsync(_tenantId, userId);
         stored.Should().NotBeNull();
@@ -63,12 +63,12 @@ public sealed class PostgresUserStoreMfaEncryptionTests
     }
 
     [Fact]
-    public async Task Save_ShouldPersistEncryptedRecoveryCodes_WhenCodesProvided()
+    public async Task Create_ShouldPersistEncryptedRecoveryCodes_WhenCodesProvided()
     {
         const string userId = "u-codes";
         string[] supplied = ["digest-alpha", "digest-bravo", "digest-charlie"];
 
-        await _sut.SaveAsync(NewUser(userId, mfaSecret: null, supplied), default);
+        await _sut.CreateAsync(NewUser(userId, mfaSecret: null, supplied), default);
 
         var stored = await _fixture.ReadRawRecoveryCodesAsync(_tenantId, userId);
         stored.Should().NotBeNull();
@@ -88,11 +88,11 @@ public sealed class PostgresUserStoreMfaEncryptionTests
     }
 
     [Fact]
-    public async Task Save_ShouldPersistNull_WhenMfaMaterialIsNull()
+    public async Task Create_ShouldPersistNull_WhenMfaMaterialIsNull()
     {
         const string userId = "u-null";
 
-        await _sut.SaveAsync(NewUser(userId, mfaSecret: null, recoveryCodes: null), default);
+        await _sut.CreateAsync(NewUser(userId, mfaSecret: null, recoveryCodes: null), default);
 
         var storedSecret = await _fixture.ReadRawMfaSecretAsync(_tenantId, userId);
         storedSecret.Should().BeNull(
@@ -104,11 +104,11 @@ public sealed class PostgresUserStoreMfaEncryptionTests
     }
 
     [Fact]
-    public async Task Save_ShouldPersistEmptyArray_WhenRecoveryCodesEmpty()
+    public async Task Create_ShouldPersistEmptyArray_WhenRecoveryCodesEmpty()
     {
         const string userId = "u-empty";
 
-        await _sut.SaveAsync(NewUser(userId, mfaSecret: null, Array.Empty<string>()), default);
+        await _sut.CreateAsync(NewUser(userId, mfaSecret: null, Array.Empty<string>()), default);
 
         var stored = await _fixture.ReadRawRecoveryCodesAsync(_tenantId, userId);
         stored.Should().NotBeNull(
@@ -118,13 +118,67 @@ public sealed class PostgresUserStoreMfaEncryptionTests
     }
 
     [Fact]
+    public async Task SetPendingMfaAsync_ShouldPersistEncryptedMaterial_WhenAnEnrollmentStarts()
+    {
+        const string userId = "u-pending";
+        const string rawSecret = "MZXW6YTBOI======MZXW6YTBOI======";
+        string[] supplied = ["pending-digest-1", "pending-digest-2"];
+        var notEnrolled = NewUser(userId, mfaSecret: null, recoveryCodes: null);
+        notEnrolled.MfaEnabled = false;
+        await _sut.CreateAsync(notEnrolled, default);
+
+        (await _sut.SetPendingMfaAsync(new TenantId(_tenantId), EntityId.From(userId), rawSecret, supplied, DateTimeOffset.UtcNow, default))
+            .Should().BeTrue();
+
+        (await _fixture.ReadRawMfaSecretAsync(_tenantId, userId)).Should().NotBe(rawSecret,
+            because: "A7: every writer of users.mfa_secret wraps it, not only the insert");
+        (await _fixture.ReadRawRecoveryCodesAsync(_tenantId, userId)).Should().NotIntersectWith(supplied);
+        var stored = (await _sut.GetByIdAsync(new TenantId(_tenantId), EntityId.From(userId), default))!;
+        stored.MfaSecret.Should().Be(rawSecret);
+        stored.MfaRecoveryCodes.Should().Equal(supplied);
+    }
+
+    [Fact]
+    public async Task SetRecoveryCodesAsync_ShouldPersistEncryptedCodes_WhenCodesAreRegenerated()
+    {
+        const string userId = "u-regenerated";
+        string[] supplied = ["fresh-digest-1", "fresh-digest-2", "fresh-digest-3"];
+        await _sut.CreateAsync(NewUser(userId, "JBSWY3DPEHPK3PXP", ["old-digest"]), default);
+
+        (await _sut.SetRecoveryCodesAsync(new TenantId(_tenantId), EntityId.From(userId), supplied, DateTimeOffset.UtcNow, default))
+            .Should().BeTrue();
+
+        (await _fixture.ReadRawRecoveryCodesAsync(_tenantId, userId)).Should().HaveCount(supplied.Length)
+            .And.NotIntersectWith(supplied, because: "A7: regenerated digests are wrapped like enrolled ones");
+        (await _sut.GetByIdAsync(new TenantId(_tenantId), EntityId.From(userId), default))!
+            .MfaRecoveryCodes.Should().Equal(supplied);
+    }
+
+    [Fact]
+    public async Task ConsumeRecoveryCodeAsync_ShouldRemoveExactlyTheMatchingWrappedElement_WhenACodeIsRedeemed()
+    {
+        const string userId = "u-consume";
+        string[] supplied = ["keep-1", "redeem-me", "keep-2"];
+        await _sut.CreateAsync(NewUser(userId, "JBSWY3DPEHPK3PXP", supplied), default);
+        var rawBefore = (await _fixture.ReadRawRecoveryCodesAsync(_tenantId, userId))!;
+
+        (await _sut.ConsumeRecoveryCodeAsync(new TenantId(_tenantId), EntityId.From(userId), "redeem-me", default))
+            .Should().BeTrue();
+
+        // The stored ciphertext of the redeemed digest is removed; the others stay byte-for-byte.
+        (await _fixture.ReadRawRecoveryCodesAsync(_tenantId, userId)).Should().Equal(new[] { rawBefore[0], rawBefore[2] });
+        (await _sut.GetByIdAsync(new TenantId(_tenantId), EntityId.From(userId), default))!
+            .MfaRecoveryCodes.Should().Equal("keep-1", "keep-2");
+    }
+
+    [Fact]
     public async Task Get_ShouldReturnOriginalMfaMaterial_WhenStoreUsedInternally()
     {
         const string userId = "u-roundtrip";
         const string rawSecret = "KRSXG5CTMVRXEZLUJBSWY3DPEHPK3PXP";
         string[] supplied = ["digest-one", "digest-two"];
 
-        await _sut.SaveAsync(NewUser(userId, rawSecret, supplied), default);
+        await _sut.CreateAsync(NewUser(userId, rawSecret, supplied), default);
 
         var byId = await _sut.GetByIdAsync(new TenantId(_tenantId), EntityId.From(userId), default);
         byId.Should().NotBeNull();
@@ -212,7 +266,7 @@ public sealed class PostgresUserStoreMfaEncryptionTests
         const string sha256HexDigest = "9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08";
         string[] supplied = [bcryptDigest, sha256HexDigest];
 
-        await _sut.SaveAsync(NewUser(userId, mfaSecret: null, supplied), default);
+        await _sut.CreateAsync(NewUser(userId, mfaSecret: null, supplied), default);
 
         var loaded = await _sut.GetByIdAsync(new TenantId(_tenantId), EntityId.From(userId), default);
 

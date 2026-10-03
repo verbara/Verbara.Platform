@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
 
-internal static class AdminEndpoints
+internal static partial class AdminEndpoints
 {
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
@@ -32,7 +32,8 @@ internal static class AdminEndpoints
         neutralGroup.MapGet("/users", ListUsers);
         neutralGroup.MapGet("/users/{id}", GetUser);
         neutralGroup.MapPost("/users", CreateUser);
-        neutralGroup.MapPut("/users/{id}", UpdateUser);
+        neutralGroup.MapPut("/users/{id}", UpdateUser)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
         neutralGroup.MapDelete("/users/{id}", DeleteUser);
 
         // Queues — OPERATIONAL
@@ -105,13 +106,22 @@ internal static class AdminEndpoints
     {
         var tenantId = GetTenantId(context);
         var user = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return user is null ? TypedResults.NotFound() : TypedResults.Ok(ToUserDto(user));
+        if (user is null)
+            return TypedResults.NotFound();
+
+        // The tag an edit form sends back in If-Match (UpdateUser).
+        UserAdminFieldsTag.SetOn(context.Response, user);
+        return TypedResults.Ok(ToUserDto(user));
     }
 
     private static async Task<IResult> CreateUser(
         HttpContext context,
         [FromBody] CreateUserRequest body,
         [FromServices] IUserStore store,
+        [FromServices] ITenantRoleStore tenantRoles,
+        [FromServices] IRoleTemplateStore roleTemplates,
+        [FromServices] IUserRoleStore userRoles,
+        ILoggerFactory loggerFactory,
         IClock clock,
         CancellationToken ct)
     {
@@ -129,7 +139,7 @@ internal static class AdminEndpoints
         };
         try
         {
-            await store.SaveAsync(user, ct);
+            await store.CreateAsync(user, ct);
         }
         catch (EntityAlreadyExistsException ex)
         {
@@ -145,19 +155,65 @@ internal static class AdminEndpoints
                 statusCode: StatusCodes.Status409Conflict,
                 type: "https://verbara.platform/errors/entity-already-exists");
         }
+
+        await GrantDefaultRoleAsync(user, tenantRoles, roleTemplates, userRoles, loggerFactory, ct);
         return Results.Created($"/admin/users/{user.UserId}", ToUserDto(user));
     }
 
+    // Server-side permissions come from the user's RBAC roles, which the role migration would otherwise
+    // attach only at the next start: grant the role the user's role maps to now (DefaultTenantRole).
+    // Best-effort — the user exists either way, and that migration grants what this could not.
+    private static async Task GrantDefaultRoleAsync(
+        User user,
+        ITenantRoleStore tenantRoles,
+        IRoleTemplateStore roleTemplates,
+        IUserRoleStore userRoles,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!);
+        try
+        {
+            var roleId = await DefaultTenantRole.GrantAsync(
+                tenantRoles, roleTemplates, userRoles, user.TenantId, user.UserId, user.Role, ct);
+            if (roleId is null)
+                LogDefaultRoleUnavailable(logger, user.UserId.Value, user.TenantId.Value, user.Role);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogDefaultRoleGrantFailed(logger, ex, user.UserId.Value, user.TenantId.Value, user.Role);
+        }
+    }
+
+    [LoggerMessage(EventId = 7500, Level = LogLevel.Warning,
+        Message = "User {UserId} in tenant {TenantId} holds no RBAC role yet: the tenant has no role for {Role} and its role template is unknown. The role migration at the next start grants it.")]
+    private static partial void LogDefaultRoleUnavailable(ILogger logger, string userId, string tenantId, UserRole role);
+
+    [LoggerMessage(EventId = 7501, Level = LogLevel.Warning,
+        Message = "User {UserId} in tenant {TenantId} could not be granted the RBAC role for {Role}; the role migration at the next start grants it.")]
+    private static partial void LogDefaultRoleGrantFailed(ILogger logger, Exception exception, string userId, string tenantId, UserRole role);
+
     // internal (not private) so Api.Tests can invoke it with a store that changes underneath it,
     // the way AuthEndpoints.Login is exercised directly.
-    internal static async Task<Results<Ok<UserDto>, NotFound>> UpdateUser(
+    //
+    // If-Match (optional): the tag GET returned for the form being saved. When it no longer names the
+    // user's display name, role and status, the edit was made from a form someone else's change made
+    // stale, and it is refused with 412 before anything is written; when it does, the write itself
+    // only lands while the user still holds the values this request read (also 412 otherwise). Without
+    // If-Match the edit is applied as before: only the fields that differ from what this request read.
+    internal static async Task<Results<Ok<UserDto>, NotFound, ProblemHttpResult>> UpdateUser(
         string id,
         HttpContext context,
         [FromBody] UpdateUserRequest body,
         [FromServices] IUserStore store,
         [FromServices] SessionService sessions,
         [FromServices] IAuditService audit,
+        [FromServices] ITenantRoleStore tenantRoles,
+        [FromServices] IRoleTemplateStore roleTemplates,
+        [FromServices] IUserRoleStore userRoles,
+        [FromServices] PermissionResolver permissions,
         PlatformEventBus eventBus,
+        ILoggerFactory loggerFactory,
         IClock clock,
         CancellationToken ct)
     {
@@ -166,95 +222,55 @@ internal static class AdminEndpoints
         if (user is null)
             return TypedResults.NotFound();
 
-        var now = clock.UtcNow;
-        if (body.DisplayName is not null && body.DisplayName != user.DisplayName)
+        var read = new AdminFields(user.DisplayName, user.Role, user.Status);
+        var precondition = UserAdminFieldsTag.Evaluate(context.Request.Headers.IfMatch, read);
+        if (precondition == IfMatchOutcome.NotMatched)
+            return UserChangedSinceRead();
+
+        // Only a value that differs from what this request read is written, and all of them in one
+        // statement that changes an existing user only: a user deleted meanwhile is not recreated,
+        // and no other column — password, MFA, lockout — is written from what this request read.
+        var change = new AdminFieldsChange
         {
-            user.DisplayName = body.DisplayName;
-            user.UpdatedAt = now;
-            await store.SaveAsync(user, ct);
+            DisplayName = body.DisplayName is { } displayName && displayName != user.DisplayName ? displayName : null,
+            Role = body.Role is { } role && role != user.Role ? role : null,
+            Status = body.Status is { } status && status != user.Status ? status : null,
+            Expected = precondition == IfMatchOutcome.Matched ? read : null,
+        };
+        if (change is { DisplayName: null, Role: null, Status: null })
+        {
+            UserAdminFieldsTag.SetOn(context.Response, user);
+            return TypedResults.Ok(ToUserDto(user));
         }
 
-        // Role and status each have their own write: SaveAsync never writes them for an existing
-        // user, so a request still holding an object read before this change (a failed sign-in
-        // recording its attempt, a password change) cannot put the old value back when it saves.
-        // Only a value that differs from what this request read is written.
-        if (body.Role is { } role && role != user.Role)
-        {
-            if (await store.SetRoleAsync(tenantId, user.UserId, role, now, ct) is null)
-                return TypedResults.NotFound();
-            user.Role = role;
-        }
+        var written = await store.UpdateAdminFieldsAsync(
+            tenantId, user.UserId, change, clock.UtcNow, CallerIdentity.ResolveUserId(context.User), ct);
+        if (written.Outcome == AdminFieldsWriteOutcome.Stale)
+            return UserChangedSinceRead();
+        if (written is not { Outcome: AdminFieldsWriteOutcome.Written, Previous: { } previous, User: { } stored })
+            return TypedResults.NotFound();
 
-        if (body.Status is { } status && status != user.Status)
-        {
-            // The store returns the status it replaced, so the revocation and the audit entry follow
-            // the transition that was actually written, not the one this request expected.
-            var previousStatus = await store.SetStatusAsync(tenantId, user.UserId, status, now, ct);
-            if (previousStatus is null)
-                return TypedResults.NotFound();
-            user.Status = status;
-            if (previousStatus != status)
-                await ApplyStatusChangeAsync(user, previousStatus.Value, context, sessions, audit, eventBus, ct);
-        }
+        // The store returns the values it replaced, so the RBAC move, the revocation and the audit
+        // entries follow the transition that was actually written, not the one this request expected.
+        await UserAdminChange.ApplyAsync(
+            context,
+            previous,
+            stored,
+            new UserAdminChangeServices(
+                sessions, audit, eventBus, tenantRoles, roleTemplates, userRoles, permissions,
+                loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)),
+            ct);
 
-        return TypedResults.Ok(ToUserDto(user));
+        UserAdminFieldsTag.SetOn(context.Response, stored);
+        return TypedResults.Ok(ToUserDto(stored));
     }
 
-    // A status change is a security event, applied AFTER the new status is persisted (so a client
-    // reconnecting after its connection is cut already meets the new status).
-    //  • Leaving Active ends the access the account still holds: its refresh-token lineage is
-    //    revoked, so no further access token can be minted, and UserAccessRevokedEvent aborts its
-    //    live Realtime hub connections and SSE streams on every node.
-    //  • User-bound API keys are NOT revoked: they stop authenticating through the status check on
-    //    every request, and work again if the account is re-activated (revoking would force
-    //    re-issuing every integration key after a temporary suspension).
-    //  • Access tokens already issued stay valid until they expire (at most 15 minutes) — there is
-    //    deliberately no per-request status lookup for them. Impersonation tokens (30 minutes, Admin
-    //    in another tenant) are the exception: the bearer pipeline checks their impersonator's status
-    //    on every request (AccountStatusGate), so they stop working here, with nothing to revoke.
-    //  • Every change, re-activation included, is audited.
-    private static async Task ApplyStatusChangeAsync(
-        User user,
-        UserStatus previousStatus,
-        HttpContext context,
-        SessionService sessions,
-        IAuditService audit,
-        PlatformEventBus eventBus,
-        CancellationToken ct)
-    {
-        var actorId = CallerIdentity.ResolveUserIdOrSystem(context.User);
-        var ip = context.Connection.RemoteIpAddress?.ToString();
-        var revoke = !user.CanAuthenticate;
-        var revokedSessions = 0;
-
-        if (revoke)
-        {
-            revokedSessions = await sessions.RevokeAllSessionsForUserAsync(
-                user.TenantId.Value, actorId, user.UserId.Value,
-                ip, context.Request.Headers.UserAgent.FirstOrDefault(), ct);
-            eventBus.Publish(new UserAccessRevokedEvent(
-                user.TenantId.Value, user.UserId.Value, AccountStatusGate.StatusName(user.Status)));
-        }
-
-        await audit.RecordAsync(
-            user.TenantId,
-            category: "auth",
-            action: "user.status_changed",
-            severity: revoke ? "warning" : "info",
-            actorId: actorId,
-            actorType: "user",
-            targetId: user.UserId.Value,
-            targetType: "User",
-            metadata: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["old_status"] = previousStatus.ToString(),
-                ["new_status"] = user.Status.ToString(),
-                ["revoked_sessions"] = revokedSessions.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["ip"] = ip ?? "unknown",
-                ["endpoint"] = context.Request.Path.Value ?? "",
-            },
-            ct: ct);
-    }
+    private static ProblemHttpResult UserChangedSinceRead() =>
+        TypedResults.Problem(
+            title: "User changed",
+            detail: "The user's display name, role or status changed after the version named in If-Match was read. Read the user again and reapply the change.",
+            statusCode: StatusCodes.Status412PreconditionFailed,
+            type: "https://verbara.platform/errors/precondition-failed");
 
     private static UserDto ToUserDto(User u) =>
         new(
@@ -265,19 +281,54 @@ internal static class AdminEndpoints
             u.Status.ToString().ToLowerInvariant(),
             u.CreatedAt);
 
+    // Deleting an account ends every access it still holds, and is audited.
+    //  • The refresh-token lineage is revoked after the delete (so a token minted by a sign-in racing
+    //    the delete is caught too). refresh_tokens has no foreign key to users: without this, the
+    //    lineage would be refused only for as long as no row with this id exists.
+    //  • Hub connections and SSE streams were authenticated once and would stay open: cut on every
+    //    node. User-bound API keys stop on their own — they authenticate only while the owner exists.
+    //  • Access tokens already issued stay valid until they expire (at most 15 minutes).
     private static async Task<IResult> DeleteUser(
         string id,
         HttpContext context,
         [FromServices] IUserStore store,
+        [FromServices] SessionService sessions,
+        [FromServices] IAuditService audit,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        var deleted = await store.DeleteAsync(tenantId, EntityId.From(id), ct);
 
-        // Refresh and API keys already fail once the user is gone, but hub connections and SSE
-        // streams were authenticated once and would stay open: cut them on every node.
+        var actorId = CallerIdentity.ResolveUserIdOrSystem(context.User);
+        var ip = context.Connection.RemoteIpAddress?.ToString();
+        var revokedSessions = await sessions.RevokeAllSessionsForUserAsync(
+            tenantId.Value, actorId, id, ip, context.Request.Headers.UserAgent.FirstOrDefault(), ct);
+
         eventBus.Publish(new UserAccessRevokedEvent(tenantId.Value, id, UserAccessRevokedEvent.DeletedReason));
+
+        if (deleted)
+        {
+            var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["revoked_sessions"] = revokedSessions.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["ip"] = ip ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            };
+            CallerIdentity.AddImpersonationContext(metadata, context.User);
+            await audit.RecordAsync(
+                tenantId,
+                category: "auth",
+                action: "user.deleted",
+                severity: "warning",
+                actorId: actorId,
+                actorType: "user",
+                targetId: id,
+                targetType: "User",
+                metadata: metadata,
+                ct: ct);
+        }
+
         return Results.NoContent();
     }
 

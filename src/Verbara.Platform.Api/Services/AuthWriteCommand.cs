@@ -4,7 +4,7 @@ namespace Verbara.Platform.Api.Services;
 /// AHH Phase 2 — discriminated command set written to the
 /// <see cref="AuthWriteQueue"/> by the success-side login flow. Each command
 /// is processed off the request critical path by the queue's background
-/// consumer, persisted via <see cref="Verbara.Platform.Identity.IUserStore"/>
+/// consumer, persisted via the column writers of <see cref="Verbara.Platform.Identity.IUserStore"/>
 /// or <see cref="Verbara.Platform.Identity.IAuthEventStore"/>.
 /// </summary>
 /// <remarks>
@@ -21,7 +21,7 @@ internal abstract record AuthWriteCommand
     public abstract string TypeName { get; }
 }
 
-/// <summary>Defer a <c>users.last_login_at</c> upsert.</summary>
+/// <summary>Defer a <c>users.last_login_at</c> write.</summary>
 internal sealed record UpdateLastLoginAtCommand(
     string TenantId,
     string UserId,
@@ -50,15 +50,22 @@ internal sealed record LogSuccessEventCommand(
 }
 
 /// <summary>
-/// Defer a <c>users.password_hash</c> upsert. AHH Phase 4 — the login handler
+/// Defer a <c>users.password_hash</c> rehash. AHH Phase 4 — the login handler
 /// enqueues this command after a successful BCrypt verify so the user's hash
 /// migrates to Argon2id transparently on the next request cycle. The new
 /// hash is computed synchronously inside the request to avoid putting the
 /// plaintext password on a queue.
 /// </summary>
+/// <remarks>
+/// <see cref="ExpectedHash"/> is the hash the login verified. The consumer writes
+/// <see cref="NewHash"/> only while that is still the stored hash: the drain runs at
+/// least one flush interval after the login, and a password changed in between must
+/// not be replaced by a hash of the old password.
+/// </remarks>
 internal sealed record PasswordRehashCommand(
     string TenantId,
     string UserId,
+    string ExpectedHash,
     string NewHash) : AuthWriteCommand
 {
     public override string TypeName => "password_rehash";

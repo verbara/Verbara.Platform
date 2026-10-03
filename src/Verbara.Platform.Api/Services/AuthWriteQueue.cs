@@ -27,7 +27,13 @@ namespace Verbara.Platform.Api.Services;
 /// <para>
 /// <b>Consumer</b>: a single background reader drains up to 64 items per
 /// flush, coalescing user-mutating commands by <c>(tenantId, userId)</c> so
-/// at most one <c>users</c> upsert is issued per user per batch.
+/// each user gets at most one write per kind per batch. Each write is a
+/// column writer of <see cref="IUserStore"/> that changes only its own
+/// columns of an existing row and carries its own precondition, so a
+/// deferred write can neither recreate a user deleted meanwhile nor undo a
+/// change made since the login: the last-login time only moves forward, the
+/// lockout reset lifts no lock set after the success, and the rehash lands
+/// only while the hash the login verified is still stored.
 /// <c>auth_events</c> inserts are independent rows and processed
 /// individually.
 /// </para>
@@ -210,8 +216,9 @@ internal sealed partial class AuthWriteQueue : BackgroundService
         var authEventStore = scope.ServiceProvider.GetRequiredService<IAuthEventStore>();
 
         // Coalesce user-mutating commands by user. Last-writer-wins for the
-        // LastLoginAt timestamp; ResetLockoutCounters is idempotent;
-        // PasswordRehash is last-writer-wins on NewHash (rare to coalesce
+        // LastLoginAt timestamp (the store keeps the later of it and the stored
+        // value); ResetLockoutCounters is idempotent; PasswordRehash is
+        // last-writer-wins on its (ExpectedHash, NewHash) pair (rare to coalesce
         // since the same user logging in twice in 250 ms is unusual).
         var userMutations = new Dictionary<(string TenantId, string UserId), UserMutation>();
         var logEvents = new List<LogSuccessEventCommand>();
@@ -241,6 +248,7 @@ internal sealed partial class AuthWriteQueue : BackgroundService
                 {
                     var key = (p.TenantId, p.UserId);
                     var existing = userMutations.TryGetValue(key, out var v) ? v : default;
+                    existing.ExpectedPasswordHash = p.ExpectedHash;
                     existing.NewPasswordHash = p.NewHash;
                     userMutations[key] = existing;
                     break;
@@ -251,55 +259,24 @@ internal sealed partial class AuthWriteQueue : BackgroundService
             }
         }
 
-        // Apply user mutations (one read + one upsert per user per batch).
+        // Apply user mutations: one targeted write per kind per user per batch, each on its own so a
+        // write that fails does not stop the others.
         foreach (var (key, mutation) in userMutations)
         {
-            try
-            {
-                var user = await userStore.GetByIdAsync(
-                    new TenantId(key.TenantId),
-                    EntityId.From(key.UserId),
-                    ct).ConfigureAwait(false);
-                if (user is null)
-                {
-                    if (mutation.HasLastLogin)
-                        _failed.Add(1, new KeyValuePair<string, object?>("type", "update_last_login_at"));
-                    if (mutation.ResetLockout)
-                        _failed.Add(1, new KeyValuePair<string, object?>("type", "reset_lockout_counters"));
-                    if (mutation.NewPasswordHash is not null)
-                        _failed.Add(1, new KeyValuePair<string, object?>("type", "password_rehash"));
-                    continue;
-                }
-
-                if (mutation.HasLastLogin)
-                    user.LastLoginAt = mutation.LastLoginAt;
-                if (mutation.ResetLockout)
-                {
-                    user.FailedLoginAttempts = 0;
-                    user.LockedUntil = null;
-                }
-                if (mutation.NewPasswordHash is not null)
-                    user.PasswordHash = mutation.NewPasswordHash;
-
-                await userStore.SaveAsync(user, ct).ConfigureAwait(false);
-
-                if (mutation.HasLastLogin)
-                    _processed.Add(1, new KeyValuePair<string, object?>("type", "update_last_login_at"));
-                if (mutation.ResetLockout)
-                    _processed.Add(1, new KeyValuePair<string, object?>("type", "reset_lockout_counters"));
-                if (mutation.NewPasswordHash is not null)
-                    _processed.Add(1, new KeyValuePair<string, object?>("type", "password_rehash"));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                if (mutation.HasLastLogin)
-                    _failed.Add(1, new KeyValuePair<string, object?>("type", "update_last_login_at"));
-                if (mutation.ResetLockout)
-                    _failed.Add(1, new KeyValuePair<string, object?>("type", "reset_lockout_counters"));
-                if (mutation.NewPasswordHash is not null)
-                    _failed.Add(1, new KeyValuePair<string, object?>("type", "password_rehash"));
-                LogUserMutationFailed(_logger, ex, key.TenantId, key.UserId);
-            }
+            var tenantId = new TenantId(key.TenantId);
+            var userId = EntityId.From(key.UserId);
+            if (mutation.HasLastLogin)
+                await ApplyUserWriteAsync(
+                    () => userStore.SetLastLoginAtAsync(tenantId, userId, mutation.LastLoginAt, ct),
+                    "update_last_login_at", key).ConfigureAwait(false);
+            if (mutation.ResetLockout)
+                await ApplyUserWriteAsync(
+                    () => userStore.ResetLockoutAsync(tenantId, userId, DateTimeOffset.UtcNow, onlyIfUnlocked: true, ct),
+                    "reset_lockout_counters", key).ConfigureAwait(false);
+            if (mutation is { NewPasswordHash: { } newHash, ExpectedPasswordHash: { } expectedHash })
+                await ApplyUserWriteAsync(
+                    () => userStore.RehashPasswordAsync(tenantId, userId, expectedHash, newHash, ct),
+                    "password_rehash", key).ConfigureAwait(false);
         }
 
         // Apply log events independently — each is its own auth_events row.
@@ -335,11 +312,29 @@ internal sealed partial class AuthWriteQueue : BackgroundService
         base.Dispose();
     }
 
+    // A write the store refused — no such user any more, a lock in force, a password changed since the
+    // login — is not persisted, so it counts under `failed` with its kind, exactly like a write that threw.
+    private async Task ApplyUserWriteAsync(Func<Task<bool>> write, string type, (string TenantId, string UserId) key)
+    {
+        var tag = new KeyValuePair<string, object?>("type", type);
+        try
+        {
+            var written = await write().ConfigureAwait(false);
+            (written ? _processed : _failed).Add(1, tag);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _failed.Add(1, tag);
+            LogUserMutationFailed(_logger, ex, key.TenantId, key.UserId);
+        }
+    }
+
     private struct UserMutation
     {
         public DateTimeOffset LastLoginAt;
         public bool HasLastLogin;
         public bool ResetLockout;
+        public string? ExpectedPasswordHash;
         public string? NewPasswordHash;
     }
 

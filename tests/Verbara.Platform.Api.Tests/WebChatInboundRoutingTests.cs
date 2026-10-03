@@ -3,6 +3,7 @@ using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Channels.WebChat;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Storage.InMemory;
@@ -53,7 +54,7 @@ public sealed class WebChatInboundRoutingTests
 
         var capacity = Substitute.For<IAgentCapacityService>();
         var eventBus = new PlatformEventBus();
-        var switchboard = new ConversationSwitchboard(store, capacity, clock, eventBus);
+        var switchboard = new ConversationSwitchboard(store, capacity, Substitute.For<IAgentStore>(), clock, eventBus);
 
         var router = Substitute.For<IInboundRouter>();
         router.RouteAsync(default!, default).ReturnsForAnyArgs(

@@ -85,24 +85,12 @@ internal sealed class MfaAdminService : IMfaAdminService
         return new PagedResult<MfaUserSummary>(pageItems, totalCount, page, pageSize);
     }
 
-    public async Task<bool> ResetMfaAsync(
-        TenantId tenantId, EntityId userId, CancellationToken ct)
-    {
-        var user = await _userStore.GetByIdAsync(tenantId, userId, ct);
-        if (user is null)
-            return false;
-
-        user.MfaEnabled = false;
-        user.MfaSecret = null;
-        user.MfaRecoveryCodes = null;
-        user.MfaConfirmedAt = null;
-        user.LockedUntil = null;
-        user.FailedLoginAttempts = 0;
-        user.UpdatedAt = _clock.GetUtcNow();
-
-        await _userStore.SaveAsync(user, ct);
-        return true;
-    }
+    // Clears MFA and lifts the lock in one write of only those columns, so neither a sign-in still
+    // holding the account as it was before the reset nor any other writer can put the factor or the
+    // lock back.
+    public Task<bool> ResetMfaAsync(
+        TenantId tenantId, EntityId userId, CancellationToken ct) =>
+        _userStore.ClearMfaAsync(tenantId, userId, clearLockout: true, _clock.GetUtcNow(), ct);
 
     public async Task<int> RevokeSessionsAsync(
         TenantId tenantId, EntityId userId, CancellationToken ct)

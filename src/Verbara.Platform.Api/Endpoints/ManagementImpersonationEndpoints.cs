@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Security.Claims;
 using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
@@ -6,6 +7,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Impersonation;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Identity.Auth;
 using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -32,8 +34,13 @@ internal static class ManagementImpersonationEndpoints
     /// </summary>
     public const string AdminAuthorizationPolicy = "ImpersonationAdminGate";
 
-
-    private static readonly HashSet<string> ReadOnlyPermissions = new(StringComparer.Ordinal)
+    /// <summary>
+    /// The permissions a read-only impersonation token may carry: of the impersonator's own, only
+    /// these reads are minted into it. A permission gate passes an impersonation token only on a minted
+    /// permission (<see cref="ImpersonationPermissions"/>), so a read missing here is refused in a
+    /// read-only session.
+    /// </summary>
+    internal static readonly FrozenSet<string> ReadOnlyPermissions = new[]
     {
         "contacts:contact:view",
         "contacts:conversation:monitor",
@@ -57,7 +64,8 @@ internal static class ManagementImpersonationEndpoints
         "partner:customer:view",
         "partner:billing:view",
         "partner:settings:view",
-    };
+        "billing:credits:read",
+    }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Resolves the calling principal's user id using the canonical claim order
@@ -85,6 +93,9 @@ internal static class ManagementImpersonationEndpoints
     internal static string? ResolveCallerUserId(ClaimsPrincipal user)
         => CallerIdentity.ResolveUserId(user);
 
+    private static bool IsManagementKey(ClaimsPrincipal user) =>
+        string.Equals(user.FindFirst("key_type")?.Value, "management", StringComparison.Ordinal);
+
     public static void MapManagementImpersonationEndpoints(this IEndpointRouteBuilder app)
     {
         // Partner-delegated gate: StartImpersonation resolves the target tenant from the
@@ -94,7 +105,14 @@ internal static class ManagementImpersonationEndpoints
             .RequireAuthorization(PlatformAdminRequirement.PartnerDelegatedPolicy);
 
         group.MapPost("/impersonate", StartImpersonation);
-        group.MapDelete("/impersonate", EndImpersonation);
+
+        // Ending is done WITH the impersonation token, whose tenant is the target — a Customer
+        // tenant fails the platform/Partner gate above, so End needs a group of its own (still
+        // under /management inside the versioned group, so its route template is unchanged). The
+        // handler refuses a caller that is not impersonating and ends only the caller's own token
+        // and session, so authentication is the whole gate.
+        var endGroup = app.MapGroup("/management").RequireAuthorization();
+        endGroup.MapDelete("/impersonate", EndImpersonation);
 
         // R5.2 PB.2 — admin session-management surface, double-gated by
         // PlatformAdminRequirement + `system:impersonation:manage`.
@@ -210,6 +228,15 @@ internal static class ManagementImpersonationEndpoints
                 statusCode: StatusCodes.Status403Forbidden);
         }
 
+        // The token records its impersonator's role as it is now, and every request made with it is
+        // held to that role (AccountStatusGate). PartnerDelegatedPolicy admitted the caller on the role
+        // its credential carries, which for an access token is the role it was issued with, up to its
+        // lifetime ago; the stored role must still be Admin, or an admin demoted since then would get a
+        // token that records the new role and keeps working. A management key passes that policy on its
+        // own authority, whatever its owner's role, and its token records the owner's role as it is.
+        if (!IsManagementKey(context.User) && adminUser.Role != UserRole.Admin)
+            return TypedResults.Forbid();
+
         // Target permissions: caller's permissions minus platform:* scoped ones
         var nonPlatformPerms = callerPermissions
             .Where(p => !p.StartsWith("platform:", StringComparison.Ordinal));
@@ -244,16 +271,19 @@ internal static class ManagementImpersonationEndpoints
 
         // Generate shadow JWT (claims include the session id so EndImpersonation
         // can locate + close the matching record).
-        var (token, expiresAt) = jwtTokenService.GenerateImpersonationToken(
+        var (token, expiresAt, tokenId) = jwtTokenService.GenerateImpersonationToken(
             adminUser, body.TargetTenantId, targetPermissions, body.ReadOnly,
             impersonationSessionId: sessionId);
 
         // Record an admin-visible session so the management UI can list it,
         // the timeout sweep can revoke it, and the manual-revoke endpoint has
-        // a stable id to act on.
+        // a stable id to act on. The token's jti and expiry are what revoking
+        // or timing out the session revokes.
         await sessionStore.AddAsync(new ImpersonationSession
         {
             Id = sessionId,
+            TokenId = tokenId,
+            TokenExpiresAt = expiresAt,
             ActorUserId = callerUserId,
             ActorTenantId = callerTenantId,
             TargetUserId = null,
@@ -345,10 +375,11 @@ internal static class ManagementImpersonationEndpoints
         HttpContext context,
         [FromServices] AuthEventService authEventService,
         [FromServices] IImpersonationSessionStore sessionStore,
+        [FromServices] IJtiRevocationCache revocationCache,
         [FromServices] TimeProvider clock,
         CancellationToken ct)
     {
-        var isImpersonating = context.User.FindFirstValue("impersonation") == "true";
+        var isImpersonating = ImpersonationTokenRevocation.IsImpersonation(context.User);
         if (!isImpersonating)
             return Results.BadRequest(new ErrorResponse("Not currently impersonating."));
 
@@ -356,9 +387,15 @@ internal static class ManagementImpersonationEndpoints
         var impersonatorTenant = context.User.FindFirstValue("impersonator_tenant");
         var sessionId = context.User.FindFirstValue("impersonation_session_id");
 
+        // Revoke the token first, by its own jti and expiry: that works on whichever replica
+        // serves the request, holding the session record or not. A failure throws here and leaves
+        // the session open for a retry, never closed with its token still working.
+        await ImpersonationTokenRevocation.RevokeAsync(revocationCache, context.User, ct);
+
         // R5.2 PB.2 — close the matching session record so the admin list view
         // stops showing it. Idempotent: a session already closed by manual
-        // revoke / auto-timeout will short-circuit inside the store.
+        // revoke / auto-timeout will short-circuit inside the store. The store is
+        // per replica, so on another replica there is no record to close.
         if (!string.IsNullOrEmpty(sessionId))
         {
             await sessionStore.RevokeAsync(
@@ -409,6 +446,7 @@ internal static class ManagementImpersonationEndpoints
         HttpContext context,
         [FromBody] RevokeImpersonationSessionRequest? body,
         [FromServices] IImpersonationSessionStore sessionStore,
+        [FromServices] IJtiRevocationCache revocationCache,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IAuditService audit,
         [FromServices] TimeProvider clock,
@@ -432,6 +470,13 @@ internal static class ManagementImpersonationEndpoints
             ?? "platform";
 
         var reason = string.IsNullOrWhiteSpace(body?.Reason) ? "manual_revoke" : body!.Reason!;
+
+        // Revoke the session's token before closing the session, whether or not it is still open
+        // (re-revoking is harmless). A failure throws here, so the session stays open and listed and
+        // the admin can retry — it is never closed while its token still works.
+        await ImpersonationTokenRevocation.RevokeAsync(
+            revocationCache, session.TokenId, session.TokenExpiresAt, ct);
+
         var revoked = await sessionStore.RevokeAsync(
             id,
             ImpersonationSessionStatus.ManuallyRevoked,

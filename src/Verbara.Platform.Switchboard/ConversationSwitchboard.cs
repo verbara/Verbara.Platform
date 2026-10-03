@@ -1,5 +1,7 @@
+using System.Globalization;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
 
 namespace Verbara.Platform.Switchboard;
@@ -8,17 +10,20 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
 {
     private readonly IConversationStore _store;
     private readonly IAgentCapacityService _capacity;
+    private readonly IAgentStore _agents;
     private readonly IClock _clock;
     private readonly PlatformEventBus _eventBus;
 
     public ConversationSwitchboard(
         IConversationStore store,
         IAgentCapacityService capacity,
+        IAgentStore agents,
         IClock clock,
         PlatformEventBus eventBus)
     {
         _store = store;
         _capacity = capacity;
+        _agents = agents;
         _clock = clock;
         _eventBus = eventBus;
     }
@@ -64,8 +69,13 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.Offered))
             return Fail(conversation.State, $"Cannot transition from {conversation.State} to Offered.");
 
-        conversation.TransitionTo(ConversationState.Offered, _clock.UtcNow);
-        conversation.UpdatedAt = _clock.UtcNow;
+        var now = _clock.UtcNow;
+        conversation.TransitionTo(ConversationState.Offered, now);
+        // Record whom the offer is for in the same write that makes it, so the offer can be accepted or
+        // rejected only by that agent from the moment it exists (the offered event follows the save).
+        conversation.SetMetadata(ConversationOffer.OfferedToKey, agentId.Value);
+        conversation.SetMetadata(ConversationOffer.OfferedAtKey, now.ToString("O", CultureInfo.InvariantCulture));
+        conversation.UpdatedAt = now;
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
         _eventBus.Publish(new ConversationOfferedEvent(
@@ -88,6 +98,9 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
 
         if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.Active))
             return Fail(conversation.State, $"Cannot transition from {conversation.State} to Active.");
+
+        if (ConversationOffer.IsOfferedToAnotherAgent(conversation, agentId))
+            return Fail(conversation.State, OfferedToAnotherAgent);
 
         var hasCapacity = await _capacity.HasCapacityAsync(tenantId, agentId, conversation.Channel, ct).ConfigureAwait(false);
         if (!hasCapacity)
@@ -119,6 +132,9 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
 
         if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.Queued))
             return Fail(conversation.State, $"Cannot transition from {conversation.State} to Queued.");
+
+        if (ConversationOffer.IsOfferedToAnotherAgent(conversation, agentId))
+            return Fail(conversation.State, OfferedToAnotherAgent);
 
         conversation.TransitionTo(ConversationState.Queued, _clock.UtcNow);
         conversation.UpdatedAt = _clock.UtcNow;
@@ -157,31 +173,30 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         if (conversation is null)
             return Fail(ConversationState.Queued, "Conversation not found.");
 
-        // Release old agent capacity if currently owned by an agent
-        if (conversation.Owner?.Kind == ConversationOwnerKind.Agent && conversation.Owner.OwnerId.HasValue)
-            await _capacity.ReleaseAsync(tenantId, conversation.Owner.OwnerId.Value, conversation.Channel, ct).ConfigureAwait(false);
-
-        var oldState = conversation.State;
-
         // Re-queue path. OnHold/Consulting have no direct →Queued edge in the state machine,
         // but they ARE valid re-queue sources (W5 FailoverWorkStates), so first bring them back
         // to Active; then Active→Escalated→Queued. Active goes straight through; other transferable
-        // states (e.g. Snoozed) use their direct →Queued edge.
-        if (conversation.State is ConversationState.OnHold or ConversationState.Consulting)
+        // states (e.g. Snoozed) use their direct →Queued edge. Decided before anything changes, so a
+        // refused transfer leaves the owner's capacity reserved.
+        var viaActive = conversation.State is ConversationState.OnHold or ConversationState.Consulting;
+        var viaEscalated = viaActive || conversation.State == ConversationState.Active;
+        if (!viaEscalated && !ConversationStateMachine.CanTransition(conversation.State, ConversationState.Queued))
+            return Fail(conversation.State, $"Cannot transition from {conversation.State} to Queued.");
+
+        await ReleaseOwnerCapacityAsync(conversation, tenantId, ct).ConfigureAwait(false);
+
+        var oldState = conversation.State;
+        if (viaActive)
             conversation.TransitionTo(ConversationState.Active, _clock.UtcNow);
 
-        if (conversation.State == ConversationState.Active)
+        if (viaEscalated)
         {
             conversation.TransitionTo(ConversationState.Escalated, _clock.UtcNow);
             conversation.TransitionTo(ConversationState.Queued, _clock.UtcNow);
         }
-        else if (ConversationStateMachine.CanTransition(conversation.State, ConversationState.Queued))
-        {
-            conversation.TransitionTo(ConversationState.Queued, _clock.UtcNow);
-        }
         else
         {
-            return Fail(conversation.State, $"Cannot transition from {conversation.State} to Queued.");
+            conversation.TransitionTo(ConversationState.Queued, _clock.UtcNow);
         }
 
         var owner = ConversationOwner.ForQueue(targetQueueId);
@@ -205,13 +220,16 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         if (conversation is null)
             return Fail(ConversationState.Active, "Conversation not found.");
 
-        // Release old agent capacity if currently owned by an agent
-        if (conversation.Owner?.Kind == ConversationOwnerKind.Agent && conversation.Owner.OwnerId.HasValue)
-            await _capacity.ReleaseAsync(tenantId, conversation.Owner.OwnerId.Value, conversation.Channel, ct).ConfigureAwait(false);
-
         if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.Active)
             && conversation.State != ConversationState.Active)
             return Fail(conversation.State, $"Cannot transition from {conversation.State} to Active.");
+
+        // The owner must be an agent of this tenant: an id that names no agent would leave the
+        // conversation with an owner nobody is, and count its capacity against no one.
+        if (await _agents.GetByIdAsync(tenantId, targetAgentId, ct).ConfigureAwait(false) is null)
+            return Fail(conversation.State, "Target agent not found.");
+
+        await ReleaseOwnerCapacityAsync(conversation, tenantId, ct).ConfigureAwait(false);
 
         // If already Active, stay Active (just change owner). Otherwise transition.
         if (conversation.State != ConversationState.Active)
@@ -238,13 +256,11 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         if (conversation is null)
             return Fail(ConversationState.Queued, "Conversation not found.");
 
-        // Release agent capacity if currently owned by agent
-        if (conversation.Owner?.Kind == ConversationOwnerKind.Agent && conversation.Owner.OwnerId.HasValue)
-            await _capacity.ReleaseAsync(tenantId, conversation.Owner.OwnerId.Value, conversation.Channel, ct).ConfigureAwait(false);
-
         // Path: Active → Escalated → Queued
         if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.Escalated))
             return Fail(conversation.State, $"Cannot transition from {conversation.State} to Escalated.");
+
+        await ReleaseOwnerCapacityAsync(conversation, tenantId, ct).ConfigureAwait(false);
 
         conversation.TransitionTo(ConversationState.Escalated, _clock.UtcNow);
         conversation.TransitionTo(ConversationState.Queued, _clock.UtcNow);
@@ -312,6 +328,15 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
             tenantId.Value, conversationId.Value, oldState.ToString(), "Active"));
         return new OwnershipResult(true, conversation.Owner, conversation.State, null);
     }
+
+    private const string OfferedToAnotherAgent = "The conversation was offered to another agent.";
+
+    // Releases the capacity the current agent owner holds for this conversation (none when an agent
+    // does not own it). Called only once the move is known to go ahead.
+    private Task ReleaseOwnerCapacityAsync(Conversation conversation, TenantId tenantId, CancellationToken ct) =>
+        conversation.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerId }
+            ? _capacity.ReleaseAsync(tenantId, ownerId, conversation.Channel, ct)
+            : Task.CompletedTask;
 
     private static OwnershipResult Fail(ConversationState currentState, string reason) =>
         new(false, null, currentState, reason);

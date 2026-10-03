@@ -8,9 +8,9 @@ namespace Verbara.Platform.Api.Services;
 /// <summary>
 /// AHH Phase 1 — IMemoryCache decorator over <see cref="IUserStore"/>. Caches
 /// <see cref="GetByEmailAsync"/> and <see cref="GetByIdAsync"/> reads keyed by
-/// <c>(tenantId, email)</c> / <c>(tenantId, userId)</c> respectively;
-/// <see cref="SaveAsync"/>, <see cref="SetStatusAsync"/>, <see cref="SetRoleAsync"/> and
-/// <see cref="DeleteAsync"/> pass through and invalidate cache entries for the affected user.
+/// <c>(tenantId, email)</c> / <c>(tenantId, userId)</c> respectively; every write passes
+/// through and then invalidates both entries for the affected user, on this replica and — through
+/// <see cref="IAuthCachePublisher"/> — on the others.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -27,6 +27,12 @@ namespace Verbara.Platform.Api.Services;
 /// <c>RedisAuthCacheInvalidator</c> pubsub channel only carries invalidation
 /// keys (no values). See ADR-0010 §"Trust boundary" for the canonical
 /// statement.
+/// </para>
+/// <para>
+/// <b>Copies.</b> A cache hit returns a copy of the cached user, never the cached object itself:
+/// requests change the user they read (a failed sign-in, a login's lockout reset), and a change made
+/// to a shared instance would reach every other request on this replica for up to the TTL without
+/// ever being written.
 /// </para>
 /// <para>
 /// Cross-replica invalidation is delivered through
@@ -70,7 +76,7 @@ internal sealed class CachedUserStore : IUserStore, ILocalAuthCacheInvalidationS
     {
         var key = ByIdKey(tenantId.Value, userId.Value);
         if (_cache.TryGetValue<User?>(key, out var cached))
-            return cached;
+            return cached?.Clone();
 
         var fresh = await _inner.GetByIdAsync(tenantId, userId, ct).ConfigureAwait(false);
         _cache.Set(key, fresh, _ttl);
@@ -78,7 +84,7 @@ internal sealed class CachedUserStore : IUserStore, ILocalAuthCacheInvalidationS
         // user hits cache without needing a separate DB round-trip.
         if (fresh is not null)
             _cache.Set(ByEmailKey(tenantId.Value, fresh.Email), fresh, _ttl);
-        return fresh;
+        return fresh?.Clone();
     }
 
     public async Task<User?> GetByEmailAsync(TenantId tenantId, string email, CancellationToken ct)
@@ -87,13 +93,13 @@ internal sealed class CachedUserStore : IUserStore, ILocalAuthCacheInvalidationS
 
         var key = ByEmailKey(tenantId.Value, email);
         if (_cache.TryGetValue<User?>(key, out var cached))
-            return cached;
+            return cached?.Clone();
 
         var fresh = await _inner.GetByEmailAsync(tenantId, email, ct).ConfigureAwait(false);
         _cache.Set(key, fresh, _ttl);
         if (fresh is not null)
             _cache.Set(ByIdKey(tenantId.Value, fresh.UserId.Value), fresh, _ttl);
-        return fresh;
+        return fresh?.Clone();
     }
 
     // OIDC-subject lookup is not on the password-login hot path; pass through.
@@ -112,42 +118,90 @@ internal sealed class CachedUserStore : IUserStore, ILocalAuthCacheInvalidationS
     public Task<IReadOnlyList<User>> GetByIdsAsync(string tenantId, IReadOnlyCollection<string> userIds, CancellationToken ct)
         => _inner.GetByIdsAsync(tenantId, userIds, ct);
 
-    public async Task SaveAsync(User user, CancellationToken ct)
+    public async Task CreateAsync(User user, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(user);
 
-        await _inner.SaveAsync(user, ct).ConfigureAwait(false);
+        await _inner.CreateAsync(user, ct).ConfigureAwait(false);
 
-        // Invalidate AFTER the write returns so the next read goes to DB and
-        // the freshly-cached value reflects what was persisted (incl. any
-        // server-assigned defaults / triggers).
-        _cache.Remove(ByIdKey(user.TenantId.Value, user.UserId.Value));
-        _cache.Remove(ByEmailKey(user.TenantId.Value, user.Email));
-        if (_invalidator is not null)
-            await _invalidator.PublishUserAsync(user.TenantId.Value, user.UserId.Value, user.Email, ct).ConfigureAwait(false);
+        // A lookup made before the user existed may have cached "no such user" under either key.
+        await InvalidateAfterWriteAsync(user.TenantId, user.UserId, user.Email, ct).ConfigureAwait(false);
     }
 
-    public async Task<UserStatus?> SetStatusAsync(
-        TenantId tenantId, EntityId userId, UserStatus status, DateTimeOffset updatedAt, CancellationToken ct)
-    {
-        var email = await EmailOfAsync(tenantId, userId, ct).ConfigureAwait(false);
-        var previous = await _inner.SetStatusAsync(tenantId, userId, status, updatedAt, ct).ConfigureAwait(false);
-        await InvalidateAfterWriteAsync(tenantId, userId, email, ct).ConfigureAwait(false);
-        return previous;
-    }
+    public Task<bool> UpdateProfileAsync(
+        TenantId tenantId, EntityId userId, UserProfileChange change, DateTimeOffset updatedAt, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId, () => _inner.UpdateProfileAsync(tenantId, userId, change, updatedAt, ct), ct);
 
-    public async Task<UserRole?> SetRoleAsync(
-        TenantId tenantId, EntityId userId, UserRole role, DateTimeOffset updatedAt, CancellationToken ct)
+    public Task<AdminFieldsWriteResult> UpdateAdminFieldsAsync(
+        TenantId tenantId, EntityId userId, AdminFieldsChange change, DateTimeOffset updatedAt, string? updatedBy,
+        CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId,
+            () => _inner.UpdateAdminFieldsAsync(tenantId, userId, change, updatedAt, updatedBy, ct), ct);
+
+    public Task<bool> SetPasswordHashAsync(
+        TenantId tenantId, EntityId userId, string newHash, DateTimeOffset changedAt, bool clearLockout,
+        string? expectedCurrentHash, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId,
+            () => _inner.SetPasswordHashAsync(tenantId, userId, newHash, changedAt, clearLockout, expectedCurrentHash, ct), ct);
+
+    public Task<bool> RehashPasswordAsync(
+        TenantId tenantId, EntityId userId, string expectedHash, string newHash, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId, () => _inner.RehashPasswordAsync(tenantId, userId, expectedHash, newHash, ct), ct);
+
+    public Task<FailedSignInResult?> RecordFailedSignInAsync(
+        TenantId tenantId, EntityId userId, int threshold, DateTimeOffset lockUntil, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId,
+            () => _inner.RecordFailedSignInAsync(tenantId, userId, threshold, lockUntil, ct), ct);
+
+    public Task<bool> ResetLockoutAsync(
+        TenantId tenantId, EntityId userId, DateTimeOffset now, bool onlyIfUnlocked, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId, () => _inner.ResetLockoutAsync(tenantId, userId, now, onlyIfUnlocked, ct), ct);
+
+    public Task<bool> SetLastLoginAtAsync(TenantId tenantId, EntityId userId, DateTimeOffset at, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId, () => _inner.SetLastLoginAtAsync(tenantId, userId, at, ct), ct);
+
+    public Task<bool> SetPendingMfaAsync(
+        TenantId tenantId, EntityId userId, string secret, IReadOnlyList<string> recoveryCodeDigests,
+        DateTimeOffset updatedAt, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId,
+            () => _inner.SetPendingMfaAsync(tenantId, userId, secret, recoveryCodeDigests, updatedAt, ct), ct);
+
+    public Task<bool> EnableMfaAsync(TenantId tenantId, EntityId userId, DateTimeOffset confirmedAt, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId, () => _inner.EnableMfaAsync(tenantId, userId, confirmedAt, ct), ct);
+
+    public Task<bool> ClearMfaAsync(
+        TenantId tenantId, EntityId userId, bool clearLockout, DateTimeOffset updatedAt, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId, () => _inner.ClearMfaAsync(tenantId, userId, clearLockout, updatedAt, ct), ct);
+
+    public Task<bool> SetRecoveryCodesAsync(
+        TenantId tenantId, EntityId userId, IReadOnlyList<string> recoveryCodeDigests, DateTimeOffset updatedAt,
+        CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId,
+            () => _inner.SetRecoveryCodesAsync(tenantId, userId, recoveryCodeDigests, updatedAt, ct), ct);
+
+    public Task<bool> ConsumeRecoveryCodeAsync(
+        TenantId tenantId, EntityId userId, string recoveryCodeDigest, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId,
+            () => _inner.ConsumeRecoveryCodeAsync(tenantId, userId, recoveryCodeDigest, ct), ct);
+
+    public Task<bool> DeleteAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
+        => WriteThroughAsync(tenantId, userId, () => _inner.DeleteAsync(tenantId, userId, ct), ct);
+
+    // Every write: capture the email (the by-email key needs it and no targeted write carries it),
+    // write, then drop both entries here and publish the invalidation to the other replicas — also
+    // when the write was refused, since a refusal means the stored row is not what this replica may
+    // have cached. A user's email never changes, so reading it before the write is enough.
+    private async Task<T> WriteThroughAsync<T>(TenantId tenantId, EntityId userId, Func<Task<T>> write, CancellationToken ct)
     {
         var email = await EmailOfAsync(tenantId, userId, ct).ConfigureAwait(false);
-        var previous = await _inner.SetRoleAsync(tenantId, userId, role, updatedAt, ct).ConfigureAwait(false);
+        var result = await write().ConfigureAwait(false);
         await InvalidateAfterWriteAsync(tenantId, userId, email, ct).ConfigureAwait(false);
-        return previous;
+        return result;
     }
 
     // The by-email entry holds the same object as the by-id one; leaving it behind would let a
-    // password sign-in read the pre-change status for up to the TTL. The targeted writes do not
-    // carry the email, so it comes from the cached user, or from the inner store on a miss.
+    // password sign-in read the pre-change state for up to the TTL. The email comes from the cached
+    // user, or from the inner store on a miss.
     private async Task<string?> EmailOfAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
     {
         if (_cache.TryGetValue<User?>(ByIdKey(tenantId.Value, userId.Value), out var cached) && cached is not null)
@@ -161,22 +215,6 @@ internal sealed class CachedUserStore : IUserStore, ILocalAuthCacheInvalidationS
         InvalidateUser(tenantId.Value, userId.Value, email);
         if (_invalidator is not null)
             await _invalidator.PublishUserAsync(tenantId.Value, userId.Value, email, ct).ConfigureAwait(false);
-    }
-
-    public async Task DeleteAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
-    {
-        // Capture email before delete so we can invalidate the by-email key too.
-        var existing = _cache.TryGetValue<User?>(ByIdKey(tenantId.Value, userId.Value), out var cached)
-            ? cached
-            : await _inner.GetByIdAsync(tenantId, userId, ct).ConfigureAwait(false);
-
-        await _inner.DeleteAsync(tenantId, userId, ct).ConfigureAwait(false);
-
-        _cache.Remove(ByIdKey(tenantId.Value, userId.Value));
-        if (existing is not null)
-            _cache.Remove(ByEmailKey(tenantId.Value, existing.Email));
-        if (_invalidator is not null)
-            await _invalidator.PublishUserAsync(tenantId.Value, userId.Value, existing?.Email, ct).ConfigureAwait(false);
     }
 
     // ─── ILocalAuthCacheInvalidationSink ────────────────────────────────────

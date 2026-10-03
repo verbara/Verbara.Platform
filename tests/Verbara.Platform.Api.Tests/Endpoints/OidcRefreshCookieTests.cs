@@ -4,7 +4,6 @@ using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
-using Verbara.Platform.Identity.Auth;
 using Verbara.Platform.Identity.Mfa;
 using Verbara.Platform.Identity.OidcTokenExchange;
 using FluentAssertions;
@@ -98,8 +97,7 @@ public sealed class OidcRefreshCookieTests
             Directory.CreateDirectory(tempKeyDir);
             _jwtService = new JwtTokenService(
                 tempKeyDir,
-                DataProtectionProvider.Create("Verbara.Platform.OidcCookieTests"),
-                new InMemoryJtiRevocationCache());
+                DataProtectionProvider.Create("Verbara.Platform.OidcCookieTests"));
 
             _refreshTokenStore.SaveAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>())
                 .Returns(Task.CompletedTask);
@@ -146,7 +144,7 @@ public sealed class OidcRefreshCookieTests
 
             var result = await OidcEndpoints.CompleteOidcLoginAsync(
                 context, _jwtService, _refreshService, _authEvents,
-                _mfaEvaluator, _mfaCache, _user, flowState,
+                _mfaEvaluator, _mfaCache, _user, flowState, publicBaseUrl: "https://app.example.com",
                 ip: null, ua: null, ct: CancellationToken.None);
 
             return (result, context);

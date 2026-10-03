@@ -10,6 +10,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
 {
     private readonly IConversationStore _store = Substitute.For<IConversationStore>();
     private readonly IAgentCapacityService _capacity = Substitute.For<IAgentCapacityService>();
+    private readonly IAgentStore _agents = Substitute.For<IAgentStore>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly PlatformEventBus _eventBus = new();
 
@@ -20,7 +21,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
     private readonly DateTimeOffset _now = new(2026, 3, 21, 12, 0, 0, TimeSpan.Zero);
 
     private ConversationSwitchboard CreateSut() =>
-        new(_store, _capacity, _clock, _eventBus);
+        new(_store, _capacity, _agents, _clock, _eventBus);
 
     private Conversation BuildConversation(ConversationState state, ConversationOwner? owner = null) =>
         new()
@@ -38,6 +39,18 @@ public sealed class ConversationSwitchboardTests : IDisposable
     {
         _clock.UtcNow.Returns(_now);
     }
+
+    private void AgentExists(EntityId agentId) =>
+        _agents.GetByIdAsync(_tenantId, agentId, Arg.Any<CancellationToken>())
+               .Returns(new Agent
+               {
+                   AgentId = agentId,
+                   TenantId = _tenantId,
+                   UserId = EntityId.From($"user-of-{agentId.Value}"),
+                   DisplayName = agentId.Value,
+                   State = AgentState.Available,
+                   CreatedAt = _now,
+               });
 
     public void Dispose() => _eventBus.Dispose();
 
@@ -201,7 +214,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
         _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
               .Returns(conversation);
 
-        var sut = new ConversationSwitchboard(_store, capacity, _clock, _eventBus);
+        var sut = new ConversationSwitchboard(_store, capacity, _agents, _clock, _eventBus);
         var result = await sut.AcceptAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
 
         result.Success.Should().BeFalse();
@@ -372,6 +385,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
               .Returns(conversation);
 
         var newAgentId = EntityId.From("agent-new");
+        AgentExists(newAgentId);
         var sut = CreateSut();
         var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, newAgentId, CancellationToken.None);
 
@@ -391,12 +405,50 @@ public sealed class ConversationSwitchboardTests : IDisposable
               .Returns(conversation);
 
         var newAgentId = EntityId.From("agent-new");
+        AgentExists(newAgentId);
         var sut = CreateSut();
         var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, newAgentId, CancellationToken.None);
 
         result.Success.Should().BeTrue();
         result.NewOwner!.Kind.Should().Be(ConversationOwnerKind.Agent);
         result.NewOwner.OwnerId.Should().Be(newAgentId);
+    }
+
+    [Fact]
+    public async Task TransferToAgentAsync_ShouldFailAndChangeNothing_WhenTargetAgentDoesNotExist()
+    {
+        var owner = ConversationOwner.ForAgent(_agentId);
+        var conversation = BuildConversation(ConversationState.Active, owner);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, EntityId.From("ghost-agent"), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.FailureReason.Should().Be("Target agent not found.");
+        conversation.Owner.Should().Be(owner);
+        conversation.State.Should().Be(ConversationState.Active);
+        await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
+        await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task TransferToAgentAsync_ShouldNotReleaseOwnerCapacity_WhenTheTransitionIsInvalid()
+    {
+        var conversation = BuildConversation(ConversationState.Closed, ConversationOwner.ForAgent(_agentId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+        var target = EntityId.From("agent-new");
+        AgentExists(target);
+
+        var sut = CreateSut();
+        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, target, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
+        await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
     }
 
     // ─── ReturnToBot ──────────────────────────────────────────────────────────
@@ -490,6 +542,21 @@ public sealed class ConversationSwitchboardTests : IDisposable
 
         result.Success.Should().BeTrue();
         result.NewState.Should().Be(ConversationState.Active);
+    }
+
+    [Fact]
+    public async Task Unhold_ShouldFailAndKeepState_WhenCallerIsNotTheAssignedAgent()
+    {
+        var conversation = BuildConversation(ConversationState.OnHold, ConversationOwner.ForAgent(EntityId.From("agent-other")));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.UnholdAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        conversation.State.Should().Be(ConversationState.OnHold);
+        await _store.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -604,6 +671,114 @@ public sealed class ConversationSwitchboardTests : IDisposable
         await sut.TransferToQueueAsync(_conversationId, _tenantId, targetQueue, CancellationToken.None);
 
         await _capacity.DidNotReceive().ReleaseAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TransferToQueueAsync_ShouldNotReleaseOwnerCapacity_WhenTheTransitionIsInvalid()
+    {
+        var owner = ConversationOwner.ForAgent(_agentId);
+        var conversation = BuildConversation(ConversationState.Closed, owner);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.TransferToQueueAsync(_conversationId, _tenantId, _queueId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        conversation.Owner.Should().Be(owner);
+        await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
+    }
+
+    [Fact]
+    public async Task ReturnToBotAsync_ShouldNotReleaseOwnerCapacity_WhenTheTransitionIsInvalid()
+    {
+        var owner = ConversationOwner.ForAgent(_agentId);
+        var conversation = BuildConversation(ConversationState.WrapUp, owner);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.ReturnToBotAsync(_conversationId, _tenantId, EntityId.From("bot-001"), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        conversation.Owner.Should().Be(owner);
+        await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
+    }
+
+    // ─── Offers belong to the agent they were made to ─────────────────────────
+
+    [Fact]
+    public async Task OfferToAgentAsync_ShouldRecordTheOfferedAgent_BeforeTheOfferIsSaved()
+    {
+        var conversation = BuildConversation(ConversationState.Queued, ConversationOwner.ForQueue(_queueId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+        Dictionary<string, string>? savedMetadata = null;
+        _store.When(s => s.SaveAsync(conversation, Arg.Any<CancellationToken>()))
+              .Do(_ => savedMetadata = new Dictionary<string, string>(conversation.Metadata));
+
+        var sut = CreateSut();
+        var result = await sut.OfferToAgentAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        savedMetadata.Should().NotBeNull();
+        savedMetadata!["_offeredTo"].Should().Be(_agentId.Value);
+        DateTimeOffset.Parse(savedMetadata["_offeredAt"], System.Globalization.CultureInfo.InvariantCulture)
+            .Should().Be(_now);
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ShouldFailAndReserveNothing_WhenOfferedToAnotherAgent()
+    {
+        var queueOwner = ConversationOwner.ForQueue(_queueId);
+        var conversation = BuildConversation(ConversationState.Offered, queueOwner);
+        conversation.SetMetadata("_offeredTo", "agent-someone-else");
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+        _capacity.HasCapacityAsync(_tenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>())
+                 .Returns(true);
+
+        var sut = CreateSut();
+        var result = await sut.AcceptAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        conversation.State.Should().Be(ConversationState.Offered);
+        conversation.Owner.Should().Be(queueOwner);
+        await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ShouldSucceed_WhenOfferedToTheAcceptingAgent()
+    {
+        var conversation = BuildConversation(ConversationState.Offered, ConversationOwner.ForQueue(_queueId));
+        conversation.SetMetadata("_offeredTo", _agentId.Value);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+        _capacity.HasCapacityAsync(_tenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>())
+                 .Returns(true);
+
+        var sut = CreateSut();
+        var result = await sut.AcceptAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.NewOwner.Should().Be(ConversationOwner.ForAgent(_agentId));
+    }
+
+    [Fact]
+    public async Task RejectAsync_ShouldFailAndKeepOffer_WhenOfferedToAnotherAgent()
+    {
+        var conversation = BuildConversation(ConversationState.Offered, ConversationOwner.ForQueue(_queueId));
+        conversation.SetMetadata("_offeredTo", "agent-someone-else");
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.RejectAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        conversation.State.Should().Be(ConversationState.Offered);
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
     }
 
     // ─── Event publishing ─────────────────────────────────────────────────────

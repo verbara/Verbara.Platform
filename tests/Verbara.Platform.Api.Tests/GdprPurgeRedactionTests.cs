@@ -73,7 +73,7 @@ public sealed class GdprPurgeRedactionTests
 
         var service = new GdprPurgeService(
             contactStore, conversationStore, messageStore,
-            authEventStore, userStore, purgeLogStore, auditStore);
+            authEventStore, userStore, new InMemoryRefreshTokenStore(), purgeLogStore, auditStore);
 
         var result = await service.PurgeContactDataAsync(
             Tenant.Value, contactId.Value, "admin", "Subject erasure request", CancellationToken.None);

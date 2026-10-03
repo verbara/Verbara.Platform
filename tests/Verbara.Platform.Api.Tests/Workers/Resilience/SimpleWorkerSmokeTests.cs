@@ -116,6 +116,7 @@ public sealed class SimpleWorkerSmokeTests
             Substitute.For<IImpersonationSessionStore>(),
             Substitute.For<ITenantAuthConfigStore>(),
             Substitute.For<IAuditService>(),
+            Substitute.For<Verbara.Platform.Identity.Auth.IJtiRevocationCache>(),
             NullLogger<ImpersonationSessionTimeoutService>.Instance,
             clock: TimeProvider.System,
             sweepInterval: TimeSpan.FromMilliseconds(100));

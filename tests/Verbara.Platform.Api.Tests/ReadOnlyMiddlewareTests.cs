@@ -1,83 +1,49 @@
+using Verbara.Platform.Api.Middleware;
+
 namespace Verbara.Platform.Api.Tests;
 
+/// <summary>
+/// The read-only impersonation rule, <see cref="ImpersonationGuardMiddleware.IsBlockedInReadOnlyMode"/>,
+/// on route templates: default-deny for every method but GET, HEAD and OPTIONS.
+/// </summary>
 public sealed class ReadOnlyMiddlewareTests
 {
-    // Mirror of TenantResolutionMiddleware.IsBlockedInReadOnlyMode for pure-logic testing.
-    private static bool IsBlockedInReadOnlyMode(string method, string path)
-    {
-        // GET, HEAD, OPTIONS always allowed
-        if (string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(method, "OPTIONS", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        // DELETE /management/impersonate always allowed (end session)
-        if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase)
-            && (path.Equals("/api/v1/management/impersonate", StringComparison.OrdinalIgnoreCase)
-                || path.Equals("/api/management/impersonate", StringComparison.OrdinalIgnoreCase)))
-            return false;
-
-        // Block all other DELETE, PUT, PATCH
-        if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(method, "PUT", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(method, "PATCH", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        // POST: allow safe read-only operations
-        if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
-        {
-            if (path.Contains("/sse", StringComparison.OrdinalIgnoreCase))
-                return false;
-            if (path.Contains("/search", StringComparison.OrdinalIgnoreCase))
-                return false;
-            if (path.Contains("/export", StringComparison.OrdinalIgnoreCase))
-                return false;
-            return true;
-        }
-
-        return false;
-    }
+    private const string Api = "/api/v{version:apiVersion}";
 
     [Theory]
     [InlineData("GET")]
     [InlineData("HEAD")]
     [InlineData("OPTIONS")]
+    [InlineData("get")]
     public void ReadOnlyMode_ShouldAllowReadMethods(string method)
     {
-        var blocked = IsBlockedInReadOnlyMode(method, "/api/v1/admin/queues");
+        var blocked = ImpersonationGuardMiddleware.IsBlockedInReadOnlyMode(method, Api + "/admin/queues");
 
         blocked.Should().BeFalse();
     }
 
     [Theory]
-    [InlineData("PUT", "/api/v1/admin/queues/q1")]
-    [InlineData("DELETE", "/api/v1/admin/users/u1")]
-    [InlineData("PATCH", "/api/v1/admin/contacts/c1")]
-    public void ReadOnlyMode_ShouldBlockWriteMethods(string method, string path)
+    [InlineData("PUT", Api + "/admin/queues/{id}")]
+    [InlineData("DELETE", Api + "/admin/users/{id}")]
+    [InlineData("PATCH", Api + "/management/retention/config")]
+    [InlineData("POST", Api + "/admin/queues")]
+    [InlineData("POST", Api + "/contacts/")]
+    public void ReadOnlyMode_ShouldBlockWriteMethods(string method, string template)
     {
-        var blocked = IsBlockedInReadOnlyMode(method, path);
+        var blocked = ImpersonationGuardMiddleware.IsBlockedInReadOnlyMode(method, template);
 
         blocked.Should().BeTrue();
     }
 
     [Theory]
-    [InlineData("POST", "/api/v1/sse/events")]
-    [InlineData("POST", "/api/v1/contacts/search")]
-    [InlineData("POST", "/api/v1/gdpr/contacts/c1/export")]
-    public void ReadOnlyMode_ShouldAllowSafePostEndpoints(string method, string path)
+    [InlineData("POST", Api + "/admin/gdpr/export")]
+    [InlineData("POST", Api + "/contacts/search")]
+    [InlineData("POST", Api + "/events/sse")]
+    public void ReadOnlyMode_ShouldBlockPost_WhenPathOnlyLooksLikeARead(string method, string template)
     {
-        var blocked = IsBlockedInReadOnlyMode(method, path);
-
-        blocked.Should().BeFalse();
-    }
-
-    [Theory]
-    [InlineData("POST", "/api/v1/admin/queues")]
-    [InlineData("POST", "/api/v1/admin/users")]
-    [InlineData("POST", "/api/v1/management/tenants")]
-    public void ReadOnlyMode_ShouldBlockUnsafePostEndpoints(string method, string path)
-    {
-        var blocked = IsBlockedInReadOnlyMode(method, path);
+        // A segment such as "export", "search" or "sse" grants nothing: a POST is a write unless its
+        // endpoint is allowed by name.
+        var blocked = ImpersonationGuardMiddleware.IsBlockedInReadOnlyMode(method, template);
 
         blocked.Should().BeTrue();
     }
@@ -85,8 +51,24 @@ public sealed class ReadOnlyMiddlewareTests
     [Fact]
     public void ReadOnlyMode_ShouldAllowEndImpersonation()
     {
-        var blocked = IsBlockedInReadOnlyMode("DELETE", "/api/v1/management/impersonate");
+        var blocked = ImpersonationGuardMiddleware.IsBlockedInReadOnlyMode("DELETE", Api + "/management/impersonate");
 
         blocked.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ReadOnlyMode_ShouldBlockStartImpersonation()
+    {
+        var blocked = ImpersonationGuardMiddleware.IsBlockedInReadOnlyMode("POST", Api + "/management/impersonate");
+
+        blocked.Should().BeTrue(because: "only ending the session is allowed, not another verb on the same route");
+    }
+
+    [Fact]
+    public void ReadOnlyMode_ShouldBlockWrite_WhenRequestMatchedNoEndpoint()
+    {
+        var blocked = ImpersonationGuardMiddleware.IsBlockedInReadOnlyMode("POST", template: null);
+
+        blocked.Should().BeTrue();
     }
 }

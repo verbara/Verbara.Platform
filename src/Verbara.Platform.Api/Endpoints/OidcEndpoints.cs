@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
@@ -33,6 +34,7 @@ internal static class OidcEndpoints
         HttpContext context,
         [FromServices] ITenantAuthConfigStore configStore,
         [FromServices] IDataProtectionProvider dataProtection,
+        [FromServices] IConfiguration configuration,
         string? tenant_id,
         string? return_url,
         CancellationToken ct)
@@ -44,6 +46,12 @@ internal static class OidcEndpoints
         if (config is null || !config.OidcEnabled || string.IsNullOrEmpty(config.OidcAuthority))
             return Results.BadRequest(new ErrorResponse("OIDC is not enabled for this tenant"));
 
+        // The provider sends the user, and the authorization code, back to redirect_uri: it is the
+        // configured console address, never the request's Host, which the sender chooses.
+        var publicBaseUrl = await PublicBaseUrl.ResolveForTenantAsync(context, configuration, tenant_id, ct);
+        if (publicBaseUrl is null)
+            return SignInUnavailable(context, configuration, tenant_id);
+
         var codeVerifier = OidcTokenExchangeService.GenerateCodeVerifier();
         var codeChallenge = OidcTokenExchangeService.ComputeCodeChallenge(codeVerifier);
         var nonce = OidcTokenExchangeService.GenerateNonce();
@@ -54,7 +62,8 @@ internal static class OidcEndpoints
             CodeVerifier = codeVerifier,
             Nonce = nonce,
             TenantId = tenant_id,
-            ReturnUrl = return_url,
+            // The sign-in's result goes back to this URL: it must be on the console (see SignInReturnUrl).
+            ReturnUrl = PublicBaseUrl.SignInReturnUrl(return_url, publicBaseUrl),
             ExpiresAtUnix = DateTimeOffset.UtcNow.Add(FlowTimeout).ToUnixTimeSeconds(),
         };
 
@@ -71,7 +80,7 @@ internal static class OidcEndpoints
             MaxAge = FlowTimeout,
         });
 
-        var redirectUri = $"{context.Request.Scheme}://{context.Request.Host}/api/auth/oidc/callback";
+        var redirectUri = PublicBaseUrl.OidcRedirectUri(publicBaseUrl);
         var authorizationUrl = $"{config.OidcAuthority.TrimEnd('/')}/authorize" +
             $"?client_id={Uri.EscapeDataString(config.OidcClientId ?? "")}" +
             $"&response_type=code" +
@@ -94,6 +103,7 @@ internal static class OidcEndpoints
         [FromServices] IDataProtectionProvider dataProtection,
         [FromServices] IMfaPolicyEvaluator mfaEvaluator,
         [FromServices] IMfaPendingCache mfaCache,
+        [FromServices] IConfiguration configuration,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
@@ -132,7 +142,15 @@ internal static class OidcEndpoints
             return Results.BadRequest(new ErrorResponse("OIDC is not enabled for this tenant"));
         }
 
-        var redirectUri = $"{context.Request.Scheme}://{context.Request.Host}/api/auth/oidc/callback";
+        // The token request repeats the redirect_uri the authorization request sent (OidcLogin).
+        var publicBaseUrl = await PublicBaseUrl.ResolveForTenantAsync(context, configuration, tenantId, ct);
+        if (publicBaseUrl is null)
+        {
+            await authEvents.LogAsync(tenantId, null, AuthEventTypes.OidcLoginFailure, ip, ua, null, ct);
+            return SignInUnavailable(context, configuration, tenantId);
+        }
+
+        var redirectUri = PublicBaseUrl.OidcRedirectUri(publicBaseUrl);
 
         OidcTokenResponse tokenResponse;
         try
@@ -169,7 +187,21 @@ internal static class OidcEndpoints
 
         // The account-status check lives in CompleteOidcLoginAsync, the step that issues tokens or
         // an MFA challenge, so no caller of that step can skip it.
-        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, mfaCache, user, flowState, ip, ua, ct);
+        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, mfaCache, user, flowState, publicBaseUrl, ip, ua, ct);
+    }
+
+    /// <summary>
+    /// Refuses a sign-in step that has no configured console address to put in redirect_uri; the
+    /// request's Host is never used in its place.
+    /// </summary>
+    private static IResult SignInUnavailable(HttpContext context, IConfiguration configuration, string tenantId)
+    {
+        PublicBaseUrl.LogOidcSignInRefused(context, configuration, tenantId);
+        return Results.Json(
+            new ErrorResponse(
+                $"Single sign-on is unavailable: the platform's public address ({PublicBaseUrl.ConfigurationKey}) is not set to a valid URL."),
+            ApiJsonContext.Default.ErrorResponse,
+            statusCode: StatusCodes.Status500InternalServerError);
     }
 
     private static (OidcFlowState? State, IResult? Error) DecryptFlowState(
@@ -205,9 +237,13 @@ internal static class OidcEndpoints
     internal static async Task<IResult> CompleteOidcLoginAsync(
         HttpContext context, JwtTokenService jwtService, RefreshTokenService refreshService,
         AuthEventService authEvents, IMfaPolicyEvaluator mfaEvaluator, IMfaPendingCache mfaCache,
-        User user, OidcFlowState flowState, string? ip, string? ua, CancellationToken ct)
+        User user, OidcFlowState flowState, string publicBaseUrl, string? ip, string? ua, CancellationToken ct)
     {
         var tenantId = flowState.TenantId;
+
+        // Every redirect below carries the result in its fragment. The login endpoint already held
+        // return_url to the console; a state cookie issued before it did is checked here again.
+        var returnUrl = PublicBaseUrl.SignInReturnUrl(flowState.ReturnUrl, publicBaseUrl);
 
         // An IdP vouching for the identity says nothing about the account here: one that may not
         // authenticate gets neither tokens nor an MFA challenge.
@@ -231,9 +267,8 @@ internal static class OidcEndpoints
         {
             await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginFailure, ip, ua,
                 new Dictionary<string, string> { ["reason"] = "mfa_enrollment_required" }, ct);
-            var enrollReturnUrl = flowState.ReturnUrl ?? "/";
             return Results.Redirect(
-                $"{enrollReturnUrl}#oidc_mfa_enrollment_required" +
+                $"{returnUrl}#oidc_mfa_enrollment_required" +
                 $"&tenant_id={Uri.EscapeDataString(tenantId)}" +
                 $"&email={Uri.EscapeDataString(user.Email)}");
         }
@@ -244,9 +279,8 @@ internal static class OidcEndpoints
         {
             var challengeToken = await AuthEndpoints.GenerateMfaChallengeTokenAndStoreAsync(
                 user.UserId.Value, tenantId, mfaCache, ct);
-            var challengeReturnUrl = flowState.ReturnUrl ?? "/";
             return Results.Redirect(
-                $"{challengeReturnUrl}#oidc_mfa_challenge" +
+                $"{returnUrl}#oidc_mfa_challenge" +
                 $"&challenge_token={Uri.EscapeDataString(challengeToken)}" +
                 $"&tenant_id={Uri.EscapeDataString(tenantId)}");
         }
@@ -268,7 +302,6 @@ internal static class OidcEndpoints
 
         await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginSuccess, ip, ua, null, ct);
 
-        var returnUrl = flowState.ReturnUrl ?? "/";
         var callbackUrl = $"{returnUrl}#oidc_callback" +
             $"&access_token={Uri.EscapeDataString(accessToken)}" +
             $"&expires_at={Uri.EscapeDataString(expiresAt.ToString("O"))}" +

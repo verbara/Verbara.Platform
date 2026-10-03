@@ -1,33 +1,12 @@
+using System.Collections.Frozen;
+using Verbara.Platform.Api.Endpoints;
+
 namespace Verbara.Platform.Api.Tests;
 
 public sealed class ImpersonationReadOnlyTests
 {
-    // Mirror of ManagementImpersonationEndpoints.ReadOnlyPermissions for test assertions.
-    private static readonly HashSet<string> ReadOnlyPermissions = new(StringComparer.Ordinal)
-    {
-        "contacts:contact:view",
-        "contacts:conversation:monitor",
-        "queues:queue:view",
-        "users:user:view",
-        "campaigns:campaign:view",
-        "reporting:realtime:view",
-        "reporting:historical:view",
-        "reporting:historical:export",
-        "quality:evaluation:view",
-        "recording:recording:play",
-        "recording:recording:export",
-        "routing:skill:view",
-        "routing:flow:view",
-        "analytics:cdr:view",
-        "analytics:cdr:export",
-        "analytics:interval:view",
-        "system:audit:view",
-        "agentassist:session:view",
-        "callanalytics:analysis:view",
-        "partner:customer:view",
-        "partner:billing:view",
-        "partner:settings:view",
-    };
+    // The production set StartImpersonation filters a read-only session's permissions through.
+    private static readonly FrozenSet<string> ReadOnlyPermissions = ManagementImpersonationEndpoints.ReadOnlyPermissions;
 
     private static HashSet<string> ApplyReadOnlyFilter(IEnumerable<string> callerPermissions, bool readOnly)
     {
@@ -146,8 +125,35 @@ public sealed class ImpersonationReadOnlyTests
     }
 
     [Fact]
-    public void ReadOnlyPermissionSet_ShouldHave22Entries()
+    public void ReadOnlyPermissionSet_ShouldHave23Entries()
     {
-        ReadOnlyPermissions.Count.Should().Be(22);
+        ReadOnlyPermissions.Count.Should().Be(23);
+    }
+
+    [Fact]
+    public void ReadOnlyFilter_ShouldIncludeCreditReadPermission()
+    {
+        var callerPermissions = new[]
+        {
+            "billing:credits:read",
+            "billing:credits:grant",
+            "features:agent-assist:manage",
+        };
+
+        var result = ApplyReadOnlyFilter(callerPermissions, readOnly: true);
+
+        result.Should().BeEquivalentTo(["billing:credits:read"],
+            because: "the credit balance is a read; granting credits and managing a feature are not");
+    }
+
+    [Fact]
+    public void ReadOnlyPermissionSet_ShouldHoldOnlyReads()
+    {
+        // A permission gate passes an impersonation token only on a minted permission, so a write or
+        // manage permission here would let a read-only session through a gate the moment anything
+        // else stopped refusing its writes.
+        string[] readActions = ["view", "read", "export", "play", "monitor"];
+
+        ReadOnlyPermissions.Should().OnlyContain(p => readActions.Contains(p.Split(':', StringSplitOptions.None)[2]));
     }
 }

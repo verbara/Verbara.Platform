@@ -1,6 +1,7 @@
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Storage.InMemory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -10,8 +11,9 @@ namespace Verbara.Platform.Api.Tests.Services;
 /// <summary>
 /// AHH Phase 2 — bounded background queue for the success-side login writes.
 /// Verifies enqueue + drop semantics, batch coalesce by user, graceful
-/// shutdown drain, and that <c>auth_events</c> inserts are processed
-/// independently of <c>users</c> upserts.
+/// shutdown drain, that <c>auth_events</c> inserts are processed
+/// independently of <c>users</c> writes, and that each deferred user write is a
+/// targeted store write that cannot undo a change made after the login.
 /// </summary>
 public sealed class AuthWriteQueueTests
 {
@@ -51,12 +53,13 @@ public sealed class AuthWriteQueueTests
 
         await StartAndDrain(sut);
 
-        // One DB read + write for the user (coalesced) and one auth_events insert.
-        await userStore.Received(1).GetByIdAsync(
-            Arg.Is<TenantId>(t => t.Value == "t1"),
-            Arg.Is<EntityId>(u => u.Value == "u1"),
-            Arg.Any<CancellationToken>());
-        await userStore.Received(1).SaveAsync(Arg.Any<User>(), Arg.Any<CancellationToken>());
+        // One targeted write per kind for the user, no read of the whole user, and one
+        // auth_events insert.
+        await userStore.Received(1).ResetLockoutAsync(
+            new TenantId("t1"), EntityId.From("u1"), Arg.Any<DateTimeOffset>(), true, Arg.Any<CancellationToken>());
+        await userStore.Received(1).SetLastLoginAtAsync(
+            new TenantId("t1"), EntityId.From("u1"), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        await userStore.DidNotReceiveWithAnyArgs().GetByIdAsync(default, default, default);
         await authEventStore.Received(1).SaveAsync(Arg.Any<AuthEvent>(), Arg.Any<CancellationToken>());
     }
 
@@ -78,17 +81,11 @@ public sealed class AuthWriteQueueTests
 
         await StartAndDrain(sut);
 
-        // One read + one save covering ALL four commands.
-        await userStore.Received(1).GetByIdAsync(
-            Arg.Is<TenantId>(t => t.Value == "t1"),
-            Arg.Is<EntityId>(u => u.Value == "u1"),
-            Arg.Any<CancellationToken>());
-        await userStore.Received(1).SaveAsync(
-            Arg.Is<User>(u => u != null &&
-                u.LastLoginAt == third &&
-                u.FailedLoginAttempts == 0 &&
-                u.LockedUntil == null),
-            Arg.Any<CancellationToken>());
+        // One last-login write carrying the latest time, and one reset, for all four commands.
+        await userStore.ReceivedWithAnyArgs(1).SetLastLoginAtAsync(default, default, default, default);
+        await userStore.Received(1).SetLastLoginAtAsync(
+            new TenantId("t1"), EntityId.From("u1"), third, Arg.Any<CancellationToken>());
+        await userStore.ReceivedWithAnyArgs(1).ResetLockoutAsync(default, default, default, default, default);
     }
 
     [Fact]
@@ -103,49 +100,64 @@ public sealed class AuthWriteQueueTests
 
         await StartAndDrain(sut);
 
-        // Three distinct (tenant, user) groups → three reads + three saves.
-        await userStore.Received(3).GetByIdAsync(
-            Arg.Any<TenantId>(),
-            Arg.Any<EntityId>(),
-            Arg.Any<CancellationToken>());
-        await userStore.Received(3).SaveAsync(Arg.Any<User>(), Arg.Any<CancellationToken>());
+        // Three distinct (tenant, user) groups → three writes, one per user.
+        await userStore.Received(1).SetLastLoginAtAsync(new TenantId("t1"), EntityId.From("userA"), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        await userStore.Received(1).SetLastLoginAtAsync(new TenantId("t1"), EntityId.From("userB"), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        await userStore.Received(1).SetLastLoginAtAsync(new TenantId("t2"), EntityId.From("userA"), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task Consumer_ShouldNotPersistUserMutations_WhenUserIsNotFound()
+    public async Task Consumer_ShouldKeepProcessing_WhenTheStoreRefusesAUserWrite()
     {
+        // The user is gone (or a precondition failed): the store writes nothing and says so. The
+        // other kinds and the auth_events insert still go through.
         var (userStore, authEventStore, services) = NewStubStores();
-        // Reconfigure userStore to return null for the lookup.
-        userStore.GetByIdAsync(
-            Arg.Any<TenantId>(),
-            Arg.Any<EntityId>(),
-            Arg.Any<CancellationToken>()).Returns(Task.FromResult<User?>(null));
+        userStore.SetLastLoginAtAsync(default, default, default, default).ReturnsForAnyArgs(false);
         using var sut = NewQueue(services: services);
 
         sut.TryEnqueue(new UpdateLastLoginAtCommand("t1", "ghost", DateTimeOffset.UtcNow));
+        sut.TryEnqueue(new ResetLockoutCountersCommand("t1", "ghost"));
+        sut.TryEnqueue(new LogSuccessEventCommand("t1", "ghost", "login_success", null, null));
 
         await StartAndDrain(sut);
 
-        await userStore.DidNotReceive().SaveAsync(Arg.Any<User>(), Arg.Any<CancellationToken>());
+        await userStore.ReceivedWithAnyArgs(1).ResetLockoutAsync(default, default, default, default, default);
+        await authEventStore.Received(1).SaveAsync(Arg.Any<AuthEvent>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Consumer_ShouldStillApplyTheOtherWrites_WhenOneUserWriteThrows()
+    {
+        var (userStore, _, services) = NewStubStores();
+        userStore.SetLastLoginAtAsync(default, default, default, default)
+            .ReturnsForAnyArgs(Task.FromException<bool>(new InvalidOperationException("simulated failure")));
+        using var sut = NewQueue(services: services);
+
+        sut.TryEnqueue(new UpdateLastLoginAtCommand("t1", "u1", DateTimeOffset.UtcNow));
+        sut.TryEnqueue(new ResetLockoutCountersCommand("t1", "u1"));
+
+        await StartAndDrain(sut);
+
+        await userStore.ReceivedWithAnyArgs(1).ResetLockoutAsync(default, default, default, default, default);
     }
 
     [Fact]
     public async Task Consumer_ShouldUpdatePasswordHash_WhenPasswordRehashCommandEnqueued()
     {
         // AHH Phase 4 — the on-login rehash flow enqueues PasswordRehashCommand
-        // after a successful BCrypt verify. The consumer must re-fetch the user,
-        // overwrite PasswordHash, and persist via SaveAsync.
+        // after a successful BCrypt verify. The consumer replaces the hash the
+        // login verified, and only that hash.
         var (userStore, _, services) = NewStubStores();
         using var sut = NewQueue(services: services);
 
+        const string verifiedBcryptHash = "$2a$12$VERIFIED_HASH_PLACEHOLDER";
         const string newArgon2idHash = "$argon2id$v=19$m=19456,t=2,p=1$NEW_HASH_PLACEHOLDER";
-        sut.TryEnqueue(new PasswordRehashCommand("t1", "u1", newArgon2idHash));
+        sut.TryEnqueue(new PasswordRehashCommand("t1", "u1", verifiedBcryptHash, newArgon2idHash));
 
         await StartAndDrain(sut);
 
-        await userStore.Received(1).SaveAsync(
-            Arg.Is<User>(u => u != null && u.PasswordHash == newArgon2idHash),
-            Arg.Any<CancellationToken>());
+        await userStore.Received(1).RehashPasswordAsync(
+            new TenantId("t1"), EntityId.From("u1"), verifiedBcryptHash, newArgon2idHash, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -155,23 +167,20 @@ public sealed class AuthWriteQueueTests
         using var sut = NewQueue(services: services);
 
         var loginAt = DateTimeOffset.UtcNow;
+        const string oldHash = "$2a$12$OLD";
         const string newHash = "$argon2id$v=19$m=19456,t=2,p=1$RESH";
-        sut.TryEnqueue(new PasswordRehashCommand("t1", "u1", newHash));
+        sut.TryEnqueue(new PasswordRehashCommand("t1", "u1", oldHash, newHash));
         sut.TryEnqueue(new UpdateLastLoginAtCommand("t1", "u1", loginAt));
         sut.TryEnqueue(new ResetLockoutCountersCommand("t1", "u1"));
 
         await StartAndDrain(sut);
 
-        // Single read + single save covering all three mutations.
-        await userStore.Received(1).GetByIdAsync(
-            Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>());
-        await userStore.Received(1).SaveAsync(
-            Arg.Is<User>(u => u != null &&
-                u.PasswordHash == newHash &&
-                u.LastLoginAt == loginAt &&
-                u.FailedLoginAttempts == 0 &&
-                u.LockedUntil == null),
-            Arg.Any<CancellationToken>());
+        // One write per kind covering all three mutations.
+        await userStore.Received(1).RehashPasswordAsync(
+            new TenantId("t1"), EntityId.From("u1"), oldHash, newHash, Arg.Any<CancellationToken>());
+        await userStore.Received(1).SetLastLoginAtAsync(
+            new TenantId("t1"), EntityId.From("u1"), loginAt, Arg.Any<CancellationToken>());
+        await userStore.ReceivedWithAnyArgs(1).ResetLockoutAsync(default, default, default, default, default);
     }
 
     [Fact]
@@ -266,7 +275,78 @@ public sealed class AuthWriteQueueTests
         await authEventStore.Received(2).SaveAsync(Arg.Any<AuthEvent>(), Arg.Any<CancellationToken>());
     }
 
+    // ─── Against a real store: what the deferred writes may not undo ───────
+
+    [Fact]
+    public async Task Consumer_ShouldKeepTheChangedPassword_WhenARehashQueuedBeforeAPasswordChangeDrainsAfterIt()
+    {
+        // Login verified the old BCrypt password and queued its Argon2id rehash; the owner changed
+        // the password before the queue drained (at least one flush interval later).
+        var store = new InMemoryUserStore();
+        var user = MakeUser("u-rehash", "t1");
+        user.PasswordHash = "$2a$12$hash-of-the-old-password";
+        await store.CreateAsync(user, CancellationToken.None);
+        using var sut = NewQueue(services: ServicesWith(store));
+        sut.TryEnqueue(new PasswordRehashCommand(
+            "t1", "u-rehash", "$2a$12$hash-of-the-old-password", "$argon2id$rehash-of-the-old-password"));
+
+        await store.SetPasswordHashAsync(
+            user.TenantId, user.UserId, "$argon2id$hash-of-the-new-password", DateTimeOffset.UtcNow,
+            clearLockout: false, expectedCurrentHash: null, CancellationToken.None);
+        await StartAndDrain(sut);
+
+        (await store.GetByIdAsync(new TenantId("t1"), EntityId.From("u-rehash"), CancellationToken.None))!
+            .PasswordHash.Should().Be("$argon2id$hash-of-the-new-password",
+                because: "re-hashing the old password must not undo the password change that followed it");
+    }
+
+    [Fact]
+    public async Task Consumer_ShouldNotRecreateTheUser_WhenTheUserIsDeletedBeforeTheDrain()
+    {
+        var store = new InMemoryUserStore();
+        await store.CreateAsync(MakeUser("u-gone", "t1"), CancellationToken.None);
+        using var sut = NewQueue(services: ServicesWith(store));
+        sut.TryEnqueue(new UpdateLastLoginAtCommand("t1", "u-gone", DateTimeOffset.UtcNow));
+        sut.TryEnqueue(new ResetLockoutCountersCommand("t1", "u-gone"));
+
+        await store.DeleteAsync(new TenantId("t1"), EntityId.From("u-gone"), CancellationToken.None);
+        await StartAndDrain(sut);
+
+        (await store.GetByIdAsync(new TenantId("t1"), EntityId.From("u-gone"), CancellationToken.None))
+            .Should().BeNull(because: "a deferred write for a deleted user writes nothing");
+    }
+
+    [Fact]
+    public async Task Consumer_ShouldKeepALockSetAfterTheSuccess_WhenTheDeferredResetDrains()
+    {
+        // The sign-in succeeded and queued its reset; failures that followed reached the threshold and
+        // locked the account before the queue drained. The reset must not lift that lock.
+        var store = new InMemoryUserStore();
+        await store.CreateAsync(MakeUser("u-locked", "t1"), CancellationToken.None);
+        using var sut = NewQueue(services: ServicesWith(store));
+        sut.TryEnqueue(new ResetLockoutCountersCommand("t1", "u-locked"));
+
+        var lockedUntil = DateTimeOffset.UtcNow.AddMinutes(15);
+        for (var i = 0; i < 5; i++)
+            await store.RecordFailedSignInAsync(new TenantId("t1"), EntityId.From("u-locked"), 5, lockedUntil, CancellationToken.None);
+        await StartAndDrain(sut);
+
+        var stored = (await store.GetByIdAsync(new TenantId("t1"), EntityId.From("u-locked"), CancellationToken.None))!;
+        stored.IsLockedOut(DateTimeOffset.UtcNow).Should().BeTrue();
+        stored.FailedLoginAttempts.Should().Be(5);
+    }
+
     // ─── helpers ───────────────────────────────────────────────────────────
+
+    private static ServiceProvider ServicesWith(IUserStore userStore)
+    {
+        var authEventStore = Substitute.For<IAuthEventStore>();
+        authEventStore.SaveAsync(Arg.Any<AuthEvent>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        var services = new ServiceCollection();
+        services.AddSingleton(userStore);
+        services.AddSingleton(authEventStore);
+        return services.BuildServiceProvider();
+    }
 
     private static AuthWriteQueue NewQueue(
         int? capacity = null,
@@ -285,10 +365,9 @@ public sealed class AuthWriteQueueTests
     private static (IUserStore UserStore, IAuthEventStore AuthEventStore, IServiceProvider Services) NewStubStores()
     {
         var userStore = Substitute.For<IUserStore>();
-        userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult<User?>(MakeUser(ci.ArgAt<EntityId>(1).Value, ci.ArgAt<TenantId>(0).Value)));
-        userStore.SaveAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
+        userStore.SetLastLoginAtAsync(default, default, default, default).ReturnsForAnyArgs(true);
+        userStore.ResetLockoutAsync(default, default, default, default, default).ReturnsForAnyArgs(true);
+        userStore.RehashPasswordAsync(default, default, default!, default!, default).ReturnsForAnyArgs(true);
         var authEventStore = Substitute.For<IAuthEventStore>();
         authEventStore.SaveAsync(Arg.Any<AuthEvent>(), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);

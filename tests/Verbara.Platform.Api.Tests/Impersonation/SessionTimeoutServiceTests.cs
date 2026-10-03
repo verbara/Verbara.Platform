@@ -3,6 +3,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Impersonation;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Identity.Auth;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -23,7 +24,7 @@ public sealed class SessionTimeoutServiceTests
     [Fact]
     public async Task SweepOnceAsync_ShouldRevokeExpiredSessions_WhenElapsedExceedsTimeout()
     {
-        var (service, store, _, _, clock) = CreateService(autoTimeoutMinutes: 240);
+        var (service, store, _, _, clock, _) = CreateService(autoTimeoutMinutes: 240);
 
         var session = await StartSessionAsync(store, clock);
 
@@ -42,12 +43,12 @@ public sealed class SessionTimeoutServiceTests
     [Fact]
     public async Task SweepOnceAsync_ShouldNotRevoke_WhenStillWithinTimeout()
     {
-        var (service, store, _, _, clock) = CreateService(autoTimeoutMinutes: 240);
+        var (service, store, _, _, clock, revocations) = CreateService(autoTimeoutMinutes: 20);
 
         var session = await StartSessionAsync(store, clock);
 
-        // Halfway through the budget — must remain active.
-        clock.AdvanceMinutes(120);
+        // Halfway through the budget, with the session's token still live — both must survive.
+        clock.AdvanceMinutes(10);
 
         await service.SweepOnceAsync(CancellationToken.None);
 
@@ -55,6 +56,59 @@ public sealed class SessionTimeoutServiceTests
         refreshed.Should().NotBeNull();
         refreshed!.Status.Should().Be(ImpersonationSessionStatus.Active);
         refreshed.EndedAt.Should().BeNull();
+        (await revocations.IsRevokedAsync(session.TokenId, CancellationToken.None)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SweepOnceAsync_ShouldRevokeTokenId_WhenSessionTimesOut()
+    {
+        // A tenant timeout (10 min) shorter than the token's 30-minute life: closing the session
+        // must stop its token, or the token outlives the session by 20 minutes.
+        var (service, store, _, _, clock, revocations) = CreateService(autoTimeoutMinutes: 10);
+        var session = await StartSessionAsync(store, clock);
+        clock.AdvanceMinutes(11);
+
+        await service.SweepOnceAsync(CancellationToken.None);
+
+        (await store.GetAsync(session.Id, CancellationToken.None))!.Status.Should().Be(ImpersonationSessionStatus.AutoTimedOut);
+        (await revocations.IsRevokedAsync(session.TokenId, CancellationToken.None)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SweepOnceAsync_ShouldLeaveSessionActive_WhenRevocationThrows()
+    {
+        var revocations = new FailingRevocationCache(failsFor: _ => true);
+        var (service, store, _, audit, clock, _) = CreateService(autoTimeoutMinutes: 10, revocations);
+        var session = await StartSessionAsync(store, clock);
+        clock.AdvanceMinutes(11);
+
+        await service.SweepOnceAsync(CancellationToken.None);
+
+        (await store.GetAsync(session.Id, CancellationToken.None))!.Status.Should().Be(ImpersonationSessionStatus.Active,
+            because: "a session closed while its token could not be revoked would leave the token working; the next tick retries");
+        await audit.DidNotReceiveWithAnyArgs().RecordAsync(
+            default, default!, default!, default!, default!, default!, default, default, default, default, default, default, default);
+    }
+
+    [Fact]
+    public async Task SweepOnceAsync_ShouldStillSweepOtherSessions_WhenOneTokenRevocationFails()
+    {
+        var store = new InMemoryImpersonationSessionStore();
+        var clock = new TestClock(DateTimeOffset.Parse("2026-04-25T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        var failing = MakeSession("sess-failing", ActorTenant, clock.GetUtcNow());
+        var healthy = MakeSession("sess-healthy", ActorTenant, clock.GetUtcNow());
+        var inner = new InMemoryJtiRevocationCache(clock);
+        var revocations = new FailingRevocationCache(failsFor: jti => jti == failing.TokenId, inner);
+        var (service, _, _, _, _, _) = CreateService(autoTimeoutMinutes: 10, revocations, store, clock);
+        await store.AddAsync(failing, CancellationToken.None);
+        await store.AddAsync(healthy, CancellationToken.None);
+        clock.AdvanceMinutes(11);
+
+        await service.SweepOnceAsync(CancellationToken.None);
+
+        (await store.GetAsync(failing.Id, CancellationToken.None))!.Status.Should().Be(ImpersonationSessionStatus.Active);
+        (await store.GetAsync(healthy.Id, CancellationToken.None))!.Status.Should().Be(ImpersonationSessionStatus.AutoTimedOut);
+        (await inner.IsRevokedAsync(healthy.TokenId, CancellationToken.None)).Should().BeTrue();
     }
 
     [Fact]
@@ -80,7 +134,7 @@ public sealed class SessionTimeoutServiceTests
 
         var audit = Substitute.For<IAuditService>();
         var service = new ImpersonationSessionTimeoutService(
-            store, authConfigStore, audit,
+            store, authConfigStore, audit, new InMemoryJtiRevocationCache(clock),
             NullLogger<ImpersonationSessionTimeoutService>.Instance,
             clock);
 
@@ -100,7 +154,7 @@ public sealed class SessionTimeoutServiceTests
     [Fact]
     public async Task SweepOnceAsync_ShouldEmitAuditEntry_OnAutoTimeout()
     {
-        var (service, store, _, audit, clock) = CreateService(autoTimeoutMinutes: 60);
+        var (service, store, _, audit, clock, _) = CreateService(autoTimeoutMinutes: 60);
 
         var session = await StartSessionAsync(store, clock);
         clock.AdvanceMinutes(61);
@@ -133,10 +187,16 @@ public sealed class SessionTimeoutServiceTests
         InMemoryImpersonationSessionStore Store,
         ITenantAuthConfigStore AuthConfigStore,
         IAuditService Audit,
-        TestClock Clock) CreateService(int autoTimeoutMinutes)
+        TestClock Clock,
+        IJtiRevocationCache Revocations) CreateService(
+            int autoTimeoutMinutes,
+            IJtiRevocationCache? revocations = null,
+            InMemoryImpersonationSessionStore? store = null,
+            TestClock? clock = null)
     {
-        var store = new InMemoryImpersonationSessionStore();
-        var clock = new TestClock(DateTimeOffset.Parse("2026-04-25T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        store ??= new InMemoryImpersonationSessionStore();
+        clock ??= new TestClock(DateTimeOffset.Parse("2026-04-25T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        revocations ??= new InMemoryJtiRevocationCache(clock);
         var authConfigStore = Substitute.For<ITenantAuthConfigStore>();
         authConfigStore.GetAsync(ActorTenant, Arg.Any<CancellationToken>())
             .Returns(new TenantAuthConfig
@@ -146,10 +206,10 @@ public sealed class SessionTimeoutServiceTests
             });
         var audit = Substitute.For<IAuditService>();
         var svc = new ImpersonationSessionTimeoutService(
-            store, authConfigStore, audit,
+            store, authConfigStore, audit, revocations,
             NullLogger<ImpersonationSessionTimeoutService>.Instance,
             clock);
-        return (svc, store, authConfigStore, audit, clock);
+        return (svc, store, authConfigStore, audit, clock, revocations);
     }
 
     private static async Task<ImpersonationSession> StartSessionAsync(
@@ -160,14 +220,29 @@ public sealed class SessionTimeoutServiceTests
         return session;
     }
 
+    // The session's token lives 30 minutes from the start, as StartImpersonation mints it.
     private static ImpersonationSession MakeSession(string id, string actorTenant, DateTimeOffset startedAt) => new()
     {
         Id = id,
+        TokenId = $"jti-{id}",
+        TokenExpiresAt = startedAt.AddMinutes(30),
         ActorUserId = ActorUser,
         ActorTenantId = actorTenant,
         TargetTenantId = TargetTenant,
         StartedAt = startedAt,
     };
+
+    /// <summary>Fails the revocation of every jti <paramref name="failsFor"/> selects (as an unreachable Redis does); passes the rest on.</summary>
+    private sealed class FailingRevocationCache(Func<string, bool> failsFor, IJtiRevocationCache? inner = null) : IJtiRevocationCache
+    {
+        public ValueTask<bool> IsRevokedAsync(string jti, CancellationToken ct) =>
+            inner?.IsRevokedAsync(jti, ct) ?? ValueTask.FromResult(false);
+
+        public ValueTask RevokeAsync(string jti, DateTimeOffset expiresAt, CancellationToken ct) =>
+            failsFor(jti)
+                ? throw new TimeoutException("revocation store unreachable")
+                : inner?.RevokeAsync(jti, expiresAt, ct) ?? ValueTask.CompletedTask;
+    }
 
     /// <summary>Tiny ad-hoc replacement for <c>Microsoft.Extensions.TimeProvider.Testing.FakeTimeProvider</c>.</summary>
     private sealed class TestClock : TimeProvider

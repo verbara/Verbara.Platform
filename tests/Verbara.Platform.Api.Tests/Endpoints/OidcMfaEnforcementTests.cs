@@ -3,7 +3,6 @@ using Verbara.Platform.Api.Endpoints;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
-using Verbara.Platform.Identity.Auth;
 using Verbara.Platform.Identity.Mfa;
 using Verbara.Platform.Identity.OidcTokenExchange;
 using Microsoft.AspNetCore.DataProtection;
@@ -147,8 +146,7 @@ public sealed class OidcMfaEnforcementTests
             Directory.CreateDirectory(tempKeyDir);
             _jwtService = new JwtTokenService(
                 tempKeyDir,
-                DataProtectionProvider.Create("Verbara.Platform.OidcMfaTests"),
-                new InMemoryJtiRevocationCache());
+                DataProtectionProvider.Create("Verbara.Platform.OidcMfaTests"));
 
             // Wire a simple in-memory refresh token store.
             var tokens = new System.Collections.Concurrent.ConcurrentDictionary<string, RefreshToken>();
@@ -206,6 +204,7 @@ public sealed class OidcMfaEnforcementTests
                 MfaCache,
                 _user,
                 flowState,
+                publicBaseUrl: "https://app.example.com",
                 ip: null,
                 ua: null,
                 ct: CancellationToken.None);

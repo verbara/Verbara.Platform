@@ -1,4 +1,5 @@
 using Verbara.Platform.Core.Push;
+using Verbara.Platform.Identity.Auth;
 using Verbara.Platform.Identity.Auth.Jwt;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -35,18 +36,44 @@ internal static class JwtValidationConfigurator
     }
 
     /// <summary>
-    /// Refuses a token whose <c>exp</c> has passed, inside the clock-skew grace lifetime validation
-    /// otherwise grants. Every hub connection is closed when its token expires
-    /// (<see cref="LiveConnectionExpiry"/>); were the client's reconnect on that same token admitted,
-    /// it would be closed again at once, over and over until the grace ran out. Refused, the
-    /// reconnect fails like any 401 and the client backs off until it holds a current token.
+    /// Refuses, at connect, a token whose <c>exp</c> has passed and an impersonation token that
+    /// Platform.Api has revoked.
     /// </summary>
-    public static Task RejectExpiredToken(TokenValidatedContext context)
+    /// <remarks>
+    /// <para>
+    /// Expired: the clock-skew grace lifetime validation otherwise grants is refused here. Every hub
+    /// connection is closed when its token expires (<see cref="LiveConnectionExpiry"/>); were the
+    /// client's reconnect on that same token admitted, it would be closed again at once, over and over
+    /// until the grace ran out. Refused, the reconnect fails like any 401 and the client backs off
+    /// until it holds a current token.
+    /// </para>
+    /// <para>
+    /// Revoked: ending, revoking or timing out an impersonation session revokes its token in the jti
+    /// revocation store (<see cref="ImpersonationTokenRevocation"/>). Realtime reads the store the Api
+    /// writes when both share the identity Redis — the same one, under the same key prefix, that holds
+    /// the JWT key pool Realtime validates Api tokens with. Only impersonation tokens are looked up. A
+    /// store failure is not caught: the connect fails rather than admitting the token. A connection
+    /// already open when its token is revoked lasts until the token expires, as above.
+    /// </para>
+    /// </remarks>
+    public static async Task RejectExpiredOrRevokedToken(TokenValidatedContext context)
     {
         var now = (context.Options.TimeProvider ?? TimeProvider.System).GetUtcNow();
         if (LiveConnectionExpiry.Of(context.Principal) <= now)
+        {
             context.Fail("The access token has expired.");
-        return Task.CompletedTask;
+            return;
+        }
+
+        if (context.Principal is { } principal
+            && ImpersonationTokenRevocation.IsImpersonation(principal)
+            && await ImpersonationTokenRevocation.IsRevokedAsync(
+                context.HttpContext.RequestServices.GetRequiredService<IJtiRevocationCache>(),
+                principal,
+                context.HttpContext.RequestAborted).ConfigureAwait(false))
+        {
+            context.Fail(ImpersonationTokenRevocation.RevokedMessage);
+        }
     }
 
     private static List<SecurityKey> ResolveKeys(IServiceProvider services)
