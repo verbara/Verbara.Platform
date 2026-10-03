@@ -208,7 +208,12 @@ internal static partial class AdminEndpoints
         [FromServices] IUserStore store,
         [FromServices] SessionService sessions,
         [FromServices] IAuditService audit,
+        [FromServices] ITenantRoleStore tenantRoles,
+        [FromServices] IRoleTemplateStore roleTemplates,
+        [FromServices] IUserRoleStore userRoles,
+        [FromServices] PermissionResolver permissions,
         PlatformEventBus eventBus,
+        ILoggerFactory loggerFactory,
         IClock clock,
         CancellationToken ct)
     {
@@ -245,10 +250,16 @@ internal static partial class AdminEndpoints
         if (written is not { Outcome: AdminFieldsWriteOutcome.Written, Previous: { } previous, User: { } stored })
             return TypedResults.NotFound();
 
-        // The store returns the values it replaced, so the revocation and the audit entry follow the
-        // transition that was actually written, not the one this request expected.
-        if (previous.Status != stored.Status)
-            await ApplyStatusChangeAsync(stored, previous.Status, context, sessions, audit, eventBus, ct);
+        // The store returns the values it replaced, so the RBAC move, the revocation and the audit
+        // entries follow the transition that was actually written, not the one this request expected.
+        await UserAdminChange.ApplyAsync(
+            context,
+            previous,
+            stored,
+            new UserAdminChangeServices(
+                sessions, audit, eventBus, tenantRoles, roleTemplates, userRoles, permissions,
+                loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)),
+            ct);
 
         UserAdminFieldsTag.SetOn(context.Response, stored);
         return TypedResults.Ok(ToUserDto(stored));
@@ -260,62 +271,6 @@ internal static partial class AdminEndpoints
             detail: "The user's display name, role or status changed after the version named in If-Match was read. Read the user again and reapply the change.",
             statusCode: StatusCodes.Status412PreconditionFailed,
             type: "https://verbara.platform/errors/precondition-failed");
-
-    // A status change is a security event, applied AFTER the new status is persisted (so a client
-    // reconnecting after its connection is cut already meets the new status).
-    //  • Leaving Active ends the access the account still holds: its refresh-token lineage is
-    //    revoked, so no further access token can be minted, and UserAccessRevokedEvent aborts its
-    //    live Realtime hub connections and SSE streams on every node.
-    //  • User-bound API keys are NOT revoked: they stop authenticating through the status check on
-    //    every request, and work again if the account is re-activated (revoking would force
-    //    re-issuing every integration key after a temporary suspension).
-    //  • Access tokens already issued stay valid until they expire (at most 15 minutes) — there is
-    //    deliberately no per-request status lookup for them. Impersonation tokens (30 minutes, Admin
-    //    in another tenant) are the exception: the bearer pipeline checks their impersonator's status
-    //    on every request (AccountStatusGate), so they stop working here, with nothing to revoke.
-    //  • Every change, re-activation included, is audited.
-    private static async Task ApplyStatusChangeAsync(
-        User user,
-        UserStatus previousStatus,
-        HttpContext context,
-        SessionService sessions,
-        IAuditService audit,
-        PlatformEventBus eventBus,
-        CancellationToken ct)
-    {
-        var actorId = CallerIdentity.ResolveUserIdOrSystem(context.User);
-        var ip = context.Connection.RemoteIpAddress?.ToString();
-        var revoke = !user.CanAuthenticate;
-        var revokedSessions = 0;
-
-        if (revoke)
-        {
-            revokedSessions = await sessions.RevokeAllSessionsForUserAsync(
-                user.TenantId.Value, actorId, user.UserId.Value,
-                ip, context.Request.Headers.UserAgent.FirstOrDefault(), ct);
-            eventBus.Publish(new UserAccessRevokedEvent(
-                user.TenantId.Value, user.UserId.Value, AccountStatusGate.StatusName(user.Status)));
-        }
-
-        await audit.RecordAsync(
-            user.TenantId,
-            category: "auth",
-            action: "user.status_changed",
-            severity: revoke ? "warning" : "info",
-            actorId: actorId,
-            actorType: "user",
-            targetId: user.UserId.Value,
-            targetType: "User",
-            metadata: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["old_status"] = previousStatus.ToString(),
-                ["new_status"] = user.Status.ToString(),
-                ["revoked_sessions"] = revokedSessions.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["ip"] = ip ?? "unknown",
-                ["endpoint"] = context.Request.Path.Value ?? "",
-            },
-            ct: ct);
-    }
 
     private static UserDto ToUserDto(User u) =>
         new(

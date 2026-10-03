@@ -91,6 +91,41 @@ internal sealed class PostgresUserRoleStore : IUserRoleStore
         await tx.CommitAsync(ct);
     }
 
+    // One statement, so the removal and the grant land together or not at all: a grant the foreign key
+    // refuses (the role is gone) fails the whole statement and removes nothing. The removal never takes
+    // the role being granted, which the insert then leaves as it is.
+    private const string MoveSql =
+        "WITH removed AS (" +
+        "  DELETE FROM user_roles " +
+        "  WHERE tenant_id = @TenantId AND user_id = @UserId " +
+        "    AND role_id = ANY(@FromRoleIds) AND role_id IS DISTINCT FROM @ToRoleId " +
+        "  RETURNING role_id), " +
+        "granted AS (" +
+        "  INSERT INTO user_roles (tenant_id, user_id, role_id, assigned_at, assigned_by) " +
+        "  SELECT @TenantId, @UserId, @ToRoleId, now(), @AssignedBy WHERE @ToRoleId IS NOT NULL " +
+        "  ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING " +
+        "  RETURNING role_id) " +
+        "SELECT role_id FROM removed";
+
+    public async Task<IReadOnlyList<string>> MoveAsync(
+        TenantId tenantId, EntityId userId, IReadOnlyCollection<string> fromRoleIds, string? toRoleId, string? assignedBy,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(fromRoleIds);
+
+        return await _dataSource.QueryListAsync(
+            MoveSql,
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("UserId", NpgsqlDbType.Text) { Value = userId.Value });
+                p.Add(new NpgsqlParameter("FromRoleIds", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = fromRoleIds.ToArray() });
+                p.Add(new NpgsqlParameter("ToRoleId", NpgsqlDbType.Text) { Value = (object?)toRoleId ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("AssignedBy", NpgsqlDbType.Text) { Value = (object?)assignedBy ?? DBNull.Value });
+            },
+            static r => r.GetString("role_id"), ct);
+    }
+
     public async Task<IReadOnlySet<string>> GetEffectivePermissionsAsync(
         TenantId tenantId, EntityId userId, CancellationToken ct)
     {

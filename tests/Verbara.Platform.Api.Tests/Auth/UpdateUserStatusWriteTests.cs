@@ -2,12 +2,15 @@ using System.Security.Claims;
 using Verbara.Platform.Api.Endpoints;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Api.Tests.Logging;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
 namespace Verbara.Platform.Api.Tests.Auth;
 
@@ -27,6 +30,8 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
     private const string TargetId = "u-target";
     private const string AdminId = "u-admin";
 
+    private static readonly string[] s_templateIds = ["agent", "supervisor", "admin", "api"];
+
     private readonly IUserStore _store = Substitute.For<IUserStore>();
     private readonly IRefreshTokenStore _refreshTokens = Substitute.For<IRefreshTokenStore>();
     private readonly IAuditService _audit = Substitute.For<IAuditService>();
@@ -34,9 +39,31 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
     private readonly List<PlatformEvent> _published = [];
     private readonly IDisposable _subscription;
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly ITenantRoleStore _tenantRoles = Substitute.For<ITenantRoleStore>();
+    private readonly IRoleTemplateStore _roleTemplates = Substitute.For<IRoleTemplateStore>();
+    private readonly IUserRoleStore _userRoles = Substitute.For<IUserRoleStore>();
+    private readonly PermissionResolver _permissions;
+    private readonly LogRecordCapture _logs = new();
+    private readonly ILoggerFactory _loggerFactory;
 
     public UpdateUserStatusWriteTests()
     {
+        _loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(_logs));
+        _permissions = new PermissionResolver(_userRoles);
+        // The tenant's copies of the role templates, under the template ids.
+        _tenantRoles.ListAsync(new TenantId(Tenant), Arg.Any<CancellationToken>())
+            .Returns(_ => (IReadOnlyList<TenantRole>)
+                s_templateIds.Select(id => new TenantRole
+                {
+                    RoleId = id,
+                    TenantId = new TenantId(Tenant),
+                    Name = id,
+                    SourceTemplateId = id,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                }).ToList());
+        _roleTemplates.GetAllAsync(Arg.Any<CancellationToken>()).Returns((IReadOnlyList<RoleTemplate>)[]);
+        _userRoles.MoveAsync(default, default!, default!, default, default, default)
+            .ReturnsForAnyArgs((IReadOnlyList<string>)[]);
         // Every read returns a fresh Active snapshot, as PostgresUserStore does.
         _store.GetByIdAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>())
             .Returns(_ => NewTarget());
@@ -48,6 +75,7 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
     {
         _subscription.Dispose();
         _eventBus.Dispose();
+        _loggerFactory.Dispose();
     }
 
     [Fact]
@@ -175,6 +203,7 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
         result.Result.Should().BeOfType<ProblemHttpResult>()
             .Which.StatusCode.Should().Be(StatusCodes.Status412PreconditionFailed);
         await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllForUserAsync(default!, default!, default, default);
+        await _userRoles.DidNotReceiveWithAnyArgs().MoveAsync(default, default!, default!, default, default, default);
         _audit.ReceivedCalls().Should().BeEmpty();
     }
 
@@ -209,6 +238,83 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
             Arg.Any<DateTimeOffset>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task UpdateUser_ShouldMoveTheRbacRolesOfTheRoleTheStoreReplaced_WhenAnotherAdminChangedItFirst()
+    {
+        // This request read Agent; another admin made the user a Supervisor before this promotion to
+        // Admin was written. The supervisor role is the one to take back, not the agent role.
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Target", UserRole.Supervisor, UserStatus.Active), NewTarget(role: UserRole.Admin)));
+
+        await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: UserRole.Admin, Status: null));
+
+        await _userRoles.Received(1).MoveAsync(
+            new TenantId(Tenant), EntityId.From(TargetId),
+            Arg.Is<IReadOnlyCollection<string>>(ids => ids.Count == 1 && ids.Contains("supervisor")),
+            "admin", DefaultTenantRole.AssignedBy, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldAuditTheRoleTheStoreReplacedWithoutRevoking_WhenTheWrittenTransitionIsAnUpgrade()
+    {
+        // This request read Admin and demotes to Supervisor; another admin had already demoted the user
+        // to Agent, so what was written is Agent -> Supervisor: an upgrade, which revokes nothing.
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Target", UserRole.Agent, UserStatus.Active), NewTarget(role: UserRole.Supervisor)));
+        _store.GetByIdAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>())
+            .Returns(_ => NewTarget(role: UserRole.Admin));
+
+        await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: UserRole.Supervisor, Status: null));
+
+        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllForUserAsync(default!, default!, default, default);
+        await _audit.Received(1).RecordAsync(
+            new TenantId(Tenant), "auth", "user.role_changed", "warning", AdminId, "user", TargetId, "User",
+            Arg.Any<Guid?>(), Arg.Any<AuditChanges?>(),
+            Arg.Is<IReadOnlyDictionary<string, string>?>(m =>
+                m != null && m["old_role"] == "Agent" && m["new_role"] == "Supervisor" && m["revoked_sessions"] == "0"),
+            Arg.Any<DateTimeOffset?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldKeepTheRoleChangeAndLogAnError_WhenMovingTheRbacRolesFails()
+    {
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Target", UserRole.Admin, UserStatus.Active), NewTarget(role: UserRole.Agent)));
+        _store.GetByIdAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>())
+            .Returns(_ => NewTarget(role: UserRole.Admin));
+        _userRoles.MoveAsync(default, default!, default!, default, default, default)
+            .ThrowsAsyncForAnyArgs(new InvalidOperationException("role store unavailable"));
+
+        var result = await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: UserRole.Agent, Status: null));
+
+        result.Result.Should().BeOfType<Ok<UserDto>>().Which.Value!.Role.Should().Be("agent");
+        _logs.Records.Should().ContainSingle(r => r.EventId.Id == 7502 && r.Level == LogLevel.Error);
+        await _audit.Received(1).RecordAsync(
+            new TenantId(Tenant), "auth", "user.role_changed", "warning", AdminId, "user", TargetId, "User",
+            Arg.Any<Guid?>(), Arg.Any<AuditChanges?>(),
+            Arg.Is<IReadOnlyDictionary<string, string>?>(m => m != null && m["rbac_roles_moved"] == "false"),
+            Arg.Any<DateTimeOffset?>(), Arg.Any<CancellationToken>());
+        await _refreshTokens.Received(1).RevokeAllForUserAsync(Tenant, TargetId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateUser_ShouldDropTheCachedPermissions_WhenTheRoleChanges()
+    {
+        WriteReturns(AdminFieldsWriteResult.Written(
+            new AdminFields("Target", UserRole.Admin, UserStatus.Active), NewTarget(role: UserRole.Agent)));
+        _store.GetByIdAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>())
+            .Returns(_ => NewTarget(role: UserRole.Admin));
+        _userRoles.GetEffectivePermissionsAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>())
+            .Returns((IReadOnlySet<string>)new HashSet<string>(StringComparer.Ordinal));
+        await _permissions.ResolveAsync(new TenantId(Tenant), EntityId.From(TargetId), CancellationToken.None);
+
+        await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: UserRole.Agent, Status: null));
+        await _permissions.ResolveAsync(new TenantId(Tenant), EntityId.From(TargetId), CancellationToken.None);
+
+        await _userRoles.Received(2).GetEffectivePermissionsAsync(
+            new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>());
+    }
+
     private void WriteReturns(AdminFieldsWriteResult result) =>
         _store.UpdateAdminFieldsAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<AdminFieldsChange>(),
                 Arg.Any<DateTimeOffset>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
@@ -226,7 +332,8 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
         var sessions = new SessionService(_refreshTokens, _store, new AuthEventService(Substitute.For<IAuthEventStore>()));
 
         return AdminEndpoints.UpdateUser(
-            TargetId, context, body, _store, sessions, _audit, _eventBus, _clock, CancellationToken.None);
+            TargetId, context, body, _store, sessions, _audit, _tenantRoles, _roleTemplates, _userRoles, _permissions,
+            _eventBus, _loggerFactory, _clock, CancellationToken.None);
     }
 
     private static User NewTarget(

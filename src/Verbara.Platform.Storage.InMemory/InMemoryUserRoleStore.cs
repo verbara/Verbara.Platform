@@ -50,6 +50,23 @@ internal sealed class InMemoryUserRoleStore : IUserRoleStore
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<string>> MoveAsync(
+        TenantId tenantId, EntityId userId, IReadOnlyCollection<string> fromRoleIds, string? toRoleId, string? assignedBy,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(fromRoleIds);
+
+        bool Leaving(UserRoleAssignment a) =>
+            a.TenantId == tenantId && a.UserId == userId
+            && fromRoleIds.Contains(a.RoleId) && !string.Equals(a.RoleId, toRoleId, StringComparison.Ordinal);
+
+        var removed = _assignments.Where(Leaving).Select(a => a.RoleId).ToList();
+        _assignments.RemoveAll(Leaving);
+        if (toRoleId is not null)
+            AssignAsync(tenantId, userId, toRoleId, assignedBy, ct);
+        return Task.FromResult<IReadOnlyList<string>>(removed);
+    }
+
     public Task<IReadOnlySet<string>> GetEffectivePermissionsAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
         => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>());
 }

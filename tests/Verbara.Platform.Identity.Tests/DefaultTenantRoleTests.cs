@@ -150,6 +150,182 @@ public sealed class DefaultTenantRoleTests
         (await _userRoles.GetRolesForUserAsync(s_tenant, s_user, CancellationToken.None)).Should().BeEmpty();
     }
 
+    // ─── The roles a role comes with, and moving between them ──────────────────
+
+    [Fact]
+    public void RolesGrantedWith_ShouldNameEveryShapeOfTheTenantsCopy_WhenTheRoleIsAnAgent()
+    {
+        var roles = new[]
+        {
+            Role("agent", "Frontline"),                       // the template's id
+            Role("role_agent_tenant-1", "Provisioned agents"), // provisioned id
+            Role("tier-1", "AGENT"),                           // the template's name, in another case
+            Role("senior-agents", "Senior agents"),            // custom, made from the template
+            Role("supervisor", "Supervisor", "supervisor"),
+        };
+
+        var granted = DefaultTenantRole.RolesGrantedWith(roles, s_tenant, UserRole.Agent, s_templateNames);
+
+        granted.Should().BeEquivalentTo(["agent", "role_agent_tenant-1", "tier-1"]);
+    }
+
+    [Fact]
+    public void RolesGrantedWith_ShouldNameEveryAdministratorRole_WhenTheRoleIsAdmin()
+    {
+        var roles = new[]
+        {
+            Role("admin", "Admin", "admin"),
+            Role("admin-tenant-1", "Administrators", "admin"),         // setup's id
+            Role("system_admin", "System Admin", "system_admin"),
+            Role("platform-admin-tenant-1", "Operators", "platform_admin"), // setup's id
+            Role("role_platform_admin_tenant-1", "Platform ops", "platform_admin"),
+            Role("partners", "Partner Admin", "partner_admin"),        // the template's name
+            Role("auditors", "Auditors", "admin"),                     // custom, made from the template
+            Role("manager", "Manager", "manager"),
+            Role("partner_billing", "Partner Billing", "partner_billing"),
+        };
+
+        var granted = DefaultTenantRole.RolesGrantedWith(roles, s_tenant, UserRole.Admin, s_templateNames);
+
+        granted.Should().BeEquivalentTo(
+            ["admin", "admin-tenant-1", "system_admin", "platform-admin-tenant-1", "role_platform_admin_tenant-1", "partners"]);
+    }
+
+    [Theory]
+    [InlineData(UserRole.Supervisor, "supervisor")]
+    [InlineData(UserRole.Api, "api")]
+    public void RolesGrantedWith_ShouldNameOnlyItsOwnTemplatesCopy_WhenTheRoleIsNotAdmin(UserRole role, string roleId)
+    {
+        var roles = new[]
+        {
+            Role("agent", "Agent", "agent"),
+            Role("supervisor", "Supervisor", "supervisor"),
+            Role("manager", "Manager", "manager"),
+            Role("quality_analyst", "Quality Analyst", "quality_analyst"),
+            Role("api", "API", "api"),
+            Role("admin", "Admin", "admin"),
+        };
+
+        DefaultTenantRole.RolesGrantedWith(roles, s_tenant, role, s_templateNames).Should().Equal(roleId);
+    }
+
+    [Fact]
+    public async Task MoveAsync_ShouldMoveTheUserFromTheFormerRolesRoleToTheNewOnes_WhenTheRoleChanges()
+    {
+        await SaveRoleAsync("admin", "Admin", "admin");
+        await SaveRoleAsync("agent", "Agent");
+        await _userRoles.AssignAsync(s_tenant, s_user, "admin", "migration", CancellationToken.None);
+
+        var move = await MoveAsync(UserRole.Admin, UserRole.Agent);
+
+        move.Removed.Should().Equal("admin");
+        move.Granted.Should().Be("agent");
+        await ShouldHoldOnlyAsync("agent");
+    }
+
+    [Fact]
+    public async Task MoveAsync_ShouldKeepRolesThatDoNotComeWithTheFormerRole_WhenTheRoleChanges()
+    {
+        await SaveRoleAsync("admin", "Admin", "admin");
+        await SaveRoleAsync("agent", "Agent");
+        await SaveRoleAsync("supervisor", "Supervisor", "supervisor");
+        await SaveRoleAsync("auditors", "Auditors", "admin");
+        await _userRoles.AssignAsync(s_tenant, s_user, "admin", "migration", CancellationToken.None);
+        await _userRoles.AssignAsync(s_tenant, s_user, "supervisor", "an-administrator", CancellationToken.None);
+        await _userRoles.AssignAsync(s_tenant, s_user, "auditors", "an-administrator", CancellationToken.None);
+
+        await MoveAsync(UserRole.Admin, UserRole.Agent);
+
+        (await RoleIdsAsync()).Should().BeEquivalentTo(["supervisor", "auditors", "agent"]);
+    }
+
+    [Fact]
+    public async Task MoveAsync_ShouldKeepTheNewRolesGrantAsItIs_WhenTheUserAlreadyHoldsIt()
+    {
+        await SaveRoleAsync("admin", "Admin", "admin");
+        await SaveRoleAsync("agent", "Agent");
+        await _userRoles.AssignAsync(s_tenant, s_user, "admin", "migration", CancellationToken.None);
+        await _userRoles.AssignAsync(s_tenant, s_user, "agent", "an-administrator", CancellationToken.None);
+
+        await MoveAsync(UserRole.Admin, UserRole.Agent);
+
+        var grants = await _userRoles.GetRolesForUserAsync(s_tenant, s_user, CancellationToken.None);
+        grants.Should().ContainSingle().Which.AssignedBy.Should().Be("an-administrator");
+    }
+
+    [Fact]
+    public async Task MoveAsync_ShouldCloneTheNewRolesTemplate_WhenTheTenantHasNoSuchRole()
+    {
+        await SaveRoleAsync("admin-tenant-1", "Admin", "admin");
+        await _userRoles.AssignAsync(s_tenant, s_user, "admin-tenant-1", assignedBy: null, CancellationToken.None);
+
+        var move = await MoveAsync(UserRole.Admin, UserRole.Agent);
+
+        move.Granted.Should().Be("agent");
+        (await _tenantRoles.GetByIdAsync(s_tenant, "agent", CancellationToken.None)).Should().NotBeNull();
+        await ShouldHoldOnlyAsync("agent");
+    }
+
+    [Fact]
+    public async Task MoveAsync_ShouldStillRemoveTheFormerRolesRole_WhenTheNewRoleHasNoRoleToGrant()
+    {
+        // No supervisor role in the tenant and no template to clone it from: the user loses the
+        // administrator role all the same, and the next start's role migration grants the new one.
+        await SaveRoleAsync("admin", "Admin", "admin");
+        await _userRoles.AssignAsync(s_tenant, s_user, "admin", "migration", CancellationToken.None);
+
+        var move = await MoveAsync(UserRole.Admin, UserRole.Supervisor);
+
+        move.Removed.Should().Equal("admin");
+        move.Granted.Should().BeNull();
+        (await RoleIdsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MoveAsync_ShouldTakeTheFormerRolesRolesAwayAndGrantNothing_WhenTheNewRoleIsNoKnownRole()
+    {
+        await SaveRoleAsync("admin", "Admin", "admin");
+        await SaveRoleAsync("agent", "Agent");
+        await _userRoles.AssignAsync(s_tenant, s_user, "admin", "migration", CancellationToken.None);
+
+        var move = await MoveAsync(UserRole.Admin, (UserRole)7);
+
+        move.Removed.Should().Equal("admin");
+        move.Granted.Should().BeNull();
+        (await RoleIdsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MoveAsync_ShouldOnlyGrantTheNewRolesRole_WhenTheFormerRoleIsNoKnownRole()
+    {
+        await SaveRoleAsync("agent", "Agent");
+        await SaveRoleAsync("custom", "Custom", "admin");
+        await _userRoles.AssignAsync(s_tenant, s_user, "custom", "an-administrator", CancellationToken.None);
+
+        var move = await MoveAsync((UserRole)7, UserRole.Agent);
+
+        move.Removed.Should().BeEmpty();
+        (await RoleIdsAsync()).Should().BeEquivalentTo(["custom", "agent"]);
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> s_templateNames = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["agent"] = "Agent",
+        ["supervisor"] = "Supervisor",
+        ["admin"] = "Admin",
+        ["api"] = "API",
+        ["system_admin"] = "System Admin",
+        ["platform_admin"] = "Platform Admin",
+        ["partner_admin"] = "Partner Admin",
+        ["manager"] = "Manager",
+    };
+
+    private Task<DefaultRoleMove> MoveAsync(UserRole previousRole, UserRole role) =>
+        DefaultTenantRole.MoveAsync(_tenantRoles, _templates, _userRoles, s_tenant, s_user, previousRole, role, CancellationToken.None);
+
+    private async Task<List<string>> RoleIdsAsync() =>
+        (await _userRoles.GetRolesForUserAsync(s_tenant, s_user, CancellationToken.None)).Select(a => a.RoleId).ToList();
+
     private Task<string?> GrantAsync(UserRole role) =>
         DefaultTenantRole.GrantAsync(_tenantRoles, _templates, _userRoles, s_tenant, s_user, role, CancellationToken.None);
 
