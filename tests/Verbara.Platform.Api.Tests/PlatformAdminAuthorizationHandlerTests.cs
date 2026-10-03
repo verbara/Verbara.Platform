@@ -24,6 +24,7 @@ namespace Verbara.Platform.Api.Tests;
 public sealed class PlatformAdminAuthorizationHandlerTests
 {
     private const string HostTenantId = "platform";
+    private const string PartnerTenantId = "partner";
 
     [Fact]
     public async Task MgmtKey_ShouldSucceed_WhenScopeIncludesPermission()
@@ -90,6 +91,49 @@ public sealed class PlatformAdminAuthorizationHandlerTests
             because: "PlatformAdminRequirement() without a permission must continue to be satisfied by any valid management key");
     }
 
+    // ─── Impersonation tokens on a Partner-delegated permission gate ─────────
+
+    [Fact]
+    public async Task ImpersonationToken_ShouldFail_WhenPermissionWasNotMintedDespiteAdminRole()
+    {
+        var handler = CreateHandler();
+        var requirement = new PlatformAdminRequirement("system:mfa:manage", allowPartnerDelegation: true);
+        var ctx = new AuthorizationHandlerContext([requirement], PartnerImpersonationPrincipal("users:user:view"), resource: null);
+
+        await handler.HandleAsync(ctx);
+
+        ctx.HasSucceeded.Should().BeFalse(
+            because: "an impersonation token holds the permissions minted into it, not those of its Admin role");
+    }
+
+    [Fact]
+    public async Task ImpersonationToken_ShouldSucceed_WhenPermissionWasMinted()
+    {
+        var handler = CreateHandler();
+        var requirement = new PlatformAdminRequirement("system:mfa:manage", allowPartnerDelegation: true);
+        var ctx = new AuthorizationHandlerContext([requirement], PartnerImpersonationPrincipal("system:mfa:manage"), resource: null);
+
+        await handler.HandleAsync(ctx);
+
+        ctx.HasSucceeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task PartnerAdmin_ShouldSucceed_WhenNotImpersonatingWithAdminRole()
+    {
+        // The Admin role keeps standing in for the permission on an ordinary token: only an
+        // impersonation token is held to its minted permissions.
+        var handler = CreateHandler();
+        var requirement = new PlatformAdminRequirement("system:mfa:manage", allowPartnerDelegation: true);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", "partner-admin"), new Claim("tid", PartnerTenantId), new Claim("role", "Admin")], "JWT"));
+        var ctx = new AuthorizationHandlerContext([requirement], principal, resource: null);
+
+        await handler.HandleAsync(ctx);
+
+        ctx.HasSucceeded.Should().BeTrue();
+    }
+
     // ─── Issuance back-compat: CreateApiKey defaults ─────────────────────────
 
     [Fact]
@@ -133,13 +177,37 @@ public sealed class PlatformAdminAuthorizationHandlerTests
                 Type = TenantType.Platform,
                 ParentTenantId = null,
             });
+        tenantStore.GetAsync(PartnerTenantId, Arg.Any<CancellationToken>())
+            .Returns(new Tenant
+            {
+                TenantId = PartnerTenantId,
+                Name = "Test Partner",
+                Status = TenantStatus.Active,
+                Type = TenantType.Partner,
+                ParentTenantId = HostTenantId,
+            });
 
-        // PermissionResolver is irrelevant for this test class — the
-        // management-key branch never calls it — but we satisfy the
-        // constructor with a substitute IUserRoleStore.
+        // PermissionResolver is irrelevant for this test class — neither the management-key branch
+        // nor an impersonation token calls it, and an ordinary Admin token skips it — but we satisfy
+        // the constructor with a substitute IUserRoleStore.
         var resolver = new PermissionResolver(Substitute.For<IUserRoleStore>());
 
         return new PlatformAdminAuthorizationHandler(tenantStore, resolver);
+    }
+
+    private static ClaimsPrincipal PartnerImpersonationPrincipal(params string[] permissions)
+    {
+        var claims = new List<Claim>
+        {
+            new("sub", "platform-admin"),
+            new("tid", PartnerTenantId),
+            new("role", "Admin"),
+            new("impersonation", "true"),
+            new("impersonator_id", "platform-admin"),
+            new("impersonator_tenant", HostTenantId),
+        };
+        claims.AddRange(permissions.Select(p => new Claim("permissions", p)));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "JWT"));
     }
 
     private static ClaimsPrincipal ManagementKeyPrincipal(IReadOnlyList<string> scopes)

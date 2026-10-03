@@ -17,6 +17,15 @@ internal sealed class PermissionAuthorizationHandler : AuthorizationHandler<Perm
     protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context, PermissionRequirement requirement)
     {
+        // An impersonation token passes only on a permission minted into it: its Admin role is not
+        // the short-circuit below, and its subject has no roles to resolve in the tenant it acts in.
+        if (AccountStatusGate.IsImpersonation(context.User))
+        {
+            if (ImpersonationPermissions.Grants(context.User, requirement.Permission))
+                context.Succeed(requirement);
+            return;
+        }
+
         // API keys with Admin role get all permissions (backward compat)
         var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value
             ?? context.User.FindFirst("role")?.Value;

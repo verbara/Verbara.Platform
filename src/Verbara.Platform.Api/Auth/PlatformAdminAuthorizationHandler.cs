@@ -94,14 +94,25 @@ internal sealed class PlatformAdminAuthorizationHandler : AuthorizationHandler<P
             if (string.IsNullOrEmpty(userIdClaim))
                 return;
 
-            var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value ?? context.User.FindFirst("role")?.Value;
-            if (roleClaim is not ("Admin" or "SystemAdmin"))
+            // An impersonation token passes only on a permission minted into it, never on its Admin
+            // role (ImpersonationPermissions). The host tenant cannot be impersonated, so such a token
+            // reaches this branch only on a Partner-delegated gate, impersonating a Partner tenant.
+            if (AccountStatusGate.IsImpersonation(context.User))
             {
-                var tenantId = new TenantId(tenantIdClaim);
-                var userId = EntityId.From(userIdClaim);
-                var permissions = await _resolver.ResolveAsync(tenantId, userId, CancellationToken.None);
-                if (!PermissionResolver.HasPermission(permissions, requirement.Permission))
+                if (!ImpersonationPermissions.Grants(context.User, requirement.Permission))
                     return;
+            }
+            else
+            {
+                var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value ?? context.User.FindFirst("role")?.Value;
+                if (roleClaim is not ("Admin" or "SystemAdmin"))
+                {
+                    var tenantId = new TenantId(tenantIdClaim);
+                    var userId = EntityId.From(userIdClaim);
+                    var permissions = await _resolver.ResolveAsync(tenantId, userId, CancellationToken.None);
+                    if (!PermissionResolver.HasPermission(permissions, requirement.Permission))
+                        return;
+                }
             }
         }
         else

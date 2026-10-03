@@ -38,6 +38,8 @@ public class ImpersonationApiFactory : AccountStatusApiFactory
     /// <c>platform:tenant:impersonate</c> starts a session, <c>system:impersonation:manage</c> lists and
     /// revokes sessions, and <c>users:user:view</c> is what the control request
     /// (<see cref="ListUsersAsync"/>) needs — a full impersonation token carries every non-platform grant.
+    /// <c>billing:credits:read</c> (a read) and <c>features:agent-assist:manage</c> (a manage permission)
+    /// show which grants a read-only session keeps.
     /// </summary>
     public static readonly IReadOnlySet<string> GrantedPermissions = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -46,6 +48,8 @@ public class ImpersonationApiFactory : AccountStatusApiFactory
         "users:user:view",
         "users:user:edit",
         "contacts:contact:view",
+        "billing:credits:read",
+        "features:agent-assist:manage",
     };
 
     /// <inheritdoc />
@@ -213,6 +217,25 @@ public class ImpersonationApiFactory : AccountStatusApiFactory
 
     /// <summary>An ordinary access token for the seeded platform admin.</summary>
     public string PlatformAdminToken() => MintAccessToken(GetUser(PlatformAdminUserId, PlatformTenantId)!);
+
+    /// <summary>
+    /// An impersonation token for <paramref name="admin"/> into <paramref name="targetTenantId"/> that
+    /// carries exactly <paramref name="permissions"/>, minted by this host's <see cref="JwtTokenService"/>
+    /// the way <c>StartImpersonation</c> mints one — for a test that needs a permission set the stubbed
+    /// role store does not give. No session is recorded for it.
+    /// </summary>
+    public string MintImpersonationToken(
+        User admin, IEnumerable<string> permissions, bool readOnly, string targetTenantId = CustomerTenantId)
+    {
+        using var scope = Services.CreateScope();
+        var (token, _, _) = scope.ServiceProvider.GetRequiredService<JwtTokenService>().GenerateImpersonationToken(
+            admin,
+            targetTenantId,
+            new HashSet<string>(permissions, StringComparer.Ordinal),
+            readOnly,
+            impersonationSessionId: Guid.NewGuid().ToString("N"));
+        return token;
+    }
 
     private HttpClient BearerClient(WebApplicationFactory<Program>? host, string bearer)
     {

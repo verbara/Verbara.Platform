@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Security.Claims;
 using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
@@ -33,8 +34,13 @@ internal static class ManagementImpersonationEndpoints
     /// </summary>
     public const string AdminAuthorizationPolicy = "ImpersonationAdminGate";
 
-
-    private static readonly HashSet<string> ReadOnlyPermissions = new(StringComparer.Ordinal)
+    /// <summary>
+    /// The permissions a read-only impersonation token may carry: of the impersonator's own, only
+    /// these reads are minted into it. A permission gate passes an impersonation token only on a minted
+    /// permission (<see cref="ImpersonationPermissions"/>), so a read missing here is refused in a
+    /// read-only session.
+    /// </summary>
+    internal static readonly FrozenSet<string> ReadOnlyPermissions = new[]
     {
         "contacts:contact:view",
         "contacts:conversation:monitor",
@@ -58,7 +64,8 @@ internal static class ManagementImpersonationEndpoints
         "partner:customer:view",
         "partner:billing:view",
         "partner:settings:view",
-    };
+        "billing:credits:read",
+    }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Resolves the calling principal's user id using the canonical claim order
