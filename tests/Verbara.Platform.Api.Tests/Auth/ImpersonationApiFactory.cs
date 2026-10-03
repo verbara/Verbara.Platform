@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
@@ -235,6 +237,30 @@ public class ImpersonationApiFactory : AccountStatusApiFactory
             readOnly,
             impersonationSessionId: Guid.NewGuid().ToString("N"));
         return token;
+    }
+
+    /// <summary>
+    /// A management API key of the platform tenant bound to <paramref name="owner"/>, stored in this host's
+    /// <see cref="IApiKeyStore"/>. Returns the raw key, which authenticates as <c>Authorization: Bearer</c>.
+    /// </summary>
+    public string NewManagementKey(User owner)
+    {
+        var rawKey = $"test-management-key-{Guid.NewGuid():N}";
+        using var scope = Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IApiKeyStore>().SaveAsync(
+            new ApiKey
+            {
+                KeyId = EntityId.From($"test-management-key-{Guid.NewGuid():N}"),
+                TenantId = new TenantId(PlatformTenantId),
+                Name = "Impersonation test key",
+                HashedKey = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(rawKey))),
+                Scopes = ["platform:tenant:impersonate"],
+                UserId = owner.UserId,
+                KeyType = ApiKeyType.Management,
+                CreatedAt = DateTimeOffset.UtcNow,
+            },
+            CancellationToken.None).GetAwaiter().GetResult();
+        return rawKey;
     }
 
     private HttpClient BearerClient(WebApplicationFactory<Program>? host, string bearer)

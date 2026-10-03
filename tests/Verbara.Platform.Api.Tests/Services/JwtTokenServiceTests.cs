@@ -169,6 +169,23 @@ public sealed class JwtTokenServiceTests : IDisposable
         first.Should().NotBe(second, because: "revoking one session must never revoke another session's token");
     }
 
+    [Theory]
+    [InlineData(UserRole.Admin)]
+    [InlineData(UserRole.Supervisor)]
+    public void GenerateImpersonationToken_ShouldRecordTheImpersonatorRole_WhenCalled(UserRole role)
+    {
+        // Every request that presents the token is held to this role (AccountStatusGate); the token's
+        // own role claim stays Admin whatever the impersonator's role.
+        var admin = MakeUser();
+        admin.Role = role;
+
+        var (token, _, _) = _sut.GenerateImpersonationToken(admin, "t2", new HashSet<string> { "read:agents" });
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        jwt.Claims.Single(c => c.Type == "impersonator_role").Value.Should().Be(role.ToString());
+        jwt.Claims.Single(c => c.Type == "role").Value.Should().Be("Admin");
+    }
+
     [Fact]
     public void ValidationParameters_ShouldGrantNoMoreClockSkewThanARevocationOutlivesExpiry()
     {

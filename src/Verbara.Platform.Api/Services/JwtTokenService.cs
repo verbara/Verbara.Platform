@@ -205,7 +205,8 @@ internal sealed partial class JwtTokenService
 
     /// <summary>
     /// Mints an impersonation token: Admin in <paramref name="targetTenantId"/> on behalf of
-    /// <paramref name="admin"/>, for 30 minutes.
+    /// <paramref name="admin"/>, for 30 minutes. It records <paramref name="admin"/>'s role, to which
+    /// every request that presents it is held (<see cref="AccountStatusGate.ImpersonatorMayAuthenticateAsync"/>).
     /// </summary>
     /// <returns>
     /// The token, its expiry, and its <c>jti</c> (<c>TokenId</c>) — the handle its session keeps so
@@ -232,6 +233,7 @@ internal sealed partial class JwtTokenService
             new(ClaimTypes.Role, "Admin"),
             new("impersonator_id", admin.UserId.Value),
             new("impersonator_tenant", admin.TenantId.Value),
+            new(AccountStatusGate.ImpersonatorRoleClaim, admin.Role.ToString()),
             new("impersonation", "true"),
             new(JwtRegisteredClaimNames.Jti, tokenId),
         };

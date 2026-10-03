@@ -93,6 +93,9 @@ internal static class ManagementImpersonationEndpoints
     internal static string? ResolveCallerUserId(ClaimsPrincipal user)
         => CallerIdentity.ResolveUserId(user);
 
+    private static bool IsManagementKey(ClaimsPrincipal user) =>
+        string.Equals(user.FindFirst("key_type")?.Value, "management", StringComparison.Ordinal);
+
     public static void MapManagementImpersonationEndpoints(this IEndpointRouteBuilder app)
     {
         // Partner-delegated gate: StartImpersonation resolves the target tenant from the
@@ -224,6 +227,15 @@ internal static class ManagementImpersonationEndpoints
                 detail: AccountStatusGate.DeniedMessage,
                 statusCode: StatusCodes.Status403Forbidden);
         }
+
+        // The token records its impersonator's role as it is now, and every request made with it is
+        // held to that role (AccountStatusGate). PartnerDelegatedPolicy admitted the caller on the role
+        // its credential carries, which for an access token is the role it was issued with, up to its
+        // lifetime ago; the stored role must still be Admin, or an admin demoted since then would get a
+        // token that records the new role and keeps working. A management key passes that policy on its
+        // own authority, whatever its owner's role, and its token records the owner's role as it is.
+        if (!IsManagementKey(context.User) && adminUser.Role != UserRole.Admin)
+            return TypedResults.Forbid();
 
         // Target permissions: caller's permissions minus platform:* scoped ones
         var nonPlatformPerms = callerPermissions
