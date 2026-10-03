@@ -146,7 +146,7 @@ public sealed class NginxGatewayAccessLogTests
     private static string GatewayConfPath()
     {
         var repoRoot = Directory.GetParent(TestTreeSource.TestsRoot())!.FullName;
-        var path = Path.Combine(repoRoot, "docker", "nginx-gateway.conf");
+        var path = Path.Join(repoRoot, "docker", "nginx-gateway.conf");
         File.Exists(path).Should().BeTrue($"the gateway configuration must exist at {path}");
         return path;
     }

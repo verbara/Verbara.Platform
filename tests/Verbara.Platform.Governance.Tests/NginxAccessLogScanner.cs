@@ -62,10 +62,8 @@ internal static partial class NginxAccessLogScanner
             }
         }
 
-        foreach (var accessLog in Descendants(directives).Where(d => d.Name == "access_log"))
+        foreach (var accessLog in Descendants(directives).Where(d => d.Name == "access_log" && d.Args is not ["off"]))
         {
-            if (accessLog.Args is ["off"])
-                continue;
             if (accessLog.Args.Count < 2)
             {
                 violations.Add(
@@ -79,14 +77,13 @@ internal static partial class NginxAccessLogScanner
             }
         }
 
-        foreach (var server in Descendants(directives).Where(d => d.Name == "server" && d.Children is not null))
+        var serversWithoutAccessLog = Descendants(directives)
+            .Where(d => d.Name == "server" && d.Children is not null && !d.Children.Any(c => c.Name == "access_log"));
+        foreach (var server in serversWithoutAccessLog)
         {
-            if (!server.Children!.Any(d => d.Name == "access_log"))
-            {
-                violations.Add(
-                    $"server block (line {server.Line}) declares no access_log of its own, so it inherits the image's " +
-                    "default 'main' format, which logs $request.");
-            }
+            violations.Add(
+                $"server block (line {server.Line}) declares no access_log of its own, so it inherits the image's " +
+                "default 'main' format, which logs $request.");
         }
 
         return violations;

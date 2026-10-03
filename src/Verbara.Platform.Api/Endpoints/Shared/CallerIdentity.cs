@@ -55,11 +55,11 @@ internal static class CallerIdentity
 
         if (!string.Equals(caller.FindFirstValue("impersonation"), "true", StringComparison.Ordinal))
             return;
-        foreach (var claimType in s_impersonationClaims)
-        {
-            if (caller.FindFirstValue(claimType) is { Length: > 0 } value)
-                metadata[claimType] = value;
-        }
+        var present = s_impersonationClaims
+            .Select(claimType => (Type: claimType, Value: caller.FindFirstValue(claimType)))
+            .Where(claim => !string.IsNullOrEmpty(claim.Value));
+        foreach (var (claimType, value) in present)
+            metadata[claimType] = value!;
     }
 
     private static readonly string[] s_impersonationClaims =

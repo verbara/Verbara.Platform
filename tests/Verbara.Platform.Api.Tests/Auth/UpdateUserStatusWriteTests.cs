@@ -61,9 +61,9 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
                     SourceTemplateId = id,
                     CreatedAt = DateTimeOffset.UtcNow,
                 }).ToList());
-        _roleTemplates.GetAllAsync(Arg.Any<CancellationToken>()).Returns((IReadOnlyList<RoleTemplate>)[]);
+        _roleTemplates.GetAllAsync(Arg.Any<CancellationToken>()).Returns(Array.Empty<RoleTemplate>());
         _userRoles.MoveAsync(default, default!, default!, default, default, default)
-            .ReturnsForAnyArgs((IReadOnlyList<string>)[]);
+            .ReturnsForAnyArgs(Array.Empty<string>());
         // Every read returns a fresh Active snapshot, as PostgresUserStore does.
         _store.GetByIdAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>())
             .Returns(_ => NewTarget());
@@ -305,7 +305,7 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
         _store.GetByIdAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>())
             .Returns(_ => NewTarget(role: UserRole.Admin));
         _userRoles.GetEffectivePermissionsAsync(new TenantId(Tenant), EntityId.From(TargetId), Arg.Any<CancellationToken>())
-            .Returns((IReadOnlySet<string>)new HashSet<string>(StringComparer.Ordinal));
+            .Returns(new HashSet<string>(StringComparer.Ordinal));
         await _permissions.ResolveAsync(new TenantId(Tenant), EntityId.From(TargetId), CancellationToken.None);
 
         await InvokeAsync(new UpdateUserRequest(DisplayName: null, Role: UserRole.Agent, Status: null));

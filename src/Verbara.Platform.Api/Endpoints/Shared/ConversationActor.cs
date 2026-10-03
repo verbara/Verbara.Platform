@@ -92,6 +92,6 @@ internal sealed class ConversationActor
     public static void AddOwner(IDictionary<string, string> metadata, string prefix, ConversationOwner? owner)
     {
         metadata[$"{prefix}_kind"] = owner?.Kind.ToString() ?? "None";
-        metadata[$"{prefix}_id"] = owner?.OwnerId?.Value ?? string.Empty;
+        metadata[$"{prefix}_id"] = owner is { OwnerId: { } ownerId } ? ownerId.Value : string.Empty;
     }
 }

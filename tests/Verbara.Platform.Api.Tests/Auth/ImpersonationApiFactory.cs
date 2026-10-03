@@ -193,7 +193,7 @@ public class ImpersonationApiFactory : AccountStatusApiFactory
     {
         var clock = new FakeTimeProvider(TimeProvider.System.GetUtcNow() + elapsed);
         var sweep = ActivatorUtilities.CreateInstance<ImpersonationSessionTimeoutService>(
-            (host ?? this).Services, (TimeProvider)clock);
+            (host ?? this).Services, clock);
         return sweep.SweepOnceAsync(CancellationToken.None);
     }
 
@@ -273,13 +273,16 @@ public class ImpersonationApiFactory : AccountStatusApiFactory
     private User CreateUser(User user, WebApplicationFactory<Program>[] replicas)
     {
         foreach (var host in Hosts(replicas))
-        {
-            using var scope = host.Services.CreateScope();
-            scope.ServiceProvider.GetRequiredService<IUserStore>().CreateAsync(user, CancellationToken.None)
-                .GetAwaiter().GetResult();
-        }
+            CreateUserIn(host.Services, user);
 
         return user;
+    }
+
+    private static void CreateUserIn(IServiceProvider services, User user)
+    {
+        using var scope = services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IUserStore>().CreateAsync(user, CancellationToken.None)
+            .GetAwaiter().GetResult();
     }
 
     private IEnumerable<WebApplicationFactory<Program>> Hosts(WebApplicationFactory<Program>[] replicas) =>
