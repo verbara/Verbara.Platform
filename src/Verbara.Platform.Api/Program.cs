@@ -87,8 +87,9 @@ using Verbara.Sdk.Pro.OpenTelemetry;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
-// No per-request log: it records the query (SSE ?token=, hub ?access_token=). In code, so no Logging:LogLevel key lifts it.
+// No per-request log (the query: SSE ?token=, hub ?access_token=), no redirect log (an OIDC sign-in's token). In code, so no Logging:LogLevel key lifts them.
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.AspNetCore.Http.Result.RedirectResult", LogLevel.Warning);
 
 // ─── Host-level worker resilience (ADR-0021) ─────────────────────────────────
 // Verbara house-style: any BackgroundService that throws out of ExecuteAsync
