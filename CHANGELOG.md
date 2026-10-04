@@ -9,6 +9,39 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Dependencies
+
+- **Verbara.Sdk `2.4.0` → `2.7.0`** and **Verbara.Sdk.Pro `2.14.1-pro` → `2.17.0-pro`** — all 29
+  consumed packages cascaded across `Directory.Packages.props` in one commit (7 `Verbara.Sdk.*` pins +
+  22 `Verbara.Sdk.Pro.*` pins). `2.5.x` and `2.6.x` are skipped on purpose: `2.7.0` is one breaking
+  minor, so Pro migrated once and `2.17.0-pro` is the Pro build compiled against it. The resulting
+  compatibility triple — **Verbara.Sdk `2.7.0` × Verbara.Sdk.Pro `2.17.0-pro` × Verbara.Platform
+  (the next version cut from `main`)** — is what this entry records; per `Verbara.Sdk/ADR-0040` D3
+  the cascade rides alone and cuts no version of its own. **No floor moved:** `dotnet restore`
+  reported no `NU1605`/`NU1109`, so every existing third-party central pin stays where it was (one is added, below). Transitively,
+  `OpenTelemetry` (not pinned here) resolves `1.19.1` instead of `1.17.0`; no package entered or left
+  the graph.
+- **`OpenTelemetry.Exporter.Prometheus.AspNetCore` pinned at `1.19.1-beta.1`** — Sdk `2.7.0` raises
+  `OpenTelemetry` to `1.19.1` but still pulls exporter `1.15.2-beta.1`, which calls a type `1.19.1`
+  removed, so `GET /metrics` answered `200` with an empty body; the pin restores the samples and a
+  `/metrics` test now guards them. Removed when the Sdk ships the aligned exporter (Sdk `2.8.0`).
+- **Behaviour Platform takes on — queued calls get an owner (H159).** Since Sdk `2.7.0`
+  (Verbara.Sdk#377) the SDK connects a queued call only when the queue reports that a member took it,
+  and emits one `CallConnectedEvent` per such call. A queue call answered by a Platform agent therefore
+  now drives the conversation to `Active` with that agent as its owner, delivers the screen-pop and
+  sets the agent `Busy`. **Operator note:** the AMI user must carry the `agent` read class, or the
+  queue's member-connect events never arrive and these calls stay unowned. A leadership failover can
+  still re-deliver the event; the existing `becameActive` gate in `VoiceConversationBridge` keeps it
+  idempotent, and only its comment changes.
+- **`DeferredPrimaryAmiConnection` forwards the three `IAmiConnection` members Sdk `2.7.0` added** —
+  `ReportsEventActionOutcome`, the `SendEventGeneratingActionAsync(action, EventActionOutcome?, ct)`
+  overload and the `StateChanged` event — to the primary connection. The interface gives them default
+  bodies, so the wrapper compiled clean while answering `false`, dropping the outcome and raising
+  nothing; four tests now lock the forwarding. Platform does not call any of them yet.
+- **Deliberately out of scope** (`Verbara.Sdk/ADR-0040` D4): `Microsoft.Extensions.TimeProvider.Testing`
+  stays at `10.10.0`, and neither `OpenTelemetry` itself nor `NATS.Client.Core` gains a direct pin.
+  The second hop, Sdk `2.8.0` (H142), is a separate change. decision_ref `Verbara.Sdk/ADR-0040`.
+
 ---
 
 ## [2.25.0] - 2026-10-03

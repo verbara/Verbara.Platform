@@ -1,4 +1,5 @@
 using Verbara.Sdk;
+using Verbara.Sdk.Ami.Connection;
 using Verbara.Sdk.Enums;
 using Verbara.Sdk.Live.Server;
 
@@ -72,6 +73,21 @@ internal sealed class DeferredPrimaryAmiConnection : IAmiConnection
     public IAsyncEnumerable<ManagerEvent> SendEventGeneratingActionAsync(
         ManagerAction action, CancellationToken cancellationToken = default)
         => Primary.SendEventGeneratingActionAsync(action, cancellationToken);
+
+    // Sdk 2.7.0 added the next three members with default bodies (false / an overload that drops the outcome /
+    // an event that raises nothing). The interface asks a wrapper to forward the inner connection's answer, so
+    // the outcome property and its overload are forwarded together, and StateChanged with them.
+    public bool ReportsEventActionOutcome => Primary.ReportsEventActionOutcome;
+
+    public IAsyncEnumerable<ManagerEvent> SendEventGeneratingActionAsync(
+        ManagerAction action, EventActionOutcome? outcome, CancellationToken cancellationToken = default)
+        => Primary.SendEventGeneratingActionAsync(action, outcome, cancellationToken);
+
+    public event Action<AmiConnectionStateChange>? StateChanged
+    {
+        add => Primary.StateChanged += value;
+        remove => Primary.StateChanged -= value;
+    }
 
     public IDisposable Subscribe(IObserver<ManagerEvent> observer)
         => Primary.Subscribe(observer);
