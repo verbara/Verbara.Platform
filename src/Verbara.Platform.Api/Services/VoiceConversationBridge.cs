@@ -266,10 +266,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             return;
         }
 
-        // The SDK emits ≥2 CallConnectedEvents for one answered queue call (the agent-connect path
-        // is unconditional), and a leadership failover can re-emit too. The Queued→Offered→Active
-        // advance is the once-per-call signal: only the FIRST delivery actually moves the state, so
-        // gating the owner-assign + persist + capacity-reserve + Busy on it makes them idempotent.
+        // Since Sdk 2.7.0 (Verbara.Sdk#377) the SDK emits one CallConnectedEvent per queued call a
+        // member takes, but a leadership failover can re-deliver it. The Queued→Offered→Active advance
+        // is the once-per-call signal: only the FIRST delivery actually moves the state, so gating the
+        // owner-assign + persist + capacity-reserve + Busy on it keeps them idempotent.
         var oldState = conversation.State;
         if (ConversationStateMachine.CanTransition(conversation.State, ConversationState.Offered))
             conversation.TransitionTo(ConversationState.Offered);
