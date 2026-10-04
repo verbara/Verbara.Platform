@@ -20,7 +20,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the cascade rides alone and cuts no version of its own. **No floor moved:** `dotnet restore`
   reported no `NU1605`/`NU1109`, so every existing third-party central pin stays where it was (one is added, below). Transitively,
   `OpenTelemetry` (not pinned here) resolves `1.19.1` instead of `1.17.0`; no package entered or left
-  the graph.
+  the graph. (#332)
 - **`OpenTelemetry.Exporter.Prometheus.AspNetCore` pinned at `1.19.1-beta.1`** — Sdk `2.7.0` raises
   `OpenTelemetry` to `1.19.1` but still pulls exporter `1.15.2-beta.1`, which calls a type `1.19.1`
   removed, so `GET /metrics` answered `200` with an empty body; the pin restores the samples and a
