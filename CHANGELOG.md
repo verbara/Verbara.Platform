@@ -18,7 +18,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   compatibility triple — **Verbara.Sdk `2.7.0` × Verbara.Sdk.Pro `2.17.0-pro` × Verbara.Platform
   (the next version cut from `main`)** — is what this entry records; per `Verbara.Sdk/ADR-0040` D3
   the cascade rides alone and cuts no version of its own. **No floor moved:** `dotnet restore`
-  reported no `NU1605`/`NU1109`, so every third-party central pin stays where it was. Transitively,
+  reported no `NU1605`/`NU1109`, so every existing third-party central pin stays where it was (one is added, below). Transitively,
   `OpenTelemetry` (not pinned here) resolves `1.19.1` instead of `1.17.0`; no package entered or left
   the graph.
 - **`OpenTelemetry.Exporter.Prometheus.AspNetCore` pinned at `1.19.1-beta.1`** — Sdk `2.7.0` raises
