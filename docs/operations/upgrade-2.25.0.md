@@ -302,6 +302,22 @@ while MFA is off.
 `/api/v1/partner/revenue`. The Admin, Partner Admin, Partner Billing and Partner Viewer templates carry
 it; other users of a Partner tenant get 403.
 
+## Partner tenants are supported from 2.25.0
+
+Partner tenants (resellers who run their own Customers) are recommended from 2.25.0 on. Before it, a
+Partner's administrator could impersonate its Customers with write access and keep administrator
+permissions after a demotion (the impersonation, revocation and role-change advisories above). Do not
+give a third party Partner administrator credentials on 2.24.x or earlier.
+
+Known limitations:
+
+- The host issues the invoice. A Partner generates its Customers' invoices
+  (`POST /api/v1/partner/customers/{customerId}/invoices/generate`), but only the host's
+  `POST /api/v1/management/invoices/{id}/issue` issues them.
+- The Partner's rate card and the host's base rate card must use the same currency. The Partner's
+  margin is the difference of the two totals, and no step compares their currencies.
+- The console does not yet show the tenant's own logo, favicon or colours.
+
 ## Password-reset links and the OIDC redirect URI use the configured public address
 
 Platform.Api no longer builds the password-reset link or the OIDC `redirect_uri` from the request's
