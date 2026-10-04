@@ -16,7 +16,10 @@ namespace Verbara.Platform.Conversations.Serialization;
 [JsonSerializable(typeof(MessageDirection))]
 [JsonSerializable(typeof(MessageDeliveryStatus))]
 [JsonSerializable(typeof(MessageBlockType))]
+// AllowOutOfOrderMetadataProperties: messages.content is JSONB, and Postgres re-orders object
+// keys, so a MessageBlock's "$type" discriminator is not the first property when read back.
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    AllowOutOfOrderMetadataProperties = true)]
 public partial class ConversationsJsonContext : JsonSerializerContext;
