@@ -9,6 +9,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Message history can be read again on PostgreSQL.** Every read of a stored message failed with a server error (500). Postgres stores message content as `jsonb`, which reorders the keys of each block, and the reader required the block's type to come first. The bug was latent since message storage first shipped (1.2.0). It broke `GET /api/v1/conversations/{id}/messages`, `GET /api/v1/supervisor/conversations/{id}/messages`, typification suggestions, the GDPR export, the conversation summary report, delivery-status webhooks, de-duplication of redelivered inbound messages and email thread matching. The in-memory store was not affected. No migration is needed: rows already stored are read correctly after the upgrade.
+
 ### Dependencies
 
 - **Verbara.Sdk `2.4.0` → `2.7.0`** and **Verbara.Sdk.Pro `2.14.1-pro` → `2.17.0-pro`** — all 29

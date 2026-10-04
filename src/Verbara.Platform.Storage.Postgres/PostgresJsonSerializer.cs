@@ -83,18 +83,23 @@ namespace Verbara.Platform.Storage.Postgres;
 // reflection) under JsonSerializerIsReflectionEnabledByDefault=false (design D2, D6).
 [JsonSerializable(typeof(IReadOnlyList<QuiescedCampaignInfo>))]
 [JsonSerializable(typeof(QuiescedCampaignInfo))]
+// AllowOutOfOrderMetadataProperties: JSONB re-orders object keys, so a polymorphic "$type"
+// discriminator (MessageBlock, via MessageEnvelope) is not the first property when read back.
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    UseStringEnumConverter = true)]
+    UseStringEnumConverter = true,
+    AllowOutOfOrderMetadataProperties = true)]
 internal sealed partial class PostgresJsonContext : JsonSerializerContext;
 
 internal static class PostgresJson
 {
+    // These options replace the attribute's wholesale, so they repeat what JSONB needs.
     internal static readonly PostgresJsonContext Ctx = new(new JsonSerializerOptions
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        AllowOutOfOrderMetadataProperties = true,
     });
 
     internal static string Serialize<T>(T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo) =>

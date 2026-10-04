@@ -166,4 +166,24 @@ public class MessageBlockTests
 
         conv.Channel.Should().Be(ChannelType.WhatsApp);
     }
+
+    [Fact]
+    public void MessageEnvelope_ShouldDeserialize_WhenTypeDiscriminatorIsNotFirst()
+    {
+        // Postgres JSONB re-orders object keys (shorter keys first), so a block read back from
+        // messages.content carries "$type" after its other properties.
+        const string json = """
+            {"blocks": [
+              {"text": "hello", "type": 0, "$type": "text"},
+              {"url": "https://x/i.jpg", "type": 1, "$type": "image", "caption": "c", "mimeType": "image/jpeg"}
+            ]}
+            """;
+
+        var envelope = JsonSerializer.Deserialize(json, ConversationsJsonContext.Default.MessageEnvelope);
+
+        envelope.Should().NotBeNull();
+        envelope!.Blocks.Should().HaveCount(2);
+        envelope.Blocks[0].Should().BeOfType<TextBlock>().Which.Text.Should().Be("hello");
+        envelope.Blocks[1].Should().BeOfType<ImageBlock>().Which.Url.Should().Be("https://x/i.jpg");
+    }
 }
