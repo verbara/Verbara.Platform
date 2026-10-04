@@ -55,6 +55,48 @@ public sealed class RealtimeSyncingStoresRegistrarTests
     }
 
     [Fact]
+    public async Task MembershipDecorator_ShouldConvergeUnderTheSingletonPauseCoordinator()
+    {
+        // queue-members-stay-unpaused-across-reconcile — the membership decorator must take the SAME
+        // per-agent lock as RealtimeStateBridge and the reconciler, i.e. the DI singleton.
+        var provider = BuildProvider(withRealtime: true);
+        var coordinator = provider.GetRequiredService<AgentPauseCoordinator>();
+        provider.GetRequiredService<AgentPauseCoordinator>().Should().BeSameAs(coordinator);
+        var tenant = new Verbara.Platform.Core.TenantId("t-reg");
+        var queue = new Queue
+        {
+            QueueId = Verbara.Platform.Core.EntityId.New(), TenantId = tenant, Name = "q-reg",
+            IsActive = true, CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var agent = new Agent
+        {
+            AgentId = Verbara.Platform.Core.EntityId.New(), TenantId = tenant, UserId = Verbara.Platform.Core.EntityId.New(),
+            DisplayName = "Registrar Agent", State = AgentState.Available, CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await provider.GetRequiredKeyedService<IQueueStore>(RealtimeSyncingStoresExtensions.QueueStoreInner)
+            .SaveAsync(queue, CancellationToken.None);
+        await provider.GetRequiredKeyedService<IAgentStore>(RealtimeSyncingStoresExtensions.AgentStoreInner)
+            .SaveAsync(agent, CancellationToken.None);
+        var membership = new QueueMembership
+        {
+            TenantId = tenant, QueueId = queue.QueueId, AgentId = agent.AgentId,
+            Source = MembershipSource.Manual, CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        Task save;
+        using (await coordinator.AcquireAsync(agent.AgentId.Value, CancellationToken.None))
+        {
+            save = provider.GetRequiredService<IQueueMembershipStore>().SaveAsync(membership, CancellationToken.None);
+            // No wall-clock wait: a contended SemaphoreSlim.WaitAsync returns an incomplete task synchronously.
+            save.IsCompleted.Should().BeFalse("the decorator's convergence must wait on the singleton's lock");
+        }
+
+        await save.WaitAsync(TimeSpan.FromSeconds(5));
+        await provider.GetRequiredService<IRealtimeSyncService>().Received(1)
+            .SyncAgentPausedAsync("t-reg", agent.AgentId.Value, false, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public void AddRealtimeSyncingStores_ShouldThrow_WhenStorageNotRegisteredFirst()
     {
         var services = new ServiceCollection();

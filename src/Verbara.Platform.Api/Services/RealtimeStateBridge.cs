@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Ami.Actions;
@@ -17,6 +16,8 @@ namespace Verbara.Platform.Api.Services;
 ///   <item>Asterisk AMI via a <c>QueuePause</c> action through the <see cref="VerbaraServerPool"/>.</item>
 /// </list>
 /// Both operations are best-effort; failures are logged without interrupting the event stream.
+/// Each write runs under the per-agent lock owned by <see cref="AgentPauseCoordinator"/>, the same
+/// lock the reconcile and membership-save convergence paths take.
 /// </summary>
 internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
 {
@@ -32,19 +33,21 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
     private readonly VerbaraServerPool _serverPool;
     private readonly ResiliencePolicy _policy;
     private readonly ILogger<RealtimeStateBridge> _logger;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _agentLocks = new();
+    private readonly AgentPauseCoordinator _pauseCoordinator;
     private IDisposable? _subscription;
 
     public RealtimeStateBridge(
         PlatformEventBus eventBus,
         IRealtimeSyncService syncService,
         VerbaraServerPool serverPool,
+        AgentPauseCoordinator pauseCoordinator,
         ILogger<RealtimeStateBridge> logger,
         [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _eventBus = eventBus;
         _syncService = syncService;
         _serverPool = serverPool;
+        _pauseCoordinator = pauseCoordinator;
         _logger = logger;
         _policy = policy ?? ResiliencePolicy.NoOp;
     }
@@ -85,18 +88,16 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
 
     /// <summary>
     /// Propagates a paused/unpaused decision to the Asterisk Realtime DB and AMI
-    /// under a per-agent semaphore. Both side-effects are independent and best-effort:
-    /// a DB failure does NOT prevent the AMI QueuePause from being attempted (and vice
-    /// versa). Both share the resilience policy key so circuit state is aggregated at
+    /// under the per-agent lock from <see cref="AgentPauseCoordinator"/>. Both side-effects
+    /// are independent and best-effort: a DB failure does NOT prevent the AMI QueuePause
+    /// from being attempted (and vice versa). Both share the resilience policy key so circuit state is aggregated at
     /// the bridge level. Shared by <see cref="AgentStateChangedEvent"/> (drain/normal
     /// state flips) and <see cref="AgentPendingStateChangedEvent"/> (W4 deferred-pause
     /// set/cancel, where State stays routable).
     /// </summary>
     private async Task ApplyPauseAsync(string tenantId, string agentId, bool shouldPause, string reason, CancellationToken ct)
     {
-        var semaphore = _agentLocks.GetOrAdd(agentId, _ => new SemaphoreSlim(1, 1));
-        await semaphore.WaitAsync(ct);
-        try
+        using (await _pauseCoordinator.AcquireAsync(agentId, ct))
         {
             var iface = $"PJSIP/{tenantId}-agent-{agentId}";
 
@@ -150,10 +151,6 @@ internal sealed partial class RealtimeStateBridge : IHostedService, IDisposable
                     Log.QueuePauseFailed(_logger, agentId, ex);
                 }
             }
-        }
-        finally
-        {
-            semaphore.Release();
         }
     }
 

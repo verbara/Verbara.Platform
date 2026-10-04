@@ -264,6 +264,74 @@ public sealed class RealtimeSyncingStoreDecoratorTests
         await sync.DidNotReceiveWithAnyArgs().RemoveQueueMemberAsync(default!, default!, default!, default);
     }
 
+    [Fact]
+    public async Task SaveAsync_ShouldSyncAgentUnpaused_WhenAgentIsAvailable()
+    {
+        // Regression (queue-members-stay-unpaused-across-reconcile): AddQueueMemberAsync
+        // inserts paused=1, so a save must converge the Available agent back to unpaused.
+        var (sut, _, sync, queue, agent) = BuildMembershipSut(out _);
+
+        await sut.SaveAsync(MakeMembership(agent.AgentId, queue.QueueId), CancellationToken.None);
+
+        // The Add (paused=1 on insert) must be followed by the convergence write.
+        RealtimeSyncCallLog.Of(sync).Should().Equal("AddQueueMemberAsync", "SyncAgentPausedAsync:False");
+        await sync.Received(1).SyncAgentPausedAsync(Tenant, agent.AgentId.Value, false, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldSyncAgentPaused_WhenAgentIsOnBreak()
+    {
+        var (sut, _, sync, queue, agent) = BuildMembershipSut(out _);
+        agent.State = AgentState.Break;
+
+        await sut.SaveAsync(MakeMembership(agent.AgentId, queue.QueueId), CancellationToken.None);
+
+        RealtimeSyncCallLog.Of(sync).Should().Equal("AddQueueMemberAsync", "SyncAgentPausedAsync:True");
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldNotConverge_WhenMembershipIsDigitalOnly()
+    {
+        var (sut, _, sync, queue, agent) = BuildMembershipSut(out _);
+
+        await sut.SaveAsync(
+            MakeMembership(agent.AgentId, queue.QueueId, allowedChannels: ["WebChat"]), CancellationToken.None);
+
+        await sync.DidNotReceiveWithAnyArgs().SyncAgentPausedAsync(default!, default!, default, default);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldNotConverge_WhenUpsertThrows()
+    {
+        var (sut, _, sync, queue, agent) = BuildMembershipSut(out _);
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+        sync.AddQueueMemberAsync(default!, default!, default!, default!, default, default, default)
+            .ReturnsForAnyArgs(_ => Faulted());
+#pragma warning restore CA2012
+
+        await sut.SaveAsync(MakeMembership(agent.AgentId, queue.QueueId), CancellationToken.None);
+
+        await sync.DidNotReceiveWithAnyArgs().SyncAgentPausedAsync(default!, default!, default, default);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldSwallowAndLog_WhenConvergenceThrows()
+    {
+        var (sut, membershipInner, sync, queue, agent) = BuildMembershipSut(out var logger);
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+        sync.SyncAgentPausedAsync(default!, default!, default, default)
+            .ReturnsForAnyArgs(_ => Faulted());
+#pragma warning restore CA2012
+        var membership = MakeMembership(agent.AgentId, queue.QueueId);
+
+        var act = async () => await sut.SaveAsync(membership, CancellationToken.None);
+
+        await act.Should().NotThrowAsync("the convergence is best-effort like the upsert");
+        (await membershipInner.GetAsync(membership.TenantId, queue.QueueId, agent.AgentId, CancellationToken.None))
+            .Should().NotBeNull();
+        logger.Warned(DeferralEventId).Should().BeTrue();
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     /// <summary>A faulted <see cref="ValueTask"/> that throws when awaited — models a fully
@@ -287,7 +355,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
         agentInner.SaveAsync(agent, CancellationToken.None).GetAwaiter().GetResult();
 
         var sut = new RealtimeSyncingQueueMembershipStore(
-            membershipInner, queueInner, agentInner, sync, logger);
+            membershipInner, queueInner, agentInner, sync, new AgentPauseCoordinator(), logger);
         return (sut, membershipInner, sync, queue, agent);
     }
 
@@ -313,7 +381,8 @@ public sealed class RealtimeSyncingStoreDecoratorTests
         CreatedAt = DateTimeOffset.UtcNow,
     };
 
-    private static QueueMembership MakeMembership(EntityId agentId, EntityId queueId, int penalty = 0) => new()
+    private static QueueMembership MakeMembership(
+        EntityId agentId, EntityId queueId, int penalty = 0, IReadOnlyList<string>? allowedChannels = null) => new()
     {
         TenantId = new TenantId(Tenant),
         QueueId = queueId,
@@ -322,7 +391,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
         Source = MembershipSource.Manual,
         IsExcluded = false,
         CreatedAt = DateTimeOffset.UtcNow,
-        AllowedChannels = null,
+        AllowedChannels = allowedChannels,
     };
 
     /// <summary>Minimal capturing logger — records the (level, eventId) of every log call so a test

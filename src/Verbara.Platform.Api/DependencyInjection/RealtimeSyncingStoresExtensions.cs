@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Queues;
@@ -46,6 +47,10 @@ public static class RealtimeSyncingStoresExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // The per-agent pause lock + rule shared by RealtimeStateBridge, the reconciler and the
+        // membership decorator (queue-members-stay-unpaused-across-reconcile). No external seam.
+        services.TryAddSingleton<AgentPauseCoordinator>();
+
         // Re-key each concrete store as the inner, drop the unkeyed alias, then re-register
         // the unkeyed service as the decorator (which falls back to the inner when realtime
         // is not registered).
@@ -85,6 +90,7 @@ public static class RealtimeSyncingStoresExtensions
                     sp.GetRequiredKeyedService<IQueueStore>(QueueStoreInner),
                     sp.GetRequiredKeyedService<IAgentStore>(AgentStoreInner),
                     sync,
+                    sp.GetRequiredService<AgentPauseCoordinator>(),
                     sp.GetRequiredService<ILogger<RealtimeSyncingQueueMembershipStore>>());
         });
 

@@ -16,6 +16,10 @@ namespace Verbara.Platform.Api.Services;
 /// <see cref="DeleteAllForAgentAsync"/>) do NOT per-member sync — the queue/agent removal path already
 /// removes the parent Asterisk rows, and the reconciler re-converges, matching the pre-migration
 /// endpoints. Every sync is best-effort: a throw is swallowed + logged (EventId 4130).
+/// After a voice upsert, <see cref="SaveAsync"/> converges the agent's <c>paused</c> value through
+/// <see cref="AgentPauseCoordinator.ConvergeAsync"/> (fresh read of the undecorated agent store under the
+/// per-agent lock shared with <see cref="RealtimeStateBridge"/>), because the upsert inserts a new row
+/// paused (queue-members-stay-unpaused-across-reconcile).
 /// </summary>
 /// <remarks>
 /// <b>R3 (decoration-cycle avoidance).</b> <see cref="IRealtimeSyncService.AddQueueMemberAsync"/> needs
@@ -30,6 +34,7 @@ internal sealed class RealtimeSyncingQueueMembershipStore : IQueueMembershipStor
     private readonly IQueueStore _queues;
     private readonly IAgentStore _agents;
     private readonly IRealtimeSyncService _sync;
+    private readonly AgentPauseCoordinator _pauseCoordinator;
     private readonly ILogger<RealtimeSyncingQueueMembershipStore> _logger;
 
     public RealtimeSyncingQueueMembershipStore(
@@ -37,18 +42,21 @@ internal sealed class RealtimeSyncingQueueMembershipStore : IQueueMembershipStor
         IQueueStore queues,
         IAgentStore agents,
         IRealtimeSyncService sync,
+        AgentPauseCoordinator pauseCoordinator,
         ILogger<RealtimeSyncingQueueMembershipStore> logger)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(queues);
         ArgumentNullException.ThrowIfNull(agents);
         ArgumentNullException.ThrowIfNull(sync);
+        ArgumentNullException.ThrowIfNull(pauseCoordinator);
         ArgumentNullException.ThrowIfNull(logger);
 
         _inner = inner;
         _queues = queues;
         _agents = agents;
         _sync = sync;
+        _pauseCoordinator = pauseCoordinator;
         _logger = logger;
     }
 
@@ -86,6 +94,13 @@ internal sealed class RealtimeSyncingQueueMembershipStore : IQueueMembershipStor
                 membership.TenantId.Value, queue.Name, agent.AgentId.Value, agent.DisplayName,
                 Math.Clamp(membership.Penalty, 0, 10),
                 allowedChannels: membership.AllowedChannels, ct).ConfigureAwait(false);
+
+            // The upsert inserts a new row with paused = 1: re-assert the agent's real state.
+            if (AgentPauseCoordinator.CreatesVoiceRow(membership.AllowedChannels))
+            {
+                await _pauseCoordinator.ConvergeAsync(
+                    membership.TenantId, membership.AgentId, _agents, _sync, ct).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
