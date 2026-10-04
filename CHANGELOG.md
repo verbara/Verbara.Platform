@@ -45,6 +45,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Deliberately out of scope** (`Verbara.Sdk/ADR-0040` D4): `Microsoft.Extensions.TimeProvider.Testing`
   stays at `10.10.0`, and neither `OpenTelemetry` itself nor `NATS.Client.Core` gains a direct pin.
   The second hop, Sdk `2.8.0` (H142), is a separate change. decision_ref `Verbara.Sdk/ADR-0040`.
+- **Verbara.Sdk.Pro `2.17.0-pro` → `2.17.1-pro`** — all 22 `Verbara.Sdk.Pro.*` pins move together
+  (Pro packages depend on their siblings at the same version, so a partial bump risks `NU1605`).
+  A patch with no API change: the `queue_members` upsert stops overwriting `paused` on conflict (see
+  *Fixed*). (#N)
+
+### Fixed
+
+- **An idle `Available` agent no longer stops receiving queue calls after a minute.** Every 60 s the
+  realtime reconciliation (and every queue-membership save) re-wrote the agent's Asterisk Realtime
+  `queue_members` rows with `paused = 1`, so `app_queue` skipped an agent the console still showed as
+  `Available` until the agent changed state by hand, and callers waited while a free agent sat idle.
+  Verbara.Sdk.Pro `2.17.1-pro` now keeps an existing row's `paused` value on re-upsert, and Platform
+  re-asserts the agent's real pause state after every member upsert it issues (reconcile pass and
+  membership save): it re-reads the agent under the same per-agent lock the state bridge uses and
+  pauses only a non-routable agent (`Available` and `Busy` are routable) or one with a pending pause.
+  This also unpauses a member created, or re-created after orphan cleanup, for an agent who is
+  already `Available`. Rows already stuck at `paused = 1` are corrected by the first reconcile after
+  the upgrade. **Known limitation:** the per-agent lock is per process. With several API replicas,
+  one pod's reconcile can still briefly race another pod's state change; the next state change or
+  reconcile re-asserts the correct value. A cross-pod lock is a separate change. (#N)
 
 ---
 

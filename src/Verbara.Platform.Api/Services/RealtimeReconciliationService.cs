@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using Verbara.Platform.Api.DependencyInjection;
 using Verbara.Platform.Api.Health;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
@@ -26,9 +27,19 @@ namespace Verbara.Platform.Api.Services;
 /// gate handles <see cref="QueueMembership.AllowedChannels"/> uniformly:
 /// </para>
 /// <list type="bullet">
-///   <item><description><c>null</c> or includes <c>"voice"</c> → idempotent upsert (no-op when already present).</description></item>
+///   <item><description><c>null</c> or includes <c>"voice"</c> → upsert. A new row is inserted with
+///   <c>paused</c> = 1; an existing row keeps its <c>paused</c> value (Sdk.Pro 2.17.1-pro) while its
+///   name and penalty are refreshed. So a freshly inserted row starts paused whatever the agent's
+///   state, which the paused convergence below corrects.</description></item>
 ///   <item><description>populated and excludes <c>"voice"</c> → short-circuits to <see cref="IRealtimeSyncService.RemoveQueueMemberAsync"/> (idempotent when row absent).</description></item>
 /// </list>
+/// <para>
+/// <b>Paused convergence.</b> After an agent's last voice upsert of the pass, the reconciler calls
+/// <see cref="AgentPauseCoordinator.ConvergeAsync"/> once for that agent: under the per-agent lock
+/// shared with <see cref="RealtimeStateBridge"/> it re-reads the agent (not the tick cache) and
+/// writes its real pause state with <see cref="IRealtimeSyncService.SyncAgentPausedAsync"/>, so an
+/// idle <c>Available</c> agent is never left paused by a tick (queue-members-stay-unpaused-across-reconcile).
+/// </para>
 /// <para>
 /// <b>Out of scope.</b> Orphan rows in Asterisk Realtime with no corresponding
 /// Verbara membership are NOT detected here — they are handled by the
@@ -61,6 +72,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
     private readonly IServiceHeartbeat _heartbeat;
     private readonly TimeSpan _interval;
     private readonly ResiliencePolicy _policy;
+    private readonly AgentPauseCoordinator _pauseCoordinator;
     private readonly ILogger<RealtimeReconciliationService> _logger;
 
     private readonly Meter _meter;
@@ -72,12 +84,14 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         IServiceProvider services,
         IServiceHeartbeat heartbeat,
         Microsoft.Extensions.Options.IOptions<RealtimeOptions> options,
+        AgentPauseCoordinator pauseCoordinator,
         ILogger<RealtimeReconciliationService> logger,
         [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(heartbeat);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(pauseCoordinator);
         ArgumentNullException.ThrowIfNull(logger);
 
         _services = services;
@@ -85,6 +99,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         var intervalSeconds = Math.Max(5, options.Value.ReconcilerIntervalSeconds);
         _interval = TimeSpan.FromSeconds(intervalSeconds);
         _policy = policy ?? ResiliencePolicy.NoOp;
+        _pauseCoordinator = pauseCoordinator;
         _logger = logger;
 
         _meter = new Meter(MeterName);
@@ -93,7 +108,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         _membershipsReconciled = _meter.CreateCounter<long>("realtime.reconciliation.memberships",
             description: "queue_memberships rows re-issued to IRealtimeSyncService per tick.");
         _syncFailures = _meter.CreateCounter<long>("realtime.reconciliation.sync_failures",
-            description: "AddQueueMemberAsync calls that threw during reconciliation (counted, not retried inline).");
+            description: "AddQueueMemberAsync or paused-convergence calls that threw during reconciliation (counted, not retried inline).");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -168,6 +183,10 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         var membershipStore = sp.GetRequiredService<IQueueMembershipStore>();
         var queueStore = sp.GetRequiredService<IQueueStore>();
         var agentStore = sp.GetRequiredService<IAgentStore>();
+        // The paused convergence re-reads the agent from the UNDECORATED store when the
+        // realtime-syncing decorators are wired (never the tick cache below).
+        var freshAgentStore =
+            sp.GetKeyedService<IAgentStore>(RealtimeSyncingStoresExtensions.AgentStoreInner) ?? agentStore;
 
         var tenants = await tenantStore.GetAllActiveAsync(ct);
 
@@ -177,7 +196,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
 
             var tid = new TenantId(tenant.TenantId);
             await ReconcileTenantAsync(
-                tid, tenant.TenantId, membershipStore, queueStore, agentStore, syncService, ct);
+                tid, tenant.TenantId, membershipStore, queueStore, agentStore, freshAgentStore, syncService, ct);
 
             _tenantsProcessed.Add(1, new KeyValuePair<string, object?>("tenant", tenant.TenantId));
         }
@@ -189,6 +208,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         IQueueMembershipStore membershipStore,
         IQueueStore queueStore,
         IAgentStore agentStore,
+        IAgentStore freshAgentStore,
         IRealtimeSyncService syncService,
         CancellationToken ct)
     {
@@ -200,6 +220,10 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         // for every membership row.
         var queueCache = new Dictionary<string, Queue?>(StringComparer.Ordinal);
         var agentCache = new Dictionary<string, Agent?>(StringComparer.Ordinal);
+        // Agents with at least one voice row upserted this pass, in first-seen order. Each one is
+        // converged once, after the loop — i.e. after that agent's last AddQueueMemberAsync.
+        var toConverge = new List<EntityId>();
+        var queuedForConverge = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var m in memberships)
         {
@@ -231,6 +255,8 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
                     Math.Clamp(m.Penalty, 0, 10),
                     allowedChannels: m.AllowedChannels, ct);
                 _membershipsReconciled.Add(1, new KeyValuePair<string, object?>("tenant", tenantId));
+                if (AgentPauseCoordinator.CreatesVoiceRow(m.AllowedChannels) && queuedForConverge.Add(agentIdValue))
+                    toConverge.Add(agent.AgentId);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -244,6 +270,25 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
                 LogSyncFailure(tenantId, queue.Name, agent.AgentId.Value, ex);
             }
         }
+
+        foreach (var agentId in toConverge)
+        {
+            try
+            {
+                await _pauseCoordinator.ConvergeAsync(tid, agentId, freshAgentStore, syncService, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _syncFailures.Add(1,
+                    new KeyValuePair<string, object?>("tenant", tenantId),
+                    new KeyValuePair<string, object?>("operation", "converge_paused"));
+                LogConvergeFailure(tenantId, agentId.Value, ex);
+            }
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Debug,
@@ -253,6 +298,10 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Realtime reconciliation failed for tenant {TenantId} queue {QueueName} agent {AgentId}.")]
     private partial void LogSyncFailure(string tenantId, string queueName, string agentId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Realtime reconciliation could not converge the paused state of agent {AgentId} in tenant {TenantId}.")]
+    private partial void LogConvergeFailure(string tenantId, string agentId, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Realtime reconciliation cycle failed.")]
     private partial void LogReconcileCycleError(Exception ex);

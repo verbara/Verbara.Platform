@@ -100,20 +100,216 @@ public sealed class RealtimeReconciliationServiceTests
 
         var sp = services.BuildServiceProvider();
         var sut = new RealtimeReconciliationService(
-            sp, heartbeat, options,
+            sp, heartbeat, options, new AgentPauseCoordinator(),
             NullLogger<RealtimeReconciliationService>.Instance);
 
         var act = async () => await sut.ReconcileAsync(CancellationToken.None);
         await act.Should().NotThrowAsync();
     }
 
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldSyncAgentUnpaused_WhenAgentIsAvailable()
+    {
+        // Regression (queue-members-stay-unpaused-across-reconcile): AddQueueMemberAsync
+        // writes paused=1 on insert, so after an agent's upserts the tick must re-assert
+        // the agent's real pause state. An Available agent with no pending pause ends unpaused.
+        var harness = BuildHarness(out var sync);
+        var agent = MakeAgent("agent-available");
+        var queue = MakeQueue(EntityId.From("q-1"));
+        harness.SeedAgent(agent);
+        harness.SeedQueue(queue);
+        harness.SeedMembership(MakeMembership(agent.AgentId, queue.QueueId));
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        // The Add (paused=1 on insert) must be followed by the convergence write.
+        RealtimeSyncCallLog.Of(sync).Should().Equal("AddQueueMemberAsync", "SyncAgentPausedAsync:False");
+        await sync.Received(1).SyncAgentPausedAsync(TestTenantId, "agent-available", false, Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(AgentState.Break, true)]
+    [InlineData(AgentState.ACW, true)]
+    [InlineData(AgentState.Offline, true)]
+    [InlineData(AgentState.Busy, false)]
+    public async Task ReconcileTenantAsync_ShouldSyncRulePausedValue_ForAgentState(AgentState state, bool expectedPaused)
+    {
+        var harness = BuildHarness(out var sync);
+        var agent = MakeAgent("agent-state");
+        agent.State = state;
+        var queue = MakeQueue(EntityId.From("q-1"));
+        harness.SeedAgent(agent);
+        harness.SeedQueue(queue);
+        harness.SeedMembership(MakeMembership(agent.AgentId, queue.QueueId));
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        RealtimeSyncCallLog.Of(sync).Should().Equal("AddQueueMemberAsync", $"SyncAgentPausedAsync:{expectedPaused}");
+    }
+
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldSyncAgentPaused_WhenAvailableAgentHasPendingPause()
+    {
+        var harness = BuildHarness(out var sync);
+        var agent = MakeAgent("agent-pending");
+        agent.PendingState = AgentState.Break;
+        var queue = MakeQueue(EntityId.From("q-1"));
+        harness.SeedAgent(agent);
+        harness.SeedQueue(queue);
+        harness.SeedMembership(MakeMembership(agent.AgentId, queue.QueueId));
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        RealtimeSyncCallLog.Of(sync).Should().Equal("AddQueueMemberAsync", "SyncAgentPausedAsync:True");
+    }
+
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldConvergeOncePerAgent_AfterItsLastUpsert()
+    {
+        // SyncAgentPausedAsync sets every row of the agent's interface, so one write per agent per
+        // pass, after the agent's last AddQueueMemberAsync, covers all its queues.
+        var harness = BuildHarness(out var sync);
+        var agent = MakeAgent("agent-two-queues");
+        var q1 = MakeQueue(EntityId.From("q-1"));
+        var q2 = MakeQueue(EntityId.From("q-2"));
+        harness.SeedAgent(agent);
+        harness.SeedQueue(q1);
+        harness.SeedQueue(q2);
+        harness.SeedMembership(MakeMembership(agent.AgentId, q1.QueueId));
+        harness.SeedMembership(MakeMembership(agent.AgentId, q2.QueueId));
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        RealtimeSyncCallLog.Of(sync).Should().Equal(
+            "AddQueueMemberAsync", "AddQueueMemberAsync", "SyncAgentPausedAsync:False");
+    }
+
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldNotConverge_WhenAgentOnlyHasExcludedMemberships()
+    {
+        var harness = BuildHarness(out var sync);
+        var agent = MakeAgent("agent-excluded-only");
+        var queue = MakeQueue(EntityId.From("q-1"));
+        harness.SeedAgent(agent);
+        harness.SeedQueue(queue);
+        harness.SeedMembership(MakeMembership(agent.AgentId, queue.QueueId, isExcluded: true));
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        await sync.DidNotReceiveWithAnyArgs().SyncAgentPausedAsync(default!, default!, default, default);
+    }
+
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldNotConverge_WhenMembershipIsDigitalOnly()
+    {
+        // Voice gate: a digital-only membership has no queue_members row (the SDK removes it).
+        var harness = BuildHarness(out var sync);
+        var agent = MakeAgent("agent-digital");
+        var queue = MakeQueue(EntityId.From("q-1"));
+        harness.SeedAgent(agent);
+        harness.SeedQueue(queue);
+        harness.SeedMembership(MakeMembership(agent.AgentId, queue.QueueId, allowedChannels: ["WebChat"]));
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        await sync.DidNotReceiveWithAnyArgs().SyncAgentPausedAsync(default!, default!, default, default);
+    }
+
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldNotConverge_WhenUpsertThrows()
+    {
+        var harness = BuildHarness(out var sync);
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+        sync.AddQueueMemberAsync(default!, default!, default!, default!, default, default, default)
+            .ReturnsForAnyArgs(_ => new ValueTask(Task.FromException(new InvalidOperationException("boom"))));
+#pragma warning restore CA2012
+        var agent = MakeAgent("agent-add-fails");
+        var queue = MakeQueue(EntityId.From("q-1"));
+        harness.SeedAgent(agent);
+        harness.SeedQueue(queue);
+        harness.SeedMembership(MakeMembership(agent.AgentId, queue.QueueId));
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        await sync.DidNotReceiveWithAnyArgs().SyncAgentPausedAsync(default!, default!, default, default);
+    }
+
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldWriteFreshState_WhenAgentChangesStateDuringThePass()
+    {
+        // A pass that started while the agent was Break; the agent becomes Available before the
+        // convergence. The convergence re-reads the agent, so the newer state wins over the tick cache.
+        var harness = BuildHarness(out var sync);
+        var agent = MakeAgent("agent-racing");
+        agent.State = AgentState.Break;
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+        sync.AddQueueMemberAsync(default!, default!, default!, default!, default, default, default)
+            .ReturnsForAnyArgs(_ =>
+            {
+                harness.ReplaceAgent(MakeAgent("agent-racing")); // fresh row, State = Available
+                return ValueTask.CompletedTask;
+            });
+#pragma warning restore CA2012
+        var queue = MakeQueue(EntityId.From("q-1"));
+        harness.SeedAgent(agent);
+        harness.SeedQueue(queue);
+        harness.SeedMembership(MakeMembership(agent.AgentId, queue.QueueId));
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        RealtimeSyncCallLog.Of(sync).Should().Equal("AddQueueMemberAsync", "SyncAgentPausedAsync:False");
+    }
+
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldReadTheUndecoratedAgentStore_WhenItIsRegistered()
+    {
+        var undecorated = Substitute.For<IAgentStore>();
+        var harness = BuildHarness(out var sync, undecorated);
+        var agent = MakeAgent("agent-inner");
+        var innerView = MakeAgent("agent-inner");
+        innerView.State = AgentState.DND;
+        undecorated.GetByIdAsync(Arg.Any<TenantId>(), agent.AgentId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Agent?>(innerView));
+        var queue = MakeQueue(EntityId.From("q-1"));
+        harness.SeedAgent(agent);
+        harness.SeedQueue(queue);
+        harness.SeedMembership(MakeMembership(agent.AgentId, queue.QueueId));
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        RealtimeSyncCallLog.Of(sync).Should().Equal("AddQueueMemberAsync", "SyncAgentPausedAsync:True");
+    }
+
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldKeepConvergingOtherAgents_WhenOneConvergenceThrows()
+    {
+        var harness = BuildHarness(out var sync);
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+        sync.SyncAgentPausedAsync(TestTenantId, "agent-a", Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new ValueTask(Task.FromException(new InvalidOperationException("db down"))));
+#pragma warning restore CA2012
+        var a = MakeAgent("agent-a");
+        var b = MakeAgent("agent-b");
+        var queue = MakeQueue(EntityId.From("q-1"));
+        harness.SeedAgent(a);
+        harness.SeedAgent(b);
+        harness.SeedQueue(queue);
+        harness.SeedMembership(MakeMembership(a.AgentId, queue.QueueId));
+        harness.SeedMembership(MakeMembership(b.AgentId, queue.QueueId));
+
+        var act = async () => await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        await sync.Received(1).SyncAgentPausedAsync(TestTenantId, "agent-b", false, Arg.Any<CancellationToken>());
+    }
+
     // ── Test harness ──────────────────────────────────────────────────────
 
-    private static Harness BuildHarness(out IRealtimeSyncService sync)
+    private static Harness BuildHarness(out IRealtimeSyncService sync, IAgentStore? undecoratedAgentStore = null)
     {
         sync = Substitute.For<IRealtimeSyncService>();
         sync.Events.Returns(System.Reactive.Linq.Observable.Empty<RealtimeSyncEvent>());
-        return new Harness(sync);
+        return new Harness(sync, undecoratedAgentStore);
     }
 
     private sealed class Harness
@@ -128,7 +324,9 @@ public sealed class RealtimeReconciliationServiceTests
 
         public RealtimeReconciliationService Sut { get; }
 
-        public Harness(IRealtimeSyncService sync)
+        public AgentPauseCoordinator Coordinator { get; } = new();
+
+        public Harness(IRealtimeSyncService sync, IAgentStore? undecoratedAgentStore = null)
         {
             _tenantStore.GetAllActiveAsync(Arg.Any<CancellationToken>())
                 .Returns(new[] { new Tenant { TenantId = TestTenantId, Name = "Recon", Status = TenantStatus.Active } });
@@ -154,15 +352,27 @@ public sealed class RealtimeReconciliationServiceTests
             services.AddSingleton(_queueStore);
             services.AddSingleton(_agentStore);
             services.AddSingleton(sync);
+            if (undecoratedAgentStore is not null)
+            {
+                services.AddKeyedSingleton(
+                    Verbara.Platform.Api.DependencyInjection.RealtimeSyncingStoresExtensions.AgentStoreInner,
+                    undecoratedAgentStore);
+            }
 
             Sut = new RealtimeReconciliationService(
                 services.BuildServiceProvider(),
                 new ServiceHeartbeat(),
                 Options.Create(new RealtimeOptions { ReconcilerIntervalSeconds = 60 }),
+                Coordinator,
                 NullLogger<RealtimeReconciliationService>.Instance);
         }
 
         public void SeedAgent(Agent a) => _agents.Add(a);
+        public void ReplaceAgent(Agent a)
+        {
+            _agents.RemoveAll(x => x.AgentId == a.AgentId);
+            _agents.Add(a);
+        }
         public void SeedQueue(Queue q) => _queues.Add(q);
         public void SeedMembership(QueueMembership m) => _memberships.Add(m);
     }

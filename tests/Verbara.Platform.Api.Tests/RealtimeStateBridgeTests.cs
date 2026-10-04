@@ -25,6 +25,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
     private readonly IRealtimeSyncService _syncService;
     private readonly IAmiConnection _ami;
     private readonly VerbaraServerPool _serverPool;
+    private readonly AgentPauseCoordinator _pauseCoordinator = new();
 
     public RealtimeStateBridgeTests()
     {
@@ -45,6 +46,7 @@ public sealed class RealtimeStateBridgeTests : IDisposable
             _eventBus,
             _syncService,
             _serverPool,
+            _pauseCoordinator,
             NullLogger<RealtimeStateBridge>.Instance);
     }
 
@@ -265,6 +267,53 @@ public sealed class RealtimeStateBridgeTests : IDisposable
         await _syncService.Received(1).SyncAgentPausedAsync("t1", "a1", false);
         await _ami.Received(1).SendActionAsync(
             Arg.Is<QueuePauseAction>(a => a != null && a.Paused == false && a.Reason == "Available"));
+    }
+
+    // ─── Shared per-agent lock (queue-members-stay-unpaused-across-reconcile) ──
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldWaitForConvergence_WhenCoordinatorLockIsHeldForSameAgent()
+    {
+        // The bridge and AgentPauseCoordinator.ConvergeAsync (reconciler + membership save) take
+        // ONE per-agent lock, so a bridge write never interleaves with a convergence read-then-write.
+        var agents = new Verbara.Platform.Storage.InMemory.InMemoryAgentStore();
+        var agent = new Agent
+        {
+            AgentId = EntityId.From("a1"),
+            TenantId = new TenantId("t1"),
+            UserId = EntityId.New(),
+            DisplayName = "Agent One",
+            State = AgentState.Break,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await agents.SaveAsync(agent, CancellationToken.None);
+        var convergeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseConverge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+        _syncService.SyncAgentPausedAsync("t1", "a1", true, Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                convergeEntered.TrySetResult();
+                return new ValueTask(releaseConverge.Task);
+            });
+#pragma warning restore CA2012
+        AddPrimaryServer();
+        var bridge = CreateBridge();
+
+        var converge = _pauseCoordinator.ConvergeAsync(
+            new TenantId("t1"), EntityId.From("a1"), agents, _syncService, CancellationToken.None);
+        await convergeEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var bridgeWrite = bridge.HandleEventAsync(MakeEvent("Available"));
+        // No wall-clock wait: a contended SemaphoreSlim.WaitAsync returns an incomplete task synchronously.
+        bridgeWrite.IsCompleted.Should().BeFalse("the bridge must wait for the convergence holding the lock");
+        await _syncService.DidNotReceive().SyncAgentPausedAsync("t1", "a1", false, Arg.Any<CancellationToken>());
+
+        releaseConverge.SetResult();
+        await converge.WaitAsync(TimeSpan.FromSeconds(5));
+        await bridgeWrite.WaitAsync(TimeSpan.FromSeconds(5));
+
+        RealtimeSyncCallLog.Of(_syncService).Should().Equal(
+            "SyncAgentPausedAsync:True", "SyncAgentPausedAsync:False");
     }
 
     public void Dispose()
