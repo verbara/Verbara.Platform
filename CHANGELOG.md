@@ -21,6 +21,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reported no `NU1605`/`NU1109`, so every third-party central pin stays where it was. Transitively,
   `OpenTelemetry` (not pinned here) resolves `1.19.1` instead of `1.17.0`; no package entered or left
   the graph.
+- **`OpenTelemetry.Exporter.Prometheus.AspNetCore` pinned at `1.19.1-beta.1`** — Sdk `2.7.0` raises
+  `OpenTelemetry` to `1.19.1` but still pulls exporter `1.15.2-beta.1`, which calls a type `1.19.1`
+  removed, so `GET /metrics` answered `200` with an empty body; the pin restores the samples and a
+  `/metrics` test now guards them. Removed when the Sdk ships the aligned exporter (Sdk `2.8.0`).
 - **Behaviour Platform takes on — queued calls get an owner (H159).** Since Sdk `2.7.0`
   (Verbara.Sdk#377) the SDK connects a queued call only when the queue reports that a member took it,
   and emits one `CallConnectedEvent` per such call. A queue call answered by a Platform agent therefore
@@ -35,8 +39,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bodies, so the wrapper compiled clean while answering `false`, dropping the outcome and raising
   nothing; four tests now lock the forwarding. Platform does not call any of them yet.
 - **Deliberately out of scope** (`Verbara.Sdk/ADR-0040` D4): `Microsoft.Extensions.TimeProvider.Testing`
-  stays at `10.10.0`, and neither `OpenTelemetry` nor `NATS.Client.Core` gains a direct pin. The second
-  hop, Sdk `2.8.0` (H142), is a separate change. decision_ref `Verbara.Sdk/ADR-0040`.
+  stays at `10.10.0`, and neither `OpenTelemetry` itself nor `NATS.Client.Core` gains a direct pin.
+  The second hop, Sdk `2.8.0` (H142), is a separate change. decision_ref `Verbara.Sdk/ADR-0040`.
 
 ---
 
