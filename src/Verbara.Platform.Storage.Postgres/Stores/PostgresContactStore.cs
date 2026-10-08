@@ -27,14 +27,27 @@ internal sealed class PostgresContactStore : IContactStore
 
     public async Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct)
     {
+        // addresses[].channel has two on-disk forms: the enum name ("WhatsApp"), written since
+        // PostgresJsonContext gained UseStringEnumConverter (2.13.0), and the ordinal (1) in rows
+        // written before. Compare the text form against both instead of casting to int, which
+        // throws 22P02 on a name. No migration: both forms stay readable by ContactRow.ToContact.
         var rows = await _dataSource.QueryListAsync(
             "SELECT contact_id, tenant_id, first_name, last_name, company, segment, preferred_channel, " +
             "preferred_language, timezone, do_not_contact, addresses, custom_fields, channel_consent, " +
             "created_at, updated_at, created_by, updated_by " +
             "FROM contacts WHERE tenant_id = @TenantId " +
             "  AND EXISTS (SELECT 1 FROM jsonb_array_elements(addresses) AS a " +
-            "              WHERE (a->>'channel')::int = @Channel AND a->>'address' = @Address)",
-            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Channel", (int)address.Channel)); p.Add(new NpgsqlParameter("Address", address.Address)); },
+            "              WHERE a->>'channel' IN (@ChannelName, @ChannelOrdinal) AND a->>'address' = @Address)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("ChannelName", NpgsqlDbType.Text) { Value = address.Channel.ToString() });
+                p.Add(new NpgsqlParameter("ChannelOrdinal", NpgsqlDbType.Text)
+                {
+                    Value = ((int)address.Channel).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+                p.Add(new NpgsqlParameter("Address", NpgsqlDbType.Text) { Value = address.Address });
+            },
             ContactRow.Map, ct);
         return rows.Select(r => r.ToContact()).FirstOrDefault();
     }
