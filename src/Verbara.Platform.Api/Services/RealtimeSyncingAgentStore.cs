@@ -73,6 +73,17 @@ internal sealed class RealtimeSyncingAgentStore : IAgentStore
         ArgumentNullException.ThrowIfNull(agent);
 
         await _inner.SaveAsync(agent, ct).ConfigureAwait(false);
+        await AfterSavedAsync(agent, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The side effect of a stored agent: upserts its PJSIP rows. <see cref="SaveAsync"/> runs it after the
+    /// write; the licensed-agent writer's caller runs it explicitly after its commit (design D5), so a created
+    /// agent is provisioned only once its creation and ledger row are durable.
+    /// </summary>
+    internal async Task AfterSavedAsync(Agent agent, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
 
         // AdminEndpoints :522 / :622 — only agents with a complete SIP identity
         // (extension + password) have PJSIP rows to sync. Skip otherwise.
@@ -98,7 +109,15 @@ internal sealed class RealtimeSyncingAgentStore : IAgentStore
     public async Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
     {
         await _inner.DeleteAsync(tenantId, agentId, ct).ConfigureAwait(false);
+        await AfterDeletedAsync(tenantId, agentId, ct).ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// The side effect of a deleted agent: removes its PJSIP rows. The licensed-agent writer's caller runs it
+    /// explicitly after its commit (design D5).
+    /// </summary>
+    internal async Task AfterDeletedAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
         try
         {
             await _sync.RemoveAgentAsync(tenantId.Value, agentId.Value, ct).ConfigureAwait(false);

@@ -7,6 +7,7 @@ using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Switchboard;
@@ -76,7 +77,8 @@ public sealed class AgentAccountStatusRegressionTests : IClassFixture<AccountSta
         var conversation = await SeedActiveConversationAsync(tenant, owner);
 
         var result = await Services.GetRequiredService<IConversationSwitchboard>()
-            .TransferToAgentAsync(conversation.ConversationId, tenant, target.AgentId, CancellationToken.None);
+            .TransferToAgentAsync(conversation.ConversationId, tenant, target.AgentId,
+                new OwnershipChange(OwnershipChangeKind.Transferred, "test-actor"), CancellationToken.None);
 
         result.Success.Should().BeFalse(because: "a Suspended user's agent cannot be made the owner");
         result.FailureReason.Should().Be("Target agent not found.");

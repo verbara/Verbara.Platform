@@ -1,8 +1,9 @@
 # Upgrading to licensed-agent metering
 
 What an operator meets when moving a Platform installation to the release that ships licensed-agent
-metering: what to check before, what changes, and how to roll back. This page covers the identity and
-routing part (migration `018_AgentUserUnique`). The release notes link here.
+metering: what to check before, what changes, and how to roll back. It covers the identity and routing
+part (migration `018_AgentUserUnique`) and the ledger and daily close (migration `019_LicenseAgentLedger`,
+described in [licensed-agent-ledger.md](licensed-agent-ledger.md)). The release notes link here.
 
 ## Before you upgrade
 
@@ -57,6 +58,14 @@ For each user in section 1:
 
 Keep a note of each losing agent id: it may still appear in `queue_log`, CDRs and recordings.
 
+### 4. Set the day zone
+
+Set `Licensing:Metering:DayZone` (an IANA zone id; environment variable `Licensing__Metering__DayZone`)
+**before the release first runs**, if the days of the licensed-agent figures should not be UTC days. The
+first run records the zone, and it can never change afterwards: a later start with another value stops
+the daily close and reports it unhealthy. See
+[licensed-agent-ledger.md](licensed-agent-ledger.md#before-the-metering-release-first-runs-set-the-day-zone).
+
 ## What changes
 
 - **A suspended or deactivated user's agent stops receiving work at once.** Routing (queue eligibility
@@ -78,6 +87,14 @@ Keep a note of each losing agent id: it may still appear in `queue_log`, CDRs an
   - `DELETE /api/v1/management/tenants/{id}` → `409` while the tenant owns any agent
     (`https://verbara.platform/errors/tenant-owns-agents`); nothing changes.
 - Agent creation and deletion are audited as `agent.created` and `agent.deleted` (category `queues`).
+- **Every counted change is recorded in the licensed-agent ledger**, in the same transaction as the
+  change: agent creation and deletion, a status change or GDPR purge of a user who owns an agent, and a
+  takeover, transfer or reassign to an agent. If the ledger row cannot be written, the change fails.
+- **The daily close starts at the first run.** It anchors every Customer tenant's chain, with one
+  `agent_baseline` row per existing agent, and from then on closes each ended day for every Customer
+  tenant (in any tenant status) plus the deployment total.
+- **Ledger and daily rows are kept 15 months**, whatever the tenant retention policies, and are purged
+  daily after that with a `purge_log` row (`subject_type` `license_agent`).
 
 ## Tenant offboarding order
 
@@ -103,4 +120,5 @@ suspension.
 ## Rolling back
 
 Revert the image. The unique index `ux_agents_tenant_user` is harmless to the previous version, which
-never creates a second agent for a user on purpose; leave it in place.
+never creates a second agent for a user on purpose; leave it in place. The ledger tables of `019_` stay,
+inert: the previous version never writes to them. Do not drop them; they are billing evidence.

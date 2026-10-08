@@ -20,6 +20,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   oldest; repoint its references; delete the others). The same page covers orphan agents, Customer
   tenants without a valid parent, the tenant offboarding order, and tenants whose
   `WorkFailoverGraceSeconds` is `0` or less. (#N)
+- **Set the licensed-agent day zone before the first run.** Licensed-agent days are cut in
+  `Licensing:Metering:DayZone` (an IANA zone id, default `UTC`). The first run records it with the
+  deployment's ledger and it can never change: a later start with another value stops the daily close
+  before it writes anything, logs both zones as a critical error and reports the close unhealthy in
+  `/health/ready`. See `docs/operations/licensed-agent-ledger.md`. (#N)
+
+### Added
+
+- **Licensed-agent ledger.** Every change that can alter who counts as a licensed agent — agent created
+  or deleted, the status change or GDPR purge of a user who owns an agent, and a takeover, transfer or
+  reassign to an agent — is recorded in an append-only ledger in the same transaction as the change; if
+  the record cannot be written, the change does not happen. Rows hold ids only and form a hash chain per
+  tenant anchored to the loaded licence (`lac1`); a licence renewal re-anchors the chain. The database
+  refuses any update or delete of these rows except the retention purge. Migration
+  `019_LicenseAgentLedger`. (#N)
+- **Daily close of licensed agents.** Each API replica closes, every 15 minutes, the ended days of every
+  Customer tenant — in every tenant status and whatever its parent — as the day's simultaneous peak of
+  licensed agents, plus the deployment total. Partner and Platform tenants are not counted. A closed day
+  is never rewritten: a late record appends a correction. The close runs whatever the licence state and
+  needs no leader. (#N)
+- **Fixed 15-month retention of the ledger.** Ledger and daily rows older than 15 months are purged daily
+  on every tenant, independently of tenant retention policies, each purge leaving a `purge_log` row
+  (`subject_type` `license_agent`) with the last purged record's hash. (#N)
 
 ### Changed
 

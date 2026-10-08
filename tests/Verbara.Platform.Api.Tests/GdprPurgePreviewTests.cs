@@ -1,3 +1,4 @@
+using Verbara.Platform.Identity;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Verbara.Platform.Api.Services;
@@ -62,6 +63,7 @@ public sealed class GdprPurgePreviewTests
             new InMemoryAgentStore(),
             new InMemoryQueueMembershipStore(),
             Substitute.For<IAuditService>(),
+            Substitute.For<ILicensedUserChangeWriter>(),
             NullLogger<GdprPurgeService>.Instance);
 
         var preview = await service.PreviewUserPurgeAsync(Tenant.Value, "user-42", CancellationToken.None);
@@ -85,6 +87,7 @@ public sealed class GdprPurgePreviewTests
             new InMemoryAgentStore(),
             new InMemoryQueueMembershipStore(),
             Substitute.For<IAuditService>(),
+            Substitute.For<ILicensedUserChangeWriter>(),
             NullLogger<GdprPurgeService>.Instance);
 
         var preview = await service.PreviewUserPurgeAsync(Tenant.Value, "user-with-no-activity", CancellationToken.None);
@@ -118,6 +121,7 @@ public sealed class GdprPurgePreviewTests
             new InMemoryAgentStore(),
             new InMemoryQueueMembershipStore(),
             Substitute.For<IAuditService>(),
+            Substitute.For<ILicensedUserChangeWriter>(),
             NullLogger<GdprPurgeService>.Instance);
 
         var preview = await service.PreviewUserPurgeAsync(Tenant.Value, "shared-user-id", CancellationToken.None);

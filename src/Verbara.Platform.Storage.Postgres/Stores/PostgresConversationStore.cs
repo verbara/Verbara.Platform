@@ -86,48 +86,28 @@ internal sealed class PostgresConversationStore : IConversationStore
         return new PagedResult<Conversation>(items, total, query.Page, query.PageSize);
     }
 
+    // licensed-agent-metering (design D5) — one SQL text and one binder, run standalone here and inside the
+    // licensed-agent writer's transaction by the overload below (an ownership change and its ledger row).
+    private const string SaveSql =
+        "INSERT INTO conversations (conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+        "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority) " +
+        "VALUES (@ConversationId, @TenantId, @ContactId, @Channel, @State, @OwnerKind, @OwnerId, @CaseId, " +
+        "@Metadata::jsonb, @CreatedAt, @ClosedAt, @UpdatedAt, @CreatedBy, @UpdatedBy, @VoiceLinkedId, @QueuePriority) " +
+        "ON CONFLICT (tenant_id, conversation_id) DO UPDATE SET " +
+        "  state = EXCLUDED.state, owner_kind = EXCLUDED.owner_kind, owner_id = EXCLUDED.owner_id, " +
+        "  case_id = EXCLUDED.case_id, metadata = EXCLUDED.metadata, closed_at = EXCLUDED.closed_at, " +
+        "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by, " +
+        // 3B.2d: an outbound voice Conversation is pre-created with a NULL voice_linked_id; the
+        // bridge stamps the real LinkedId later, so it must persist on UPDATE (not just INSERT).
+        "  voice_linked_id = EXCLUDED.voice_linked_id, " +
+        // W5: a failover re-queue (priority -1) or a normal transfer (priority 0) must persist on UPDATE.
+        "  queue_priority = EXCLUDED.queue_priority";
+
     public async Task SaveAsync(Conversation conversation, CancellationToken ct)
     {
-        var metadataJson = JsonSerializer.Serialize(
-            (Dictionary<string, string>)conversation.Metadata,
-            PostgresJson.Ctx.DictionaryStringString);
-
         try
         {
-            await _dataSource.ExecuteAsync(
-                "INSERT INTO conversations (conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-                "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority) " +
-                "VALUES (@ConversationId, @TenantId, @ContactId, @Channel, @State, @OwnerKind, @OwnerId, @CaseId, " +
-                "@Metadata::jsonb, @CreatedAt, @ClosedAt, @UpdatedAt, @CreatedBy, @UpdatedBy, @VoiceLinkedId, @QueuePriority) " +
-                "ON CONFLICT (tenant_id, conversation_id) DO UPDATE SET " +
-                "  state = EXCLUDED.state, owner_kind = EXCLUDED.owner_kind, owner_id = EXCLUDED.owner_id, " +
-                "  case_id = EXCLUDED.case_id, metadata = EXCLUDED.metadata, closed_at = EXCLUDED.closed_at, " +
-                "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by, " +
-                // 3B.2d: an outbound voice Conversation is pre-created with a NULL voice_linked_id; the
-                // bridge stamps the real LinkedId later, so it must persist on UPDATE (not just INSERT).
-                "  voice_linked_id = EXCLUDED.voice_linked_id, " +
-                // W5: a failover re-queue (priority -1) or a normal transfer (priority 0) must persist on UPDATE.
-                "  queue_priority = EXCLUDED.queue_priority",
-                p =>
-                {
-                    p.Add(new NpgsqlParameter("ConversationId", conversation.ConversationId.Value));
-                    p.Add(new NpgsqlParameter("TenantId", conversation.TenantId.Value));
-                    p.Add(new NpgsqlParameter("ContactId", conversation.ContactId.Value));
-                    p.Add(new NpgsqlParameter("Channel", (int)conversation.Channel));
-                    p.Add(new NpgsqlParameter("State", (int)conversation.State));
-                    p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = (object?)(conversation.Owner != null ? (int?)conversation.Owner.Kind : null) ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("OwnerId", NpgsqlDbType.Text) { Value = (object?)conversation.Owner?.OwnerId?.Value ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("CaseId", NpgsqlDbType.Text) { Value = (object?)conversation.CaseId?.Value ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("Metadata", metadataJson));
-                    p.Add(new NpgsqlParameter("CreatedAt", conversation.CreatedAt));
-                    p.Add(new NpgsqlParameter("ClosedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.ClosedAt ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.UpdatedAt ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.CreatedBy ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.UpdatedBy ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("VoiceLinkedId", NpgsqlDbType.Text) { Value = (object?)conversation.VoiceLinkedId ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("QueuePriority", conversation.QueuePriority));
-                },
-                ct);
+            await _dataSource.ExecuteAsync(SaveSql, p => BindSave(p, conversation), ct);
         }
         catch (PostgresException ex) when (ex.SqlState == "23505" && ex.ConstraintName == "uq_conversations_voice_linked_id")
         {
@@ -136,6 +116,42 @@ internal sealed class PostgresConversationStore : IConversationStore
             // Idempotent no-op: this is the failover safety net behind the leader-emit gate
             // (see migration 027). Mirrors the InMemoryConversationStore uniqueness guard.
         }
+    }
+
+    /// <summary>
+    /// Saves <paramref name="conversation"/> inside <paramref name="tx"/>: the licensed-agent writer commits an
+    /// ownership change with its ledger row. An ownership change saves an existing conversation, so the
+    /// voice-link insert race the standalone save absorbs cannot occur here.
+    /// </summary>
+    internal static Task SaveAsync(NpgsqlConnection conn, NpgsqlTransaction tx, Conversation conversation, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(conn);
+        ArgumentNullException.ThrowIfNull(conversation);
+        return conn.ExecuteAsync(SaveSql, p => BindSave(p, conversation), tx, ct);
+    }
+
+    private static void BindSave(NpgsqlParameterCollection p, Conversation conversation)
+    {
+        var metadataJson = JsonSerializer.Serialize(
+            (Dictionary<string, string>)conversation.Metadata,
+            PostgresJson.Ctx.DictionaryStringString);
+
+        p.Add(new NpgsqlParameter("ConversationId", conversation.ConversationId.Value));
+        p.Add(new NpgsqlParameter("TenantId", conversation.TenantId.Value));
+        p.Add(new NpgsqlParameter("ContactId", conversation.ContactId.Value));
+        p.Add(new NpgsqlParameter("Channel", (int)conversation.Channel));
+        p.Add(new NpgsqlParameter("State", (int)conversation.State));
+        p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = (object?)(conversation.Owner != null ? (int?)conversation.Owner.Kind : null) ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("OwnerId", NpgsqlDbType.Text) { Value = (object?)conversation.Owner?.OwnerId?.Value ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("CaseId", NpgsqlDbType.Text) { Value = (object?)conversation.CaseId?.Value ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("Metadata", metadataJson));
+        p.Add(new NpgsqlParameter("CreatedAt", conversation.CreatedAt));
+        p.Add(new NpgsqlParameter("ClosedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.ClosedAt ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.UpdatedAt ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.CreatedBy ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.UpdatedBy ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("VoiceLinkedId", NpgsqlDbType.Text) { Value = (object?)conversation.VoiceLinkedId ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("QueuePriority", conversation.QueuePriority));
     }
 
     public async Task<bool> TryConditionalCloseWrapUpAsync(

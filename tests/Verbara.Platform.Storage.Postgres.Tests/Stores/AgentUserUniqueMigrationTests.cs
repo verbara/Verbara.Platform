@@ -79,14 +79,14 @@ public sealed class AgentUserUniqueMigrationTests : IClassFixture<AgentIdentityF
     }
 
     [Fact]
-    public async Task SaveAsync_ShouldThrowEntityAlreadyExists_WhenUserAlreadyOwnsAgent()
+    public async Task InsertAsync_ShouldThrowEntityAlreadyExists_WhenUserAlreadyOwnsAgent()
     {
         var ds = await _fixture.CreateDatabaseAsync(before018: false);
         var store = new PostgresAgentStore(ds);
         var first = NewAgent("u1");
-        await store.SaveAsync(first, CancellationToken.None);
+        await AgentInsert.InsertAsync(ds, first);
 
-        var second = () => store.SaveAsync(NewAgent("u1"), CancellationToken.None);
+        var second = () => AgentInsert.InsertAsync(ds, NewAgent("u1"));
 
         (await second.Should().ThrowAsync<EntityAlreadyExistsException>()).Which.EntityKind.Should().Be("agent");
         first.DisplayName = "Renamed";
@@ -96,16 +96,15 @@ public sealed class AgentUserUniqueMigrationTests : IClassFixture<AgentIdentityF
     }
 
     [Fact]
-    public async Task SaveAsync_ShouldLetExactlyOneSucceed_WhenTwoCreationsForOneUserRace()
+    public async Task InsertAsync_ShouldLetExactlyOneSucceed_WhenTwoCreationsForOneUserRace()
     {
         var ds = await _fixture.CreateDatabaseAsync(before018: false);
-        var store = new PostgresAgentStore(ds);
 
         var outcomes = await Task.WhenAll(Enumerable.Range(0, 2).Select(async _ =>
         {
             try
             {
-                await store.SaveAsync(NewAgent("racer"), CancellationToken.None);
+                await AgentInsert.InsertAsync(ds, NewAgent("racer"));
                 return "created";
             }
             catch (EntityAlreadyExistsException)

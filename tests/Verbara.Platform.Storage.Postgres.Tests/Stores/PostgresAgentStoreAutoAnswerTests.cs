@@ -50,7 +50,7 @@ public class PostgresAgentStoreAutoAnswerTests : IClassFixture<AgentStoreAutoAns
     {
         // The /agents/me regression lock: GetByUserIdAsync used to omit these columns on Postgres.
         var userId = EntityId.New();
-        await _sut.SaveAsync(NewAgent(userId, autoAnswer: null), CancellationToken.None);
+        await AgentInsert.InsertAsync(_fixture.DataSource, NewAgent(userId, autoAnswer: null));
 
         var loaded = await _sut.GetByUserIdAsync(Tenant, userId, CancellationToken.None);
 
@@ -66,7 +66,7 @@ public class PostgresAgentStoreAutoAnswerTests : IClassFixture<AgentStoreAutoAns
     public async Task SaveAsync_ShouldRoundTripAutoAnswerTriState(bool? value)
     {
         var userId = EntityId.New();
-        await _sut.SaveAsync(NewAgent(userId, autoAnswer: value), CancellationToken.None);
+        await AgentInsert.InsertAsync(_fixture.DataSource, NewAgent(userId, autoAnswer: value));
 
         var byUser = await _sut.GetByUserIdAsync(Tenant, userId, CancellationToken.None);
         var byId = await _sut.GetByIdAsync(Tenant, byUser!.AgentId, CancellationToken.None);
@@ -81,9 +81,9 @@ public class PostgresAgentStoreAutoAnswerTests : IClassFixture<AgentStoreAutoAns
         var a1 = NewAgent(EntityId.New(), autoAnswer: null);
         var a2 = NewAgent(EntityId.New(), autoAnswer: null);
         var a3 = NewAgent(EntityId.New(), autoAnswer: null);
-        await _sut.SaveAsync(a1, CancellationToken.None);
-        await _sut.SaveAsync(a2, CancellationToken.None);
-        await _sut.SaveAsync(a3, CancellationToken.None);
+        await AgentInsert.InsertAsync(_fixture.DataSource, a1);
+        await AgentInsert.InsertAsync(_fixture.DataSource, a2);
+        await AgentInsert.InsertAsync(_fixture.DataSource, a3);
 
         var result = await _sut.GetByIdsAsync(Tenant, [a1.AgentId, a3.AgentId], CancellationToken.None);
 
@@ -93,7 +93,7 @@ public class PostgresAgentStoreAutoAnswerTests : IClassFixture<AgentStoreAutoAns
     [Fact]
     public async Task GetByIdsAsync_ShouldReturnEmpty_WhenEmptyCollection()
     {
-        await _sut.SaveAsync(NewAgent(EntityId.New(), autoAnswer: null), CancellationToken.None);
+        await AgentInsert.InsertAsync(_fixture.DataSource, NewAgent(EntityId.New(), autoAnswer: null));
 
         var result = await _sut.GetByIdsAsync(Tenant, [], CancellationToken.None);
 
@@ -105,12 +105,24 @@ public class PostgresAgentStoreAutoAnswerTests : IClassFixture<AgentStoreAutoAns
     {
         var userId = EntityId.New();
         var agent = NewAgent(userId, autoAnswer: null);
-        await _sut.SaveAsync(agent, CancellationToken.None);
+        await AgentInsert.InsertAsync(_fixture.DataSource, agent);
 
         agent.AutoAnswer = true;
         await _sut.SaveAsync(agent, CancellationToken.None);
 
         var loaded = await _sut.GetByIdAsync(Tenant, agent.AgentId, CancellationToken.None);
         loaded!.AutoAnswer.Should().BeTrue();
+    }
+
+    // licensed-agent-metering (design D5) — SaveAsync updates and never creates: an agent is created only by
+    // the licensed-agent writer, with its ledger row, and a save racing a delete does not bring it back.
+    [Fact]
+    public async Task SaveAsync_ShouldNotCreateAnAgent_WhenItDoesNotExist()
+    {
+        var agent = NewAgent(EntityId.New(), autoAnswer: null);
+
+        await _sut.SaveAsync(agent, CancellationToken.None);
+
+        (await _sut.GetByIdAsync(Tenant, agent.AgentId, CancellationToken.None)).Should().BeNull();
     }
 }

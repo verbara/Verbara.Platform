@@ -364,7 +364,7 @@ internal sealed class PostgresUserStore : IUserStore
     // the row first, so under READ COMMITTED a concurrent writer's committed value is what comes back
     // as `previous`, never a value read before it — and the expectation, when there is one, is checked
     // against that same locked row. No row (no such user, or a failed expectation) → no result.
-    private static readonly string UpdateAdminFieldsSql =
+    internal static readonly string UpdateAdminFieldsSql =
         "UPDATE users AS u SET " +
         "  display_name = COALESCE(@DisplayName, u.display_name), " +
         "  role = COALESCE(@Role, u.role), " +
@@ -380,28 +380,50 @@ internal sealed class PostgresUserStore : IUserStore
         "  previous.status AS previous_status, " +
         string.Join(", ", SelectColumns.Split(", ").Select(column => "u." + column));
 
+    // licensed-agent-metering (design D5) — the status write is shared by the standalone method and the
+    // transaction overload the licensed-agent writer calls with the user's ledger row; production code changes
+    // a status only through that writer (guard test).
     public async Task<AdminFieldsWriteResult> UpdateAdminFieldsAsync(
         TenantId tenantId, EntityId userId, AdminFieldsChange change, DateTimeOffset updatedAt, string? updatedBy,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(change);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        var result = await UpdateAdminFieldsAsync(conn, tx, tenantId, userId, change, updatedAt, updatedBy, ct).ConfigureAwait(false);
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return result;
+    }
+
+    /// <summary>
+    /// <see cref="UpdateAdminFieldsAsync(TenantId, EntityId, AdminFieldsChange, DateTimeOffset, string?, CancellationToken)"/>
+    /// inside <paramref name="tx"/>: the licensed-agent writer calls it with the status change's ledger row.
+    /// </summary>
+    internal async Task<AdminFieldsWriteResult> UpdateAdminFieldsAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, TenantId tenantId, EntityId userId, AdminFieldsChange change,
+        DateTimeOffset updatedAt, string? updatedBy, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(conn);
+        ArgumentNullException.ThrowIfNull(change);
         var expected = change.Expected;
-        var row = await _dataSource.QuerySingleOrDefaultAsync(
-            UpdateAdminFieldsSql,
-            p =>
-            {
-                AddKey(p, tenantId, userId);
-                p.Add(new NpgsqlParameter("DisplayName", NpgsqlDbType.Text) { Value = (object?)change.DisplayName ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("Role", NpgsqlDbType.Integer) { Value = change.Role is { } role ? (object)(int)role : DBNull.Value });
-                p.Add(new NpgsqlParameter("Status", NpgsqlDbType.Integer) { Value = change.Status is { } status ? (object)(int)status : DBNull.Value });
-                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = updatedAt });
-                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)updatedBy ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("CheckExpected", NpgsqlDbType.Boolean) { Value = expected is not null });
-                p.Add(new NpgsqlParameter("ExpectedDisplayName", NpgsqlDbType.Text) { Value = (object?)expected?.DisplayName ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("ExpectedRole", NpgsqlDbType.Integer) { Value = expected is { } e1 ? (object)(int)e1.Role : DBNull.Value });
-                p.Add(new NpgsqlParameter("ExpectedStatus", NpgsqlDbType.Integer) { Value = expected is { } e2 ? (object)(int)e2.Status : DBNull.Value });
-            },
-            AdminFieldsRow.Map, ct);
+
+        AdminFieldsRow? row = null;
+        await using (var cmd = new NpgsqlCommand(UpdateAdminFieldsSql, conn, tx))
+        {
+            AddKey(cmd.Parameters, tenantId, userId);
+            cmd.Parameters.Add(new NpgsqlParameter("DisplayName", NpgsqlDbType.Text) { Value = (object?)change.DisplayName ?? DBNull.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("Role", NpgsqlDbType.Integer) { Value = change.Role is { } role ? (object)(int)role : DBNull.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("Status", NpgsqlDbType.Integer) { Value = change.Status is { } status ? (object)(int)status : DBNull.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = updatedAt });
+            cmd.Parameters.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)updatedBy ?? DBNull.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("CheckExpected", NpgsqlDbType.Boolean) { Value = expected is not null });
+            cmd.Parameters.Add(new NpgsqlParameter("ExpectedDisplayName", NpgsqlDbType.Text) { Value = (object?)expected?.DisplayName ?? DBNull.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("ExpectedRole", NpgsqlDbType.Integer) { Value = expected is { } e1 ? (object)(int)e1.Role : DBNull.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("ExpectedStatus", NpgsqlDbType.Integer) { Value = expected is { } e2 ? (object)(int)e2.Status : DBNull.Value });
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (await reader.ReadAsync(ct).ConfigureAwait(false))
+                row = AdminFieldsRow.Map(reader);
+        }
 
         if (row is not null)
             return AdminFieldsWriteResult.Written(
@@ -411,13 +433,13 @@ internal sealed class PostgresUserStore : IUserStore
         if (expected is null)
             return AdminFieldsWriteResult.NotFound;
 
-        // Nothing was written: tell a missing row from a failed expectation. Not atomic with the write
-        // above, and it need not be — neither outcome changed anything.
-        var exists = await _dataSource.ExecuteScalarAsync<bool>(
-            "SELECT EXISTS (SELECT 1 FROM users WHERE tenant_id = @TenantId AND user_id = @UserId)",
-            p => AddKey(p, tenantId, userId),
-            ct);
-        return exists ? AdminFieldsWriteResult.Stale : AdminFieldsWriteResult.NotFound;
+        // Nothing was written: tell a missing row from a failed expectation. Neither outcome changed anything.
+        await using var exists = new NpgsqlCommand(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE tenant_id = @TenantId AND user_id = @UserId)", conn, tx);
+        AddKey(exists.Parameters, tenantId, userId);
+        return (bool)(await exists.ExecuteScalarAsync(ct).ConfigureAwait(false))!
+            ? AdminFieldsWriteResult.Stale
+            : AdminFieldsWriteResult.NotFound;
     }
 
     private const string SetPasswordHashSql =
@@ -625,12 +647,25 @@ internal sealed class PostgresUserStore : IUserStore
         return rows > 0;
     }
 
+    internal const string DeleteSql = "DELETE FROM users WHERE tenant_id = @TenantId AND user_id = @UserId";
+
+    // licensed-agent-metering (design D5) — production code deletes a user only through the licensed-agent
+    // writer (guard test); the standalone method keeps the store contract and delegates to the overload.
     public async Task<bool> DeleteAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
     {
-        var rows = await _dataSource.ExecuteAsync(
-            "DELETE FROM users WHERE tenant_id = @TenantId AND user_id = @UserId",
-            p => AddKey(p, tenantId, userId),
-            ct);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        var deleted = await DeleteAsync(conn, tx, tenantId, userId, ct).ConfigureAwait(false);
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return deleted;
+    }
+
+    /// <summary>Deletes the user inside <paramref name="tx"/>; the licensed-agent writer calls it with the ledger row.</summary>
+    internal static async Task<bool> DeleteAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, TenantId tenantId, EntityId userId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(conn);
+        var rows = await conn.ExecuteAsync(DeleteSql, p => AddKey(p, tenantId, userId), tx, ct).ConfigureAwait(false);
         return rows > 0;
     }
 

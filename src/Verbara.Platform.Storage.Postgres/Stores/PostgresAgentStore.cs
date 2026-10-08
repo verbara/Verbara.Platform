@@ -134,73 +134,119 @@ internal sealed class PostgresAgentStore : IAgentStore
         return new PagedResult<Agent>(items, total, query.Page, query.PageSize);
     }
 
-    public async Task SaveAsync(Agent agent, CancellationToken ct)
-    {
-        var capacityJson = JsonSerializer.Serialize(agent.CapacityOverride, PostgresJson.Ctx.ChannelCapacityOverride);
-        var skillsJson = JsonSerializer.Serialize(agent.Skills, PostgresJson.Ctx.IReadOnlyListString);
+    // licensed-agent-metering (design D5) — an agent row is inserted and deleted only inside the licensed-agent
+    // writer's transaction, together with its ledger row (InsertAsync / DeleteAsync overloads below). SaveAsync
+    // updates an existing agent and never creates one: a presence or admin save racing a delete changes no
+    // row instead of bringing the agent back without a ledger row.
+    internal const string InsertSql =
+        "INSERT INTO agents (agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
+        "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+        "offline_since, created_at, updated_at, created_by, updated_by) " +
+        "VALUES (@AgentId, @TenantId, @UserId, @DisplayName, @State, @Capacity::jsonb, @TeamId, @Skills::jsonb, " +
+        "@Extension, @SipPassword, @AutoAnswer, @PendingState, @PendingReason, @PendingSince, " +
+        "@OfflineSince, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy)";
 
+    internal const string DeleteSql =
+        "DELETE FROM agents WHERE tenant_id = @TenantId AND agent_id = @AgentId";
+
+    private const string UpdateSql =
+        "UPDATE agents SET " +
+        "  display_name = @DisplayName, state = @State, capacity = @Capacity::jsonb, " +
+        "  team_id = @TeamId, skills = @Skills::jsonb, " +
+        "  extension = @Extension, sip_password = @SipPassword, " +
+        "  auto_answer = @AutoAnswer, " +
+        "  pending_state = @PendingState, pending_reason = @PendingReason, " +
+        "  pending_since = @PendingSince, offline_since = @OfflineSince, " +
+        "  updated_at = @UpdatedAt, updated_by = @UpdatedBy " +
+        "WHERE tenant_id = @TenantId AND agent_id = @AgentId";
+
+    /// <summary>
+    /// Updates an existing agent. An agent that does not exist is not created: creation goes through the
+    /// licensed-agent writer (<see cref="InsertAsync"/>), which records it in the ledger.
+    /// </summary>
+    public Task SaveAsync(Agent agent, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        return _dataSource.ExecuteAsync(UpdateSql, p => BindAgent(p, agent), ct);
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="agent"/> inside <paramref name="tx"/>. Only the licensed-agent writer calls it,
+    /// with the agent's ledger row in the same transaction. A second agent for a user who already owns one
+    /// is refused by <see cref="UserUniqueIndex"/> and surfaces as <see cref="EntityAlreadyExistsException"/>.
+    /// </summary>
+    internal static async Task InsertAsync(NpgsqlConnection conn, NpgsqlTransaction tx, Agent agent, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(conn);
+        ArgumentNullException.ThrowIfNull(agent);
         try
         {
-            await _dataSource.ExecuteAsync(
-                "INSERT INTO agents (agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
-                "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
-                "offline_since, created_at, updated_at, created_by, updated_by) " +
-                "VALUES (@AgentId, @TenantId, @UserId, @DisplayName, @State, @Capacity::jsonb, @TeamId, @Skills::jsonb, " +
-                "@Extension, @SipPassword, @AutoAnswer, @PendingState, @PendingReason, @PendingSince, " +
-                "@OfflineSince, @CreatedAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
-                "ON CONFLICT (tenant_id, agent_id) DO UPDATE SET " +
-                "  display_name = EXCLUDED.display_name, state = EXCLUDED.state, capacity = EXCLUDED.capacity, " +
-                "  team_id = EXCLUDED.team_id, skills = EXCLUDED.skills, " +
-                "  extension = EXCLUDED.extension, sip_password = EXCLUDED.sip_password, " +
-                "  auto_answer = EXCLUDED.auto_answer, " +
-                "  pending_state = EXCLUDED.pending_state, pending_reason = EXCLUDED.pending_reason, " +
-                "  pending_since = EXCLUDED.pending_since, offline_since = EXCLUDED.offline_since, " +
-                "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-                p =>
-                {
-                    p.Add(new NpgsqlParameter("AgentId", agent.AgentId.Value));
-                    p.Add(new NpgsqlParameter("TenantId", agent.TenantId.Value));
-                    p.Add(new NpgsqlParameter("UserId", agent.UserId.Value));
-                    p.Add(new NpgsqlParameter("DisplayName", agent.DisplayName));
-                    p.Add(new NpgsqlParameter("State", (int)agent.State));
-                    p.Add(new NpgsqlParameter("Capacity", capacityJson));
-                    p.Add(new NpgsqlParameter("TeamId", NpgsqlDbType.Text) { Value = (object?)agent.TeamId?.Value ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("Skills", skillsJson));
-                    p.Add(new NpgsqlParameter("Extension", NpgsqlDbType.Varchar) { Value = (object?)agent.Extension ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("SipPassword", NpgsqlDbType.Varchar) { Value = (object?)agent.SipPassword ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("AutoAnswer", NpgsqlDbType.Boolean) { Value = (object?)agent.AutoAnswer ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("PendingState", NpgsqlDbType.Integer) { Value = (object?)(int?)agent.PendingState ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("PendingReason", NpgsqlDbType.Text) { Value = (object?)agent.PendingReason ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("PendingSince", NpgsqlDbType.TimestampTz) { Value = (object?)agent.PendingSince ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("OfflineSince", NpgsqlDbType.TimestampTz) { Value = (object?)agent.OfflineSince ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("CreatedAt", agent.CreatedAt));
-                    p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)agent.UpdatedAt ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)agent.CreatedBy ?? DBNull.Value });
-                    p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)agent.UpdatedBy ?? DBNull.Value });
-                },
-                ct);
+            await conn.ExecuteAsync(InsertSql, p => BindAgent(p, agent), tx, ct).ConfigureAwait(false);
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation
                                            && ex.ConstraintName == UserUniqueIndex)
         {
-            // licensed-agent-metering (D3) — a second agent for a user who already owns one in the
-            // tenant. The upsert's ON CONFLICT targets the primary key only, so the unique index on
-            // (tenant_id, user_id) raises; the endpoint turns this into 409. Race-free: of two
-            // concurrent creations exactly one row lands.
+            // licensed-agent-metering (D3) — a second agent for a user who already owns one in the tenant.
+            // Race-free: of two concurrent creations exactly one row lands; the endpoint answers 409.
             throw new EntityAlreadyExistsException("agent", "user_id", ex);
         }
     }
 
-    public async Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    /// <summary>
+    /// Deletes an agent row inside <paramref name="tx"/>; returns the rows deleted. Only the licensed-agent
+    /// writer calls it, with the agent's ledger row in the same transaction.
+    /// </summary>
+    internal static Task<int> DeleteAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, TenantId tenantId, EntityId agentId, CancellationToken ct)
     {
-        await _dataSource.ExecuteAsync(
-            "DELETE FROM agents WHERE tenant_id = @TenantId AND agent_id = @AgentId",
+        ArgumentNullException.ThrowIfNull(conn);
+        return conn.ExecuteAsync(
+            DeleteSql,
             p =>
             {
-                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
-                p.Add(new NpgsqlParameter("AgentId", agentId.Value));
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("AgentId", NpgsqlDbType.Text) { Value = agentId.Value });
             },
-            ct);
+            tx, ct);
+    }
+
+    /// <summary>
+    /// The standalone delete keeps the store contract and delegates to the transaction overload in a
+    /// transaction of its own, with no ledger row. Production code deletes agents through the licensed-agent
+    /// writer; a guard test holds every production caller to that.
+    /// </summary>
+    public async Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await DeleteAsync(conn, tx, tenantId, agentId, ct).ConfigureAwait(false);
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    private static void BindAgent(NpgsqlParameterCollection p, Agent agent)
+    {
+        var capacityJson = JsonSerializer.Serialize(agent.CapacityOverride, PostgresJson.Ctx.ChannelCapacityOverride);
+        var skillsJson = JsonSerializer.Serialize(agent.Skills, PostgresJson.Ctx.IReadOnlyListString);
+
+        p.Add(new NpgsqlParameter("AgentId", agent.AgentId.Value));
+        p.Add(new NpgsqlParameter("TenantId", agent.TenantId.Value));
+        p.Add(new NpgsqlParameter("UserId", agent.UserId.Value));
+        p.Add(new NpgsqlParameter("DisplayName", agent.DisplayName));
+        p.Add(new NpgsqlParameter("State", (int)agent.State));
+        p.Add(new NpgsqlParameter("Capacity", capacityJson));
+        p.Add(new NpgsqlParameter("TeamId", NpgsqlDbType.Text) { Value = (object?)agent.TeamId?.Value ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("Skills", skillsJson));
+        p.Add(new NpgsqlParameter("Extension", NpgsqlDbType.Varchar) { Value = (object?)agent.Extension ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("SipPassword", NpgsqlDbType.Varchar) { Value = (object?)agent.SipPassword ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("AutoAnswer", NpgsqlDbType.Boolean) { Value = (object?)agent.AutoAnswer ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("PendingState", NpgsqlDbType.Integer) { Value = (object?)(int?)agent.PendingState ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("PendingReason", NpgsqlDbType.Text) { Value = (object?)agent.PendingReason ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("PendingSince", NpgsqlDbType.TimestampTz) { Value = (object?)agent.PendingSince ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("OfflineSince", NpgsqlDbType.TimestampTz) { Value = (object?)agent.OfflineSince ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("CreatedAt", agent.CreatedAt));
+        p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)agent.UpdatedAt ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)agent.CreatedBy ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)agent.UpdatedBy ?? DBNull.Value });
     }
 
     public async IAsyncEnumerable<Agent> StreamRoutableAgentsAsync(

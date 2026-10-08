@@ -341,7 +341,7 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
 
         return AdminEndpoints.UpdateUser(
             TargetId, context, body, _store, sessions, _audit, _tenantRoles, _roleTemplates, _userRoles, _permissions,
-            _agents, _forceOffline, _eventBus, _loggerFactory, _clock, CancellationToken.None);
+            _agents, _forceOffline, new StoreBackedUserWriter(_store), _eventBus, _loggerFactory, _clock, CancellationToken.None);
     }
 
     private static User NewTarget(
@@ -355,4 +355,18 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
         Status = status,
         CreatedAt = DateTimeOffset.UtcNow,
     };
+
+    // The licensed-agent writer's admin-field write is the store's write plus a ledger row; these tests drive
+    // the endpoint's handling of the store's outcomes, so the writer here is the store's write alone.
+    private sealed class StoreBackedUserWriter(IUserStore store) : ILicensedUserChangeWriter
+    {
+        public Task<AdminFieldsWriteResult> CommitUserStatusChangedAsync(
+            TenantId tenantId, EntityId userId, AdminFieldsChange change, DateTimeOffset updatedAt, string? updatedBy,
+            CancellationToken ct) =>
+            store.UpdateAdminFieldsAsync(tenantId, userId, change, updatedAt, updatedBy, ct);
+
+        public Task<LicensedUserDeletion> CommitUserDeletedAsync(
+            TenantId tenantId, EntityId userId, string? actorUserId, bool deleteOwnedAgent, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
 }

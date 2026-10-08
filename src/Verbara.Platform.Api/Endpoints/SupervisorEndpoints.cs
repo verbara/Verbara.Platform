@@ -7,6 +7,7 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Switchboard;
 using Verbara.Sdk.Pro.AgentAssist.Engine;
@@ -175,7 +176,10 @@ internal static class SupervisorEndpoints
         };
         ConversationActor.AddOwner(metadata, "previous_owner", conversation.Owner);
 
-        var result = await switchboard.TransferToAgentAsync(conversation.ConversationId, tenantId, actor.Agent.AgentId, ct);
+        // licensed-agent-metering (design D5) — the owner change commits with its conversation_taken_over row.
+        var result = await switchboard.TransferToAgentAsync(
+            conversation.ConversationId, tenantId, actor.Agent.AgentId,
+            new OwnershipChange(OwnershipChangeKind.TakenOver, CallerIdentity.ResolveUserIdOrSystem(context.User)), ct);
         if (!result.Success)
             return ConversationActor.Conflict(result.FailureReason ?? "Takeover failed");
 
@@ -376,7 +380,9 @@ internal static class SupervisorEndpoints
         if (hasQueue)
             result = await switchboard.TransferToQueueAsync(convId, tenantId, EntityId.From(body.TargetQueueId!), ct);
         else
-            result = await switchboard.TransferToAgentAsync(convId, tenantId, EntityId.From(body.TargetAgentId!), ct);
+            result = await switchboard.TransferToAgentAsync(
+                convId, tenantId, EntityId.From(body.TargetAgentId!),
+                new OwnershipChange(OwnershipChangeKind.Reassigned, supervisorId.Value), ct);
 
         if (!result.Success)
             return Results.BadRequest(new ErrorResponse(result.FailureReason ?? "Reassign failed"));
