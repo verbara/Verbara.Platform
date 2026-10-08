@@ -9,17 +9,40 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Upgrading from 2.26.0
+
+- **The API now trusts `X-Forwarded-For` from the shipped gateways.** Each compose file that puts
+  nginx in front of the API (`docker-compose.full.yml`, `docker-compose.production.yml`,
+  `docker-compose.reference-smb.yml`, `demo/docker-compose.demo.yml`) gives its project network a fixed
+  subnet and `nginx-gateway` a fixed address, and sets `ForwardedHeaders__TrustedProxies__0` on
+  `platform-api` to that address only (`172.31.250.10/32`, `.251.10`, `.252.10` and `.253.10`
+  respectively); `docker-compose.scale.yml` also trusts `nginx-lb` (`172.31.250.11/32`, as
+  `ForwardedHeaders__TrustedProxies__1`). If the subnet collides with a network on your host, set
+  `VERBARA_NETWORK_SUBNET` and `VERBARA_GATEWAY_IP` (and `VERBARA_LB_IP` with the scale override)
+  together. The Helm chart adds `api.forwardedHeaders.trustedProxies`, defaulting to
+  `["10.244.0.0/16"]`, the reference cluster's pod CIDR from which the Gateway and the web pods
+  connect; set it to your cluster's pod CIDR or ingress address range. Without a trusted proxy the API
+  sees the proxy's address for every visitor, and logs one warning naming
+  `ForwardedHeaders:TrustedProxies` the first time a WebChat request arrives from a private or
+  loopback address.
+- **WebChat rate limits** (see Security) default to 20 session creates and 120 messages per minute per
+  tenant and client address; tune them with `WebChat:RateLimit:SessionsPerMinutePerIp` and
+  `WebChat:RateLimit:MessagesPerMinutePerIp` (compose: `WebChat__RateLimit__SessionsPerMinutePerIp`,
+  `WebChat__RateLimit__MessagesPerMinutePerIp`).
+
 ### Fixed
 
-- **Every inbound channel resolves its contact again on PostgreSQL — broken since 2.13.0.** Since
-  2.13.0 the Postgres store writes a contact address's channel as its name (`"WhatsApp"`), while the
-  lookup by address still read it as a number. Once a tenant held one contact saved that way, every
-  contact lookup in that tenant failed with a database error, so inbound WhatsApp, SMS, Email,
-  Messenger, Instagram, Telegram, Twitter and RCS messages, WebChat sessions and messages (REST and
-  WebSocket), and voice contact matching (queue calls, agent outbound dial, callbacks) could not
-  resolve or create their contact. The lookup now matches the channel in both forms. No migration is
-  needed: rows written before 2.13.0 (numbers) and since (names) are both read correctly after the
-  upgrade. The in-memory store was not affected; a PostgreSQL test suite now covers the lookup.
+- **Inbound contact lookup works again on PostgreSQL — broken since 2.13.0.** Since 2.13.0 the
+  Postgres store writes a contact address's channel as its name (`"WhatsApp"`), while the lookup by
+  address still read it as a number, so the lookup failed with a database error whenever it reached a
+  stored address in the name form. That happened from the second message of each sender whose contact
+  was created since 2.13.0 (the first message stores the sender's address in the name form), and
+  whenever the same address string was stored in the name form on another channel of the tenant.
+  Inbound WhatsApp, SMS, Email, Messenger, Instagram, Telegram, Twitter, RCS and WebChat messages and
+  voice contact matching (queue calls, agent outbound dial, callbacks) were affected. The lookup now
+  matches the channel in both forms. No migration is needed: rows written before 2.13.0 (numbers) and
+  since (names) are both read correctly after the upgrade. The in-memory store was not affected; a
+  PostgreSQL test suite now covers the lookup.
 - **Queue distribution only picks up conversations a queue owns.** The routing pass read the 50
   oldest `Queued` conversations of a tenant, including ones no queue owns, which it then skipped; enough
   of those filled the window and held back routable conversations until the timeout worker abandoned
@@ -27,14 +50,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
-- **Anonymous WebChat endpoints are rate-limited per client**
+- **Anonymous WebChat endpoints are rate-limited per tenant and client**
   ([GHSA-PENDING](https://github.com/verbara/Verbara.Platform/security/advisories/GHSA-PENDING)).
   `POST /api/v1/webchat/sessions` and `POST /api/v1/webchat/sessions/{sessionId}/messages` now carry
-  fixed one-minute limits per client address (IPv6 grouped by /64), defaulting to 20 session creates
-  and 120 messages per minute and configurable through `WebChat:RateLimit:SessionsPerMinutePerIp` and
-  `WebChat:RateLimit:MessagesPerMinutePerIp`. A request over the limit gets the shared `429` response
-  with `Retry-After`. Behind a reverse proxy, list it in `ForwardedHeaders:TrustedProxies` so the limit
-  applies to the visitor's address rather than the proxy's.
+  fixed one-minute limits per tenant and client address (IPv6 grouped by /64), defaulting to 20 session
+  creates and 120 messages per minute and configurable through
+  `WebChat:RateLimit:SessionsPerMinutePerIp` and `WebChat:RateLimit:MessagesPerMinutePerIp`. The tenant
+  is the existing tenant a session create names, or the tenant of the session a message names; requests
+  for an unknown tenant or session share one separate budget per client address. A request over the
+  limit gets the shared `429` response with `Retry-After`. The client address is the visitor's only when
+  the proxy in front of the API is listed in `ForwardedHeaders:TrustedProxies` (now set by the shipped
+  compose files and Helm chart; see Upgrading); otherwise the limits apply per proxy address and tenant.
 - **Server errors no longer echo internal error text.** A `5xx` problem response now carries a
   generic `detail` and the `traceId`; the exception message goes only to the server log, correlated
   by that `traceId`. `4xx` responses are unchanged.
