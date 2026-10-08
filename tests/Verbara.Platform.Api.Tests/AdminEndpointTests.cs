@@ -198,7 +198,7 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
     [Fact]
     public async Task CreateAgent_ShouldReturn201_WithCreatedAgent()
     {
-        var body = JsonContent.Create(new { userId = "user-xyz-001", displayName = "Alice Agent" });
+        var body = JsonContent.Create(new { userId = _factory.SeedActiveUser(), displayName = "Alice Agent" });
         var response = await _client.PostAsync("/api/admin/agents", body);
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -341,7 +341,7 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
     [Fact]
     public async Task CreateAgent_ShouldPersistCapacityOverride_WhenSupplied()
     {
-        var userId = $"user-{Guid.NewGuid():N}";
+        var userId = _factory.SeedActiveUser();
         var response = await _client.PostAsync(
             "/api/v1/admin/agents",
             JsonContent.Create(new { userId, displayName = "Created With Cap", capacity = new { maxChat = 6 } }));
@@ -429,7 +429,7 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
 
     private async Task<string> CreateAgentAsync(string displayName)
     {
-        var userId = $"user-{Guid.NewGuid():N}";
+        var userId = _factory.SeedActiveUser();
         var response = await _client.PostAsync(
             "/api/v1/admin/agents",
             JsonContent.Create(new { userId, displayName }));

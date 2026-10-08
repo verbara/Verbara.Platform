@@ -360,6 +360,7 @@ builder.Services.AddAuthHotpathCaching();
 // seam; pass-through when IRealtimeSyncService is not registered. MUST run AFTER
 // AddPostgresStorage / AddInMemoryStorage (they register the unkeyed stores it re-keys).
 builder.Services.AddRealtimeSyncingStores();
+builder.Services.AddLicensedAgentMetering();
 
 // ─── W6 capacity defaults provider ─────────────────────────────────────────────
 // Supplies Queues' IAgentCapacityResolver with the per-tenant Max*Default columns,

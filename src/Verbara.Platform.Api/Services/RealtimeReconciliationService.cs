@@ -3,6 +3,7 @@ using Verbara.Platform.Api.DependencyInjection;
 using Verbara.Platform.Api.Health;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Pro.Realtime;
 using Verbara.Sdk.Resilience;
@@ -183,6 +184,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         var membershipStore = sp.GetRequiredService<IQueueMembershipStore>();
         var queueStore = sp.GetRequiredService<IQueueStore>();
         var agentStore = sp.GetRequiredService<IAgentStore>();
+        var accountStatus = sp.GetRequiredService<IAgentAccountStatusLookup>();
         // The paused convergence re-reads the agent from the UNDECORATED store when the
         // realtime-syncing decorators are wired (never the tick cache below).
         var freshAgentStore =
@@ -196,7 +198,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
 
             var tid = new TenantId(tenant.TenantId);
             await ReconcileTenantAsync(
-                tid, tenant.TenantId, membershipStore, queueStore, agentStore, freshAgentStore, syncService, ct);
+                tid, tenant.TenantId, membershipStore, queueStore, agentStore, freshAgentStore, accountStatus, syncService, ct);
 
             _tenantsProcessed.Add(1, new KeyValuePair<string, object?>("tenant", tenant.TenantId));
         }
@@ -209,12 +211,23 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         IQueueStore queueStore,
         IAgentStore agentStore,
         IAgentStore freshAgentStore,
+        IAgentAccountStatusLookup accountStatus,
         IRealtimeSyncService syncService,
         CancellationToken ct)
     {
         var memberships = await membershipStore.ListByTenantAsync(tid, ct);
         if (memberships.Count == 0)
             return;
+
+        // licensed-agent-metering (D2): the members of an agent whose user is not Active (or does not
+        // exist) are deprovisioned, not paused — the desired state leaves them out so the Sdk.Pro
+        // reconciler removes their rows, and re-issuing AddQueueMemberAsync here would put them back.
+        // One status lookup for every member agent of the tenant, per tick.
+        var memberAgentIds = memberships.Where(m => !m.IsExcluded).Select(m => m.AgentId).Distinct().ToList();
+        var memberAgents = await agentStore.GetByIdsAsync(tid, memberAgentIds, ct);
+        var activeAgentIds = (await accountStatus.WhereUserActiveAsync(tid, memberAgents, ct))
+            .Select(a => a.AgentId.Value)
+            .ToHashSet(StringComparer.Ordinal);
 
         // Cache queues + agents within the tenant so we don't re-hit the store
         // for every membership row.
@@ -227,7 +240,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
 
         foreach (var m in memberships)
         {
-            if (m.IsExcluded)
+            if (m.IsExcluded || !activeAgentIds.Contains(m.AgentId.Value))
                 continue;
 
             var queueIdValue = m.QueueId.Value;

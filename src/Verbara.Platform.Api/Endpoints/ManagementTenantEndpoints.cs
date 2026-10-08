@@ -2,6 +2,7 @@ using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
 using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -281,6 +282,7 @@ internal static class ManagementTenantEndpoints
         string id,
         HttpContext context,
         [FromServices] ITenantStore store,
+        [FromServices] IAgentStore agents,
         [FromServices] IAuditService audit,
         [FromServices] IEnumerable<ITenantLifecycleHandler> lifecycleHandlers,
         [FromServices] ILogger<Program> logger,
@@ -290,6 +292,21 @@ internal static class ManagementTenantEndpoints
         if (tenant is null) return Results.NotFound();
         if (tenant.Type == TenantType.Platform)
             return Results.BadRequest(new ErrorResponse("Cannot delete the Platform tenant."));
+
+        // licensed-agent-metering (D4, Q3b) — the licensed-agent count does not consult tenant status,
+        // and a deleted tenant can no longer be reached through the API to clean up its agents. So a
+        // tenant that still owns agent rows is refused before anything changes: no status write, no
+        // lifecycle handler, no tenant.deleted audit. A dunning-driven move to PendingDeletion does not
+        // pass through here and is not covered.
+        var ownedAgents = await agents.ListAsync(new TenantId(id), new AgentQuery { Page = 1, PageSize = 1 }, ct);
+        if (ownedAgents.TotalCount > 0)
+        {
+            return Results.Problem(
+                title: "Tenant owns agents",
+                detail: $"Tenant '{id}' still owns {ownedAgents.TotalCount} agent(s). Delete its agents (or deactivate their users and delete the agents) first, then delete the tenant.",
+                statusCode: StatusCodes.Status409Conflict,
+                type: "https://verbara.platform/errors/tenant-owns-agents");
+        }
 
         // UpdateStatusAsync throws if active children exist
         await store.UpdateStatusAsync(id, TenantStatus.Deleted, ct);

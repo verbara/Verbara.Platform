@@ -13,19 +13,22 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
     private readonly IAgentStore _agents;
     private readonly IClock _clock;
     private readonly PlatformEventBus _eventBus;
+    private readonly IAgentAccountStatusLookup _accountStatus;
 
     public ConversationSwitchboard(
         IConversationStore store,
         IAgentCapacityService capacity,
         IAgentStore agents,
         IClock clock,
-        PlatformEventBus eventBus)
+        PlatformEventBus eventBus,
+        IAgentAccountStatusLookup accountStatus)
     {
         _store = store;
         _capacity = capacity;
         _agents = agents;
         _clock = clock;
         _eventBus = eventBus;
+        _accountStatus = accountStatus;
     }
 
     public async Task<OwnershipResult> AssignToQueueAsync(
@@ -226,7 +229,13 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
 
         // The owner must be an agent of this tenant: an id that names no agent would leave the
         // conversation with an owner nobody is, and count its capacity against no one.
-        if (await _agents.GetByIdAsync(tenantId, targetAgentId, ct).ConfigureAwait(false) is null)
+        // licensed-agent-metering (D2): nor may the owner be an agent whose user is not Active — a
+        // suspended or deactivated user cannot act on it. Same failure as an unknown agent, checked
+        // before anything is changed, so takeover, reassign and transfer all leave the conversation as
+        // it was.
+        var target = await _agents.GetByIdAsync(tenantId, targetAgentId, ct).ConfigureAwait(false);
+        if (target is null
+            || !await _accountStatus.IsActiveAsync(tenantId, target.UserId, ct).ConfigureAwait(false))
             return Fail(conversation.State, "Target agent not found.");
 
         await ReleaseOwnerCapacityAsync(conversation, tenantId, ct).ConfigureAwait(false);

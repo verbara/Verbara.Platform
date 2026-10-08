@@ -13,6 +13,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
     private readonly IAgentStore _agents = Substitute.For<IAgentStore>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly PlatformEventBus _eventBus = new();
+    private readonly FakeAgentAccountStatusLookup _accountStatus = new();
 
     private readonly TenantId _tenantId = new("t1");
     private readonly EntityId _conversationId = EntityId.From("conv-001");
@@ -21,7 +22,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
     private readonly DateTimeOffset _now = new(2026, 3, 21, 12, 0, 0, TimeSpan.Zero);
 
     private ConversationSwitchboard CreateSut() =>
-        new(_store, _capacity, _agents, _clock, _eventBus);
+        new(_store, _capacity, _agents, _clock, _eventBus, _accountStatus);
 
     private Conversation BuildConversation(ConversationState state, ConversationOwner? owner = null) =>
         new()
@@ -214,7 +215,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
         _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
               .Returns(conversation);
 
-        var sut = new ConversationSwitchboard(_store, capacity, _agents, _clock, _eventBus);
+        var sut = new ConversationSwitchboard(_store, capacity, _agents, _clock, _eventBus, _accountStatus);
         var result = await sut.AcceptAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
 
         result.Success.Should().BeFalse();
@@ -429,6 +430,30 @@ public sealed class ConversationSwitchboardTests : IDisposable
         result.FailureReason.Should().Be("Target agent not found.");
         conversation.Owner.Should().Be(owner);
         conversation.State.Should().Be(ConversationState.Active);
+        await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
+        await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+    }
+
+    // licensed-agent-metering (agent-account-status-routing) — an agent whose user is not Active is
+    // refused exactly like an unknown agent, and nothing changes.
+    [Fact]
+    public async Task TransferToAgentAsync_ShouldFailAndChangeNothing_WhenTargetUserIsNotActive()
+    {
+        var owner = ConversationOwner.ForAgent(_agentId);
+        var conversation = BuildConversation(ConversationState.Active, owner);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+        var target = EntityId.From("agent-suspended");
+        AgentExists(target);
+        _accountStatus.Inactive.Add(EntityId.From($"user-of-{target.Value}"));
+
+        var sut = CreateSut();
+        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, target, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.FailureReason.Should().Be("Target agent not found.");
+        conversation.Owner.Should().Be(owner);
         await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
         await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
         await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);

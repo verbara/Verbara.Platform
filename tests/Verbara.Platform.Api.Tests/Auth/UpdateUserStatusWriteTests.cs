@@ -6,6 +6,9 @@ using Verbara.Platform.Api.Tests.Logging;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging;
@@ -45,11 +48,16 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
     private readonly PermissionResolver _permissions;
     private readonly LogRecordCapture _logs = new();
     private readonly ILoggerFactory _loggerFactory;
+    private readonly IAgentStore _agents = Substitute.For<IAgentStore>();
+    private readonly AgentForceOfflineService _forceOffline;
 
     public UpdateUserStatusWriteTests()
     {
         _loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(_logs));
         _permissions = new PermissionResolver(_userRoles);
+        _forceOffline = new AgentForceOfflineService(
+            _agents, Substitute.For<IAgentLivenessStore>(), _eventBus, new AgentPauseCoordinator(), TimeProvider.System,
+            Substitute.For<IServiceProvider>(), NullLogger<AgentForceOfflineService>.Instance);
         // The tenant's copies of the role templates, under the template ids.
         _tenantRoles.ListAsync(new TenantId(Tenant), Arg.Any<CancellationToken>())
             .Returns(_ => (IReadOnlyList<TenantRole>)
@@ -333,7 +341,7 @@ public sealed class UpdateUserStatusWriteTests : IDisposable
 
         return AdminEndpoints.UpdateUser(
             TargetId, context, body, _store, sessions, _audit, _tenantRoles, _roleTemplates, _userRoles, _permissions,
-            _eventBus, _loggerFactory, _clock, CancellationToken.None);
+            _agents, _forceOffline, _eventBus, _loggerFactory, _clock, CancellationToken.None);
     }
 
     private static User NewTarget(

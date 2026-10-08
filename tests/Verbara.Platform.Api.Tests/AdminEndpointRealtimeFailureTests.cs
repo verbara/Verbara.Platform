@@ -22,9 +22,13 @@ public sealed class AdminEndpointRealtimeFailureTests
     : IClassFixture<AdminEndpointRealtimeFailureTests.ThrowingSyncApiFactory>
 {
     private readonly HttpClient _client;
+    private readonly ThrowingSyncApiFactory _factory;
 
     public AdminEndpointRealtimeFailureTests(ThrowingSyncApiFactory factory)
-        => _client = factory.CreateAuthenticatedClient();
+    {
+        _factory = factory;
+        _client = factory.CreateAuthenticatedClient();
+    }
 
     [Fact]
     public async Task CreateQueue_ShouldReturn201_WhenRealtimeSyncThrows()
@@ -63,7 +67,7 @@ public sealed class AdminEndpointRealtimeFailureTests
         var response = await _client.PostAsync("/api/admin/agents",
             JsonContent.Create(new
             {
-                userId = "user-sync-fail-a",
+                userId = _factory.SeedActiveUser("user-sync-fail-a"),
                 displayName = "Sync Fail Agent",
                 extension = "7001",
                 sipPassword = "s",
@@ -81,7 +85,7 @@ public sealed class AdminEndpointRealtimeFailureTests
         var response = await _client.PostAsync("/api/admin/agents",
             JsonContent.Create(new
             {
-                userId = "user-sync-fail-m",
+                userId = _factory.SeedActiveUser("user-sync-fail-m"),
                 displayName = "Member Fail Agent",
                 queueMemberships = new[] { new { queueId, penalty = 0 } },
             }));
@@ -92,7 +96,7 @@ public sealed class AdminEndpointRealtimeFailureTests
     public async Task UpdateAgent_ShouldReturn200_WhenAgentSyncThrows()
     {
         var create = await _client.PostAsync("/api/admin/agents",
-            JsonContent.Create(new { userId = "user-sync-fail-u", displayName = "Update Sync Agent" }));
+            JsonContent.Create(new { userId = _factory.SeedActiveUser("user-sync-fail-u"), displayName = "Update Sync Agent" }));
         var id = JsonNode.Parse(await create.Content.ReadAsStringAsync())!["agentId"]!.GetValue<string>();
 
         var response = await _client.PutAsync($"/api/admin/agents/{id}",
@@ -106,7 +110,7 @@ public sealed class AdminEndpointRealtimeFailureTests
         var create = await _client.PostAsync("/api/admin/agents",
             JsonContent.Create(new
             {
-                userId = "user-sync-fail-d",
+                userId = _factory.SeedActiveUser("user-sync-fail-d"),
                 displayName = "Delete Sync Agent",
                 extension = "7003",
                 sipPassword = "s",

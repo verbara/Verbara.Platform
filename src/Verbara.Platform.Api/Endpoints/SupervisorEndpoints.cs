@@ -7,6 +7,7 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Switchboard;
 using Verbara.Sdk.Pro.AgentAssist.Engine;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -338,6 +339,7 @@ internal static class SupervisorEndpoints
         [FromServices] IConversationStore conversationStore,
         [FromServices] IConversationSwitchboard switchboard,
         [FromServices] IAgentStore agentStore,
+        [FromServices] IAgentAccountStatusLookup accountStatus,
         [FromServices] IQueueStore queueStore,
         [FromServices] IAuditService audit,
         CancellationToken ct)
@@ -360,7 +362,8 @@ internal static class SupervisorEndpoints
         // names nothing would strand the conversation with no one able to work it.
         if (hasQueue && await queueStore.GetByIdAsync(tenantId, EntityId.From(body.TargetQueueId!), ct) is null)
             return Results.BadRequest(new ErrorResponse(ConversationActor.TargetQueueNotFound));
-        if (hasAgent && await agentStore.GetByIdAsync(tenantId, EntityId.From(body.TargetAgentId!), ct) is null)
+        if (hasAgent && !await ConversationActor.IsOwnableTargetAsync(
+                agentStore, accountStatus, tenantId, EntityId.From(body.TargetAgentId!), ct))
             return Results.BadRequest(new ErrorResponse(ConversationActor.TargetAgentNotFound));
 
         // Clear failover markers BEFORE the transfer so the transfer's re-load+save carries

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Pro.Realtime;
 
 namespace Verbara.Platform.Api.Services;
@@ -15,24 +16,31 @@ namespace Verbara.Platform.Api.Services;
 /// PJSIP identity to sync). A <see cref="DeleteAsync"/> removes them. Every sync is best-effort:
 /// a throw is swallowed + logged (EventId 4130) so the store write still succeeds — the
 /// <see cref="RealtimeReconciliationService"/> re-converges. Read + stream methods pass through.
+/// licensed-agent-metering (D2): a save never provisions an agent whose user is not <c>Active</c> (or does
+/// not exist), the same rule the desired state applies at the reconcile tick, so an admin edit of a
+/// suspended agent does not bring its endpoint back between ticks.
 /// </summary>
 internal sealed class RealtimeSyncingAgentStore : IAgentStore
 {
     private readonly IAgentStore _inner;
     private readonly IRealtimeSyncService _sync;
+    private readonly IAgentAccountStatusLookup _accountStatus;
     private readonly ILogger<RealtimeSyncingAgentStore> _logger;
 
     public RealtimeSyncingAgentStore(
         IAgentStore inner,
         IRealtimeSyncService sync,
+        IAgentAccountStatusLookup accountStatus,
         ILogger<RealtimeSyncingAgentStore> logger)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(sync);
+        ArgumentNullException.ThrowIfNull(accountStatus);
         ArgumentNullException.ThrowIfNull(logger);
 
         _inner = inner;
         _sync = sync;
+        _accountStatus = accountStatus;
         _logger = logger;
     }
 
@@ -73,6 +81,11 @@ internal sealed class RealtimeSyncingAgentStore : IAgentStore
 
         try
         {
+            // An agent whose user is not Active is excluded from the PJSIP desired state; provisioning
+            // it here would undo the reconcile until the next tick.
+            if (!await _accountStatus.IsActiveAsync(agent.TenantId, agent.UserId, ct).ConfigureAwait(false))
+                return;
+
             await _sync.SyncAgentAsync(agent.TenantId.Value, agent.AgentId.Value, agent.DisplayName,
                 agent.Extension, agent.SipPassword, ct: ct).ConfigureAwait(false);
         }

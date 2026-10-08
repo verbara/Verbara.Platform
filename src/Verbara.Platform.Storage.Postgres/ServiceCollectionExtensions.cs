@@ -124,6 +124,9 @@ public static class ServiceCollectionExtensions
         // Queues
         services.AddSingleton<IQueueStore, PostgresQueueStore>();
         services.AddSingleton<IAgentStore, PostgresAgentStore>();
+        // licensed-agent-metering (D2) — the account-status seam's Postgres implementation. The Api's
+        // AddLicensedAgentMetering binds IAgentAccountStatusLookup to it in this storage mode.
+        services.TryAddSingleton<PostgresAgentAccountStatusLookup>();
         services.AddSingleton<ITeamStore, PostgresTeamStore>();
         services.AddSingleton<IQueueMembershipStore, PostgresQueueMembershipStore>();
         services.AddSingleton<IAgentCapacityStore, PostgresAgentCapacityStore>();

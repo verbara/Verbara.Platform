@@ -9,6 +9,45 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Run the agent identity report before upgrading.** Migration `018_AgentUserUnique` makes each user
+  own at most one agent per tenant, and refuses to run while a user owns two or more: the API does not
+  start, and its log names every duplicated tenant, user and agent. Nothing is merged or deleted for
+  you. Run the read-only `scripts/ops/agents-identity-report.sql` together with
+  `scripts/tenant-type-misplaced-data.sh`, and resolve what they list with the procedure in
+  `docs/operations/licensed-agent-metering-upgrade.md` (keep the agent that has an extension, else the
+  oldest; repoint its references; delete the others). The same page covers orphan agents, Customer
+  tenants without a valid parent, the tenant offboarding order, and tenants whose
+  `WorkFailoverGraceSeconds` is `0` or less. (#N)
+
+### Changed
+
+- **A user's account status now governs its agent.** When a user is suspended or deactivated, its agent
+  stops being offered work at once, on every channel and on the sticky last-agent path, and cannot be
+  made a conversation's owner by transfer, reassign or takeover. Its desk phone unregisters at the next
+  realtime reconcile: the PJSIP endpoint and the Asterisk `queue_members` rows are removed, and are
+  restored at the next reconcile after the user is reactivated. The suspension also forces the agent
+  `Offline` in the same request and pauses its queue members before the response returns; a reactivated
+  agent stays `Offline` until it signs in. An agent whose user does not exist is never offered work or
+  provisioned. Previously a suspended user's agent kept taking calls until its liveness expired. (#N)
+- **One agent per user, and agents always name a real user.** `POST /api/v1/admin/agents` answers `404`
+  when the user does not exist in the tenant and `409` when the user already owns an agent; two
+  concurrent creations for one user yield one agent. (#N)
+- **Deletes keep agent history attributable.** `DELETE /api/v1/admin/users/{id}` answers `409`
+  (`user-owns-agent`) while the user owns an agent, and changes nothing: delete the agent first. A GDPR
+  user purge is never refused for it — it deletes the agent, then the user. `DELETE
+  /api/v1/management/tenants/{id}` answers `409` (`tenant-owns-agents`) while the tenant owns any agent,
+  before any status change, lifecycle handler or audit entry; a tenant without agents is deleted as
+  before. Status changes made by dunning do not pass through this endpoint and are not covered. (#N)
+- **Agent creation and deletion are audited** as `agent.created` and `agent.deleted` (category
+  `queues`), with the actor, the agent id and the owning user id — from the admin endpoints and from a
+  GDPR purge. (#N)
+- **The PJSIP desired state enumerates every agent of a tenant.** It was capped at 1000 agents per
+  tenant, so agents beyond the first page were never provisioned. (#N)
+
+---
+
 ## [2.26.1] - 2026-10-08
 
 Patch and security release: contact lookup on PostgreSQL, a rate limit on the anonymous WebChat

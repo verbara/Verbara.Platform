@@ -105,7 +105,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
     {
         var inner = new InMemoryAgentStore();
         var sync = Substitute.For<IRealtimeSyncService>();
-        var sut = new RealtimeSyncingAgentStore(inner, sync, NullLogger<RealtimeSyncingAgentStore>.Instance);
+        var sut = new RealtimeSyncingAgentStore(inner, sync, new FakeAgentAccountStatusLookup(), NullLogger<RealtimeSyncingAgentStore>.Instance);
         var agent = MakeAgent(extension: "6001", sipPassword: "secret");
 
         await sut.SaveAsync(agent, CancellationToken.None);
@@ -115,12 +115,32 @@ public sealed class RealtimeSyncingStoreDecoratorTests
             "6001", "secret", Arg.Any<long?>(), Arg.Any<CancellationToken>());
     }
 
+    // licensed-agent-metering (agent-account-status-routing) — a save never provisions an agent whose
+    // user is not Active, so an admin edit of a suspended agent does not bring its endpoint back.
+    [Fact]
+    public async Task SaveAsync_ShouldNotProvision_WhenUserSuspended()
+    {
+        var inner = new InMemoryAgentStore();
+        var sync = Substitute.For<IRealtimeSyncService>();
+        var status = new FakeAgentAccountStatusLookup();
+        var sut = new RealtimeSyncingAgentStore(inner, sync, status, NullLogger<RealtimeSyncingAgentStore>.Instance);
+        var agent = MakeAgent(extension: "6002", sipPassword: "secret");
+        status.Inactive.Add(agent.UserId);
+
+        agent.DisplayName = "Renamed while suspended";
+        await sut.SaveAsync(agent, CancellationToken.None);
+
+        (await inner.GetByIdAsync(agent.TenantId, agent.AgentId, CancellationToken.None))!.DisplayName
+            .Should().Be("Renamed while suspended", "the store write still lands");
+        await sync.DidNotReceiveWithAnyArgs().SyncAgentAsync(default!, default!, default!, default!, default!, default, default);
+    }
+
     [Fact]
     public async Task AgentSave_ShouldNotSync_WhenExtensionOrPasswordMissing()
     {
         var inner = new InMemoryAgentStore();
         var sync = Substitute.For<IRealtimeSyncService>();
-        var sut = new RealtimeSyncingAgentStore(inner, sync, NullLogger<RealtimeSyncingAgentStore>.Instance);
+        var sut = new RealtimeSyncingAgentStore(inner, sync, new FakeAgentAccountStatusLookup(), NullLogger<RealtimeSyncingAgentStore>.Instance);
         var agent = MakeAgent(extension: null, sipPassword: null);
 
         await sut.SaveAsync(agent, CancellationToken.None);
@@ -141,7 +161,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
             .Returns(_ => Faulted());
 #pragma warning restore CA2012
         var logger = new CapturingLogger<RealtimeSyncingAgentStore>();
-        var sut = new RealtimeSyncingAgentStore(inner, sync, logger);
+        var sut = new RealtimeSyncingAgentStore(inner, sync, new FakeAgentAccountStatusLookup(), logger);
         var agent = MakeAgent(extension: "6002", sipPassword: "secret");
 
         var act = async () => await sut.SaveAsync(agent, CancellationToken.None);
@@ -156,7 +176,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
     {
         var inner = new InMemoryAgentStore();
         var sync = Substitute.For<IRealtimeSyncService>();
-        var sut = new RealtimeSyncingAgentStore(inner, sync, NullLogger<RealtimeSyncingAgentStore>.Instance);
+        var sut = new RealtimeSyncingAgentStore(inner, sync, new FakeAgentAccountStatusLookup(), NullLogger<RealtimeSyncingAgentStore>.Instance);
         var a1 = MakeAgent(extension: "7001", sipPassword: "secret");
         var a2 = MakeAgent(extension: "7002", sipPassword: "secret");
         await inner.SaveAsync(a1, CancellationToken.None);
@@ -173,7 +193,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
     {
         var inner = new InMemoryAgentStore();
         var sync = Substitute.For<IRealtimeSyncService>();
-        var sut = new RealtimeSyncingAgentStore(inner, sync, NullLogger<RealtimeSyncingAgentStore>.Instance);
+        var sut = new RealtimeSyncingAgentStore(inner, sync, new FakeAgentAccountStatusLookup(), NullLogger<RealtimeSyncingAgentStore>.Instance);
         var agent = MakeAgent(extension: "6003", sipPassword: "secret");
         await inner.SaveAsync(agent, CancellationToken.None);
 
@@ -193,7 +213,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
             .Returns(_ => Faulted());
 #pragma warning restore CA2012
         var logger = new CapturingLogger<RealtimeSyncingAgentStore>();
-        var sut = new RealtimeSyncingAgentStore(inner, sync, logger);
+        var sut = new RealtimeSyncingAgentStore(inner, sync, new FakeAgentAccountStatusLookup(), logger);
         var agent = MakeAgent(extension: "6004", sipPassword: "secret");
         await inner.SaveAsync(agent, CancellationToken.None);
 
@@ -332,6 +352,21 @@ public sealed class RealtimeSyncingStoreDecoratorTests
         logger.Warned(DeferralEventId).Should().BeTrue();
     }
 
+    [Fact]
+    public async Task MembershipSave_ShouldNotAddQueueMember_WhenAgentUserIsNotActive()
+    {
+        var status = new FakeAgentAccountStatusLookup();
+        var (sut, membershipInner, sync, queue, agent) = BuildMembershipSut(out _, status);
+        status.Inactive.Add(agent.UserId);
+
+        await sut.SaveAsync(MakeMembership(agent.AgentId, queue.QueueId), CancellationToken.None);
+
+        (await membershipInner.ListByAgentAsync(agent.TenantId, agent.AgentId, CancellationToken.None)).Should().ContainSingle(
+            "the Platform membership is kept, so reactivation restores the exact set");
+        await sync.DidNotReceiveWithAnyArgs().AddQueueMemberAsync(default!, default!, default!, default!, default, default, default);
+        await sync.DidNotReceiveWithAnyArgs().SyncAgentPausedAsync(default!, default!, default, default);
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     /// <summary>A faulted <see cref="ValueTask"/> that throws when awaited — models a fully
@@ -341,7 +376,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
 
     private static (RealtimeSyncingQueueMembershipStore Sut, IQueueMembershipStore MembershipInner,
         IRealtimeSyncService Sync, Queue Queue, Agent Agent) BuildMembershipSut(
-        out CapturingLogger<RealtimeSyncingQueueMembershipStore> logger)
+        out CapturingLogger<RealtimeSyncingQueueMembershipStore> logger, FakeAgentAccountStatusLookup? status = null)
     {
         var queueInner = new InMemoryQueueStore();
         var agentInner = new InMemoryAgentStore();
@@ -355,7 +390,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
         agentInner.SaveAsync(agent, CancellationToken.None).GetAwaiter().GetResult();
 
         var sut = new RealtimeSyncingQueueMembershipStore(
-            membershipInner, queueInner, agentInner, sync, new AgentPauseCoordinator(), logger);
+            membershipInner, queueInner, agentInner, sync, new AgentPauseCoordinator(), status ?? new FakeAgentAccountStatusLookup(), logger);
         return (sut, membershipInner, sync, queue, agent);
     }
 

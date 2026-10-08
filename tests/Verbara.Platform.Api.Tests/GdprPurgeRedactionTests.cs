@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
@@ -73,7 +75,9 @@ public sealed class GdprPurgeRedactionTests
 
         var service = new GdprPurgeService(
             contactStore, conversationStore, messageStore,
-            authEventStore, userStore, new InMemoryRefreshTokenStore(), purgeLogStore, auditStore);
+            authEventStore, userStore, new InMemoryRefreshTokenStore(), purgeLogStore, auditStore,
+            new InMemoryAgentStore(), new InMemoryQueueMembershipStore(), Substitute.For<IAuditService>(),
+            NullLogger<GdprPurgeService>.Instance);
 
         var result = await service.PurgeContactDataAsync(
             Tenant.Value, contactId.Value, "admin", "Subject erasure request", CancellationToken.None);

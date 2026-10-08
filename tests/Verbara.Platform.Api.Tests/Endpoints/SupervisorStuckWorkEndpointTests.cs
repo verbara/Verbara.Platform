@@ -404,7 +404,7 @@ public sealed class SupervisorStuckWorkEndpointTests : IClassFixture<Authenticat
         {
             AgentId = EntityId.New(),
             TenantId = s_tenantId,
-            UserId = EntityId.New(),
+            UserId = EntityId.From(_factory.SeedActiveUser()),
             DisplayName = displayName,
             State = state,
             OfflineSince = state == AgentState.Offline ? DateTimeOffset.UtcNow.AddMinutes(-5) : null,

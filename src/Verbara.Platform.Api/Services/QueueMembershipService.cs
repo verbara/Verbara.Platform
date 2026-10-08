@@ -1,5 +1,6 @@
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Pro.Routing.Skills;
 
 namespace Verbara.Platform.Api.Services;
@@ -41,7 +42,9 @@ internal sealed class QueueMembershipService
 
         // 1. Load all queues and agents
         var queues = await _queueStore.ListAsync(tid, new PagedQuery(1, 1000), ct);
-        var agents = await _agentStore.ListAsync(tid, new AgentQuery { PageSize = 1000 }, ct);
+        // Every agent of the tenant, with no page cap (licensed-agent-metering D2).
+        var agents = await _agentStore.ListAllAsync(tid, ct);
+        var agentsById = agents.ToDictionary(a => a.AgentId);
 
         // 2. Build skill-derived memberships
         var skillDerived = new List<EffectiveQueueMember>();
@@ -49,7 +52,7 @@ internal sealed class QueueMembershipService
         {
             if (queue.RequiredSkills.Count == 0) continue;
 
-            foreach (var agent in agents.Items)
+            foreach (var agent in agents)
             {
                 if (string.IsNullOrEmpty(agent.Extension) || string.IsNullOrEmpty(agent.SipPassword))
                     continue; // Not provisioned — skip
@@ -97,7 +100,7 @@ internal sealed class QueueMembershipService
             if (!exclusions.Contains(key))
             {
                 // Need agent display name + queue name
-                var agent = agents.Items.FirstOrDefault(a => a.AgentId == m.AgentId);
+                var agent = agentsById.GetValueOrDefault(m.AgentId);
                 var queue = queues.Items.FirstOrDefault(q => q.QueueId == m.QueueId);
                 if (agent is not null && queue is not null &&
                     !string.IsNullOrEmpty(agent.Extension) && !string.IsNullOrEmpty(agent.SipPassword))

@@ -133,6 +133,27 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
     protected virtual Verbara.Sdk.Pro.Realtime.IRealtimeSyncService CreateRealtimeSyncService()
         => Substitute.For<Verbara.Sdk.Pro.Realtime.IRealtimeSyncService>();
 
+    /// <summary>
+    /// Creates an Active user in the test tenant through the host's <see cref="IUserStore"/> and returns
+    /// its id — what an agent must name (licensed-agent-metering: an agent's user must exist, and only an
+    /// Active user's agent is routable or provisioned).
+    /// </summary>
+    public string SeedActiveUser(string? userId = null, string tenantId = TestTenantId)
+    {
+        var id = userId ?? $"user-{Guid.NewGuid():N}";
+        Services.GetRequiredService<IUserStore>().CreateAsync(new User
+        {
+            UserId = EntityId.From(id),
+            TenantId = new TenantId(tenantId),
+            Email = $"{id}@seeded.test",
+            DisplayName = id,
+            Role = UserRole.Agent,
+            Status = UserStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        }, CancellationToken.None).GetAwaiter().GetResult();
+        return id;
+    }
+
     public HttpClient CreateAuthenticatedClient()
     {
         var client = CreateClient();
@@ -193,6 +214,24 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
             Status = UserStatus.Active,
             CreatedAt = DateTimeOffset.UtcNow,
         };
+        // licensed-agent-metering — users created through the substitute are readable by id, singly
+        // and in batch, so an agent created for one passes the "user exists" check (404 otherwise)
+        // and the account-status seam (which reads GetByIdsAsync) sees its status. Registered before
+        // the admin-specific setup so that one keeps precedence.
+        var usersById = new System.Collections.Concurrent.ConcurrentDictionary<(TenantId, EntityId), User>();
+        usersById[(tenantId_, userEntityId)] = testUser;
+        userStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+                 .Returns(ci => Task.FromResult(usersById.GetValueOrDefault((ci.ArgAt<TenantId>(0), ci.ArgAt<EntityId>(1)))));
+        userStore.GetByIdsAsync(Arg.Any<string>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+                 .Returns(ci =>
+                 {
+                     var tenant = new TenantId(ci.ArgAt<string>(0));
+                     IReadOnlyList<User> found = ci.ArgAt<IReadOnlyCollection<string>>(1)
+                         .Select(id => usersById.GetValueOrDefault((tenant, EntityId.From(id))))
+                         .OfType<User>()
+                         .ToList();
+                     return Task.FromResult(found);
+                 });
         userStore.GetByIdAsync(tenantId_, userEntityId, Arg.Any<CancellationToken>())
                  .Returns(Task.FromResult<User?>(testUser));
         // ListAsync must return a non-null PagedResult or the endpoint NREs on
@@ -229,6 +268,7 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
                      if (!string.IsNullOrEmpty(u.Email) && seenUsers.ContainsKey(u.Email))
                          return Task.FromException(new EntityAlreadyExistsException("user", "email"));
                      seenUsers[u.Email ?? Guid.NewGuid().ToString()] = u;
+                     usersById[(u.TenantId, u.UserId)] = u;
                      return Task.CompletedTask;
                  });
         SubstituteUserWrites.ApplyTo(userStore, testUser);

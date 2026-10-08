@@ -303,6 +303,34 @@ public sealed class RealtimeReconciliationServiceTests
         await sync.Received(1).SyncAgentPausedAsync(TestTenantId, "agent-b", false, Arg.Any<CancellationToken>());
     }
 
+    // ── licensed-agent-metering: members of an agent whose user is not Active ─
+
+    [Fact]
+    public async Task ReconcileTenantAsync_ShouldNotReissueMembers_WhenAgentUserIsNotActive()
+    {
+        var harness = BuildHarness(out var sync);
+        var queueId = EntityId.New();
+        harness.SeedQueue(MakeQueue(queueId));
+        var suspended = MakeAgent("agent-suspended");
+        var active = MakeAgent("agent-active");
+        harness.SeedAgent(suspended);
+        harness.SeedAgent(active);
+        harness.SeedMembership(MakeMembership(suspended.AgentId, queueId));
+        harness.SeedMembership(MakeMembership(active.AgentId, queueId));
+        harness.AccountStatus.Inactive.Add(suspended.UserId);
+
+        await harness.Sut.ReconcileAsync(CancellationToken.None);
+
+        // Re-adding the row would undo the desired-state removal (realtime-queue-member-sync).
+        await sync.DidNotReceive().AddQueueMemberAsync(
+            TestTenantId, Arg.Any<string>(), "agent-suspended", Arg.Any<string>(), Arg.Any<int>(),
+            Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>());
+        await sync.DidNotReceive().SyncAgentPausedAsync(TestTenantId, "agent-suspended", Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        await sync.Received(1).AddQueueMemberAsync(
+            TestTenantId, TestQueueName, "agent-active", Arg.Any<string>(), Arg.Any<int>(),
+            Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>());
+    }
+
     // ── Test harness ──────────────────────────────────────────────────────
 
     private static Harness BuildHarness(out IRealtimeSyncService sync, IAgentStore? undecoratedAgentStore = null)
@@ -326,6 +354,8 @@ public sealed class RealtimeReconciliationServiceTests
 
         public AgentPauseCoordinator Coordinator { get; } = new();
 
+        public FakeAgentAccountStatusLookup AccountStatus { get; } = new();
+
         public Harness(IRealtimeSyncService sync, IAgentStore? undecoratedAgentStore = null)
         {
             _tenantStore.GetAllActiveAsync(Arg.Any<CancellationToken>())
@@ -336,6 +366,12 @@ public sealed class RealtimeReconciliationServiceTests
                 {
                     var id = call.ArgAt<EntityId>(1);
                     return Task.FromResult<Agent?>(_agents.FirstOrDefault(a => a.AgentId == id));
+                });
+            _agentStore.GetByIdsAsync(Arg.Any<TenantId>(), Arg.Any<IReadOnlyCollection<EntityId>>(), Arg.Any<CancellationToken>())
+                .Returns(call =>
+                {
+                    var ids = call.ArgAt<IReadOnlyCollection<EntityId>>(1);
+                    return Task.FromResult<IReadOnlyList<Agent>>(_agents.Where(a => ids.Contains(a.AgentId)).ToList());
                 });
             _queueStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
                 .Returns(call =>
@@ -352,6 +388,7 @@ public sealed class RealtimeReconciliationServiceTests
             services.AddSingleton(_queueStore);
             services.AddSingleton(_agentStore);
             services.AddSingleton(sync);
+            services.AddSingleton<Verbara.Platform.Queues.Services.IAgentAccountStatusLookup>(AccountStatus);
             if (undecoratedAgentStore is not null)
             {
                 services.AddKeyedSingleton(

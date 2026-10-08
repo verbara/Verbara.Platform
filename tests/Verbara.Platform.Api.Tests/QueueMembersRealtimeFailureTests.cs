@@ -16,9 +16,13 @@ public sealed class QueueMembersRealtimeFailureTests
     : IClassFixture<AdminEndpointRealtimeFailureTests.ThrowingSyncApiFactory>
 {
     private readonly HttpClient _client;
+    private readonly AdminEndpointRealtimeFailureTests.ThrowingSyncApiFactory _factory;
 
     public QueueMembersRealtimeFailureTests(AdminEndpointRealtimeFailureTests.ThrowingSyncApiFactory factory)
-        => _client = factory.CreateAuthenticatedClient();
+    {
+        _factory = factory;
+        _client = factory.CreateAuthenticatedClient();
+    }
 
     [Fact]
     public async Task AddMember_ShouldReturn201_WhenRealtimeSyncThrows()
@@ -72,7 +76,7 @@ public sealed class QueueMembersRealtimeFailureTests
         var queueId = JsonNode.Parse(await queue.Content.ReadAsStringAsync())!["id"]!.GetValue<string>();
 
         var agent = await _client.PostAsync("/api/v1/admin/agents",
-            JsonContent.Create(new { userId = $"user-{slug}", displayName = $"{slug} Agent" }));
+            JsonContent.Create(new { userId = _factory.SeedActiveUser($"user-{slug}"), displayName = $"{slug} Agent" }));
         agent.StatusCode.Should().Be(HttpStatusCode.Created);
         var agentId = JsonNode.Parse(await agent.Content.ReadAsStringAsync())!["agentId"]!.GetValue<string>();
 
