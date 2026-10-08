@@ -131,6 +131,29 @@ public sealed class AgentAccountStatusRegressionTests : IClassFixture<AccountSta
             .And.NotContain(suspended.AgentId.Value, because: "a Suspended user's queue_members rows are deprovisioned, not paused");
     }
 
+    [Fact]
+    public async Task GetExpectedState_ShouldIncludeAgentAndMembersAgain_WhenUserReactivated()
+    {
+        var tenant = NewTenant();
+        var queue = await SeedQueueAsync(tenant);
+        var agent = await SeedAgentAsync(tenant, UserStatus.Suspended, AgentState.Offline, provisioned: true);
+        await SeedMembershipAsync(tenant, queue, agent);
+        var desired = Services.GetRequiredService<IDesiredStateProvider>();
+        (await desired.GetExpectedQueueMembersAsync(tenant.Value, CancellationToken.None))
+            .Select(m => m.AgentId).Should().NotContain(agent.AgentId.Value);
+
+        await Services.GetRequiredService<IUserStore>().UpdateAdminFieldsAsync(
+            tenant, agent.UserId, new AdminFieldsChange { Status = UserStatus.Active },
+            DateTimeOffset.UtcNow, updatedBy: null, CancellationToken.None);
+
+        (await desired.GetExpectedAgentsAsync(tenant.Value, CancellationToken.None))
+            .Select(a => a.AgentId).Should().Contain(agent.AgentId.Value,
+                because: "the reconciler re-provisions the endpoint once the user is Active again");
+        (await desired.GetExpectedQueueMembersAsync(tenant.Value, CancellationToken.None))
+            .Select(m => m.AgentId).Should().Contain(agent.AgentId.Value,
+                because: "the next reconcile re-creates the agent's queue_members rows after reactivation");
+    }
+
     // ─── (g) (h) agent creation ──────────────────────────────────────────────
 
     [Fact]
