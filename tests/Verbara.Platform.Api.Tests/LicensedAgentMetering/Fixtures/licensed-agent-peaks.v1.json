@@ -1,0 +1,87 @@
+{
+  "_comment": "Golden wire shape for the NEW read endpoint GET /api/v1/management/licensing/agents?from=YYYY-MM-DD&to=YYYY-MM-DD (L9; consumed by Platform.Web for L12). PlatformAdminOnly, like /management/system/license*. Unit: licensedAgents = PDR-0003 section C licensed agents, the daily SIMULTANEOUS peak of counted identities (integer count of identities, never seconds or sessions). day = calendar date in dayZone (ISO-8601 date). The deployment figure for the range is the highest daily sum across Customer tenants (deployment.peakLicensedAgents on deployment.peakDay). Nullability: deployment.peakDay is string|null; it is null, and deployment.peakLicensedAgents is 0, when no day in the range is closed (days is then empty and overBand false). Each tenant/day cell is the LATEST revision of that (tenantId, day) row (a correction row has revision > 0); rowHash is that row's hash in its tenant chain (scheme prefix lac1:). license.maxAgents is ADVISORY (license.maxAgentsAdvisory is always true): null or 0 means not declared, and then deployment.overBand is false. overBand is computed server-side as maxAgents > 0 AND peakLicensedAgents > maxAgents; nothing is ever blocked on it. license.* is read once from ILicenseStatus per request (licenseId may be null when no licence is loaded). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "schemaVersion": 1,
+  "from": "2026-09-01",
+  "to": "2026-09-30",
+  "dayZone": "UTC",
+  "license": {
+    "licenseId": "lic-7f3c2a91",
+    "licensee": "Example Contact Ltd",
+    "tier": "SelfHostBusiness",
+    "maxAgents": 50,
+    "maxAgentsAdvisory": true
+  },
+  "deployment": {
+    "peakLicensedAgents": 47,
+    "peakDay": "2026-09-17",
+    "overBand": false
+  },
+  "days": [
+    {
+      "day": "2026-09-16",
+      "deploymentLicensedAgents": 44,
+      "deploymentRowHash": "lac1:ee565c220d2cabe09065f10407d92290232beab0bf941d296f29c2cf8a2b00be",
+      "tenants": [
+        {
+          "tenantId": "ten-acme",
+          "tenantName": "Acme Support",
+          "licensedAgents": 30,
+          "revision": 0,
+          "closedAt": "2026-09-17T00:05:12Z",
+          "rowHash": "lac1:c6d888063e5deb0ec8059e70e0e51e14926f608b0679e4abcbfe0da027e833b0"
+        },
+        {
+          "tenantId": "ten-globex",
+          "tenantName": "Globex Sales",
+          "licensedAgents": 14,
+          "revision": 0,
+          "closedAt": "2026-09-17T00:05:12Z",
+          "rowHash": "lac1:57e62d0da6934c8b9ac06bf83794c688dceee4d3763b8d67103b669338b23fcf"
+        }
+      ]
+    },
+    {
+      "day": "2026-09-17",
+      "deploymentLicensedAgents": 47,
+      "deploymentRowHash": "lac1:47801b9267fbbabe3885b5396d166d2eecd4c8349a40cd073c2624e2475a4272",
+      "tenants": [
+        {
+          "tenantId": "ten-acme",
+          "tenantName": "Acme Support",
+          "licensedAgents": 32,
+          "revision": 1,
+          "closedAt": "2026-09-18T09:41:03Z",
+          "rowHash": "lac1:a81d013dbe5b808ab079383af45ce46bf5569d79d3b6ad603ec89d7c590cc000"
+        },
+        {
+          "tenantId": "ten-globex",
+          "tenantName": "Globex Sales",
+          "licensedAgents": 15,
+          "revision": 0,
+          "closedAt": "2026-09-18T00:05:09Z",
+          "rowHash": "lac1:d8152fc8a09b712672ca14b9e7b51a0ab30b5dbe162c282889a895f5ed68312e"
+        }
+      ]
+    }
+  ],
+  "chainHeads": [
+    {
+      "tenantId": "ten-acme",
+      "headSequence": 212,
+      "headHash": "lac1:0d0d571c35be7c47302d7e57276e2d4802fe02e48fd8e49ca22a8ee52d5b6f35",
+      "licenseId": "lic-7f3c2a91"
+    },
+    {
+      "tenantId": "ten-globex",
+      "headSequence": 97,
+      "headHash": "lac1:125238d20e40d23a1f6c739a280b64da46ae8132e2009307582a67ad5890cca5",
+      "licenseId": "lic-7f3c2a91"
+    },
+    {
+      "tenantId": null,
+      "headSequence": 31,
+      "headHash": "lac1:dc5c209062c97c953fe68a15bee8634198e18c4b56c39e207119aae16365b39f",
+      "licenseId": "lic-7f3c2a91"
+    }
+  ]
+}

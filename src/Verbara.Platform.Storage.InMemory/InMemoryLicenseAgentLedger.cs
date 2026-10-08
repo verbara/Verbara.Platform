@@ -36,6 +36,22 @@ public sealed class InMemoryLicenseAgentLedger
     }
 
     /// <summary>
+    /// Every chain's head and committed rows, read under one lock so each chain's last row is its head
+    /// (the read side of the export, licensed-agent-reporting).
+    /// </summary>
+    internal (IReadOnlyList<LicenseAgentChainHead> Heads, IReadOnlyList<LicenseAgentEvent> Events) Snapshot()
+    {
+        lock (_gate)
+        {
+            var heads = _heads
+                .Select(kv => new LicenseAgentChainHead(LicenseAgentChain.TenantIdOf(kv.Key), kv.Value.Sequence, kv.Value.Hash, kv.Value.LicenseId))
+                .ToList();
+            var events = _events.Values.SelectMany(rows => rows).ToList();
+            return (heads, events);
+        }
+    }
+
+    /// <summary>
     /// Opens a staged append on <paramref name="tenantId"/>'s chain: anchors it (with one baseline row per
     /// agent from <paramref name="baseline"/>) when it has no head, and re-anchors it when the loaded licence
     /// changed. Nothing is visible until <see cref="Staged.Commit"/>.

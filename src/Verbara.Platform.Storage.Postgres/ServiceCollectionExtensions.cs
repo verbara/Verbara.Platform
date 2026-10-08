@@ -146,6 +146,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<PostgresLicenseAgentDailyClose>>()));
         services.TryAddSingleton<ILicenseAgentRetentionPurge>(sp =>
             new PostgresLicenseAgentRetentionPurge(sp.GetRequiredService<NpgsqlDataSource>()));
+        // licensed-agent-metering slice 3 — the read side of the peaks report and the export (read-only).
+        services.TryAddSingleton<ILicensedAgentReportReader>(sp =>
+            new PostgresLicensedAgentReportReader(sp.GetRequiredService<NpgsqlDataSource>()));
         services.AddSingleton<ITeamStore, PostgresTeamStore>();
         services.AddSingleton<IQueueMembershipStore, PostgresQueueMembershipStore>();
         services.AddSingleton<IAgentCapacityStore, PostgresAgentCapacityStore>();

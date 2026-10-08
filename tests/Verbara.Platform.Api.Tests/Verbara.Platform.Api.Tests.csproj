@@ -38,6 +38,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- licensed-agent-metering slice 3: the frozen wire shapes of the peaks report and the export, copied
+         verbatim from the change's cross-repo contract (impact.yaml fixtures) for the contract tests. -->
+    <None Include="LicensedAgentMetering/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="FluentAssertions" />
   </ItemGroup>

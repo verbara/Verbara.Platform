@@ -9,6 +9,7 @@ using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Storage.InMemory;
 using Verbara.Platform.Storage.Postgres.Stores;
 using Verbara.Sdk.Pro.Licensing;
+using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Api.DependencyInjection;
 
@@ -17,7 +18,8 @@ namespace Verbara.Platform.Api.DependencyInjection;
 /// spends a single line on it). Slice 1 binds the account-status seam that routing, the switchboard and
 /// the PJSIP desired state consult (design D2); slice 2 adds the licence-id seam of the ledger, the in-memory
 /// licensed-agent writer (the Postgres one is registered by <c>AddPostgresStorage</c>), and the worker that
-/// runs the daily close and the 15-month purge (design D5-D8).
+/// runs the daily close and the 15-month purge (design D5-D8); slice 3 adds the read side of the peaks report
+/// and the export (licensed-agent-reporting).
 /// </summary>
 public static class LicensedAgentMeteringExtensions
 {
@@ -54,6 +56,11 @@ public static class LicensedAgentMeteringExtensions
         services.TryAddSingleton<ILicensedUserChangeWriter>(sp => sp.GetRequiredService<InMemoryLicensedAgentChangeWriter>());
         // The switchboard depends on the ownership half only.
         services.TryAddSingleton<ILicensedAgentOwnershipWriter>(sp => sp.GetRequiredService<ILicensedAgentChangeWriter>());
+
+        // Slice 3 — the read side of GET /management/licensing/agents and its export: AddPostgresStorage registers
+        // the Postgres reader; otherwise the in-memory one over the in-memory ledger (no daily close runs there).
+        services.TryAddSingleton<ILicensedAgentReportReader>(sp => new InMemoryLicensedAgentReportReader(
+            sp.GetRequiredService<InMemoryLicenseAgentLedger>(), sp.GetRequiredService<ITenantStore>()));
 
         // The daily close and the fixed 15-month purge. Resolves its storage at the first tick, never at host
         // start; without Postgres it returns at once.

@@ -40,6 +40,10 @@ internal static class ManagementSystemEndpoints
         group.MapPut("/license", UpdateLicense);
         group.MapGet("/settings", GetSettings);
         group.MapPut("/settings", SaveSettings);
+
+        // licensed-agent-metering slice 3: /management/licensing, a second PlatformAdminOnly group mapped from
+        // here so Program.cs does not grow (design D10).
+        app.MapManagementLicensingEndpoints();
     }
 
     // Pro v2.4.0-pro — expose the raw LicenseStatusSnapshot. Sibling of GetLicenseInfo

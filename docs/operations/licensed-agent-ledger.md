@@ -128,6 +128,41 @@ writes a `purge_log` row with `subject_type` `license_agent`, `subject_id` the c
 in `reason`. Verification of the remaining chain starts from that hash: the first remaining row's
 `prevHash` equals it.
 
+## Reading the figures and the export
+
+Two read-only endpoints serve the figures, to Platform administrators only (`PlatformAdminOnly`, like
+`/management/system/license`); a tenant administrator gets `403`. Both take `from` and `to` as
+`yyyy-MM-dd` dates in the day zone; the range may span at most **460 days** (any 15 calendar months fit
+one call), and a longer range, `from` later than `to` or a malformed date answers `400`.
+
+- **`GET /api/v1/management/licensing/agents`** — the self-declaration figures. `days[]` lists each day of
+  the range whose deployment total is closed, with that total (`deploymentLicensedAgents`,
+  `deploymentRowHash`) and each Customer tenant's figure for the day (`tenants[]`: `tenantName`,
+  `licensedAgents`, `revision`, `closedAt`, `rowHash`); every cell is the latest revision of its day.
+  `deployment.peakLicensedAgents` is the highest daily total of the range and `deployment.peakDay` the
+  earliest day that reached it; both are `0` and `null` while no day of the range is closed (for example on
+  the first day of a month). `license` is read from the loaded licence once per request; `maxAgents` is the
+  signed band and is advisory (`maxAgentsAdvisory` is always `true`). `deployment.overBand` is `true` only
+  when `maxAgents` is greater than 0 and the peak exceeds it; it blocks nothing.
+- **`GET /api/v1/management/licensing/agents/export`** — the evidence. For every chain (Customer, Partner and
+  Platform tenants, and the deployment chain with `tenantId` null) it returns a contiguous run of rows:
+  from the row immediately before the first row written in the range, to the last row written in it or the
+  last correction of a day inside it, whichever is later. `events[]` and `daily[]` together are that run,
+  in `sequence` order per chain, with every correction revision. `chainHeads[]` gives each chain's head;
+  when the range ends today, each chain's last exported row is its head. A chain that did not change during
+  the range contributes its head row alone. Instants are written exactly as the canonical form hashes them
+  (`2026-09-17T13:02:44.0000000Z`) and nulls as `null`, so a verifier renders each row from the JSON
+  without reformatting.
+
+Both read one database snapshot, so the rows and the heads agree even while other replicas append. While
+the deployment chain is not anchored yet, `dayZone` is the configured `Licensing:Metering:DayZone`;
+afterwards it is the recorded zone.
+
+To verify an export offline: per chain, order `events[]` and `daily[]` together by `sequence`; check that
+the sequences have no gap; recompute each row's `rowHash` from its canonical form (above); check that each
+row's `prevHash` is the previous row's `rowHash` (the first exported row's `prevHash` is taken as given, or
+must be the genesis when its `sequence` is 1); and compare the last row with `chainHeads`.
+
 ## Audit runbook: what to reconcile
 
 The owner declares the reached band monthly; an audit reconciles the ledger against other signals.
@@ -141,7 +176,8 @@ The owner declares the reached band monthly; an audit reconciles the ledger agai
    serves calls from a Partner or Platform tenant serves uncounted.
 3. **Secondary signals.** Compare the counted agents with `auth_events`, conversation owners,
    `queue_log`/CDR, the PJSIP endpoints, `webhook_deliveries` and `dialer_license_audit`.
-4. The 15-month window fits one export call (the export accepts up to 460 days).
+4. The 15-month window fits one export call (the export accepts up to 460 days); see "Reading the figures
+   and the export" above for how to verify it.
 
 ## Rolling back
 

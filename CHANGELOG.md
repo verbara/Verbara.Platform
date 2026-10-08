@@ -40,6 +40,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   licensed agents, plus the deployment total. Partner and Platform tenants are not counted. A closed day
   is never rewritten: a late record appends a correction. The close runs whatever the licence state and
   needs no leader. (#N)
+- **Licensed-agent figures for the monthly self-declaration.** `GET /api/v1/management/licensing/agents?from=&to=`
+  (Platform administrators only) returns, for a range of dates in the deployment's day zone, each closed
+  day's deployment total and per-tenant figures (the latest correction of each day), the range's peak and
+  its day, the loaded licence (`licenseId`, `licensee`, `tier`, `maxAgents`) and every chain head.
+  `maxAgents` is advisory: `overBand` is computed by the server and is true only when a band is declared
+  and the peak exceeds it — nothing is ever blocked. `peakDay` is `null` and the peak `0` while no day of
+  the range is closed. A range may span up to 460 days, so any 15 calendar months fit one request;
+  a longer or inverted range answers `400`. (#N)
+- **Verifiable export of the ledger.** `GET /api/v1/management/licensing/agents/export?from=&to=` (Platform
+  administrators only, same range rule) returns the ledger and daily rows of every chain for the range —
+  every correction revision, in `sequence` order, starting with the row just before the range — with their
+  `prevHash`/`rowHash`, the licence identity and the chain heads, so the owner can attach it to the monthly
+  self-declaration and an auditor can recompute every hash offline, with no Platform code. Instants are
+  written in the canonical form the hashes use (UTC, seven fractional digits, `Z`). Both endpoints are
+  read-only. (#N)
 - **Fixed 15-month retention of the ledger.** Ledger and daily rows older than 15 months are purged daily
   on every tenant, independently of tenant retention policies, each purge leaving a `purge_log` row
   (`subject_type` `license_agent`) with the last purged record's hash. (#N)

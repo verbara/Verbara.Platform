@@ -95,6 +95,19 @@ public sealed class ManagementSystemEndpointTests : IClassFixture<PlatformAdminA
         body.Should().Contain("\"isValid\":false");
     }
 
+    // licensed-agent-metering slice 3 — the /management/licensing group is mapped from this file's group, and the
+    // in-memory host binds the report reader by default (no daily close runs in memory: no day is closed).
+    [Fact]
+    public async Task LicensedAgentPeaks_ShouldBeServedFromTheInMemoryLedger_WhenPlatformAdmin()
+    {
+        var response = await _client.GetAsync("/api/management/licensing/agents?from=2026-09-01&to=2026-09-30");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("\"peakDay\":null");
+        body.Should().Contain("\"days\":[]");
+    }
+
     [Fact]
     public async Task Settings_ShouldPersistRoundTrip()
     {
