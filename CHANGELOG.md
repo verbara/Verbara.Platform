@@ -9,6 +9,36 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every inbound channel resolves its contact again on PostgreSQL — broken since 2.13.0.** Since
+  2.13.0 the Postgres store writes a contact address's channel as its name (`"WhatsApp"`), while the
+  lookup by address still read it as a number. Once a tenant held one contact saved that way, every
+  contact lookup in that tenant failed with a database error, so inbound WhatsApp, SMS, Email,
+  Messenger, Instagram, Telegram, Twitter and RCS messages, WebChat sessions and messages (REST and
+  WebSocket), and voice contact matching (queue calls, agent outbound dial, callbacks) could not
+  resolve or create their contact. The lookup now matches the channel in both forms. No migration is
+  needed: rows written before 2.13.0 (numbers) and since (names) are both read correctly after the
+  upgrade. The in-memory store was not affected; a PostgreSQL test suite now covers the lookup.
+- **Queue distribution only picks up conversations a queue owns.** The routing pass read the 50
+  oldest `Queued` conversations of a tenant, including ones no queue owns, which it then skipped; enough
+  of those filled the window and held back routable conversations until the timeout worker abandoned
+  them. The pass now reads only queue-owned conversations (PostgreSQL and in-memory stores).
+
+### Security
+
+- **Anonymous WebChat endpoints are rate-limited per client**
+  ([GHSA-PENDING](https://github.com/verbara/Verbara.Platform/security/advisories/GHSA-PENDING)).
+  `POST /api/v1/webchat/sessions` and `POST /api/v1/webchat/sessions/{sessionId}/messages` now carry
+  fixed one-minute limits per client address (IPv6 grouped by /64), defaulting to 20 session creates
+  and 120 messages per minute and configurable through `WebChat:RateLimit:SessionsPerMinutePerIp` and
+  `WebChat:RateLimit:MessagesPerMinutePerIp`. A request over the limit gets the shared `429` response
+  with `Retry-After`. Behind a reverse proxy, list it in `ForwardedHeaders:TrustedProxies` so the limit
+  applies to the visitor's address rather than the proxy's.
+- **Server errors no longer echo internal error text.** A `5xx` problem response now carries a
+  generic `detail` and the `traceId`; the exception message goes only to the server log, correlated
+  by that `traceId`. `4xx` responses are unchanged.
+
 ## [2.26.0] - 2026-10-04
 
 Minor release: the Verbara.Sdk `2.7.0` / Verbara.Sdk.Pro `2.17.1-pro` cascade, with the queue-call
