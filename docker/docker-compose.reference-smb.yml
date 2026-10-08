@@ -171,6 +171,12 @@ services:
       # Left empty, the API uses CORS_ORIGINS when that names exactly one origin; the
       # default above names two, so set PUBLIC_BASE_URL (see .env.reference-smb.example).
       Platform__PublicBaseUrl: ${PUBLIC_BASE_URL:-}
+      # The gateway (and any proxy in front of it) puts the visitor's address in X-Forwarded-For;
+      # the API believes it only from these networks. Without it every visitor shares the gateway's
+      # address, and the per-visitor limits (WebChat) become one shared bucket.
+      # Behind a further load balancer the API sees that balancer's address: it reads only the
+      # last X-Forwarded-For entry, the one nginx-gateway appends.
+      ForwardedHeaders__TrustedProxies__0: ${VERBARA_GATEWAY_IP:-172.31.252.10}/32
       # Licensing — point Licensing__FilePath at your signed .lic to enable Pro
       # features. Empty / unset = community/OSS mode (Pro endpoints respond with
       # HTTP 402 PaymentRequired + RFC 9457 ProblemDetails carrying actionable
@@ -300,6 +306,12 @@ services:
     image: nginx:1.27-alpine
     container_name: verbara-nginx-gateway
     logging: *default-logging
+    # Fixed address: platform-api trusts X-Forwarded-For from exactly this one
+    # (ForwardedHeaders__TrustedProxies__0). Override VERBARA_GATEWAY_IP and
+    # VERBARA_NETWORK_SUBNET together if the subnet collides with one on your host.
+    networks:
+      default:
+        ipv4_address: ${VERBARA_GATEWAY_IP:-172.31.252.10}
     volumes:
       - ./nginx-gateway.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
@@ -492,6 +504,14 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     restart: unless-stopped
     profiles: [s3]
+
+# The project network gets a fixed subnet so nginx-gateway can have a fixed address
+# that platform-api trusts for X-Forwarded-For (see ForwardedHeaders__TrustedProxies__0).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${VERBARA_NETWORK_SUBNET:-172.31.252.0/24}
 
 volumes:
   verbara_postgres_data:

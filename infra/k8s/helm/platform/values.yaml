@@ -76,6 +76,17 @@ api:
   # ingress.tlsEnabled while the ingress is enabled (http://r55.local here). The
   # API cannot fall back to corsOrigins above: it names two origins.
   publicBaseUrl: ""
+  # Networks the API believes X-Forwarded-For (the visitor's address) from
+  # (ForwardedHeaders:TrustedProxies, one CIDR per entry). Default: the pod CIDR of
+  # the reference cluster (infra/k8s/manifests/cilium-values.yaml), which is where
+  # the Cilium Gateway's Envoy (it appends the visitor's address) and the web pods
+  # connect from. Set it to your cluster's pod CIDR, or to your ingress
+  # controller's address range. An empty list turns header trust off: the API then
+  # sees the proxy's address for every visitor, and the per-visitor limits
+  # (WebChat) become one bucket per tenant.
+  forwardedHeaders:
+    trustedProxies:
+      - "10.244.0.0/16"
   asterisk:
     ami:
       hostname: asterisk-sip.r55-asterisk.svc.cluster.local

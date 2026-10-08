@@ -83,6 +83,10 @@ services:
       # links and the OIDC redirect_uri are built from it, never from a request's Host.
       # Left empty, the API uses CORS_ORIGINS above, which names exactly one origin.
       Platform__PublicBaseUrl: ${PUBLIC_BASE_URL:-}
+      # The gateway (and any proxy in front of it) puts the visitor's address in X-Forwarded-For;
+      # the API believes it only from these networks. Without it every visitor shares the gateway's
+      # address, and the per-visitor limits (WebChat) become one shared bucket.
+      ForwardedHeaders__TrustedProxies__0: ${VERBARA_GATEWAY_IP:-172.31.250.10}/32
       Services__Renderer__BaseUrl: http://renderer:5010
       Services__Mail__BaseUrl: http://mail:5020
       Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
@@ -219,6 +223,12 @@ services:
   nginx-gateway:
     image: nginx:1.27-alpine
     logging: *default-logging
+    # Fixed address: platform-api trusts X-Forwarded-For from exactly this one
+    # (ForwardedHeaders__TrustedProxies__0). Override VERBARA_GATEWAY_IP and
+    # VERBARA_NETWORK_SUBNET together if the subnet collides with one on your host.
+    networks:
+      default:
+        ipv4_address: ${VERBARA_GATEWAY_IP:-172.31.250.10}
     ports:
       - "80:80"
     volumes:
@@ -291,6 +301,14 @@ services:
 #   export NUGET_AUTH_TOKEN=<GitHub PAT with read:packages>
 # The Dockerfiles mount it with required=false, so builds needing only public packages still
 # work without it; without it a Pro-dependent build fails with NU1301 / 401 Unauthorized.
+# The project network gets a fixed subnet so nginx-gateway can have a fixed address
+# that platform-api trusts for X-Forwarded-For (see ForwardedHeaders__TrustedProxies__0).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${VERBARA_NETWORK_SUBNET:-172.31.250.0/24}
+
 secrets:
   nuget_auth_token:
     environment: NUGET_AUTH_TOKEN
