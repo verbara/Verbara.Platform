@@ -8,6 +8,13 @@ namespace Verbara.Platform.Api.Middleware;
 
 internal sealed partial class ErrorHandlingMiddleware
 {
+    /// <summary>
+    /// The only detail a 5xx carries. An unexpected exception's message can hold driver, SQL or
+    /// library text, so it goes to the log (correlated by <c>traceId</c>), never to the caller.
+    /// </summary>
+    internal const string ServerErrorDetail =
+        "An unexpected error occurred. Quote the traceId when reporting it.";
+
     private readonly RequestDelegate _next;
     private readonly ILogger<ErrorHandlingMiddleware> _logger;
 
@@ -51,7 +58,8 @@ internal sealed partial class ErrorHandlingMiddleware
         {
             Status = status,
             Title = title,
-            Detail = exception.Message,
+            // 4xx: the mapped types carry a caller-facing message. 5xx: never echo the message.
+            Detail = status >= StatusCodes.Status500InternalServerError ? ServerErrorDetail : exception.Message,
             Instance = context.Request.Path,
         };
 

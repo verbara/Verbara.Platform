@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Channels.Core.Pipeline;
@@ -27,8 +28,10 @@ internal static partial class WebChatEndpoints
             .WithTags("WebChat")
             .AllowAnonymous();
 
-        webchat.MapPost("/sessions", CreateSession);
-        webchat.MapPost("/sessions/{sessionId}/messages", SendRestMessage);
+        webchat.MapPost("/sessions", CreateSession)
+            .RequireRateLimiting(WebChatRateLimitPolicy.SessionsPolicy);
+        webchat.MapPost("/sessions/{sessionId}/messages", SendRestMessage)
+            .RequireRateLimiting(WebChatRateLimitPolicy.MessagesPolicy);
 
         return group;
     }

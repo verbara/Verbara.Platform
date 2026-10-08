@@ -124,6 +124,9 @@ internal static class TenantRateLimitPolicy
             });
         });
 
+        // Anonymous WebChat endpoints: per-client-address buckets (never a shared one).
+        WebChatRateLimitPolicy.AddPolicies(options);
+
         // Custom 429 response
         options.OnRejected = async (context, ct) =>
         {

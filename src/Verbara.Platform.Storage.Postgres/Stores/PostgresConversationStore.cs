@@ -269,12 +269,16 @@ internal sealed class PostgresConversationStore : IConversationStore
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
             "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            // Only a queue-owned conversation is routable by QueueDistributionWorker; letting
+            // ownerless Queued rows into the bounded window would starve the routable ones.
             "FROM conversations WHERE tenant_id = @TenantId AND state = @State " +
+            "AND owner_kind = @OwnerKind AND owner_id IS NOT NULL " +
             "ORDER BY queue_priority ASC, created_at ASC LIMIT @Limit",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
                 p.Add(new NpgsqlParameter("State", (object)(int)ConversationState.Queued));
+                p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = (int)ConversationOwnerKind.Queue });
                 p.Add(new NpgsqlParameter("Limit", limit));
             },
             ConversationRow.Map, ct);
