@@ -97,7 +97,7 @@ public sealed partial class ForwardedHeadersTopologyTests
 
         HelmTrustedProxiesDefault().IsMatch(values).Should().BeTrue(
             "api.forwardedHeaders.trustedProxies must default to the network the cluster's gateway connects from");
-        template.Should().Contain(".Values.api.forwardedHeaders.trustedProxies")
+        template.Should().Contain("(.Values.api.forwardedHeaders | default dict).trustedProxies")
             .And.Contain(TrustedProxiesVariable,
                 "the API deployment must turn the value into ForwardedHeaders:TrustedProxies entries");
     }

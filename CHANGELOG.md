@@ -19,7 +19,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   respectively); `docker-compose.scale.yml` also trusts `nginx-lb` (`172.31.250.11/32`, as
   `ForwardedHeaders__TrustedProxies__1`). If the subnet collides with a network on your host, set
   `VERBARA_NETWORK_SUBNET` and `VERBARA_GATEWAY_IP` (and `VERBARA_LB_IP` with the scale override)
-  together. The Helm chart adds `api.forwardedHeaders.trustedProxies`, defaulting to
+  together. In `docker-compose.production.yml` the value is set under `environment:`, so it overrides a
+  `ForwardedHeaders__TrustedProxies__0` you already set in `.env.production`; move yours to `__1` or later.
+  The Helm chart adds `api.forwardedHeaders.trustedProxies`, defaulting to
   `["10.244.0.0/16"]`, the reference cluster's pod CIDR from which the Gateway and the web pods
   connect; set it to your cluster's pod CIDR or ingress address range. Without a trusted proxy the API
   sees the proxy's address for every visitor, and logs one warning naming

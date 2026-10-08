@@ -139,7 +139,7 @@ spec:
               value: {{ .Values.api.serviceKey }}
             - name: CORS_ORIGINS
               value: {{ .Values.api.corsOrigins | quote }}
-            {{- range $i, $cidr := .Values.api.forwardedHeaders.trustedProxies }}
+            {{- range $i, $cidr := (.Values.api.forwardedHeaders | default dict).trustedProxies }}
             # X-Forwarded-For is believed only from these networks (the gateway's).
             - name: ForwardedHeaders__TrustedProxies__{{ $i }}
               value: {{ $cidr | quote }}
