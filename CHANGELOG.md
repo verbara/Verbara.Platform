@@ -40,8 +40,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stored address in the name form. That happened from the second message of each sender whose contact
   was created since 2.13.0 (the first message stores the sender's address in the name form), and
   whenever the same address string was stored in the name form on another channel of the tenant.
-  Inbound WhatsApp, SMS, Email, Messenger, Instagram, Telegram, Twitter, RCS and WebChat messages and
-  voice contact matching (queue calls, agent outbound dial, callbacks) were affected. The lookup now
+  Inbound WebChat messages (REST and WebSocket; a visitor's second message answered `500`) and voice
+  contact matching (queue calls, agent outbound dial, callbacks) were affected. The webhook channels
+  (WhatsApp, SMS, Email, Messenger, Instagram, Telegram, Twitter, RCS) use the same lookup, but this API
+  host does not register their webhook handlers, so their webhooks answer `400` before reaching it. The lookup now
   matches the channel in both forms. No migration is needed: rows written before 2.13.0 (numbers) and
   since (names) are both read correctly after the upgrade. The in-memory store was not affected; a
   PostgreSQL test suite now covers the lookup.
