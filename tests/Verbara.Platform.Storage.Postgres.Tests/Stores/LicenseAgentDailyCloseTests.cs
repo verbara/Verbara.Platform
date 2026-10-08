@@ -38,6 +38,35 @@ public sealed class LicenseAgentDailyCloseTests : IClassFixture<AgentIdentityFix
     }
 
     [Fact]
+    public async Task CloseAsync_ShouldWaitForEveryCustomerChain_BeforeWritingTheDeploymentTotal()
+    {
+        var h = await LicenseLedgerHarness.CreateAsync(_fixture, Day1.AddHours(9));
+        await h.TenantAsync("c1", LicenseLedgerHarness.Customer);
+        await h.TenantAsync("c2", LicenseLedgerHarness.Customer);
+        await h.CreateAgentAsync("c1", "a1");
+        await h.CreateAgentAsync("c2", "b1");
+        await h.CreateAgentAsync("c2", "b2");
+        await h.Close.PrepareAsync("UTC", CancellationToken.None);
+        h.Clock.UtcNow = Day1.AddDays(1).AddMinutes(5);
+
+        // c2's close fails this tick: the deployment total of the day must wait for it, not sum c1 alone.
+        await h.ExecAsync(
+            "CREATE OR REPLACE FUNCTION test_fail_c2_daily() RETURNS trigger LANGUAGE plpgsql AS $$ " +
+            "BEGIN RAISE EXCEPTION 'injected c2 close failure'; END $$; " +
+            "CREATE TRIGGER test_fail_c2_daily BEFORE INSERT ON license_agent_daily FOR EACH ROW " +
+            "WHEN (NEW.chain_key = 'c2') EXECUTE FUNCTION test_fail_c2_daily();");
+        (await h.Close.CloseAsync(TimeZoneInfo.Utc, h.Clock.UtcNow, CancellationToken.None)).ChainsFailed.Should().Be(1);
+        (await h.DailyAsync("c1")).Should().ContainSingle();
+        (await h.DailyAsync(null)).Should().BeEmpty("a Customer chain anchored before the day ended has not closed it");
+
+        await h.ExecAsync("DROP TRIGGER test_fail_c2_daily ON license_agent_daily;");
+        await h.Close.CloseAsync(TimeZoneInfo.Utc, h.Clock.UtcNow, CancellationToken.None);
+
+        (await h.DailyAsync(null)).Should().ContainSingle().Which.Should().Match<LicenseAgentDaily>(
+            d => d.Day == D1 && d.Revision == 0 && d.LicensedAgents == 3);
+    }
+
+    [Fact]
     public async Task CloseAsync_ShouldAppendRevision1AndKeepRevision0_WhenALateRowFallsInAClosedDay()
     {
         var h = await LicenseLedgerHarness.CreateAsync(_fixture, Day1.AddHours(9));
