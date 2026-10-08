@@ -87,6 +87,6 @@ internal static class WebChatRateLimitPolicy
         Span<byte> bytes = stackalloc byte[16];
         address.TryWriteBytes(bytes, out _);
         bytes[8..].Clear();
-        return new IPAddress(bytes).ToString() + "/64";
+        return string.Create(CultureInfo.InvariantCulture, $"{new IPAddress(bytes)}/64");
     }
 }

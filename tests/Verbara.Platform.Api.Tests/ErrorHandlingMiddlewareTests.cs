@@ -65,7 +65,8 @@ public class ErrorHandlingMiddlewareTests
     private static async Task<string> ReadBodyAsync(DefaultHttpContext ctx)
     {
         ctx.Response.Body.Position = 0;
-        return await new StreamReader(ctx.Response.Body).ReadToEndAsync();
+        using var reader = new StreamReader(ctx.Response.Body, leaveOpen: true);
+        return await reader.ReadToEndAsync();
     }
 
     [Fact]
