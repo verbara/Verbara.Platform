@@ -29,11 +29,36 @@ internal static partial class WebChatEndpoints
             .AllowAnonymous();
 
         webchat.MapPost("/sessions", CreateSession)
-            .RequireRateLimiting(WebChatRateLimitPolicy.SessionsPolicy);
+            .RequireWebChatRateLimit(WebChatRateLimitPolicy.SessionsPolicy, WebChatRateLimitPolicy.SessionsLimitKey,
+                WebChatRateLimitPolicy.DefaultSessionsPerMinutePerIp, ResolveSessionCreateTenantAsync);
         webchat.MapPost("/sessions/{sessionId}/messages", SendRestMessage)
-            .RequireRateLimiting(WebChatRateLimitPolicy.MessagesPolicy);
+            .RequireWebChatRateLimit(WebChatRateLimitPolicy.MessagesPolicy, WebChatRateLimitPolicy.MessagesLimitKey,
+                WebChatRateLimitPolicy.DefaultMessagesPerMinutePerIp, ResolveSessionTenantAsync);
 
         return group;
+    }
+
+    /// <summary>The rate-limit tenant of a session create: the requested tenant, when it exists.</summary>
+    private static async ValueTask<string?> ResolveSessionCreateTenantAsync(EndpointFilterInvocationContext invocation)
+    {
+        var request = invocation.Arguments.OfType<CreateSessionRequest>().FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(request?.TenantId))
+            return null;
+
+        var tenantStore = invocation.HttpContext.RequestServices.GetRequiredService<ITenantStore>();
+        return await tenantStore.GetAsync(request.TenantId, invocation.HttpContext.RequestAborted) is null
+            ? null
+            : request.TenantId;
+    }
+
+    /// <summary>The rate-limit tenant of a message: the tenant of the session it names, when that exists.</summary>
+    private static async ValueTask<string?> ResolveSessionTenantAsync(EndpointFilterInvocationContext invocation)
+    {
+        if (invocation.HttpContext.Request.RouteValues["sessionId"] is not string sessionId)
+            return null;
+
+        var sessionManager = invocation.HttpContext.RequestServices.GetRequiredService<WebChatSessionManager>();
+        return (await sessionManager.GetSessionAsync(sessionId))?.TenantId.Value;
     }
 
     /// <summary>Maps the WebSocket endpoint at root level (outside versioned API group).</summary>
