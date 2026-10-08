@@ -123,7 +123,9 @@ internal sealed class InMemoryConversationStore : IConversationStore
     public Task<IReadOnlyList<Conversation>> ListQueuedAsync(TenantId tenantId, int limit, CancellationToken ct)
     {
         IReadOnlyList<Conversation> result = _items.Values
-            .Where(c => c.TenantId == tenantId && c.State == ConversationState.Queued)
+            // Only a queue-owned conversation is routable (parity with PostgresConversationStore).
+            .Where(c => c.TenantId == tenantId && c.State == ConversationState.Queued
+                && c.Owner is { Kind: ConversationOwnerKind.Queue, OwnerId: not null })
             .OrderBy(c => c.QueuePriority)
             .ThenBy(c => c.CreatedAt)
             .Take(limit)
