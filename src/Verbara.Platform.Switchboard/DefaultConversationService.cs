@@ -41,6 +41,7 @@ internal sealed partial class DefaultConversationService : IConversationService
         _whatsAppWindow = whatsAppWindow;
     }
 
+    /// <summary>Stores an outbound message on the conversation and hands it to the channel's connector.</summary>
     /// <remarks>
     /// A send a channel rule forbids (a WhatsApp reply outside the 24-hour window without a template) reaches no
     /// provider and is stored as <see cref="MessageDeliveryStatus.Failed"/>: the system callers of this method (bot
