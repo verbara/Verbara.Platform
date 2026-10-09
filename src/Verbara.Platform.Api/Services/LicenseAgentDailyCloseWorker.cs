@@ -17,12 +17,23 @@ namespace Verbara.Platform.Api.Services;
 /// the one the deployment chain was anchored with stops the worker before anything is anchored or closed:
 /// the error naming both zones is logged as critical and the worker's heartbeat is reported unhealthy at once
 /// (<see cref="BackgroundServiceHealthCheck"/>), so a rollout with the wrong zone never becomes ready.</item>
-/// <item>Licence state is never consulted: the close runs under a missing, expired or grace licence.</item>
+/// <item>Nothing is anchored or closed until the host's licence load attempt has completed
+/// (<see cref="ILicenseIdSource.LoadCompleted"/>): the worker starts before Pro's licence validation service
+/// has read the <c>.lic</c>, and anchoring then would write the deployment chain's null form, followed a tick
+/// later by a spurious <c>chain_reanchored</c>. While it waits the worker logs once, keeps its heartbeat
+/// healthy (a transient start-up state, not a fault) and retries every
+/// <see cref="LicenceLoadRetryInterval"/>. Without a licence-id seam (hosts with no licence service) there is
+/// nothing to wait for.</item>
+/// <item>Licence validity is never consulted: once the load attempt has completed, the close runs under a
+/// missing, expired or grace licence, a missing one anchoring with the null form (verbara-meta/ADR-0020 §6).</item>
 /// </list>
 /// </remarks>
 internal sealed partial class LicenseAgentDailyCloseWorker : BackgroundService
 {
     internal static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(15);
+
+    /// <summary>How soon the worker retries while the licence load attempt has not completed yet.</summary>
+    internal static readonly TimeSpan LicenceLoadRetryInterval = TimeSpan.FromSeconds(1);
 
     private readonly IServiceProvider _services;
     private readonly IConfiguration _configuration;
@@ -33,6 +44,9 @@ internal sealed partial class LicenseAgentDailyCloseWorker : BackgroundService
     private ILicenseAgentDailyClose? _close;
     private TimeZoneInfo? _zone;
     private DateOnly? _lastPurgeDay;
+    private bool _prepared;
+    private bool _waitingForLicence;
+    private bool _loggedLicenceWait;
 
     public LicenseAgentDailyCloseWorker(
         IServiceProvider services,
@@ -59,7 +73,8 @@ internal sealed partial class LicenseAgentDailyCloseWorker : BackgroundService
             {
                 if (!await TickAsync(stoppingToken).ConfigureAwait(false))
                     return;
-                await Task.Delay(TickInterval, _time, stoppingToken).ConfigureAwait(false);
+                await Task.Delay(_waitingForLicence ? LicenceLoadRetryInterval : TickInterval, _time, stoppingToken)
+                    .ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -79,7 +94,25 @@ internal sealed partial class LicenseAgentDailyCloseWorker : BackgroundService
                 LogNoPostgres(_logger);
                 return false;
             }
+        }
 
+        // Anchoring before the licence has loaded would stamp the null form and re-anchor a tick later. Once the
+        // first-tick step has run, later licence changes are the ledger's re-anchor, not a reason to wait.
+        _waitingForLicence = !_prepared && _services.GetService<ILicenseIdSource>() is { LoadCompleted: false };
+        if (_waitingForLicence)
+        {
+            if (!_loggedLicenceWait)
+            {
+                _loggedLicenceWait = true;
+                LogWaitingForLicence(_logger);
+            }
+
+            _heartbeat.RecordTick(nameof(LicenseAgentDailyCloseWorker), TickInterval);
+            return true;
+        }
+
+        if (!_prepared)
+        {
             var zoneId = _configuration[LicenseAgentDayZone.ConfigurationKey] is { Length: > 0 } configured
                 ? configured
                 : LicenseAgentDayZone.DefaultZone;
@@ -88,6 +121,7 @@ internal sealed partial class LicenseAgentDailyCloseWorker : BackgroundService
                 _zone = LicenseAgentDayZone.Resolve(zoneId);
                 var anchored = await _close.PrepareAsync(zoneId, ct).ConfigureAwait(false);
                 LogPrepared(_logger, zoneId, anchored);
+                _prepared = true;
             }
             catch (Exception ex) when (ex is LicenseAgentDayZoneMismatchException or ArgumentException)
             {
@@ -97,7 +131,6 @@ internal sealed partial class LicenseAgentDailyCloseWorker : BackgroundService
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // A transient failure (database unreachable): try the first-tick step again next tick.
-                _close = null;
                 LogTickFailed(_logger, ex);
                 _heartbeat.RecordTick(nameof(LicenseAgentDailyCloseWorker), TickInterval);
                 return true;
@@ -157,6 +190,10 @@ internal sealed partial class LicenseAgentDailyCloseWorker : BackgroundService
     [LoggerMessage(EventId = 7525, Level = LogLevel.Information,
         Message = "Licensed-agent retention purge removed rows older than 15 months from {Chains} chain(s).")]
     private static partial void LogPurged(ILogger logger, int chains);
+
+    [LoggerMessage(EventId = 7527, Level = LogLevel.Information,
+        Message = "Licensed-agent daily close waiting for the licence to load before anchoring any chain.")]
+    private static partial void LogWaitingForLicence(ILogger logger);
 
     [LoggerMessage(EventId = 7526, Level = LogLevel.Error,
         Message = "Licensed-agent daily close tick failed; the next tick retries.")]

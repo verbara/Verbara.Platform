@@ -39,7 +39,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Customer tenant — in every tenant status and whatever its parent — as the day's simultaneous peak of
   licensed agents, plus the deployment total. Partner and Platform tenants are not counted. A closed day
   is never rewritten: a late record appends a correction. The close runs whatever the licence state and
-  needs no leader. (#N)
+  needs no leader; at start-up it waits until the licence file has been read, so chains are anchored
+  with the loaded licence id rather than empty and then re-anchored. (#N)
 - **Licensed-agent figures for the monthly self-declaration.** `GET /api/v1/management/licensing/agents?from=&to=`
   (Platform administrators only) returns, for a range of dates in the deployment's day zone, each closed
   day's deployment total and per-tenant figures (the latest correction of each day), the range's peak and

@@ -98,9 +98,14 @@ reports the first broken `sequence`.
 is closed under a lock on its head, and `(chain_key, day, revision)` is unique, so a second replica finds
 the rows already written.
 
+- **Before the first tick:** the worker waits until the licence file has been read, whatever the result
+  (valid, expired, invalid, or no licence file at all), retrying every second and logging
+  `Licensed-agent daily close waiting for the licence to load before anchoring any chain.` once. This is
+  a start-up state, not a fault: `/health/ready` stays healthy. It only waits for the load; a deployment
+  without a valid licence still meters, its chains anchored with the empty licence id.
 - **First tick:** checks the day zone (above), then anchors the deployment chain and every Customer
-  tenant chain that has no head yet, with their `agent_baseline` rows. A quiet tenant's days are closed
-  from the upgrade on.
+  tenant chain that has no head yet, with their `agent_baseline` rows, all with the licence id just
+  loaded. A quiet tenant's days are closed from the upgrade on.
 - **Every tick:** anchors any new Customer tenant, closes every ended day of every Customer tenant, then
   the deployment total once every Customer tenant has closed that day.
 - **Which tenants:** every tenant whose type is Customer, **in every status** (`Suspended`, `Warning`,
