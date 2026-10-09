@@ -228,11 +228,20 @@ public sealed class WhatsAppConnector : IChannelConnector
             return new SendResult(false, null, "HTTP_ERROR", ex.Message);
         }
 
-        var responseBody = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
+        // The connector owns the provider response on every path: read what it needs, then release it.
+        string responseBody;
+        int statusCode;
+        bool succeeded;
+        using (response)
         {
-            Log.ApiError(_logger, (int)response.StatusCode, responseBody);
+            responseBody = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            statusCode = (int)response.StatusCode;
+            succeeded = response.IsSuccessStatusCode;
+        }
+
+        if (!succeeded)
+        {
+            Log.ApiError(_logger, statusCode, responseBody);
 
             MetaSendResponse? errorResponse = null;
             try
@@ -243,7 +252,7 @@ public sealed class WhatsAppConnector : IChannelConnector
             catch (JsonException) { /* ignore */ }
 
             var errorCode = errorResponse?.Error?.Code.ToString(CultureInfo.InvariantCulture) ??
-                            ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture);
+                            statusCode.ToString(CultureInfo.InvariantCulture);
             var errorMessage = errorResponse?.Error?.Message ?? responseBody;
 
             return new SendResult(false, null, errorCode, errorMessage);

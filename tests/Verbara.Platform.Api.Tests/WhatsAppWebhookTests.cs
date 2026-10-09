@@ -79,13 +79,13 @@ public sealed class WhatsAppWebhookTests : IClassFixture<PlatformApiFactory>
             }
             """);
 
-    private Task<HttpResponseMessage> PostAsync(TenantId tenant, byte[] body, string secret)
+    private async Task<HttpResponseMessage> PostAsync(TenantId tenant, byte[] body, string secret)
     {
-        var content = new ByteArrayContent(body);
+        using var content = new ByteArrayContent(body);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
         var hash = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), body);
         content.Headers.Add("X-Hub-Signature-256", "sha256=" + Convert.ToHexString(hash).ToLowerInvariant());
-        return _client.PostAsync($"/api/v1/webhooks/{tenant.Value}/whatsapp", content);
+        return await _client.PostAsync($"/api/v1/webhooks/{tenant.Value}/whatsapp", content);
     }
 
     private Task<(int Contacts, int Conversations, int Messages)> CountRowsAsync(TenantId tenant) =>
@@ -145,6 +145,21 @@ public sealed class WhatsAppWebhookTests : IClassFixture<PlatformApiFactory>
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await CountRowsAsync(tenant)).Should().Be((1, 1, 2));
+    }
+
+    [Fact]
+    public async Task Metrics_ShouldExportRejectedCounter_WhenSignatureIsWrong()
+    {
+        var tenant = NewTenant();
+        await ConfigureTenantAsync(tenant);
+        (await PostAsync(tenant, Payload(PhoneNumberId, TextMessage("wamid.m1", "forged")), "not-the-tenant-secret"))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var response = await _client.GetAsync("/metrics");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(
+            "whatsapp_webhook_rejected_total", "the WhatsApp meter is exported, so a silent tenant is visible to an operator");
     }
 
     // ── GET verification handshake ───────────────────────────────────────────

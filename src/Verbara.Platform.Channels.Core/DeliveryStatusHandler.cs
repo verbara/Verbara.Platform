@@ -12,13 +12,14 @@ namespace Verbara.Platform.Channels.Core;
 /// here and, atomically, by the store's own guard. A callback for a provider id no message carries is logged and
 /// counted on <c>channels.delivery_status.unknown_id</c>; it is not parked (design D8, open question).
 /// </summary>
-public sealed class DeliveryStatusHandler
+public sealed class DeliveryStatusHandler : IDisposable
 {
     /// <summary>Name of the <see cref="Meter"/> carrying the channel delivery-status instruments.</summary>
     public const string MeterName = "verbara.platform.channels";
 
     private readonly IMessageStore _messageStore;
     private readonly ILogger<DeliveryStatusHandler> _logger;
+    private readonly Meter _meter;
     private readonly Counter<long> _unknownIds;
 
     public DeliveryStatusHandler(
@@ -26,8 +27,8 @@ public sealed class DeliveryStatusHandler
     {
         _messageStore = messageStore;
         _logger = logger;
-        var meter = meterFactory is null ? new Meter(MeterName) : meterFactory.Create(MeterName);
-        _unknownIds = meter.CreateCounter<long>(
+        _meter = meterFactory is null ? new Meter(MeterName) : meterFactory.Create(MeterName);
+        _unknownIds = _meter.CreateCounter<long>(
             "channels.delivery_status.unknown_id",
             description: "Provider delivery-status callbacks whose message id matched no stored message.");
     }
@@ -57,6 +58,9 @@ public sealed class DeliveryStatusHandler
 
         Log.StatusUpdated(_logger, message.MessageId.Value, update.NewStatus);
     }
+
+    /// <summary>Disposes the meter this handler records on.</summary>
+    public void Dispose() => _meter.Dispose();
 }
 
 internal static partial class Log

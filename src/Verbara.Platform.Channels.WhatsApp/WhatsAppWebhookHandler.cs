@@ -17,7 +17,7 @@ namespace Verbara.Platform.Channels.WhatsApp;
 /// accepted only when its <c>metadata.phone_number_id</c> is the tenant's <c>PhoneNumberId</c>. The GET
 /// subscription handshake is checked against the tenant's <c>WebhookVerifyToken</c>.
 /// </summary>
-public sealed class WhatsAppWebhookHandler : IWebhookHandler, IWebhookSubscriptionVerifier
+public sealed class WhatsAppWebhookHandler : IWebhookHandler, IWebhookSubscriptionVerifier, IDisposable
 {
     /// <summary>Meter that carries <see cref="RejectedCounterName"/>.</summary>
     public const string MeterName = "Verbara.Platform.Channels.WhatsApp";
@@ -30,6 +30,7 @@ public sealed class WhatsAppWebhookHandler : IWebhookHandler, IWebhookSubscripti
 
     private readonly ITenantChannelConfigStore _configStore;
     private readonly ILogger<WhatsAppWebhookHandler> _logger;
+    private readonly Meter _meter;
     private readonly Counter<long> _rejected;
 
     public ChannelType Channel => ChannelType.WhatsApp;
@@ -41,8 +42,8 @@ public sealed class WhatsAppWebhookHandler : IWebhookHandler, IWebhookSubscripti
     {
         _configStore = configStore;
         _logger = logger;
-        var meter = meterFactory is null ? new Meter(MeterName) : meterFactory.Create(MeterName);
-        _rejected = meter.CreateCounter<long>(
+        _meter = meterFactory is null ? new Meter(MeterName) : meterFactory.Create(MeterName);
+        _rejected = _meter.CreateCounter<long>(
             RejectedCounterName,
             description: "WhatsApp webhook deliveries or changes refused (missing_app_secret, bad_signature, foreign_phone_number_id).");
     }
@@ -166,24 +167,16 @@ public sealed class WhatsAppWebhookHandler : IWebhookHandler, IWebhookSubscripti
                     continue;
                 }
 
-                foreach (var status in value.Statuses ?? [])
-                {
-                    var update = ParseStatusUpdate(status);
-                    if (update is not null)
-                        statuses.Add(update);
-                }
-
-                foreach (var message in value.Messages ?? [])
-                {
-                    var inbound = ParseInboundMessage(message);
-                    if (inbound is not null)
-                        messages.Add(inbound);
-                }
+                statuses.AddRange((value.Statuses ?? []).Select(ParseStatusUpdate).OfType<DeliveryStatusUpdate>());
+                messages.AddRange((value.Messages ?? []).Select(ParseInboundMessage).OfType<InboundMessage>());
             }
         }
 
         return WebhookResult.From(messages, statuses);
     }
+
+    /// <summary>Disposes the meter this handler records on.</summary>
+    public void Dispose() => _meter.Dispose();
 
     private void Reject(string reason) =>
         _rejected.Add(1, new KeyValuePair<string, object?>("reason", reason));

@@ -1,9 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Channels.Sms;
 using Verbara.Platform.Channels.Sms.Providers;
 using Verbara.Platform.Channels.WebChat;
 using Verbara.Platform.Channels.WhatsApp;
+using Verbara.Sdk.OpenTelemetry;
 
 namespace Verbara.Platform.Api.DependencyInjection;
 
@@ -53,5 +55,27 @@ public static class DigitalChannelsExtensions
         }
 
         return services;
+    }
+
+    /// <summary>
+    /// The meters the digital channels record on, so the Prometheus/OTLP exporters carry them:
+    /// <see cref="DeliveryStatusHandler.MeterName"/> (<c>channels.delivery_status.unknown_id</c>) and
+    /// <see cref="WhatsAppWebhookHandler.MeterName"/> (<c>whatsapp.webhook.rejected</c> — why a tenant's WhatsApp
+    /// traffic is being ignored).
+    /// </summary>
+    public static IReadOnlyList<string> MeterNames { get; } =
+    [
+        DeliveryStatusHandler.MeterName,
+        WhatsAppWebhookHandler.MeterName,
+    ];
+
+    /// <summary>Enrols every meter in <see cref="MeterNames"/> on the host's OpenTelemetry builder.</summary>
+    public static VerbaraOpenTelemetryBuilder AddDigitalChannelMeters(this VerbaraOpenTelemetryBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        foreach (var meterName in MeterNames)
+            builder.AddMeter(meterName);
+        return builder;
     }
 }

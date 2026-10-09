@@ -5,10 +5,11 @@ using Verbara.Platform.Core;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using NSubstitute.ReturnsExtensions;
 
 namespace Verbara.Platform.Channels.Core.Tests;
 
-public class DeliveryStatusHandlerTests
+public sealed class DeliveryStatusHandlerTests : IDisposable
 {
     private static readonly TenantId TenantId = new("tenant-1");
 
@@ -20,6 +21,8 @@ public class DeliveryStatusHandlerTests
         _messageStore = Substitute.For<IMessageStore>();
         _handler = new DeliveryStatusHandler(_messageStore, NullLogger<DeliveryStatusHandler>.Instance);
     }
+
+    public void Dispose() => _handler.Dispose();
 
     private static Message MakeMessage(string externalId, MessageDeliveryStatus status = MessageDeliveryStatus.Pending) =>
         new()
@@ -174,7 +177,7 @@ public class DeliveryStatusHandlerTests
         };
         listener.SetMeasurementEventCallback<long>((_, value, _, _) => Interlocked.Add(ref counted, value));
         listener.Start();
-        _messageStore.FindByExternalIdAsync(TenantId, "never-sent", Arg.Any<CancellationToken>()).Returns((Message?)null);
+        _messageStore.FindByExternalIdAsync(TenantId, "never-sent", Arg.Any<CancellationToken>()).ReturnsNull();
 
         await handler.HandleAsync(TenantId, new DeliveryStatusUpdate("never-sent", MessageDeliveryStatus.Delivered, DateTimeOffset.UtcNow), CancellationToken.None);
 

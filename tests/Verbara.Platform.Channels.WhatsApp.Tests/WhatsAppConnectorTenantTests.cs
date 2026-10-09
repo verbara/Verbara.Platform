@@ -197,6 +197,47 @@ public class WhatsAppConnectorTenantTests
             .Which.Should().BeSameAs(first);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.OK)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    public async Task SendAsync_ShouldDisposeProviderResponse_WhenSendCompletes(HttpStatusCode status)
+    {
+        var store = Substitute.For<ITenantChannelConfigStore>();
+        SeedConfig(store, TenantA, new() { ["AccessToken"] = "token-a", ["PhoneNumberId"] = "pn-a" });
+        var responses = new List<TrackedResponse>();
+        var http = new RecordingGraphHandler(_ =>
+        {
+            var response = new TrackedResponse(status)
+            {
+                Content = new StringContent(
+                    status == HttpStatusCode.OK
+                        ? """{"messaging_product":"whatsapp","messages":[{"id":"wamid.disposed"}]}"""
+                        : """{"error":{"message":"Invalid OAuth access token","code":190}}""",
+                    Encoding.UTF8, "application/json"),
+            };
+            responses.Add(response);
+            return response;
+        });
+        using var provider = BuildProvider(store, http);
+        var connector = provider.GetRequiredService<WhatsAppConnector>();
+
+        var result = await connector.SendAsync(Text(TenantA, "15550000009", "hi"), CancellationToken.None);
+
+        result.Success.Should().Be(status == HttpStatusCode.OK);
+        responses.Should().ContainSingle().Which.Disposed.Should().BeTrue("the connector owns the provider response");
+    }
+
+    private sealed class TrackedResponse(HttpStatusCode status) : HttpResponseMessage(status)
+    {
+        public bool Disposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
     private static ServiceProvider BuildProvider(ITenantChannelConfigStore store, RecordingGraphHandler http)
     {
         var services = new ServiceCollection();
