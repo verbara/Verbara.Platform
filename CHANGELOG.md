@@ -9,6 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.26.1] - 2026-10-08
+
+Patch and security release: contact lookup on PostgreSQL, a rate limit on the anonymous WebChat
+endpoints ([GHSA-6chq-5fp2-478c](https://github.com/verbara/Verbara.Platform/security/advisories/GHSA-6chq-5fp2-478c)),
+queue distribution that ignores ownerless conversations, and server errors without internal text.
+There is no database migration. (#345)
+
 ### Upgrading from 2.26.0
 
 - **The API now trusts `X-Forwarded-For` from the shipped gateways.** Each compose file that puts
