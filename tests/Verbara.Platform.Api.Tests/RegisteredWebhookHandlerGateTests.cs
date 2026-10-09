@@ -34,7 +34,9 @@ public sealed class RegisteredWebhookHandlerGateTests : IClassFixture<PlatformAp
         var violations = await FindViolationsAsync(_factory, WebhookProbes.ByChannel);
 
         registered.Should().NotBeEmpty("the host registers WhatsApp; an empty set would make this gate vacuous");
-        violations.Should().BeEmpty();
+        violations.Should().BeEmpty(
+            "every registered webhook handler must ignore an unsigned body and write nothing; violations: {0}",
+            string.Join(" | ", violations));
     }
 
     [Fact]
