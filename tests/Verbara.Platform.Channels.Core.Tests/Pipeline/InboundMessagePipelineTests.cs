@@ -467,6 +467,40 @@ public class InboundMessagePipelineTests
         result.IsNewConversation.Should().BeFalse();
         result.IsDuplicate.Should().BeTrue("the caller must not repeat the winning delivery's side effects");
         await _messageStore.DidNotReceive().SaveAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>());
+        await _conversationStore.DidNotReceiveWithAnyArgs().DeleteIfNoMessagesAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task Pipeline_ShouldDiscardConversationItOpened_WhenConcurrentIdenticalDeliveryWonTheInsert()
+    {
+        var inbound = MakeMessage("race-new");
+        var contact = MakeContact();
+        var opened = MakeConversation(contact.ContactId, isNew: true);
+        var winner = new Message
+        {
+            MessageId = EntityId.New(),
+            ConversationId = EntityId.New(),
+            TenantId = TenantId,
+            Direction = MessageDirection.Inbound,
+            Channel = Channel,
+            Content = new MessageEnvelope([]),
+            DeliveryStatus = MessageDeliveryStatus.Delivered,
+            ExternalMessageId = "race-new",
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        _messageStore.FindByExternalIdAsync(TenantId, "race-new", Arg.Any<CancellationToken>()).ReturnsNull();
+        _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>()).Returns(winner);
+        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
+            .ReturnsNull();
+        _lifecycleService.CreateAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>()).Returns(opened);
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        result.IsDuplicate.Should().BeTrue();
+        result.IsNewConversation.Should().BeFalse();
+        result.ConversationId.Should().Be(winner.ConversationId);
+        await _conversationStore.Received(1).DeleteIfNoMessagesAsync(TenantId, opened.ConversationId, Arg.Any<CancellationToken>());
     }
 
     [Fact]

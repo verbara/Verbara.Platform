@@ -12,6 +12,19 @@ internal sealed class InMemoryMessageStore : IMessageStore
     // Serialises the check-then-write paths (provider-id uniqueness, monotonic status, the Sent stamp).
     private readonly Lock _writeLock = new();
 
+    /// <summary>
+    /// Runs <paramref name="removeConversation"/> only while no message belongs to the conversation, holding the
+    /// lock an inbound insert takes, so a message cannot land between the check and the removal.
+    /// </summary>
+    internal bool RemoveConversationIfEmpty(TenantId tenantId, EntityId conversationId, Func<bool> removeConversation)
+    {
+        lock (_writeLock)
+        {
+            var hasMessages = _items.Values.Any(m => m.TenantId == tenantId && m.ConversationId == conversationId);
+            return !hasMessages && removeConversation();
+        }
+    }
+
     public Task SaveAsync(Message message, CancellationToken ct)
     {
         _items[(message.TenantId, message.MessageId)] = message;

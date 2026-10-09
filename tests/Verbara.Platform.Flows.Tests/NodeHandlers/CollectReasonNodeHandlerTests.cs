@@ -367,6 +367,9 @@ public sealed class CollectReasonNodeHandlerTests
         public Task<int> DeleteByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct) =>
             Task.FromResult(0);
 
+        public Task<bool> DeleteIfNoMessagesAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct) =>
+            Task.FromResult(false);
+
         public Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct) =>
             Task.FromResult(0);
 

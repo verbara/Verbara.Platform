@@ -693,4 +693,49 @@ public sealed class InMemoryConversationStoreTests
             conv.SetMetadata("callbackStuck", marker);
         return conv;
     }
+
+    [Fact]
+    public async Task DeleteIfNoMessagesAsync_ShouldDeleteOnlyEmptyConversation_WhenTenantMatches()
+    {
+        var messages = new InMemoryMessageStore();
+        var store = new InMemoryConversationStore(messages);
+        var empty = MakeConversation(Tenant1);
+        var withMessage = MakeConversation(Tenant1);
+        var otherTenant = MakeConversation(Tenant2);
+        foreach (var conversation in new[] { empty, withMessage, otherTenant })
+            await store.SaveAsync(conversation, CancellationToken.None);
+        await messages.InsertInboundIfAbsentAsync(new Message
+        {
+            MessageId = EntityId.New(),
+            ConversationId = withMessage.ConversationId,
+            TenantId = Tenant1,
+            Direction = MessageDirection.Inbound,
+            Channel = ChannelType.WebChat,
+            Content = new MessageEnvelope([]),
+            DeliveryStatus = MessageDeliveryStatus.Delivered,
+            ExternalMessageId = "ext-kept",
+            CreatedAt = DateTimeOffset.UtcNow,
+        }, CancellationToken.None);
+
+        (await store.DeleteIfNoMessagesAsync(Tenant1, empty.ConversationId, CancellationToken.None)).Should().BeTrue();
+        (await store.DeleteIfNoMessagesAsync(Tenant1, withMessage.ConversationId, CancellationToken.None)).Should().BeFalse();
+        (await store.DeleteIfNoMessagesAsync(Tenant1, otherTenant.ConversationId, CancellationToken.None)).Should().BeFalse();
+
+        (await store.GetByIdAsync(Tenant1, empty.ConversationId, CancellationToken.None)).Should().BeNull();
+        (await store.GetByIdAsync(Tenant1, withMessage.ConversationId, CancellationToken.None)).Should().NotBeNull();
+        (await store.GetByIdAsync(Tenant2, otherTenant.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DeleteIfNoMessagesAsync_ShouldThrow_WhenStoreHasNoMessageStore()
+    {
+        var store = new InMemoryConversationStore();
+        var conversation = MakeConversation(Tenant1);
+        await store.SaveAsync(conversation, CancellationToken.None);
+
+        var act = () => store.DeleteIfNoMessagesAsync(Tenant1, conversation.ConversationId, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await store.GetByIdAsync(Tenant1, conversation.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
 }

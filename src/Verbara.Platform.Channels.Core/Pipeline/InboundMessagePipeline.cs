@@ -11,6 +11,7 @@ public sealed class InboundMessagePipeline : IInboundMessagePipeline
     private readonly ContactResolutionStep _contactResolutionStep;
     private readonly ConversationResolutionStep _conversationResolutionStep;
     private readonly MessagePersistenceStep _messagePersistenceStep;
+    private readonly IConversationStore _conversationStore;
 
     public InboundMessagePipeline(
         IMessageStore messageStore,
@@ -22,6 +23,7 @@ public sealed class InboundMessagePipeline : IInboundMessagePipeline
         _contactResolutionStep = new ContactResolutionStep(contactIdentityResolver);
         _conversationResolutionStep = new ConversationResolutionStep(conversationStore, conversationLifecycleService);
         _messagePersistenceStep = new MessagePersistenceStep(messageStore);
+        _conversationStore = conversationStore;
     }
 
     public async Task<PipelineResult> ProcessAsync(
@@ -67,6 +69,14 @@ public sealed class InboundMessagePipeline : IInboundMessagePipeline
         if (context.IsDuplicate)
         {
             // Lost the insert race to an identical delivery: report the stored message, as Step 1 would have.
+            // A conversation this delivery opened for it never got a message; left behind, it would be routed as
+            // queued and owner-less on the customer's next message. Remove it unless a message has landed there.
+            if (context.IsNewConversation)
+            {
+                await _conversationStore.DeleteIfNoMessagesAsync(
+                    tenantId, context.Conversation!.ConversationId, ct);
+            }
+
             return new PipelineResult(
                 ConversationId: persisted.ConversationId,
                 ContactId: context.Contact!.ContactId,

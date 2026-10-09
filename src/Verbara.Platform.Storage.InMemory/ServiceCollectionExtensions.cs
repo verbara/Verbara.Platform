@@ -42,8 +42,10 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddInMemoryStorage(this IServiceCollection services)
     {
         // Conversations
-        services.AddSingleton<IConversationStore, InMemoryConversationStore>();
-        services.AddSingleton<IMessageStore, InMemoryMessageStore>();
+        // One message store instance serves both: the conversation store asks it whether a conversation is empty.
+        services.AddSingleton<InMemoryMessageStore>();
+        services.AddSingleton<IMessageStore>(sp => sp.GetRequiredService<InMemoryMessageStore>());
+        services.AddSingleton<IConversationStore>(sp => new InMemoryConversationStore(sp.GetRequiredService<InMemoryMessageStore>()));
         services.AddSingleton<IContactStore, InMemoryContactStore>();
         services.AddSingleton<ICaseStore, InMemoryCaseStore>();
         services.AddSingleton<ICannedResponseStore, InMemoryCannedResponseStore>();
