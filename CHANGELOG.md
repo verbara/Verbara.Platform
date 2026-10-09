@@ -55,7 +55,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Security
 
 - **Anonymous WebChat endpoints are rate-limited per tenant and client**
-  ([GHSA-PENDING](https://github.com/verbara/Verbara.Platform/security/advisories/GHSA-PENDING)).
+  ([GHSA-6chq-5fp2-478c](https://github.com/verbara/Verbara.Platform/security/advisories/GHSA-6chq-5fp2-478c)).
   `POST /api/v1/webchat/sessions` and `POST /api/v1/webchat/sessions/{sessionId}/messages` now carry
   fixed one-minute limits per tenant and client address (IPv6 grouped by /64), defaulting to 20 session
   creates and 120 messages per minute and configurable through
