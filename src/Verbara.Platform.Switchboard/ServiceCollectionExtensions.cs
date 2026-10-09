@@ -9,12 +9,13 @@ namespace Verbara.Platform.Switchboard;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the conversation switchboard and conversation service.
+    /// Registers the conversation switchboard, the conversation service and the WhatsApp session window.
     /// </summary>
     public static IServiceCollection AddSwitchboard(this IServiceCollection services)
     {
         services.AddSingleton<IConversationSwitchboard, ConversationSwitchboard>();
         services.AddSingleton<IConversationService, DefaultConversationService>();
+        services.AddSingleton<IWhatsAppSessionWindow, WhatsAppSessionWindow>();
         return services;
     }
 }
