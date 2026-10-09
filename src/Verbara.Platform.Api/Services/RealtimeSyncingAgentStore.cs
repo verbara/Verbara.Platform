@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Pro.Realtime;
 
 namespace Verbara.Platform.Api.Services;
@@ -15,24 +16,31 @@ namespace Verbara.Platform.Api.Services;
 /// PJSIP identity to sync). A <see cref="DeleteAsync"/> removes them. Every sync is best-effort:
 /// a throw is swallowed + logged (EventId 4130) so the store write still succeeds — the
 /// <see cref="RealtimeReconciliationService"/> re-converges. Read + stream methods pass through.
+/// licensed-agent-metering (D2): a save never provisions an agent whose user is not <c>Active</c> (or does
+/// not exist), the same rule the desired state applies at the reconcile tick, so an admin edit of a
+/// suspended agent does not bring its endpoint back between ticks.
 /// </summary>
 internal sealed class RealtimeSyncingAgentStore : IAgentStore
 {
     private readonly IAgentStore _inner;
     private readonly IRealtimeSyncService _sync;
+    private readonly IAgentAccountStatusLookup _accountStatus;
     private readonly ILogger<RealtimeSyncingAgentStore> _logger;
 
     public RealtimeSyncingAgentStore(
         IAgentStore inner,
         IRealtimeSyncService sync,
+        IAgentAccountStatusLookup accountStatus,
         ILogger<RealtimeSyncingAgentStore> logger)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(sync);
+        ArgumentNullException.ThrowIfNull(accountStatus);
         ArgumentNullException.ThrowIfNull(logger);
 
         _inner = inner;
         _sync = sync;
+        _accountStatus = accountStatus;
         _logger = logger;
     }
 
@@ -65,6 +73,17 @@ internal sealed class RealtimeSyncingAgentStore : IAgentStore
         ArgumentNullException.ThrowIfNull(agent);
 
         await _inner.SaveAsync(agent, ct).ConfigureAwait(false);
+        await AfterSavedAsync(agent, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The side effect of a stored agent: upserts its PJSIP rows. <see cref="SaveAsync"/> runs it after the
+    /// write; the licensed-agent writer's caller runs it explicitly after its commit (design D5), so a created
+    /// agent is provisioned only once its creation and ledger row are durable.
+    /// </summary>
+    internal async Task AfterSavedAsync(Agent agent, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
 
         // AdminEndpoints :522 / :622 — only agents with a complete SIP identity
         // (extension + password) have PJSIP rows to sync. Skip otherwise.
@@ -73,6 +92,11 @@ internal sealed class RealtimeSyncingAgentStore : IAgentStore
 
         try
         {
+            // An agent whose user is not Active is excluded from the PJSIP desired state; provisioning
+            // it here would undo the reconcile until the next tick.
+            if (!await _accountStatus.IsActiveAsync(agent.TenantId, agent.UserId, ct).ConfigureAwait(false))
+                return;
+
             await _sync.SyncAgentAsync(agent.TenantId.Value, agent.AgentId.Value, agent.DisplayName,
                 agent.Extension, agent.SipPassword, ct: ct).ConfigureAwait(false);
         }
@@ -85,7 +109,15 @@ internal sealed class RealtimeSyncingAgentStore : IAgentStore
     public async Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
     {
         await _inner.DeleteAsync(tenantId, agentId, ct).ConfigureAwait(false);
+        await AfterDeletedAsync(tenantId, agentId, ct).ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// The side effect of a deleted agent: removes its PJSIP rows. The licensed-agent writer's caller runs it
+    /// explicitly after its commit (design D5).
+    /// </summary>
+    internal async Task AfterDeletedAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
         try
         {
             await _sync.RemoveAgentAsync(tenantId.Value, agentId.Value, ct).ConfigureAwait(false);

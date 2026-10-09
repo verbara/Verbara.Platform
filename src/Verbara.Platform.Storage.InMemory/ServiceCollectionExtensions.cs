@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Automation;
 using Verbara.Platform.Billing;
@@ -71,6 +72,13 @@ public static class ServiceCollectionExtensions
         // Queues
         services.AddSingleton<IQueueStore, InMemoryQueueStore>();
         services.AddSingleton<IAgentStore, InMemoryAgentStore>();
+        // licensed-agent-metering (D2) — the account-status seam's in-memory implementation. The Api's
+        // AddLicensedAgentMetering binds IAgentAccountStatusLookup to it in this storage mode.
+        services.TryAddSingleton<InMemoryAgentAccountStatusLookup>();
+        // licensed-agent-metering slice 2 (design D5) — the in-memory ledger. The Api's AddLicensedAgentMetering
+        // builds the writer over it with the undecorated inner stores. Resolved at first use.
+        services.TryAddSingleton(sp => new InMemoryLicenseAgentLedger(
+            sp.GetRequiredService<Verbara.Platform.Queues.Licensing.ILicenseIdSource>(), sp.GetRequiredService<IClock>()));
         services.AddSingleton<ITeamStore, InMemoryTeamStore>();
         services.AddSingleton<IQueueMembershipStore, InMemoryQueueMembershipStore>();
         services.AddSingleton<IAgentCapacityStore, InMemoryAgentCapacityStore>();

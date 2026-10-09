@@ -8,6 +8,9 @@ internal sealed class InMemoryAgentStore : IAgentStore
 {
     private readonly ConcurrentDictionary<(TenantId, EntityId), Agent> _items = new();
 
+    // Serialises the uniqueness check with the write, as the unique index does in Postgres.
+    private readonly Lock _writeLock = new();
+
     public Task<Agent?> GetByIdAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
     {
         _items.TryGetValue((tenantId, agentId), out var item);
@@ -58,13 +61,23 @@ internal sealed class InMemoryAgentStore : IAgentStore
 
     public Task SaveAsync(Agent agent, CancellationToken ct)
     {
-        _items[(agent.TenantId, agent.AgentId)] = agent;
+        ArgumentNullException.ThrowIfNull(agent);
+        lock (_writeLock)
+        {
+            // licensed-agent-metering (D3) — mirrors ux_agents_tenant_user: a user owns at most one
+            // agent per tenant, so a second agent for the same user is refused and nothing is written.
+            if (_items.Values.Any(a => a.TenantId == agent.TenantId && a.UserId == agent.UserId && a.AgentId != agent.AgentId))
+                return Task.FromException(new EntityAlreadyExistsException("agent", "user_id"));
+
+            _items[(agent.TenantId, agent.AgentId)] = agent;
+        }
         return Task.CompletedTask;
     }
 
     public Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
     {
-        _items.TryRemove((tenantId, agentId), out _);
+        lock (_writeLock)
+            _items.TryRemove((tenantId, agentId), out _);
         return Task.CompletedTask;
     }
 

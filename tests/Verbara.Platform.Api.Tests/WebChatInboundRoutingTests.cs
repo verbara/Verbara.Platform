@@ -54,7 +54,7 @@ public sealed class WebChatInboundRoutingTests
 
         var capacity = Substitute.For<IAgentCapacityService>();
         var eventBus = new PlatformEventBus();
-        var switchboard = new ConversationSwitchboard(store, capacity, Substitute.For<IAgentStore>(), clock, eventBus);
+        var switchboard = new ConversationSwitchboard(store, capacity, Substitute.For<IAgentStore>(), clock, eventBus, new FakeAgentAccountStatusLookup());
 
         var router = Substitute.For<IInboundRouter>();
         router.RouteAsync(default!, default).ReturnsForAnyArgs(

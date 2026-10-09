@@ -620,7 +620,7 @@ public sealed class QueueMembersEndpointsTests :
 
     private async Task<string> CreateAgentAsync(string displayName)
     {
-        var userId = $"user-{Guid.NewGuid():N}";
+        var userId = _adminFactory.SeedActiveUser();
         var response = await _admin.PostAsync(
             "/api/v1/admin/agents",
             JsonContent.Create(new { userId, displayName }));

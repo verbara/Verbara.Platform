@@ -73,6 +73,13 @@ public sealed class RealtimeSyncingStoresRegistrarTests
             AgentId = Verbara.Platform.Core.EntityId.New(), TenantId = tenant, UserId = Verbara.Platform.Core.EntityId.New(),
             DisplayName = "Registrar Agent", State = AgentState.Available, CreatedAt = DateTimeOffset.UtcNow,
         };
+        // licensed-agent-metering — only an Active user's agent gets queue_members rows.
+        await provider.GetRequiredService<Verbara.Platform.Identity.IUserStore>().CreateAsync(new Verbara.Platform.Identity.User
+        {
+            UserId = agent.UserId, TenantId = tenant, Email = "registrar@test.local", DisplayName = "Registrar",
+            Role = Verbara.Platform.Identity.UserRole.Agent, Status = Verbara.Platform.Identity.UserStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        }, CancellationToken.None);
         await provider.GetRequiredKeyedService<IQueueStore>(RealtimeSyncingStoresExtensions.QueueStoreInner)
             .SaveAsync(queue, CancellationToken.None);
         await provider.GetRequiredKeyedService<IAgentStore>(RealtimeSyncingStoresExtensions.AgentStoreInner)
@@ -115,6 +122,7 @@ public sealed class RealtimeSyncingStoresRegistrarTests
         if (withRealtime)
             services.AddSingleton(Substitute.For<IRealtimeSyncService>());
         services.AddRealtimeSyncingStores();
+        services.AddLicensedAgentMetering();
         return services.BuildServiceProvider();
     }
 }

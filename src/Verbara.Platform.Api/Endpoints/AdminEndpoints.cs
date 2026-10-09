@@ -4,6 +4,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Api.Services;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -212,6 +213,9 @@ internal static partial class AdminEndpoints
         [FromServices] IRoleTemplateStore roleTemplates,
         [FromServices] IUserRoleStore userRoles,
         [FromServices] PermissionResolver permissions,
+        [FromServices] IAgentStore agents,
+        [FromServices] AgentForceOfflineService forceOffline,
+        [FromServices] ILicensedUserChangeWriter userWriter,
         PlatformEventBus eventBus,
         ILoggerFactory loggerFactory,
         IClock clock,
@@ -243,8 +247,10 @@ internal static partial class AdminEndpoints
             return TypedResults.Ok(ToUserDto(user));
         }
 
-        var written = await store.UpdateAdminFieldsAsync(
-            tenantId, user.UserId, change, clock.UtcNow, CallerIdentity.ResolveUserId(context.User), ct);
+        // licensed-agent-metering (design D5) — a status change of a user who owns an agent commits with its
+        // licensed-agent ledger row; every admin-field write goes through the same writer.
+        var written = await LicensedUserWrites.UpdateAdminFieldsAsync(
+            store, userWriter, tenantId, user.UserId, change, clock.UtcNow, CallerIdentity.ResolveUserId(context.User), ct);
         if (written.Outcome == AdminFieldsWriteOutcome.Stale)
             return UserChangedSinceRead();
         if (written is not { Outcome: AdminFieldsWriteOutcome.Written, Previous: { } previous, User: { } stored })
@@ -257,7 +263,7 @@ internal static partial class AdminEndpoints
             previous,
             stored,
             new UserAdminChangeServices(
-                sessions, audit, eventBus, tenantRoles, roleTemplates, userRoles, permissions,
+                sessions, audit, eventBus, tenantRoles, roleTemplates, userRoles, permissions, agents, forceOffline,
                 loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)),
             ct);
 
@@ -288,19 +294,32 @@ internal static partial class AdminEndpoints
     //  • Hub connections and SSE streams were authenticated once and would stay open: cut on every
     //    node. User-bound API keys stop on their own — they authenticate only while the owner exists.
     //  • Access tokens already issued stay valid until they expire (at most 15 minutes).
+    //  • licensed-agent-metering (Q1) — a user who owns an agent is refused with 409 before anything is
+    //    revoked or deleted: the admin deletes the agent first, so the agent's history stays attributable.
     private static async Task<IResult> DeleteUser(
         string id,
         HttpContext context,
         [FromServices] IUserStore store,
+        [FromServices] IAgentStore agents,
+        [FromServices] ILicensedUserChangeWriter userWriter,
         [FromServices] SessionService sessions,
         [FromServices] IAuditService audit,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var deleted = await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        if (await agents.GetByUserIdAsync(tenantId, EntityId.From(id), ct) is { } ownedAgent)
+            return UserOwnsAgent(id, ownedAgent.AgentId.Value);
 
+        // licensed-agent-metering (design D5) — the delete goes through the licensed-agent writer, which refuses
+        // it under its lock when an agent was created for the user after the check above.
         var actorId = CallerIdentity.ResolveUserIdOrSystem(context.User);
+        var deletion = await LicensedUserWrites.DeleteAsync(
+            store, userWriter, tenantId, EntityId.From(id), actorId, deleteOwnedAgent: false, ct);
+        if (deletion.OwnsAgent)
+            return UserOwnsAgent(id, agentId: null);
+        var deleted = deletion.UserDeleted;
+
         var ip = context.Connection.RemoteIpAddress?.ToString();
         var revokedSessions = await sessions.RevokeAllSessionsForUserAsync(
             tenantId.Value, actorId, id, ip, context.Request.Headers.UserAgent.FirstOrDefault(), ct);
@@ -331,6 +350,15 @@ internal static partial class AdminEndpoints
 
         return Results.NoContent();
     }
+
+    private static IResult UserOwnsAgent(string userId, string? agentId) =>
+        Results.Problem(
+            title: "User owns an agent",
+            detail: agentId is null
+                ? $"User '{userId}' owns an agent. Delete the agent first, then the user."
+                : $"User '{userId}' owns agent '{agentId}'. Delete the agent first (DELETE /api/v1/admin/agents/{agentId}), then the user.",
+            statusCode: StatusCodes.Status409Conflict,
+            type: "https://verbara.platform/errors/user-owns-agent");
 
     // ─── Queues ───────────────────────────────────────────────────────────────
 
@@ -559,10 +587,13 @@ internal static partial class AdminEndpoints
         HttpContext context,
         [FromBody] CreateAgentRequest body,
         [FromServices] IAgentStore store,
+        [FromServices] IUserStore users,
         [FromServices] IQueueStore queueStore,
         [FromServices] IQueueMembershipStore membershipStore,
         [FromServices] ICapacityDefaultsProvider defaultsProvider,
         [FromServices] IAuditService audit,
+        [FromServices] ILicensedAgentChangeWriter writer,
+        ILoggerFactory loggerFactory,
         IClock clock,
         CancellationToken ct)
     {
@@ -593,6 +624,18 @@ internal static partial class AdminEndpoints
             }
         }
 
+        // licensed-agent-metering (agent-identity-integrity) — an agent always names a user that exists
+        // in the tenant: refused with 404 before anything is written.
+        if (string.IsNullOrWhiteSpace(body.UserId)
+            || await users.GetByIdAsync(tenantId, EntityId.From(body.UserId), ct) is null)
+        {
+            return Results.Problem(
+                title: "User not found",
+                detail: $"No user '{body.UserId}' exists in this tenant. Create the user first, then its agent.",
+                statusCode: StatusCodes.Status404NotFound,
+                type: "https://verbara.platform/errors/user-not-found");
+        }
+
         var agent = new Agent
         {
             AgentId = EntityId.New(),
@@ -606,7 +649,27 @@ internal static partial class AdminEndpoints
         if (body.SipPassword is not null) agent.SipPassword = body.SipPassword;
         if (body.AutoAnswer is not null) agent.AutoAnswer = body.AutoAnswer;
         if (body.Capacity is { } capOverride) agent.CapacityOverride = ToOverride(capOverride);
-        await store.SaveAsync(agent, ct);
+        try
+        {
+            // licensed-agent-metering (design D5) — the agent row and its agent_created ledger row commit
+            // together; the PJSIP upsert runs after the commit.
+            await AgentLifecycle.CreateAsync(writer, store, agent, CallerIdentity.ResolveUserIdOrSystem(context.User), ct);
+        }
+        catch (EntityAlreadyExistsException)
+        {
+            // licensed-agent-metering (D3) — a user owns at most one agent per tenant. The unique
+            // index on (tenant_id, user_id) refuses the second one, so two concurrent creations yield
+            // one 201 and one 409, and no row is written for the refused one.
+            return Results.Problem(
+                title: "Agent already exists",
+                detail: $"User '{body.UserId}' already owns an agent in this tenant; a user owns at most one agent.",
+                statusCode: StatusCodes.Status409Conflict,
+                type: "https://verbara.platform/errors/entity-already-exists");
+        }
+
+        await AgentLifecycle.TryAuditAsync(
+            audit, loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!), AgentLifecycle.CreatedAction,
+            agent, CallerIdentity.ResolveUserIdOrSystem(context.User), source: "admin", extraMetadata: null, ct);
 
         // W6-A6/M1 — best-effort audit when an override was supplied at creation (no old value).
         // Skip when the supplied override is itself all-null (== empty): that sets no real override,
@@ -616,8 +679,8 @@ internal static partial class AdminEndpoints
             await RecordCapacityAuditAsync(audit, tenantId, GetCurrentUserId(context), agent.AgentId,
                 oldOverride: emptyOverride, newOverride: agent.CapacityOverride, ct);
 
-        // ADR-0012 Ola-3 — SyncAgentAsync (guarded on extension+password) now rides
-        // IAgentStore.SaveAsync (RealtimeSyncingAgentStore decorator).
+        // ADR-0012 Ola-3 — SyncAgentAsync (guarded on extension+password) rides the realtime-syncing
+        // decorator's post-commit hook, run by AgentLifecycle.CreateAsync above.
 
         // ADR-0026 Phase A.1 — associate agent to queues with channel-aware
         // memberships. Sync to Asterisk queue_members is conditional: voice
@@ -713,16 +776,23 @@ internal static partial class AdminEndpoints
         HttpContext context,
         [FromServices] IAgentStore store,
         [FromServices] IQueueMembershipStore membershipStore,
+        [FromServices] IAuditService audit,
+        [FromServices] ILicensedAgentChangeWriter writer,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var agent = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (agent is null) return Results.NotFound();
 
-        // ADR-0012 Ola-3 — RemoveAgentAsync now rides IAgentStore.DeleteAsync
-        // (RealtimeSyncingAgentStore decorator).
-        await membershipStore.DeleteAllForAgentAsync(tenantId, EntityId.From(id), ct);
-        await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        // licensed-agent-metering — the agent row and its agent_deleted ledger row commit together; the PJSIP
+        // removal (ADR-0012 Ola-3) runs after the commit; audited as agent.deleted.
+        var actorId = CallerIdentity.ResolveUserIdOrSystem(context.User);
+        if (!await AgentLifecycle.DeleteAsync(writer, store, membershipStore, tenantId, agent.AgentId, actorId, ct))
+            return Results.NotFound();
+        await AgentLifecycle.TryAuditAsync(
+            audit, loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!), AgentLifecycle.DeletedAction,
+            agent, actorId, source: "admin", extraMetadata: null, ct);
         return Results.NoContent();
     }
 
@@ -776,10 +846,8 @@ internal static partial class AdminEndpoints
         string id,
         [FromBody] ForceAgentOfflineRequest body,
         HttpContext context,
-        [FromServices] IAgentStore agentStore,
-        [FromServices] IAgentLivenessStore livenessStore,
+        [FromServices] AgentForceOfflineService forceOffline,
         [FromServices] IRefreshTokenStore refreshTokenStore,
-        PlatformEventBus eventBus,
         [FromServices] IAuditService audit,
         [FromServices] TimeProvider clock,
         CancellationToken ct)
@@ -787,24 +855,13 @@ internal static partial class AdminEndpoints
         var tenantId = GetTenantId(context);
         var callerUserId = GetCurrentUserId(context);
 
-        var agent = await agentStore.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        if (agent is null)
+        // licensed-agent-metering (D2) — the teardown (Offline + liveness removal + paused, under the
+        // per-agent lock, and the state event on a real transition) is shared with a user status change
+        // that leaves access.
+        if (await forceOffline.ApplyAsync(tenantId, EntityId.From(id), ct) is not { } forced)
             return Results.NotFound();
-
-        var oldState = agent.State;
-        agent.ForceOffline(clock.GetUtcNow());   // W5 — deterministic grace stamp
-        await agentStore.SaveAsync(agent, ct);
-        await livenessStore.RemoveAsync(tenantId, agent.AgentId, ct);
-
-        // Publish ONLY on a real transition so a force-offline against an
-        // already-Offline agent doesn't spam RealtimeStateBridge → AMI QueuePause.
-        if (oldState != AgentState.Offline)
-            eventBus.Publish(new AgentStateChangedEvent(
-                tenantId.ToString(),
-                agent.AgentId.Value,
-                agent.DisplayName,
-                oldState.ToString(),
-                AgentState.Offline.ToString()));
+        var agent = forced.Agent;
+        var oldState = forced.OldState;
 
         // Optional hard session revoke. RevokeAllForUserAsync expects the USER
         // id (not the agent id) — agent.UserId is the owning user.

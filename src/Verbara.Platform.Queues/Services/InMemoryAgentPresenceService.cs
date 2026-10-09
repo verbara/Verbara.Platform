@@ -8,16 +8,19 @@ public sealed class InMemoryAgentPresenceService : IAgentPresenceService
     private readonly IAgentStore _agentStore;
     private readonly IQueueStore _queueStore;
     private readonly IAgentCapacityService _capacityService;
+    private readonly IAgentAccountStatusLookup _accountStatus;
     private readonly ConcurrentDictionary<(TenantId, EntityId), AgentState> _states = new();
 
     public InMemoryAgentPresenceService(
         IAgentStore agentStore,
         IQueueStore queueStore,
-        IAgentCapacityService capacityService)
+        IAgentCapacityService capacityService,
+        IAgentAccountStatusLookup accountStatus)
     {
         _agentStore = agentStore;
         _queueStore = queueStore;
         _capacityService = capacityService;
+        _accountStatus = accountStatus;
     }
 
     public async Task UpdateStateAsync(TenantId tenantId, EntityId agentId, AgentState newState, CancellationToken ct)
@@ -60,7 +63,7 @@ public sealed class InMemoryAgentPresenceService : IAgentPresenceService
 
         var allAgents = await _agentStore.ListAsync(tenantId, new AgentQuery { PageSize = int.MaxValue }, ct).ConfigureAwait(false);
 
-        var result = new List<Agent>();
+        var candidates = new List<Agent>();
 
         foreach (var agent in allAgents.Items)
         {
@@ -77,6 +80,18 @@ public sealed class InMemoryAgentPresenceService : IAgentPresenceService
             if (!AgentStateMachine.IsRoutable(currentState))
                 continue;
 
+            candidates.Add(agent);
+        }
+
+        // licensed-agent-metering (D2) — only an agent whose user is Active (and exists) is offered
+        // work. One uncached lookup for the whole candidate set, read at the moment of the decision,
+        // so a status write takes effect on the next routing decision. Eligibility and the sticky
+        // (last-agent) path both read this list.
+        var activeAccounts = await _accountStatus.WhereUserActiveAsync(tenantId, candidates, ct).ConfigureAwait(false);
+
+        var result = new List<Agent>();
+        foreach (var agent in activeAccounts)
+        {
             // Filter: capacity available
             var hasCapacity = await _capacityService.HasCapacityAsync(tenantId, agent.AgentId, channel, ct).ConfigureAwait(false);
             if (!hasCapacity)

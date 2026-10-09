@@ -26,6 +26,7 @@
         "ManagementClusterEndpoints.cs",
         "ManagementImpersonationEndpoints.cs",
         "ManagementSystemEndpoints.cs",
+        "ManagementLicensingEndpoints.cs",
         "ManagementTenantEndpoints.cs",
         "ManagementTenantIpAllowlistEndpoints.cs",
         "ManagementTenantSettingsEndpoints.cs",
@@ -530,6 +531,88 @@
           "circuitOpenedAt",
           "circuitNextProbeAt",
           "circuitProbeAttempts"
+        ],
+        "LicensedAgentPeaksResponse": [
+          "schemaVersion",
+          "from",
+          "to",
+          "dayZone",
+          "license",
+          "deployment",
+          "days",
+          "chainHeads"
+        ],
+        "LicensedAgentExportResponse": [
+          "schemaVersion",
+          "hashScheme",
+          "generatedAt",
+          "from",
+          "to",
+          "dayZone",
+          "license",
+          "events",
+          "daily",
+          "chainHeads"
+        ],
+        "LicensedAgentLicenseDto": [
+          "licenseId",
+          "licensee",
+          "tier",
+          "maxAgents",
+          "maxAgentsAdvisory"
+        ],
+        "LicensedAgentDeploymentPeakDto": [
+          "peakLicensedAgents",
+          "peakDay",
+          "overBand"
+        ],
+        "LicensedAgentDayDto": [
+          "day",
+          "deploymentLicensedAgents",
+          "deploymentRowHash",
+          "tenants"
+        ],
+        "LicensedAgentTenantDayDto": [
+          "tenantId",
+          "tenantName",
+          "licensedAgents",
+          "revision",
+          "closedAt",
+          "rowHash"
+        ],
+        "LicensedAgentChainHeadDto": [
+          "tenantId",
+          "headSequence",
+          "headHash",
+          "licenseId"
+        ],
+        "LicensedAgentExportEventDto": [
+          "tenantId",
+          "sequence",
+          "eventId",
+          "kind",
+          "occurredAt",
+          "agentId",
+          "userId",
+          "actorUserId",
+          "conversationId",
+          "userStatus",
+          "counted",
+          "licenseId",
+          "prevHash",
+          "rowHash"
+        ],
+        "LicensedAgentExportDailyDto": [
+          "tenantId",
+          "sequence",
+          "day",
+          "revision",
+          "licensedAgents",
+          "closedAt",
+          "closedThroughSequence",
+          "licenseId",
+          "prevHash",
+          "rowHash"
         ]
       }
     },

@@ -1,5 +1,6 @@
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Sdk.Pro.Realtime.Engine;
@@ -11,6 +12,12 @@ namespace Verbara.Platform.Api.Services;
 /// Implements <see cref="IDesiredStateProvider"/> by reading from Platform stores,
 /// feeding the 5-phase reconciler with expected agents, queues, queue members, and trunks.
 /// </summary>
+/// <remarks>
+/// licensed-agent-metering (D2): an agent whose user is not <c>Active</c>, or does not exist, is left
+/// out of the expected agents and the expected queue members, so the reconciler removes its PJSIP
+/// endpoint and its <c>queue_members</c> rows and re-creates them once the user is Active again. Every
+/// agent of the tenant is enumerated, with no page cap.
+/// </remarks>
 internal sealed class PlatformDesiredStateProvider : IDesiredStateProvider
 {
     private readonly IConfiguration _configuration;
@@ -18,19 +25,22 @@ internal sealed class PlatformDesiredStateProvider : IDesiredStateProvider
     private readonly IQueueStore _queueStore;
     private readonly TrunkStoreBase _trunkStore;
     private readonly QueueMembershipService _membershipService;
+    private readonly IAgentAccountStatusLookup _accountStatus;
 
     public PlatformDesiredStateProvider(
         IConfiguration configuration,
         IAgentStore agentStore,
         IQueueStore queueStore,
         TrunkStoreBase trunkStore,
-        QueueMembershipService membershipService)
+        QueueMembershipService membershipService,
+        IAgentAccountStatusLookup accountStatus)
     {
         _configuration = configuration;
         _agentStore = agentStore;
         _queueStore = queueStore;
         _trunkStore = trunkStore;
         _membershipService = membershipService;
+        _accountStatus = accountStatus;
     }
 
     public ValueTask<IReadOnlyList<string>> GetActiveTenantIdsAsync(CancellationToken ct = default)
@@ -46,8 +56,8 @@ internal sealed class PlatformDesiredStateProvider : IDesiredStateProvider
         string tenantId, CancellationToken ct = default)
     {
         var tid = new TenantId(tenantId);
-        var agents = await _agentStore.ListAsync(tid, new AgentQuery { PageSize = 1000 }, ct);
-        return agents.Items
+        var agents = await _accountStatus.WhereUserActiveAsync(tid, await _agentStore.ListAllAsync(tid, ct), ct);
+        return agents
             .Where(a => !string.IsNullOrEmpty(a.Extension) && !string.IsNullOrEmpty(a.SipPassword))
             .Select(a => new AgentSyncRequest
             {
@@ -82,8 +92,20 @@ internal sealed class PlatformDesiredStateProvider : IDesiredStateProvider
     public async ValueTask<IReadOnlyList<QueueMemberSyncRequest>> GetExpectedQueueMembersAsync(
         string tenantId, CancellationToken ct = default)
     {
+        var tid = new TenantId(tenantId);
         var effective = await _membershipService.ComputeEffectiveMembersAsync(tenantId, ct);
+        if (effective.Count == 0)
+            return [];
+
+        // A member whose agent's user is not Active is deprovisioned, not paused: leaving it out makes
+        // the reconciler delete its queue_members row (realtime-queue-member-sync).
+        var agents = await _agentStore.GetByIdsAsync(
+            tid, effective.Select(m => EntityId.From(m.AgentId)).Distinct().ToList(), ct);
+        var routable = (await _accountStatus.WhereUserActiveAsync(tid, agents, ct))
+            .Select(a => a.AgentId.Value)
+            .ToHashSet(StringComparer.Ordinal);
         return effective
+            .Where(m => routable.Contains(m.AgentId))
             .Select(m => new QueueMemberSyncRequest
             {
                 QueueName = m.QueueName,

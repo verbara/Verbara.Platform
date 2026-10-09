@@ -182,7 +182,7 @@ public sealed class BotHandoffLogicTests
         conversation.Owner = ConversationOwner.ForBot(BotId);
         await store.SaveAsync(conversation, CancellationToken.None);
 
-        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, Substitute.For<Verbara.Platform.Queues.IAgentStore>(), clock, eventBus);
+        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, Substitute.For<Verbara.Platform.Queues.IAgentStore>(), clock, eventBus, new FakeAgentAccountStatusLookup());
         var botResponse = new BotResponse(BotResponseAction.TransferToQueue, null, QueueId, null, "Flow handoff");
 
         // Act — execute the WebhookEndpoints branch verbatim
@@ -231,7 +231,7 @@ public sealed class BotHandoffLogicTests
         };
         await store.SaveAsync(conversation, CancellationToken.None);
 
-        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, Substitute.For<Verbara.Platform.Queues.IAgentStore>(), clock, eventBus);
+        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, Substitute.For<Verbara.Platform.Queues.IAgentStore>(), clock, eventBus, new FakeAgentAccountStatusLookup());
         var routeResult = new Verbara.Platform.Routing.Inbound.RouteResult(
             QueueId,
             default,
@@ -280,7 +280,7 @@ public sealed class BotHandoffLogicTests
         updated.Owner = ConversationOwner.ForBot(BotId);
         await store.SaveAsync(updated, CancellationToken.None);
 
-        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, Substitute.For<Verbara.Platform.Queues.IAgentStore>(), clock, eventBus);
+        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, Substitute.For<Verbara.Platform.Queues.IAgentStore>(), clock, eventBus, new FakeAgentAccountStatusLookup());
         var botResponse = new BotResponse(
             BotResponseAction.TransferToQueue,
             null,
@@ -332,7 +332,7 @@ public sealed class BotHandoffLogicTests
         };
         await store.SaveAsync(conversation, CancellationToken.None);
 
-        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, Substitute.For<Verbara.Platform.Queues.IAgentStore>(), clock, eventBus);
+        var switchboard = new Verbara.Platform.Switchboard.ConversationSwitchboard(store, capacity, Substitute.For<Verbara.Platform.Queues.IAgentStore>(), clock, eventBus, new FakeAgentAccountStatusLookup());
 
         // 1) Routing stamps the implicit reasonPath, then assigns to the queue.
         var routeResult = new Verbara.Platform.Routing.Inbound.RouteResult(

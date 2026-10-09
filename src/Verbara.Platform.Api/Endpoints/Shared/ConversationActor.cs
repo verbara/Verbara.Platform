@@ -4,6 +4,7 @@ using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Switchboard;
 
 namespace Verbara.Platform.Api.Endpoints.Shared;
@@ -78,6 +79,19 @@ internal sealed class ConversationActor
     {
         var authorization = context.RequestServices.GetRequiredService<IAuthorizationService>();
         return (await authorization.AuthorizeAsync(context.User, SupervisorPolicy)).Succeeded;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="agentId"/> may become a conversation's owner: it is an agent of the tenant
+    /// and its user is <c>Active</c> (licensed-agent-metering, agent-account-status-routing). An agent
+    /// whose user is suspended, deactivated or missing gets the same answer as an unknown agent, so a
+    /// transfer or reassign to it fails with <see cref="TargetAgentNotFound"/>.
+    /// </summary>
+    public static async Task<bool> IsOwnableTargetAsync(
+        IAgentStore agents, IAgentAccountStatusLookup accountStatus, TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        var agent = await agents.GetByIdAsync(tenantId, agentId, ct);
+        return agent is not null && await accountStatus.IsActiveAsync(tenantId, agent.UserId, ct);
     }
 
     /// <summary>403 with the stable <paramref name="code"/> as the error.</summary>

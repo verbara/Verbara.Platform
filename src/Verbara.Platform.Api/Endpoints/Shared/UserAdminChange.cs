@@ -4,6 +4,7 @@ using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Queues;
 
 namespace Verbara.Platform.Api.Endpoints.Shared;
 
@@ -16,6 +17,8 @@ internal sealed record UserAdminChangeServices(
     IRoleTemplateStore RoleTemplates,
     IUserRoleStore UserRoles,
     PermissionResolver Permissions,
+    IAgentStore Agents,
+    AgentForceOfflineService ForceOffline,
     ILogger Logger);
 
 /// <summary>
@@ -34,6 +37,10 @@ internal sealed record UserAdminChangeServices(
 /// refresh-token lineage, once, so no further access token is minted from it: the next one comes from a
 /// sign-in, with the role as stored. Only leaving Active also cuts live Realtime and SSE connections
 /// (<see cref="UserAccessRevokedEvent"/>): after a role change they would reconnect with the same token.</item>
+/// <item>Leaving Active also forces the user's agent, if any, Offline in the same request, with the teardown
+/// of the admin force-offline action (<see cref="AgentForceOfflineService"/>): its <c>queue_members</c>
+/// rows are paused at once rather than when its liveness expires. Re-activation does not bring the agent
+/// back; the agent signs in again (licensed-agent-metering, agent-account-status-routing).</item>
 /// <item>User-bound API keys are not revoked: they stop authenticating through the status check on every
 /// request, and work again if the account is re-activated.</item>
 /// <item>Access tokens already issued keep the role they were issued with until they expire (at most
@@ -78,9 +85,13 @@ internal static partial class UserAdminChange
                 user.TenantId.Value, user.UserId.Value, AccountStatusGate.StatusName(user.Status)));
         }
 
+        var forcedOfflineAgent = leavesAccess ? await ForceAgentOfflineAsync(user, services, ct) : null;
+
         if (statusChanged)
         {
             var metadata = BaseMetadata(context, ip, revokedSessions);
+            if (forcedOfflineAgent is not null)
+                metadata["agent_forced_offline"] = forcedOfflineAgent;
             metadata["old_status"] = previous.Status.ToString();
             metadata["new_status"] = user.Status.ToString();
             await RecordAsync(context, user, services.Audit, "user.status_changed", leavesAccess ? "warning" : "info", actorId, metadata, ct);
@@ -146,6 +157,28 @@ internal static partial class UserAdminChange
         }
     }
 
+    // A user who leaves access stops taking work at once: the agent it owns is forced Offline with the
+    // admin force-offline teardown. Returns the agent id, or null when the user owns no agent. A failure
+    // is logged as an error and does not fail the request: the status is already written, routing and
+    // the PJSIP desired state already exclude the agent by its user's status, and the liveness reaper
+    // and the next reconcile still converge.
+    private static async Task<string?> ForceAgentOfflineAsync(User user, UserAdminChangeServices services, CancellationToken ct)
+    {
+        try
+        {
+            var agent = await services.Agents.GetByUserIdAsync(user.TenantId, user.UserId, ct);
+            if (agent is null)
+                return null;
+            await services.ForceOffline.ApplyAsync(user.TenantId, agent.AgentId, ct);
+            return agent.AgentId.Value;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogForceOfflineFailed(services.Logger, ex, user.UserId.Value, user.TenantId.Value);
+            return null;
+        }
+    }
+
     private static Dictionary<string, string> BaseMetadata(HttpContext context, string? ip, int revokedSessions)
     {
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -181,4 +214,8 @@ internal static partial class UserAdminChange
     [LoggerMessage(EventId = 7503, Level = LogLevel.Warning,
         Message = "User {UserId} in tenant {TenantId} holds no RBAC role for its new role {Role}: the tenant has no role for it and its role template is unknown. The role migration at the next start grants it.")]
     private static partial void LogNoRbacRoleForRole(ILogger logger, string userId, string tenantId, UserRole role);
+
+    [LoggerMessage(EventId = 7504, Level = LogLevel.Error,
+        Message = "User {UserId} in tenant {TenantId} left Active, but its agent could not be forced Offline: routing and provisioning already exclude it, and the liveness reaper ends its presence.")]
+    private static partial void LogForceOfflineFailed(ILogger logger, Exception exception, string userId, string tenantId);
 }

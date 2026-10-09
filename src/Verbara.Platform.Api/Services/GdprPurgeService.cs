@@ -3,6 +3,7 @@ using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Queues;
 
 namespace Verbara.Platform.Api.Services;
 
@@ -16,6 +17,11 @@ internal sealed class GdprPurgeService : IGdprPurgeService
     private readonly IRefreshTokenStore _refreshTokenStore;
     private readonly IPurgeLogStore _purgeLogStore;
     private readonly IAuditStore _auditStore;
+    private readonly IAgentStore _agentStore;
+    private readonly IQueueMembershipStore _membershipStore;
+    private readonly IAuditService _audit;
+    private readonly ILicensedUserChangeWriter _userWriter;
+    private readonly ILogger<GdprPurgeService> _logger;
 
     public GdprPurgeService(
         IContactStore contactStore,
@@ -25,7 +31,12 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         IUserStore userStore,
         IRefreshTokenStore refreshTokenStore,
         IPurgeLogStore purgeLogStore,
-        IAuditStore auditStore)
+        IAuditStore auditStore,
+        IAgentStore agentStore,
+        IQueueMembershipStore membershipStore,
+        IAuditService audit,
+        ILicensedUserChangeWriter userWriter,
+        ILogger<GdprPurgeService> logger)
     {
         _contactStore = contactStore;
         _conversationStore = conversationStore;
@@ -35,6 +46,11 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         _refreshTokenStore = refreshTokenStore;
         _purgeLogStore = purgeLogStore;
         _auditStore = auditStore;
+        _agentStore = agentStore;
+        _membershipStore = membershipStore;
+        _audit = audit;
+        _userWriter = userWriter;
+        _logger = logger;
     }
 
 
@@ -130,16 +146,35 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         if (authEventsDeleted > 0)
             entitiesDeleted["authEvents"] = authEventsDeleted;
 
-        // 2. Delete the user record itself
-        await _userStore.DeleteAsync(tid, uid, ct);
+        // 2. licensed-agent-metering (Q1, design D4/D5) — the purge is never refused for an agent the user owns
+        //    (the admin delete is): its queue memberships go first, then the agent and the user are deleted in
+        //    ONE transaction with their ledger rows (agent_deleted, then user_deleted), so no agent row is left
+        //    naming a user that no longer exists and no change goes unrecorded. The PJSIP removal runs after the
+        //    commit, and the agent deletion is audited as agent.deleted exactly as the admin path does.
+        var agent = await _agentStore.GetByUserIdAsync(tid, uid, ct);
+        if (agent is not null)
+            await _membershipStore.DeleteAllForAgentAsync(tid, agent.AgentId, ct);
+
+        // 3. Delete the user record itself (with its agent, when it owns one)
+        var deletion = await LicensedUserWrites.DeleteAsync(
+            _userStore, _userWriter, tid, uid, performedBy, deleteOwnedAgent: true, ct);
+        if (agent is not null && deletion.DeletedAgentId == agent.AgentId.Value)
+        {
+            entitiesDeleted["agent"] = 1;
+            await AgentLifecycle.AfterDeletedAsync(_agentStore, tid, agent.AgentId, ct);
+            await AgentLifecycle.TryAuditAsync(
+                _audit, _logger, AgentLifecycle.DeletedAction, agent, performedBy, source: "gdpr_purge",
+                extraMetadata: null, ct);
+        }
+
         entitiesDeleted["user"] = 1;
 
-        // 2b. End the account's refresh-token lineage, after the delete so a token minted by a sign-in
+        // 3b. End the account's refresh-token lineage, after the delete so a token minted by a sign-in
         //     racing the purge is caught too. refresh_tokens has no foreign key to users: without
         //     this the lineage would be refused only for as long as no row with this id exists.
         await _refreshTokenStore.RevokeAllForUserAsync(tenantId, userId, DateTimeOffset.UtcNow, ct);
 
-        // 3. Write tombstone (NO PII — only metadata)
+        // 4. Write tombstone (NO PII — only metadata)
         var purgeId = Guid.NewGuid().ToString("N");
         var purgedAt = DateTimeOffset.UtcNow;
         var purgeEntry = new PurgeEntry

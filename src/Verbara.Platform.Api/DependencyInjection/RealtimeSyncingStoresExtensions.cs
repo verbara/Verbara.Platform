@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.Dialer.Storage.Postgres;
@@ -73,7 +74,8 @@ public static class RealtimeSyncingStoresExtensions
             return sync is null
                 ? inner
                 : new RealtimeSyncingAgentStore(
-                    inner, sync, sp.GetRequiredService<ILogger<RealtimeSyncingAgentStore>>());
+                    inner, sync, sp.GetRequiredService<IAgentAccountStatusLookup>(),
+                    sp.GetRequiredService<ILogger<RealtimeSyncingAgentStore>>());
         });
 
         RekeyInnerFromUnkeyed<IQueueMembershipStore>(services, QueueMembershipStoreInner);
@@ -91,6 +93,7 @@ public static class RealtimeSyncingStoresExtensions
                     sp.GetRequiredKeyedService<IAgentStore>(AgentStoreInner),
                     sync,
                     sp.GetRequiredService<AgentPauseCoordinator>(),
+                    sp.GetRequiredService<IAgentAccountStatusLookup>(),
                     sp.GetRequiredService<ILogger<RealtimeSyncingQueueMembershipStore>>());
         });
 

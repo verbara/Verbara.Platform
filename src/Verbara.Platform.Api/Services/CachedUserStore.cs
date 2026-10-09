@@ -191,7 +191,9 @@ internal sealed class CachedUserStore : IUserStore, ILocalAuthCacheInvalidationS
     // write, then drop both entries here and publish the invalidation to the other replicas — also
     // when the write was refused, since a refusal means the stored row is not what this replica may
     // have cached. A user's email never changes, so reading it before the write is enough.
-    private async Task<T> WriteThroughAsync<T>(TenantId tenantId, EntityId userId, Func<Task<T>> write, CancellationToken ct)
+    // internal: the licensed-agent writer writes a user's status or deletes it outside this decorator (one
+    // transaction with the ledger row); its caller wraps that write here so the cache is dropped the same way.
+    internal async Task<T> WriteThroughAsync<T>(TenantId tenantId, EntityId userId, Func<Task<T>> write, CancellationToken ct)
     {
         var email = await EmailOfAsync(tenantId, userId, ct).ConfigureAwait(false);
         var result = await write().ConfigureAwait(false);

@@ -18,6 +18,19 @@ public sealed class ServiceCollectionExtensionsTests
     private const string FakeConnectionString = "Host=localhost;Database=test;Username=postgres;Password=postgres";
 
     [Fact]
+    public void AddPostgresStorage_ShouldRegisterThePostgresLicensedAgentReportReader()
+    {
+        // licensed-agent-metering slice 3: the reports read the Postgres ledger in this storage mode (the Api's
+        // AddLicensedAgentMetering falls back to the in-memory reader only when none is registered).
+        var services = new ServiceCollection();
+        services.AddPostgresStorage(FakeConnectionString);
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<Verbara.Platform.Queues.Licensing.ILicensedAgentReportReader>()
+            .Should().BeOfType<Verbara.Platform.Storage.Postgres.Licensing.PostgresLicensedAgentReportReader>();
+    }
+
+    [Fact]
     public void AddPostgresStorage_ShouldRegisterAllStoreInterfaces()
     {
         var services = new ServiceCollection();

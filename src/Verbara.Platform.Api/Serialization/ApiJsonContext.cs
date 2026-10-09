@@ -469,6 +469,9 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(LicenseInfoDto))]
 // Pro v2.4.0-pro — License status snapshot for GET /management/system/license/status
 [JsonSerializable(typeof(Verbara.Sdk.Pro.Licensing.LicenseStatusSnapshot))]
+// licensed-agent-metering slice 3 — GET /management/licensing/agents and /agents/export (licensed-agent-reporting).
+[JsonSerializable(typeof(LicensedAgentPeaksResponse))]
+[JsonSerializable(typeof(LicensedAgentExportResponse))]
 [JsonSerializable(typeof(SystemSettingsDto))]
 // GDPR
 [JsonSerializable(typeof(GdprExportRequest))]

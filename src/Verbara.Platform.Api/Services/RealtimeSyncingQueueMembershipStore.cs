@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Pro.Realtime;
 
 namespace Verbara.Platform.Api.Services;
@@ -35,6 +36,7 @@ internal sealed class RealtimeSyncingQueueMembershipStore : IQueueMembershipStor
     private readonly IAgentStore _agents;
     private readonly IRealtimeSyncService _sync;
     private readonly AgentPauseCoordinator _pauseCoordinator;
+    private readonly IAgentAccountStatusLookup _accountStatus;
     private readonly ILogger<RealtimeSyncingQueueMembershipStore> _logger;
 
     public RealtimeSyncingQueueMembershipStore(
@@ -43,6 +45,7 @@ internal sealed class RealtimeSyncingQueueMembershipStore : IQueueMembershipStor
         IAgentStore agents,
         IRealtimeSyncService sync,
         AgentPauseCoordinator pauseCoordinator,
+        IAgentAccountStatusLookup accountStatus,
         ILogger<RealtimeSyncingQueueMembershipStore> logger)
     {
         ArgumentNullException.ThrowIfNull(inner);
@@ -50,6 +53,7 @@ internal sealed class RealtimeSyncingQueueMembershipStore : IQueueMembershipStor
         ArgumentNullException.ThrowIfNull(agents);
         ArgumentNullException.ThrowIfNull(sync);
         ArgumentNullException.ThrowIfNull(pauseCoordinator);
+        ArgumentNullException.ThrowIfNull(accountStatus);
         ArgumentNullException.ThrowIfNull(logger);
 
         _inner = inner;
@@ -57,6 +61,7 @@ internal sealed class RealtimeSyncingQueueMembershipStore : IQueueMembershipStor
         _agents = agents;
         _sync = sync;
         _pauseCoordinator = pauseCoordinator;
+        _accountStatus = accountStatus;
         _logger = logger;
     }
 
@@ -88,6 +93,10 @@ internal sealed class RealtimeSyncingQueueMembershipStore : IQueueMembershipStor
                 return;
             var agent = await _agents.GetByIdAsync(membership.TenantId, membership.AgentId, ct).ConfigureAwait(false);
             if (agent is null)
+                return;
+            // licensed-agent-metering (D2): the members of an agent whose user is not Active are
+            // deprovisioned, not paused — the reconcile leaves them out, and so does a save between ticks.
+            if (!await _accountStatus.IsActiveAsync(membership.TenantId, agent.UserId, ct).ConfigureAwait(false))
                 return;
 
             await _sync.AddQueueMemberAsync(

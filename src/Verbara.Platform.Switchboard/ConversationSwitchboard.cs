@@ -2,6 +2,7 @@ using System.Globalization;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 
 namespace Verbara.Platform.Switchboard;
@@ -13,19 +14,25 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
     private readonly IAgentStore _agents;
     private readonly IClock _clock;
     private readonly PlatformEventBus _eventBus;
+    private readonly IAgentAccountStatusLookup _accountStatus;
+    private readonly ILicensedAgentOwnershipWriter? _ownershipWriter;
 
     public ConversationSwitchboard(
         IConversationStore store,
         IAgentCapacityService capacity,
         IAgentStore agents,
         IClock clock,
-        PlatformEventBus eventBus)
+        PlatformEventBus eventBus,
+        IAgentAccountStatusLookup accountStatus,
+        ILicensedAgentOwnershipWriter? ownershipWriter = null)
     {
         _store = store;
         _capacity = capacity;
         _agents = agents;
         _clock = clock;
         _eventBus = eventBus;
+        _accountStatus = accountStatus;
+        _ownershipWriter = ownershipWriter;
     }
 
     public async Task<OwnershipResult> AssignToQueueAsync(
@@ -210,12 +217,22 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         return new OwnershipResult(true, owner, conversation.State, null);
     }
 
+    // licensed-agent-metering (design D5) — every move of a conversation to an agent (takeover, transfer,
+    // reassign) names its call site and actor, and the conversation save commits through the licensed-agent
+    // writer together with its ledger row: both are durable or neither is. Without a writer the switchboard
+    // refuses the move rather than save it unrecorded.
     public async Task<OwnershipResult> TransferToAgentAsync(
         EntityId conversationId,
         TenantId tenantId,
         EntityId targetAgentId,
+        OwnershipChange change,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(change);
+        var writer = _ownershipWriter ?? throw new InvalidOperationException(
+            "ConversationSwitchboard needs an ILicensedAgentOwnershipWriter to move a conversation to an agent: " +
+            "register the licensed-agent writer (AddLicensedAgentMetering).");
+
         var conversation = await _store.GetByIdAsync(tenantId, conversationId, ct).ConfigureAwait(false);
         if (conversation is null)
             return Fail(ConversationState.Active, "Conversation not found.");
@@ -226,7 +243,13 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
 
         // The owner must be an agent of this tenant: an id that names no agent would leave the
         // conversation with an owner nobody is, and count its capacity against no one.
-        if (await _agents.GetByIdAsync(tenantId, targetAgentId, ct).ConfigureAwait(false) is null)
+        // licensed-agent-metering (D2): nor may the owner be an agent whose user is not Active — a
+        // suspended or deactivated user cannot act on it. Same failure as an unknown agent, checked
+        // before anything is changed, so takeover, reassign and transfer all leave the conversation as
+        // it was.
+        var target = await _agents.GetByIdAsync(tenantId, targetAgentId, ct).ConfigureAwait(false);
+        if (target is null
+            || !await _accountStatus.IsActiveAsync(tenantId, target.UserId, ct).ConfigureAwait(false))
             return Fail(conversation.State, "Target agent not found.");
 
         await ReleaseOwnerCapacityAsync(conversation, tenantId, ct).ConfigureAwait(false);
@@ -240,7 +263,7 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         conversation.UpdatedAt = _clock.UtcNow;
 
         await _capacity.ReserveAsync(tenantId, targetAgentId, conversation.Channel, ct).ConfigureAwait(false);
-        await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        await writer.CommitOwnershipAsync(conversation, change, ct).ConfigureAwait(false);
         _eventBus.Publish(new ConversationAssignedEvent(
             tenantId.Value, conversationId.Value, targetAgentId.Value, "", "", ""));
         return new OwnershipResult(true, owner, conversation.State, null);

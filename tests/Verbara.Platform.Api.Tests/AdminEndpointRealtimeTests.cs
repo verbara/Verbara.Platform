@@ -7,9 +7,11 @@ namespace Verbara.Platform.Api.Tests;
 public sealed class AdminEndpointRealtimeTests : IClassFixture<AuthenticatedPlatformApiFactory>
 {
     private readonly HttpClient _client;
+    private readonly AuthenticatedPlatformApiFactory _factory;
 
     public AdminEndpointRealtimeTests(AuthenticatedPlatformApiFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateAuthenticatedClient();
     }
 
@@ -20,7 +22,7 @@ public sealed class AdminEndpointRealtimeTests : IClassFixture<AuthenticatedPlat
     {
         var body = JsonContent.Create(new
         {
-            userId = "user-realtime-001",
+            userId = _factory.SeedActiveUser("user-realtime-001"),
             displayName = "Realtime Agent",
             extension = "2001",
             sipPassword = "secret123"
@@ -39,7 +41,7 @@ public sealed class AdminEndpointRealtimeTests : IClassFixture<AuthenticatedPlat
     {
         var body = JsonContent.Create(new
         {
-            userId = "user-realtime-002",
+            userId = _factory.SeedActiveUser("user-realtime-002"),
             displayName = "Extension Agent",
             extension = "3001",
             sipPassword = "pass456"
@@ -61,7 +63,7 @@ public sealed class AdminEndpointRealtimeTests : IClassFixture<AuthenticatedPlat
     {
         var body = JsonContent.Create(new
         {
-            userId = "user-no-ext-001",
+            userId = _factory.SeedActiveUser("user-no-ext-001"),
             displayName = "Agent Without Extension"
         });
 
@@ -80,7 +82,7 @@ public sealed class AdminEndpointRealtimeTests : IClassFixture<AuthenticatedPlat
         // Create first
         var createBody = JsonContent.Create(new
         {
-            userId = "user-delete-001",
+            userId = _factory.SeedActiveUser("user-delete-001"),
             displayName = "Agent To Delete",
             extension = "4001",
             sipPassword = "del-secret"
@@ -110,7 +112,7 @@ public sealed class AdminEndpointRealtimeTests : IClassFixture<AuthenticatedPlat
         // Create
         var createBody = JsonContent.Create(new
         {
-            userId = "user-delete-verify-001",
+            userId = _factory.SeedActiveUser("user-delete-verify-001"),
             displayName = "Agent Verify Delete"
         });
         var createResp = await _client.PostAsync("/api/admin/agents", createBody);

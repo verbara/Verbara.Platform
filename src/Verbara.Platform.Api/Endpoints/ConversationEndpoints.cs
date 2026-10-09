@@ -14,6 +14,8 @@ using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using Verbara.Platform.Llm;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Licensing;
+using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Switchboard;
 using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Ai;
@@ -211,6 +213,7 @@ internal static class ConversationEndpoints
         IConversationSwitchboard switchboard,
         [FromServices] IConversationStore conversations,
         [FromServices] IAgentStore agents,
+        [FromServices] IAgentAccountStatusLookup accountStatus,
         [FromServices] IQueueStore queues,
         [FromServices] IAuditService audit,
         [FromBody] TransferRequest body,
@@ -245,10 +248,12 @@ internal static class ConversationEndpoints
         else
         {
             var agentId = EntityId.From(body.TargetAgentId!);
-            if (await agents.GetByIdAsync(tenantId, agentId, ct) is null)
+            if (!await ConversationActor.IsOwnableTargetAsync(agents, accountStatus, tenantId, agentId, ct))
                 return TypedResults.BadRequest(new ErrorResponse(ConversationActor.TargetAgentNotFound));
 
-            result = await switchboard.TransferToAgentAsync(conversation.ConversationId, tenantId, agentId, ct);
+            result = await switchboard.TransferToAgentAsync(
+                conversation.ConversationId, tenantId, agentId,
+                new OwnershipChange(OwnershipChangeKind.Transferred, CallerIdentity.ResolveUserIdOrSystem(context.User)), ct);
             metadata["target_agent"] = agentId.Value;
         }
 

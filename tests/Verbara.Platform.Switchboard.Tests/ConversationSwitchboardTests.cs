@@ -1,6 +1,7 @@
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Switchboard;
 
@@ -13,6 +14,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
     private readonly IAgentStore _agents = Substitute.For<IAgentStore>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly PlatformEventBus _eventBus = new();
+    private readonly FakeAgentAccountStatusLookup _accountStatus = new();
 
     private readonly TenantId _tenantId = new("t1");
     private readonly EntityId _conversationId = EntityId.From("conv-001");
@@ -20,8 +22,11 @@ public sealed class ConversationSwitchboardTests : IDisposable
     private readonly EntityId _queueId = EntityId.From("queue-001");
     private readonly DateTimeOffset _now = new(2026, 3, 21, 12, 0, 0, TimeSpan.Zero);
 
+    private readonly RecordingOwnershipWriter _ownership;
+    private static readonly OwnershipChange Change = new(OwnershipChangeKind.Transferred, "actor-user");
+
     private ConversationSwitchboard CreateSut() =>
-        new(_store, _capacity, _agents, _clock, _eventBus);
+        new(_store, _capacity, _agents, _clock, _eventBus, _accountStatus, _ownership);
 
     private Conversation BuildConversation(ConversationState state, ConversationOwner? owner = null) =>
         new()
@@ -37,6 +42,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
 
     public ConversationSwitchboardTests()
     {
+        _ownership = new RecordingOwnershipWriter(_store);
         _clock.UtcNow.Returns(_now);
     }
 
@@ -214,7 +220,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
         _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
               .Returns(conversation);
 
-        var sut = new ConversationSwitchboard(_store, capacity, _agents, _clock, _eventBus);
+        var sut = new ConversationSwitchboard(_store, capacity, _agents, _clock, _eventBus, _accountStatus);
         var result = await sut.AcceptAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
 
         result.Success.Should().BeFalse();
@@ -387,7 +393,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
         var newAgentId = EntityId.From("agent-new");
         AgentExists(newAgentId);
         var sut = CreateSut();
-        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, newAgentId, CancellationToken.None);
+        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, newAgentId, Change, CancellationToken.None);
 
         result.Success.Should().BeTrue();
         await _capacity.Received(1).ReleaseAsync(_tenantId, oldAgentId, ChannelType.Voice, Arg.Any<CancellationToken>());
@@ -407,7 +413,7 @@ public sealed class ConversationSwitchboardTests : IDisposable
         var newAgentId = EntityId.From("agent-new");
         AgentExists(newAgentId);
         var sut = CreateSut();
-        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, newAgentId, CancellationToken.None);
+        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, newAgentId, Change, CancellationToken.None);
 
         result.Success.Should().BeTrue();
         result.NewOwner!.Kind.Should().Be(ConversationOwnerKind.Agent);
@@ -423,12 +429,36 @@ public sealed class ConversationSwitchboardTests : IDisposable
               .Returns(conversation);
 
         var sut = CreateSut();
-        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, EntityId.From("ghost-agent"), CancellationToken.None);
+        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, EntityId.From("ghost-agent"), Change, CancellationToken.None);
 
         result.Success.Should().BeFalse();
         result.FailureReason.Should().Be("Target agent not found.");
         conversation.Owner.Should().Be(owner);
         conversation.State.Should().Be(ConversationState.Active);
+        await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
+        await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+    }
+
+    // licensed-agent-metering (agent-account-status-routing) — an agent whose user is not Active is
+    // refused exactly like an unknown agent, and nothing changes.
+    [Fact]
+    public async Task TransferToAgentAsync_ShouldFailAndChangeNothing_WhenTargetUserIsNotActive()
+    {
+        var owner = ConversationOwner.ForAgent(_agentId);
+        var conversation = BuildConversation(ConversationState.Active, owner);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+        var target = EntityId.From("agent-suspended");
+        AgentExists(target);
+        _accountStatus.Inactive.Add(EntityId.From($"user-of-{target.Value}"));
+
+        var sut = CreateSut();
+        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, target, Change, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.FailureReason.Should().Be("Target agent not found.");
+        conversation.Owner.Should().Be(owner);
         await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
         await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
         await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
@@ -444,11 +474,55 @@ public sealed class ConversationSwitchboardTests : IDisposable
         AgentExists(target);
 
         var sut = CreateSut();
-        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, target, CancellationToken.None);
+        var result = await sut.TransferToAgentAsync(_conversationId, _tenantId, target, Change, CancellationToken.None);
 
         result.Success.Should().BeFalse();
         await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
         await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
+    }
+
+    // licensed-agent-metering (design D5) — the owner change is committed by the licensed-agent writer with
+    // the call site's kind and actor, never saved unrecorded.
+    [Fact]
+    public async Task TransferToAgentAsync_ShouldCommitThroughTheOwnershipWriter_WithItsKindAndActor()
+    {
+        var conversation = BuildConversation(ConversationState.Active, ConversationOwner.ForQueue(_queueId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+        var target = EntityId.From("agent-new");
+        AgentExists(target);
+        var takeover = new OwnershipChange(OwnershipChangeKind.TakenOver, "supervisor-user");
+
+        var result = await CreateSut().TransferToAgentAsync(_conversationId, _tenantId, target, takeover, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        _ownership.Commits.Should().ContainSingle()
+            .Which.Should().Be((_conversationId, target, takeover));
+    }
+
+    [Fact]
+    public async Task TransferToAgentAsync_ShouldRefuse_WhenNoOwnershipWriterIsRegistered()
+    {
+        var conversation = BuildConversation(ConversationState.Active, ConversationOwner.ForQueue(_queueId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+        var target = EntityId.From("agent-new");
+        AgentExists(target);
+        var sut = new ConversationSwitchboard(_store, _capacity, _agents, _clock, _eventBus, _accountStatus);
+
+        var act = () => sut.TransferToAgentAsync(_conversationId, _tenantId, target, Change, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*ILicensedAgentOwnershipWriter*");
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+    }
+
+    private sealed class RecordingOwnershipWriter(IConversationStore store) : ILicensedAgentOwnershipWriter
+    {
+        public List<(EntityId Conversation, EntityId Owner, OwnershipChange Change)> Commits { get; } = [];
+
+        public async Task CommitOwnershipAsync(Conversation conversation, OwnershipChange change, CancellationToken ct)
+        {
+            await store.SaveAsync(conversation, ct);
+            Commits.Add((conversation.ConversationId, conversation.Owner!.OwnerId!.Value, change));
+        }
     }
 
     // ─── ReturnToBot ──────────────────────────────────────────────────────────

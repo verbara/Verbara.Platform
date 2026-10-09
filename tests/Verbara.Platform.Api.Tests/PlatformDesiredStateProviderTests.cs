@@ -19,6 +19,7 @@ public sealed class PlatformDesiredStateProviderTests
     private readonly IQueueMembershipStore _membershipStore = Substitute.For<IQueueMembershipStore>();
 
     private readonly Dictionary<string, string?> _configData = new();
+    private readonly FakeAgentAccountStatusLookup _accountStatus = new();
 
     public PlatformDesiredStateProviderTests()
     {
@@ -33,7 +34,7 @@ public sealed class PlatformDesiredStateProviderTests
     }
 
     private PlatformDesiredStateProvider CreateSut() =>
-        new(_configuration, _agentStore, _queueStore, _trunkStore, _membershipService);
+        new(_configuration, _agentStore, _queueStore, _trunkStore, _membershipService, _accountStatus);
 
     // ─── GetActiveTenantIds ─────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ public sealed class PlatformDesiredStateProviderTests
             .AddInMemoryCollection(_configData!)
             .Build();
         var sut = new PlatformDesiredStateProvider(
-            config, _agentStore, _queueStore, _trunkStore, _membershipService);
+            config, _agentStore, _queueStore, _trunkStore, _membershipService, _accountStatus);
 
         var result = await sut.GetActiveTenantIdsAsync();
 
@@ -58,7 +59,7 @@ public sealed class PlatformDesiredStateProviderTests
     {
         var config = new ConfigurationBuilder().Build();
         var sut = new PlatformDesiredStateProvider(
-            config, _agentStore, _queueStore, _trunkStore, _membershipService);
+            config, _agentStore, _queueStore, _trunkStore, _membershipService, _accountStatus);
 
         var result = await sut.GetActiveTenantIdsAsync();
 
@@ -163,6 +164,8 @@ public sealed class PlatformDesiredStateProviderTests
 
         _agentStore.ListAsync(tid, Arg.Any<AgentQuery>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new PagedResult<Agent>([agent], 1, 1, 1000)));
+        _agentStore.GetByIdsAsync(tid, Arg.Any<IReadOnlyCollection<EntityId>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Agent>>([agent]));
         _queueStore.ListAsync(tid, Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new PagedResult<Queue>([queue], 1, 1, 1000)));
 

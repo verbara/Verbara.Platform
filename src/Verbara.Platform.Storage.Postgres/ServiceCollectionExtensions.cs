@@ -18,8 +18,10 @@ using Verbara.Platform.Core.Notifications;
 using Verbara.Platform.Core.Reports;
 using Verbara.Platform.Media;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Routing.Inbound;
+using Verbara.Platform.Storage.Postgres.Licensing;
 using Verbara.Platform.Storage.Postgres.Stores;
 using Verbara.Platform.Surveys;
 using Verbara.Platform.Typification.Ai;
@@ -124,6 +126,29 @@ public static class ServiceCollectionExtensions
         // Queues
         services.AddSingleton<IQueueStore, PostgresQueueStore>();
         services.AddSingleton<IAgentStore, PostgresAgentStore>();
+        // licensed-agent-metering (D2) — the account-status seam's Postgres implementation. The Api's
+        // AddLicensedAgentMetering binds IAgentAccountStatusLookup to it in this storage mode.
+        services.TryAddSingleton<PostgresAgentAccountStatusLookup>();
+        // licensed-agent-metering slice 2 (design D5-D8) — the ledger, its single write path (agent, user and
+        // ownership changes commit with their ledger row), the daily close and the fixed 15-month purge. All
+        // resolve at first use: nothing here touches the database at host start. ILicenseIdSource and IClock
+        // come from the host (AddLicensedAgentMetering binds the licence id to ILicenseStatus).
+        services.TryAddSingleton(sp => new LicenseAgentLedger(
+            sp.GetRequiredService<ILicenseIdSource>(), sp.GetRequiredService<IClock>()));
+        services.TryAddSingleton(sp => new PostgresLicensedAgentChangeWriter(
+            sp.GetRequiredService<NpgsqlDataSource>(),
+            (PostgresUserStore)sp.GetRequiredKeyedService<IUserStore>(AuthHotpathCacheKeys.UserStoreInner),
+            sp.GetRequiredService<LicenseAgentLedger>()));
+        services.TryAddSingleton<ILicensedAgentChangeWriter>(sp => sp.GetRequiredService<PostgresLicensedAgentChangeWriter>());
+        services.TryAddSingleton<ILicensedUserChangeWriter>(sp => sp.GetRequiredService<PostgresLicensedAgentChangeWriter>());
+        services.TryAddSingleton<ILicenseAgentDailyClose>(sp => new PostgresLicenseAgentDailyClose(
+            sp.GetRequiredService<NpgsqlDataSource>(), sp.GetRequiredService<LicenseAgentLedger>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<PostgresLicenseAgentDailyClose>>()));
+        services.TryAddSingleton<ILicenseAgentRetentionPurge>(sp =>
+            new PostgresLicenseAgentRetentionPurge(sp.GetRequiredService<NpgsqlDataSource>()));
+        // licensed-agent-metering slice 3 — the read side of the peaks report and the export (read-only).
+        services.TryAddSingleton<ILicensedAgentReportReader>(sp =>
+            new PostgresLicensedAgentReportReader(sp.GetRequiredService<NpgsqlDataSource>()));
         services.AddSingleton<ITeamStore, PostgresTeamStore>();
         services.AddSingleton<IQueueMembershipStore, PostgresQueueMembershipStore>();
         services.AddSingleton<IAgentCapacityStore, PostgresAgentCapacityStore>();

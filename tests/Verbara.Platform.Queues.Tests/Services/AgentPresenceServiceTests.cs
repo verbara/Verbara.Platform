@@ -63,7 +63,7 @@ public class AgentPresenceServiceTests
         capacity.HasCapacityAsync(Tenant, AgentId, Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
                 .Returns(hasCapacity);
 
-        var sut = new InMemoryAgentPresenceService(agentStore, queueStore, capacity);
+        var sut = new InMemoryAgentPresenceService(agentStore, queueStore, capacity, new FakeAgentAccountStatusLookup());
         return (sut, agentStore, queueStore, capacity);
     }
 
@@ -158,7 +158,7 @@ public class AgentPresenceServiceTests
         capacity.HasCapacityAsync(Tenant, Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
                 .Returns(true);
 
-        var sut = new InMemoryAgentPresenceService(agentStore, queueStore, capacity);
+        var sut = new InMemoryAgentPresenceService(agentStore, queueStore, capacity, new FakeAgentAccountStatusLookup());
 
         var result = await sut.GetAvailableAgentsAsync(Tenant, QueueId, ChannelType.Voice, CancellationToken.None);
 
@@ -220,7 +220,7 @@ public class AgentPresenceServiceTests
         queueStore.GetByIdAsync(Tenant, QueueId, Arg.Any<CancellationToken>())
                   .Returns(MakeQueue());
 
-        var sut = new InMemoryAgentPresenceService(agentStore, queueStore, capacity);
+        var sut = new InMemoryAgentPresenceService(agentStore, queueStore, capacity, new FakeAgentAccountStatusLookup());
 
         var result = await sut.GetAvailableAgentsAsync(Tenant, QueueId, ChannelType.Voice, CancellationToken.None);
 

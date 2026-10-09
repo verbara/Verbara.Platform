@@ -9,6 +9,84 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Run the agent identity report before upgrading.** Migration `018_AgentUserUnique` makes each user
+  own at most one agent per tenant, and refuses to run while a user owns two or more: the API does not
+  start, and its log names every duplicated tenant, user and agent. Nothing is merged or deleted for
+  you. Run the read-only `scripts/ops/agents-identity-report.sql` together with
+  `scripts/tenant-type-misplaced-data.sh`, and resolve what they list with the procedure in
+  `docs/operations/licensed-agent-metering-upgrade.md` (keep the agent that has an extension, else the
+  oldest; repoint its references; delete the others). The same page covers orphan agents, Customer
+  tenants without a valid parent, the tenant offboarding order, and tenants whose
+  `WorkFailoverGraceSeconds` is `0` or less. (#N)
+- **Set the licensed-agent day zone before the first run.** Licensed-agent days are cut in
+  `Licensing:Metering:DayZone` (an IANA zone id, default `UTC`). The first run records it with the
+  deployment's ledger and it can never change: a later start with another value stops the daily close
+  before it writes anything, logs both zones as a critical error and reports the close unhealthy in
+  `/health/ready`. See `docs/operations/licensed-agent-ledger.md`. (#N)
+
+### Added
+
+- **Licensed-agent ledger.** Every change that can alter who counts as a licensed agent — agent created
+  or deleted, the status change or GDPR purge of a user who owns an agent, and a takeover, transfer or
+  reassign to an agent — is recorded in an append-only ledger in the same transaction as the change; if
+  the record cannot be written, the change does not happen. Rows hold ids only and form a hash chain per
+  tenant anchored to the loaded licence (`lac1`); a licence renewal re-anchors the chain. The database
+  refuses any update or delete of these rows except the retention purge. Migration
+  `019_LicenseAgentLedger`. (#N)
+- **Daily close of licensed agents.** Each API replica closes, every 15 minutes, the ended days of every
+  Customer tenant — in every tenant status and whatever its parent — as the day's simultaneous peak of
+  licensed agents, plus the deployment total. Partner and Platform tenants are not counted. A closed day
+  is never rewritten: a late record appends a correction. The close runs whatever the licence state and
+  needs no leader; at start-up it waits until the licence file has been read, so chains are anchored
+  with the loaded licence id rather than empty and then re-anchored. (#N)
+- **Licensed-agent figures for the monthly self-declaration.** `GET /api/v1/management/licensing/agents?from=&to=`
+  (Platform administrators only) returns, for a range of dates in the deployment's day zone, each closed
+  day's deployment total and per-tenant figures (the latest correction of each day), the range's peak and
+  its day, the loaded licence (`licenseId`, `licensee`, `tier`, `maxAgents`) and every chain head.
+  `maxAgents` is advisory: `overBand` is computed by the server and is true only when a band is declared
+  and the peak exceeds it — nothing is ever blocked. `peakDay` is `null` and the peak `0` while no day of
+  the range is closed. A range may span up to 460 days, so any 15 calendar months fit one request;
+  a longer or inverted range answers `400`. (#N)
+- **Verifiable export of the ledger.** `GET /api/v1/management/licensing/agents/export?from=&to=` (Platform
+  administrators only, same range rule) returns the ledger and daily rows of every chain for the range —
+  every correction revision, in `sequence` order, starting with the row just before the range — with their
+  `prevHash`/`rowHash`, the licence identity and the chain heads, so the owner can attach it to the monthly
+  self-declaration and an auditor can recompute every hash offline, with no Platform code. Instants are
+  written in the canonical form the hashes use (UTC, seven fractional digits, `Z`). Both endpoints are
+  read-only. (#N)
+- **Fixed 15-month retention of the ledger.** Ledger and daily rows older than 15 months are purged daily
+  on every tenant, independently of tenant retention policies, each purge leaving a `purge_log` row
+  (`subject_type` `license_agent`) with the last purged record's hash. (#N)
+
+### Changed
+
+- **A user's account status now governs its agent.** When a user is suspended or deactivated, its agent
+  stops being offered work at once, on every channel and on the sticky last-agent path, and cannot be
+  made a conversation's owner by transfer, reassign or takeover. Its desk phone unregisters at the next
+  realtime reconcile: the PJSIP endpoint and the Asterisk `queue_members` rows are removed, and are
+  restored at the next reconcile after the user is reactivated. The suspension also forces the agent
+  `Offline` in the same request and pauses its queue members before the response returns; a reactivated
+  agent stays `Offline` until it signs in. An agent whose user does not exist is never offered work or
+  provisioned. Previously a suspended user's agent kept taking calls until its liveness expired. (#N)
+- **One agent per user, and agents always name a real user.** `POST /api/v1/admin/agents` answers `404`
+  when the user does not exist in the tenant and `409` when the user already owns an agent; two
+  concurrent creations for one user yield one agent. (#N)
+- **Deletes keep agent history attributable.** `DELETE /api/v1/admin/users/{id}` answers `409`
+  (`user-owns-agent`) while the user owns an agent, and changes nothing: delete the agent first. A GDPR
+  user purge is never refused for it — it deletes the agent, then the user. `DELETE
+  /api/v1/management/tenants/{id}` answers `409` (`tenant-owns-agents`) while the tenant owns any agent,
+  before any status change, lifecycle handler or audit entry; a tenant without agents is deleted as
+  before. Status changes made by dunning do not pass through this endpoint and are not covered. (#N)
+- **Agent creation and deletion are audited** as `agent.created` and `agent.deleted` (category
+  `queues`), with the actor, the agent id and the owning user id — from the admin endpoints and from a
+  GDPR purge. (#N)
+- **The PJSIP desired state enumerates every agent of a tenant.** It was capped at 1000 agents per
+  tenant, so agents beyond the first page were never provisioned. (#N)
+
+---
+
 ## [2.26.1] - 2026-10-08
 
 Patch and security release: contact lookup on PostgreSQL, a rate limit on the anonymous WebChat
