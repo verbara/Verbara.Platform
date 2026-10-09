@@ -161,7 +161,7 @@ A fresh Phase 0L bring-up was the first scenario to exercise them.
 | DB | CloudNativePG operator → Postgres 17 (3-instance HA) | CNPG 1.25.0 |
 | DB pool | PgBouncer (CNPG Pooler CR, transaction mode) | (managed) |
 | Cache | Redis 8 (StatefulSet, AOF persistence) | 8-alpine |
-| PBX | Asterisk (StatefulSet, 2 replicas, anti-affinity) | 22 |
+| PBX | Asterisk (StatefulSet, 1 replica — the chart refuses more: Platform registers one AMI server) | 22 |
 | SBC | Kamailio (DaemonSet, hostNetwork) | 5.8.8 |
 | Media | RTPEngine (DaemonSet, hostNetwork) | fonoster/latest |
 | API | Platform.Api (Deployment, HPA 2→8) | 1.14.6 |
@@ -198,7 +198,7 @@ A fresh Phase 0L bring-up was the first scenario to exercise them.
 
 | Feature | Scope | Detail |
 |---------|-------|--------|
-| PodDisruptionBudgets | Asterisk + Platform API | `minAvailable: 1` — protects during node drain/upgrades |
+| PodDisruptionBudgets | Asterisk + Platform API | `minAvailable: 1`. Platform API: keeps one pod serving during a node drain. Asterisk (one replica): **blocks** the drain of its node on purpose, so live calls are not dropped — voice does not stay up through a drain; plan a maintenance window (procedure in the CHANGELOG upgrade note of the Sdk 2.8.0 cascade). A pod that is not Ready can always be evicted (`unhealthyPodEvictionPolicy: AlwaysAllow`) |
 | NetworkPolicies | 17 policies, 4 namespaces | Default-deny ingress + service-level whitelists; standard `networking.k8s.io/v1` |
 | ResourceQuotas | r55-data, r55-asterisk, r55-platform | Per-namespace CPU/memory/pod caps with headroom for HPA |
 | SecurityContext | All workloads | `runAsNonRoot`, `seccompProfile: RuntimeDefault`, `allowPrivilegeEscalation: false` |
