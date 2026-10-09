@@ -18,8 +18,9 @@ namespace Verbara.Platform.Api.Tests;
 /// </summary>
 /// <remarks>
 /// Each test uses its own client address, so no test starts with a budget another one spent. The
-/// channel is SMS because what the handler does with the body is irrelevant here: the limits and
-/// the cap act before (or regardless of) the handler.
+/// channel is WhatsApp, a channel the host registers (an unregistered one answers 404 and so spends the
+/// unknown-tenant budget); what its handler does with the body is irrelevant here: the limits and the
+/// cap act before (or regardless of) the handler, and with no tenant AppSecret it ignores the delivery.
 /// </remarks>
 public sealed class WebhookRateLimitTests : IClassFixture<WebhookRateLimitTests.Factory>
 {
@@ -32,7 +33,7 @@ public sealed class WebhookRateLimitTests : IClassFixture<WebhookRateLimitTests.
 
     /// <summary>
     /// Every request reaches the app from a trusted proxy at 10.0.0.1, so the client address is the
-    /// X-Forwarded-For value, exactly as behind an ingress. The test tenant has an active SMS channel;
+    /// X-Forwarded-For value, exactly as behind an ingress. The test tenant has an active WhatsApp channel;
     /// the channel-config store is a substitute so a test can count the lookups.
     /// </summary>
     public sealed class Factory : AuthenticatedPlatformApiFactory
@@ -45,11 +46,11 @@ public sealed class WebhookRateLimitTests : IClassFixture<WebhookRateLimitTests.
             var config = new TenantChannelConfig
             {
                 TenantId = new TenantId(ConfiguredTenant),
-                Channel = ChannelType.Sms,
+                Channel = ChannelType.WhatsApp,
                 Credentials = new Dictionary<string, string>(),
                 IsActive = true,
             };
-            store.GetAsync(Arg.Is<TenantId>(t => t.Value == ConfiguredTenant), ChannelType.Sms, Arg.Any<CancellationToken>())
+            store.GetAsync(Arg.Is<TenantId>(t => t.Value == ConfiguredTenant), ChannelType.WhatsApp, Arg.Any<CancellationToken>())
                 .Returns(config);
             return store;
         }
@@ -83,7 +84,7 @@ public sealed class WebhookRateLimitTests : IClassFixture<WebhookRateLimitTests.
     private static HttpRequestMessage Post(string tenant, string clientIp, int bodyBytes = 2)
     {
         var body = bodyBytes <= 2 ? Encoding.UTF8.GetBytes("{}") : new byte[bodyBytes];
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/webhooks/{tenant}/sms")
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/webhooks/{tenant}/whatsapp")
         {
             Content = new ByteArrayContent(body),
         };
