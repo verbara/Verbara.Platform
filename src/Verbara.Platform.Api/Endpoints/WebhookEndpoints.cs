@@ -66,23 +66,17 @@ internal static class WebhookEndpoints
                 headers[header.Key] = header.Value.ToString();
         }
 
-        WebhookResult result;
-        try
-        {
-            var handler = channelRegistry.GetHandler(channelType);
-            result = await handler.HandleAsync(body, headers, tid, ct);
-        }
-        catch (InvalidOperationException ex)
-        {
-#pragma warning disable CA1848 // Use LoggerMessage delegates
-            logger.LogWarning(ex, "No handler registered for channel {Channel}", channel);
-#pragma warning restore CA1848
-            return Results.BadRequest(new ErrorResponse(ex.Message));
-        }
+        // Only a channel whose module the host registered is served (whatsapp-works-for-real D1/D2); any
+        // other configured channel stays unreachable, without exception text in the response.
+        if (!channelRegistry.TryGetHandler(channelType, out var handler))
+            return Results.NotFound();
 
-        if (result.Type == WebhookResultType.NewMessage && result.Message is not null)
+        var result = await handler.HandleAsync(body, headers, tid, ct);
+
+        // A delivery may batch several messages and statuses (D4): process every one, in order.
+        foreach (var inbound in result.Messages)
         {
-            var pipelineResult = await pipeline.ProcessAsync(result.Message, tid, channelType, ct);
+            var pipelineResult = await pipeline.ProcessAsync(inbound, tid, channelType, ct);
 
             // Publish SSE events for real-time UI updates
             if (pipelineResult.IsNewConversation)
@@ -96,13 +90,13 @@ internal static class WebhookEndpoints
                 pipelineResult.MessageId.Value, "Inbound", channelType.ToString()));
 
             // Fetch conversation and contact by IDs returned from pipeline
-            var conversation = await conversationStore.GetByIdAsync(tid, pipelineResult.ConversationId, ct);
-            var contact = await contactStore.GetByIdAsync(tid, pipelineResult.ContactId, ct);
+            var conversation = await conversationStore.GetByIdAsync(tid, pipelineResult.ConversationId, ct); // enrichment-n1-ok: per batched webhook event (D4), each with its own conversation
+            var contact = await contactStore.GetByIdAsync(tid, pipelineResult.ContactId, ct); // enrichment-n1-ok: per batched webhook event (D4), each with its own conversation
 
             if (conversation is not null && contact is not null)
             {
                 // Route to queue
-                var routingCtx = new RoutingContext(conversation, contact, channelType, result.Message.Content, tid);
+                var routingCtx = new RoutingContext(conversation, contact, channelType, inbound.Content, tid);
                 var routeResult = await router.RouteAsync(routingCtx, ct);
 
                 // C5 (implicit capture): stamp any reason/metadata the router resolved (e.g. the
@@ -119,11 +113,11 @@ internal static class WebhookEndpoints
                 await switchboard.AssignToQueueAsync(conversation.ConversationId, tid, routeResult.QueueId, ct);
 
                 // Reload conversation to check owner after assignment
-                var updated = await conversationStore.GetByIdAsync(tid, conversation.ConversationId, ct);
+                var updated = await conversationStore.GetByIdAsync(tid, conversation.ConversationId, ct); // enrichment-n1-ok: per batched webhook event (D4), each with its own conversation
                 if (updated?.Owner?.Kind == ConversationOwnerKind.Bot && updated.Owner.OwnerId.HasValue)
                 {
                     var botResponse = await virtualAgent.ProcessMessageAsync(
-                        updated.ConversationId, tid, result.Message.Content, ct);
+                        updated.ConversationId, tid, inbound.Content, ct);
 
                     if (botResponse.Action == BotResponseAction.Reply && botResponse.Messages is not null)
                     {
@@ -179,48 +173,64 @@ internal static class WebhookEndpoints
                 }
             }
         }
-        else if (result.Type == WebhookResultType.StatusUpdate && result.StatusUpdate is not null)
+
+        foreach (var statusUpdate in result.StatusUpdates)
         {
-            await deliveryStatusHandler.HandleAsync(tid, result.StatusUpdate, ct);
+            await deliveryStatusHandler.HandleAsync(tid, statusUpdate, ct);
         }
 
         return Results.Ok();
     }
 
-    private static IResult HandleWhatsAppVerification(
+    private static Task<IResult> HandleWhatsAppVerification(
         string tenantId,
         [FromQuery(Name = "hub.mode")] string? mode,
         [FromQuery(Name = "hub.verify_token")] string? verifyToken,
-        [FromQuery(Name = "hub.challenge")] string? challenge)
-    {
-        if (mode == "subscribe" && !string.IsNullOrEmpty(challenge))
-            return Results.Ok(challenge);
+        [FromQuery(Name = "hub.challenge")] string? challenge,
+        IChannelRegistry channelRegistry,
+        CancellationToken ct) =>
+        VerifySubscriptionAsync(ChannelType.WhatsApp, tenantId, mode, verifyToken, challenge, channelRegistry, ct);
 
-        return Results.BadRequest();
-    }
-
-    private static IResult HandleMessengerVerification(
+    private static Task<IResult> HandleMessengerVerification(
         string tenantId,
         [FromQuery(Name = "hub.mode")] string? mode,
         [FromQuery(Name = "hub.verify_token")] string? verifyToken,
-        [FromQuery(Name = "hub.challenge")] string? challenge)
-    {
-        if (mode == "subscribe" && !string.IsNullOrEmpty(challenge))
-            return Results.Ok(challenge);
+        [FromQuery(Name = "hub.challenge")] string? challenge,
+        IChannelRegistry channelRegistry,
+        CancellationToken ct) =>
+        VerifySubscriptionAsync(ChannelType.Messenger, tenantId, mode, verifyToken, challenge, channelRegistry, ct);
 
-        return Results.BadRequest();
-    }
-
-    private static IResult HandleInstagramVerification(
+    private static Task<IResult> HandleInstagramVerification(
         string tenantId,
         [FromQuery(Name = "hub.mode")] string? mode,
         [FromQuery(Name = "hub.verify_token")] string? verifyToken,
-        [FromQuery(Name = "hub.challenge")] string? challenge)
-    {
-        if (mode == "subscribe" && !string.IsNullOrEmpty(challenge))
-            return Results.Ok(challenge);
+        [FromQuery(Name = "hub.challenge")] string? challenge,
+        IChannelRegistry channelRegistry,
+        CancellationToken ct) =>
+        VerifySubscriptionAsync(ChannelType.Instagram, tenantId, mode, verifyToken, challenge, channelRegistry, ct);
 
-        return Results.BadRequest();
+    /// <summary>
+    /// Meta's GET subscription handshake (whatsapp-works-for-real D5): the challenge is echoed as plain text
+    /// only when the channel is registered, verifies subscriptions, and the token matches the tenant's own
+    /// configured verify token. Anything else — wrong mode or token, no active configuration, or a channel
+    /// the host does not serve — is 403 and never echoes the challenge.
+    /// </summary>
+    private static async Task<IResult> VerifySubscriptionAsync(
+        ChannelType channel,
+        string tenantId,
+        string? mode,
+        string? verifyToken,
+        string? challenge,
+        IChannelRegistry channelRegistry,
+        CancellationToken ct)
+    {
+        if (!channelRegistry.TryGetHandler(channel, out var handler) || handler is not IWebhookSubscriptionVerifier verifier)
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        var echo = await verifier.VerifySubscriptionAsync(new TenantId(tenantId), mode, verifyToken, challenge, ct);
+        return echo is null
+            ? Results.StatusCode(StatusCodes.Status403Forbidden)
+            : Results.Text(echo, "text/plain");
     }
 
     private static bool TryParseChannelType(string channel, out ChannelType channelType)

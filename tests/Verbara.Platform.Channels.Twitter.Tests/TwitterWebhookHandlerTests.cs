@@ -72,11 +72,11 @@ public class TwitterWebhookHandlerTests
         var result = await handler.HandleAsync(body, new Dictionary<string, string>(), TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        result.Message.Should().NotBeNull();
-        result.Message!.ExternalMessageId.Should().Be("dm-event-001");
-        result.Message.From.Channel.Should().Be(ChannelType.Twitter);
-        result.Message.From.Address.Should().Be("456");
-        var textBlock = result.Message.Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<TextBlock>().Subject;
+        result.Messages.Should().ContainSingle();
+        result.Messages[0].ExternalMessageId.Should().Be("dm-event-001");
+        result.Messages[0].From.Channel.Should().Be(ChannelType.Twitter);
+        result.Messages[0].From.Address.Should().Be("456");
+        var textBlock = result.Messages[0].Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<TextBlock>().Subject;
         textBlock.Text.Should().Be("Hello from Twitter!");
     }
 

@@ -25,7 +25,7 @@ public class VideoWebhookHandlerTests
         var result = await handler.HandleAsync(ToBody(json), new Dictionary<string, string>(), TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.Ignored);
-        result.Message.Should().BeNull();
+        result.Messages.Should().BeEmpty();
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public class VideoWebhookHandlerTests
         var result = await handler.HandleAsync(ToBody(json), new Dictionary<string, string>(), TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.Ignored);
-        result.Message.Should().BeNull();
+        result.Messages.Should().BeEmpty();
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public class VideoWebhookHandlerTests
         var result = await handler.HandleAsync(ToBody(json), new Dictionary<string, string>(), TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.Ignored);
-        result.Message.Should().BeNull();
+        result.Messages.Should().BeEmpty();
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class VideoWebhookHandlerTests
         var result = await handler.HandleAsync(ToBody(json), new Dictionary<string, string>(), TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.Ignored);
-        result.Message.Should().BeNull();
+        result.Messages.Should().BeEmpty();
     }
 
     [Fact]

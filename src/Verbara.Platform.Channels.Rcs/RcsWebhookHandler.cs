@@ -28,7 +28,7 @@ public sealed class RcsWebhookHandler : IWebhookHandler
         CancellationToken ct)
     {
         if (!ValidateSignature(body, headers))
-            return new WebhookResult(WebhookResultType.Ignored, null, null);
+            return WebhookResult.Ignored;
 
         RbmWebhookPayload? payload;
         try
@@ -37,11 +37,11 @@ public sealed class RcsWebhookHandler : IWebhookHandler
         }
         catch (JsonException)
         {
-            return new WebhookResult(WebhookResultType.Ignored, null, null);
+            return WebhookResult.Ignored;
         }
 
         if (payload is null)
-            return new WebhookResult(WebhookResultType.Ignored, null, null);
+            return WebhookResult.Ignored;
 
         // Delivery receipt event
         if (payload.DeliveryReceipt is not null && payload.MessageId is not null)
@@ -49,15 +49,15 @@ public sealed class RcsWebhookHandler : IWebhookHandler
             var status = await _provider.GetStatusAsync(payload.MessageId, ct).ConfigureAwait(false);
             var mapped = MapDeliveryStatus(status);
             var update = new DeliveryStatusUpdate(payload.MessageId, mapped, DateTimeOffset.UtcNow);
-            return new WebhookResult(WebhookResultType.StatusUpdate, null, update);
+            return new WebhookResult(WebhookResultType.StatusUpdate, [], [update]);
         }
 
         // Inbound text message event — surfaced as NewMessage with no parsed InboundMessage
         // (full parsing requires provider-specific tenant routing configuration).
         if (payload.Text is not null)
-            return new WebhookResult(WebhookResultType.NewMessage, null, null);
+            return new WebhookResult(WebhookResultType.NewMessage, [], []);
 
-        return new WebhookResult(WebhookResultType.Ignored, null, null);
+        return WebhookResult.Ignored;
     }
 
     /// <summary>

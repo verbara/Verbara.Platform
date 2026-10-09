@@ -51,9 +51,9 @@ public class EmailWebhookHandlerTests
             CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        result.Message.Should().NotBeNull();
-        result.Message!.From.Address.Should().Be("alice@example.com");
-        result.Message.ExternalMessageId.Should().Be("<test@example.com>");
+        result.Messages.Should().ContainSingle();
+        result.Messages[0].From.Address.Should().Be("alice@example.com");
+        result.Messages[0].ExternalMessageId.Should().Be("<test@example.com>");
     }
 
     [Fact]
@@ -73,8 +73,8 @@ public class EmailWebhookHandlerTests
             Tenant,
             CancellationToken.None);
 
-        result.Message!.Content.Blocks.Should().HaveCount(1);
-        result.Message.Content.Blocks[0].Should().BeOfType<TextBlock>()
+        result.Messages[0].Content.Blocks.Should().HaveCount(1);
+        result.Messages[0].Content.Blocks[0].Should().BeOfType<TextBlock>()
             .Which.Text.Should().Contain("This is the body text.");
     }
 
@@ -125,7 +125,7 @@ public class EmailWebhookHandlerTests
             CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        var blocks = result.Message!.Content.Blocks;
+        var blocks = result.Messages[0].Content.Blocks;
         blocks.Should().Contain(b => b is FileBlock);
         var file = blocks.OfType<FileBlock>().First();
         file.FileName.Should().Be("report.pdf");

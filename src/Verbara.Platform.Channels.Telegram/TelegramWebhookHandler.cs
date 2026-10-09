@@ -84,7 +84,7 @@ public sealed class TelegramWebhookHandler : IWebhookHandler
         if (inbound is null)
             return Ignored();
 
-        return new WebhookResult(WebhookResultType.NewMessage, inbound, null);
+        return new WebhookResult(WebhookResultType.NewMessage, [inbound], []);
     }
 
     private static InboundMessage? ParseInboundMessage(TelegramMessage msg)
@@ -152,5 +152,5 @@ public sealed class TelegramWebhookHandler : IWebhookHandler
     }
 
     private static WebhookResult Ignored() =>
-        new(WebhookResultType.Ignored, null, null);
+        WebhookResult.Ignored;
 }

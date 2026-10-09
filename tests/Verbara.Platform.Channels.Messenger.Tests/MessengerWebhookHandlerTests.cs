@@ -74,11 +74,11 @@ public class MessengerWebhookHandlerTests
         var result = await handler.HandleAsync(body, headers, TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        result.Message.Should().NotBeNull();
-        result.Message!.ExternalMessageId.Should().Be("m_abc123");
-        result.Message.From.Channel.Should().Be(ChannelType.Messenger);
-        result.Message.From.Address.Should().Be("user-456");
-        var textBlock = result.Message.Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<TextBlock>().Subject;
+        result.Messages.Should().ContainSingle();
+        result.Messages[0].ExternalMessageId.Should().Be("m_abc123");
+        result.Messages[0].From.Channel.Should().Be(ChannelType.Messenger);
+        result.Messages[0].From.Address.Should().Be("user-456");
+        var textBlock = result.Messages[0].Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<TextBlock>().Subject;
         textBlock.Text.Should().Be("Hello Messenger!");
     }
 
@@ -114,7 +114,7 @@ public class MessengerWebhookHandlerTests
         var result = await handler.HandleAsync(body, headers, TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        var imageBlock = result.Message!.Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<ImageBlock>().Subject;
+        var imageBlock = result.Messages[0].Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<ImageBlock>().Subject;
         imageBlock.Url.Should().Be("https://example.com/photo.jpg");
     }
 
@@ -147,9 +147,9 @@ public class MessengerWebhookHandlerTests
         var result = await handler.HandleAsync(body, headers, TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.StatusUpdate);
-        result.StatusUpdate.Should().NotBeNull();
-        result.StatusUpdate!.ExternalMessageId.Should().Be("m_out001");
-        result.StatusUpdate.NewStatus.Should().Be(MessageDeliveryStatus.Delivered);
+        result.StatusUpdates.Should().ContainSingle();
+        result.StatusUpdates[0].ExternalMessageId.Should().Be("m_out001");
+        result.StatusUpdates[0].NewStatus.Should().Be(MessageDeliveryStatus.Delivered);
     }
 
     // ── HMAC validation pass ──────────────────────────────────────────────────

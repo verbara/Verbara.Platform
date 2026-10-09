@@ -43,17 +43,17 @@ public sealed class SmsWebhookHandler : IWebhookHandler
         var statusValue = TryExtract(formParams, headers, "MessageStatus", "X-Delivery-Status", "status");
 
         if (messageId is null || statusValue is null)
-            return new WebhookResult(WebhookResultType.Ignored, null, null);
+            return WebhookResult.Ignored;
 
         var smsStatus = ParseDeliveryStatus(statusValue);
         if (smsStatus is null)
-            return new WebhookResult(WebhookResultType.Ignored, null, null);
+            return WebhookResult.Ignored;
 
         var confirmedStatus = await _provider.GetStatusAsync(messageId, ct).ConfigureAwait(false);
         var mappedStatus = MapStatus(confirmedStatus);
 
         var update = new DeliveryStatusUpdate(messageId, mappedStatus, DateTimeOffset.UtcNow);
-        return new WebhookResult(WebhookResultType.StatusUpdate, null, update);
+        return new WebhookResult(WebhookResultType.StatusUpdate, [], [update]);
     }
 
     private static WebhookResult HandleInbound(
@@ -87,7 +87,7 @@ public sealed class SmsWebhookHandler : IWebhookHandler
             smsSid,
             DateTimeOffset.UtcNow);
 
-        return new WebhookResult(WebhookResultType.NewMessage, inbound, null);
+        return new WebhookResult(WebhookResultType.NewMessage, [inbound], []);
     }
 
     private static Dictionary<string, string> ParseFormBody(ReadOnlyMemory<byte> body)

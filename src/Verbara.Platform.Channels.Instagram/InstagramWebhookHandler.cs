@@ -118,14 +118,14 @@ public sealed class InstagramWebhookHandler : IWebhookHandler
                         mids[0],
                         MessageDeliveryStatus.Delivered,
                         DateTimeOffset.FromUnixTimeMilliseconds(ev.Delivery.Watermark));
-                    return new WebhookResult(WebhookResultType.StatusUpdate, null, update);
+                    return new WebhookResult(WebhookResultType.StatusUpdate, [], [update]);
                 }
 
                 if (ev.Message is not null)
                 {
                     var inbound = ParseInboundMessage(ev);
                     if (inbound is not null)
-                        return new WebhookResult(WebhookResultType.NewMessage, inbound, null);
+                        return new WebhookResult(WebhookResultType.NewMessage, [inbound], []);
                 }
             }
         }
@@ -176,5 +176,5 @@ public sealed class InstagramWebhookHandler : IWebhookHandler
     }
 
     private static WebhookResult Ignored() =>
-        new(WebhookResultType.Ignored, null, null);
+        WebhookResult.Ignored;
 }
