@@ -18,6 +18,7 @@ public sealed class DefaultConversationServiceTests : IDisposable
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IChannelConnector _connector = Substitute.For<IChannelConnector>();
     private readonly PlatformEventBus _eventBus = new();
+    private readonly IWhatsAppSessionWindow _whatsAppWindow = Substitute.For<IWhatsAppSessionWindow>();
 
     private readonly TenantId _tenantId = new("tenant-1");
     private readonly EntityId _conversationId = EntityId.From("conv-001");
@@ -34,13 +35,15 @@ public sealed class DefaultConversationServiceTests : IDisposable
         _channelRegistry.GetConnector(Arg.Any<ChannelType>()).Returns(_connector);
         _connector.SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>())
             .Returns(new SendResult(true, "ext-123", null, null));
+        _whatsAppWindow.DecideAsync(default, default, default, default)
+            .ReturnsForAnyArgs(new WhatsAppWindowDecision(WhatsAppSendMode.FreeForm, _now.AddMinutes(-5)));
     }
 
     public void Dispose() => _eventBus.Dispose();
 
     private DefaultConversationService CreateSut() =>
         new(_conversationStore, _contactStore, _messageStore, _channelRegistry,
-            _lifecycleService, _clock, NullLogger<DefaultConversationService>.Instance, _eventBus);
+            _lifecycleService, _clock, NullLogger<DefaultConversationService>.Instance, _eventBus, _whatsAppWindow);
 
     private Conversation BuildConversation(
         ConversationState state = ConversationState.Active,
@@ -459,5 +462,90 @@ public sealed class DefaultConversationServiceTests : IDisposable
         result.Should().NotBeSameAs(tenantBConversation);
         await _lifecycleService.Received(1).CreateAsync(
             tenantA, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
+    }
+    // ─── WhatsApp 24-hour window (whatsapp-outbound, design D7) ───────────────
+
+    private void WindowClosed() =>
+        _whatsAppWindow.DecideAsync(_tenantId, _conversationId, null, Arg.Any<CancellationToken>())
+            .Returns(new WhatsAppWindowDecision(WhatsAppSendMode.TemplateRequired, _now.AddHours(-25)));
+
+    private void SeedOwnedConversation(ChannelType channel = ChannelType.WhatsApp)
+    {
+        var conversation = new Conversation
+        {
+            ConversationId = _conversationId,
+            TenantId = _tenantId,
+            ContactId = _contactId,
+            Channel = channel,
+            State = ConversationState.Active,
+            Owner = ConversationOwner.ForAgent(_agentId),
+            CreatedAt = _now,
+        };
+        _conversationStore.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+        var contact = BuildContact(new ChannelAddress(channel, "+1234567890"));
+        _contactStore.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>()).Returns(contact);
+    }
+
+    [Fact]
+    public async Task TrySendMessageAsync_ShouldRefuseAndStoreNothing_WhenWhatsAppWindowClosed()
+    {
+        SeedOwnedConversation();
+        WindowClosed();
+
+        var outcome = await CreateSut().TrySendMessageAsync(
+            _conversationId, _tenantId, _envelope, _agentId, ConversationOwnerKind.Agent, null, CancellationToken.None);
+
+        outcome.IsRefused.Should().BeTrue();
+        outcome.RefusalCode.Should().Be("whatsapp-template-required");
+        outcome.Message.Should().BeNull();
+        await _messageStore.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+        await _connector.DidNotReceiveWithAnyArgs().SendAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task TrySendMessageAsync_ShouldSendTemplate_WhenTemplateNamedOutsideWindow()
+    {
+        SeedOwnedConversation();
+        _whatsAppWindow.DecideAsync(_tenantId, _conversationId, "order_update", Arg.Any<CancellationToken>())
+            .Returns(new WhatsAppWindowDecision(WhatsAppSendMode.Template, _now.AddHours(-30)));
+
+        var outcome = await CreateSut().TrySendMessageAsync(
+            _conversationId, _tenantId, _envelope, _agentId, ConversationOwnerKind.Agent, "order_update", CancellationToken.None);
+
+        outcome.IsRefused.Should().BeFalse();
+        outcome.Message!.DeliveryStatus.Should().Be(MessageDeliveryStatus.Sent);
+        await _connector.Received(1).SendAsync(
+            Arg.Is<OutboundMessage>(m => m.TemplateId == "order_update"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TrySendMessageAsync_ShouldNotConsultWindow_WhenChannelIsNotWhatsApp()
+    {
+        SeedOwnedConversation(ChannelType.WebChat);
+        _whatsAppWindow.DecideAsync(default, default, default, default)
+            .ReturnsForAnyArgs(new WhatsAppWindowDecision(WhatsAppSendMode.TemplateRequired, null));
+
+        var outcome = await CreateSut().TrySendMessageAsync(
+            _conversationId, _tenantId, _envelope, _agentId, ConversationOwnerKind.Agent, null, CancellationToken.None);
+
+        outcome.IsRefused.Should().BeFalse();
+        await _whatsAppWindow.DidNotReceiveWithAnyArgs().DecideAsync(default, default, default, default);
+        await _connector.Received(1).SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldStoreFailedWithoutSending_WhenWhatsAppWindowClosed()
+    {
+        // System callers (bot, automation, survey) have nobody to show a 409 to: the message is recorded failed.
+        SeedOwnedConversation();
+        WindowClosed();
+
+        var message = await CreateSut().SendMessageAsync(
+            _conversationId, _tenantId, _envelope, _agentId, ConversationOwnerKind.Agent, CancellationToken.None);
+
+        message.DeliveryStatus.Should().Be(MessageDeliveryStatus.Failed);
+        await _messageStore.Received(1).SaveAsync(
+            Arg.Is<Message>(m => m.DeliveryStatus == MessageDeliveryStatus.Failed), Arg.Any<CancellationToken>());
+        await _connector.DidNotReceiveWithAnyArgs().SendAsync(default!, default);
     }
 }

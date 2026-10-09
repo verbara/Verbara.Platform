@@ -141,15 +141,20 @@ internal static class ConversationEndpoints
             new TextBlock(body.Text),
         ]);
 
-        var message = await conversationService.SendMessageAsync(
+        // A channel rule refusal (WhatsApp outside its 24-hour window: whatsapp-template-required) is a 409 with
+        // the machine code; nothing was stored or sent.
+        var outcome = await conversationService.TrySendMessageAsync(
             conversation.ConversationId,
             tenantId,
             envelope,
             actor.Agent.AgentId,
             ConversationOwnerKind.Agent,
+            templateId: null,
             ct);
 
-        return TypedResults.Ok(message);
+        return outcome.Message is { } message
+            ? TypedResults.Ok(message)
+            : ConversationActor.Conflict(outcome.RefusalCode!);
     }
 
     // An offer is accepted only by the agent it was made to, which then owns the conversation.

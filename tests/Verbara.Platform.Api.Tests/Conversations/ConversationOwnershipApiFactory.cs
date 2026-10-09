@@ -37,7 +37,7 @@ namespace Verbara.Platform.Api.Tests.Conversations;
 /// one), so a check that compares an owner with the wrong identifier cannot pass by accident.
 /// </para>
 /// </remarks>
-public sealed class ConversationOwnershipApiFactory : ImpersonationApiFactory
+public class ConversationOwnershipApiFactory : ImpersonationApiFactory
 {
     public static readonly TenantId Tenant = new(CustomerTenantId);
 
