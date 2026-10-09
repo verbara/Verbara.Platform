@@ -4,6 +4,7 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using NSubstitute;
+using NSubstitute.ReturnsExtensions;
 
 namespace Verbara.Platform.Channels.Core.Tests.Pipeline;
 
@@ -453,7 +454,7 @@ public class InboundMessagePipelineTests
             ExternalMessageId = "race-ext",
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        _messageStore.FindByExternalIdAsync(TenantId, "race-ext", Arg.Any<CancellationToken>()).Returns((Message?)null);
+        _messageStore.FindByExternalIdAsync(TenantId, "race-ext", Arg.Any<CancellationToken>()).ReturnsNull();
         _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>()).Returns(winner);
         _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
@@ -464,6 +465,50 @@ public class InboundMessagePipelineTests
         result.MessageId.Should().Be(winner.MessageId);
         result.ConversationId.Should().Be(winner.ConversationId);
         result.IsNewConversation.Should().BeFalse();
+        result.IsDuplicate.Should().BeTrue("the caller must not repeat the winning delivery's side effects");
         await _messageStore.DidNotReceive().SaveAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShouldFlagDuplicate_WhenExternalIdIsAlreadyStored()
+    {
+        var inbound = MakeMessage("replayed-ext");
+        var contact = MakeContact();
+        var stored = new Message
+        {
+            MessageId = EntityId.New(),
+            ConversationId = EntityId.New(),
+            TenantId = TenantId,
+            Direction = MessageDirection.Inbound,
+            Channel = Channel,
+            Content = new MessageEnvelope([]),
+            DeliveryStatus = MessageDeliveryStatus.Delivered,
+            ExternalMessageId = "replayed-ext",
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        _messageStore.FindByExternalIdAsync(TenantId, "replayed-ext", Arg.Any<CancellationToken>()).Returns(stored);
+        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        result.IsDuplicate.Should().BeTrue();
+        result.MessageId.Should().Be(stored.MessageId);
+        result.ConversationId.Should().Be(stored.ConversationId);
+        await _messageStore.DidNotReceiveWithAnyArgs().InsertInboundIfAbsentAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShouldNotFlagDuplicate_WhenMessageIsNew()
+    {
+        var inbound = MakeMessage("fresh-ext");
+        var contact = MakeContact();
+        _messageStore.FindByExternalIdAsync(TenantId, "fresh-ext", Arg.Any<CancellationToken>()).ReturnsNull();
+        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
+            .Returns(MakeConversation(contact.ContactId));
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        result.IsDuplicate.Should().BeFalse();
     }
 }

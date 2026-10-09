@@ -1,12 +1,8 @@
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
-using Verbara.Platform.Bot;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Channels.Core;
-using Verbara.Platform.Conversations;
-using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
-using Verbara.Platform.Routing.Inbound;
-using Verbara.Platform.Switchboard;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
@@ -28,22 +24,10 @@ internal static class WebhookEndpoints
         string channel,
         HttpRequest request,
         IChannelRegistry channelRegistry,
-        IInboundMessagePipeline pipeline,
-        IInboundRouter router,
-        IConversationSwitchboard switchboard,
-        IConversationService conversationService,
-        [FromServices] IConversationStore conversationStore,
-        [FromServices] IContactStore contactStore,
-        IVirtualAgent virtualAgent,
-        [FromServices] IConversationLifecycleService lifecycleService,
-        [FromServices] DeliveryStatusHandler deliveryStatusHandler,
         [FromServices] ITenantChannelConfigStore configStore,
-        [FromServices] PlatformEventBus eventBus,
-        ILoggerFactory loggerFactory,
+        [FromServices] WebhookInboundProcessor processor,
         CancellationToken ct)
     {
-        var logger = loggerFactory.CreateLogger("WebhookEndpoints");
-
         if (!TryParseChannelType(channel, out var channelType))
             return Results.BadRequest(new ErrorResponse($"Unknown channel: {channel}"));
 
@@ -58,13 +42,9 @@ internal static class WebhookEndpoints
         if (await BoundedRequestBody.ReadAsync(request, BoundedRequestBody.WebhookMaxBytes, ct) is not { } body)
             return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
 
-        // Extract headers
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var header in request.Headers)
-        {
-            if (header.Value.Count > 0)
-                headers[header.Key] = header.Value.ToString();
-        }
+        var headers = request.Headers
+            .Where(header => header.Value.Count > 0)
+            .ToDictionary(header => header.Key, header => header.Value.ToString(), StringComparer.OrdinalIgnoreCase);
 
         // Only a channel whose module the host registered is served (whatsapp-works-for-real D1/D2); any
         // other configured channel stays unreachable, without exception text in the response.
@@ -73,112 +53,9 @@ internal static class WebhookEndpoints
 
         var result = await handler.HandleAsync(body, headers, tid, ct);
 
-        // A delivery may batch several messages and statuses (D4): process every one, in order.
-        foreach (var inbound in result.Messages)
-        {
-            var pipelineResult = await pipeline.ProcessAsync(inbound, tid, channelType, ct);
-
-            // Publish SSE events for real-time UI updates
-            if (pipelineResult.IsNewConversation)
-            {
-                eventBus.Publish(new ConversationStateChangedEvent(
-                    tid.Value, pipelineResult.ConversationId.Value, "", "Queued"));
-            }
-
-            eventBus.Publish(new ConversationMessageEvent(
-                tid.Value, pipelineResult.ConversationId.Value,
-                pipelineResult.MessageId.Value, "Inbound", channelType.ToString()));
-
-            // Fetch conversation and contact by IDs returned from pipeline
-            var conversation = await conversationStore.GetByIdAsync(tid, pipelineResult.ConversationId, ct); // enrichment-n1-ok: per batched webhook event (D4), each with its own conversation
-            var contact = await contactStore.GetByIdAsync(tid, pipelineResult.ContactId, ct); // enrichment-n1-ok: per batched webhook event (D4), each with its own conversation
-
-            if (conversation is not null && contact is not null)
-            {
-                // Route to queue
-                var routingCtx = new RoutingContext(conversation, contact, channelType, inbound.Content, tid);
-                var routeResult = await router.RouteAsync(routingCtx, ct);
-
-                // C5 (implicit capture): stamp any reason/metadata the router resolved (e.g. the
-                // ReasonHintMiddleware's "reasonPath") onto the conversation BEFORE assignment and
-                // any bot processing. AssignToQueueAsync reloads + persists the row, so this metadata
-                // round-trips through the assignment.
-                if (routeResult.Metadata is { Count: > 0 })
-                {
-                    foreach (var kv in routeResult.Metadata)
-                        conversation.SetMetadata(kv.Key, kv.Value);
-                    await conversationStore.SaveAsync(conversation, ct);
-                }
-
-                await switchboard.AssignToQueueAsync(conversation.ConversationId, tid, routeResult.QueueId, ct);
-
-                // Reload conversation to check owner after assignment
-                var updated = await conversationStore.GetByIdAsync(tid, conversation.ConversationId, ct); // enrichment-n1-ok: per batched webhook event (D4), each with its own conversation
-                if (updated?.Owner?.Kind == ConversationOwnerKind.Bot && updated.Owner.OwnerId.HasValue)
-                {
-                    var botResponse = await virtualAgent.ProcessMessageAsync(
-                        updated.ConversationId, tid, inbound.Content, ct);
-
-                    if (botResponse.Action == BotResponseAction.Reply && botResponse.Messages is not null)
-                    {
-                        foreach (var reply in botResponse.Messages)
-                        {
-                            await conversationService.SendMessageAsync(
-                                updated.ConversationId,
-                                tid,
-                                reply,
-                                updated.Owner.OwnerId.Value,
-                                ConversationOwnerKind.Bot,
-                                ct);
-                        }
-                    }
-                    else if (botResponse.Action == BotResponseAction.TransferToQueue)
-                    {
-                        if (botResponse.TargetQueueId is null)
-                        {
-#pragma warning disable CA1848 // Use LoggerMessage delegates
-                            logger.LogWarning(
-                                "Bot requested TransferToQueue for conversation {ConversationId} without a target queue; skipping handoff.",
-                                updated.ConversationId.Value);
-#pragma warning restore CA1848
-                        }
-                        else
-                        {
-                            // C6 (explicit capture): apply the bot flow's captured metadata (non-"__"
-                            // flow variables) onto the conversation at the bot→queue handoff, BEFORE the
-                            // transfer. The bot runs AFTER routing, so FlowMetadata intentionally
-                            // OVERWRITES the implicit C5 reasonPath — explicit wins. TransferToQueueAsync
-                            // reloads + persists, so this metadata round-trips through the transfer.
-                            if (botResponse.FlowMetadata is { Count: > 0 })
-                            {
-                                foreach (var kv in botResponse.FlowMetadata)
-                                    updated.SetMetadata(kv.Key, kv.Value);
-                                await conversationStore.SaveAsync(updated, ct);
-                            }
-
-                            await switchboard.TransferToQueueAsync(
-                                updated.ConversationId,
-                                tid,
-                                botResponse.TargetQueueId.Value,
-                                ct);
-
-                            eventBus.Publish(new ConversationStateChangedEvent(
-                                tid.Value, updated.ConversationId.Value, "Bot", "Queued"));
-                        }
-                    }
-                    else if (botResponse.Action == BotResponseAction.EndConversation)
-                    {
-                        await lifecycleService.CloseAsync(tid, updated.ConversationId, ct);
-                    }
-                }
-            }
-        }
-
-        foreach (var statusUpdate in result.StatusUpdates)
-        {
-            await deliveryStatusHandler.HandleAsync(tid, statusUpdate, ct);
-        }
-
+        // Every message and status of the delivery is stored before the 200; a replayed message has no side
+        // effect, and one message's routing or bot failure never fails the others (WebhookInboundProcessor).
+        await processor.ProcessAsync(tid, channelType, result, ct);
         return Results.Ok();
     }
 

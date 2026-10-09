@@ -50,7 +50,8 @@ public sealed class InboundMessagePipeline : IInboundMessagePipeline
                 ConversationId: duplicate.ConversationId,
                 ContactId: context.Contact!.ContactId,
                 MessageId: duplicate.MessageId,
-                IsNewConversation: false);
+                IsNewConversation: false,
+                IsDuplicate: true);
         }
 
         // Step 2: Contact resolution
@@ -70,7 +71,8 @@ public sealed class InboundMessagePipeline : IInboundMessagePipeline
                 ConversationId: persisted.ConversationId,
                 ContactId: context.Contact!.ContactId,
                 MessageId: persisted.MessageId,
-                IsNewConversation: false);
+                IsNewConversation: false,
+                IsDuplicate: true);
         }
 
         return new PipelineResult(

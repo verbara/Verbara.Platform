@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Channels.Sms;
 using Verbara.Platform.Channels.Sms.Providers;
 using Verbara.Platform.Channels.WebChat;
@@ -32,6 +33,9 @@ public static class DigitalChannelsExtensions
         // Every WhatsApp credential is per tenant (TenantChannelConfig, keys in WhatsAppCredentialKeys):
         // no process-wide option is bound, so a tenant without its own AppSecret is ignored (fail-closed).
         services.AddWhatsApp(static _ => { });
+
+        // What a verified webhook delivery does once stored: idempotent side effects, isolated per message.
+        services.AddScoped<WebhookInboundProcessor>();
 
         // ─── Twilio SMS provider (conditional on config) ───────────────────────
         var twilioSection = configuration.GetSection("Twilio");
