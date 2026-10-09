@@ -4,8 +4,14 @@ namespace Verbara.Platform.Channels.WhatsApp;
 
 internal static partial class Log
 {
-    [LoggerMessage(Level = LogLevel.Warning, Message = "WhatsApp webhook HMAC validation failed for tenant {TenantId}")]
+    [LoggerMessage(EventId = 8401, Level = LogLevel.Warning, Message = "WhatsApp webhook HMAC validation failed for tenant {TenantId}")]
     internal static partial void HmacValidationFailed(ILogger logger, string tenantId);
+
+    [LoggerMessage(EventId = 8400, Level = LogLevel.Warning, Message = "WhatsApp webhook ignored for tenant {TenantId}: the tenant's WhatsApp configuration has no AppSecret (no process-wide fallback)")]
+    internal static partial void AppSecretMissing(ILogger logger, string tenantId);
+
+    [LoggerMessage(EventId = 8402, Level = LogLevel.Warning, Message = "WhatsApp webhook change ignored for tenant {TenantId}: metadata.phone_number_id is not the tenant's PhoneNumberId")]
+    internal static partial void ForeignPhoneNumberId(ILogger logger, string tenantId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to deserialize WhatsApp webhook payload")]
     internal static partial void DeserializeWebhookFailed(ILogger logger, Exception exception);

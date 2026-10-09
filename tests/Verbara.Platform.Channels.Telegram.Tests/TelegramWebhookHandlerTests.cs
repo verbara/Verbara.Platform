@@ -55,11 +55,11 @@ public class TelegramWebhookHandlerTests
         var result = await handler.HandleAsync(body, new Dictionary<string, string>(), TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        result.Message.Should().NotBeNull();
-        result.Message!.ExternalMessageId.Should().Be("42");
-        result.Message.From.Channel.Should().Be(ChannelType.Telegram);
-        result.Message.From.Address.Should().Be("987654321");
-        var textBlock = result.Message.Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<TextBlock>().Subject;
+        result.Messages.Should().ContainSingle();
+        result.Messages[0].ExternalMessageId.Should().Be("42");
+        result.Messages[0].From.Channel.Should().Be(ChannelType.Telegram);
+        result.Messages[0].From.Address.Should().Be("987654321");
+        var textBlock = result.Messages[0].Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<TextBlock>().Subject;
         textBlock.Text.Should().Be("Hello from Telegram!");
     }
 
@@ -88,7 +88,7 @@ public class TelegramWebhookHandlerTests
         var result = await handler.HandleAsync(body, new Dictionary<string, string>(), TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        var imageBlock = result.Message!.Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<ImageBlock>().Subject;
+        var imageBlock = result.Messages[0].Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<ImageBlock>().Subject;
         // Should pick the largest (last) photo
         imageBlock.Url.Should().Be("telegram-file:large_id");
         imageBlock.MimeType.Should().Be("image/jpeg");
@@ -121,7 +121,7 @@ public class TelegramWebhookHandlerTests
         var result = await handler.HandleAsync(body, new Dictionary<string, string>(), TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        var fileBlock = result.Message!.Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<FileBlock>().Subject;
+        var fileBlock = result.Messages[0].Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<FileBlock>().Subject;
         fileBlock.FileName.Should().Be("report.pdf");
         fileBlock.MimeType.Should().Be("application/pdf");
         fileBlock.Url.Should().Be("telegram-file:doc_file_id");
@@ -149,7 +149,7 @@ public class TelegramWebhookHandlerTests
         var result = await handler.HandleAsync(body, new Dictionary<string, string>(), TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        var locBlock = result.Message!.Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<LocationBlock>().Subject;
+        var locBlock = result.Messages[0].Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<LocationBlock>().Subject;
         locBlock.Latitude.Should().BeApproximately(48.8566, 0.0001);
         locBlock.Longitude.Should().BeApproximately(2.3522, 0.0001);
     }

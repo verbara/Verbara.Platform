@@ -74,11 +74,11 @@ public class InstagramWebhookHandlerTests
         var result = await handler.HandleAsync(body, headers, TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        result.Message.Should().NotBeNull();
-        result.Message!.ExternalMessageId.Should().Be("ig_m_abc123");
-        result.Message.From.Channel.Should().Be(ChannelType.Instagram);
-        result.Message.From.Address.Should().Be("iguser-789");
-        var textBlock = result.Message.Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<TextBlock>().Subject;
+        result.Messages.Should().ContainSingle();
+        result.Messages[0].ExternalMessageId.Should().Be("ig_m_abc123");
+        result.Messages[0].From.Channel.Should().Be(ChannelType.Instagram);
+        result.Messages[0].From.Address.Should().Be("iguser-789");
+        var textBlock = result.Messages[0].Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<TextBlock>().Subject;
         textBlock.Text.Should().Be("Hey Instagram!");
     }
 
@@ -114,7 +114,7 @@ public class InstagramWebhookHandlerTests
         var result = await handler.HandleAsync(body, headers, TenantA, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        var imageBlock = result.Message!.Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<ImageBlock>().Subject;
+        var imageBlock = result.Messages[0].Content.Blocks.Should().ContainSingle().Which.Should().BeOfType<ImageBlock>().Subject;
         imageBlock.Url.Should().Be("https://example.com/igphoto.jpg");
     }
 

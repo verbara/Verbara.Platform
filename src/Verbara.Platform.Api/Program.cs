@@ -73,7 +73,6 @@ using Verbara.Sdk.Pro.Cluster;
 using Verbara.Sdk.Pro.Cluster.DependencyInjection;
 using Verbara.Sdk.Pro.Cluster.Storage.Postgres.DependencyInjection;
 using Verbara.Sdk.Cluster.Postgres.DependencyInjection;
-using Verbara.Platform.Channels.WebChat;
 using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Pro.MultiTenant.DependencyInjection;
 using Verbara.Sdk.Push.Hosting;
@@ -252,23 +251,8 @@ builder.Services.AddPlatformBilling();
 // the suggestion handler can resolve ITypificationCreditMeter.
 builder.Services.AddSingleton<Verbara.Platform.Typification.Ai.ITypificationCreditMeter,
     Verbara.Platform.Api.Services.BillingTypificationCreditMeter>();
-builder.Services.AddWebChat();
-
-// ─── Twilio SMS (conditional on config) ─────────────────────────────────────
-var twilioSection = builder.Configuration.GetSection("Twilio");
-if (!string.IsNullOrEmpty(twilioSection["AccountSid"]))
-{
-    builder.Services.Configure<Verbara.Platform.Channels.Sms.Providers.TwilioOptions>(o =>
-    {
-        o.AccountSid = twilioSection["AccountSid"]!;
-        o.AuthToken = twilioSection["AuthToken"]!;
-    });
-    builder.Services.AddHttpClient("twilio");
-    builder.Services.AddSingleton<Verbara.Platform.Channels.Sms.ISmsProvider,
-        Verbara.Platform.Channels.Sms.Providers.TwilioSmsProvider>();
-    // Transient-retry policy for Twilio HTTP calls (v1.9.1 Frente A).
-    Verbara.Platform.Channels.Sms.ServiceCollectionExtensions.AddTwilioResiliencePolicy(builder.Services);
-}
+// Digital channels (WebChat + WhatsApp only) and the conditional Twilio SMS provider.
+builder.Services.AddDigitalChannels(builder.Configuration);
 
 // ─── GDPR Services ──────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IGdprExportService, GdprExportService>();

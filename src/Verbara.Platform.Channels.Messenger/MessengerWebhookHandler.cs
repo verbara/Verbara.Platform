@@ -114,7 +114,7 @@ public sealed class MessengerWebhookHandler : IWebhookHandler
                         mids[0],
                         MessageDeliveryStatus.Delivered,
                         DateTimeOffset.FromUnixTimeMilliseconds(ev.Delivery.Watermark));
-                    return new WebhookResult(WebhookResultType.StatusUpdate, null, update);
+                    return new WebhookResult(WebhookResultType.StatusUpdate, [], [update]);
                 }
 
                 // Read receipt
@@ -129,7 +129,7 @@ public sealed class MessengerWebhookHandler : IWebhookHandler
                 {
                     var inbound = ParseInboundMessage(ev);
                     if (inbound is not null)
-                        return new WebhookResult(WebhookResultType.NewMessage, inbound, null);
+                        return new WebhookResult(WebhookResultType.NewMessage, [inbound], []);
                 }
             }
         }
@@ -180,5 +180,5 @@ public sealed class MessengerWebhookHandler : IWebhookHandler
     }
 
     private static WebhookResult Ignored() =>
-        new(WebhookResultType.Ignored, null, null);
+        WebhookResult.Ignored;
 }

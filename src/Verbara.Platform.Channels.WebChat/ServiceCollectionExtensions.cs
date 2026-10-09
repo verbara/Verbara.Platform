@@ -1,3 +1,4 @@
+using Verbara.Platform.Channels.Core;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Channels.WebChat;
@@ -8,7 +9,8 @@ namespace Verbara.Platform.Channels.WebChat;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers WebChat connector, session manager, and message adapter.
+    /// Registers WebChat connector (also exposed as <see cref="IChannelConnector"/> for the channel
+    /// registry), session manager, and message adapter.
     /// </summary>
     public static IServiceCollection AddWebChat(
         this IServiceCollection services,
@@ -23,6 +25,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<WebSocketWebChatTransport>();
         services.AddSingleton<IWebChatTransport>(sp => sp.GetRequiredService<WebSocketWebChatTransport>());
         services.AddSingleton<WebChatConnector>();
+        // Expose the outbound connector to the channel registry (whatsapp-works-for-real D1/D2): an agent
+        // reply to a WebChat contact reaches this connector instead of "no connector registered". WebChat
+        // has no webhook handler — its inbound path is its own endpoints.
+        services.AddSingleton<IChannelConnector>(sp => sp.GetRequiredService<WebChatConnector>());
 
         return services;
     }
