@@ -76,13 +76,18 @@ internal sealed partial class DefaultConversationService : IConversationService
             var outbound = new OutboundMessage(address, envelope, tenantId, conversationId);
             var result = await connector.SendAsync(outbound, ct).ConfigureAwait(false);
 
-            var status = result.Success ? MessageDeliveryStatus.Sent : MessageDeliveryStatus.Failed;
-            var sentAt = result.Success ? _clock.UtcNow : (DateTimeOffset?)null;
-            await _messageStore.UpdateDeliveryStatusAsync(tenantId, message.MessageId, status, sentAt, ct).ConfigureAwait(false);
-            message.DeliveryStatus = status;
-
-            if (!result.Success)
+            if (result.Success)
             {
+                // The provider id and Sent land in one write (message-delivery-correlation, design D8): the
+                // provider's sent/delivered callback can arrive before a second write would have committed.
+                await _messageStore.MarkSentAsync(tenantId, message.MessageId, result.ExternalMessageId, ct).ConfigureAwait(false);
+                message.DeliveryStatus = MessageDeliveryStatus.Sent;
+            }
+            else
+            {
+                await _messageStore.UpdateDeliveryStatusAsync(
+                    tenantId, message.MessageId, MessageDeliveryStatus.Failed, null, ct).ConfigureAwait(false);
+                message.DeliveryStatus = MessageDeliveryStatus.Failed;
                 LogSendFailed(_logger, conversationId.Value, result.ErrorCode, result.ErrorMessage);
             }
         }

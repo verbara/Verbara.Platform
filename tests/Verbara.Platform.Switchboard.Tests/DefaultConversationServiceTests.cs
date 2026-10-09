@@ -130,8 +130,31 @@ public sealed class DefaultConversationServiceTests : IDisposable
             EntityId.From("system"), ConversationOwnerKind.System, CancellationToken.None);
 
         result.DeliveryStatus.Should().Be(MessageDeliveryStatus.Sent);
-        await _messageStore.Received(1).UpdateDeliveryStatusAsync(
-            _tenantId, result.MessageId, MessageDeliveryStatus.Sent, _now, Arg.Any<CancellationToken>());
+        await _messageStore.Received(1).MarkSentAsync(
+            _tenantId, result.MessageId, "ext-msg-999", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldStampExternalId_WhenConnectorSucceeds()
+    {
+        // message-delivery-correlation: the provider id and Sent land in ONE store write, so Meta's
+        // sent/delivered webhook — which can arrive before a second write would — finds the message.
+        var conversation = BuildConversation(owner: ConversationOwner.System);
+        _conversationStore.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        _contactStore.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>())
+            .Returns(BuildContact(WhatsAppAddress()));
+
+        var sut = CreateSut();
+        var result = await sut.SendMessageAsync(
+            _conversationId, _tenantId, _envelope,
+            EntityId.From("system"), ConversationOwnerKind.System, CancellationToken.None);
+
+        result.DeliveryStatus.Should().Be(MessageDeliveryStatus.Sent);
+        await _messageStore.Received(1).MarkSentAsync(_tenantId, result.MessageId, "ext-123", Arg.Any<CancellationToken>());
+        await _messageStore.DidNotReceive().UpdateDeliveryStatusAsync(
+            Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<MessageDeliveryStatus>(),
+            Arg.Any<DateTimeOffset?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -153,6 +176,8 @@ public sealed class DefaultConversationServiceTests : IDisposable
         result.DeliveryStatus.Should().Be(MessageDeliveryStatus.Failed);
         await _messageStore.Received(1).UpdateDeliveryStatusAsync(
             _tenantId, result.MessageId, MessageDeliveryStatus.Failed, null, Arg.Any<CancellationToken>());
+        await _messageStore.DidNotReceive().MarkSentAsync(
+            Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     // ─── SendMessageAsync — error cases ──────────────────────────────────────

@@ -92,4 +92,13 @@ public class MigrationsTests : IClassFixture<MigrationsFixture>
         (await _fixture.ColumnExistsAsync("csat_templates", "locale")).Should().BeTrue();
         (await _fixture.ColumnExistsAsync("csat_templates", "body")).Should().BeTrue();
     }
+
+    // ── whatsapp-works-for-real block B (migration 020) ───────────────────────
+
+    [Fact]
+    public async Task Migrations_ShouldReplaceExternalIdIndexWithUniquePartialIndex_WhenApplied()
+    {
+        (await _fixture.IndexExistsAsync("ux_messages_tenant_external")).Should().BeTrue();
+        (await _fixture.IndexExistsAsync("idx_messages_external")).Should().BeFalse();
+    }
 }

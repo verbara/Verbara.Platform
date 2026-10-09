@@ -63,6 +63,16 @@ public sealed class InboundMessagePipeline : IInboundMessagePipeline
         context = await _messagePersistenceStep.ExecuteAsync(context, ct);
 
         var persisted = context.PersistedMessage!;
+        if (context.IsDuplicate)
+        {
+            // Lost the insert race to an identical delivery: report the stored message, as Step 1 would have.
+            return new PipelineResult(
+                ConversationId: persisted.ConversationId,
+                ContactId: context.Contact!.ContactId,
+                MessageId: persisted.MessageId,
+                IsNewConversation: false);
+        }
+
         return new PipelineResult(
             ConversationId: context.Conversation!.ConversationId,
             ContactId: context.Contact!.ContactId,

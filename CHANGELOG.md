@@ -32,6 +32,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `whatsapp.webhook.rejected` (meter `Verbara.Platform.Channels.WhatsApp`, `reason`
   `missing_app_secret`). Configurations saved by console v3.21.0 use other key names (`ApiToken`,
   `PhoneNumber`) and must be re-entered with these.
+- **Migration `020_MessagesExternalIdUnique` removes duplicate inbound messages.** A provider message
+  delivered twice at the same moment could be stored twice. Before it makes the provider message id
+  unique per tenant, the migration keeps the earliest stored copy of each such message and deletes the
+  others; messages without a provider id are untouched. It holds a write lock on `messages` while it
+  runs, so plan the upgrade for a quiet period on large tenants.
 
 ### Added
 
@@ -110,11 +115,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **WhatsApp sends use the tenant's own credentials.** The WhatsApp connector reads `AccessToken` and
   `PhoneNumberId` from the sending tenant's WhatsApp channel configuration when it sends; the
   process-wide `WhatsAppOptions.AccessToken`, `PhoneNumberId`, `AppSecret` and `WebhookVerifyToken` are
-  removed and nothing falls back to them. A tenant without an active WhatsApp configuration, or missing either key, gets the message
-  marked failed with `channel-not-configured`, and no request reaches Meta. A template is sent only when
-  the caller names one: the in-memory 24-hour tracker, which nothing fed and which turned every reply
-  into the template `default_template`, is gone. The connector now sends through a named
-  `IHttpClientFactory` client with the same retry, timeout and circuit-breaker policy, so the singleton
+  removed and nothing falls back to them. A tenant without an active WhatsApp configuration, or missing
+  either key, gets the message marked failed with `channel-not-configured`, and no request reaches Meta.
+  A template is sent only when the caller names one: the in-memory 24-hour tracker, which nothing fed
+  and which turned every reply into the template `default_template`, is gone. The connector now sends
+  through a named `IHttpClientFactory` client with the same retry, timeout and circuit-breaker policy, so the singleton
   channel registry never pins one `HttpClient`.
 
 ### Fixed
@@ -128,6 +133,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connectors the channel modules register, resolved on first use. The session lookup is unchanged: a
   reply for which no visitor session is connected under that address is recorded as failed
   (`SESSION_NOT_CONNECTED`) instead of failing the request.
+- **Outbound delivery statuses now reach the message.** The provider's message id was never stored
+  when a send succeeded, so every later `sent`/`delivered`/`read` callback was dropped as unknown. The
+  id and the `Sent` status are now written together in a single update, so a callback that arrives
+  right after the provider's response still finds the message. A callback for an id no message holds
+  is logged and counted on `channels.delivery_status.unknown_id` (meter `verbara.platform.channels`).
+- **Delivery statuses only move forward.** `Pending` → `Sent` → `Delivered` → `Read`; `Failed` is final
+  and can only follow `Pending` or `Sent`. A replayed or late callback (a `sent` after `read`) no longer
+  moves a message backwards, in the database and in the in-memory store alike.
+- **Two identical inbound deliveries store one message.** When a provider delivered the same message
+  twice at the same moment, both copies could be stored, and every later lookup of that message failed.
+  The second delivery now finds the message the first one stored (migration `020`).
 
 ### Security
 
