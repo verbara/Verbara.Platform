@@ -62,7 +62,7 @@ Larger features (multi-week) should be agreed in an issue before code review.
    - `fix: handle queue overflow when capacity is zero`
    - `docs: clarify multi-tenant resolver flow`
    - `refactor:`, `test:`, `chore:`, `perf:` are also accepted.
-3. **Write tests** when changing behavior. xUnit + FluentAssertions for unit tests. Integration tests under `tests/Verbara.Platform.Api.Tests/` use a real PostgreSQL via Testcontainers — **do not mock the database** (we got burned in the past by mock-vs-prod divergence).
+3. **Write tests** when changing behavior. xUnit + FluentAssertions for unit tests. Postgres-backed store tests live in `tests/Verbara.Platform.Storage.Postgres.Tests/` and use a real PostgreSQL via Testcontainers — **do not mock the database there** (we got burned in the past by mock-vs-prod divergence). `tests/Verbara.Platform.Api.Tests/` runs the API over in-memory stores, so it cannot catch a Postgres constraint or SQL error.
 4. **Run locally before pushing:**
    ```bash
    dotnet build Verbara.Platform.slnx -c Release  # TreatWarningsAsErrors=true is enforced
