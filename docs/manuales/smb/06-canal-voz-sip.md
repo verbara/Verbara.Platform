@@ -57,6 +57,60 @@ Después de cualquier cambio en trunks/colas/agentes, Asterisk los toma on-deman
 $ docker exec verbara-asterisk asterisk -rx 'module reload res_pjsip_endpoint_identifier_ip.so'
 ```
 
+### 0.1 Un Asterisk propio: usuario AMI y `systemname`
+
+Si usás el Asterisk del stack de Verbara (Compose), esto ya está hecho: su `manager.conf` se genera en cada arranque desde `docker/asterisk-config/manager.conf.template`. Si conectás Verbara a **tu propio Asterisk** (o a varios), su usuario AMI tiene que ser **igual** a este:
+
+```ini
+; manager.conf
+[general]
+enabled = yes
+bindaddr = 0.0.0.0
+port = 5038
+
+[platform]
+secret = <tu-password-AMI>
+read = system,call,agent,user,config,originate,reporting,command
+write = system,call,agent,user,config,originate,command
+deny = 0.0.0.0/0.0.0.0
+permit = 0.0.0.0/0.0.0.0
+```
+
+El `secret` es el mismo valor que Verbara usa como `Asterisk__Ami__Password`. Restringí `permit` a la IP del servidor de Verbara si podés.
+
+**Por qué cada clase de `write`** (cada acción AMI exige una clase; Asterisk rechaza la acción si el usuario no la tiene):
+
+| Clase | Qué hace Verbara con ella |
+|-------|---------------------------|
+| `system` / `call` | `Status`: la carga del estado al arrancar (y en cada reconexión) y el barrido que cierra las llamadas cuyo `Hangup` se perdió (cada 30 s). `Hangup` y `ModuleLoad` (recarga de módulos) también la usan. |
+| `call` | `Redirect` + `SetVar`: las transferencias de agente (`VoiceCallControlService`); `GetVar`; `BlindTransfer` hacia la encuesta CSAT por voz. |
+| `agent` | `QueuePause`: el estado del agente (Disponible / Ausente) pausa o despausa su miembro de cola (`RealtimeStateBridge`); `QueueAdd`/`QueueRemove` al reconciliar miembros. |
+| `originate` | `Originate`: llamadas salientes del agente y callbacks. |
+| `command` | `Command`: `core show codecs` (lista de codecs instalados en la consola de administración) y la prueba de conectividad de trunks. |
+| `user`, `config` | No encontramos ninguna acción de Verbara que las exija; se mantienen como en la plantilla. |
+
+**Por qué cada clase de `read`** (qué eventos recibe Verbara): `call` (canales, puentes y cada `Hangup`: las sesiones de llamada), `agent` (`AgentConnect` y el estado de los miembros de cola: sin ella la llamada de cola no tiene dueño ni screen-pop) y `system` (`FullyBooted`: sabe cuándo Asterisk terminó de arrancar). Para `user`, `config`, `originate`, `reporting` y `command` no encontramos un evento que Verbara necesite; se mantienen como en la plantilla.
+
+> ⚠️ **No filtres el evento `Hangup`.** No agregues un `eventfilter` que lo excluya (por ejemplo `eventfilter=!Event: Hangup`). Verbara cierra la llamada con ese evento; si no llega, sólo el barrido la cierra, y el barrido necesita `Status`.
+
+**Varios Asterisk (un pool):** cada servidor necesita su propio nombre de sistema, o los ids de canal se repiten entre servidores y las llamadas se mezclan:
+
+```ini
+; asterisk.conf
+[options]
+systemname = <único por servidor>   ; por ejemplo pbx-1, pbx-2
+```
+
+**Qué falla sin esto:** sin `write` con `system`, `call` o `reporting`, el `Status` se rechaza: las llamadas cuyo `Hangup` se perdió quedan abiertas (el agente sigue Ocupado). Sin `call` fallan las transferencias; sin `agent` el agente no se pausa ni despausa en la cola; sin `originate` no salen llamadas. Con dos servidores sin `systemname` distinto, Verbara puede mezclar llamadas de servidores distintos y sólo lo avisa con un Warning en el log.
+
+**Cómo detectarlo:** el `Status` se manda en cada arranque del API, así que un permiso faltante aparece en el **log de arranque**:
+
+```bash
+$ dc logs platform-api | grep 'Status refused'
+```
+
+✓ Sin salida = el usuario AMI tiene el permiso. Si aparece `[LIVE] Status refused: …` (nivel Warning), corregí el `write` del usuario AMI, recargá el manager en Asterisk (`asterisk -rx 'manager reload'`) y reiniciá el API.
+
 ## 1. Pre-requisitos de red — checklist final
 
 Si esto NO está verde, **revisá manual 01 §2 y §3** antes de seguir.

@@ -72,3 +72,43 @@ data:
     [modules]
     autoload=yes
     noload => chan_sip.so
+
+  # Platform's AMI user. Same [general] and the same read/write/deny/permit lines
+  # as docker/asterisk-config/manager.conf.template, no eventfilter (Platform's
+  # pool sweep needs every Hangup and an AMI write class of system, call or
+  # reporting to send Status). The container command renders
+  # /etc/asterisk/manager.conf from this template with the password from the
+  # Secret; the placeholder never reaches Asterisk.
+  manager.conf.template: |
+    [general]
+    enabled = yes
+    bindaddr = 0.0.0.0
+    port = 5038
+
+    [{{ .Values.asterisk.ami.username }}]
+    secret = __AMI_PASSWORD__
+    read = system,call,agent,user,config,originate,reporting,command
+    write = system,call,agent,user,config,originate,command
+    deny = 0.0.0.0/0.0.0.0
+    permit = 0.0.0.0/0.0.0.0
+
+  # Platform's ARI user, as in docker/asterisk-config/ari.conf.template; the
+  # password is rendered in from the Secret the same way.
+  ari.conf.template: |
+    [general]
+    enabled = yes
+    pretty = yes
+
+    [{{ .Values.asterisk.ari.username }}]
+    type = user
+    read_only = no
+    password = __ARI_PASSWORD__
+
+  # ARI is served by Asterisk's HTTP server, which the image binds to 127.0.0.1
+  # only. Plain HTTP on 8088 inside the cluster, as the platform chart's
+  # api.asterisk.ari.baseUrl expects.
+  http.conf: |
+    [general]
+    enabled = yes
+    bindaddr = 0.0.0.0
+    bindport = 8088
