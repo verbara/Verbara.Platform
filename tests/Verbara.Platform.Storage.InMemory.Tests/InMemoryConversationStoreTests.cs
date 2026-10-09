@@ -411,6 +411,7 @@ public sealed class InMemoryConversationStoreTests
         // A failover re-queue (priority -1) created LATER must still sort ahead of a normal
         // (priority 0) conversation created earlier — the customer was already engaged.
         var store = new InMemoryConversationStore();
+        var queue = ConversationOwner.ForQueue(EntityId.New());
         var earlierNormal = new Conversation
         {
             ConversationId = EntityId.New(),
@@ -418,6 +419,7 @@ public sealed class InMemoryConversationStoreTests
             ContactId = EntityId.New(),
             Channel = ChannelType.WebChat,
             State = ConversationState.Queued,
+            Owner = queue,
             CreatedAt = new DateTimeOffset(2026, 6, 1, 10, 0, 0, TimeSpan.Zero),
             QueuePriority = 0,
         };
@@ -428,6 +430,7 @@ public sealed class InMemoryConversationStoreTests
             ContactId = EntityId.New(),
             Channel = ChannelType.WebChat,
             State = ConversationState.Queued,
+            Owner = queue,
             CreatedAt = new DateTimeOffset(2026, 6, 1, 11, 0, 0, TimeSpan.Zero),
             QueuePriority = -1,
         };
@@ -439,6 +442,53 @@ public sealed class InMemoryConversationStoreTests
 
         result.Select(c => c.ConversationId).Should().ContainInOrder(
             laterFront.ConversationId, earlierNormal.ConversationId);
+    }
+
+    [Fact]
+    public async Task ListQueuedAsync_ShouldReturnOnlyQueueOwnedConversations_WhenOwnerlessQueuedFillTheWindow()
+    {
+        // Mirrors PostgresConversationStoreQueueTests: only a queue-owned conversation is routable,
+        // so ownerless (or bot-owned) Queued rows must not occupy the bounded window.
+        var store = new InMemoryConversationStore();
+        var start = new DateTimeOffset(2026, 10, 1, 9, 0, 0, TimeSpan.Zero);
+        for (var i = 0; i < 60; i++)
+        {
+            await store.SaveAsync(new Conversation
+            {
+                ConversationId = EntityId.New(),
+                TenantId = Tenant1,
+                ContactId = EntityId.New(),
+                Channel = ChannelType.WebChat,
+                State = ConversationState.Queued,
+                CreatedAt = start.AddSeconds(i),
+            }, CancellationToken.None);
+        }
+        await store.SaveAsync(new Conversation
+        {
+            ConversationId = EntityId.New(),
+            TenantId = Tenant1,
+            ContactId = EntityId.New(),
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Queued,
+            Owner = ConversationOwner.ForBot(EntityId.New()),
+            CreatedAt = start.AddMinutes(5),
+        }, CancellationToken.None);
+        var queueOwned = new Conversation
+        {
+            ConversationId = EntityId.New(),
+            TenantId = Tenant1,
+            ContactId = EntityId.New(),
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Queued,
+            Owner = ConversationOwner.ForQueue(EntityId.New()),
+            CreatedAt = start.AddMinutes(10),
+        };
+        await store.SaveAsync(queueOwned, CancellationToken.None);
+
+        var result = await store.ListQueuedAsync(Tenant1, 50, CancellationToken.None);
+
+        result.Select(c => c.ConversationId).Should().ContainSingle()
+            .Which.Should().Be(queueOwned.ConversationId);
     }
 
     [Fact]

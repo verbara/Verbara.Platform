@@ -125,27 +125,36 @@ internal static class TenantRateLimitPolicy
         });
 
         // Custom 429 response
-        options.OnRejected = async (context, ct) =>
+        options.OnRejected = (context, ct) =>
+            new ValueTask(WriteTooManyRequestsAsync(context.HttpContext, context.Lease, "Tenant rate limit exceeded", ct));
+    }
+
+    /// <summary>
+    /// Writes the shared 429 response for a rejected <paramref name="lease"/>: a <c>rate_limit_exceeded</c>
+    /// problem and a <c>Retry-After</c> header (the lease's, or 30 seconds). Used by the rate-limiting
+    /// middleware and by the limits applied in endpoint filters (<see cref="WebChatRateLimitPolicy"/>).
+    /// </summary>
+    internal static async Task WriteTooManyRequestsAsync(
+        HttpContext httpContext, RateLimitLease lease, string detail, CancellationToken ct)
+    {
+        httpContext.Response.StatusCode = 429;
+        httpContext.Response.ContentType = "application/json";
+
+        var retryAfter = lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfterValue)
+            ? (int)retryAfterValue.TotalSeconds : 30;
+
+        httpContext.Response.Headers["Retry-After"] = retryAfter.ToString(CultureInfo.InvariantCulture);
+
+        var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails
         {
-            context.HttpContext.Response.StatusCode = 429;
-            context.HttpContext.Response.ContentType = "application/json";
-
-            var retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfterValue)
-                ? (int)retryAfterValue.TotalSeconds : 30;
-
-            context.HttpContext.Response.Headers["Retry-After"] = retryAfter.ToString(CultureInfo.InvariantCulture);
-
-            var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails
-            {
-                Type = "rate_limit_exceeded",
-                Title = "Too Many Requests",
-                Status = 429,
-                Detail = "Tenant rate limit exceeded",
-            };
-            problem.Extensions["retryAfter"] = retryAfter;
-            await context.HttpContext.Response.WriteAsync(
-                JsonSerializer.Serialize(problem, ApiJsonContext.Default.ProblemDetails), ct);
+            Type = "rate_limit_exceeded",
+            Title = "Too Many Requests",
+            Status = 429,
+            Detail = detail,
         };
+        problem.Extensions["retryAfter"] = retryAfter;
+        await httpContext.Response.WriteAsync(
+            JsonSerializer.Serialize(problem, ApiJsonContext.Default.ProblemDetails), ct);
     }
 
     /// <summary>

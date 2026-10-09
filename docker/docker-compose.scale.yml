@@ -58,6 +58,9 @@ services:
       # cross-replica request handoff.
       Identity__RequireRedisIdentityCaches: "true"
       ConnectionStrings__IdentityRedis: redis:6379
+      # nginx-lb fronts the replicas too: trust its fixed address as well as the gateway's
+      # (TrustedProxies__0, from full.yml), or every LB client shares one address.
+      ForwardedHeaders__TrustedProxies__1: ${VERBARA_LB_IP:-172.31.250.11}/32
       # v1.14.2 — explicit Postgres pool sizing for multi-replica deployments.
       # Default Npgsql pool max=100. With 4 replicas at this default, total
       # demand is 400 conns but Postgres default `max_connections=100` denies
@@ -89,6 +92,11 @@ services:
 
   nginx-lb:
     image: nginx:alpine
+    # Fixed address in full.yml's network: platform-api trusts X-Forwarded-For from it
+    # (ForwardedHeaders__TrustedProxies__1 above).
+    networks:
+      default:
+        ipv4_address: ${VERBARA_LB_IP:-172.31.250.11}
     ports:
       - "5000:80"
     volumes:

@@ -33,6 +33,11 @@ services:
       - "5000:5000"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      # The gateway puts the visitor's address in X-Forwarded-For; the API believes it only
+      # from these networks. Without it every visitor shares the gateway's address, and the
+      # per-visitor limits (WebChat) become one shared bucket. This entry wins over
+      # .env.production: change the address with VERBARA_GATEWAY_IP.
+      - ForwardedHeaders__TrustedProxies__0=${VERBARA_GATEWAY_IP:-172.31.251.10}/32
     env_file:
       - .env.production
     depends_on:
@@ -120,6 +125,12 @@ services:
   # compose and K8s. /api/* fans to platform-api, /hubs/* to realtime, / to web.
   nginx-gateway:
     image: nginx:1.27-alpine
+    # Fixed address: platform-api trusts X-Forwarded-For from exactly this one
+    # (ForwardedHeaders__TrustedProxies__0). Override VERBARA_GATEWAY_IP and
+    # VERBARA_NETWORK_SUBNET together if the subnet collides with one on your host.
+    networks:
+      default:
+        ipv4_address: ${VERBARA_GATEWAY_IP:-172.31.251.10}
     ports:
       - "80:80"
     volumes:
@@ -199,6 +210,14 @@ services:
           memory: 512M
     profiles:
       - s3
+
+# The project network gets a fixed subnet so nginx-gateway can have a fixed address
+# that platform-api trusts for X-Forwarded-For (see ForwardedHeaders__TrustedProxies__0).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${VERBARA_NETWORK_SUBNET:-172.31.251.0/24}
 
 volumes:
   pgdata:

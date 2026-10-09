@@ -108,6 +108,10 @@ services:
       Redis__ConnectionString: redis:6379
       Services__ServiceKey: demo-service-key-2026
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      # The gateway (and any proxy in front of it) puts the visitor's address in X-Forwarded-For;
+      # the API believes it only from these networks. Without it every visitor shares the gateway's
+      # address, and the per-visitor limits (WebChat) become one shared bucket.
+      ForwardedHeaders__TrustedProxies__0: ${VERBARA_GATEWAY_IP:-172.31.253.10}/32
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,6 +167,12 @@ services:
   # Reverse-proxy entrypoint — /hubs/* → realtime, /api/* → platform-api, / → web.
   nginx-gateway:
     image: nginx:1.27-alpine
+    # Fixed address: platform-api trusts X-Forwarded-For from exactly this one
+    # (ForwardedHeaders__TrustedProxies__0). Override VERBARA_GATEWAY_IP and
+    # VERBARA_NETWORK_SUBNET together if the subnet collides with one on your host.
+    networks:
+      default:
+        ipv4_address: ${VERBARA_GATEWAY_IP:-172.31.253.10}
     ports:
       - "80:80"
     volumes:
@@ -213,6 +223,14 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+
+# The project network gets a fixed subnet so nginx-gateway can have a fixed address
+# that platform-api trusts for X-Forwarded-For (see ForwardedHeaders__TrustedProxies__0).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${VERBARA_NETWORK_SUBNET:-172.31.253.0/24}
 
 volumes:
   pgdata:
