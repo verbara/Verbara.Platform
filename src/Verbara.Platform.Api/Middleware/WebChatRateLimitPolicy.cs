@@ -64,6 +64,6 @@ internal static class WebChatRateLimitPolicy
         AnonymousRateLimitPolicy.IsLikelyUntrustedProxy(peer, trustedProxiesConfigured);
 
     /// <summary>The untrusted-proxy warning for the WebChat surface.</summary>
-    internal sealed class UntrustedProxyWarning(ILogger logger, bool trustedProxiesConfigured)
+    internal sealed class WebChatUntrustedProxyWarning(ILogger logger, bool trustedProxiesConfigured)
         : AnonymousRateLimitPolicy.UntrustedProxyWarning(logger, trustedProxiesConfigured, Surface);
 }

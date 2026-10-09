@@ -293,7 +293,7 @@ public class WhatsAppWebhookHandlerTests
     {
         // Structural: the digest comparison must be constant time. A string/sequence comparison exits at the
         // first differing character and leaks how much of a forged signature is right.
-        var source = File.ReadAllText(Path.Combine(
+        var source = File.ReadAllText(Path.Join(
             RepoRoot(), "src", "Verbara.Platform.Channels.WhatsApp", "WhatsAppWebhookHandler.cs"));
         var method = source[source.IndexOf("internal static bool ValidateSignature", StringComparison.Ordinal)..];
         method = method[..method.IndexOf("\n    }", StringComparison.Ordinal)];
@@ -357,7 +357,7 @@ public class WhatsAppWebhookHandlerTests
     private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Verbara.Platform.slnx")))
+        while (dir is not null && !File.Exists(Path.Join(dir.FullName, "Verbara.Platform.slnx")))
             dir = dir.Parent;
         return dir?.FullName ?? throw new InvalidOperationException("Repository root (Verbara.Platform.slnx) not found.");
     }

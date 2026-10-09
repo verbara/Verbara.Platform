@@ -2,6 +2,7 @@ using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using Verbara.Platform.Switchboard;
+using NSubstitute.ReturnsExtensions;
 
 namespace Verbara.Platform.Switchboard.Tests;
 
@@ -84,7 +85,7 @@ public sealed class WhatsAppSessionWindowTests
         var store = Substitute.For<IMessageStore>();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
-        store.FindLastInboundAsync(Tenant, ConversationId, Arg.Any<CancellationToken>()).Returns((Message?)null);
+        store.FindLastInboundAsync(Tenant, ConversationId, Arg.Any<CancellationToken>()).ReturnsNull();
 
         var decision = await new WhatsAppSessionWindow(store, clock).DecideAsync(Tenant, ConversationId, null, CancellationToken.None);
 

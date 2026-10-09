@@ -54,14 +54,14 @@ internal static class ExceptionMessageEchoScanner
             if (string.IsNullOrEmpty(variable))
                 continue;
 
-            foreach (var access in catchClause.Block.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+            var echoes = catchClause.Block.DescendantNodes()
+                .OfType<MemberAccessExpressionSyntax>()
+                .Where(access => access.Name.Identifier.Text == "Message"
+                    && RootIdentifier(access.Expression) == variable
+                    && FlowsIntoErrorResponse(access, catchClause.Block));
+
+            foreach (var access in echoes)
             {
-                if (access.Name.Identifier.Text != "Message" || RootIdentifier(access.Expression) != variable)
-                    continue;
-
-                if (!FlowsIntoErrorResponse(access, catchClause.Block))
-                    continue;
-
                 var line = access.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
                 matches.Add(new ExceptionMessageEchoMatch(path, line, access.ToString()));
             }
