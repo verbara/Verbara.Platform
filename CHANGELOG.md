@@ -112,13 +112,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds lists of inbound messages and status updates, and all nine webhook handlers were updated; the
   webhook endpoint processes every element in order. Code that read `WebhookResult.Message` or
   `.StatusUpdate` reads `Messages` and `StatusUpdates`.
+- **A webhook delivery answers `200` once every event it carried is stored, and each message's side
+  effects run once and on their own.** A message whose provider id is already stored (a provider retry)
+  is skipped with no side effect — no event, no routing, no queue assignment, no bot turn;
+  `PipelineResult.IsDuplicate` (Channels.Core) says so. A message whose routing finds no queue (no active
+  queue, or out of hours with no overflow) no longer fails the delivery: it is logged (event `7411`), its
+  conversation stays queued with no owner for manual pickup, and the next message from that customer
+  tries routing again; any other failure after a message is stored is logged (event `7412`) and the rest
+  of the delivery carries on. Only a storage failure answers an error, so the provider retries. A
+  conversation is routed once — when the message opens it, or while it is still queued with no owner — so
+  a customer's follow-up no longer pulls an offered or active conversation back to the queue; a
+  conversation a bot owns hands the follow-up to the bot.
 - **WhatsApp sends use the tenant's own credentials.** The WhatsApp connector reads `AccessToken` and
   `PhoneNumberId` from the sending tenant's WhatsApp channel configuration when it sends; the
   process-wide `WhatsAppOptions.AccessToken`, `PhoneNumberId`, `AppSecret` and `WebhookVerifyToken` are
   removed and nothing falls back to them. A tenant without an active WhatsApp configuration, or missing
   either key, gets the message marked failed with `channel-not-configured`, and no request reaches Meta.
   A template is sent only when the caller names one: the in-memory 24-hour tracker, which nothing fed
-  and which turned every reply into the template `default_template`, is gone. The connector now sends
+  and which turned every reply into the template `default_template`, is gone. The 24-hour window is read
+  from the conversation's stored inbound messages: an agent reply (`POST /conversations/{id}/messages`)
+  when the customer's last message is 24 hours old or more, or when there is none, answers `409` with
+  `{"error":"whatsapp-template-required"}`, stores nothing and sends nothing; other senders (bot replies,
+  automations, surveys) get the message recorded as failed instead. `IConversationService` gains
+  `TrySendMessageAsync`, which returns that refusal as a typed result. The connector now sends
   through a named `IHttpClientFactory` client with the same retry, timeout and circuit-breaker policy,
   so the singleton channel registry never pins one `HttpClient`.
 - **Client-error bodies no longer carry exception text.** A request that fails with an unhandled
@@ -163,7 +179,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Each change of a delivery is processed only when its `metadata.phone_number_id` is the tenant's
   `PhoneNumberId`, so two tenants that share one Meta app no longer accept each other's messages. A
   delivery that fails these checks answers `200` and writes nothing; it is logged (events `8400`-`8402`)
-  and counted in `whatsapp.webhook.rejected` by `reason`. No advisory: no published version registered
+  and counted in `whatsapp.webhook.rejected` by `reason`, exported on `/metrics` as
+  `whatsapp_webhook_rejected_total`. No advisory: no published version registered
   the WhatsApp handler.
 - **The anonymous provider-webhook route is rate-limited per tenant and client.**
   `GET` and `POST /api/v1/webhooks/{tenantId}/{channel}` now share a limit keyed by the tenant named in
