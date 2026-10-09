@@ -44,7 +44,7 @@ public sealed class AgentsIdentityReportTests : IClassFixture<AgentIdentityFixtu
 
     private static async Task<List<List<Dictionary<string, string>>>> RunReportAsync(NpgsqlDataSource ds)
     {
-        var path = Path.GetFullPath(Path.Combine(
+        var path = Path.GetFullPath(Path.Join(
             AppContext.BaseDirectory, "..", "..", "..", "..", "..", "scripts", "ops", "agents-identity-report.sql"));
         var sql = string.Join('\n', File.ReadAllLines(path).Where(l => !l.TrimStart().StartsWith('\\')));
 

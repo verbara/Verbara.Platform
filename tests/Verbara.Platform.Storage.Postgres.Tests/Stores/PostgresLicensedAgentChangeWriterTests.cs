@@ -149,7 +149,7 @@ public sealed class PostgresLicensedAgentChangeWriterTests : IClassFixture<Agent
         deletion.Should().Be(new LicensedUserDeletion(true, false, "a1"));
         var rows = (await h.EventsAsync("t1")).TakeLast(2).ToList();
         rows.Select(r => (r.Kind, r.AgentId, r.UserId, r.UserStatus, r.Counted, r.ActorUserId)).Should().Equal(
-            (LicenseAgentEventKinds.AgentDeleted, "a1", "u-a1", (string?)null, (bool?)false, "dpo"),
+            (LicenseAgentEventKinds.AgentDeleted, "a1", "u-a1", null, (bool?)false, "dpo"),
             (LicenseAgentEventKinds.UserDeleted, "a1", "u-a1", "Suspended", false, "dpo"));
         (await h.CountAsync("SELECT COUNT(*) FROM agents WHERE agent_id = 'a1'")).Should().Be(0);
         (await h.CountAsync("SELECT COUNT(*) FROM users WHERE user_id = 'u-a1'")).Should().Be(0);

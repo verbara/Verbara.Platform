@@ -78,8 +78,8 @@ public static class LicensedAgentExportSpan
         ArgumentNullException.ThrowIfNull(events);
         ArgumentNullException.ThrowIfNull(daily);
 
-        var rows = events.Select(e => (e.Sequence, At: e.OccurredAt, Day: (DateOnly?)null))
-            .Concat(daily.Select(d => (d.Sequence, At: d.ClosedAt, Day: (DateOnly?)d.Day)))
+        var rows = events.Select(e => (e.Sequence, At: e.OccurredAt, Day: default(DateOnly?)))
+            .Concat(daily.Select(d => (d.Sequence, At: d.ClosedAt, Day: new DateOnly?(d.Day))))
             .ToList();
 
         var firstSince = rows.Where(r => r.At >= start).Select(r => (long?)r.Sequence).Min();

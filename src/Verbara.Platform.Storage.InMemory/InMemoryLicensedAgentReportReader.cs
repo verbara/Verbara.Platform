@@ -29,7 +29,8 @@ public sealed class InMemoryLicensedAgentReportReader : ILicensedAgentReportRead
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var tenantId in heads.Select(h => h.TenantId).OfType<string>())
         {
-            if (await _tenants.GetAsync(tenantId, ct).ConfigureAwait(false) is { } tenant)
+            var tenant = await _tenants.GetAsync(tenantId, ct).ConfigureAwait(false);
+            if (tenant is not null)
                 names[tenantId] = tenant.Name;
         }
 

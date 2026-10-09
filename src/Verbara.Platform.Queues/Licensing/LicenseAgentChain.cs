@@ -150,12 +150,7 @@ public static class LicenseAgentChain
 
     private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
 
-    private static string Bool(bool? value) => value switch
-    {
-        true => "true",
-        false => "false",
-        null => "",
-    };
+    private static string Bool(bool? value) => value is { } flag ? (flag ? "true" : "false") : "";
 
     private static string Join(params string?[] fields) => string.Join('|', fields.Select(f => f ?? ""));
 }

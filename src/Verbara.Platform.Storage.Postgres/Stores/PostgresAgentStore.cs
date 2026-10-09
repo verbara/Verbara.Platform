@@ -234,7 +234,7 @@ internal sealed class PostgresAgentStore : IAgentStore
         p.Add(new NpgsqlParameter("DisplayName", agent.DisplayName));
         p.Add(new NpgsqlParameter("State", (int)agent.State));
         p.Add(new NpgsqlParameter("Capacity", capacityJson));
-        p.Add(new NpgsqlParameter("TeamId", NpgsqlDbType.Text) { Value = (object?)agent.TeamId?.Value ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("TeamId", NpgsqlDbType.Text) { Value = agent.TeamId is { } teamId ? teamId.Value : DBNull.Value });
         p.Add(new NpgsqlParameter("Skills", skillsJson));
         p.Add(new NpgsqlParameter("Extension", NpgsqlDbType.Varchar) { Value = (object?)agent.Extension ?? DBNull.Value });
         p.Add(new NpgsqlParameter("SipPassword", NpgsqlDbType.Varchar) { Value = (object?)agent.SipPassword ?? DBNull.Value });

@@ -118,7 +118,7 @@ public sealed class LicensedAgentLedgerAdminTests : IClassFixture<AccountStatusA
             Tenant.Value, agent.UserId.Value, "dpo-user", "Art. 17 request", CancellationToken.None);
 
         RowsFor(agent.AgentId.Value).Skip(1).Select(r => (r.Kind, r.UserStatus, r.Counted, r.ActorUserId)).Should().Equal(
-            (LicenseAgentEventKinds.AgentDeleted, (string?)null, (bool?)false, "dpo-user"),
+            (LicenseAgentEventKinds.AgentDeleted, null, (bool?)false, "dpo-user"),
             (LicenseAgentEventKinds.UserDeleted, "Active", false, "dpo-user"));
         (await Services.GetRequiredService<IAgentStore>().GetByIdAsync(Tenant, agent.AgentId, CancellationToken.None)).Should().BeNull();
     }

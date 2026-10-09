@@ -20,7 +20,7 @@ public sealed class LicensedAgentReportContractTests
 {
     private static JsonObject Fixture(string name)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "LicensedAgentMetering", "Fixtures", name);
+        var path = Path.Join(AppContext.BaseDirectory, "LicensedAgentMetering", "Fixtures", name);
         var node = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
         node.Remove("_comment");
         return node;
@@ -174,8 +174,9 @@ public sealed class LicensedAgentReportContractTests
         LicensedAgentReports.License(status).Should().Be(
             new LicensedAgentLicenseDto("lic-7f3c2a91", "Example Contact Ltd", "SelfHostBusiness", 50, true));
 
-        status.LicenseId.Returns((string?)null);
-        status.Licensee.Returns((string?)null);
+        string? none = null;
+        status.LicenseId.Returns(none);
+        status.Licensee.Returns(none);
         status.Tier.Returns(LicenseTier.None);
         status.MaxAgents.Returns(0);
         LicensedAgentReports.License(status).Should().Be(

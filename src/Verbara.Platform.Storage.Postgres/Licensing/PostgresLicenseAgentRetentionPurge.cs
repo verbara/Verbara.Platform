@@ -52,7 +52,8 @@ internal sealed class PostgresLicenseAgentRetentionPurge : ILicenseAgentRetentio
         var purged = 0;
         foreach (var chainKey in chains)
         {
-            if (await PurgeChainAsync(chainKey, cutDay, cutInstant, now, ct).ConfigureAwait(false))
+            var chainPurged = await PurgeChainAsync(chainKey, cutDay, cutInstant, now, ct).ConfigureAwait(false);
+            if (chainPurged)
                 purged++;
         }
 

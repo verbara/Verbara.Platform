@@ -155,7 +155,7 @@ public sealed class LicenseAgentLedgerTests : IClassFixture<AgentIdentityFixture
 
         var rows = await h.EventsAsync("t1");
         rows.Select(r => (r.Kind, r.AgentId, r.Counted)).Should().Equal(
-            (LicenseAgentEventKinds.ChainAnchored, (string?)null, (bool?)null),
+            (LicenseAgentEventKinds.ChainAnchored, null, null),
             (LicenseAgentEventKinds.AgentBaseline, "a-1", false),
             (LicenseAgentEventKinds.AgentBaseline, "a-2", true),
             (LicenseAgentEventKinds.AgentBaseline, "a-3", false));

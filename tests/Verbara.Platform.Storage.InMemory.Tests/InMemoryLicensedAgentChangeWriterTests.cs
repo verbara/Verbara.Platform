@@ -109,7 +109,7 @@ public sealed class InMemoryLicensedAgentChangeWriterTests : IDisposable
 
         var rows = _ledger.Events("t1");
         rows.Select(r => (r.Kind, r.AgentId, r.LicenseId)).Should().Equal(
-            (LicenseAgentEventKinds.ChainAnchored, (string?)null, (string?)"lic-1"),
+            (LicenseAgentEventKinds.ChainAnchored, null, "lic-1"),
             (LicenseAgentEventKinds.AgentBaseline, "a-old", "lic-1"),
             (LicenseAgentEventKinds.AgentCreated, "a1", "lic-1"),
             (LicenseAgentEventKinds.ChainReanchored, null, "lic-2"),

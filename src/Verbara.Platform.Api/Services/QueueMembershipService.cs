@@ -52,11 +52,9 @@ internal sealed class QueueMembershipService
         {
             if (queue.RequiredSkills.Count == 0) continue;
 
-            foreach (var agent in agents)
+            // Not provisioned (no extension or SIP password) — skip
+            foreach (var agent in agents.Where(a => !string.IsNullOrEmpty(a.Extension) && !string.IsNullOrEmpty(a.SipPassword)))
             {
-                if (string.IsNullOrEmpty(agent.Extension) || string.IsNullOrEmpty(agent.SipPassword))
-                    continue; // Not provisioned — skip
-
                 // Check skill match: agent must have at least one required skill
                 var matchingSkills = queue.RequiredSkills
                     .Where(s => agent.Skills.Contains(s))

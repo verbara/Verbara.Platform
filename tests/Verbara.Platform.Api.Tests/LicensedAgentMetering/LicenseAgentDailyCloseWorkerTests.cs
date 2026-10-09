@@ -160,7 +160,7 @@ public sealed class LicenseAgentDailyCloseWorkerTests
 
         (await worker.TickAsync(CancellationToken.None)).Should().BeTrue();
 
-        anchoredWith.Should().Equal([(string?)null], "metering never waits for a valid licence, only for the load attempt (ADR-0020 §6)");
+        anchoredWith.Should().Equal([null], "metering never waits for a valid licence, only for the load attempt (ADR-0020 §6)");
         await _close.ReceivedWithAnyArgs(1).CloseAsync(default!, default, default);
     }
 

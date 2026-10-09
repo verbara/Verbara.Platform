@@ -14,7 +14,7 @@ public sealed class LicensedAgentWriteGuardTests
     [Fact]
     public void StorageSqlWriters_ShouldBeReachedOnlyThroughTheLicensedAgentWriter()
     {
-        var files = Sources(Path.Combine(SourceTreeSource.SrcRoot(), StorageProject)).ToList();
+        var files = Sources(Path.Join(SourceTreeSource.SrcRoot(), StorageProject)).ToList();
         files.Should().Contain(f => f.File == LicensedAgentWriteScanner.WriterFile, "the scan must reach the writer");
         files.Count.Should().BeGreaterThan(40, "the scan must walk the real Storage.Postgres tree");
 
@@ -26,7 +26,7 @@ public sealed class LicensedAgentWriteGuardTests
     {
         // Every allowlist entry must still name a constant that holds a counted write: a stale entry would
         // let a future constant of that name through unexamined.
-        var files = Sources(Path.Combine(SourceTreeSource.SrcRoot(), StorageProject)).ToDictionary(f => f.File, f => f.Source);
+        var files = Sources(Path.Join(SourceTreeSource.SrcRoot(), StorageProject)).ToDictionary(f => f.File, f => f.Source);
         foreach (var (file, constant) in LicensedAgentWriteScanner.AllowedSqlConstants)
         {
             files.Should().ContainKey(file);

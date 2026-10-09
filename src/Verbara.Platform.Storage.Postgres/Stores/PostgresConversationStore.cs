@@ -133,17 +133,18 @@ internal sealed class PostgresConversationStore : IConversationStore
     private static void BindSave(NpgsqlParameterCollection p, Conversation conversation)
     {
         var metadataJson = JsonSerializer.Serialize(
-            (Dictionary<string, string>)conversation.Metadata,
-            PostgresJson.Ctx.DictionaryStringString);
+            conversation.Metadata,
+            PostgresJson.Ctx.IReadOnlyDictionaryStringString);
 
         p.Add(new NpgsqlParameter("ConversationId", conversation.ConversationId.Value));
         p.Add(new NpgsqlParameter("TenantId", conversation.TenantId.Value));
         p.Add(new NpgsqlParameter("ContactId", conversation.ContactId.Value));
         p.Add(new NpgsqlParameter("Channel", (int)conversation.Channel));
         p.Add(new NpgsqlParameter("State", (int)conversation.State));
-        p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = (object?)(conversation.Owner != null ? (int?)conversation.Owner.Kind : null) ?? DBNull.Value });
-        p.Add(new NpgsqlParameter("OwnerId", NpgsqlDbType.Text) { Value = (object?)conversation.Owner?.OwnerId?.Value ?? DBNull.Value });
-        p.Add(new NpgsqlParameter("CaseId", NpgsqlDbType.Text) { Value = (object?)conversation.CaseId?.Value ?? DBNull.Value });
+        var owner = conversation.Owner;
+        p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = owner is null ? DBNull.Value : (int)owner.Kind });
+        p.Add(new NpgsqlParameter("OwnerId", NpgsqlDbType.Text) { Value = owner?.OwnerId is { } ownerId ? ownerId.Value : DBNull.Value });
+        p.Add(new NpgsqlParameter("CaseId", NpgsqlDbType.Text) { Value = conversation.CaseId is { } caseId ? caseId.Value : DBNull.Value });
         p.Add(new NpgsqlParameter("Metadata", metadataJson));
         p.Add(new NpgsqlParameter("CreatedAt", conversation.CreatedAt));
         p.Add(new NpgsqlParameter("ClosedAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.ClosedAt ?? DBNull.Value });

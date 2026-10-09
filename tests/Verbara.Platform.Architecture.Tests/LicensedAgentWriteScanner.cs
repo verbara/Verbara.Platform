@@ -83,11 +83,12 @@ internal static partial class LicensedAgentWriteScanner
                     continue;
                 }
 
-                foreach (Match reference in Regex.Matches(source, $@"\b{Regex.Escape(constant)}\b"))
+                // Skip the declaration itself; each remaining reference resolves to its enclosing method.
+                var methods = Regex.Matches(source, $@"\b{Regex.Escape(constant)}\b")
+                    .Where(reference => reference.Index < literal.Index - 200 || reference.Index >= literal.Index)
+                    .Select(reference => EnclosingMethodSignature(source, reference.Index));
+                foreach (var method in methods)
                 {
-                    if (reference.Index >= literal.Index - 200 && reference.Index < literal.Index)
-                        continue; // the declaration itself
-                    var method = EnclosingMethodSignature(source, reference.Index);
                     if (method is null || !method.Value.Parameters.Contains("NpgsqlTransaction", StringComparison.Ordinal))
                         violations.Add(new(file, method?.Name ?? "?", $"uses {constant} outside a transaction overload"));
                     else
@@ -162,10 +163,10 @@ internal static partial class LicensedAgentWriteScanner
     private static (string Name, string Parameters)? EnclosingMethodSignature(string source, int index)
     {
         (string, string)? last = null;
-        foreach (Match m in MethodSignature().Matches(source[..index]))
+        var signatures = MethodSignature().Matches(source[..index])
+            .Where(m => m.Groups[1].Value is not ("if" or "while" or "for" or "foreach" or "switch" or "using" or "catch" or "lock" or "return"));
+        foreach (var m in signatures)
         {
-            if (m.Groups[1].Value is "if" or "while" or "for" or "foreach" or "switch" or "using" or "catch" or "lock" or "return")
-                continue;
             last = (m.Groups[1].Value, m.Groups[2].Value);
         }
 
