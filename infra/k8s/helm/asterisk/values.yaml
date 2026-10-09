@@ -4,7 +4,29 @@ asterisk:
   image:
     repository: andrius/asterisk
     tag: "22"
-  replicas: 2
+  # One Asterisk. Platform registers exactly one AMI server for this chart (the
+  # "primary" node, src/Verbara.Platform.Api/Program.cs), so a second pod would
+  # take calls Platform never sees. templates/asterisk-statefulset.yaml refuses
+  # any value above 1; more than one Asterisk is a follow-up that needs one
+  # Platform AMI node per pod.
+  replicas: 1
+  # Platform's AMI user (manager.conf), the same read/write classes as the Compose
+  # template docker/asterisk-config/manager.conf.template. The password lives only
+  # in a Secret: pass asterisk.ami.password at install (scripts/k8s-apps.sh does,
+  # and passes the same value to the platform chart's api.asterisk.ami.password),
+  # or leave it empty and create the Secret yourself before installing.
+  ami:
+    username: platform
+    password: ""
+    passwordSecret: asterisk-ami-credentials
+    passwordKey: password
+  # Platform's ARI user (ari.conf), served on http.conf's 8088. Same mechanism as
+  # the AMI user: the password only in a Secret.
+  ari:
+    username: verbara
+    password: ""
+    passwordSecret: asterisk-ari-credentials
+    passwordKey: password
   resources:
     requests:
       cpu: 500m

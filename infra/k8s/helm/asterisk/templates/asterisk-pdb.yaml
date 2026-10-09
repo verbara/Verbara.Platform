@@ -1,3 +1,10 @@
+# With one Asterisk replica, minAvailable: 1 blocks every voluntary eviction of
+# the only Asterisk pod. That is deliberate: a node drain would otherwise drop
+# every live call. Draining its node needs a maintenance window (cordon; agents
+# Away and queues and campaigns paused; wait for `core show channels count` = 0;
+# then `kubectl delete pod asterisk-0` or `kubectl drain --disable-eviction`;
+# uncordon) - see the upgrade note in CHANGELOG.md. AlwaysAllow lets an unhealthy
+# (not Ready) pod be evicted, so a broken Asterisk never blocks a drain.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -7,6 +14,7 @@ metadata:
     {{- include "asterisk.labels" . | nindent 4 }}
 spec:
   minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:
       app.kubernetes.io/name: asterisk
