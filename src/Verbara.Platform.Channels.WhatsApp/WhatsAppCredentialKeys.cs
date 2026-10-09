@@ -22,6 +22,6 @@ public static class WhatsAppCredentialKeys
     /// <summary>Optional: the WhatsApp Business Account id.</summary>
     public const string WabaId = "WabaId";
 
-    /// <summary>Optional: the Graph API version, e.g. <c>v21.0</c>.</summary>
+    /// <summary>Optional: the Graph API version, e.g. <c>v21.0</c> (default: <see cref="WhatsAppOptions.ApiVersion"/>).</summary>
     public const string ApiVersion = "ApiVersion";
 }
