@@ -19,12 +19,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docs/operations/licensed-agent-metering-upgrade.md` (keep the agent that has an extension, else the
   oldest; repoint its references; delete the others). The same page covers orphan agents, Customer
   tenants without a valid parent, the tenant offboarding order, and tenants whose
-  `WorkFailoverGraceSeconds` is `0` or less. (#N)
+  `WorkFailoverGraceSeconds` is `0` or less. (#348)
 - **Set the licensed-agent day zone before the first run.** Licensed-agent days are cut in
   `Licensing:Metering:DayZone` (an IANA zone id, default `UTC`). The first run records it with the
   deployment's ledger and it can never change: a later start with another value stops the daily close
   before it writes anything, logs both zones as a critical error and reports the close unhealthy in
-  `/health/ready`. See `docs/operations/licensed-agent-ledger.md`. (#N)
+  `/health/ready`. See `docs/operations/licensed-agent-ledger.md`. (#348)
 
 ### Added
 
@@ -34,13 +34,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the record cannot be written, the change does not happen. Rows hold ids only and form a hash chain per
   tenant anchored to the loaded licence (`lac1`); a licence renewal re-anchors the chain. The database
   refuses any update or delete of these rows except the retention purge. Migration
-  `019_LicenseAgentLedger`. (#N)
+  `019_LicenseAgentLedger`. (#348)
 - **Daily close of licensed agents.** Each API replica closes, every 15 minutes, the ended days of every
   Customer tenant — in every tenant status and whatever its parent — as the day's simultaneous peak of
   licensed agents, plus the deployment total. Partner and Platform tenants are not counted. A closed day
   is never rewritten: a late record appends a correction. The close runs whatever the licence state and
   needs no leader; at start-up it waits until the licence file has been read, so chains are anchored
-  with the loaded licence id rather than empty and then re-anchored. (#N)
+  with the loaded licence id rather than empty and then re-anchored. (#348)
 - **Licensed-agent figures for the monthly self-declaration.** `GET /api/v1/management/licensing/agents?from=&to=`
   (Platform administrators only) returns, for a range of dates in the deployment's day zone, each closed
   day's deployment total and per-tenant figures (the latest correction of each day), the range's peak and
@@ -48,17 +48,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `maxAgents` is advisory: `overBand` is computed by the server and is true only when a band is declared
   and the peak exceeds it — nothing is ever blocked. `peakDay` is `null` and the peak `0` while no day of
   the range is closed. A range may span up to 460 days, so any 15 calendar months fit one request;
-  a longer or inverted range answers `400`. (#N)
+  a longer or inverted range answers `400`. (#348)
 - **Verifiable export of the ledger.** `GET /api/v1/management/licensing/agents/export?from=&to=` (Platform
   administrators only, same range rule) returns the ledger and daily rows of every chain for the range —
   every correction revision, in `sequence` order, starting with the row just before the range — with their
   `prevHash`/`rowHash`, the licence identity and the chain heads, so the owner can attach it to the monthly
   self-declaration and an auditor can recompute every hash offline, with no Platform code. Instants are
   written in the canonical form the hashes use (UTC, seven fractional digits, `Z`). Both endpoints are
-  read-only. (#N)
+  read-only. (#348)
 - **Fixed 15-month retention of the ledger.** Ledger and daily rows older than 15 months are purged daily
   on every tenant, independently of tenant retention policies, each purge leaving a `purge_log` row
-  (`subject_type` `license_agent`) with the last purged record's hash. (#N)
+  (`subject_type` `license_agent`) with the last purged record's hash. (#348)
 
 ### Changed
 
@@ -69,21 +69,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restored at the next reconcile after the user is reactivated. The suspension also forces the agent
   `Offline` in the same request and pauses its queue members before the response returns; a reactivated
   agent stays `Offline` until it signs in. An agent whose user does not exist is never offered work or
-  provisioned. Previously a suspended user's agent kept taking calls until its liveness expired. (#N)
+  provisioned. Previously a suspended user's agent kept taking calls until its liveness expired. (#348)
 - **One agent per user, and agents always name a real user.** `POST /api/v1/admin/agents` answers `404`
   when the user does not exist in the tenant and `409` when the user already owns an agent; two
-  concurrent creations for one user yield one agent. (#N)
+  concurrent creations for one user yield one agent. (#348)
 - **Deletes keep agent history attributable.** `DELETE /api/v1/admin/users/{id}` answers `409`
   (`user-owns-agent`) while the user owns an agent, and changes nothing: delete the agent first. A GDPR
   user purge is never refused for it — it deletes the agent, then the user. `DELETE
   /api/v1/management/tenants/{id}` answers `409` (`tenant-owns-agents`) while the tenant owns any agent,
   before any status change, lifecycle handler or audit entry; a tenant without agents is deleted as
-  before. Status changes made by dunning do not pass through this endpoint and are not covered. (#N)
+  before. Status changes made by dunning do not pass through this endpoint and are not covered. (#348)
 - **Agent creation and deletion are audited** as `agent.created` and `agent.deleted` (category
   `queues`), with the actor, the agent id and the owning user id — from the admin endpoints and from a
-  GDPR purge. (#N)
+  GDPR purge. (#348)
 - **The PJSIP desired state enumerates every agent of a tenant.** It was capped at 1000 agents per
-  tenant, so agents beyond the first page were never provisioned. (#N)
+  tenant, so agents beyond the first page were never provisioned. (#348)
 
 ---
 
