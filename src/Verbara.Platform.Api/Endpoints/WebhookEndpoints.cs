@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
@@ -14,7 +15,7 @@ internal static class WebhookEndpoints
 {
     public static void MapWebhookEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/webhooks");
+        var group = app.MapGroup("/webhooks").RequireWebhookRateLimit();
 
         group.MapPost("/{tenantId}/{channel}", HandleWebhook);
         group.MapGet("/{tenantId}/whatsapp", HandleWhatsAppVerification);
@@ -53,10 +54,9 @@ internal static class WebhookEndpoints
         if (channelConfig is null || !channelConfig.IsActive)
             return Results.NotFound();
 
-        // Read body
-        using var ms = new MemoryStream();
-        await request.Body.CopyToAsync(ms, ct);
-        var body = new ReadOnlyMemory<byte>(ms.ToArray());
+        // Read body, at most 1 MB
+        if (await BoundedRequestBody.ReadAsync(request, BoundedRequestBody.WebhookMaxBytes, ct) is not { } body)
+            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
 
         // Extract headers
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

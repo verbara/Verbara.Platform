@@ -162,7 +162,8 @@ internal static class OidcEndpoints
         catch (Exception ex)
         {
             await authEvents.LogAsync(tenantId, null, AuthEventTypes.OidcLoginFailure, ip, ua, null, ct);
-            return Results.BadRequest(new ErrorResponse($"OIDC token exchange failed: {ex.Message}"));
+            RejectedRequestLog.Write(context, "oidc-token-exchange", ex);
+            return Results.BadRequest(new ErrorResponse("OIDC token exchange failed."));
         }
 
         OidcClaimsResult claims;
@@ -175,7 +176,8 @@ internal static class OidcEndpoints
         catch (Exception ex)
         {
             await authEvents.LogAsync(tenantId, null, AuthEventTypes.OidcLoginFailure, ip, ua, null, ct);
-            return Results.BadRequest(new ErrorResponse($"OIDC ID token validation failed: {ex.Message}"));
+            RejectedRequestLog.Write(context, "oidc-id-token-validation", ex);
+            return Results.BadRequest(new ErrorResponse("OIDC ID token validation failed."));
         }
 
         var user = await provisioning.ProvisionOrUpdateAsync(tenantId, claims, config, ct);

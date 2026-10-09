@@ -119,8 +119,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   either key, gets the message marked failed with `channel-not-configured`, and no request reaches Meta.
   A template is sent only when the caller names one: the in-memory 24-hour tracker, which nothing fed
   and which turned every reply into the template `default_template`, is gone. The connector now sends
-  through a named `IHttpClientFactory` client with the same retry, timeout and circuit-breaker policy, so the singleton
-  channel registry never pins one `HttpClient`.
+  through a named `IHttpClientFactory` client with the same retry, timeout and circuit-breaker policy,
+  so the singleton channel registry never pins one `HttpClient`.
+- **Client-error bodies no longer carry exception text.** A request that fails with an unhandled
+  `InvalidOperationException`, `ArgumentException` (including `ArgumentNullException`) or
+  `KeyNotFoundException` keeps its status (`400` or `404`), but the problem body's `detail` is now its
+  title (`Bad Request`, `Not Found`) instead of the exception's message; the message is logged with the
+  `traceId` the body carries. A platform error keeps its code as the title and its own message. The
+  endpoints that copied a caught exception's message into their own `400` now answer a fixed message:
+  conversation wrap-up, invoice generation (management and partner), media upload, the OIDC callback's
+  token exchange and ID-token validation (the provider webhook for a channel without a handler answers
+  `404` with no body, see above). Clients should read the status, the title or code, and quote the `traceId`; nothing should parse
+  `detail`.
 
 ### Fixed
 
@@ -155,6 +165,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   delivery that fails these checks answers `200` and writes nothing; it is logged (events `8400`-`8402`)
   and counted in `whatsapp.webhook.rejected` by `reason`. No advisory: no published version registered
   the WhatsApp handler.
+- **The anonymous provider-webhook route is rate-limited per tenant and client.**
+  `GET` and `POST /api/v1/webhooks/{tenantId}/{channel}` now share a limit keyed by the tenant named in
+  the path and the client address (IPv6 by /64), applied before the channel configuration is looked
+  up, so a flood no longer costs a database lookup per request and one client cannot spend another's
+  budget. A request for a tenant with no active configuration (the `404` path) is also charged to one
+  per-client bucket shared by every unknown tenant, so enumerating tenant ids spends a small budget and
+  never a real tenant's. Defaults: 1200 per minute per tenant and client, 60 per minute per client for
+  unknown tenants; tune them with `Webhooks:RateLimit:PerMinutePerClient` and
+  `Webhooks:RateLimit:UnknownTenantPerMinutePerClient` (compose: `Webhooks__RateLimit__PerMinutePerClient`,
+  `Webhooks__RateLimit__UnknownTenantPerMinutePerClient`). A rejected request gets the same `429`
+  `rate_limit_exceeded` problem with `Retry-After` as the other limits, and the first rejection per
+  tenant is logged. The limit uses the client address the app trusts, so behind a gateway set
+  `ForwardedHeaders:TrustedProxies` as described in 2.26.1; a provider that delivers for many tenants
+  from few addresses still gets a separate budget per tenant. The WebChat limits now run on the same
+  limiter, with unchanged keys, defaults and responses.
+- **Webhook delivery bodies are capped at 1 MB.** A larger `POST` to the webhook route is answered `413`
+  and not processed; the body is read into a bounded buffer. Previously the route buffered whatever the
+  server accepted (Kestrel's 30 MB default, and the shipped gateway allows 50 MB).
+- **Client-error bodies no longer echo exception text** (see Changed): internal messages, which can
+  name tables, ids or provider responses, now go only to the log.
 
 ---
 

@@ -186,7 +186,9 @@ public sealed class ManagementBillingEndpointTests : IClassFixture<PlatformAdmin
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("No active rate card");
+        // v2.27.0: a stable message, not the exception's (which names the tenant id).
+        body.Should().Contain("no active rate card");
+        body.Should().NotContain("no-rate-card-tenant");
     }
 
     [Fact]
