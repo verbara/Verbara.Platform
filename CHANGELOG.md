@@ -84,6 +84,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   GDPR purge. (#348)
 - **The PJSIP desired state enumerates every agent of a tenant.** It was capped at 1000 agents per
   tenant, so agents beyond the first page were never provisioned. (#348)
+- **WhatsApp sends use the tenant's own credentials.** The WhatsApp connector reads `AccessToken` and
+  `PhoneNumberId` from the sending tenant's WhatsApp channel configuration when it sends; the
+  process-wide `WhatsAppOptions.AccessToken` and `PhoneNumberId` are removed and nothing falls back to
+  them. A tenant without an active WhatsApp configuration, or missing either key, gets the message
+  marked failed with `channel-not-configured`, and no request reaches Meta. A template is sent only when
+  the caller names one: the in-memory 24-hour tracker, which nothing fed and which turned every reply
+  into the template `default_template`, is gone. The connector now sends through a named
+  `IHttpClientFactory` client with the same retry, timeout and circuit-breaker policy, so the singleton
+  channel registry never pins one `HttpClient`.
+
+### Fixed
+
+- **An agent reply on WebChat reaches the WebChat connector.** The host registered the WebChat connector
+  in DI but not in the channel registry, so a reply in a conversation whose contact has a WebChat
+  address failed with `No connector registered for channel 'WebChat'`. The registry now exposes the
+  connectors the channel modules register, resolved on first use. The session lookup is unchanged: a
+  reply for which no visitor session is connected under that address is recorded as failed
+  (`SESSION_NOT_CONNECTED`) instead of failing the request.
 
 ---
 
