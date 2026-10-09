@@ -90,8 +90,8 @@ internal static class WebhookEndpoints
                 pipelineResult.MessageId.Value, "Inbound", channelType.ToString()));
 
             // Fetch conversation and contact by IDs returned from pipeline
-            var conversation = await conversationStore.GetByIdAsync(tid, pipelineResult.ConversationId, ct);
-            var contact = await contactStore.GetByIdAsync(tid, pipelineResult.ContactId, ct);
+            var conversation = await conversationStore.GetByIdAsync(tid, pipelineResult.ConversationId, ct); // enrichment-n1-ok: per batched webhook event (D4), each with its own conversation
+            var contact = await contactStore.GetByIdAsync(tid, pipelineResult.ContactId, ct); // enrichment-n1-ok: per batched webhook event (D4), each with its own conversation
 
             if (conversation is not null && contact is not null)
             {
@@ -113,7 +113,7 @@ internal static class WebhookEndpoints
                 await switchboard.AssignToQueueAsync(conversation.ConversationId, tid, routeResult.QueueId, ct);
 
                 // Reload conversation to check owner after assignment
-                var updated = await conversationStore.GetByIdAsync(tid, conversation.ConversationId, ct);
+                var updated = await conversationStore.GetByIdAsync(tid, conversation.ConversationId, ct); // enrichment-n1-ok: per batched webhook event (D4), each with its own conversation
                 if (updated?.Owner?.Kind == ConversationOwnerKind.Bot && updated.Owner.OwnerId.HasValue)
                 {
                     var botResponse = await virtualAgent.ProcessMessageAsync(
