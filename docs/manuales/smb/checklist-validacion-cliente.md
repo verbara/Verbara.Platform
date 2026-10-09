@@ -147,6 +147,12 @@ Test inbound (golden path — ✅ V1):
 - ☐ Hangup limpio
 - ☐ CDR aparece en `/admin/analytics/calls`
 
+Usuario AMI (manual [06](06-canal-voz-sip.md) §0.1):
+- ☐ Log de arranque del Api sin `[LIVE] Status refused`: tras reiniciar el API, `docker logs verbara-platform-api 2>&1 | grep 'Status refused'` no devuelve nada (si aparece, al usuario AMI le falta `write` con `system`, `call` o `reporting`)
+
+Test transferencia (dos agentes):
+- ☐ Una transferencia entre dos agentes completa: un cliente llama al DID y lo atiende el agente A; el agente A hace una **transferencia ciega** al agente B desde la consola (control de llamada); el teléfono o softphone del agente B suena, B atiende y el cliente queda hablando con B con audio en ambas direcciones; A queda libre. Si la transferencia falla o el cliente queda colgado, revisá que el usuario AMI tenga `write` con `call` (manual 06 §0.1)
+
 Test concurrencia mínima (5 calls):
 - ☐ 5 llamadas simultáneas al DID (SIPp o 5 teléfonos) → 5 entran a la cola
 - ☐ 5 agentes distintos atienden (5 teléfonos SIP registrados)

@@ -15,6 +15,13 @@ echo ""
 
 kubectl get nodes --no-headers | grep -q "Ready" || { echo "ERROR: No Ready nodes. Run scripts/k8s-up.sh first."; exit 1; }
 
+# Platform's AMI and ARI passwords: one variable each, passed to BOTH charts, so the
+# Asterisk users (asterisk chart) and Platform's Asterisk__Ami__Password /
+# Asterisk__Ari__Password (platform chart) cannot drift. --set-literal keeps commas,
+# backslashes and dots in the value as typed.
+: "${VERBARA_AMI_PASSWORD:?ERROR: export VERBARA_AMI_PASSWORD (Platform's AMI password; the Asterisk chart needs it at install)}"
+: "${VERBARA_ARI_PASSWORD:?ERROR: export VERBARA_ARI_PASSWORD (Platform's ARI password; the Asterisk chart needs it at install)}"
+
 # --- 1. Storage: local-path-provisioner ---
 echo "[1/10] Installing local-path-provisioner..."
 if ! kubectl get storageclass local-path &>/dev/null; then
@@ -45,9 +52,13 @@ echo "  Done."
 # --- 4. Asterisk + Kamailio + RTPEngine ---
 echo "[4/10] Installing Asterisk Helm chart..."
 if helm status asterisk -n r55-asterisk &>/dev/null; then
-    helm upgrade asterisk "$INFRA/helm/asterisk" --values "$INFRA/helm/asterisk/values.yaml"
+    helm upgrade asterisk "$INFRA/helm/asterisk" --values "$INFRA/helm/asterisk/values.yaml" \
+        --set-literal asterisk.ami.password="$VERBARA_AMI_PASSWORD" \
+        --set-literal asterisk.ari.password="$VERBARA_ARI_PASSWORD"
 else
-    helm install asterisk "$INFRA/helm/asterisk" --values "$INFRA/helm/asterisk/values.yaml"
+    helm install asterisk "$INFRA/helm/asterisk" --values "$INFRA/helm/asterisk/values.yaml" \
+        --set-literal asterisk.ami.password="$VERBARA_AMI_PASSWORD" \
+        --set-literal asterisk.ari.password="$VERBARA_ARI_PASSWORD"
 fi
 kubectl -n r55-asterisk rollout status statefulset/asterisk --timeout=5m
 echo "  Waiting for Kamailio + RTPEngine DaemonSets..."
@@ -58,9 +69,13 @@ echo "  Done."
 # --- 5. Platform.Api + Web ---
 echo "[5/10] Installing Platform Helm chart..."
 if helm status platform -n r55-platform &>/dev/null; then
-    helm upgrade platform "$INFRA/helm/platform" --values "$INFRA/helm/platform/values.yaml"
+    helm upgrade platform "$INFRA/helm/platform" --values "$INFRA/helm/platform/values.yaml" \
+        --set-literal api.asterisk.ami.password="$VERBARA_AMI_PASSWORD" \
+        --set-literal api.asterisk.ari.password="$VERBARA_ARI_PASSWORD"
 else
-    helm install platform "$INFRA/helm/platform" --values "$INFRA/helm/platform/values.yaml"
+    helm install platform "$INFRA/helm/platform" --values "$INFRA/helm/platform/values.yaml" \
+        --set-literal api.asterisk.ami.password="$VERBARA_AMI_PASSWORD" \
+        --set-literal api.asterisk.ari.password="$VERBARA_ARI_PASSWORD"
 fi
 kubectl -n r55-platform rollout status deploy/platform-api --timeout=5m
 kubectl -n r55-platform rollout status deploy/web --timeout=2m

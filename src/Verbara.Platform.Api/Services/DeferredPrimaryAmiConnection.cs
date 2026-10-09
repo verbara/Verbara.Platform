@@ -92,6 +92,12 @@ internal sealed class DeferredPrimaryAmiConnection : IAmiConnection
     public IDisposable Subscribe(IObserver<ManagerEvent> observer)
         => Primary.Subscribe(observer);
 
+    // Sdk 2.8.0 (#391) added this overload with a default body that subscribes through this wrapper's OnEvent
+    // with a token that is never cancelled. Forwarding hands the handler to the primary, whose token is
+    // cancelled when the connection closes.
+    public IDisposable Subscribe(Func<ManagerEvent, CancellationToken, ValueTask> handler)
+        => Primary.Subscribe(handler);
+
     public ValueTask DisconnectAsync(CancellationToken cancellationToken = default)
         => Primary.DisconnectAsync(cancellationToken);
 

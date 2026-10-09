@@ -26,6 +26,34 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before it writes anything, logs both zones as a critical error and reports the close unhealthy in
   `/health/ready`. See `docs/operations/licensed-agent-ledger.md`. (#348)
 
+- **Calls whose `Hangup` never reached Platform now end on the pool sweep (Verbara.Sdk `2.8.0`).**
+  Every 30 s each Asterisk server holding calls older than 60 s receives one AMI `Status`; a held call
+  Asterisk no longer lists is ended and wraps up like any other hang-up (Sdk #402, H142). Before, such a
+  call stayed open for the life of the process. The sweep needs, on **every** Asterisk Platform
+  connects to, an AMI user whose `write` includes `system`, `call` or `reporting` and that does **not**
+  filter out `Hangup` (`eventfilter`); otherwise the sweep fails on that server and those calls stay
+  open as before. Every Asterisk of a multi-server pool also needs its own `systemname` in
+  `asterisk.conf` `[options]`, or channel ids collide across servers (Sdk #403 now logs a Warning on a
+  collision). The signal of a missing permission is `[LIVE] Status refused: …` at Warning in the API's
+  **start-up** log, because every state load sends `Status`. Platform's Compose `manager.conf` template
+  already complies; the AMI user and its reasons are in the voice manual
+  (`docs/manuales/smb/06-canal-voz-sip.md`).
+- **Helm: the Asterisk chart changed in a breaking way.** It now ships Platform's AMI user (the same
+  `read`/`write` classes as the Compose template, no `eventfilter`) and its ARI user, and serves ARI on
+  port 8088. It needs both passwords at install: pass `asterisk.ami.password` and
+  `asterisk.ari.password`, or create the Secrets named by `asterisk.ami.passwordSecret` and
+  `asterisk.ari.passwordSecret` first; without them the Asterisk pod does not start. Keep them equal to
+  the platform chart's `api.asterisk.ami.password` and `api.asterisk.ari.password`;
+  `scripts/k8s-apps.sh` now requires `VERBARA_AMI_PASSWORD` and `VERBARA_ARI_PASSWORD` and passes each
+  to both charts. The chart sets `systemname` to the pod name, runs **one** Asterisk
+  (`asterisk.replicas: 1`) and refuses to render with `replicas > 1`, because Platform registers one AMI
+  server. Its PodDisruptionBudget (`minAvailable: 1`) therefore blocks a drain of the only Asterisk on
+  purpose. To drain its node, plan a maintenance window: cordon the node; set the agents Away and pause
+  queues and campaigns; wait until `asterisk -rx 'core show channels count'` shows 0 active channels;
+  run `kubectl delete pod asterisk-0` (or `kubectl drain --disable-eviction`); uncordon. The pod stays
+  `Pending` until its node is back, because its volumes use `local-path` storage. A pod that is not
+  Ready can always be evicted (`unhealthyPodEvictionPolicy: AlwaysAllow`).
+
 ### Added
 
 - **Licensed-agent ledger.** Every change that can alter who counts as a licensed agent — agent created
@@ -84,6 +112,27 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   GDPR purge. (#348)
 - **The PJSIP desired state enumerates every agent of a tenant.** It was capped at 1000 agents per
   tenant, so agents beyond the first page were never provisioned. (#348)
+
+### Dependencies
+
+- **Verbara.Sdk `2.7.0` → `2.8.0`** and **Verbara.Sdk.Pro `2.17.1-pro` → `2.18.0-pro`** — all 29
+  consumed packages in one commit (7 `Verbara.Sdk.*` pins + 22 `Verbara.Sdk.Pro.*` pins). The
+  compatibility triple is **Verbara.Sdk `2.8.0` × Verbara.Sdk.Pro `2.18.0-pro` × Verbara.Platform (the
+  next version cut from `main`)**; per `Verbara.Sdk/ADR-0040` D3 the cascade cuts no version of its
+  own. **No floor moved:** `dotnet restore` reported no `NU1605`/`NU1109`, and the per-project
+  `project.assets.json` diff by package name moves only the Verbara packages; nothing entered or left
+  the graph.
+- **The `OpenTelemetry.Exporter.Prometheus.AspNetCore` pin is removed.** Verbara.Sdk.OpenTelemetry
+  `2.8.0` declares the exporter at `1.19.1-beta.1` itself (Sdk #388), so the exporter resolves to the
+  same version without Platform's pin; `GET /metrics` is unchanged and its test stays.
+- **`DeferredPrimaryAmiConnection` forwards `IAmiConnection.Subscribe(Func<ManagerEvent,
+  CancellationToken, ValueTask>)`**, the member Sdk `2.8.0` added with a default body (Sdk #391).
+  Without the forwarding, a handler subscribed through the wrapper got a token that is never
+  cancelled, so the primary connection's fast close never reached it.
+- **Behaviour Platform takes on — the pool sweep (H142).** `AddVerbaraSessionsMultiServer()` now
+  registers the reconciliation sweep for every server, on by default; Platform keeps the Sdk defaults
+  (`ReconciliationInterval` 30 s, `DialingTimeout` 60 s). A call the sweep ends carries no hangup
+  cause, so it never triggers a callback-on-drop. Prerequisites and signal: see **Upgrading**.
 
 ---
 

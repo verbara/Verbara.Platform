@@ -1,3 +1,6 @@
+{{- if gt (int .Values.asterisk.replicas) 1 }}
+{{- fail (printf "asterisk.replicas=%v is not supported: Platform registers exactly one AMI server for this chart (the \"primary\" node in Verbara.Platform.Api Program.cs), so a second Asterisk would take calls Platform never sees. Keep asterisk.replicas at 1; more than one Asterisk is a follow-up that needs one Platform AMI node per pod." .Values.asterisk.replicas) }}
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -36,7 +39,32 @@ spec:
             allowPrivilegeEscalation: false
             seccompProfile:
               type: RuntimeDefault
-          command: ["asterisk", "-fpvvv"]
+          # Renders Platform's AMI and ARI users from the mounted templates with the
+          # passwords from the Secrets, sets a per-pod systemname (unique channel ids
+          # if this ever runs more than one Asterisk), then execs Asterisk as before.
+          # awk reads the passwords from ENVIRON, so "/", "&" and "\" stay literal
+          # (no sed replacement). Re-run on every container start: idempotent.
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              : "${AMI_PASSWORD:?AMI_PASSWORD is empty: set asterisk.ami.password or create the asterisk.ami.passwordSecret Secret}"
+              : "${ARI_PASSWORD:?ARI_PASSWORD is empty: set asterisk.ari.password or create the asterisk.ari.passwordSecret Secret}"
+              : "${POD_NAME:?POD_NAME is empty}"
+              awk '/^secret = /{print "secret = " ENVIRON["AMI_PASSWORD"]; next} {print}' \
+                /etc/asterisk/manager.conf.template > /etc/asterisk/manager.conf
+              awk '/^password = /{print "password = " ENVIRON["ARI_PASSWORD"]; next} {print}' \
+                /etc/asterisk/ari.conf.template > /etc/asterisk/ari.conf
+              chmod 600 /etc/asterisk/manager.conf /etc/asterisk/ari.conf
+              awk 'BEGIN { name = ENVIRON["POD_NAME"]; done = 0 }
+                /^[ \t]*systemname[ \t]*=/ { next }
+                { print }
+                /^\[options\]/ && !done { print "systemname = " name; done = 1 }
+                END { if (!done) { print ""; print "[options]"; print "systemname = " name } }' \
+                /etc/asterisk/asterisk.conf > /etc/asterisk/asterisk.conf.new
+              mv /etc/asterisk/asterisk.conf.new /etc/asterisk/asterisk.conf
+              exec asterisk -fpvvv
           ports:
             - name: sip
               containerPort: 5060
@@ -48,6 +76,20 @@ spec:
             - name: prom
               containerPort: {{ .Values.asterisk.prometheus.port }}
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AMI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.asterisk.ami.passwordSecret }}
+                  key: {{ .Values.asterisk.ami.passwordKey }}
+            - name: ARI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.asterisk.ari.passwordSecret }}
+                  key: {{ .Values.asterisk.ari.passwordKey }}
             - name: PG_HOST
               value: {{ .Values.asterisk.postgres.host }}
             - name: PG_PORT
@@ -78,6 +120,15 @@ spec:
             - name: config
               mountPath: /etc/asterisk/modules.conf
               subPath: modules.conf
+            - name: config
+              mountPath: /etc/asterisk/manager.conf.template
+              subPath: manager.conf.template
+            - name: config
+              mountPath: /etc/asterisk/ari.conf.template
+              subPath: ari.conf.template
+            - name: config
+              mountPath: /etc/asterisk/http.conf
+              subPath: http.conf
             - name: voicemail
               mountPath: /var/spool/asterisk/voicemail
             - name: recordings

@@ -141,4 +141,21 @@ public sealed class DeferredPrimaryAmiConnectionTests
 
         Assert.Same(first, Assert.Single(delivered));
     }
+
+    // sdk-2-8-0-pin-cascade: Sdk 2.8.0 (#391) added Subscribe(Func<ManagerEvent, CancellationToken, ValueTask>)
+    // with a default body that attaches the handler through the wrapper's own OnEvent with a token that is never
+    // cancelled. The wrapper must hand it to the primary instead, so the primary's fast close reaches the handler.
+    [Fact]
+    public void Subscribe_ShouldDelegateTokenHandlerToPrimary_WhenHandlerIsSubscribedThroughWrapper()
+    {
+        var (wrapper, primary) = WrapperOverSubstitutedPrimary();
+        var subscription = Substitute.For<IDisposable>();
+        Func<ManagerEvent, CancellationToken, ValueTask> handler = (_, _) => ValueTask.CompletedTask;
+        primary.Subscribe(handler).Returns(subscription);
+
+        var returned = wrapper.Subscribe(handler);
+
+        Assert.Same(subscription, returned);
+        primary.Received(1).Subscribe(handler);
+    }
 }
