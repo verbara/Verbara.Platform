@@ -122,7 +122,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   of the delivery carries on. Only a storage failure answers an error, so the provider retries. A
   conversation is routed once — when the message opens it, or while it is still queued with no owner — so
   a customer's follow-up no longer pulls an offered or active conversation back to the queue; a
-  conversation a bot owns hands the follow-up to the bot.
+  conversation a bot owns hands the follow-up to the bot. When two identical deliveries of a new
+  customer's first message race, the one whose insert loses no longer leaves an empty queued conversation
+  behind for the customer's next message to route: the pipeline removes the conversation it opened unless
+  a message has landed in it. `IConversationStore` gains `DeleteIfNoMessagesAsync` for this, so every
+  implementation of it must add the method.
 - **WhatsApp sends use the tenant's own credentials.** The WhatsApp connector reads `AccessToken` and
   `PhoneNumberId` from the sending tenant's WhatsApp channel configuration when it sends; the
   process-wide `WhatsAppOptions.AccessToken`, `PhoneNumberId`, `AppSecret` and `WebhookVerifyToken` are
