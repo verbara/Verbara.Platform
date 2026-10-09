@@ -22,7 +22,7 @@ namespace Verbara.Platform.Api.Tests;
 /// whatsapp-works-for-real — what an accepted WhatsApp delivery does after it is stored, through the real
 /// host: a replayed message id has no side effect at all (no event, no routing, no queue assignment, no bot
 /// turn); one event of a batch whose routing fails never fails the request or the rest of the batch; and a
-/// customer's follow-up on a conversation that is already offered or active is not routed again.
+/// customer's follow-up on a conversation that is already offered, active or on hold is not routed again.
 /// </summary>
 public sealed class WhatsAppInboundSideEffectTests : IClassFixture<PlatformApiFactory>
 {
@@ -107,11 +107,12 @@ public sealed class WhatsAppInboundSideEffectTests : IClassFixture<PlatformApiFa
         host.MessageEvents.Should().Be(3);
     }
 
-    // ── B3: a follow-up does not re-route an offered or active conversation ──
+    // ── B3: a follow-up does not re-route an offered, active or held conversation ──
 
     [Theory]
     [InlineData(ConversationState.Offered)]
     [InlineData(ConversationState.Active)]
+    [InlineData(ConversationState.OnHold)]
     public async Task PostWebhook_ShouldNotRouteAgain_WhenFollowUpArrivesOnAssignedConversation(ConversationState state)
     {
         await using var host = await SideEffectHost.StartAsync(_factory);
@@ -119,11 +120,14 @@ public sealed class WhatsAppInboundSideEffectTests : IClassFixture<PlatformApiFa
             .Should().Be(HttpStatusCode.OK);
         var conversation = await host.SingleConversationAsync();
         conversation.TransitionTo(ConversationState.Offered, DateTimeOffset.UtcNow);
-        if (state == ConversationState.Active)
+        if (state is ConversationState.Active or ConversationState.OnHold)
         {
             conversation.TransitionTo(ConversationState.Active, DateTimeOffset.UtcNow);
             conversation.Owner = ConversationOwner.ForAgent(EntityId.From("agent-side-effect"));
         }
+
+        if (state == ConversationState.OnHold)
+            conversation.TransitionTo(ConversationState.OnHold, DateTimeOffset.UtcNow);
 
         await host.SaveAsync(conversation);
         var ownerBefore = conversation.Owner;
