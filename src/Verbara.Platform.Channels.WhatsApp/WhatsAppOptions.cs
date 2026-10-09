@@ -1,14 +1,11 @@
 namespace Verbara.Platform.Channels.WhatsApp;
 
-/// <summary>Options for the WhatsApp Meta Business API connector.</summary>
+/// <summary>
+/// Process-wide options for the WhatsApp Meta Business API channel. The sending credentials
+/// (access token, phone number id) are per tenant only — see <see cref="WhatsAppCredentialKeys"/>.
+/// </summary>
 public sealed class WhatsAppOptions
 {
-    /// <summary>The WhatsApp Business phone number ID.</summary>
-    public required string PhoneNumberId { get; set; }
-
-    /// <summary>Meta API access token (Bearer).</summary>
-    public required string AccessToken { get; set; }
-
     /// <summary>Token used to verify the webhook subscription challenge.</summary>
     public required string WebhookVerifyToken { get; set; }
 

@@ -1,3 +1,4 @@
+using Verbara.Platform.Channels.Core;
 using Verbara.Sdk.Resilience;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -11,15 +12,23 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers WhatsApp connector, webhook handler, message transformer, and the
     /// keyed <see cref="ResiliencePolicy"/> consumed by <see cref="WhatsAppConnector"/>
-    /// (circuit 5/60s + retry 2/500ms + timeout 15s).
+    /// (circuit 5/60s + retry 2/500ms + timeout 15s). The connector is a singleton that sends
+    /// through the <see cref="WhatsAppConnector.HttpClientName"/> named client of
+    /// <see cref="IHttpClientFactory"/>, so a singleton channel registry never pins one
+    /// <see cref="HttpClient"/>; it is exposed as an <see cref="IChannelConnector"/>.
     /// </summary>
     public static IServiceCollection AddWhatsApp(
         this IServiceCollection services,
-        Action<WhatsAppOptions> configure)
+        Action<WhatsAppOptions>? configure = null)
     {
-        services.Configure(configure);
+        if (configure is not null)
+            services.Configure(configure);
+        else
+            services.AddOptions<WhatsAppOptions>();
 
-        services.AddHttpClient<WhatsAppConnector>();
+        services.AddHttpClient(WhatsAppConnector.HttpClientName);
+        services.AddSingleton<WhatsAppConnector>();
+        services.AddSingleton<IChannelConnector>(sp => sp.GetRequiredService<WhatsAppConnector>());
         services.AddSingleton<WhatsAppWebhookHandler>();
         services.AddSingleton<WhatsAppMessageTransformer>();
 

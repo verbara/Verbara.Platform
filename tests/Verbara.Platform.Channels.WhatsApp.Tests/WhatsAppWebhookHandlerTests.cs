@@ -23,8 +23,6 @@ public class WhatsAppWebhookHandlerTests
     {
         var options = Options.Create(new WhatsAppOptions
         {
-            PhoneNumberId = "123456789",
-            AccessToken = "EAAtest",
             WebhookVerifyToken = verifyToken ?? VerifyToken,
             AppSecret = appSecret ?? AppSecret,
         });
