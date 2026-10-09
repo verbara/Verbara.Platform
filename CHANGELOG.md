@@ -25,6 +25,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deployment's ledger and it can never change: a later start with another value stops the daily close
   before it writes anything, logs both zones as a critical error and reports the close unhealthy in
   `/health/ready`. See `docs/operations/licensed-agent-ledger.md`. (#348)
+- **Migration `020_MessagesExternalIdUnique` removes duplicate inbound messages.** A provider message
+  delivered twice at the same moment could be stored twice. Before it makes the provider message id
+  unique per tenant, the migration keeps the earliest stored copy of each such message and deletes the
+  others; messages without a provider id are untouched. It holds a write lock on `messages` while it
+  runs, so plan the upgrade for a quiet period on large tenants.
 
 ### Added
 
@@ -84,6 +89,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   GDPR purge. (#348)
 - **The PJSIP desired state enumerates every agent of a tenant.** It was capped at 1000 agents per
   tenant, so agents beyond the first page were never provisioned. (#348)
+
+### Fixed
+
+- **Outbound delivery statuses now reach the message.** The provider's message id was never stored
+  when a send succeeded, so every later `sent`/`delivered`/`read` callback was dropped as unknown. The
+  id and the `Sent` status are now written together in a single update, so a callback that arrives
+  right after the provider's response still finds the message. A callback for an id no message holds
+  is logged and counted on `channels.delivery_status.unknown_id` (meter `verbara.platform.channels`).
+- **Delivery statuses only move forward.** `Pending` → `Sent` → `Delivered` → `Read`; `Failed` is final
+  and can only follow `Pending` or `Sent`. A replayed or late callback (a `sent` after `read`) no longer
+  moves a message backwards, in the database and in the in-memory store alike.
+- **Two identical inbound deliveries store one message.** When a provider delivered the same message
+  twice at the same moment, both copies could be stored, and every later lookup of that message failed.
+  The second delivery now finds the message the first one stored (migration `020`).
 
 ---
 

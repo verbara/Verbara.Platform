@@ -444,9 +444,9 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     // Typification P2b B2 — expose verbara.platform.typification.ai meter
     // (suggestion.made / suggestion.accepted / suggestion.overridden).
     .AddMeter(Verbara.Platform.Typification.Ai.TypificationAiMetrics.MeterName)
-    // ADR-0026 Phase B — realtime.reconciliation.{tenants,memberships,sync_failures}
-    // for Verbara queue_memberships → Asterisk Realtime drift observability.
+    // ADR-0026 Phase B — realtime.reconciliation.* (queue_memberships → Asterisk Realtime drift).
     .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)
+    .AddMeter(Verbara.Platform.Channels.Core.DeliveryStatusHandler.MeterName) // channels.delivery_status.unknown_id
     .WithPrometheusExporter());
 
 // ─── Pro Hardening — Resilience + LicenseGuard + Retention ──────────────────

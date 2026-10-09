@@ -24,6 +24,8 @@ public class InboundMessagePipelineTests
         _contactResolver = Substitute.For<IContactIdentityResolver>();
         _conversationStore = Substitute.For<IConversationStore>();
         _lifecycleService = Substitute.For<IConversationLifecycleService>();
+        _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<Message>());
 
         _pipeline = new InboundMessagePipeline(
             _messageStore,
@@ -190,8 +192,9 @@ public class InboundMessagePipelineTests
             Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
         await _lifecycleService.DidNotReceive().CreateAsync(
             Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
-        // SaveAsync must not be called again
+        // Nothing must be persisted again
         await _messageStore.DidNotReceive().SaveAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>());
+        await _messageStore.DidNotReceive().InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>());
     }
 
     // -------------------------------------------------------------------------
@@ -214,7 +217,7 @@ public class InboundMessagePipelineTests
 
         await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
 
-        await _messageStore.Received(1).SaveAsync(
+        await _messageStore.Received(1).InsertInboundIfAbsentAsync(
             Arg.Is<Message>(m => m != null &&
                 m.Direction == MessageDirection.Inbound &&
                 m.DeliveryStatus == MessageDeliveryStatus.Delivered &&
@@ -427,6 +430,40 @@ public class InboundMessagePipelineTests
         result.PersistedMessage.TenantId.Should().Be(TenantId);
         result.PersistedMessage.ExternalMessageId.Should().Be(inbound.ExternalMessageId);
 
-        await _messageStore.Received(1).SaveAsync(result.PersistedMessage, Arg.Any<CancellationToken>());
+        await _messageStore.Received(1).InsertInboundIfAbsentAsync(result.PersistedMessage, Arg.Any<CancellationToken>());
+        result.IsDuplicate.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Pipeline_ShouldReportStoredMessage_WhenConcurrentIdenticalDeliveryWonTheInsert()
+    {
+        // Both deliveries passed DeduplicateStep before either inserted; the store keeps the first one.
+        var inbound = MakeMessage("race-ext");
+        var contact = MakeContact();
+        var conversation = MakeConversation(contact.ContactId);
+        var winner = new Message
+        {
+            MessageId = EntityId.New(),
+            ConversationId = EntityId.New(),
+            TenantId = TenantId,
+            Direction = MessageDirection.Inbound,
+            Channel = Channel,
+            Content = new MessageEnvelope([]),
+            DeliveryStatus = MessageDeliveryStatus.Delivered,
+            ExternalMessageId = "race-ext",
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        _messageStore.FindByExternalIdAsync(TenantId, "race-ext", Arg.Any<CancellationToken>()).Returns((Message?)null);
+        _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>()).Returns(winner);
+        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
+            .Returns(conversation);
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        result.MessageId.Should().Be(winner.MessageId);
+        result.ConversationId.Should().Be(winner.ConversationId);
+        result.IsNewConversation.Should().BeFalse();
+        await _messageStore.DidNotReceive().SaveAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>());
     }
 }
