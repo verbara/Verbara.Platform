@@ -77,7 +77,7 @@ internal static class WebhookEndpoints
 #pragma warning disable CA1848 // Use LoggerMessage delegates
             logger.LogWarning(ex, "No handler registered for channel {Channel}", channel);
 #pragma warning restore CA1848
-            return Results.BadRequest(new ErrorResponse(ex.Message));
+            return Results.BadRequest(new ErrorResponse($"Channel not available: {channel}"));
         }
 
         if (result.Type == WebhookResultType.NewMessage && result.Message is not null)

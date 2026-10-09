@@ -207,7 +207,9 @@ internal static class ManagementBillingEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new ErrorResponse(ex.Message));
+            RejectedRequestLog.Write(context, "invoice-generation", ex);
+            return Results.BadRequest(new ErrorResponse(
+                "The invoice could not be generated for this period: the tenant has no active rate card."));
         }
 
         await store.SaveAsync(invoice, ct);

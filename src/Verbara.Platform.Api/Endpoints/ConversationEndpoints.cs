@@ -689,7 +689,8 @@ internal static class ConversationEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return TypedResults.BadRequest(new ErrorResponse(ex.Message));
+            RejectedRequestLog.Write(context, "conversation-wrap-up", ex);
+            return TypedResults.BadRequest(new ErrorResponse("The conversation cannot move to wrap-up from its current state."));
         }
 
         await conversationStore.SaveAsync(conversation, ct);

@@ -88,13 +88,53 @@ public class ErrorHandlingMiddlewareTests
     [Fact]
     public async Task InvokeAsync_ShouldKeepExceptionMessageAsDetail_WhenMappedTo4xx()
     {
-        // 4xx keeps its detail: domain code throws ArgumentException / PlatformException with a
-        // caller-facing message, and console clients render it.
+        // A PlatformException keeps its detail: it carries a caller-facing message (and its code as
+        // the title). Other exception types' messages are scrubbed from 4xx bodies (v2.27.0).
         var (sut, ctx) = CreateSut(_ => throw new PlatformException("INVALID_STATE", "Bad state"));
 
         await sut.InvokeAsync(ctx);
 
         ctx.Response.StatusCode.Should().Be(400);
         (await ReadBodyAsync(ctx)).Should().Contain("Bad state");
+    }
+    [Theory]
+    [InlineData(nameof(InvalidOperationException), 400)]
+    [InlineData(nameof(ArgumentException), 400)]
+    [InlineData(nameof(ArgumentNullException), 400)]
+    [InlineData(nameof(KeyNotFoundException), 404)]
+    public async Task HandleException_ShouldNotEchoMessage_WhenInvalidOperationException(string exceptionType, int expectedStatus)
+    {
+        // The status stays; the message (which can name tables, ids or internal state) goes to the
+        // log, and the caller gets the title plus a traceId to quote.
+        const string marker = "internal detail X-4b1e";
+        Exception exception = exceptionType switch
+        {
+            nameof(InvalidOperationException) => new InvalidOperationException(marker),
+            nameof(ArgumentException) => new ArgumentException(marker),
+            nameof(ArgumentNullException) => new ArgumentNullException(nameof(exceptionType), marker),
+            _ => new KeyNotFoundException(marker),
+        };
+        var (sut, ctx) = CreateSut(_ => throw exception);
+        ctx.TraceIdentifier = "trace-4xx";
+
+        await sut.InvokeAsync(ctx);
+
+        ctx.Response.StatusCode.Should().Be(expectedStatus);
+        var body = await ReadBodyAsync(ctx);
+        body.Should().NotContain("X-4b1e");
+        body.Should().Contain("trace-4xx");
+    }
+
+    [Fact]
+    public async Task HandleException_ShouldKeepCode_WhenPlatformException()
+    {
+        var (sut, ctx) = CreateSut(_ => throw new PlatformException("some-code", "Caller-facing reason"));
+
+        await sut.InvokeAsync(ctx);
+
+        ctx.Response.StatusCode.Should().Be(400);
+        var body = await ReadBodyAsync(ctx);
+        body.Should().Contain("\"title\":\"some-code\"");
+        body.Should().Contain("Caller-facing reason");
     }
 }
