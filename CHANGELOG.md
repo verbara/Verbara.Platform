@@ -34,6 +34,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`docker/demo/demo-reset.sh` no longer stops when the shared `local-nuget-feed/` is missing.** Its
+  step 2 copied that folder into `Verbara.Platform/local-nuget-feed/`, which `.dockerignore` excludes
+  from every demo image build, so the copy never reached Docker — and the step exited 1 on any machine
+  without the folder. The step is gone; the script now has 10 steps. `CONTRIBUTING.md` now says where
+  the Postgres-backed (Testcontainers) tests live: `Storage.Postgres.Tests`, not `Api.Tests`.
 - **Inbound contact lookup works again on PostgreSQL — broken since 2.13.0.** Since 2.13.0 the
   Postgres store writes a contact address's channel as its name (`"WhatsApp"`), while the lookup by
   address still read it as a number, so the lookup failed with a database error whenever it reached a

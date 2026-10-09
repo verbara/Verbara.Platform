@@ -16,30 +16,17 @@ echo "============================================"
 echo ""
 
 # 1. Clean up
-echo "[1/11] Limpiando entorno anterior..."
+echo "[1/10] Limpiando entorno anterior..."
 docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
 echo "  OK"
 
-# 2. Copy local NuGet feed for Docker build (Pro packages)
-echo "[2/11] Copiando NuGet feed local..."
-PLATFORM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-NUGET_FEED="$(cd "$PLATFORM_ROOT/../local-nuget-feed" 2>/dev/null && pwd || true)"
-if [ -z "$NUGET_FEED" ] || [ ! -d "$NUGET_FEED" ]; then
-    echo "  ERROR: local NuGet feed not found at $PLATFORM_ROOT/../local-nuget-feed" >&2
-    echo "  Expected sibling 'local-nuget-feed/' next to the Verbara repos (see workspace CLAUDE.md)." >&2
-    exit 1
-fi
-mkdir -p "$PLATFORM_ROOT/local-nuget-feed"
-cp -r "$NUGET_FEED/"*.nupkg "$PLATFORM_ROOT/local-nuget-feed/" 2>/dev/null || true
-echo "  OK ($(ls "$PLATFORM_ROOT/local-nuget-feed/"*.nupkg 2>/dev/null | wc -l) packages)"
-
-# 3. Build images (if needed)
-echo "[3/11] Construyendo imagenes..."
+# 2. Build images (if needed)
+echo "[2/10] Construyendo imagenes..."
 docker compose -f "$COMPOSE_FILE" build --quiet
 echo "  OK"
 
-# 4. Start Postgres
-echo "[4/11] Iniciando Postgres..."
+# 3. Start Postgres
+echo "[3/10] Iniciando Postgres..."
 docker compose -f "$COMPOSE_FILE" up -d postgres
 echo -n "  Esperando..."
 until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform -q 2>/dev/null; do
@@ -48,13 +35,13 @@ until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U platform 
 done
 echo " OK"
 
-# 5. Start all services (Pro tables created by EnsureSchemaAsync during API DI registration)
-echo "[5/11] Iniciando todos los servicios..."
+# 4. Start all services (Pro tables created by EnsureSchemaAsync during API DI registration)
+echo "[4/10] Iniciando todos los servicios..."
 docker compose -f "$COMPOSE_FILE" up -d
 echo "  OK"
 
-# 6. Wait for all services healthy
-echo "[6/11] Esperando servicios..."
+# 5. Wait for all services healthy
+echo "[5/10] Esperando servicios..."
 for svc in asterisk pstn-emulator platform-api web grafana; do
     echo -n "  $svc..."
     timeout=120
@@ -76,13 +63,13 @@ done
 
 API_BASE="http://localhost:5000"
 
-# 7. Initialize platform via setup wizard. Since v2.6.0 the setup endpoint
+# 6. Initialize platform via setup wizard. Since v2.6.0 the setup endpoint
 # creates BOTH the host "platform" tenant (admin) AND a first operational
 # "Customer" tenant (admin) in one call — Platform is administrative-only and
 # cannot hold agents/queues (ADR-0027), so a Customer is mandatory. We make
 # that first Customer the "demo" tenant the rest of this script seeds into;
-# step 8 below then becomes an idempotent no-op (the tenant already exists).
-echo "[7/11] Inicializando plataforma (platform + customer 'demo')..."
+# step 7 below then becomes an idempotent no-op (the tenant already exists).
+echo "[6/10] Inicializando plataforma (platform + customer 'demo')..."
 SETUP_RESPONSE=$(curl -sf -X POST "$API_BASE/api/v1/setup" \
     -H "Content-Type: application/json" \
     -d '{
@@ -143,10 +130,10 @@ docker exec -i demo-postgres-1 psql -U platform -d platform >/dev/null 2>&1 <<'S
 SQL
 echo "  OK"
 
-# 8. Ensure demo customer tenant exists (idempotent). Since v2.6.0 step 7's
+# 7. Ensure demo customer tenant exists (idempotent). Since v2.6.0 step 6's
 # setup already creates "demo" as the first Customer; this POST is a no-op
 # safety net (409 swallowed by `|| true`) for re-runs where setup returned 409.
-echo "[8/11] Asegurando tenant demo (idempotente)..."
+echo "[7/10] Asegurando tenant demo (idempotente)..."
 if [ -n "$MGMT_KEY" ]; then
     curl -sf -X POST "$API_BASE/api/v1/management/tenants" \
         -H "Content-Type: application/json" \
@@ -173,8 +160,8 @@ else
     echo "  SKIP (no management key)"
 fi
 
-# 9. Seed demo data via API (persisted to Postgres when connection string is configured)
-echo "[9/11] Creando datos demo via API..."
+# 8. Seed demo data via API (persisted to Postgres when connection string is configured)
+echo "[8/10] Creando datos demo via API..."
 
 # Get a JWT for the platform admin to use admin endpoints
 PLATFORM_JWT=$(curl -sf -X POST "$API_BASE/api/v1/auth/login" \
@@ -323,16 +310,16 @@ else
     echo "  SKIP (no management key)"
 fi
 
-# 10. Load Asterisk Realtime seed + historical data (Pro-owned Postgres tables)
-echo "[10/11] Cargando datos Asterisk + historicos..."
+# 9. Load Asterisk Realtime seed + historical data (Pro-owned Postgres tables)
+echo "[9/10] Cargando datos Asterisk + historicos..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/010_demo_asterisk_seed.sql -q
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
     psql -U platform -d platform -f /demo-sql/020_demo_historical_data.sql -q
 echo "  OK"
 
-# 11. Warmup + Summary
-echo "[11/11] Verificando..."
+# 10. Warmup + Summary
+echo "[10/10] Verificando..."
 LOGIN_RESULT=$(curl -sf -X POST "$API_BASE/api/v1/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"tenantId":"demo","email":"admin@demo.local","password":"DemoAdmin2026!"}' 2>/dev/null)

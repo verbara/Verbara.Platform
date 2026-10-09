@@ -9,7 +9,7 @@ namespace Verbara.Platform.Api.Tests.Authz;
 /// Verifies the cache + error-handling behavior of <see cref="CachedAgentTenantResolver"/>.
 /// The DB-lookup half of the resolver is exercised via a test subclass that overrides the
 /// protected virtual <c>LookupTenantIdAsync</c> method so we can run without Postgres.
-/// (Platform repo has no Testcontainers fixture; the DB SQL itself is trivial — column read.)
+/// (Postgres-backed tests live in Storage.Postgres.Tests; the DB SQL itself is trivial — column read.)
 /// </summary>
 public sealed class CachedAgentTenantResolverTests
 {
