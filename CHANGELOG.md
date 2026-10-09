@@ -25,6 +25,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deployment's ledger and it can never change: a later start with another value stops the daily close
   before it writes anything, logs both zones as a critical error and reports the close unhealthy in
   `/health/ready`. See `docs/operations/licensed-agent-ledger.md`. (#348)
+- **WhatsApp needs the tenant's own credentials.** A WhatsApp webhook is accepted only with the keys
+  `AppSecret`, `PhoneNumberId` and `WebhookVerifyToken` in the tenant's WhatsApp channel configuration
+  (`AccessToken` is the outbound token). There is no process-wide fallback: a tenant without its own
+  `AppSecret` has every delivery ignored, logged as event `8400` and counted in
+  `whatsapp.webhook.rejected` (meter `Verbara.Platform.Channels.WhatsApp`, `reason`
+  `missing_app_secret`). Configurations saved by console v3.21.0 use other key names (`ApiToken`,
+  `PhoneNumber`) and must be re-entered with these.
 
 ### Added
 
@@ -84,6 +91,39 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   GDPR purge. (#348)
 - **The PJSIP desired state enumerates every agent of a tenant.** It was capped at 1000 agents per
   tenant, so agents beyond the first page were never provisioned. (#348)
+- **The API host now serves exactly two digital channels, WhatsApp and WebChat.** The channel registry
+  is built from the channel modules the host registers, on first use, instead of from registration
+  calls that nothing made. WhatsApp webhooks and agent replies to WhatsApp and WebChat contacts now reach
+  their handler and connector. SMS, Email, Messenger, Instagram, Telegram, Twitter and RCS stay
+  unregistered: a webhook for one of them answers `404` with no body even when the tenant has configured
+  it (it answered `400` with the text "No webhook handler registered"). An automated test posts an
+  unsigned body to every registered webhook handler and fails the build if any accepts it.
+- **`GET /api/v1/webhooks/{tenant}/whatsapp` checks the tenant's verify token.** The challenge is
+  echoed, as plain text, only when `hub.mode` is `subscribe` and `hub.verify_token` equals the tenant's
+  `WebhookVerifyToken`; anything else, or a tenant without an active WhatsApp configuration, answers
+  `403`. It echoed the challenge for any token, as a JSON string that Meta does not accept. The
+  Messenger and Instagram handshakes answer `403`, as those channels are not registered.
+- **A webhook delivery carries every event the provider batched.** `WebhookResult` (Channels.Core) now
+  holds lists of inbound messages and status updates, and all nine webhook handlers were updated; the
+  webhook endpoint processes every element in order. Code that read `WebhookResult.Message` or
+  `.StatusUpdate` reads `Messages` and `StatusUpdates`.
+
+### Fixed
+
+- **WhatsApp webhooks are handled — they never were.** The API host registered no digital channel's
+  webhook handler, so every WhatsApp webhook answered `400` in every published version. A Meta delivery
+  with several messages or statuses is processed whole; only the first event was read before.
+
+### Security
+
+- **WhatsApp webhooks are verified per tenant and fail closed.** The `X-Hub-Signature-256` HMAC is
+  computed with the `AppSecret` of the tenant whose URL received the delivery and compared in constant
+  time (it was compared as a string, and fell back to a process-wide secret when the tenant had none).
+  Each change of a delivery is processed only when its `metadata.phone_number_id` is the tenant's
+  `PhoneNumberId`, so two tenants that share one Meta app no longer accept each other's messages. A
+  delivery that fails these checks answers `200` and writes nothing; it is logged (events `8400`-`8402`)
+  and counted in `whatsapp.webhook.rejected` by `reason`. No advisory: no published version registered
+  the WhatsApp handler.
 
 ---
 
