@@ -171,7 +171,7 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
             if (open is null)
                 await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogPersistFailedAfterSend(_logger, ex, tenantId.Value, conversationId.Value, channel, sent.ExternalMessageId);
             await ReleaseIfReservedAsync(request, reserved).ConfigureAwait(false);
@@ -224,7 +224,7 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
             await _capacity.ReleaseAsync(request.TenantId, request.AgentId, request.Channel, CancellationToken.None)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Never mask the start's own outcome; the restart reconcile recounts the agent's load from conversations.
             LogReleaseFailed(_logger, ex, request.TenantId.Value, request.AgentId.Value);

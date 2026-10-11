@@ -223,7 +223,7 @@ public class AgentCapacityServiceTests
     public async Task TryReserveAsync_ShouldReturnFalseAndReserveNothing_WhenAgentDoesNotExist()
     {
         var resolver = Substitute.For<IAgentCapacityResolver>();
-        resolver.ResolveAsync(Tenant, AgentId, Arg.Any<CancellationToken>()).Returns((ChannelCapacity?)null);
+        resolver.ResolveAsync(Tenant, AgentId, Arg.Any<CancellationToken>()).Returns(default(ChannelCapacity?));
         var sut = new InMemoryAgentCapacityService(resolver);
 
         (await sut.TryReserveAsync(Tenant, AgentId, ChannelType.WebChat, CancellationToken.None)).Should().BeFalse();
