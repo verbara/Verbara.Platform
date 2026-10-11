@@ -20,7 +20,7 @@ namespace Verbara.Platform.Api.DependencyInjection;
 /// </para>
 /// <para>
 /// <b>Order is part of the contract.</b> <c>IHostedService</c> instances start in
-/// registration order, so the three are registered in the order below and pinned by
+/// registration order, so the four are registered in the order below and pinned by
 /// <c>StartupMigratorsRegistrarTests</c>.
 /// </para>
 /// </remarks>
@@ -40,7 +40,7 @@ public static class StartupMigratorsExtensions
     /// runs on InMemory storage, so nothing is registered.
     /// </param>
     /// <remarks>
-    /// The three migrators, in start order:
+    /// The four migrators, in start order:
     /// <list type="number">
     /// <item><description>
     /// <b>OIDC client secret</b> (ADMIN-001, PREPUB-2026-05-09) — encrypts any legacy plaintext
@@ -53,12 +53,17 @@ public static class StartupMigratorsExtensions
     /// re-runs are zero-write no-ops once every value is wrapped.
     /// </description></item>
     /// <item><description>
+    /// <b>Channel credentials</b> (whatsapp-works-for-real D15) — wraps any legacy plaintext secret value in
+    /// <c>tenant_channel_configs.credentials</c>. Never blocks startup; re-runs are zero-write no-ops once
+    /// every secret is wrapped.
+    /// </description></item>
+    /// <item><description>
     /// <b>Tenant LLM config seed</b> (P2c.1 §6) — materialises the appsettings global LLM key
     /// into the single operational tenant's <c>tenant_llm_config</c> row. No-op unless the global
     /// key is set AND exactly one operational tenant exists AND it has no config row yet.
     /// </description></item>
     /// </list>
-    /// All three are idempotent and safe to leave registered indefinitely.
+    /// All four are idempotent and safe to leave registered indefinitely.
     /// </remarks>
     public static IServiceCollection AddPlatformStartupMigrators(
         this IServiceCollection services,
@@ -73,6 +78,7 @@ public static class StartupMigratorsExtensions
 
         services.AddOidcClientSecretEncryptionMigrator();
         services.AddUserMfaEncryptionMigrator();
+        services.AddTenantChannelCredentialsEncryptionMigrator();
         services.AddTenantLlmConfigSeedMigrator();
         return services;
     }
