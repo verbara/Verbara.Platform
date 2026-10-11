@@ -12,6 +12,12 @@
 
 After **every** Verbara.Platform tagged release.
 
+> **Stop condition — do not run this while that tag's smoke is red.** If the release's
+> Release workflow run shows its `Post-release functional smoke` job as failed, do **not**
+> register the `api` + `realtime` digests: registering binds every newly issued license's
+> `AuthorizedImageDigests` claim to a functionally unverified image set (Pro/ADR-0011
+> Layer C). Re-run or fix the smoke first; register only once that job is green.
+
 > **TWO entries per release — `api` AND `realtime`.**
 > `data/authorized-digests.json` stores **one `current[]` entry per image per
 > version**, and every release since **v2.5.1** is an `api` + `realtime` **pair**

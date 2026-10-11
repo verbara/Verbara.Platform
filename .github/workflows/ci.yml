@@ -8,9 +8,10 @@ name: CI
 # this gate is the fast feedback loop.
 #
 # Jobs: build-and-test (Build + Unit Tests, Release) · live-db-tests (Postgres/Redis
-# Testcontainers — gating since the readiness-probe fix graduated it, though still not
-# a required check; see the promotion note on the job) · coverage (blocking
-# line-coverage ratchet) · coverage-scripts · aot-probe · invariant-gates.
+# Testcontainers — gating since the readiness-probe fix graduated it, and a required
+# check since promote-live-db-lane-to-required; see the promotion note on the job) ·
+# coverage (blocking line-coverage ratchet) · coverage-scripts · aot-probe ·
+# invariant-gates.
 #
 # NOTE (private Pro packages): Verbara.Sdk.Pro.* live on the private GitHub Packages
 # NuGet feed (source `github` in NuGet.Config). Restore authenticates with the
@@ -41,10 +42,10 @@ permissions:
 jobs:
   # Docs/data-only CI fast-path gate (verbara-meta/ADR-0016 §1). Classifies the PR /
   # merge_group diff and exposes outputs.docs_only. The HEAVY required jobs (build-and-test,
-  # coverage, aot-probe) gate on it and report a satisfying `skipped` when the diff is
-  # docs/data-only; the ALWAYS-RUN required job (invariant-gates) carries NO edge to
-  # this gate and validates the docs diff unconditionally (§3.3). live-db-tests is non-required
-  # but also gated (safe — §4 Platform row). This is the ONLY merge-queue-safe AND
+  # live-db-tests, coverage, aot-probe) gate on it and report a satisfying `skipped` when the
+  # diff is docs/data-only; the ALWAYS-RUN required job (invariant-gates) carries NO edge to
+  # this gate and validates the docs diff unconditionally (§3.3). live-db-tests joined the
+  # required set with promote-live-db-lane-to-required. This is the ONLY merge-queue-safe AND
   # required-check-safe pattern — a workflow-level paths-ignore on ci.yml is BANNED (it would
   # strand the ruleset 17662679 required contexts in `Expected` forever). Triggers stay
   # unconditional (pull_request + merge_group, no path filter). Classifier: scripts/ci/
@@ -281,15 +282,25 @@ jobs:
   # intermittently blocking unrelated PRs, which is the exact outcome report-only existed
   # to avoid.
   #
-  # Gating is NOT the same as required: this check-run is still absent from the
-  # required-checks ruleset (17662679). Adding it there is a separate, deliberate
-  # repo-config change — a red job here is visible on the PR and blocks nothing
-  # automatically.
+  # PROMOTED TO REQUIRED — the second step. Gating is not the same as required (a gating
+  # job reports its red faithfully but blocks nothing), so "Live-DB Tests (Postgres)" is
+  # now a required status check on the main-protection ruleset (17662679): a red lane
+  # blocks the merge instead of annotating it. Also gated on evidence, read at step
+  # level: after the two gating runs above, the lane held green on the merge queue a
+  # month later — runs 35542449427 (pr-298), 35524372439 (pr-274), 35517549350 (pr-297).
+  # This discharges task 2.2 of openspec/changes/archive/2026-07-05-live-postgres-ci-lane
+  # (deferred behind this promotion trigger), via promote-live-db-lane-to-required.
+  # The ruleset entry is repository configuration, not a file: it does not appear in a
+  # diff. Its context string is this job's `name:` verbatim — renaming the job orphans
+  # the entry and blocks every PR. A transient red here (e.g. a restore hiccup at the
+  # Build step) is remedied by re-running the job, not by walking the promotion back.
   live-db-tests:
     name: Live-DB Tests (Postgres)
-    # Gating (see the promotion note above for the evidence), but still not a required
-    # check. Gated on the docs-only fast path too — safe per ADR-0016 §4 Platform row: a
-    # non-required job skipping on a docs diff strands nothing.
+    # A REQUIRED context (see the promotion note above). Gated on the docs-only fast path
+    # like the other heavy required jobs: the skip is safe because a skipped required
+    # check satisfies branch protection (verbara-meta/ADR-0016 §1) — the same way it
+    # already does for build-and-test, coverage and aot-probe, which carry this identical
+    # `if:` guard.
     needs: gate
     if: ${{ !cancelled() && (needs.gate.result != 'success' || needs.gate.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
@@ -332,13 +343,17 @@ jobs:
         # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): the container-backed
         # test run is the heavy part of this job; skipped on a bot PR so the
         # required check-run NAME ("Live-DB Tests (Postgres)") still reports.
+        # INVARIANT, not style: this context is required, so the skip MUST stay at
+        # step level — a JOB-level skip collapses the context and a bot PR could
+        # never merge.
         if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
         run: >-
           dotnet test tests/Verbara.Platform.Storage.Postgres.Tests/Verbara.Platform.Storage.Postgres.Tests.csproj
           --no-build -c Release --logger "console;verbosity=normal"
 
       - name: Live-DB tests — Identity.Redis.Tests
-        # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): as above.
+        # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): as above — and, as
+        # above, it MUST stay step-level while this context is required.
         if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
         run: >-
           dotnet test tests/Verbara.Platform.Identity.Redis.Tests/Verbara.Platform.Identity.Redis.Tests.csproj
