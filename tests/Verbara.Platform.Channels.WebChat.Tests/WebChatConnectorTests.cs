@@ -3,7 +3,9 @@ using Verbara.Platform.Channels.WebChat;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Microsoft.Extensions.Options;
+using System.Net.WebSockets;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
 namespace Verbara.Platform.Channels.WebChat.Tests;
 
@@ -135,6 +137,61 @@ public class WebChatConnectorTests
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(WebChatConnector.SessionNotConnected);
+    }
+
+    [Theory]
+    [InlineData("socket")]
+    [InlineData("concurrent")]
+    [InlineData("disposed")]
+    public async Task SendAsync_ShouldReturnFailure_WhenTransportThrows(string failure)
+    {
+        // The socket can close between the state check and the send, or a second send can race the
+        // first: the spec records that as a failed send, never as an exception reaching the agent.
+        Exception thrown = failure switch
+        {
+            "socket" => new WebSocketException("connection reset"),
+            "concurrent" => new InvalidOperationException("There is already one outstanding 'SendAsync' call."),
+            _ => new ObjectDisposedException("socket"),
+        };
+        var manager = CreateManager();
+        await ConnectVisitorAsync(manager);
+        var transport = Substitute.For<IWebChatTransport>();
+        transport.SendToClientAsync(Arg.Any<string>(), Arg.Any<MessageEnvelope>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(thrown);
+        var connector = new WebChatConnector(manager, transport);
+
+        var send = () => connector.SendAsync(MakeMessage(VisitorAddress), CancellationToken.None);
+
+        var result = (await send.Should().NotThrowAsync()).Subject;
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(WebChatConnector.SessionNotConnected);
+    }
+
+    [Fact]
+    public async Task SendAsync_ShouldReturnFailure_WhenSessionBelongsToAnotherTenant()
+    {
+        var manager = CreateManager();
+        await ConnectVisitorAsync(manager); // tenant-1's visitor
+        var transport = Substitute.For<IWebChatTransport>();
+        var connector = new WebChatConnector(manager, transport);
+        var fromOtherTenant = MakeMessage(VisitorAddress) with { TenantId = new TenantId("tenant-2") };
+
+        var result = await connector.SendAsync(fromOtherTenant, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(WebChatConnector.SessionNotConnected);
+        await transport.DidNotReceive().SendToClientAsync(Arg.Any<string>(), Arg.Any<MessageEnvelope>(), Arg.Any<CancellationToken>());
+    }
+
+    private static Task<string> ConnectVisitorAsync(WebChatSessionManager manager)
+    {
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        return manager.ConnectAsync(
+            new TenantId("tenant-1"),
+            EntityId.From("conv-1"),
+            new ChannelAddress(ChannelType.WebChat, VisitorAddress),
+            clock);
     }
 
     [Fact]

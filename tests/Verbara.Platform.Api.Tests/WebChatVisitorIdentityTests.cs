@@ -167,6 +167,139 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         messages.Count(m => m.Direction == MessageDirection.Inbound).Should().Be(2);
     }
 
+    [Fact]
+    public async Task AgentReply_ShouldMarkFailed_WhenSocketNotYetAttached()
+    {
+        // The session exists (created over REST) but the visitor's socket never attached: nothing can
+        // carry the reply, so it must be recorded as failed, never as sent.
+        using var client = _factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client);
+        var session = await GetSessionAsync(sessionId);
+        var agentId = await GiveConversationToAgentAsync(session.ConversationId);
+
+        var message = await SendAgentReplyAsync(session, agentId, "anyone there?");
+
+        message.DeliveryStatus.Should().Be(MessageDeliveryStatus.Failed,
+            "no socket is attached to the session, so the reply reached nobody");
+        var stored = await _factory.Services.GetRequiredService<IMessageStore>()
+            .GetConversationMessagesAsync(VisitorTenant, session.ConversationId, 100, 0, CancellationToken.None);
+        stored.Should().ContainSingle(m => m.MessageId == message.MessageId)
+            .Which.DeliveryStatus.Should().Be(MessageDeliveryStatus.Failed);
+    }
+
+    [Fact]
+    public async Task AgentReply_ShouldReachVisitorSocket_WhenSocketReattached()
+    {
+        using var client = _factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client);
+        var session = await GetSessionAsync(sessionId);
+        var agentId = await GiveConversationToAgentAsync(session.ConversationId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var wsClient = _factory.Server.CreateWebSocketClient();
+
+        // First attach, then the visitor drops (network blip, page reload).
+        using (var first = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token))
+        {
+            (await ReceiveTextAsync(first, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+            await first.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "reload", timeout.Token);
+        }
+
+        await WaitUntilAsync(() => !session.IsConnected);
+
+        // The widget re-attaches to the same session.
+        using var second = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
+        (await ReceiveTextAsync(second, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+
+        const string replyText = "welcome back";
+        var message = await SendAgentReplyAsync(session, agentId, replyText);
+
+        var received = await ReceiveTextAsync(second, TimeSpan.FromSeconds(3));
+        received.Should().NotBeNull(
+            "the visitor re-attached to the session, so the reply must reach the new socket (stored delivery status: {0})",
+            message.DeliveryStatus);
+        received.Should().Contain(replyText);
+        message.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
+    }
+
+    [Fact]
+    public async Task AgentReply_ShouldReachRemainingSocket_WhenOtherSocketOfSessionCloses()
+    {
+        using var client = _factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client);
+        var session = await GetSessionAsync(sessionId);
+        var agentId = await GiveConversationToAgentAsync(session.ConversationId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var wsClient = _factory.Server.CreateWebSocketClient();
+
+        // Two tabs share the session (the widget restores it from localStorage).
+        using var stays = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
+        (await ReceiveTextAsync(stays, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+        using (var leaves = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token))
+        {
+            (await ReceiveTextAsync(leaves, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+            await leaves.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "tab closed", timeout.Token);
+            // The server acknowledges the close once its read loop and cleanup ran.
+            (await ReceiveTextAsync(leaves, TimeSpan.FromSeconds(5))).Should().BeNull();
+        }
+
+        const string replyText = "still here?";
+        var message = await SendAgentReplyAsync(session, agentId, replyText);
+
+        var received = await ReceiveTextAsync(stays, TimeSpan.FromSeconds(3));
+        received.Should().NotBeNull(
+            "one socket of the session is still open, so closing the other must not cut delivery (stored delivery status: {0})",
+            message.DeliveryStatus);
+        received.Should().Contain(replyText);
+        message.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
+    }
+
+    [Fact]
+    public async Task VisitorSocketMessage_ShouldReuseSessionContact_WhenSentOverWebSocket()
+    {
+        using var client = _factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client);
+        var session = await GetSessionAsync(sessionId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var wsClient = _factory.Server.CreateWebSocketClient();
+        using var socket = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
+        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+
+        var frame = Encoding.UTF8.GetBytes("""{"type":"message","text":"hola por socket"}""");
+        await socket.SendAsync(frame, WebSocketMessageType.Text, true, timeout.Token);
+
+        var messageStore = _factory.Services.GetRequiredService<IMessageStore>();
+        IReadOnlyList<Message> messages = [];
+        await WaitUntilAsync(() =>
+        {
+            messages = messageStore.GetConversationMessagesAsync(VisitorTenant, session.ConversationId, 100, 0, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            return messages.Any(m => m.Direction == MessageDirection.Inbound);
+        });
+
+        messages.Should().ContainSingle(m => m.Direction == MessageDirection.Inbound,
+            "the socket message belongs to the conversation the session was created with");
+        var (contacts, conversations, _) = await WebhookProbes.CountRowsAsync(_factory.Services, VisitorTenant);
+        (contacts, conversations).Should().Be((1, 1),
+            "a message over the WebSocket reuses the session's contact and conversation, exactly like the REST route");
+    }
+
+    private Task<Message> SendAgentReplyAsync(WebChatSession session, EntityId agentId, string text) =>
+        _factory.Services.GetRequiredService<IConversationService>().SendMessageAsync(
+            session.ConversationId,
+            VisitorTenant,
+            new MessageEnvelope([new TextBlock(text)]),
+            agentId,
+            ConversationOwnerKind.Agent,
+            CancellationToken.None);
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (!condition() && DateTimeOffset.UtcNow < deadline)
+            await Task.Delay(20); // fence-allow: LOOP-DRIVER — poll pacing until the server-side socket loop catches up
+        condition().Should().BeTrue("the server-side socket loop should have caught up within 5 s");
+    }
+
     private async Task<EntityId> GiveConversationToAgentAsync(EntityId conversationId)
     {
         var agentId = EntityId.From($"agent-{Guid.NewGuid():N}");
@@ -204,7 +337,10 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         conversation!.ContactId.Should().Be(contact.ContactId);
     }
 
-    /// <summary>Reads one text frame, or <c>null</c> when none arrives within <paramref name="wait"/>.</summary>
+    /// <summary>
+    /// Reads one text frame, or <c>null</c> when none arrives within <paramref name="wait"/> (or the socket
+    /// ends instead).
+    /// </summary>
     private static async Task<string?> ReceiveTextAsync(WebSocket socket, TimeSpan wait)
     {
         using var cts = new CancellationTokenSource(wait);
@@ -217,6 +353,10 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
                 : null;
         }
         catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (WebSocketException)
         {
             return null;
         }

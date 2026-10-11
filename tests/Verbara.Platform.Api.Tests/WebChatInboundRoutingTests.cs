@@ -109,6 +109,37 @@ public sealed class WebChatInboundRoutingTests
     }
 
     [Fact]
+    public async Task RouteFirstInboundAsync_ShouldRouteNewConversation_WhenSessionConversationEnded()
+    {
+        // The session's first message routed its conversation; that conversation later ended, so the
+        // pipeline opened a new one for the same contact on the visitor's next message. The new
+        // conversation is owner-less like the first one and must be routed, or no agent is ever offered it.
+        var (sut, store, sessionId, _, _) = BuildWithRealSwitchboard();
+        await sut.RouteFirstInboundAsync(sessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        var reopenedId = EntityId.From("conv-wc-2");
+        await store.SaveAsync(new Conversation
+        {
+            ConversationId = reopenedId,
+            TenantId = Tenant,
+            ContactId = ContactId,
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Queued,
+            CreatedAt = DateTimeOffset.UtcNow,
+        }, CancellationToken.None);
+
+        await sut.RouteFirstInboundAsync(
+            sessionId, Tenant,
+            new PipelineResult(reopenedId, ContactId, EntityId.From("msg-2"), IsNewConversation: true),
+            Content(), CancellationToken.None);
+
+        var reopened = await store.GetByIdAsync(Tenant, reopenedId, CancellationToken.None);
+        reopened!.Owner.Should().NotBeNull("a new conversation opened by a visitor message is routed to a queue");
+        reopened.Owner!.Kind.Should().Be(ConversationOwnerKind.Queue);
+        reopened.Owner.OwnerId.Should().Be(QueueId);
+    }
+
+    [Fact]
     public async Task RouteFirstInboundAsync_ShouldStampRouteMetadata_WhenPresent()
     {
         // C5 (implicit): WebChat does NOT run the bot, so only the router's metadata (e.g. the
