@@ -9,6 +9,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.27.0] - 2026-10-10
+
+Minor release with three trains: **licensed-agent metering** (R-023: one agent per user, status-aware routing,
+an append-only ledger with daily peaks and a verifiable export; #348), the **Verbara.Sdk `2.8.0` /
+Verbara.Sdk.Pro `2.18.0-pro` cascade** (a pool sweep that ends calls whose `Hangup` was lost, and a breaking
+Helm Asterisk chart; #361), and **WhatsApp working for real** (the API host registers WhatsApp and WebChat,
+WhatsApp inbound and outbound per tenant, delivery-status correlation, webhook hardening; #354). Read
+**Upgrading** before the first start: migrations `018`, `019` and `020` run at start-up, the AMI user needs
+new permissions, and WhatsApp needs per-tenant credentials entered with console **v3.22.0-web**. Measured in
+the lab on the combined build (verbara-lab #17, #18, #19).
+
 ### Upgrading
 
 - **Run the agent identity report before upgrading.** Migration `018_AgentUserUnique` makes each user
@@ -31,12 +42,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `AppSecret` has every delivery ignored, logged as event `8400` and counted in
   `whatsapp.webhook.rejected` (meter `Verbara.Platform.Channels.WhatsApp`, `reason`
   `missing_app_secret`). Configurations saved by console v3.21.0 use other key names (`ApiToken`,
-  `PhoneNumber`) and must be re-entered with these.
+  `PhoneNumber`) and must be re-entered with these. (#354)
 - **Migration `020_MessagesExternalIdUnique` removes duplicate inbound messages.** A provider message
   delivered twice at the same moment could be stored twice. Before it makes the provider message id
   unique per tenant, the migration keeps the earliest stored copy of each such message and deletes the
   others; messages without a provider id are untouched. It holds a write lock on `messages` while it
-  runs, so plan the upgrade for a quiet period on large tenants.
+  runs, so plan the upgrade for a quiet period on large tenants. (#354)
 
 - **Calls whose `Hangup` never reached Platform now end on the pool sweep (Verbara.Sdk `2.8.0`).**
   Every 30 s each Asterisk server holding calls older than 60 s receives one AMI `Status`; a held call
@@ -49,7 +60,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   collision). The signal of a missing permission is `[LIVE] Status refused: …` at Warning in the API's
   **start-up** log, because every state load sends `Status`. Platform's Compose `manager.conf` template
   already complies; the AMI user and its reasons are in the voice manual
-  (`docs/manuales/smb/06-canal-voz-sip.md`). (#361)
+  (`docs/manuales/smb/06-canal-voz-sip.md`). The sweep has no configuration switch in this version: it runs on
+  every deployment, single Asterisk included (one `Status` per server per 30 s per API replica while a call
+  older than 60 s is held). (#361)
 - **Helm: the Asterisk chart changed in a breaking way.** It now ships Platform's AMI user (the same
   `read`/`write` classes as the Compose template, no `eventfilter`) and its ARI user, and serves ARI on
   port 8088. It needs both passwords at install: pass `asterisk.ami.password` and
@@ -130,16 +143,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   their handler and connector. SMS, Email, Messenger, Instagram, Telegram, Twitter and RCS stay
   unregistered: a webhook for one of them answers `404` with no body even when the tenant has configured
   it (it answered `400` with the text "No webhook handler registered"). An automated test posts an
-  unsigned body to every registered webhook handler and fails the build if any accepts it.
+  unsigned body to every registered webhook handler and fails the build if any accepts it. (#354)
 - **`GET /api/v1/webhooks/{tenant}/whatsapp` checks the tenant's verify token.** The challenge is
   echoed, as plain text, only when `hub.mode` is `subscribe` and `hub.verify_token` equals the tenant's
   `WebhookVerifyToken`; anything else, or a tenant without an active WhatsApp configuration, answers
   `403`. It echoed the challenge for any token, as a JSON string that Meta does not accept. The
-  Messenger and Instagram handshakes answer `403`, as those channels are not registered.
+  Messenger and Instagram handshakes answer `403`, as those channels are not registered. (#354)
 - **A webhook delivery carries every event the provider batched.** `WebhookResult` (Channels.Core) now
   holds lists of inbound messages and status updates, and all nine webhook handlers were updated; the
   webhook endpoint processes every element in order. Code that read `WebhookResult.Message` or
-  `.StatusUpdate` reads `Messages` and `StatusUpdates`.
+  `.StatusUpdate` reads `Messages` and `StatusUpdates`. (#354)
 - **A webhook delivery answers `200` once every event it carried is stored, and each message's side
   effects run once and on their own.** A message whose provider id is already stored (a provider retry)
   is skipped with no side effect — no event, no routing, no queue assignment, no bot turn;
@@ -154,7 +167,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   customer's first message race, the one whose insert loses no longer leaves an empty queued conversation
   behind for the customer's next message to route: the pipeline removes the conversation it opened unless
   a message has landed in it. `IConversationStore` gains `DeleteIfNoMessagesAsync` for this, so every
-  implementation of it must add the method.
+  implementation of it must add the method. (#354)
 - **WhatsApp sends use the tenant's own credentials.** The WhatsApp connector reads `AccessToken` and
   `PhoneNumberId` from the sending tenant's WhatsApp channel configuration when it sends; the
   process-wide `WhatsAppOptions.AccessToken`, `PhoneNumberId`, `AppSecret` and `WebhookVerifyToken` are
@@ -168,7 +181,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   automations, surveys) get the message recorded as failed instead. `IConversationService` gains
   `TrySendMessageAsync`, which returns that refusal as a typed result. The connector now sends
   through a named `IHttpClientFactory` client with the same retry, timeout and circuit-breaker policy,
-  so the singleton channel registry never pins one `HttpClient`.
+  so the singleton channel registry never pins one `HttpClient`. (#354)
 - **Client-error bodies no longer carry exception text.** A request that fails with an unhandled
   `InvalidOperationException`, `ArgumentException` (including `ArgumentNullException`) or
   `KeyNotFoundException` keeps its status (`400` or `404`), but the problem body's `detail` is now its
@@ -178,30 +191,30 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   conversation wrap-up, invoice generation (management and partner), media upload, the OIDC callback's
   token exchange and ID-token validation (the provider webhook for a channel without a handler answers
   `404` with no body, see above). Clients should read the status, the title or code, and quote the `traceId`; nothing should parse
-  `detail`.
+  `detail`. (#354)
 
 ### Fixed
 
 - **WhatsApp webhooks are handled — they never were.** The API host registered no digital channel's
   webhook handler, so every WhatsApp webhook answered `400` in every published version. A Meta delivery
-  with several messages or statuses is processed whole; only the first event was read before.
+  with several messages or statuses is processed whole; only the first event was read before. (#354)
 - **An agent reply on WebChat reaches the WebChat connector.** The host registered the WebChat connector
   in DI but not in the channel registry, so a reply in a conversation whose contact has a WebChat
   address failed with `No connector registered for channel 'WebChat'`. The registry now exposes the
   connectors the channel modules register, resolved on first use. The session lookup is unchanged: a
   reply for which no visitor session is connected under that address is recorded as failed
-  (`SESSION_NOT_CONNECTED`) instead of failing the request.
+  (`SESSION_NOT_CONNECTED`) instead of failing the request. (#354)
 - **Outbound delivery statuses now reach the message.** The provider's message id was never stored
   when a send succeeded, so every later `sent`/`delivered`/`read` callback was dropped as unknown. The
   id and the `Sent` status are now written together in a single update, so a callback that arrives
   right after the provider's response still finds the message. A callback for an id no message holds
-  is logged and counted on `channels.delivery_status.unknown_id` (meter `verbara.platform.channels`).
+  is logged and counted on `channels.delivery_status.unknown_id` (meter `verbara.platform.channels`). (#354)
 - **Delivery statuses only move forward.** `Pending` → `Sent` → `Delivered` → `Read`; `Failed` is final
   and can only follow `Pending` or `Sent`. A replayed or late callback (a `sent` after `read`) no longer
-  moves a message backwards, in the database and in the in-memory store alike.
+  moves a message backwards, in the database and in the in-memory store alike. (#354)
 - **Two identical inbound deliveries store one message.** When a provider delivered the same message
   twice at the same moment, both copies could be stored, and every later lookup of that message failed.
-  The second delivery now finds the message the first one stored (migration `020`).
+  The second delivery now finds the message the first one stored (migration `020`). (#354)
 
 ### Security
 
@@ -213,7 +226,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   delivery that fails these checks answers `200` and writes nothing; it is logged (events `8400`-`8402`)
   and counted in `whatsapp.webhook.rejected` by `reason`, exported on `/metrics` as
   `whatsapp_webhook_rejected_total`. No advisory: no published version registered
-  the WhatsApp handler.
+  the WhatsApp handler. (#354)
 - **The anonymous provider-webhook route is rate-limited per tenant and client.**
   `GET` and `POST /api/v1/webhooks/{tenantId}/{channel}` now share a limit keyed by the tenant named in
   the path and the client address (IPv6 by /64), applied before the channel configuration is looked
@@ -228,12 +241,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tenant is logged. The limit uses the client address the app trusts, so behind a gateway set
   `ForwardedHeaders:TrustedProxies` as described in 2.26.1; a provider that delivers for many tenants
   from few addresses still gets a separate budget per tenant. The WebChat limits now run on the same
-  limiter, with unchanged keys, defaults and responses.
+  limiter, with unchanged keys, defaults and responses. (#354)
 - **Webhook delivery bodies are capped at 1 MB.** A larger `POST` to the webhook route is answered `413`
   and not processed; the body is read into a bounded buffer. Previously the route buffered whatever the
-  server accepted (Kestrel's 30 MB default, and the shipped gateway allows 50 MB).
+  server accepted (Kestrel's 30 MB default, and the shipped gateway allows 50 MB). (#354)
 - **Client-error bodies no longer echo exception text** (see Changed): internal messages, which can
-  name tables, ids or provider responses, now go only to the log.
+  name tables, ids or provider responses, now go only to the log. (#354)
 
 ### Dependencies
 
