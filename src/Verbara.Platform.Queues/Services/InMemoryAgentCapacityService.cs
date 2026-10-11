@@ -8,6 +8,9 @@ public sealed class InMemoryAgentCapacityService : IAgentCapacityService
     private readonly IAgentCapacityResolver _resolver;
     private readonly ConcurrentDictionary<(TenantId, EntityId, ChannelType), int> _load = new();
 
+    // Serialises every load write with TryReserveAsync's check, so the check and its increment are one step.
+    private readonly Lock _gate = new();
+
     public InMemoryAgentCapacityService(IAgentCapacityResolver resolver)
     {
         ArgumentNullException.ThrowIfNull(resolver);
@@ -51,12 +54,31 @@ public sealed class InMemoryAgentCapacityService : IAgentCapacityService
 
     public async Task<bool> HasCapacityAsync(TenantId tenantId, EntityId agentId, ChannelType channel, CancellationToken ct)
     {
-        var bucket = NormalizeToCapacityBucket(channel);
-
         // W6 — a SINGLE agent read, owned by the resolver: it returns the EFFECTIVE capacity for
         // a present agent or null for a deleted/phantom one. Failing closed on null keeps work
         // from ever routing to an agent that no longer exists, with no second store round-trip.
         var effective = await _resolver.ResolveAsync(tenantId, agentId, ct).ConfigureAwait(false);
+        lock (_gate)
+            return Fits(effective, tenantId, agentId, NormalizeToCapacityBucket(channel));
+    }
+
+    public async Task<bool> TryReserveAsync(TenantId tenantId, EntityId agentId, ChannelType channel, CancellationToken ct)
+    {
+        var effective = await _resolver.ResolveAsync(tenantId, agentId, ct).ConfigureAwait(false);
+        var bucket = NormalizeToCapacityBucket(channel);
+        // The check and the increment are one step under the gate every load write takes (design D14).
+        lock (_gate)
+        {
+            if (!Fits(effective, tenantId, agentId, bucket))
+                return false;
+            _load[(tenantId, agentId, bucket)] = _load.GetValueOrDefault((tenantId, agentId, bucket), 0) + 1;
+            return true;
+        }
+    }
+
+    // Whether one more unit of `bucket` fits the agent's effective capacity. Callers hold _gate.
+    private bool Fits(ChannelCapacity? effective, TenantId tenantId, EntityId agentId, ChannelType bucket)
+    {
         if (effective is null)
             return false;
 
@@ -85,17 +107,21 @@ public sealed class InMemoryAgentCapacityService : IAgentCapacityService
     public Task ReserveAsync(TenantId tenantId, EntityId agentId, ChannelType channel, CancellationToken ct)
     {
         var bucket = NormalizeToCapacityBucket(channel);
-        _load.AddOrUpdate((tenantId, agentId, bucket), 1, static (_, current) => current + 1);
+        lock (_gate)
+            _load.AddOrUpdate((tenantId, agentId, bucket), 1, static (_, current) => current + 1);
         return Task.CompletedTask;
     }
 
     public Task ReleaseAsync(TenantId tenantId, EntityId agentId, ChannelType channel, CancellationToken ct)
     {
         var bucket = NormalizeToCapacityBucket(channel);
-        _load.AddOrUpdate(
-            (tenantId, agentId, bucket),
-            0,
-            static (_, current) => current > 0 ? current - 1 : 0);
+        lock (_gate)
+        {
+            _load.AddOrUpdate(
+                (tenantId, agentId, bucket),
+                0,
+                static (_, current) => current > 0 ? current - 1 : 0);
+        }
         return Task.CompletedTask;
     }
 

@@ -70,6 +70,17 @@ internal sealed class InMemoryConversationStore : IConversationStore
         return Task.FromResult(result);
     }
 
+    public Task<DateTimeOffset?> FindLastInboundAtAsync(
+        TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
+    {
+        var conversationIds = _items.Values
+            .Where(c => c.TenantId == tenantId && c.ContactId == contactId && c.Channel == channel)
+            .Select(c => c.ConversationId)
+            .ToHashSet();
+
+        return Task.FromResult(_messages?.LastInboundAt(tenantId, conversationIds));
+    }
+
     public Task<Conversation?> FindByVoiceLinkedIdAsync(TenantId tenantId, string voiceLinkedId, CancellationToken ct)
     {
         var result = _items.Values.FirstOrDefault(c =>

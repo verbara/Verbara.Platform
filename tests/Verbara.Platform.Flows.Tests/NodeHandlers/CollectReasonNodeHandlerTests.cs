@@ -348,6 +348,10 @@ public sealed class CollectReasonNodeHandlerTests
             TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) =>
             Task.FromResult<Conversation?>(null);
 
+        public Task<DateTimeOffset?> FindLastInboundAtAsync(
+            TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) =>
+            Task.FromResult<DateTimeOffset?>(null);
+
         public Task<Conversation?> FindByVoiceLinkedIdAsync(
             TenantId tenantId, string voiceLinkedId, CancellationToken ct) =>
             Task.FromResult<Conversation?>(null);

@@ -10,6 +10,14 @@ public interface IConversationStore
     Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct);
 
     /// <summary>
+    /// When the contact last wrote to the tenant on <paramref name="channel"/>: the creation time of the most recent
+    /// inbound message in <b>any</b> of the contact's conversations on that channel, or <see langword="null"/> when
+    /// there is none. WhatsApp's customer-service window belongs to the user, not to one conversation, so an agent
+    /// starting a new conversation reads it here (agent-started-conversations, design D14).
+    /// </summary>
+    Task<DateTimeOffset?> FindLastInboundAtAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct);
+
+    /// <summary>
     /// Returns the voice conversation correlated to an Asterisk call <paramref name="voiceLinkedId"/>,
     /// or <see langword="null"/> if none exists. The per-call idempotency lookup the voice bridge
     /// uses to avoid creating a duplicate Conversation for the same physical call.
