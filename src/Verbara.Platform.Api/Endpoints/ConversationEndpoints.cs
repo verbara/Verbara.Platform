@@ -59,7 +59,11 @@ internal static class ConversationEndpoints
             .RequireRateLimiting("llm");
         group.MapPost("/{id}/hold", HoldConversation);
         group.MapPost("/{id}/unhold", UnholdConversation);
-        group.MapPost("/", CreateConversation);
+        // agent-started-conversations (D14): the 403 (not-an-agent) and 502 (channel-send-failed) bodies are
+        // written as JSON results, which declare no response metadata of their own.
+        group.MapPost("/", CreateConversation)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ConversationStartRefusal>(StatusCodes.Status502BadGateway);
         // ADR-0034 — supervisor correction of an autonomously stamped disposition. Gated by the
         // dedicated `typification:correct-autonomous` permission (NOT AdminOnly — a supervisor is
         // the realistic actor). The `Permission:` prefix forces the PermissionPolicyProvider to
@@ -894,25 +898,32 @@ internal static class ConversationEndpoints
         return screened;
     }
 
-    private static async Task<IResult> CreateConversation(
+    // With an initial message the caller starts the conversation in its own name (agent-started-conversations,
+    // design D14): the starter sends first, persists nothing on failure, and a success is born Active and owned by
+    // the caller's Agent profile. Without one, the 2.26 queued path stays — deprecated, removal planned.
+    private static async Task<Results<Created<Conversation>, NotFound<ErrorResponse>,
+        JsonHttpResult<ErrorResponse>, BadRequest<ConversationStartRefusal>, Conflict<ConversationStartRefusal>,
+        JsonHttpResult<ConversationStartRefusal>>> CreateConversation(
         HttpContext context,
         [FromBody] CreateConversationRequest body,
         IConversationService conversationService,
+        [FromServices] IOutboundConversationStarter starter,
         [FromServices] IContactStore contactStore,
         [FromServices] IAgentStore agents,
+        [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
 
         if (!Enum.TryParse<ChannelType>(body.Channel, ignoreCase: true, out var channelType))
-            return Results.BadRequest(new ErrorResponse($"Unknown channel: {body.Channel}"));
+            return TypedResults.BadRequest(new ConversationStartRefusal($"Unknown channel: {body.Channel}"));
 
         // An initial message is sent as the caller's Agent profile, so a caller without one cannot send it.
-        Agent? sender = null;
+        ConversationActor? actor = null;
         if (body.InitialMessage is not null)
         {
-            sender = (await ConversationActor.ResolveAsync(context, tenantId, agents, ct)).Agent;
-            if (sender is null)
+            actor = await ConversationActor.ResolveAsync(context, tenantId, agents, ct);
+            if (actor.Agent is null)
                 return ConversationActor.Forbidden(ConversationActor.NotAnAgent);
         }
 
@@ -920,20 +931,60 @@ internal static class ConversationEndpoints
 
         var contact = await contactStore.GetByIdAsync(tenantId, contactId, ct);
         if (contact is null)
-            return Results.NotFound(new ErrorResponse("Contact not found"));
+            return TypedResults.NotFound(new ErrorResponse("Contact not found"));
 
-        var conversation = await conversationService.GetOrCreateForContactAsync(
-            tenantId, contactId, channelType, ct);
-
-        if (body.InitialMessage is not null && sender is not null)
+        if (actor is not { Agent: { } agent, UserId: { } actorUserId })
         {
-            var envelope = new MessageEnvelope([new TextBlock(body.InitialMessage)]);
-            await conversationService.SendMessageAsync(
-                conversation.ConversationId, tenantId, envelope,
-                sender.AgentId, ConversationOwnerKind.Agent, ct);
+            // Deprecated (D14): the queued path without an initial message, kept until its planned removal.
+            var queued = await conversationService.GetOrCreateForContactAsync(tenantId, contactId, channelType, ct);
+            return TypedResults.Created($"/conversations/{queued.ConversationId.Value}", queued);
         }
 
-        return Results.Created($"/conversations/{conversation.ConversationId.Value}", conversation);
+        var outcome = await starter.StartAsync(
+            new OutboundStartRequest(
+                tenantId, contactId, channelType, agent.AgentId, actorUserId,
+                new MessageEnvelope([new TextBlock(body.InitialMessage!)]),
+                string.IsNullOrWhiteSpace(body.TemplateName) ? null : body.TemplateName,
+                string.IsNullOrWhiteSpace(body.TemplateLanguage) ? null : body.TemplateLanguage),
+            ct);
+
+        if (outcome.RefusalCode is { } code)
+            return StartRefusal(code, outcome);
+
+        var conversation = outcome.Conversation!;
+        if (!outcome.Reused)
+        {
+            var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["agent_id"] = agent.AgentId.Value,
+                ["channel"] = channelType.ToString(),
+                ["message_id"] = outcome.Message!.MessageId.Value,
+            };
+            await ConversationAudit.TryRecordAsync(
+                context, audit, tenantId, "conversation.started", conversation.ConversationId, metadata, ct);
+        }
+
+        return TypedResults.Created($"/conversations/{conversation.ConversationId.Value}", conversation);
+    }
+
+    // The status each start refusal carries (D14): 400 for a contact with no address, 502 when the provider
+    // rejected the first message, 409 for every other refusal decided before the send.
+    private static Results<Created<Conversation>, NotFound<ErrorResponse>,
+        JsonHttpResult<ErrorResponse>, BadRequest<ConversationStartRefusal>, Conflict<ConversationStartRefusal>,
+        JsonHttpResult<ConversationStartRefusal>> StartRefusal(string code, OutboundStartOutcome outcome)
+    {
+        var refusal = new ConversationStartRefusal(
+            code,
+            outcome.OpenConversationId?.Value,
+            outcome.OpenConversationId is null ? null : outcome.OpenOwnerKind?.ToString() ?? "None");
+
+        return code switch
+        {
+            OutboundStartCodes.ContactHasNoAddress => TypedResults.BadRequest(refusal),
+            OutboundStartCodes.ChannelSendFailed => TypedResults.Json(
+                refusal, ApiJsonContext.Default.ConversationStartRefusal, statusCode: StatusCodes.Status502BadGateway),
+            _ => TypedResults.Conflict(refusal),
+        };
     }
 
     // Only the owner holds or resumes a conversation, as its Agent profile.
@@ -1206,10 +1257,24 @@ internal static class TypificationFieldKeys
     internal const string CallbackDate = "callback_date";
 }
 
+/// <summary>
+/// Body of <c>POST /conversations</c>. With <c>initialMessage</c> the caller starts the conversation in its own name
+/// (design D14); <c>templateName</c> and <c>templateLanguage</c> send a provider template instead (WhatsApp outside
+/// its 24-hour window). Without <c>initialMessage</c> the deprecated queued path runs.
+/// </summary>
 internal sealed record CreateConversationRequest(
     string ContactId,
     string Channel,
-    string? InitialMessage = null);
+    string? InitialMessage = null,
+    string? TemplateName = null,
+    string? TemplateLanguage = null);
+
+/// <summary>
+/// A refused agent start (design D14): <c>error</c> is the stable code. For
+/// <c>conversation-open-elsewhere</c> it names the open conversation and its owner kind (<c>Agent</c>,
+/// <c>Queue</c>, <c>Bot</c>, <c>System</c>, or <c>None</c> when queued unowned).
+/// </summary>
+internal sealed record ConversationStartRefusal(string Error, string? ConversationId = null, string? OwnerKind = null);
 
 // ─── ADR-0034 — supervisor correction of an autonomous disposition ─────────────
 

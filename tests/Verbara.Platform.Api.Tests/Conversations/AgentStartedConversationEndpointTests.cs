@@ -9,6 +9,9 @@ using Verbara.Platform.Channels.WhatsApp;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
+using Verbara.Platform.Queues.Licensing;
+using Verbara.Platform.Storage.InMemory;
 
 namespace Verbara.Platform.Api.Tests.Conversations;
 
@@ -97,6 +100,77 @@ public sealed class AgentStartedConversationEndpointTests
         var stored = (await OpenConversationAsync(contactId))!;
         stored.State.Should().Be(ConversationState.Queued);
         stored.Owner.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateConversation_ShouldAuditAndCommitLedgerRow_WhenStarted()
+    {
+        var (user, agent) = _factory.NewAgent("starter");
+        var (contactId, _) = await SeedWhatsAppContactAsync();
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsJsonAsync("/api/v1/conversations", Body(contactId, initialMessage: "Hello!"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var conversationId = EntityId.From(response.Headers.Location!.ToString().Split('/')[^1]);
+        _factory.AuditOf(conversationId).Should().ContainSingle(e => e.Action == "conversation.started");
+        var row = _factory.Services.GetRequiredService<InMemoryLicenseAgentLedger>()
+            .Events(ConversationOwnershipApiFactory.Tenant.Value)
+            .Should().ContainSingle(e => e.ConversationId == conversationId.Value).Subject;
+        row.Kind.Should().Be(LicenseAgentEventKinds.ConversationTakenOver, "an own-name start reuses an existing kind");
+        row.AgentId.Should().Be(agent.AgentId.Value);
+        row.ActorUserId.Should().Be(user.UserId.Value);
+        _factory.LoadOf(agent.AgentId, ChannelType.WhatsApp).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CreateConversation_ShouldReturn409TemplateRequired_WhenNewWhatsAppStartHasNoTemplate()
+    {
+        var (user, agent) = _factory.NewAgent("starter");
+        var (contactId, address) = await SeedWhatsAppContactAsync();
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/conversations", new { contactId = contactId.Value, channel = "WhatsApp", initialMessage = "Hi" });
+
+        await ShouldBeErrorAsync(response, HttpStatusCode.Conflict, "whatsapp-template-required");
+        (await OpenConversationAsync(contactId)).Should().BeNull();
+        _factory.Graph.RequestsTo(address).Should().BeEmpty();
+        _factory.LoadOf(agent.AgentId, ChannelType.WhatsApp).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CreateConversation_ShouldReturn400NoAddress_WhenContactHasNoWhatsAppAddress()
+    {
+        var (user, _) = _factory.NewAgent("starter");
+        await _factory.EnsureWhatsAppConfiguredAsync();
+        var contact = new Contact
+        {
+            ContactId = EntityId.From($"contact-{Guid.NewGuid():N}"),
+            TenantId = ConversationOwnershipApiFactory.Tenant,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await _factory.Services.GetRequiredService<IContactStore>().SaveAsync(contact, CancellationToken.None);
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsJsonAsync("/api/v1/conversations", Body(contact.ContactId, initialMessage: "Hello!"));
+
+        await ShouldBeErrorAsync(response, HttpStatusCode.BadRequest, "contact-has-no-address");
+        (await OpenConversationAsync(contact.ContactId)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateConversation_ShouldReturn403_WhenCallerHasNoAgentProfile()
+    {
+        var user = _factory.NewUser(UserRole.Agent, "no-profile");
+        var (contactId, address) = await SeedWhatsAppContactAsync();
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsJsonAsync("/api/v1/conversations", Body(contactId, initialMessage: "Hello!"));
+
+        await ShouldBeErrorAsync(response, HttpStatusCode.Forbidden, "not-an-agent");
+        (await OpenConversationAsync(contactId)).Should().BeNull();
+        _factory.Graph.RequestsTo(address).Should().BeEmpty();
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
