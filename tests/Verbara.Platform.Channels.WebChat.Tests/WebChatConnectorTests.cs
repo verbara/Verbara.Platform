@@ -42,6 +42,7 @@ public class WebChatConnectorTests
             clock);
 
         var transport = Substitute.For<IWebChatTransport>();
+        transport.SendToClientAsync(Arg.Any<string>(), Arg.Any<MessageEnvelope>(), Arg.Any<CancellationToken>()).Returns(true);
         var connector = new WebChatConnector(manager, transport);
         var message = MakeMessage(VisitorAddress);
 
@@ -137,6 +138,56 @@ public class WebChatConnectorTests
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(WebChatConnector.SessionNotConnected);
+    }
+
+    [Fact]
+    public async Task SendAsync_ShouldReturnFailure_WhenNoSocketTookReply()
+    {
+        // The session exists but no visitor socket is attached yet (or every socket just closed): the
+        // transport reports that nothing took the frame, and the send is a failure, never a false Sent.
+        var manager = CreateManager();
+        await ConnectVisitorAsync(manager);
+        var transport = Substitute.For<IWebChatTransport>();
+        transport.SendToClientAsync(Arg.Any<string>(), Arg.Any<MessageEnvelope>(), Arg.Any<CancellationToken>()).Returns(false);
+        var connector = new WebChatConnector(manager, transport);
+
+        var result = await connector.SendAsync(MakeMessage(VisitorAddress), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ExternalMessageId.Should().BeNull();
+        result.ErrorCode.Should().Be(WebChatConnector.SessionNotConnected);
+    }
+
+    [Fact]
+    public async Task SendAsync_ShouldReturnFailure_WhenReplyHandledByAnotherReplica()
+    {
+        // Replica A holds the visitor's session; replica B has its own in-process manager and never saw it.
+        var replicaA = CreateManager();
+        await ConnectVisitorAsync(replicaA);
+        var replicaB = CreateManager();
+        var transportB = Substitute.For<IWebChatTransport>();
+        var connectorB = new WebChatConnector(replicaB, transportB);
+
+        var result = await connectorB.SendAsync(MakeMessage(VisitorAddress), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(WebChatConnector.SessionNotConnected);
+        await transportB.DidNotReceive().SendToClientAsync(Arg.Any<string>(), Arg.Any<MessageEnvelope>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SendAsync_ShouldPropagateCancellation_WhenCallerCancels()
+    {
+        var manager = CreateManager();
+        await ConnectVisitorAsync(manager);
+        var transport = Substitute.For<IWebChatTransport>();
+        transport.SendToClientAsync(Arg.Any<string>(), Arg.Any<MessageEnvelope>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new OperationCanceledException());
+        var connector = new WebChatConnector(manager, transport);
+
+        var send = () => connector.SendAsync(MakeMessage(VisitorAddress), CancellationToken.None);
+
+        await send.Should().ThrowAsync<OperationCanceledException>("cancellation is the caller's, not a delivery failure");
     }
 
     [Theory]

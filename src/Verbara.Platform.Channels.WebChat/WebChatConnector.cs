@@ -1,3 +1,4 @@
+using System.Net.WebSockets;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
@@ -7,7 +8,9 @@ namespace Verbara.Platform.Channels.WebChat;
 /// <summary>
 /// Delivers an agent reply to a WebChat visitor. The destination address is the visitor address
 /// (<c>webchat-&lt;guid&gt;</c>) of the conversation's contact; it resolves to the session holding that
-/// address and the reply goes out on that session's socket (spec <c>webchat-visitor-identity</c>, D16).
+/// address and the reply goes out on that session's sockets (spec <c>webchat-visitor-identity</c>, D16). The
+/// send succeeds only when a socket took the frame: a session with no socket attached yet, a socket that
+/// closed mid-send, or a session of another tenant all fail with <see cref="SessionNotConnected"/>.
 /// </summary>
 /// <remarks>
 /// Scope: the session manager and the socket transport are in-process, so a reply reaches the visitor
@@ -33,19 +36,28 @@ public sealed class WebChatConnector : IChannelConnector
 
     public async Task<SendResult> SendAsync(OutboundMessage message, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(message);
         var visitorAddress = message.To.Address;
         var session = await _sessionManager.GetSessionByVisitorAddressAsync(visitorAddress).ConfigureAwait(false);
 
-        if (session is null || !session.IsConnected)
+        // A session of another tenant is never a destination, even when the address matches.
+        if (session is null || !session.IsConnected || session.TenantId != message.TenantId)
+            return NotConnected($"No connected WebChat session holds visitor address '{visitorAddress}' on this replica.");
+
+        bool delivered;
+        try
         {
-            return new SendResult(
-                Success: false,
-                ExternalMessageId: null,
-                ErrorCode: SessionNotConnected,
-                ErrorMessage: $"No connected WebChat session holds visitor address '{visitorAddress}' on this replica.");
+            delivered = await _transport.SendToClientAsync(session.SessionId, message.Content, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is WebSocketException or InvalidOperationException)
+        {
+            // The socket closed between the check and the send, or a send was already outstanding on it
+            // (ObjectDisposedException is an InvalidOperationException): a failed send, never a throw.
+            delivered = false;
         }
 
-        await _transport.SendToClientAsync(session.SessionId, message.Content, ct).ConfigureAwait(false);
+        if (!delivered)
+            return NotConnected($"No socket of the WebChat session holding visitor address '{visitorAddress}' took the reply.");
 
         var externalMessageId = Guid.NewGuid().ToString("N");
         return new SendResult(
@@ -54,6 +66,9 @@ public sealed class WebChatConnector : IChannelConnector
             ErrorCode: null,
             ErrorMessage: null);
     }
+
+    private static SendResult NotConnected(string reason) =>
+        new(Success: false, ExternalMessageId: null, ErrorCode: SessionNotConnected, ErrorMessage: reason);
 
     public async Task<MessageDeliveryStatus?> GetStatusAsync(string externalMessageId, CancellationToken ct)
     {
