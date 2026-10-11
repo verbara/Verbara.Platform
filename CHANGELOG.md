@@ -9,6 +9,31 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Agents can start a WhatsApp or WebChat conversation with a contact.** `POST /conversations` with an
+  `initialMessage` now starts the conversation in the calling agent's own name: it is created `Active`
+  and owned by that agent, the message is stored `Sent` with the provider's id, and the start is audited
+  as `conversation.started`. On WhatsApp, a new conversation needs a template, named with the optional
+  `templateName` and `templateLanguage` fields (`templateLanguage` defaults to `en_US`). If the caller
+  already owns an open conversation with that contact on that channel, the message goes out on it
+  instead.
+- **Refused starts carry stable codes.** Nothing is sent before these checks pass. The body is a
+  `ConversationStartRefusal` with `error` set to one of: `contact-has-no-address` (400),
+  `channel-not-available` (409), `conversation-open-elsewhere` (409, with the open conversation's
+  `conversationId` and `ownerKind`; it is never taken over), `agent-at-capacity` (409) or
+  `whatsapp-template-required` (409).
+
+### Changed
+
+- **A failed first message no longer leaves an empty conversation behind.** The provider send now
+  happens before anything is saved. If the provider rejects the message, the API answers `502` with
+  `channel-send-failed`, and no conversation, message or capacity reservation is stored. In 2.27.0 such
+  a start answered `400` and left a queued conversation with no owner.
+- **`POST /conversations` without `initialMessage` is deprecated.** It still returns the contact's
+  open conversation, or creates a queued one with no owner, as in 2.26. It will be removed in a later
+  release; start conversations with an `initialMessage` instead.
+
 ## [2.27.0] - 2026-10-10
 
 Minor release with three trains: **licensed-agent metering** (R-023: one agent per user, status-aware routing,
