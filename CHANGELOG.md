@@ -11,6 +11,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **WhatsApp connection test.** `POST /admin/channels/whatsapp/test` now asks Meta's Graph API for the
+  tenant's phone number using the tenant's own `AccessToken`. A success includes the number's verified
+  name (`verifiedName`). A failure includes Meta's own error message (`code: provider-rejected`), or
+  `provider-unreachable` after a network error or a 15-second timeout. A tenant without an `AccessToken`
+  or `PhoneNumberId` gets `channel-not-configured`, and no request is sent. Other channels answer
+  `not-testable` and never report success. Before this release the endpoint answered "Connection test
+  passed" for every channel without calling anything.
+- **`WhatsApp:BaseUrl`** sets the Graph API base address used for sends and connection tests. The default
+  is still `https://graph.facebook.com`. The value must be an absolute `https` URL without a query, a
+  fragment or user information. Plain `http` is accepted only for a loopback host (`localhost`,
+  `127.0.0.0/8`, `::1`), because the tenant's token is sent to this address. An invalid value stops the API
+  at start-up with an error that names the key.
+- **The WebChat session response names the visitor.** `POST /api/v1/webchat/sessions` now returns, next
+  to `sessionId` and `wsUrl`, the session's `visitorAddress` (`webchat-…`), the `contactId` carrying it
+  and that contact's `conversationId`. The change is additive: existing fields keep their names and
+  meaning.
 - **Agents can start a WhatsApp or WebChat conversation with a contact.** `POST /conversations` with an
   `initialMessage` now starts the conversation in the calling agent's own name: it is created `Active`
   and owned by that agent, the message is stored `Sent` with the provider's id, and the start is audited
@@ -32,6 +48,35 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`/admin/channels` no longer returns credential values.** `GET /admin/channels`,
+  `GET /admin/channels/{channel}` and `PUT /admin/channels/{channel}` answer
+  `{ channel, isActive, isConfigured, credentials: [{ key, isSet }] }`. For WhatsApp the list holds every
+  key it accepts: `AccessToken`, `PhoneNumberId`, `AppSecret`, `WebhookVerifyToken`, `WabaId`,
+  `ApiVersion` and `defaultQueueId` (the default queue that inbound routing reads), followed by any stored
+  key outside that list, such as the `ApiToken` and `PhoneNumber` that consoles before v3.22.0-web saved.
+  A client that read values from these responses now gets key names only. Console v3.22.0-web shows them
+  as "set" badges.
+- **`PUT /admin/channels/{channel}` merges with the stored credentials.** A key you leave out, or send
+  blank, keeps its stored value; a value replaces it; `null` removes the key, including a stored key
+  outside the channel's list. Saving a form with an empty secret field therefore keeps the secret.
+  WhatsApp refuses a value for a key outside its list with `400 unknown-credential-key` and stores
+  nothing. An unknown channel name now answers `400` with the JSON code `invalid-channel` instead of a
+  text message.
+- The `channel.configured` audit record lists the names of the changed keys in `changed_keys`, never a
+  value.
+- **WebChat replies are delivered reliably only when the API runs as a single replica.** WebChat
+  sessions and sockets live in the API process, and there is no cross-replica routing yet. The reply is
+  delivered inside the agent's own request, so it reaches the visitor only when that request lands on
+  the replica holding the visitor's socket; on any other replica it fails with `SESSION_NOT_CONNECTED`
+  and is stored as failed, exactly as for a visitor who has left. Sticky sessions do not help: they pin
+  the agent's requests by the agent's affinity, not the visitor's.
+- **Two console end-to-end specs fail against this release** (v3.21.0-web, and v3.22.0-web, which ships
+  the same helper). `conversation-refusals` and `monitor-takeover-and-contact-search` use the e2e
+  `conversation-routing` helper, which gives its own contact the WebChat session id as an address and
+  relies on the visitor's message being resolved by that session id. Messages are now attributed to the
+  session's visitor address (see Fixed), so the helper's conversation is never routed and the specs time
+  out. The product is not affected. The next console release migrates the helper to the `contactId` and
+  `conversationId` the session response now returns.
 - **A failed first message no longer leaves an empty conversation behind.** The provider send now
   happens before anything is saved. If the provider rejects the message, the API answers `502` with
   `channel-send-failed`, and no conversation, message or capacity reservation is stored. In 2.27.0 such
@@ -42,6 +87,44 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **An unknown `channel` on `POST /conversations` answers `400` with `error: "unknown-channel"`.** The
   body no longer repeats the request's value (2.27.0 answered `Unknown channel: <value>`), and an
   undefined number such as `"99"` is now refused the same way.
+
+### Fixed
+
+- **A WebChat visitor is one contact and one conversation, and agent replies in it reach the visitor.**
+  Before, the visitor's first message was attributed to the session id, so it created a second contact
+  and a second conversation apart from the ones the session had opened: the tenant held two of each per
+  visitor, the session's own conversation stayed empty, and a reply sent in it was stored as failed
+  because no session was known by the visitor's address. Every visitor message, over the WebSocket or the
+  REST message route, now goes into the conversation the session was created with while that
+  conversation is open; once it has ended, the visitor's next message opens a new conversation for the
+  same contact, and that conversation is routed to a queue (before, it stayed unassigned). Sessions are
+  found by visitor address, and the reply is delivered on the visitor's socket. A socket that re-attaches
+  to its session (a reload, a network blip, a second tab) receives replies again, and closing one tab no
+  longer cuts the other. A reply is stored as sent only when a visitor socket took it: when the visitor
+  has left or has not connected the socket yet, it is stored as failed with `SESSION_NOT_CONNECTED`; no
+  error reaches the agent.
+
+### Security
+
+- **`PUT /admin/channels/{channel}` no longer echoes secrets.** It returned the whole stored
+  configuration, including the WhatsApp `AppSecret` and `AccessToken` (residual from 2.27.0).
+- **Channel secrets are encrypted at rest.** On PostgreSQL storage, secret credential values (WhatsApp
+  `AccessToken`, `AppSecret` and `WebhookVerifyToken`, any WhatsApp key outside its declared list such
+  as the legacy `ApiToken`, and every key of a channel without a declared key list) are encrypted with
+  the deployment's DataProtection keyring before they are written. A one-time start-up migration
+  encrypts the values already stored. It never blocks start-up and is safe to run again. As with MFA
+  secrets, losing the keyring makes these values unreadable, and tenants must enter them again.
+- **The connection test never returns the tenant's token.** Meta's error message and the verified name
+  are relayed with every occurrence of the `AccessToken` replaced by `[redacted]`, cut to 300 characters,
+  and a Graph response body over 64 KiB is not read.
+- **Operators: this upgrade is forward-only once the start-up migration has run.** Do not roll the API
+  image back below 2.28.0 after it. An older image reads the encrypted values as if they were the
+  credentials themselves: it checks WhatsApp webhook signatures against ciphertext and ignores all
+  inbound, sends ciphertext as the bearer token so every outbound message fails with `401`, and loses
+  every channel's `defaultQueueId`. The signal that the migration ran is the log line with EventId
+  `4301` ("Channel credential encryption migration completed: …"). If you must roll back, re-enter
+  every tenant's channel credentials through `PUT /admin/channels/{channel}` on the older image; there is
+  no unwrap script. See `docs/operations/backup-disaster-recovery.md` §1.6.
 
 ## [2.27.0] - 2026-10-10
 

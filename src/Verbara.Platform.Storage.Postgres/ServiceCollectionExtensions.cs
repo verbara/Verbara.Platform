@@ -43,8 +43,9 @@ public static class ServiceCollectionExtensions
     /// </summary>
     /// <remarks>
     /// <b>Requires an <c>IDataProtectionProvider</c> in the container.</b>
-    /// <c>PostgresUserStore</c> (<c>mfa_secret</c>, <c>mfa_recovery_codes</c>) and
-    /// <c>PostgresTenantAuthConfigStore</c> (<c>oidc_client_secret</c>) resolve it to wrap their
+    /// <c>PostgresUserStore</c> (<c>mfa_secret</c>, <c>mfa_recovery_codes</c>),
+    /// <c>PostgresTenantAuthConfigStore</c> (<c>oidc_client_secret</c>) and
+    /// <c>PostgresTenantChannelConfigStore</c> (secret <c>credentials</c> values) resolve it to wrap their
     /// column-level secrets — see ADR-0003's protected-column register. The composition root
     /// supplies it via <c>AddPlatformDataProtection</c>; a bare <c>ServiceCollection</c> must
     /// register a keyring itself. This method deliberately does NOT self-register one: a silently
@@ -293,6 +294,20 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddHostedService<UserMfaEncryptionMigrator>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers <see cref="TenantChannelCredentialsEncryptionMigrator"/> as an
+    /// <see cref="Microsoft.Extensions.Hosting.IHostedService"/> (whatsapp-works-for-real D15): wraps any
+    /// legacy plaintext secret value in <c>tenant_channel_configs.credentials</c> with DataProtection at
+    /// process startup, for rows written before <see cref="PostgresTenantChannelConfigStore"/> started
+    /// protecting on write. Idempotent and never blocks startup.
+    /// </summary>
+    public static IServiceCollection AddTenantChannelCredentialsEncryptionMigrator(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddHostedService<TenantChannelCredentialsEncryptionMigrator>();
         return services;
     }
 

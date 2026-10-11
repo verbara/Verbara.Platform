@@ -115,6 +115,21 @@ public sealed class ResidualContractShapesCaptureTests
     }
 
     [Fact]
+    public async Task OpenApiDocument_ShouldDeclareNullableCredentialValues_WhenUpdateChannelConfigRequestEmitted()
+    {
+        // whatsapp-works-for-real D15: a null credential value removes the key, so the generated Web client
+        // must be allowed to send null — the value schema says string | null.
+        var doc = await FetchOpenApiDocumentAsync();
+        var schemas = Schemas(doc);
+
+        schemas.Should().ContainKey("UpdateChannelConfigRequest");
+        var values = schemas["UpdateChannelConfigRequest"]!["properties"]!["credentials"]!["additionalProperties"]!;
+        var type = values["type"];
+        type.Should().BeOfType<JsonArray>("a credential value is string or null, got {0}", type?.ToJsonString());
+        type!.AsArray().Select(n => n!.GetValue<string>()).Should().BeEquivalentTo(["null", "string"]);
+    }
+
+    [Fact]
     public async Task OpenApiDocument_ShouldNotDeclareNumericStringUnion_WhenCaptured()
     {
         // Regression guard: the sibling ComplianceSeverityEnumTransformer must not have disturbed the

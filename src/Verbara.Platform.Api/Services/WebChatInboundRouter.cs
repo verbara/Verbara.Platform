@@ -14,8 +14,10 @@ namespace Verbara.Platform.Api.Services;
 /// conversations are pre-created (owner-less, in <see cref="ConversationState.Queued"/>) at
 /// session open, and the inbound pipeline only persists messages — it never routes/assigns —
 /// so <c>QueueDistributionWorker</c> (which skips owner-less conversations) never offers them
-/// to an agent. This bridge closes that gap. Idempotent per session: only the first inbound
-/// message routes; later messages are no-ops.
+/// to an agent. This bridge closes that gap. It routes the session's first inbound message and any
+/// message that opened a new conversation (the session's conversation ended, so the pipeline created a
+/// fresh owner-less one, mirroring the webhook path's <c>IsNewConversation</c> trigger); other messages
+/// are no-ops.
 /// </summary>
 internal sealed partial class WebChatInboundRouter
 {
@@ -46,9 +48,9 @@ internal sealed partial class WebChatInboundRouter
     }
 
     /// <summary>
-    /// Routes and assigns the session's conversation to a queue on the first inbound message.
-    /// Subsequent calls for the same session return immediately (the session is marked routed
-    /// atomically, first-wins). Publishes the same SSE events as the webhook path so the agent
+    /// Routes and assigns the conversation to a queue on the session's first inbound message, or when
+    /// the message opened a new conversation. Other calls return immediately (the session is marked
+    /// routed atomically, first-wins). Publishes the same SSE events as the webhook path so the agent
     /// UI updates live.
     /// </summary>
     public async Task RouteFirstInboundAsync(
@@ -58,9 +60,19 @@ internal sealed partial class WebChatInboundRouter
         MessageEnvelope? content,
         CancellationToken ct)
     {
-        if (!_sessionManager.TryMarkRouted(sessionId))
+        // Route the session's first message, and any message that opened a new conversation (the session's
+        // conversation ended, so the pipeline created a fresh owner-less one for the same contact).
+        var firstOfSession = _sessionManager.TryMarkRouted(sessionId);
+        if (!firstOfSession && !pipelineResult.IsNewConversation)
         {
             return;
+        }
+
+        if (pipelineResult.IsNewConversation
+            && await _sessionManager.GetSessionAsync(sessionId).ConfigureAwait(false) is { } session)
+        {
+            // Typing indicators and later lookups follow the conversation the visitor is now in.
+            session.ConversationId = pipelineResult.ConversationId;
         }
 
         _eventBus.Publish(new ConversationStateChangedEvent(

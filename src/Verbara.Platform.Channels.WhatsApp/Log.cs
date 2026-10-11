@@ -30,4 +30,10 @@ internal static partial class Log
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to deserialize WhatsApp send response")]
     internal static partial void DeserializeSendResponseFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(EventId = 8403, Level = LogLevel.Information, Message = "WhatsApp connection test for tenant {TenantId}: Graph API answered {StatusCode}")]
+    internal static partial void ConnectionTestAnswered(ILogger logger, string tenantId, int statusCode);
+
+    [LoggerMessage(EventId = 8404, Level = LogLevel.Warning, Message = "WhatsApp connection test for tenant {TenantId}: Graph API unreachable ({ErrorType})")]
+    internal static partial void ConnectionTestUnreachable(ILogger logger, string tenantId, string errorType);
 }

@@ -37,6 +37,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IWebhookHandler>(sp => sp.GetRequiredService<WhatsAppWebhookHandler>());
         services.AddSingleton<IChannelConnector>(sp => sp.GetRequiredService<WhatsAppConnector>());
 
+        // The administrator's connection test (D15): a real Graph API call with the tenant's own token.
+        services.AddSingleton<IChannelConnectionTester, WhatsAppConnectionTester>();
+
         services.AddKeyedSingleton<ResiliencePolicy>(
             WhatsAppConnector.ResiliencePolicyKey,
             (_, _) => new ResiliencePolicyBuilder()

@@ -460,9 +460,10 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(PermissionDefinition))]
 [JsonSerializable(typeof(List<PermissionDefinition>))]
 // Channel Config
-[JsonSerializable(typeof(ChannelStatusDto))]
 [JsonSerializable(typeof(ChannelTestResponse))]
-[JsonSerializable(typeof(TenantChannelConfig))]  // ADR-0026 Phase A.2 — fix AOT bug surfaced by living-docs (GET /admin/channels/{channel} returned 500 for enabled channels)
+[JsonSerializable(typeof(ChannelConfigResponse))]  // whatsapp-works-for-real D15 — redacted {key, isSet} view; replaces TenantChannelConfig in responses
+[JsonSerializable(typeof(ChannelConfigResponse[]))]
+[JsonSerializable(typeof(ChannelCredentialStatus))]
 [JsonSerializable(typeof(ChannelChangeAudit))]  // ADR-0026 Phase A.2 — typed audit DTO replacing anonymous types in UpdateChannelConfig
 [JsonSerializable(typeof(IReadOnlyDictionary<string, bool>))]
 // Management System

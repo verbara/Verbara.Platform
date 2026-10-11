@@ -19,7 +19,17 @@ namespace Verbara.Platform.Api.Endpoints;
 internal static partial class WebChatEndpoints
 {
     internal sealed record CreateSessionRequest(string TenantId);
-    internal sealed record CreateSessionResponse(string SessionId, string WsUrl);
+    /// <summary>
+    /// A created WebChat session: its transport handle (<c>sessionId</c>, <c>wsUrl</c>) and the visitor's
+    /// identity — its <c>webchat-</c> visitor address, the contact carrying it and that contact's
+    /// conversation (spec <c>webchat-visitor-identity</c>; the last three are additive in 2.28.0).
+    /// </summary>
+    internal sealed record CreateSessionResponse(
+        string SessionId,
+        string WsUrl,
+        string VisitorAddress,
+        string ContactId,
+        string ConversationId);
     internal sealed record WebChatMessageRequest(string Text);
 
     internal static RouteGroupBuilder MapWebChatEndpoints(this RouteGroupBuilder group)
@@ -101,7 +111,12 @@ internal static partial class WebChatEndpoints
         var sessionId = await sessionManager.ConnectAsync(
             tid, conversation.ConversationId, visitorAddress, clock);
 
-        return TypedResults.Ok(new CreateSessionResponse(sessionId, $"/ws/webchat/{sessionId}"));
+        return TypedResults.Ok(new CreateSessionResponse(
+            sessionId,
+            $"/ws/webchat/{sessionId}",
+            visitorAddress.Address,
+            contact.ContactId.Value,
+            conversation.ConversationId.Value));
     }
 
     internal static async Task HandleWebSocket(
@@ -129,15 +144,24 @@ internal static partial class WebChatEndpoints
 
         var ct = context.RequestAborted;
         var ws = await context.WebSockets.AcceptWebSocketAsync();
-        transport.Register(sessionId, ws);
+
+        // Attaching (re)connects the session — a reload or a network blip re-attaches to the same one — and
+        // it stays connected until its LAST socket detaches (spec webchat-visitor-identity).
+        if (!await sessionManager.AttachSocketAsync(sessionId, clock))
+        {
+            await ws.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Session expired", ct);
+            return;
+        }
 
         try
         {
-            // Send connected confirmation
+            // The confirmation goes out before the socket is registered, so it never races an agent reply
+            // for the socket's single outstanding send.
             var connectedMsg = JsonSerializer.SerializeToUtf8Bytes(
                 new WebChatWsMessage("connected", null),
                 WebChatJsonContext.Default.WebChatWsMessage);
             await ws.SendAsync(connectedMsg, WebSocketMessageType.Text, true, ct);
+            transport.Register(sessionId, ws);
 
             // Read loop
             var buffer = new byte[4096];
@@ -165,7 +189,7 @@ internal static partial class WebChatEndpoints
                     {
                         await sessionManager.TouchAsync(sessionId, clock);
                         var inbound = WebChatMessageAdapter.ToInboundMessage(
-                            sessionId,
+                            session,
                             new MessageEnvelope([new TextBlock(clientMsg.Text)]),
                             Guid.NewGuid().ToString("N"),
                             clock.UtcNow);
@@ -185,8 +209,8 @@ internal static partial class WebChatEndpoints
         }
         finally
         {
-            transport.Unregister(sessionId);
-            await sessionManager.DisconnectAsync(sessionId);
+            transport.Unregister(sessionId, ws);
+            await sessionManager.DetachSocketAsync(sessionId);
         }
     }
 
@@ -209,7 +233,7 @@ internal static partial class WebChatEndpoints
         await sessionManager.TouchAsync(sessionId, clock);
 
         var inbound = WebChatMessageAdapter.ToInboundMessage(
-            sessionId,
+            session,
             new MessageEnvelope([new TextBlock(request.Text)]),
             Guid.NewGuid().ToString("N"),
             clock.UtcNow);

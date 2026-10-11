@@ -239,4 +239,158 @@ public class WebChatSessionManagerTests
 
         session.Should().BeNull();
     }
+
+    [Fact]
+    public async Task GetSessionByVisitorAddressAsync_ShouldReturnSession_WhenVisitorConnected()
+    {
+        var manager = CreateManager();
+        var address = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-1");
+
+        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock());
+        var session = await manager.GetSessionByVisitorAddressAsync(address.Address);
+
+        session.Should().NotBeNull();
+        session!.SessionId.Should().Be(sessionId);
+    }
+
+    [Fact]
+    public async Task GetSessionByVisitorAddressAsync_ShouldReturnNull_WhenAddressIsTheSessionId()
+    {
+        var manager = CreateManager();
+        var sessionId = await manager.ConnectAsync(
+            MakeTenant(), MakeConversation(), new ChannelAddress(ChannelType.WebChat, "webchat-visitor-2"), MakeClock());
+
+        (await manager.GetSessionByVisitorAddressAsync(sessionId)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetSessionByVisitorAddressAsync_ShouldReturnNull_WhenSessionExpiredAndCleanedUp()
+    {
+        var start = DateTimeOffset.UtcNow;
+        var manager = CreateManager(TimeSpan.FromMinutes(30));
+        var address = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-3");
+        await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock(start));
+
+        await manager.CleanupExpiredAsync(MakeClock(start.AddMinutes(31)));
+
+        (await manager.GetSessionByVisitorAddressAsync(address.Address)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CleanupExpiredAsync_ShouldKeepNewerSessionIndexed_WhenOlderSessionOfSameAddressExpires()
+    {
+        var start = DateTimeOffset.UtcNow;
+        var manager = CreateManager(TimeSpan.FromMinutes(30));
+        var address = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-4");
+        await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock(start));
+        var newer = await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock(start.AddMinutes(20)));
+
+        var removed = await manager.CleanupExpiredAsync(MakeClock(start.AddMinutes(31)));
+
+        removed.Should().Be(1);
+        (await manager.GetSessionByVisitorAddressAsync(address.Address))!.SessionId.Should().Be(newer);
+    }
+
+    [Fact]
+    public async Task AttachSocketAsync_ShouldReconnectSession_WhenSocketReattachesAfterDisconnect()
+    {
+        var manager = CreateManager();
+        var clock = MakeClock();
+        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        (await manager.AttachSocketAsync(sessionId, clock)).Should().BeTrue();
+        await manager.DetachSocketAsync(sessionId);
+        var session = await manager.GetSessionAsync(sessionId);
+        session!.IsConnected.Should().BeFalse("its only socket detached");
+
+        var attached = await manager.AttachSocketAsync(sessionId, clock);
+
+        attached.Should().BeTrue();
+        session.IsConnected.Should().BeTrue("a re-attached socket reconnects the session");
+        session.AttachedSockets.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DetachSocketAsync_ShouldKeepSessionConnected_WhenAnotherSocketRemains()
+    {
+        var manager = CreateManager();
+        var clock = MakeClock();
+        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        await manager.AttachSocketAsync(sessionId, clock);
+        await manager.AttachSocketAsync(sessionId, clock);
+
+        await manager.DetachSocketAsync(sessionId);
+        var session = await manager.GetSessionAsync(sessionId);
+
+        session!.IsConnected.Should().BeTrue("one socket of the session is still attached");
+        session.AttachedSockets.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DetachSocketAsync_ShouldNotDisconnect_WhenNoSocketWasAttached()
+    {
+        var manager = CreateManager();
+        var clock = MakeClock();
+        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+
+        await manager.DetachSocketAsync(sessionId);
+        await manager.DetachSocketAsync("unknown-session");
+
+        (await manager.GetSessionAsync(sessionId))!.IsConnected.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AttachSocketAsync_ShouldReturnFalse_WhenSessionUnknownOrExpired()
+    {
+        var manager = CreateManager(sessionTimeout: TimeSpan.FromMinutes(30));
+        var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), MakeClock(createdAt));
+
+        (await manager.AttachSocketAsync("unknown-session", MakeClock(createdAt))).Should().BeFalse();
+        (await manager.AttachSocketAsync(sessionId, MakeClock(createdAt.AddMinutes(31)))).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CleanupExpiredAsync_ShouldKeepSession_WhenSocketStillAttached()
+    {
+        // An idle visitor whose socket is open is still reachable: eviction would drop agent replies.
+        var manager = CreateManager(sessionTimeout: TimeSpan.FromMinutes(30));
+        var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
+        var clock = MakeClock(createdAt);
+        var address = new ChannelAddress(ChannelType.WebChat, "webchat-idle-but-attached");
+        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, clock);
+        await manager.AttachSocketAsync(sessionId, clock);
+
+        var removed = await manager.CleanupExpiredAsync(MakeClock(createdAt.AddHours(2)));
+
+        removed.Should().Be(0);
+        (await manager.GetSessionByVisitorAddressAsync(address.Address))!.SessionId.Should().Be(sessionId);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_ShouldEvictExpiredSessions_WhenSweepIsDue()
+    {
+        var manager = CreateManager(sessionTimeout: TimeSpan.FromMinutes(30));
+        var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
+        var stale = new ChannelAddress(ChannelType.WebChat, "webchat-stale");
+        var staleId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), stale, MakeClock(createdAt));
+
+        await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), MakeClock(createdAt.AddMinutes(31)));
+
+        (await manager.GetSessionAsync(staleId)).Should().BeNull("creating a session sweeps expired, unattached ones");
+        (await manager.GetSessionByVisitorAddressAsync(stale.Address)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ConnectAsync_ShouldNotSweep_WhenLastSweepWithinInterval()
+    {
+        var manager = CreateManager(sessionTimeout: TimeSpan.FromSeconds(10));
+        var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
+        var firstId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), MakeClock(createdAt));
+
+        // 30 s later the first session is expired, but the last sweep ran less than SweepInterval ago.
+        await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), MakeClock(createdAt.AddSeconds(30)));
+
+        (await manager.GetSessionAsync(firstId)).Should().NotBeNull("sweeps are throttled to one per SweepInterval");
+        WebChatSessionManager.SweepInterval.Should().BeGreaterThan(TimeSpan.FromSeconds(30));
+    }
 }

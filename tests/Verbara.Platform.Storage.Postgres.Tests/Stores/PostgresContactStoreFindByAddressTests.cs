@@ -209,6 +209,36 @@ public class PostgresContactStoreFindByAddressTests : IClassFixture<ContactStore
     }
 
     [Fact]
+    public async Task FindByAddressAsync_ShouldReturnContact_WhenWebChatVisitorStoredInEitherChannelForm()
+    {
+        // webchat-visitor-identity (D16): a visitor message is attributed to its webchat-<guid> address, so
+        // the session's contact must be found by it whether the row holds "WebChat" (written since 2.13.0)
+        // or the ordinal 3 (written before), and never by the session id.
+        var nameFormAddress = new ChannelAddress(ChannelType.WebChat, $"webchat-{Guid.NewGuid():N}");
+        var nameForm = MakeContact(_tenant, nameFormAddress);
+        await _sut.SaveAsync(nameForm, CancellationToken.None);
+        var ordinalVisitor = $"webchat-{Guid.NewGuid():N}";
+        var ordinalId = await InsertOrdinalRowAsync(
+            _tenant, $$"""[{"channel": 3, "address": "{{ordinalVisitor}}"}]""");
+
+        var byName = await _sut.FindByAddressAsync(_tenant, nameFormAddress, CancellationToken.None);
+        var byOrdinal = await _sut.FindByAddressAsync(
+            _tenant, new ChannelAddress(ChannelType.WebChat, ordinalVisitor), CancellationToken.None);
+        var bySessionId = await _sut.FindByAddressAsync(
+            _tenant, new ChannelAddress(ChannelType.WebChat, Guid.NewGuid().ToString("N")), CancellationToken.None);
+        var otherChannel = await _sut.FindByAddressAsync(
+            _tenant, new ChannelAddress(ChannelType.Sms, nameFormAddress.Address), CancellationToken.None);
+
+        (await ReadStoredAddressesAsync(nameForm.ContactId)).Should().Contain("\"channel\": \"WebChat\"");
+        byName!.ContactId.Should().Be(nameForm.ContactId);
+        byOrdinal!.ContactId.Should().Be(ordinalId);
+        byOrdinal.Addresses.Should().ContainSingle()
+            .Which.Should().Be(new ChannelAddress(ChannelType.WebChat, ordinalVisitor));
+        bySessionId.Should().BeNull();
+        otherChannel.Should().BeNull("the channel stays part of the match for a webchat-<guid> address");
+    }
+
+    [Fact]
     public async Task ResolveAsync_ShouldReturnSameContact_WhenSecondInboundArrivesForNameFormContact()
     {
         // Inbound path: ContactResolutionStep → DefaultContactIdentityResolver → FindByAddressAsync.
