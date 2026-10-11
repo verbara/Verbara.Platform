@@ -20,7 +20,8 @@ El canal WebChat permite que un visitante anónimo del sitio web del cliente ini
    carga lazy un iframe aislado en /webchat/embed/
          │
          │  (2) el iframe POST /api/v1/webchat/sessions  { "tenantId": "<customer>" }
-         │      → { "sessionId", "wsUrl": "/ws/webchat/{sessionId}" }   (anónimo, sin auth)
+         │      → { "sessionId", "wsUrl": "/ws/webchat/{sessionId}",
+         │          "visitorAddress": "webchat-…", "contactId", "conversationId" }   (anónimo, sin auth)
          │
          │  (3) abre WebSocket  wss://verbara.tu-dominio.com/ws/webchat/{sessionId}
          ▼
@@ -36,6 +37,10 @@ El canal WebChat permite que un visitante anónimo del sitio web del cliente ini
          ▼
    Agente la ve aparecer en /agent → Aceptar → responde → el visitante recibe
 ```
+
+> 💡 Cada sesión es **un contacto y una conversación**: al crearla, Verbara crea el contacto anónimo con la dirección `webchat-…` (`visitorAddress`) y su conversación, y todos los mensajes del visitante caen en esa conversación. La respuesta del agente se entrega por la dirección del visitante al WebSocket de la sesión.
+>
+> ⚠️ **Una sola réplica entrega las respuestas.** Las sesiones y los WebSockets viven en el proceso del API: la respuesta del agente sólo llega al visitante si la procesa la réplica que tiene su WebSocket. En otra réplica queda guardada como fallida (`SESSION_NOT_CONNECTED`), igual que si el visitante se hubiera ido. Si corrés más de una réplica del API, fijá el tráfico WebChat de una sesión y las respuestas del agente a una réplica (sticky sessions).
 
 > 💡 El SDK (`verbara-webchat.js`) sólo pinta la burbuja y carga el iframe. Las llamadas al API las hace el **iframe** (`/webchat/embed/`), aislado del sitio del cliente. El operador no necesita saber esto para embeber, pero explica por qué sólo hay un `<script>` y ningún `<div>` que montar.
 

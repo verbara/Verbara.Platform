@@ -9,6 +9,40 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The WebChat session response names the visitor.** `POST /api/v1/webchat/sessions` now returns, next
+  to `sessionId` and `wsUrl`, the session's `visitorAddress` (`webchat-…`), the `contactId` carrying it
+  and that contact's `conversationId`. The change is additive: existing fields keep their names and
+  meaning.
+
+### Changed
+
+- **WebChat replies reach the visitor only from the replica holding the visitor's socket.** WebChat
+  sessions and sockets live in the API process, and there is no cross-replica routing yet. A reply
+  processed by another replica fails with `SESSION_NOT_CONNECTED` and is stored as failed, exactly as
+  for a visitor who has left. If you run more than one API replica, pin a session's WebChat traffic and
+  the agent's replies to one replica (sticky sessions), or accept that replies sent elsewhere are
+  recorded as failed.
+- **Two console end-to-end specs fail against this release** (v3.21.0-web, and v3.22.0-web, which ships
+  the same helper). `conversation-refusals` and `monitor-takeover-and-contact-search` use the e2e
+  `conversation-routing` helper, which gives its own contact the WebChat session id as an address and
+  relies on the visitor's message being resolved by that session id. Messages are now attributed to the
+  session's visitor address (see Fixed), so the helper's conversation is never routed and the specs time
+  out. The product is not affected. The next console release migrates the helper to the `contactId` and
+  `conversationId` the session response now returns.
+
+### Fixed
+
+- **A WebChat visitor is one contact and one conversation, and agent replies in it reach the visitor.**
+  Before, the visitor's first message was attributed to the session id, so it created a second contact
+  and a second conversation apart from the ones the session had opened: the tenant held two of each per
+  visitor, the session's own conversation stayed empty, and a reply sent in it was stored as failed
+  because no session was known by the visitor's address. Every visitor message, over the WebSocket or the
+  REST message route, now goes into the conversation the session was created with; sessions are found by
+  visitor address, and the reply is delivered on the visitor's socket. When the visitor has left, the
+  reply is stored as failed with `SESSION_NOT_CONNECTED`; no error reaches the agent.
+
 ## [2.27.0] - 2026-10-10
 
 Minor release with three trains: **licensed-agent metering** (R-023: one agent per user, status-aware routing,
