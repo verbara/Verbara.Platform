@@ -100,7 +100,9 @@
         ],
         "ChannelTestResponse": [
           "success",
-          "message"
+          "message",
+          "code",
+          "verifiedName"
         ],
         "CircuitStatusResponse": [
           "subscriptionId",

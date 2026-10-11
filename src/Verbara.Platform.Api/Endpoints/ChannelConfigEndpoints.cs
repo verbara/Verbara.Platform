@@ -121,12 +121,27 @@ internal static class ChannelConfigEndpoints
         return new ChannelConfigResponse(channel.ToString(), config?.IsActive ?? false, config is not null, credentials);
     }
 
-    private static Results<Ok<ChannelTestResponse>, BadRequest<string>> TestChannelConfig(string channel)
+    // whatsapp-works-for-real D15: a real provider call where the channel module registered a tester
+    // (WhatsApp: the Graph API with the tenant's own token); every other channel is not-testable and never
+    // reports success. The outcome is the body; 200 means the test ran, not that it passed.
+    private static async Task<Results<Ok<ChannelTestResponse>, BadRequest<ErrorDetailResponse>>> TestChannelConfig(
+        string channel,
+        HttpContext context,
+        [FromServices] IEnumerable<IChannelConnectionTester> testers,
+        CancellationToken ct)
     {
-        if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out _))
-            return TypedResults.BadRequest($"Invalid channel type: {channel}");
+        if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out var channelType))
+            return TypedResults.BadRequest(new ErrorDetailResponse(InvalidChannelCode, []));
 
-        return TypedResults.Ok(new ChannelTestResponse(true, "Connection test passed"));
+        var tester = testers.FirstOrDefault(t => t.Channel == channelType);
+        if (tester is null)
+        {
+            return TypedResults.Ok(new ChannelTestResponse(
+                false, $"{channelType} has no connection test.", ChannelConnectionTestCodes.NotTestable));
+        }
+
+        var result = await tester.TestAsync(GetTenantId(context), ct);
+        return TypedResults.Ok(new ChannelTestResponse(result.Success, result.Message, result.Code, result.VerifiedName));
     }
 
     private static TenantId GetTenantId(HttpContext context)
@@ -161,6 +176,11 @@ internal sealed record ChannelConfigResponse(
     bool IsActive,
     bool IsConfigured,
     IReadOnlyList<ChannelCredentialStatus> Credentials);
-internal sealed record ChannelTestResponse(bool Success, string Message);
+/// <summary>The outcome of <c>POST /admin/channels/{channel}/test</c>.</summary>
+/// <param name="Success">Whether the provider accepted the tenant's configuration.</param>
+/// <param name="Message">Human-readable outcome; on a provider rejection, the provider's own message.</param>
+/// <param name="Code">On failure: <c>channel-not-configured</c>, <c>not-testable</c>, <c>provider-rejected</c> or <c>provider-unreachable</c>.</param>
+/// <param name="VerifiedName">The provider's display name for the account (WhatsApp: the number's verified name).</param>
+internal sealed record ChannelTestResponse(bool Success, string Message, string? Code = null, string? VerifiedName = null);
 // ADR-0026 Phase A.2 — typed replacement for anonymous-type AuditChanges payload.
 internal sealed record ChannelChangeAudit(string Channel, bool IsActive);

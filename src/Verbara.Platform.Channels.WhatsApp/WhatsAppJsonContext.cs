@@ -6,6 +6,7 @@ namespace Verbara.Platform.Channels.WhatsApp;
 [JsonSerializable(typeof(MetaWebhookPayload))]
 [JsonSerializable(typeof(MetaSendRequest))]
 [JsonSerializable(typeof(MetaSendResponse))]
+[JsonSerializable(typeof(MetaPhoneNumberResponse))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
