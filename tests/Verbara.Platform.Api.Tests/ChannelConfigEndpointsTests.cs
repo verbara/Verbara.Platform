@@ -125,8 +125,7 @@ public sealed class ChannelConfigEndpointsTests : IClassFixture<AuthenticatedPla
             Tenant, new AuditQuery(Action: "channel.configured", Page: 1, PageSize: 500), CancellationToken.None);
         audit.Items.Should().Contain(
             e => e.Metadata != null
-                 && e.Metadata.ContainsKey("changed_keys")
-                 && e.Metadata["changed_keys"] == WhatsAppCredentialKeys.AppSecret,
+                 && e.Metadata.GetValueOrDefault("changed_keys") == WhatsAppCredentialKeys.AppSecret,
             "the record names the replaced key");
         // No reflection JSON here (AOT_JSON_STRICT runs): the record text of Changes plus every metadata pair.
         var recorded = string.Join('\n', audit.Items.Select(e =>
@@ -280,10 +279,11 @@ public sealed class ChannelConfigEndpointsTests : IClassFixture<AuthenticatedPla
         return config!;
     }
 
-    private Task<HttpResponseMessage> PutAsync(JsonObject credentials)
+    private async Task<HttpResponseMessage> PutAsync(JsonObject credentials)
     {
         var body = new JsonObject { ["isActive"] = true, ["credentials"] = credentials };
-        return _client.PutAsync(Route, new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"));
+        using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+        return await _client.PutAsync(Route, content);
     }
 
     /// <summary>Reads the <c>credentials</c> array of <c>{key, isSet}</c> entries into a map.</summary>

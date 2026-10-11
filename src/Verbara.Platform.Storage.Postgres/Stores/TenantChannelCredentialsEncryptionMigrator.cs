@@ -87,11 +87,7 @@ internal sealed partial class TenantChannelCredentialsEncryptionMigrator : IHost
                     else
                         alreadyWrapped++;
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     // One bad row must not abandon the others. The exception is logged without the row's value.
                     failed++;
@@ -114,7 +110,7 @@ internal sealed partial class TenantChannelCredentialsEncryptionMigrator : IHost
         {
             // Host shutting down — non-fatal.
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Never block startup; the next deploy retries.
             LogMigrationFailed(_logger, ex);
