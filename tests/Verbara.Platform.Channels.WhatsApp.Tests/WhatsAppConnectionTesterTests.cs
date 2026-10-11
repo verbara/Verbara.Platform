@@ -48,6 +48,63 @@ public class WhatsAppConnectionTesterTests
     }
 
     [Fact]
+    public async Task TestConnection_ShouldRedactToken_WhenMetaErrorQuotesIt()
+    {
+        const string token = "EAAsecretTokenValue123";
+        var http = new RecordingGraphHandler(_ => Json(HttpStatusCode.Unauthorized,
+            "{\"error\":{\"message\":\"Malformed access token " + token + " (twice: " + token + ").\",\"type\":\"OAuthException\",\"code\":190}}"));
+        var tester = Build(Config(new() { ["AccessToken"] = token, ["PhoneNumberId"] = "pn-a" }), http);
+
+        var result = await tester.TestAsync(Tenant, CancellationToken.None);
+
+        result.Code.Should().Be(ChannelConnectionTestCodes.ProviderRejected);
+        result.Message.Should().NotContain(token, "the stored token never travels back to the client");
+        result.Message.Should().Be("Malformed access token [redacted] (twice: [redacted]).");
+    }
+
+    [Fact]
+    public async Task TestConnection_ShouldCapMessage_WhenMetaErrorIsLong()
+    {
+        var longMessage = new string('m', 5000);
+        var http = new RecordingGraphHandler(_ => Json(HttpStatusCode.BadRequest,
+            "{\"error\":{\"message\":\"" + longMessage + "\",\"code\":100}}"));
+        var tester = Build(Config(new() { ["AccessToken"] = "token-a", ["PhoneNumberId"] = "pn-a" }), http);
+
+        var result = await tester.TestAsync(Tenant, CancellationToken.None);
+
+        result.Message.Length.Should().BeLessThanOrEqualTo(WhatsAppConnectionTester.MaxProviderTextLength + 1);
+        result.Message.Should().StartWith("mmm");
+    }
+
+    [Fact]
+    public async Task TestConnection_ShouldCapVerifiedName_WhenGraphReturnsLongName()
+    {
+        var longName = new string('n', 5000);
+        var http = new RecordingGraphHandler(_ => Json(HttpStatusCode.OK, "{\"verified_name\":\"" + longName + "\"}"));
+        var tester = Build(Config(new() { ["AccessToken"] = "token-a", ["PhoneNumberId"] = "pn-a" }), http);
+
+        var result = await tester.TestAsync(Tenant, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.VerifiedName!.Length.Should().BeLessThanOrEqualTo(WhatsAppConnectionTester.MaxProviderTextLength + 1);
+        result.Message.Length.Should().BeLessThan(WhatsAppConnectionTester.MaxProviderTextLength + 100);
+    }
+
+    [Fact]
+    public async Task TestConnection_ShouldReportStatus_WhenBodyExceedsReadLimit()
+    {
+        var huge = new string('x', WhatsAppConnectionTester.MaxResponseBodyBytes + 1024);
+        var http = new RecordingGraphHandler(_ => Json(HttpStatusCode.BadRequest,
+            "{\"error\":{\"message\":\"" + huge + "\",\"code\":100}}"));
+        var tester = Build(Config(new() { ["AccessToken"] = "token-a", ["PhoneNumberId"] = "pn-a" }), http);
+
+        var result = await tester.TestAsync(Tenant, CancellationToken.None);
+
+        result.Code.Should().Be(ChannelConnectionTestCodes.ProviderRejected);
+        result.Message.Should().Contain("400", "a body past the read limit is not parsed");
+    }
+
+    [Fact]
     public async Task TestConnection_ShouldReportStatus_WhenErrorBodyIsNotJson()
     {
         var http = new RecordingGraphHandler(_ => new HttpResponseMessage(HttpStatusCode.BadGateway)
