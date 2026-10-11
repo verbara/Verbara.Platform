@@ -215,7 +215,8 @@ internal sealed class PostgresConversationStore : IConversationStore
                 p.Add(new NpgsqlParameter("Inbound", NpgsqlDbType.Integer) { Value = (int)MessageDirection.Inbound });
             },
             r => r.GetDateTime("created_at"), ct);
-        return rows.Count == 0 ? null : new DateTimeOffset(DateTime.SpecifyKind(rows[0], DateTimeKind.Utc));
+        // timestamptz reads as a UTC DateTime; ToUniversalTime keeps the instant (gate #11).
+        return rows.Count == 0 ? null : new DateTimeOffset(rows[0].ToUniversalTime());
     }
 
     public async Task<Conversation?> FindByVoiceLinkedIdAsync(TenantId tenantId, string voiceLinkedId, CancellationToken ct)
