@@ -9,6 +9,48 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **WhatsApp connection test.** `POST /admin/channels/whatsapp/test` now asks Meta's Graph API for the
+  tenant's phone number using the tenant's own `AccessToken`. A success includes the number's verified
+  name (`verifiedName`). A failure includes Meta's own error message (`code: provider-rejected`), or
+  `provider-unreachable` after a network error or a 15-second timeout. A tenant without an `AccessToken`
+  or `PhoneNumberId` gets `channel-not-configured`, and no request is sent. Other channels answer
+  `not-testable` and never report success. Before this release the endpoint answered "Connection test
+  passed" for every channel without calling anything.
+- **`WhatsApp:BaseUrl`** sets the Graph API base address used for sends and connection tests. The default
+  is still `https://graph.facebook.com`. The value must be an absolute `https` URL without a query, a
+  fragment or user information. Plain `http` is accepted only for a loopback host (`localhost`,
+  `127.0.0.0/8`, `::1`), because the tenant's token is sent to this address. An invalid value stops the API
+  at start-up with an error that names the key.
+
+### Changed
+
+- **`/admin/channels` no longer returns credential values.** `GET /admin/channels`,
+  `GET /admin/channels/{channel}` and `PUT /admin/channels/{channel}` answer
+  `{ channel, isActive, isConfigured, credentials: [{ key, isSet }] }`. For WhatsApp the list holds every
+  key it accepts: `AccessToken`, `PhoneNumberId`, `AppSecret`, `WebhookVerifyToken`, `WabaId` and
+  `ApiVersion`. A client that read values from these responses now gets key names only. Console
+  v3.22.0-web shows them as "set" badges.
+- **`PUT /admin/channels/{channel}` merges with the stored credentials.** A key you leave out, or send
+  blank, keeps its stored value; a value replaces it; `null` removes the key. Saving a form with an empty
+  secret field therefore keeps the secret. WhatsApp refuses a key outside its list with
+  `400 unknown-credential-key` and stores nothing. An unknown channel name now answers `400` with the
+  JSON code `invalid-channel` instead of a text message.
+- The `channel.configured` audit record lists the names of the changed keys in `changed_keys`, never a
+  value.
+
+### Security
+
+- **`PUT /admin/channels/{channel}` no longer echoes secrets.** It returned the whole stored
+  configuration, including the WhatsApp `AppSecret` and `AccessToken` (residual from 2.27.0).
+- **Channel secrets are encrypted at rest.** On PostgreSQL storage, secret credential values (WhatsApp
+  `AccessToken`, `AppSecret` and `WebhookVerifyToken`, and every key of a channel without a declared key
+  list) are encrypted with the deployment's DataProtection keyring before they are written. A one-time
+  start-up migration encrypts the values already stored. It never blocks start-up and is safe to run
+  again. As with MFA secrets, losing the keyring makes these values unreadable, and tenants must enter
+  them again.
+
 ## [2.27.0] - 2026-10-10
 
 Minor release with three trains: **licensed-agent metering** (R-023: one agent per user, status-aware routing,
