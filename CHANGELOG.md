@@ -52,7 +52,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tenant's own peak. The export (`/agents/export`) adds a top-level `tenants[]` map (`tenantId`,
   `tenantType`, `parentTenantId`) covering every tenant its rows name and every parent above them. The map
   sits outside every hashed row: `events[]`, `daily[]`, `chainHeads[]`, the `lac1` canonical form and every
-  hash are unchanged, and `schemaVersion` stays 1. Both endpoints stay Platform-administrator only.
+  hash are unchanged, and `schemaVersion` stays 1. Both endpoints stay Platform-administrator only. (#367)
 
 ### Changed
 
@@ -98,11 +98,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Rate-card currencies must be ISO 4217.** The four rate-card writes (`POST`/`PUT /management/rate-cards`
   and `POST`/`PUT /partner/rate-cards`) accept only an active ISO 4217 code, trimmed and stored upper case
   (` usd ` is stored as `USD`). Anything else (`banana`, `""`, `XYZ`) answers 400 with
-  `{ "error": "currency-invalid", "currency": … }` and saves nothing.
+  `{ "error": "currency-invalid", "currency": … }` and saves nothing. (#367)
 - **One settlement currency per deployment.** `POST /partner/customers/{customerId}/invoices/generate`
   answers 400 `{ "error": "currency-mismatch", "partnerCurrency", "hostCurrency" }` when the Partner's
   card and the host's base card are priced in different currencies, and 400 `currency-invalid` when either
-  stored currency is not ISO 4217. There is no FX conversion.
+  stored currency is not ISO 4217. There is no FX conversion. (#367)
 - **Breaking (wire): a plan above the parent's plan answers 409 `plan-exceeds-parent`** with
   `{ "error", "requestedPlan", "parentPlan", "parentTenantId" }`, before any field of the request is saved:
   `PUT /partner/customers/{customerId}/settings` and `POST /partner/customers` answered 400 before, and
@@ -111,7 +111,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   409 and creates no tenant (it used to store the plan unchecked). `PUT /management/tenants/{id}` with a
   `metadata.Plan` above the parent's plan answers the same 409 and saves nothing (it answered 200 and
   stored the plan unchecked), and a `metadata.Plan` that is not `Starter`, `Pro` or `Enterprise` answers
-  400 there.
+  400 there. (#367)
 - **Tenants are born with a plan.** `/api/setup` creates the host tenant on `Enterprise`, keeping any
   metadata a repaired host row already holds, and its Customer on the host's plan. A tenant created
   without a plan inherits its parent's plan on every creation path: `POST /partner/customers` with no
@@ -119,18 +119,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and Partners. A plan that is not `Starter`, `Pro` or `Enterprise` answers 400 on both create routes and
   creates no tenant (`POST /partner/customers` used to fall back to `Starter`). Migration
   `021_HostTenantPlanEnterprise` gives `Plan = Enterprise` to an existing host that has no plan; an
-  explicit plan is kept, and no other tenant is touched.
+  explicit plan is kept, and no other tenant is touched. (#367)
 - **`nodeAffinity` is host-only.** `PUT /admin/tenant/settings`, `PUT /partner/settings` and
   `PUT /partner/customers/{customerId}/settings` ignore `operational.nodeAffinity` and keep the stored
   value; every other field of the request is still applied. `PUT /management/tenants/{id}/settings` still
-  writes it.
+  writes it. (#367)
 - **Verbara runs no dunning on a Partner's Customer** (a Customer whose parent tenant is a Partner, which the
   Partner bills). `GET /management/tenants/{id}/dunning`, `POST …/dunning/pause` and `POST …/dunning/resume`
   answer 409 `{ "error": "dunning-partner-customer", "tenantId", "partnerTenantId" }` for one, before any
   dunning record is read or written. The background dunning sweep skips these Customers: it opens no
   record, changes no invoice payment status and never moves them to Warning, Degraded, Suspended or
   PendingDeletion. Paying an invoice (`POST /management/invoices/{invoiceId}/pay`) still ends dunning.
-  Direct Customers are unaffected.
+  Direct Customers are unaffected. (#367)
 
 ### Fixed
 
@@ -150,8 +150,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A refused Partner invoice no longer leaves an invoice behind.** `POST /partner/customers/{customerId}/invoices/generate`
   saved the invoice before it looked up the host tenant and the host's base rate card, so "Platform host
   tenant not found.", "No platform base rate card configured." and a failure to price the platform cost
-  each answered 400 with the invoice already stored. Every refusal now comes before the first write.
-- OpenAPI documents the success response again on the seven routes that #367 gave refusal responses.
+  each answered 400 with the invoice already stored. Every refusal now comes before the first write. (#367)
+- OpenAPI documents the success response again on the seven routes that #367 gave refusal responses. (#369)
 
 ### Security
 
