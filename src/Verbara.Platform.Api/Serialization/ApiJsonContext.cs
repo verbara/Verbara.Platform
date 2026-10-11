@@ -199,6 +199,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(CampaignMetricsDto))]
 [JsonSerializable(typeof(List<CampaignMetricsDto>))]
 [JsonSerializable(typeof(CreateConversationRequest))]
+[JsonSerializable(typeof(ConversationStartRefusal))]
 // AOT (ADR-0022 Phase D): remaining ConversationEndpoints [FromBody] DTOs.
 [JsonSerializable(typeof(SendMessageRequest))]
 [JsonSerializable(typeof(TransferRequest))]

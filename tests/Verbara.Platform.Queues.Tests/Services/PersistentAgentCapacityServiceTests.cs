@@ -140,4 +140,45 @@ public class PersistentAgentCapacityServiceTests
         var pooled = await sut.GetCurrentLoadAsync(Tenant, AgentId, ChannelType.WebChat, CancellationToken.None);
         pooled.Should().Be(3);
     }
+
+    // ─── TryReserveAsync (agent-started-conversations, design D14) ───────────
+
+    [Fact]
+    public async Task TryReserveAsync_ShouldPersistLoad_WhenCapacityIsFree()
+    {
+        var (sut, store, _, _) = CreateSut();
+
+        var reserved = await sut.TryReserveAsync(Tenant, AgentId, ChannelType.WhatsApp, CancellationToken.None);
+
+        reserved.Should().BeTrue();
+        await store.Received().UpsertAsync(
+            Arg.Is<AgentCapacityRecord>(r => r.AgentId == AgentId.Value && r.ChatLoad == 1), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TryReserveAsync_ShouldReturnFalseWithoutWriting_WhenAtMax()
+    {
+        var (sut, store, _, _) = CreateSut(new ChannelCapacity { MaxChat = 1 });
+        await sut.ReserveAsync(Tenant, AgentId, ChannelType.WebChat, CancellationToken.None);
+        store.ClearReceivedCalls();
+
+        var reserved = await sut.TryReserveAsync(Tenant, AgentId, ChannelType.WhatsApp, CancellationToken.None);
+
+        reserved.Should().BeFalse();
+        await store.DidNotReceiveWithAnyArgs().UpsertAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task TryReserveAsync_ShouldLeaveNothingReserved_WhenPersistingTheLoadFails()
+    {
+        var (sut, store, _, _) = CreateSut();
+        await sut.GetCurrentLoadAsync(Tenant, AgentId, ChannelType.WebChat, CancellationToken.None); // reconcile first
+        store.UpsertAsync(Arg.Any<AgentCapacityRecord>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("capacity table unavailable"));
+
+        var act = () => sut.TryReserveAsync(Tenant, AgentId, ChannelType.WhatsApp, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await sut.GetCurrentLoadAsync(Tenant, AgentId, ChannelType.WhatsApp, CancellationToken.None)).Should().Be(0);
+    }
 }

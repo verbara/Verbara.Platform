@@ -116,6 +116,14 @@ internal sealed class InMemoryMessageStore : IMessageStore
         }
     }
 
+    /// <summary>The creation time of the most recent inbound message in any of <paramref name="conversationIds"/>.</summary>
+    internal DateTimeOffset? LastInboundAt(TenantId tenantId, IReadOnlySet<EntityId> conversationIds) =>
+        _items.Values
+            .Where(m => m.TenantId == tenantId && m.Direction == MessageDirection.Inbound
+                && conversationIds.Contains(m.ConversationId))
+            .Select(m => (DateTimeOffset?)m.CreatedAt)
+            .Max();
+
     public Task<Message?> FindLastInboundAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
     {
         var result = _items.Values

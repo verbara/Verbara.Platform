@@ -27,6 +27,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to `sessionId` and `wsUrl`, the session's `visitorAddress` (`webchat-…`), the `contactId` carrying it
   and that contact's `conversationId`. The change is additive: existing fields keep their names and
   meaning.
+- **Agents can start a WhatsApp or WebChat conversation with a contact.** `POST /conversations` with an
+  `initialMessage` now starts the conversation in the calling agent's own name: it is created `Active`
+  and owned by that agent, the message is stored `Sent` with the provider's id, and the start is audited
+  as `conversation.started`. The start writes no row to the licensed-agent ledger: starting a
+  conversation in one's own name is not an ownership move. On WhatsApp, a template is needed unless the
+  contact wrote to the tenant on WhatsApp in the last 24 hours, in any conversation; name it with the
+  optional `templateName` and `templateLanguage` fields (`templateLanguage` defaults to `en_US`;
+  templates with parameters are not supported yet). A template start stores `[template <name>
+  <language>]` as the message text, since that is what the contact received. If the caller already owns
+  an open conversation with that contact on that channel, the message goes out on it instead.
+- **Refused starts carry stable codes.** Nothing is sent before these checks pass. The body is a
+  `ConversationStartRefusal` with `error` set to one of: `unknown-channel` (400),
+  `contact-has-no-address` (400), `channel-not-available` (409), `conversation-open-elsewhere` (409,
+  with the open conversation's `conversationId` and `ownerKind`; it is never taken over),
+  `conversation-not-sendable` (409, the caller's own open conversation is in wrap-up, snoozed or another
+  state that takes no message; with its `conversationId` and `ownerKind`), `agent-at-capacity` (409) or
+  `whatsapp-template-required` (409). If the provider accepted the message but storing it failed, the
+  API answers `500` with `start-persist-failed`; the provider message id is logged for reconciliation.
 
 ### Changed
 
@@ -59,6 +77,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session's visitor address (see Fixed), so the helper's conversation is never routed and the specs time
   out. The product is not affected. The next console release migrates the helper to the `contactId` and
   `conversationId` the session response now returns.
+- **A failed first message no longer leaves an empty conversation behind.** The provider send now
+  happens before anything is saved. If the provider rejects the message, the API answers `502` with
+  `channel-send-failed`, and no conversation, message or capacity reservation is stored. In 2.27.0 such
+  a start answered `400` and left a queued conversation with no owner.
+- **`POST /conversations` without `initialMessage` is deprecated.** It still returns the contact's
+  open conversation, or creates a queued one with no owner, as in 2.26. Its removal is planned for a
+  later release; start conversations with an `initialMessage` instead.
+- **An unknown `channel` on `POST /conversations` answers `400` with `error: "unknown-channel"`.** The
+  body no longer repeats the request's value (2.27.0 answered `Unknown channel: <value>`), and an
+  undefined number such as `"99"` is now refused the same way.
 
 ### Fixed
 

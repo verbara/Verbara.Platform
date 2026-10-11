@@ -795,6 +795,11 @@
           "metadata",
           "sessions"
         ],
+        "ConversationStartRefusal": [
+          "error",
+          "conversationId",
+          "ownerKind"
+        ],
         "CreateSessionResponse": [
           "sessionId",
           "wsUrl",

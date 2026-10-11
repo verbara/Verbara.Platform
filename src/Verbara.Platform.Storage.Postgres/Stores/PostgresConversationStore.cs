@@ -198,6 +198,27 @@ internal sealed class PostgresConversationStore : IConversationStore
         return row?.ToConversation();
     }
 
+    public async Task<DateTimeOffset?> FindLastInboundAtAsync(
+        TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
+    {
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT m.created_at FROM messages m " +
+            "JOIN conversations c ON c.tenant_id = m.tenant_id AND c.conversation_id = m.conversation_id " +
+            "WHERE m.tenant_id = @TenantId AND c.contact_id = @ContactId AND c.channel = @Channel " +
+            "  AND m.direction = @Inbound " +
+            "ORDER BY m.created_at DESC LIMIT 1",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("ContactId", contactId.Value));
+                p.Add(new NpgsqlParameter("Channel", NpgsqlDbType.Integer) { Value = (int)channel });
+                p.Add(new NpgsqlParameter("Inbound", NpgsqlDbType.Integer) { Value = (int)MessageDirection.Inbound });
+            },
+            r => r.GetDateTime("created_at"), ct);
+        // timestamptz reads as a UTC DateTime; ToUniversalTime keeps the instant (gate #11).
+        return rows.Count == 0 ? null : new DateTimeOffset(rows[0].ToUniversalTime());
+    }
+
     public async Task<Conversation?> FindByVoiceLinkedIdAsync(TenantId tenantId, string voiceLinkedId, CancellationToken ct)
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(

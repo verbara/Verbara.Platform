@@ -738,4 +738,59 @@ public sealed class InMemoryConversationStoreTests
         await act.Should().ThrowAsync<InvalidOperationException>();
         (await store.GetByIdAsync(Tenant1, conversation.ConversationId, CancellationToken.None)).Should().NotBeNull();
     }
+
+    // ─── FindLastInboundAtAsync (agent-started-conversations, design D14) ─────
+
+    [Fact]
+    public async Task FindLastInboundAtAsync_ShouldReturnNewestInboundAcrossContactConversations_WhenSeveralExist()
+    {
+        var messages = new InMemoryMessageStore();
+        var store = new InMemoryConversationStore(messages);
+        var now = new DateTimeOffset(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
+        var contact = EntityId.From("contact-window");
+        var closed = await SaveWindowConversationAsync(store, contact, ChannelType.WhatsApp, ConversationState.Closed, now);
+        var active = await SaveWindowConversationAsync(store, contact, ChannelType.WhatsApp, ConversationState.Active, now);
+        var webChat = await SaveWindowConversationAsync(store, contact, ChannelType.WebChat, ConversationState.Active, now);
+        var otherContact = await SaveWindowConversationAsync(store, EntityId.From("contact-other"), ChannelType.WhatsApp, ConversationState.Active, now);
+        await SaveWindowMessageAsync(messages, closed, MessageDirection.Inbound, now.AddHours(-2));
+        await SaveWindowMessageAsync(messages, active, MessageDirection.Inbound, now.AddHours(-5));
+        await SaveWindowMessageAsync(messages, active, MessageDirection.Outbound, now.AddMinutes(-30));
+        await SaveWindowMessageAsync(messages, webChat, MessageDirection.Inbound, now.AddMinutes(-10));
+        await SaveWindowMessageAsync(messages, otherContact, MessageDirection.Inbound, now.AddMinutes(-5));
+
+        var last = await store.FindLastInboundAtAsync(Tenant1, contact, ChannelType.WhatsApp, CancellationToken.None);
+
+        last.Should().Be(now.AddHours(-2), "the newest inbound WhatsApp message of this contact, in any conversation");
+        (await store.FindLastInboundAtAsync(Tenant2, contact, ChannelType.WhatsApp, CancellationToken.None)).Should().BeNull();
+    }
+
+    private static async Task<Conversation> SaveWindowConversationAsync(
+        InMemoryConversationStore store, EntityId contact, ChannelType channel, ConversationState state, DateTimeOffset now)
+    {
+        var conversation = new Conversation
+        {
+            ConversationId = EntityId.New(),
+            TenantId = Tenant1,
+            ContactId = contact,
+            Channel = channel,
+            State = state,
+            CreatedAt = now.AddDays(-1),
+        };
+        await store.SaveAsync(conversation, CancellationToken.None);
+        return conversation;
+    }
+
+    private static Task SaveWindowMessageAsync(
+        InMemoryMessageStore messages, Conversation conversation, MessageDirection direction, DateTimeOffset at) =>
+        messages.SaveAsync(new Message
+        {
+            MessageId = EntityId.New(),
+            ConversationId = conversation.ConversationId,
+            TenantId = conversation.TenantId,
+            Direction = direction,
+            Channel = conversation.Channel,
+            Content = new MessageEnvelope([new TextBlock("hi")]),
+            DeliveryStatus = MessageDeliveryStatus.Delivered,
+            CreatedAt = at,
+        }, CancellationToken.None);
 }

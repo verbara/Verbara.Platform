@@ -42,6 +42,26 @@ public sealed class PersistentAgentCapacityService : IAgentCapacityService
         await PersistCurrentLoadsAsync(tenantId, agentId, ct).ConfigureAwait(false);
     }
 
+    public async Task<bool> TryReserveAsync(TenantId tenantId, EntityId agentId, ChannelType channel, CancellationToken ct)
+    {
+        await EnsureReconciledAsync(tenantId, ct).ConfigureAwait(false);
+        if (!await _inner.TryReserveAsync(tenantId, agentId, channel, ct).ConfigureAwait(false))
+            return false;
+
+        try
+        {
+            await PersistCurrentLoadsAsync(tenantId, agentId, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Nothing stays reserved when the call fails: undo the in-memory unit (the store row is rewritten by the
+            // next successful write or the restart reconcile).
+            await _inner.ReleaseAsync(tenantId, agentId, channel, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+        return true;
+    }
+
     public async Task ReleaseAsync(TenantId tenantId, EntityId agentId, ChannelType channel, CancellationToken ct)
     {
         await EnsureReconciledAsync(tenantId, ct).ConfigureAwait(false);

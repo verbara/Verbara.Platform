@@ -204,4 +204,29 @@ public class AgentCapacityServiceTests
         // The 6th chat is blocked by the elevated per-agent MaxChat=5.
         (await sut.HasCapacityAsync(Tenant, AgentId, ChannelType.WebChat, CancellationToken.None)).Should().BeFalse();
     }
+
+    // ─── TryReserveAsync (agent-started-conversations, design D14) ───────────
+
+    [Fact]
+    public async Task TryReserveAsync_ShouldReserveExactlyUpToMax_WhenCalledConcurrently()
+    {
+        var (sut, _) = CreateSut(new ChannelCapacity { MaxChat = 3 });
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 40).Select(_ =>
+            Task.Run(() => sut.TryReserveAsync(Tenant, AgentId, ChannelType.WhatsApp, CancellationToken.None))));
+
+        results.Count(r => r).Should().Be(3, "the check and the increment are one step");
+        (await sut.GetCurrentLoadAsync(Tenant, AgentId, ChannelType.WhatsApp, CancellationToken.None)).Should().Be(3);
+    }
+
+    [Fact]
+    public async Task TryReserveAsync_ShouldReturnFalseAndReserveNothing_WhenAgentDoesNotExist()
+    {
+        var resolver = Substitute.For<IAgentCapacityResolver>();
+        resolver.ResolveAsync(Tenant, AgentId, Arg.Any<CancellationToken>()).Returns(default(ChannelCapacity?));
+        var sut = new InMemoryAgentCapacityService(resolver);
+
+        (await sut.TryReserveAsync(Tenant, AgentId, ChannelType.WebChat, CancellationToken.None)).Should().BeFalse();
+        (await sut.GetCurrentLoadAsync(Tenant, AgentId, ChannelType.WebChat, CancellationToken.None)).Should().Be(0);
+    }
 }
