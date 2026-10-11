@@ -29,14 +29,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/admin/channels` no longer returns credential values.** `GET /admin/channels`,
   `GET /admin/channels/{channel}` and `PUT /admin/channels/{channel}` answer
   `{ channel, isActive, isConfigured, credentials: [{ key, isSet }] }`. For WhatsApp the list holds every
-  key it accepts: `AccessToken`, `PhoneNumberId`, `AppSecret`, `WebhookVerifyToken`, `WabaId` and
-  `ApiVersion`. A client that read values from these responses now gets key names only. Console
-  v3.22.0-web shows them as "set" badges.
+  key it accepts: `AccessToken`, `PhoneNumberId`, `AppSecret`, `WebhookVerifyToken`, `WabaId`,
+  `ApiVersion` and `defaultQueueId` (the default queue that inbound routing reads), followed by any stored
+  key outside that list, such as the `ApiToken` and `PhoneNumber` that consoles before v3.22.0-web saved.
+  A client that read values from these responses now gets key names only. Console v3.22.0-web shows them
+  as "set" badges.
 - **`PUT /admin/channels/{channel}` merges with the stored credentials.** A key you leave out, or send
-  blank, keeps its stored value; a value replaces it; `null` removes the key. Saving a form with an empty
-  secret field therefore keeps the secret. WhatsApp refuses a key outside its list with
-  `400 unknown-credential-key` and stores nothing. An unknown channel name now answers `400` with the
-  JSON code `invalid-channel` instead of a text message.
+  blank, keeps its stored value; a value replaces it; `null` removes the key, including a stored key
+  outside the channel's list. Saving a form with an empty secret field therefore keeps the secret.
+  WhatsApp refuses a value for a key outside its list with `400 unknown-credential-key` and stores
+  nothing. An unknown channel name now answers `400` with the JSON code `invalid-channel` instead of a
+  text message.
 - The `channel.configured` audit record lists the names of the changed keys in `changed_keys`, never a
   value.
 
@@ -45,11 +48,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`PUT /admin/channels/{channel}` no longer echoes secrets.** It returned the whole stored
   configuration, including the WhatsApp `AppSecret` and `AccessToken` (residual from 2.27.0).
 - **Channel secrets are encrypted at rest.** On PostgreSQL storage, secret credential values (WhatsApp
-  `AccessToken`, `AppSecret` and `WebhookVerifyToken`, and every key of a channel without a declared key
-  list) are encrypted with the deployment's DataProtection keyring before they are written. A one-time
-  start-up migration encrypts the values already stored. It never blocks start-up and is safe to run
-  again. As with MFA secrets, losing the keyring makes these values unreadable, and tenants must enter
-  them again.
+  `AccessToken`, `AppSecret` and `WebhookVerifyToken`, any WhatsApp key outside its declared list such
+  as the legacy `ApiToken`, and every key of a channel without a declared key list) are encrypted with
+  the deployment's DataProtection keyring before they are written. A one-time start-up migration
+  encrypts the values already stored. It never blocks start-up and is safe to run again. As with MFA
+  secrets, losing the keyring makes these values unreadable, and tenants must enter them again.
+- **The connection test never returns the tenant's token.** Meta's error message and the verified name
+  are relayed with every occurrence of the `AccessToken` replaced by `[redacted]`, cut to 300 characters,
+  and a Graph response body over 64 KiB is not read.
+- **Operators: this upgrade is forward-only once the start-up migration has run.** Do not roll the API
+  image back below 2.28.0 after it. An older image reads the encrypted values as if they were the
+  credentials themselves: it checks WhatsApp webhook signatures against ciphertext and ignores all
+  inbound, sends ciphertext as the bearer token so every outbound message fails with `401`, and loses
+  every channel's `defaultQueueId`. The signal that the migration ran is the log line with EventId
+  `4301` ("Channel credential encryption migration completed: …"). If you must roll back, re-enter
+  every tenant's channel credentials through `PUT /admin/channels/{channel}` on the older image; there is
+  no unwrap script. See `docs/operations/backup-disaster-recovery.md` §1.6.
 
 ## [2.27.0] - 2026-10-10
 

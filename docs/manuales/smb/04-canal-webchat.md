@@ -66,7 +66,9 @@ $ curl -sS -X PUT http://{server-ip}:5000/api/v1/admin/channels/webchat \
     }' | jq
 ```
 
-> El endpoint es **`PUT`** (reemplaza la config completa del canal, no merge). El body son sólo dos campos: `isActive` (bool) y `credentials` (mapa string→string). `defaultQueueId` vive **dentro de `credentials`**. No existen campos `displayName`/`allowedOrigins`/`enabled` — los orígenes CORS se manejan aparte (ver §6).
+> El endpoint es **`PUT`** y **mezcla** con lo guardado, clave por clave (desde Platform 2.28.0): una clave que omitís, o que mandás vacía, conserva su valor; un valor la reemplaza; `null` la borra. El body son sólo dos campos: `isActive` (bool) y `credentials` (mapa string→string, donde un valor puede ser `null`). `defaultQueueId` vive **dentro de `credentials`**. No existen campos `displayName`/`allowedOrigins`/`enabled` — los orígenes CORS se manejan aparte (ver §6).
+>
+> La respuesta (igual que `GET /admin/channels/webchat`) **nunca devuelve valores**: lista cada clave como `{ "key": "defaultQueueId", "isSet": true }`. Para confirmar qué queue quedó configurada, mirá el enrutado de un chat de prueba (§4), no la respuesta.
 
 ### Vía Web UI
 
