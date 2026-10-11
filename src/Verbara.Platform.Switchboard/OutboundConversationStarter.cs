@@ -165,7 +165,8 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         {
             // The message row first, right after the send: the provider's sent/delivered callback looks it up by
             // provider id and can arrive at once (design D8). The conversation follows; a conversation therefore
-            // never exists without its first message.
+            // never exists without its first message. The reverse can happen: if the conversation write fails, the
+            // message row stays orphaned (next to its provider id) until retention removes it.
             await _messages.SaveAsync(message, CancellationToken.None).ConfigureAwait(false);
             if (open is null)
                 await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
@@ -278,7 +279,7 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
     private static partial void LogConnectorFault(ILogger logger, Exception exception, string tenantId, ChannelType channel);
 
     [LoggerMessage(Level = LogLevel.Error,
-        Message = "Agent start: the first message of conversation {ConversationId} (tenant {TenantId}) reached the {Channel} provider as {ProviderMessageId}, but it could not be stored; reconcile by the provider id.")]
+        Message = "Agent start: the first message of conversation {ConversationId} (tenant {TenantId}) reached the {Channel} provider as {ProviderMessageId}, but it could not be stored (a message row may remain without its conversation until retention removes it); reconcile by the provider id.")]
     private static partial void LogPersistFailedAfterSend(
         ILogger logger, Exception exception, string tenantId, string conversationId, ChannelType channel, string? providerMessageId);
 
