@@ -148,7 +148,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   still ends cleanly. Operators: do not register a release's digests in `authorized-digests.json`
   while its smoke is red; the stop condition is in
   `docs/operations/2026-05-10-update-authorized-digests-after-release.md`. This applies from the first
-  tag cut after it merges, because `release.yml` runs from the tagged ref.
+  tag cut after it merges, because `release.yml` runs from the tagged ref. (#368)
 - **`Live-DB Tests (Postgres)` is a required check** (decision_ref verbara-meta/ADR-0023). The lane has
   been gating since the Testcontainers readiness fix; it is now also in the `main-protection` ruleset's
   required status checks, so a red lane blocks the merge instead of only showing on the PR. It got
@@ -158,7 +158,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   configuration, so the diff shows only the comments in `ci.yml`. On a docs-only PR the lane is
   skipped and the skip satisfies the check; on a Dependabot PR the job still reports, with its two
   test steps skipped. Neither is a regression. A
-  transient red is fixed by re-running the job, not by removing the requirement.
+  transient red is fixed by re-running the job, not by removing the requirement. (#368)
 
 ### Fixed
 
