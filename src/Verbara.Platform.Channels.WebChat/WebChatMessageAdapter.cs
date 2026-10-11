@@ -6,24 +6,12 @@ namespace Verbara.Platform.Channels.WebChat;
 
 public sealed class WebChatMessageAdapter
 {
-    public static InboundMessage ToInboundMessage(
-        string sessionId,
-        MessageEnvelope content,
-        string externalMessageId,
-        DateTimeOffset timestamp)
-    {
-        var from = new ChannelAddress(ChannelType.WebChat, sessionId);
-        return new InboundMessage(from, content, externalMessageId, timestamp);
-    }
-
     /// <summary>
-    /// Adapts a visitor message of <paramref name="session"/> into an inbound message.
+    /// Adapts a visitor message of <paramref name="session"/> into an inbound message attributed to the
+    /// session's visitor address (<c>webchat-&lt;guid&gt;</c>), never to the session id: the session id is a
+    /// transport handle, and the visitor address is the contact address the session was created with
+    /// (spec <c>webchat-visitor-identity</c>, design D16).
     /// </summary>
-    /// <remarks>
-    /// RED-PHASE STUB (whatsapp-works-for-real 8.2): keeps today's behaviour — <c>From</c> is the
-    /// session id — so <c>ToInboundMessage_ShouldUseVisitorAddress_NotSessionId</c> fails for the
-    /// stated reason. Task 8.3 makes <c>From</c> the session's visitor address (design D16).
-    /// </remarks>
     public static InboundMessage ToInboundMessage(
         WebChatSession session,
         MessageEnvelope content,
@@ -31,6 +19,7 @@ public sealed class WebChatMessageAdapter
         DateTimeOffset timestamp)
     {
         ArgumentNullException.ThrowIfNull(session);
-        return ToInboundMessage(session.SessionId, content, externalMessageId, timestamp);
+        var from = new ChannelAddress(ChannelType.WebChat, session.CustomerAddress.Address);
+        return new InboundMessage(from, content, externalMessageId, timestamp);
     }
 }

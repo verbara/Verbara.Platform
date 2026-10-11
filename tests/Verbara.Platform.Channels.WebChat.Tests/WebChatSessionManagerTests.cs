@@ -239,4 +239,55 @@ public class WebChatSessionManagerTests
 
         session.Should().BeNull();
     }
+
+    [Fact]
+    public async Task GetSessionByVisitorAddressAsync_ShouldReturnSession_WhenVisitorConnected()
+    {
+        var manager = CreateManager();
+        var address = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-1");
+
+        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock());
+        var session = await manager.GetSessionByVisitorAddressAsync(address.Address);
+
+        session.Should().NotBeNull();
+        session!.SessionId.Should().Be(sessionId);
+    }
+
+    [Fact]
+    public async Task GetSessionByVisitorAddressAsync_ShouldReturnNull_WhenAddressIsTheSessionId()
+    {
+        var manager = CreateManager();
+        var sessionId = await manager.ConnectAsync(
+            MakeTenant(), MakeConversation(), new ChannelAddress(ChannelType.WebChat, "webchat-visitor-2"), MakeClock());
+
+        (await manager.GetSessionByVisitorAddressAsync(sessionId)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetSessionByVisitorAddressAsync_ShouldReturnNull_WhenSessionExpiredAndCleanedUp()
+    {
+        var start = DateTimeOffset.UtcNow;
+        var manager = CreateManager(TimeSpan.FromMinutes(30));
+        var address = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-3");
+        await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock(start));
+
+        await manager.CleanupExpiredAsync(MakeClock(start.AddMinutes(31)));
+
+        (await manager.GetSessionByVisitorAddressAsync(address.Address)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CleanupExpiredAsync_ShouldKeepNewerSessionIndexed_WhenOlderSessionOfSameAddressExpires()
+    {
+        var start = DateTimeOffset.UtcNow;
+        var manager = CreateManager(TimeSpan.FromMinutes(30));
+        var address = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-4");
+        await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock(start));
+        var newer = await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock(start.AddMinutes(20)));
+
+        var removed = await manager.CleanupExpiredAsync(MakeClock(start.AddMinutes(31)));
+
+        removed.Should().Be(1);
+        (await manager.GetSessionByVisitorAddressAsync(address.Address))!.SessionId.Should().Be(newer);
+    }
 }

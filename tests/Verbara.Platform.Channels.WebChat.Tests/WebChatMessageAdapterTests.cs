@@ -9,18 +9,29 @@ public class WebChatMessageAdapterTests
     private static MessageEnvelope MakeEnvelope() =>
         new(new List<MessageBlock>());
 
+    private static WebChatSession MakeSession(string sessionId = "session-1", string visitorAddress = "webchat-visitor-1") =>
+        new()
+        {
+            SessionId = sessionId,
+            ConversationId = EntityId.From("conv-1"),
+            TenantId = new TenantId("tenant-1"),
+            CustomerAddress = new ChannelAddress(ChannelType.WebChat, visitorAddress),
+            CreatedAt = DateTimeOffset.UtcNow,
+            LastActivityAt = DateTimeOffset.UtcNow,
+        };
+
     [Fact]
     public void ToInboundMessage_ShouldReturnInboundMessage_WithCorrectChannelAddress()
     {
-        var sessionId = "session-xyz";
+        var session = MakeSession("session-xyz", "webchat-xyz");
         var envelope = MakeEnvelope();
         var externalId = "ext-001";
         var timestamp = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
-        var result = WebChatMessageAdapter.ToInboundMessage(sessionId, envelope, externalId, timestamp);
+        var result = WebChatMessageAdapter.ToInboundMessage(session, envelope, externalId, timestamp);
 
         result.From.Channel.Should().Be(ChannelType.WebChat);
-        result.From.Address.Should().Be(sessionId);
+        result.From.Address.Should().Be("webchat-xyz");
     }
 
     [Fact]
@@ -28,7 +39,7 @@ public class WebChatMessageAdapterTests
     {
         var envelope = MakeEnvelope();
 
-        var result = WebChatMessageAdapter.ToInboundMessage("session-1", envelope, "ext-id", DateTimeOffset.UtcNow);
+        var result = WebChatMessageAdapter.ToInboundMessage(MakeSession(), envelope, "ext-id", DateTimeOffset.UtcNow);
 
         result.Content.Should().BeSameAs(envelope);
     }
@@ -38,7 +49,7 @@ public class WebChatMessageAdapterTests
     {
         var externalId = "msg-external-123";
 
-        var result = WebChatMessageAdapter.ToInboundMessage("session-1", MakeEnvelope(), externalId, DateTimeOffset.UtcNow);
+        var result = WebChatMessageAdapter.ToInboundMessage(MakeSession(), MakeEnvelope(), externalId, DateTimeOffset.UtcNow);
 
         result.ExternalMessageId.Should().Be(externalId);
     }
@@ -48,21 +59,22 @@ public class WebChatMessageAdapterTests
     {
         var timestamp = new DateTimeOffset(2026, 6, 15, 9, 30, 0, TimeSpan.Zero);
 
-        var result = WebChatMessageAdapter.ToInboundMessage("session-1", MakeEnvelope(), "ext-id", timestamp);
+        var result = WebChatMessageAdapter.ToInboundMessage(MakeSession(), MakeEnvelope(), "ext-id", timestamp);
 
         result.Timestamp.Should().Be(timestamp);
     }
 
     [Fact]
-    public void ToInboundMessage_ShouldSetFromChannelToWebChat_ForAnySessionId()
+    public void ToInboundMessage_ShouldSetFromChannelToWebChat_ForAnyVisitorAddress()
     {
-        var sessionIds = new[] { "abc", "def123", "visitor-999" };
+        var visitorAddresses = new[] { "webchat-abc", "webchat-def123", "webchat-999" };
 
-        foreach (var sessionId in sessionIds)
+        foreach (var visitorAddress in visitorAddresses)
         {
-            var result = WebChatMessageAdapter.ToInboundMessage(sessionId, MakeEnvelope(), "ext-id", DateTimeOffset.UtcNow);
+            var result = WebChatMessageAdapter.ToInboundMessage(
+                MakeSession(visitorAddress: visitorAddress), MakeEnvelope(), "ext-id", DateTimeOffset.UtcNow);
             result.From.Channel.Should().Be(ChannelType.WebChat);
-            result.From.Address.Should().Be(sessionId);
+            result.From.Address.Should().Be(visitorAddress);
         }
     }
 

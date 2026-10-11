@@ -4,9 +4,18 @@ using Microsoft.Extensions.Options;
 
 namespace Verbara.Platform.Channels.WebChat;
 
+/// <summary>
+/// The in-process registry of WebChat sessions, indexed by session id (the transport handle) and by
+/// visitor address (<c>webchat-&lt;guid&gt;</c>, the contact address agent replies are sent to).
+/// </summary>
+/// <remarks>
+/// In-process by design: a session is known only to the replica that created it, so agent-reply delivery
+/// is scoped to that replica (spec <c>webchat-visitor-identity</c>; a backplane is deferred).
+/// </remarks>
 public sealed class WebChatSessionManager
 {
     private readonly ConcurrentDictionary<string, WebChatSession> _sessions = new();
+    private readonly ConcurrentDictionary<string, WebChatSession> _byVisitorAddress = new(StringComparer.Ordinal);
     private readonly WebChatOptions _options;
 
     public WebChatSessionManager(IOptions<WebChatOptions> options)
@@ -30,6 +39,8 @@ public sealed class WebChatSessionManager
         };
 
         _sessions[sessionId] = session;
+        // Last writer wins: a visitor address names one live session, the newest one created for it.
+        _byVisitorAddress[customerAddress.Address] = session;
         return Task.FromResult(sessionId);
     }
 
@@ -67,6 +78,16 @@ public sealed class WebChatSessionManager
     }
 
     /// <summary>
+    /// The session holding <paramref name="visitorAddress"/> on this replica, or <c>null</c> when none does
+    /// (never created here, or expired and cleaned up).
+    /// </summary>
+    public Task<WebChatSession?> GetSessionByVisitorAddressAsync(string visitorAddress)
+    {
+        _byVisitorAddress.TryGetValue(visitorAddress, out var session);
+        return Task.FromResult(session);
+    }
+
+    /// <summary>
     /// Atomically marks the session as routed-to-queue. Returns <c>true</c> exactly once (the
     /// first inbound message of the session) and <c>false</c> afterwards or when the session is
     /// unknown — so the first message triggers queue assignment and later messages are no-ops.
@@ -83,6 +104,8 @@ public sealed class WebChatSessionManager
             {
                 if (_sessions.TryRemove(key, out _))
                 {
+                    // Drop the visitor index entry only while it still names this session.
+                    _byVisitorAddress.TryRemove(new KeyValuePair<string, WebChatSession>(session.CustomerAddress.Address, session));
                     removed++;
                 }
             }

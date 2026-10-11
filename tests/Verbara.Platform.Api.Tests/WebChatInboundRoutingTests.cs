@@ -21,6 +21,9 @@ namespace Verbara.Platform.Api.Tests;
 /// are pre-created (owner-less, Queued) at session open and the inbound pipeline never routes
 /// them, so the auto-distribution worker skips them. This component closes that gap, mirroring
 /// the webhook inbound path (<c>WebhookEndpoints.cs:104-108</c>).
+/// Since 2.28.0 (spec <c>webchat-visitor-identity</c>) the pipeline resolves a visitor message to the
+/// session's own contact (by its <c>webchat-&lt;guid&gt;</c> address) and so to the conversation the
+/// session was created with; the fixtures below model exactly that pairing.
 /// </summary>
 public sealed class WebChatInboundRoutingTests
 {
@@ -48,9 +51,12 @@ public sealed class WebChatInboundRoutingTests
         // Mirrors WebChatEndpoints.CreateSession: conversation persisted owner-less in Queued.
         store.SaveAsync(conversation, CancellationToken.None).GetAwaiter().GetResult();
 
+        // The session's contact carries the session's visitor address (WebChatEndpoints.CreateSession).
+        var visitorAddress = new ChannelAddress(ChannelType.WebChat, "webchat-x");
+        var contact = new Contact { ContactId = ContactId, TenantId = Tenant, CreatedAt = DateTimeOffset.UtcNow };
+        contact.AddAddress(visitorAddress);
         var contactStore = Substitute.For<IContactStore>();
-        contactStore.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>())
-            .Returns(new Contact { ContactId = ContactId, TenantId = Tenant, CreatedAt = DateTimeOffset.UtcNow });
+        contactStore.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>()).Returns(contact);
 
         var capacity = Substitute.For<IAgentCapacityService>();
         var eventBus = new PlatformEventBus();
@@ -62,7 +68,7 @@ public sealed class WebChatInboundRoutingTests
 
         var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
         var sessionId = sessionManager.ConnectAsync(
-            Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-x"), clock).GetAwaiter().GetResult();
+            Tenant, ConvId, visitorAddress, clock).GetAwaiter().GetResult();
 
         var sut = new WebChatInboundRouter(router, switchboard, store, contactStore, eventBus, sessionManager, NullLogger<WebChatInboundRouter>.Instance);
         return (sut, store, sessionId, switchboard, eventBus);
@@ -85,6 +91,21 @@ public sealed class WebChatInboundRoutingTests
         reloaded!.Owner.Should().NotBeNull();
         reloaded.Owner!.Kind.Should().Be(ConversationOwnerKind.Queue);
         reloaded.Owner.OwnerId.Should().Be(QueueId);
+    }
+
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldRouteSessionConversation_WhenPipelineReusedSessionContact()
+    {
+        // D16: the first visitor message lands in the session's conversation, so the conversation routed
+        // is the one the session was created with — and no second conversation exists to route.
+        var (sut, store, sessionId, _, _) = BuildWithRealSwitchboard();
+
+        await sut.RouteFirstInboundAsync(sessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        var active = await store.FindActiveByContactAsync(Tenant, ContactId, ChannelType.WebChat, CancellationToken.None);
+        active.Should().NotBeNull();
+        active!.ConversationId.Should().Be(ConvId);
+        active.Owner!.Kind.Should().Be(ConversationOwnerKind.Queue);
     }
 
     [Fact]

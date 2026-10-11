@@ -76,11 +76,20 @@ public class WebChatEndpointTests
     public void WebChatMessageAdapter_ShouldCreateInboundMessage_WithCorrectChannel()
     {
         var envelope = new MessageEnvelope([new TextBlock("Hello")]);
+        var session = new WebChatSession
+        {
+            SessionId = "sess-1",
+            ConversationId = EntityId.From("conv-1"),
+            TenantId = new TenantId("tenant-1"),
+            CustomerAddress = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-1"),
+            CreatedAt = DateTimeOffset.UtcNow,
+            LastActivityAt = DateTimeOffset.UtcNow,
+        };
         var msg = WebChatMessageAdapter.ToInboundMessage(
-            "sess-1", envelope, "ext-1", DateTimeOffset.UtcNow);
+            session, envelope, "ext-1", DateTimeOffset.UtcNow);
 
         msg.From.Channel.Should().Be(ChannelType.WebChat);
-        msg.From.Address.Should().Be("sess-1");
+        msg.From.Address.Should().Be("webchat-visitor-1");
         msg.ExternalMessageId.Should().Be("ext-1");
     }
 

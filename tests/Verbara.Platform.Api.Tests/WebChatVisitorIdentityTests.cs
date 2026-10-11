@@ -110,6 +110,76 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
     }
 
     [Fact]
+    public async Task AgentReply_ShouldMarkFailed_WhenSessionClosed()
+    {
+        using var client = _factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client);
+        var session = await GetSessionAsync(sessionId);
+        var agentId = await GiveConversationToAgentAsync(session.ConversationId);
+
+        // The visitor connects, then leaves: the server marks the session disconnected.
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+        {
+            var wsClient = _factory.Server.CreateWebSocketClient();
+            using var socket = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
+            (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "visitor left", timeout.Token);
+        }
+
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (session.IsConnected && DateTimeOffset.UtcNow < deadline)
+            await Task.Delay(20); // fence-allow: LOOP-DRIVER — poll pacing until the server-side socket loop marks the session disconnected
+        session.IsConnected.Should().BeFalse("the server marks the session disconnected when the socket closes");
+
+        var conversations = _factory.Services.GetRequiredService<IConversationService>();
+        var send = async () => await conversations.SendMessageAsync(
+            session.ConversationId,
+            VisitorTenant,
+            new MessageEnvelope([new TextBlock("are you still there?")]),
+            agentId,
+            ConversationOwnerKind.Agent,
+            CancellationToken.None);
+
+        var message = (await send.Should().NotThrowAsync("a closed session is a failed send, never an exception")).Subject;
+        message.DeliveryStatus.Should().Be(MessageDeliveryStatus.Failed);
+        var stored = await _factory.Services.GetRequiredService<IMessageStore>()
+            .GetConversationMessagesAsync(VisitorTenant, session.ConversationId, 100, 0, CancellationToken.None);
+        stored.Should().ContainSingle(m => m.MessageId == message.MessageId)
+            .Which.DeliveryStatus.Should().Be(MessageDeliveryStatus.Failed);
+    }
+
+    [Fact]
+    public async Task VisitorMessages_ShouldStayInSessionConversation_WhenVisitorSendsTwice()
+    {
+        using var client = _factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client);
+        var session = await GetSessionAsync(sessionId);
+
+        using (var first = await client.PostAsJsonAsync($"/api/v1/webchat/sessions/{sessionId}/messages", new { text = "hola" }))
+            first.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var second = await client.PostAsJsonAsync($"/api/v1/webchat/sessions/{sessionId}/messages", new { text = "sigo aqui" }))
+            second.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var (contacts, conversations, _) = await WebhookProbes.CountRowsAsync(_factory.Services, VisitorTenant);
+        (contacts, conversations).Should().Be((1, 1));
+        var messages = await _factory.Services.GetRequiredService<IMessageStore>()
+            .GetConversationMessagesAsync(VisitorTenant, session.ConversationId, 100, 0, CancellationToken.None);
+        messages.Count(m => m.Direction == MessageDirection.Inbound).Should().Be(2);
+    }
+
+    private async Task<EntityId> GiveConversationToAgentAsync(EntityId conversationId)
+    {
+        var agentId = EntityId.From($"agent-{Guid.NewGuid():N}");
+        var conversationStore = _factory.Services.GetRequiredService<IConversationStore>();
+        var conversation = await conversationStore.GetByIdAsync(VisitorTenant, conversationId, CancellationToken.None);
+        conversation.Should().NotBeNull();
+        conversation!.State = ConversationState.Active;
+        conversation.Owner = ConversationOwner.ForAgent(agentId);
+        await conversationStore.SaveAsync(conversation, CancellationToken.None);
+        return agentId;
+    }
+
+    [Fact]
     public async Task CreateSession_ShouldReturnVisitorIdentity_WhenTenantExists()
     {
         using var client = _factory.CreateClient();

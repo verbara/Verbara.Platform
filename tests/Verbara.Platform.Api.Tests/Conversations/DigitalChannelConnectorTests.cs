@@ -9,10 +9,11 @@ namespace Verbara.Platform.Api.Tests.Conversations;
 
 /// <summary>
 /// An agent reply on a digital channel reaches that channel's connector through the host's channel
-/// registry, as the real <c>Program.cs</c> composes it. The WebChat session lookup itself is unchanged
-/// here (it still resolves by the outbound address; the visitor-identity fix is a later slice), so a
-/// reply to a contact without a connected session is recorded as failed — never thrown as
-/// "no connector registered".
+/// registry, as the real <c>Program.cs</c> composes it. The WebChat connector resolves the contact's
+/// visitor address to a session (spec <c>webchat-visitor-identity</c>); a contact no session on this
+/// replica holds is recorded as failed (<c>SESSION_NOT_CONNECTED</c>) — never thrown as
+/// "no connector registered". Delivery to a connected socket is covered by
+/// <c>WebChatVisitorIdentityTests</c>.
 /// </summary>
 public sealed class DigitalChannelConnectorTests(PlatformApiFactory factory) : IClassFixture<PlatformApiFactory>
 {
