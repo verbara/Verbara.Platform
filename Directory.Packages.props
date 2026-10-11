@@ -107,7 +107,7 @@
          walking-skeleton harness for ADR-0022 Phase A.5 exactly-once verification).
          Reflection-based — incompatible with Native AOT, but the harness itself is
          NO-AOT per ADR-0023; deliverables (Api + Realtime images) remain AOT-clean. -->
-    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
     <!-- Transitive-pin override (CentralPackageTransitivePinningEnabled=true): SignalR's
          MessagePack protocol pulls MessagePack transitively into Realtime + Realtime.Tests.
          The version it would otherwise resolve (2.5.187) carries CVE-2026-48109 — a HIGH
