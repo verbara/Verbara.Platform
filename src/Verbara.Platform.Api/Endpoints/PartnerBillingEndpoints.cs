@@ -21,7 +21,8 @@ internal static class PartnerBillingEndpoints
         group.MapGet("/rate-cards", ListRateCards)
             .RequireAuthorization("partner:billing:manage");
         group.MapPost("/rate-cards", CreateRateCard)
-            .RequireAuthorization("partner:billing:manage");
+            .RequireAuthorization("partner:billing:manage")
+            .Produces<CurrencyInvalidRefusal>(StatusCodes.Status400BadRequest);
         group.MapPut("/rate-cards/{rateCardId}", UpdateRateCard)
             .RequireAuthorization("partner:billing:manage");
         group.MapDelete("/rate-cards/{rateCardId}", DeleteRateCard)
@@ -30,7 +31,9 @@ internal static class PartnerBillingEndpoints
         group.MapGet("/customers/{customerId}/invoices", ListCustomerInvoices)
             .RequireAuthorization("partner:billing:view");
         group.MapPost("/customers/{customerId}/invoices/generate", GenerateCustomerInvoice)
-            .RequireAuthorization("partner:billing:manage");
+            .RequireAuthorization("partner:billing:manage")
+            .Produces<CurrencyInvalidRefusal>(StatusCodes.Status400BadRequest)
+            .Produces<CurrencyMismatchRefusal>(StatusCodes.Status400BadRequest);
         group.MapGet("/customers/{customerId}/usage", GetCustomerUsage)
             .RequireAuthorization("partner:billing:view");
 
@@ -64,12 +67,16 @@ internal static class PartnerBillingEndpoints
         if (callerTenantId is null)
             return Results.Forbid();
 
+        // partner-channel-pilot-fixes (rate-card-settlement-currency): ISO 4217 only, stored canonical.
+        if (!Iso4217.TryCanonicalize(body.Currency, out var currency))
+            return Results.BadRequest(CurrencyInvalidRefusal.For(body.Currency));
+
         var rateCard = new RateCard
         {
             RateCardId = EntityId.New(),
             TenantId = new TenantId(callerTenantId),
             Name = body.Name,
-            Currency = body.Currency,
+            Currency = currency,
             EffectiveFrom = body.EffectiveFrom.ToUtcInstant(),
             EffectiveTo = body.EffectiveTo.ToUtcInstant(),
             IsDefault = body.IsDefault,
@@ -80,7 +87,7 @@ internal static class PartnerBillingEndpoints
         return Results.Created($"/partner/rate-cards/{rateCard.RateCardId.Value}", MapRateCardToDto(rateCard));
     }
 
-    private static async Task<Results<Ok<RateCardDto>, ForbidHttpResult, NotFound>> UpdateRateCard(
+    private static async Task<Results<Ok<RateCardDto>, ForbidHttpResult, NotFound, BadRequest<CurrencyInvalidRefusal>>> UpdateRateCard(
         string rateCardId,
         HttpContext context,
         [FromBody] CreateRateCardRequest body,
@@ -92,6 +99,9 @@ internal static class PartnerBillingEndpoints
         if (callerTenantId is null)
             return TypedResults.Forbid();
 
+        if (!Iso4217.TryCanonicalize(body.Currency, out var currency))
+            return TypedResults.BadRequest(CurrencyInvalidRefusal.For(body.Currency));
+
         var partnerTid = new TenantId(callerTenantId);
         var existing = await rateCardStore.GetByIdAsync(partnerTid, EntityId.From(rateCardId), ct);
         if (existing is null)
@@ -102,7 +112,7 @@ internal static class PartnerBillingEndpoints
             RateCardId = existing.RateCardId,
             TenantId = existing.TenantId,
             Name = body.Name,
-            Currency = body.Currency,
+            Currency = currency,
             EffectiveFrom = body.EffectiveFrom.ToUtcInstant(),
             EffectiveTo = body.EffectiveTo.ToUtcInstant(),
             IsDefault = body.IsDefault,
@@ -187,27 +197,16 @@ internal static class PartnerBillingEndpoints
         var partnerTid = new TenantId(callerTenantId);
         var customerTid = new TenantId(customerId);
 
+        // partner-channel-pilot-fixes (design D3): every refusal precedes the first write — the Partner card, the
+        // host tenant and its base card, both stored currencies and their comparison, and both price computations
+        // are settled before the invoice or the revenue record is saved.
+
         // 2. Load partner's active rate card
         var partnerRateCard = await rateCardStore.GetActiveAsync(partnerTid, now, ct);
         if (partnerRateCard is null)
             return Results.BadRequest(new ErrorResponse("No active rate card configured for this partner."));
 
-        // 3. Generate invoice for customer using partner's rate card
-        Invoice invoice;
-        try
-        {
-            invoice = await invoiceService.GenerateWithRateCardAsync(customerTid, partnerRateCard, periodStart, periodEnd, ct);
-        }
-        catch (InvalidOperationException ex)
-        {
-            RejectedRequestLog.Write(context, "partner-invoice-generation", ex);
-            return Results.BadRequest(new ErrorResponse(InvoiceNotGenerated));
-        }
-
-        // 4. Save the invoice
-        await invoiceStore.SaveAsync(invoice, ct);
-
-        // 5. Load platform base rate card from host tenant
+        // 3. Load the platform base rate card from the host tenant
         var hostTenant = await tenantStore.GetHostTenantAsync(ct);
         if (hostTenant is null)
             return Results.BadRequest(new ErrorResponse("Platform host tenant not found."));
@@ -217,10 +216,21 @@ internal static class PartnerBillingEndpoints
         if (baseRateCard is null)
             return Results.BadRequest(new ErrorResponse("No platform base rate card configured."));
 
-        // 6. Calculate platform cost (not saved)
+        // 4. One settlement currency per deployment: both stored currencies must be ISO 4217 (legacy rows predate
+        //    the write-time check) and equal. No FX — the Partner bills locally, outside Verbara.
+        if (!Iso4217.TryCanonicalize(partnerRateCard.Currency, out var partnerCurrency))
+            return Results.BadRequest(CurrencyInvalidRefusal.For(partnerRateCard.Currency));
+        if (!Iso4217.TryCanonicalize(baseRateCard.Currency, out var hostCurrency))
+            return Results.BadRequest(CurrencyInvalidRefusal.For(baseRateCard.Currency));
+        if (!string.Equals(partnerCurrency, hostCurrency, StringComparison.Ordinal))
+            return Results.BadRequest(CurrencyMismatchRefusal.For(partnerCurrency, hostCurrency));
+
+        // 5. Price the customer invoice (Partner card) and the platform cost (host base card); neither is saved yet
+        Invoice invoice;
         Invoice baseInvoice;
         try
         {
+            invoice = await invoiceService.GenerateWithRateCardAsync(customerTid, partnerRateCard, periodStart, periodEnd, ct);
             baseInvoice = await invoiceService.GenerateWithRateCardAsync(customerTid, baseRateCard, periodStart, periodEnd, ct);
         }
         catch (InvalidOperationException ex)
@@ -229,7 +239,10 @@ internal static class PartnerBillingEndpoints
             return Results.BadRequest(new ErrorResponse(InvoiceNotGenerated));
         }
 
-        // 7 & 8. Create and save PartnerRevenueRecord
+        // 6. Save the invoice
+        await invoiceStore.SaveAsync(invoice, ct);
+
+        // 7. Create and save PartnerRevenueRecord
         var revenueRecord = new PartnerRevenueRecord
         {
             RevenueId = EntityId.New(),
@@ -246,7 +259,7 @@ internal static class PartnerBillingEndpoints
 
         await revenueStore.UpsertAsync(revenueRecord, ct);
 
-        // 9. Return response
+        // 8. Return response
         var revenueSnapshot = new PartnerRevenueSnapshotDto(
             revenueRecord.GrossAmount,
             revenueRecord.PlatformCost,

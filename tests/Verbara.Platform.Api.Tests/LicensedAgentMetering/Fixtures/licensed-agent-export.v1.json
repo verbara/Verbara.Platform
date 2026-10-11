@@ -1,5 +1,5 @@
 {
-  "_comment": "Golden wire shape for the NEW export GET /api/v1/management/licensing/agents/export?from=YYYY-MM-DD&to=YYYY-MM-DD (L9 + L10), application/json, PlatformAdminOnly; the owner attaches it (or its chainHeads) to the monthly self-declaration. events[] = license_agent_events rows (append-only), daily[] = license_agent_daily rows INCLUDING every correction revision, both in their per-tenant chain order (sequence ascending). One hash chain per tenant spans its events AND daily rows (shared sequence); rows with tenantId null are the deployment chain (deployment daily totals plus its own anchor rows). rowHash = 'lac1:' + hex(SHA-256(prevHash | canonical fields)); the first row of a chain is kind chain_anchored, whose prevHash is the genesis 'lac1:' + hex(SHA-256('genesis' | tenantId-or-'deployment' | licenseId)). A licence change (renewal, PUT /license hot swap, revalidation) appends chain_reanchored with the new licenseId, linked to the old head, never a new genesis. kind is one of: chain_anchored, chain_reanchored, agent_baseline (one per agent row that already exists when a tenant chain is first anchored), agent_created, agent_deleted, user_status_changed, user_deleted, conversation_taken_over, conversation_transferred, conversation_reassigned. userStatus is Active|Suspended|Deactivated (null when not a user_status_changed or user_deleted row; for user_deleted it is the last status). counted is the post-event countability of agentId (agent row exists AND its user is Active), null for chain rows. daily[].closedThroughSequence is the highest event sequence of that chain the close had seen; an event with a higher sequence whose occurredAt falls inside an already-closed day triggers a correction row (revision + 1). Timestamps are UTC ISO-8601; day is a date in dayZone. The ledger stores ids only (no names or e-mails). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "_comment": "Golden wire shape for the NEW export GET /api/v1/management/licensing/agents/export?from=YYYY-MM-DD&to=YYYY-MM-DD (L9 + L10), application/json, PlatformAdminOnly; the owner attaches it (or its chainHeads) to the monthly self-declaration. events[] = license_agent_events rows (append-only), daily[] = license_agent_daily rows INCLUDING every correction revision, both in their per-tenant chain order (sequence ascending). One hash chain per tenant spans its events AND daily rows (shared sequence); rows with tenantId null are the deployment chain (deployment daily totals plus its own anchor rows). rowHash = 'lac1:' + hex(SHA-256(prevHash | canonical fields)); the first row of a chain is kind chain_anchored, whose prevHash is the genesis 'lac1:' + hex(SHA-256('genesis' | tenantId-or-'deployment' | licenseId)). A licence change (renewal, PUT /license hot swap, revalidation) appends chain_reanchored with the new licenseId, linked to the old head, never a new genesis. kind is one of: chain_anchored, chain_reanchored, agent_baseline (one per agent row that already exists when a tenant chain is first anchored), agent_created, agent_deleted, user_status_changed, user_deleted, conversation_taken_over, conversation_transferred, conversation_reassigned. userStatus is Active|Suspended|Deactivated (null when not a user_status_changed or user_deleted row; for user_deleted it is the last status). counted is the post-event countability of agentId (agent row exists AND its user is Active), null for chain rows. daily[].closedThroughSequence is the highest event sequence of that chain the close had seen; an event with a higher sequence whose occurredAt falls inside an already-closed day triggers a correction row (revision + 1). Timestamps are UTC ISO-8601; day is a date in dayZone. The ledger stores ids only (no names or e-mails). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate). partner-channel-pilot-fixes (owner decision 8): tenants[] is the tenant map an auditor uses with this export to recompute the resale share s of verbara-meta/PDR-0004 section D.1. It lists every tenantId that appears in events[], daily[] or chainHeads[] plus every parent those tenants name (closure), ordered by tenantId (ordinal): tenantId, tenantType (Platform|Partner|Customer, or null when the tenant row no longer exists), parentTenantId (string|null; null for the Platform tenant and for a missing tenant row). It is a snapshot as of generatedAt, read in the same REPEATABLE READ transaction as the rows, ids only (no names). tenants[] is OUTSIDE every hashed row: events[], daily[] and chainHeads[] keep exactly their fields, and the lac1 canonical form, every prevHash and every rowHash are unchanged (verbara-meta/ADR-0020). schemaVersion stays 1 (additive field).",
   "schemaVersion": 1,
   "hashScheme": "lac1",
   "generatedAt": "2026-10-01T08:00:00Z",
@@ -135,6 +135,28 @@
       "headSequence": 31,
       "headHash": "lac1:dc5c209062c97c953fe68a15bee8634198e18c4b56c39e207119aae16365b39f",
       "licenseId": "lic-7f3c2a91"
+    }
+  ],
+  "tenants": [
+    {
+      "tenantId": "platform",
+      "tenantType": "Platform",
+      "parentTenantId": null
+    },
+    {
+      "tenantId": "ten-acme",
+      "tenantType": "Customer",
+      "parentTenantId": "platform"
+    },
+    {
+      "tenantId": "ten-globex",
+      "tenantType": "Customer",
+      "parentTenantId": "ten-reseller"
+    },
+    {
+      "tenantId": "ten-reseller",
+      "tenantType": "Partner",
+      "parentTenantId": "platform"
     }
   ]
 }

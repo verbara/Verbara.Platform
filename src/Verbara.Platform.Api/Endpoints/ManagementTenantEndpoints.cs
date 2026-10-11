@@ -18,8 +18,10 @@ internal static class ManagementTenantEndpoints
 
         group.MapGet("/", ListTenants);
         group.MapGet("/{id}", GetTenant);
-        group.MapPost("/", CreateTenant);
-        group.MapPut("/{id}", UpdateTenant);
+        group.MapPost("/", CreateTenant)
+            .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
+        group.MapPut("/{id}", UpdateTenant)
+            .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
         group.MapPost("/{id}/suspend", SuspendTenant);
         group.MapPost("/{id}/activate", ActivateTenant);
         group.MapDelete("/{id}", DeleteTenant);
@@ -130,7 +132,23 @@ internal static class ManagementTenantEndpoints
         if (body.Template is not null && !TenantProvisioningTemplates.ValidTemplateNames.Contains(body.Template))
             return Results.BadRequest(new ErrorResponse($"Invalid template '{body.Template}'. Valid: support, sales, blended."));
 
-        var metadata = body.Metadata ?? new Dictionary<string, string>();
+        // Plan at birth (design D15): no metadata.Plan inherits the parent's plan; an unknown name is a 400; a plan
+        // above the parent's is a 409 plan-exceeds-parent — all before the upsert.
+        var metadata = body.Metadata is null
+            ? new Dictionary<string, string>()
+            : new Dictionary<string, string>(body.Metadata);
+        var resolution = TenantPlanResolution.Resolve(parent, metadata.GetValueOrDefault("Plan"));
+        switch (resolution.Kind)
+        {
+            case TenantPlanResolutionKind.UnknownName:
+                return Results.BadRequest(new ErrorResponse(
+                    $"Unknown plan '{metadata["Plan"]}' in metadata. Valid: Starter, Pro, Enterprise."));
+            case TenantPlanResolutionKind.AboveParent:
+                return Results.Conflict(PlanAboveParentRefusal.For(
+                    resolution.Plan.ToString(), resolution.ParentPlan.ToString(), parent.TenantId));
+        }
+
+        metadata["Plan"] = resolution.Plan.ToString();
         if (body.Template is not null)
             metadata["OnboardingTemplate"] = body.Template;
 
@@ -167,7 +185,7 @@ internal static class ManagementTenantEndpoints
         return Results.Created($"/management/tenants/{tenant.TenantId}", MapToDto(tenant));
     }
 
-    private static async Task<Results<Ok<MgmtTenantDto>, NotFound>> UpdateTenant(
+    private static async Task<Results<Ok<MgmtTenantDto>, NotFound, BadRequest<ErrorResponse>, Conflict<PlanAboveParentRefusal>>> UpdateTenant(
         string id,
         HttpContext context,
         [FromBody] UpdateMgmtTenantRequest body,
@@ -178,6 +196,24 @@ internal static class ManagementTenantEndpoints
         var existing = await store.GetAsync(id, ct);
         if (existing is null)
             return TypedResults.NotFound();
+
+        // partner-channel-pilot-fixes (design D5): a metadata.Plan is held to the same rule as every other plan
+        // write — an unknown name is a 400 and a plan above the parent's is a 409 plan-exceeds-parent, both before
+        // anything is written.
+        var metadata = body.Metadata;
+        if (metadata is not null && metadata.TryGetValue("Plan", out var requestedName))
+        {
+            if (!TenantPlanResolution.TryParseName(requestedName, out var requestedPlan))
+            {
+                return TypedResults.BadRequest(new ErrorResponse(
+                    $"Unknown plan '{requestedName}' in metadata. Valid: Starter, Pro, Enterprise."));
+            }
+
+            if (await TenantSettingsEndpoints.PlanAboveParentAsync(id, requestedPlan, store, ct) is { } refusal)
+                return TypedResults.Conflict(refusal);
+
+            metadata = new Dictionary<string, string>(metadata) { ["Plan"] = requestedPlan.ToString() };
+        }
 
         var before = new { existing.TenantId, existing.Name };
 
@@ -203,7 +239,7 @@ internal static class ManagementTenantEndpoints
                 NodeAffinity = existing.Options.NodeAffinity,
                 AllowedDialingModes = existing.Options.AllowedDialingModes,
             },
-            Metadata = body.Metadata ?? existing.Metadata,
+            Metadata = metadata ?? existing.Metadata,
             CreatedAt = existing.CreatedAt,
             UpdatedAt = DateTimeOffset.UtcNow,
         };

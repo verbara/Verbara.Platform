@@ -18,7 +18,8 @@ internal static class ManagementBillingEndpoints
         // Rate Cards
         var rc = app.MapGroup("/management/rate-cards").RequireAuthorization("PlatformAdminOnly");
         rc.MapGet("/", ListRateCards);
-        rc.MapPost("/", CreateRateCard);
+        rc.MapPost("/", CreateRateCard)
+            .Produces<CurrencyInvalidRefusal>(StatusCodes.Status400BadRequest);
         rc.MapPut("/{id}", UpdateRateCard);
         rc.MapDelete("/{id}", DeleteRateCard);
 
@@ -64,12 +65,16 @@ internal static class ManagementBillingEndpoints
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
+        // partner-channel-pilot-fixes (rate-card-settlement-currency): ISO 4217 only, stored canonical.
+        if (!Iso4217.TryCanonicalize(body.Currency, out var currency))
+            return Results.BadRequest(CurrencyInvalidRefusal.For(body.Currency));
+
         var rateCard = new RateCard
         {
             RateCardId = EntityId.New(),
             TenantId = new TenantId(tenantId),
             Name = body.Name,
-            Currency = body.Currency,
+            Currency = currency,
             EffectiveFrom = body.EffectiveFrom.ToUtcInstant(),
             EffectiveTo = body.EffectiveTo.ToUtcInstant(),
             IsDefault = body.IsDefault,
@@ -97,7 +102,7 @@ internal static class ManagementBillingEndpoints
         return Results.Created($"/management/rate-cards/{rateCard.RateCardId.Value}", MapRateCardToDto(rateCard));
     }
 
-    private static async Task<Results<Ok<RateCardDto>, NotFound>> UpdateRateCard(
+    private static async Task<Results<Ok<RateCardDto>, NotFound, BadRequest<CurrencyInvalidRefusal>>> UpdateRateCard(
         string id,
         HttpContext context,
         [FromQuery] string tenantId,
@@ -106,6 +111,9 @@ internal static class ManagementBillingEndpoints
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
+        if (!Iso4217.TryCanonicalize(body.Currency, out var currency))
+            return TypedResults.BadRequest(CurrencyInvalidRefusal.For(body.Currency));
+
         var tid = new TenantId(tenantId);
         var existing = await store.GetByIdAsync(tid, EntityId.From(id), ct);
         if (existing is null)
@@ -116,7 +124,7 @@ internal static class ManagementBillingEndpoints
             RateCardId = existing.RateCardId,
             TenantId = existing.TenantId,
             Name = body.Name,
-            Currency = body.Currency,
+            Currency = currency,
             EffectiveFrom = body.EffectiveFrom.ToUtcInstant(),
             EffectiveTo = body.EffectiveTo.ToUtcInstant(),
             IsDefault = body.IsDefault,
@@ -426,11 +434,27 @@ internal static class ManagementBillingEndpoints
 
     // ─── Dunning Handlers ────────────────────────────────────────────────────────
 
-    private static async Task<Results<Ok<DunningRecordDto>, NotFound>> GetDunning(
+    /// <summary>
+    /// partner-channel-pilot-fixes (design D16): Verbara never runs dunning on a Customer whose parent is a Partner —
+    /// the Partner bills it outside Verbara. The 409 body when <paramref name="tenantId"/> is such a Customer, decided
+    /// before any dunning record is read or written; null otherwise (a missing tenant keeps its 404 through the
+    /// record lookup). Pay stays allowed: it ends dunning.
+    /// </summary>
+    private static async Task<DunningPartnerCustomerRefusal?> PartnerCustomerRefusalAsync(
+        string tenantId, ITenantStore tenantStore, CancellationToken ct) =>
+        await PartnerHierarchy.GetBillingPartnerAsync(tenantStore, tenantId, ct) is { } partner
+            ? DunningPartnerCustomerRefusal.For(tenantId, partner.TenantId)
+            : null;
+
+    private static async Task<Results<Ok<DunningRecordDto>, NotFound, Conflict<DunningPartnerCustomerRefusal>>> GetDunning(
         string id,
         [FromServices] IDunningStore dunningStore,
+        [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
     {
+        if (await PartnerCustomerRefusalAsync(id, tenantStore, ct) is { } refusal)
+            return TypedResults.Conflict(refusal);
+
         var record = await dunningStore.GetActiveAsync(id, ct);
         return record is null
             ? TypedResults.NotFound()
@@ -446,13 +470,17 @@ internal static class ManagementBillingEndpoints
                 record.IsActive));
     }
 
-    private static async Task<Results<Ok<DunningRecordDto>, NotFound>> PauseDunning(
+    private static async Task<Results<Ok<DunningRecordDto>, NotFound, Conflict<DunningPartnerCustomerRefusal>>> PauseDunning(
         string id,
         HttpContext context,
         [FromServices] IDunningStore dunningStore,
+        [FromServices] ITenantStore tenantStore,
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
+        if (await PartnerCustomerRefusalAsync(id, tenantStore, ct) is { } refusal)
+            return TypedResults.Conflict(refusal);
+
         var record = await dunningStore.GetActiveAsync(id, ct);
         if (record is null)
             return TypedResults.NotFound();
@@ -496,13 +524,17 @@ internal static class ManagementBillingEndpoints
     /// (Phase B B.2) uses this dedicated action to restore dunning processing
     /// after a hold period.
     /// </summary>
-    private static async Task<Results<Ok<DunningRecordDto>, NotFound>> ResumeDunning(
+    private static async Task<Results<Ok<DunningRecordDto>, NotFound, Conflict<DunningPartnerCustomerRefusal>>> ResumeDunning(
         string id,
         HttpContext context,
         [FromServices] IDunningStore dunningStore,
+        [FromServices] ITenantStore tenantStore,
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
+        if (await PartnerCustomerRefusalAsync(id, tenantStore, ct) is { } refusal)
+            return TypedResults.Conflict(refusal);
+
         var record = await dunningStore.GetActiveAsync(id, ct);
         if (record is null)
             return TypedResults.NotFound();

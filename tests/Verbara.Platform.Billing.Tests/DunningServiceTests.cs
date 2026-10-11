@@ -1,3 +1,4 @@
+using NSubstitute.ReturnsExtensions;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
@@ -239,5 +240,127 @@ public class DunningServiceTests
 
         await act.Should().NotThrowAsync();
         await tenantStore.Received(1).UpdateStatusAsync("tenant-ok", TenantStatus.Degraded, Arg.Any<CancellationToken>());
+    }
+
+    // ─── partner-channel-pilot-fixes D16: the sweep never runs dunning on a Partner's Customer ─────
+
+    // A Partner p1 under the host, its Customer pc1, and a direct Customer dc1.
+    private static ITenantStore HierarchyStore()
+    {
+        var tenantStore = Substitute.For<ITenantStore>();
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+        tenantStore.GetAsync("platform", Arg.Any<CancellationToken>()).Returns(Tenant("platform", TenantType.Platform, null));
+        tenantStore.GetAsync("p1", Arg.Any<CancellationToken>()).Returns(Tenant("p1", TenantType.Partner, "platform"));
+        tenantStore.GetAsync("pc1", Arg.Any<CancellationToken>()).Returns(Tenant("pc1", TenantType.Customer, "p1"));
+        tenantStore.GetAsync("dc1", Arg.Any<CancellationToken>()).Returns(Tenant("dc1", TenantType.Customer, "platform"));
+#pragma warning restore CA2012
+        return tenantStore;
+    }
+
+    private static Tenant? Tenant(string id, TenantType type, string? parent) => new()
+    {
+        TenantId = id,
+        Name = id,
+        Status = TenantStatus.Active,
+        Type = type,
+        ParentTenantId = parent,
+    };
+
+    [Fact]
+    public async Task ProcessDunningCycle_ShouldNotOpenDunning_WhenOverdueInvoiceBelongsToPartnerCustomer()
+    {
+        var invoiceStore = Substitute.For<IInvoiceStore>();
+        var dunningStore = Substitute.For<IDunningStore>();
+        var tenantStore = HierarchyStore();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(FixedNow);
+
+        var invoice = MakeIssuedInvoice("pc1", FixedNow.AddDays(-3));
+        invoiceStore.ListByStatusAsync(InvoiceStatus.Issued, Arg.Any<CancellationToken>()).Returns([invoice]);
+        dunningStore.GetByInvoiceAsync(invoice.InvoiceId.Value, Arg.Any<CancellationToken>()).ReturnsNull();
+        dunningStore.ListActiveAsync(Arg.Any<CancellationToken>()).Returns([]);
+
+        var (svc, _) = Build(invoiceStore, dunningStore, tenantStore, clock);
+        await svc.ProcessDunningCycleAsync(CancellationToken.None);
+
+        await dunningStore.DidNotReceive().UpsertAsync(Arg.Any<DunningRecord>(), Arg.Any<CancellationToken>());
+        await invoiceStore.DidNotReceive().SaveAsync(Arg.Any<Invoice>(), Arg.Any<CancellationToken>());
+        invoice.PaymentStatus.Should().Be(PaymentStatus.Current, "the invoice's payment status is unchanged");
+        await tenantStore.DidNotReceive().UpdateStatusAsync(Arg.Any<string>(), Arg.Any<TenantStatus>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(TenantStatus.Degraded, 15)]   // past SuspendedDays
+    [InlineData(TenantStatus.Warning, 8)]     // past DegradedDays
+    public async Task ProcessDunningCycle_ShouldNotSuspend_WhenRecordBelongsToPartnerCustomer(TenantStatus stage, double ageInDays)
+    {
+        var invoiceStore = Substitute.For<IInvoiceStore>();
+        var dunningStore = Substitute.For<IDunningStore>();
+        var tenantStore = HierarchyStore();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(FixedNow);
+        var handler = Substitute.For<ITenantLifecycleHandler>();
+
+        invoiceStore.ListByStatusAsync(InvoiceStatus.Issued, Arg.Any<CancellationToken>()).Returns([]);
+        var invoice = MakeIssuedInvoice("pc1", FixedNow.AddDays(-ageInDays));
+        invoice.PaymentStatus = PaymentStatus.Overdue;
+        var record = MakeActiveRecord("pc1", invoice.InvoiceId.Value, stage, ageInDays);
+        dunningStore.ListActiveAsync(Arg.Any<CancellationToken>()).Returns([record]);
+        invoiceStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>()).Returns(invoice);
+
+        var (svc, _) = Build(invoiceStore, dunningStore, tenantStore, clock, [handler]);
+        await svc.ProcessDunningCycleAsync(CancellationToken.None);
+
+        record.CurrentStage.Should().Be(stage, "the record keeps its stage");
+        await dunningStore.DidNotReceive().UpsertAsync(Arg.Any<DunningRecord>(), Arg.Any<CancellationToken>());
+        await tenantStore.DidNotReceive().UpdateStatusAsync(Arg.Any<string>(), Arg.Any<TenantStatus>(), Arg.Any<CancellationToken>());
+        invoice.PaymentStatus.Should().Be(PaymentStatus.Overdue, "the invoice keeps its payment status");
+        await invoiceStore.DidNotReceive().SaveAsync(Arg.Any<Invoice>(), Arg.Any<CancellationToken>());
+        await handler.DidNotReceive().OnTenantSuspendedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ProcessDunningCycle_ShouldNotMarkPendingDeletion_WhenRecordBelongsToPartnerCustomer()
+    {
+        var invoiceStore = Substitute.For<IInvoiceStore>();
+        var dunningStore = Substitute.For<IDunningStore>();
+        var tenantStore = HierarchyStore();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(FixedNow);
+
+        invoiceStore.ListByStatusAsync(InvoiceStatus.Issued, Arg.Any<CancellationToken>()).Returns([]);
+        var invoice = MakeIssuedInvoice("pc1", FixedNow.AddDays(-31));
+        invoice.PaymentStatus = PaymentStatus.Delinquent;
+        var record = MakeActiveRecord("pc1", invoice.InvoiceId.Value, TenantStatus.Suspended, ageInDays: 31);
+        dunningStore.ListActiveAsync(Arg.Any<CancellationToken>()).Returns([record]);
+        invoiceStore.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>()).Returns(invoice);
+
+        var (svc, _) = Build(invoiceStore, dunningStore, tenantStore, clock);
+        await svc.ProcessDunningCycleAsync(CancellationToken.None);
+
+        record.CurrentStage.Should().Be(TenantStatus.Suspended);
+        await tenantStore.DidNotReceive().UpdateStatusAsync("pc1", TenantStatus.PendingDeletion, Arg.Any<CancellationToken>());
+        invoice.PaymentStatus.Should().Be(PaymentStatus.Delinquent, "the invoice is not written off");
+    }
+
+    [Fact]
+    public async Task ProcessDunningCycle_ShouldSuspend_WhenRecordBelongsToDirectCustomer()
+    {
+        var invoiceStore = Substitute.For<IInvoiceStore>();
+        var dunningStore = Substitute.For<IDunningStore>();
+        var tenantStore = HierarchyStore();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(FixedNow);
+        var handler = Substitute.For<ITenantLifecycleHandler>();
+
+        invoiceStore.ListByStatusAsync(InvoiceStatus.Issued, Arg.Any<CancellationToken>()).Returns([]);
+        var record = MakeActiveRecord("dc1", EntityId.New().Value, TenantStatus.Degraded, ageInDays: 15);
+        dunningStore.ListActiveAsync(Arg.Any<CancellationToken>()).Returns([record]);
+
+        var (svc, _) = Build(invoiceStore, dunningStore, tenantStore, clock, [handler]);
+        await svc.ProcessDunningCycleAsync(CancellationToken.None);
+
+        await tenantStore.Received(1).UpdateStatusAsync("dc1", TenantStatus.Suspended, Arg.Any<CancellationToken>());
+        await handler.Received(1).OnTenantSuspendedAsync("dc1", Arg.Any<CancellationToken>());
     }
 }

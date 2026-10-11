@@ -1,5 +1,5 @@
 {
-  "_comment": "Golden wire shape for the NEW read endpoint GET /api/v1/management/licensing/agents?from=YYYY-MM-DD&to=YYYY-MM-DD (L9; consumed by Platform.Web for L12). PlatformAdminOnly, like /management/system/license*. Unit: licensedAgents = PDR-0003 section C licensed agents, the daily SIMULTANEOUS peak of counted identities (integer count of identities, never seconds or sessions). day = calendar date in dayZone (ISO-8601 date). The deployment figure for the range is the highest daily sum across Customer tenants (deployment.peakLicensedAgents on deployment.peakDay). Nullability: deployment.peakDay is string|null; it is null, and deployment.peakLicensedAgents is 0, when no day in the range is closed (days is then empty and overBand false). Each tenant/day cell is the LATEST revision of that (tenantId, day) row (a correction row has revision > 0); rowHash is that row's hash in its tenant chain (scheme prefix lac1:). license.maxAgents is ADVISORY (license.maxAgentsAdvisory is always true): null or 0 means not declared, and then deployment.overBand is false. overBand is computed server-side as maxAgents > 0 AND peakLicensedAgents > maxAgents; nothing is ever blocked on it. license.* is read once from ILicenseStatus per request (licenseId may be null when no licence is loaded). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "_comment": "Golden wire shape for the NEW read endpoint GET /api/v1/management/licensing/agents?from=YYYY-MM-DD&to=YYYY-MM-DD (L9; consumed by Platform.Web for L12). PlatformAdminOnly, like /management/system/license*. Unit: licensedAgents = PDR-0003 section C licensed agents, the daily SIMULTANEOUS peak of counted identities (integer count of identities, never seconds or sessions). day = calendar date in dayZone (ISO-8601 date). The deployment figure for the range is the highest daily sum across Customer tenants (deployment.peakLicensedAgents on deployment.peakDay). Nullability: deployment.peakDay is string|null; it is null, and deployment.peakLicensedAgents is 0, when no day in the range is closed (days is then empty and overBand false). Each tenant/day cell is the LATEST revision of that (tenantId, day) row (a correction row has revision > 0); rowHash is that row's hash in its tenant chain (scheme prefix lac1:). license.maxAgents is ADVISORY (license.maxAgentsAdvisory is always true): null or 0 means not declared, and then deployment.overBand is false. overBand is computed server-side as maxAgents > 0 AND peakLicensedAgents > maxAgents; nothing is ever blocked on it. license.* is read once from ILicenseStatus per request (licenseId may be null when no licence is loaded). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate). partner-channel-pilot-fixes (owner decision 8, verbara-meta/PDR-0004 amendment 2026-10-11 section D.1): days[].tenants[].parentTenantId is the tenant's parent AT READ TIME (string|null; null only when the tenant row no longer exists) and is NOT part of any rowHash. deployment.partnerSubtotals[] lists, for deployment.peakDay only (the earliest day that reaches peakLicensedAgents, the day that sets s), one entry per tenant whose type is Partner at read time and that is the parent of at least one tenant row on that day: partnerTenantId, partnerTenantName, licensedAgents = sum of those rows' licensedAgents (latest revision) on peakDay; ordered by partnerTenantId (ordinal). It is NOT a sum of per-tenant peaks. It is empty when peakDay is null or no Partner child has a row on peakDay. Direct Customers (parent is the Platform tenant) have no entry: their total is peakLicensedAgents minus the sum of partnerSubtotals[].licensedAgents. Here ten-acme is a direct Customer and ten-globex is a Customer of the Partner ten-reseller. schemaVersion stays 1 (additive fields).",
   "schemaVersion": 1,
   "from": "2026-09-01",
   "to": "2026-09-30",
@@ -14,7 +14,14 @@
   "deployment": {
     "peakLicensedAgents": 47,
     "peakDay": "2026-09-17",
-    "overBand": false
+    "overBand": false,
+    "partnerSubtotals": [
+      {
+        "partnerTenantId": "ten-reseller",
+        "partnerTenantName": "Reseller One",
+        "licensedAgents": 15
+      }
+    ]
   },
   "days": [
     {
@@ -25,6 +32,7 @@
         {
           "tenantId": "ten-acme",
           "tenantName": "Acme Support",
+          "parentTenantId": "platform",
           "licensedAgents": 30,
           "revision": 0,
           "closedAt": "2026-09-17T00:05:12Z",
@@ -33,6 +41,7 @@
         {
           "tenantId": "ten-globex",
           "tenantName": "Globex Sales",
+          "parentTenantId": "ten-reseller",
           "licensedAgents": 14,
           "revision": 0,
           "closedAt": "2026-09-17T00:05:12Z",
@@ -48,6 +57,7 @@
         {
           "tenantId": "ten-acme",
           "tenantName": "Acme Support",
+          "parentTenantId": "platform",
           "licensedAgents": 32,
           "revision": 1,
           "closedAt": "2026-09-18T09:41:03Z",
@@ -56,6 +66,7 @@
         {
           "tenantId": "ten-globex",
           "tenantName": "Globex Sales",
+          "parentTenantId": "ten-reseller",
           "licensedAgents": 15,
           "revision": 0,
           "closedAt": "2026-09-18T00:05:09Z",

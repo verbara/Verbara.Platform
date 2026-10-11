@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
+using Verbara.Platform.Api.Tests.PartnerChannel;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -207,14 +209,37 @@ public sealed class TenantSettingsEndpointTests : IClassFixture<PlatformAdminApi
         op["maxChatDefault"]!.GetValue<int>().Should().Be(7);
         op["maxTotalDefault"]!.GetValue<int>().Should().Be(11);
     }
+
+    // ─── partner-channel-pilot-fixes P6 (partner-channel-tenancy, design D7) ─────────
+
+    [Fact]
+    public async Task UpdateSettings_ShouldIgnoreNodeAffinity_WhenCallerIsTenantAdmin()
+    {
+        var host = await _client.PutAsJsonAsync(
+            $"/api/v1/management/tenants/{PlatformAdminApiFactory.HostTenantId}/settings",
+            new { operational = new { nodeAffinity = PartnerChannelTestKit.NodeA } });
+        host.StatusCode.Should().Be(HttpStatusCode.OK, "the host places the tenant first");
+
+        var response = await _client.PutAsJsonAsync("/api/v1/admin/tenant/settings", new
+        {
+            operational = new { nodeAffinity = PartnerChannelTestKit.NodeB, maxActiveCampaigns = 11 },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var tenant = await PartnerChannelTestKit.GetTenantAsync(_factory.Services, PlatformAdminApiFactory.HostTenantId);
+        tenant!.Options.NodeAffinity.Should().Equal(["node-a"], "a tenant's own administrator cannot overwrite its placement");
+        tenant.Options.MaxActiveCampaigns.Should().Be(11);
+    }
 }
 
 public sealed class ManagementTenantSettingsEndpointTests : IClassFixture<PlatformAdminApiFactory>
 {
+    private readonly PlatformAdminApiFactory _factory;
     private readonly HttpClient _client;
 
     public ManagementTenantSettingsEndpointTests(PlatformAdminApiFactory factory)
     {
+        _factory = factory;
         _client = factory.CreatePlatformAdminClient();
     }
 
@@ -272,5 +297,78 @@ public sealed class ManagementTenantSettingsEndpointTests : IClassFixture<Platfo
     {
         var response = await _client.GetAsync("/api/v1/management/tenants/nonexistent/settings");
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // ─── partner-channel-pilot-fixes P3 / P6 (partner-channel-tenancy) ───────────────
+
+    [Fact]
+    public async Task UpdateManagementSettings_ShouldReturn409PlanExceedsParent_WhenPlanAboveParent()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var partnerId = "ceiling-p-" + suffix;
+        var customerId = "ceiling-c-" + suffix;
+        _ = _factory.Server;
+        await PartnerChannelTestKit.SeedTenantAsync(_factory.Services, partnerId, TenantType.Partner,
+            PlatformAdminApiFactory.HostTenantId, TenantPlan.Pro);
+        await PartnerChannelTestKit.SeedTenantAsync(_factory.Services, customerId, TenantType.Customer, partnerId, TenantPlan.Starter);
+
+        var response = await _client.PutAsJsonAsync($"/api/v1/management/tenants/{customerId}/settings", new
+        {
+            plan = "Enterprise",
+            operational = new { maxConcurrentChannels = 3 },
+        });
+
+        var body = await PartnerChannelTestKit.AssertRefusalAsync(response, HttpStatusCode.Conflict,
+            PartnerChannelTestKit.FixtureBody("plan-above-parent-409.json"), "plan-exceeds-parent");
+        body["requestedPlan"]!.GetValue<string>().Should().Be("Enterprise");
+        body["parentPlan"]!.GetValue<string>().Should().Be("Pro");
+        body["parentTenantId"]!.GetValue<string>().Should().Be(partnerId);
+        var stored = await PartnerChannelTestKit.GetTenantAsync(_factory.Services, customerId);
+        stored!.Options.MaxConcurrentChannels.Should().Be(100, "nothing in the refused request is saved");
+        stored.GetPlan().Should().Be(TenantPlan.Starter);
+    }
+
+    [Fact]
+    public async Task UpdateManagementSettings_ShouldSaveEnterprise_WhenHostWasSetUpByThisVersion()
+    {
+        using var factory = new PlatformApiFactory();
+        var anonymous = factory.CreateClient();
+        var setup = await anonymous.PostAsJsonAsync("/api/setup", new
+        {
+            email = "admin@ceiling-test.com",
+            password = "PlatformPass2026!",
+            customerTenantId = "dc1",
+            customerName = "Direct Customer",
+            customerAdminEmail = "ops@dc1.com",
+            customerAdminPassword = "CustomerPass2026!",
+        });
+        setup.StatusCode.Should().Be(HttpStatusCode.Created);
+        var key = JsonNode.Parse(await setup.Content.ReadAsStringAsync())!["managementApiKey"]!.GetValue<string>();
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {key}");
+
+        var response = await client.PutAsJsonAsync("/api/v1/management/tenants/dc1/settings", new { plan = "Enterprise" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var dc1 = await PartnerChannelTestKit.GetTenantAsync(factory.Services, "dc1");
+        dc1!.GetPlan().Should().Be(TenantPlan.Enterprise, "a host born on Enterprise lets a direct Customer reach Enterprise");
+    }
+
+    [Fact]
+    public async Task UpdateManagementSettings_ShouldWriteNodeAffinity_WhenCallerIsPlatformAdmin()
+    {
+        var tenantId = "affinity-host-" + Guid.NewGuid().ToString("N")[..8];
+        _ = _factory.Server;
+        await PartnerChannelTestKit.SeedTenantAsync(_factory.Services, tenantId, TenantType.Customer,
+            PlatformAdminApiFactory.HostTenantId, plan: null);
+
+        var response = await _client.PutAsJsonAsync($"/api/v1/management/tenants/{tenantId}/settings", new
+        {
+            operational = new { nodeAffinity = PartnerChannelTestKit.NodeA },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var stored = await PartnerChannelTestKit.GetTenantAsync(_factory.Services, tenantId);
+        stored!.Options.NodeAffinity.Should().Equal(["node-a"], "the host still places tenants");
     }
 }

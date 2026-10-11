@@ -26,18 +26,11 @@ public sealed class InMemoryLicensedAgentReportReader : ILicensedAgentReportRead
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(fallbackDayZone);
         var (heads, _) = _ledger.Snapshot();
-        var names = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var tenantId in heads.Select(h => h.TenantId).OfType<string>())
-        {
-            var tenant = await _tenants.GetAsync(tenantId, ct).ConfigureAwait(false);
-            if (tenant is not null)
-                names[tenantId] = tenant.Name;
-        }
-
-        return new LicensedAgentPeaksData(fallbackDayZone, [], names, heads);
+        var tenants = await TenantsAsync(heads.Select(h => h.TenantId), ct).ConfigureAwait(false);
+        return new LicensedAgentPeaksData(fallbackDayZone, [], tenants, heads);
     }
 
-    public Task<LicensedAgentExportData> ReadExportAsync(
+    public async Task<LicensedAgentExportData> ReadExportAsync(
         DateOnly firstDay, DateOnly lastDay, string fallbackDayZone, CancellationToken ct)
     {
         var zone = LicenseAgentDayZone.Resolve(fallbackDayZone);
@@ -52,6 +45,28 @@ public sealed class InMemoryLicensedAgentReportReader : ILicensedAgentReportRead
                 selected.AddRange(chain.Where(e => e.Sequence >= span.First && e.Sequence <= span.Last));
         }
 
-        return Task.FromResult(new LicensedAgentExportData(fallbackDayZone, selected, [], heads));
+        var tenants = await TenantsAsync(selected.Select(e => e.TenantId).Concat(heads.Select(h => h.TenantId)), ct)
+            .ConfigureAwait(false);
+        return new LicensedAgentExportData(fallbackDayZone, selected, [], heads, tenants);
+    }
+
+    // The named tenants and every parent above them (design D10), as the Postgres reader reads them.
+    private async Task<Dictionary<string, LicensedAgentTenantRef>> TenantsAsync(IEnumerable<string?> tenantIds, CancellationToken ct)
+    {
+        var tenants = new Dictionary<string, LicensedAgentTenantRef>(StringComparer.Ordinal);
+        var pending = new Queue<string>(tenantIds.OfType<string>().Distinct(StringComparer.Ordinal));
+        while (pending.TryDequeue(out var tenantId))
+        {
+            if (tenants.ContainsKey(tenantId))
+                continue;
+            var tenant = await _tenants.GetAsync(tenantId, ct).ConfigureAwait(false);
+            if (tenant is null)
+                continue;
+            tenants[tenantId] = new LicensedAgentTenantRef(tenant.Name, tenant.Type.ToString(), tenant.ParentTenantId);
+            if (tenant.ParentTenantId is { } parent)
+                pending.Enqueue(parent);
+        }
+
+        return tenants;
     }
 }

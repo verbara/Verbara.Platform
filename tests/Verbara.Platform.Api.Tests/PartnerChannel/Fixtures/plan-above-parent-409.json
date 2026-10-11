@@ -1,0 +1,10 @@
+{
+  "_comment": "Golden wire shape for the plan-ceiling refusal (partner-channel-pilot-fixes, owner decision 9; capability partner-channel-tenancy). HTTP 409, application/json, `error` = plan-exceeds-parent. Body convention (Platform ErrorResponse, read by Web's ApiError, Web ADR-0013): `error` carries ONLY a kebab-case machine code, never prose and never a separate `code` field; the extra fields are typed members of a sealed record whose first property is Error (precedent: ConversationStartRefusal), registered in ApiJsonContext. It answers every path that sets a tenant's plan above its parent tenant's plan (plan order Starter < Pro < Enterprise): PUT /api/v1/management/tenants/{id}/settings (until now 200 without saving anything), PUT /api/v1/partner/customers/{customerId}/settings (until now 400) POST /api/v1/partner/customers (until now 400) and POST /api/v1/management/tenants with a metadata.Plan above the parent's plan (until now the tenant was created). The refusal happens BEFORE any write of the request: no field of the same request body (operational, auth, quotas, retention, add-ons, branding) is saved, and no tenant is created. requestedPlan and parentPlan are TenantPlan names (Starter|Pro|Enterprise); parentTenantId is the parent whose plan is the ceiling. A tenant created with no plan never gets this refusal: it inherits its parent's plan (POST /api/v1/partner/customers with no plan, POST /api/v1/management/tenants with no metadata.Plan, and the Customer that POST /api/setup creates). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "status": 409,
+  "body": {
+    "error": "plan-exceeds-parent",
+    "requestedPlan": "Enterprise",
+    "parentPlan": "Pro",
+    "parentTenantId": "ten-reseller"
+  }
+}

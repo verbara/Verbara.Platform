@@ -177,7 +177,8 @@ public sealed class PostgresLicensedAgentReportReaderTests : IClassFixture<Agent
         corrected.Revision.Should().Be(1);
         corrected.LicensedAgents.Should().Be(5, "a0..a4 and the late agent, with a1 suspended");
         peaks.Daily.Where(d => d.TenantId is null).Select(d => d.Day).Should().HaveCount(10);
-        peaks.TenantNames.Should().Contain("c1", "Acme Support").And.Contain("c2", "c2");
+        peaks.Tenants["c1"].Name.Should().Be("Acme Support");
+        peaks.Tenants["c2"].Name.Should().Be("c2");
         peaks.ChainHeads.Select(c => c.TenantId).Should().Equal("c1", "c2", "p1", null);
     }
 
@@ -194,5 +195,36 @@ public sealed class PostgresLicensedAgentReportReaderTests : IClassFixture<Agent
         export.DayZone.Should().Be("America/Bogota");
         export.Events.Should().BeEmpty();
         export.ChainHeads.Should().BeEmpty();
+    }
+
+    // ─── partner-channel-pilot-fixes P5 (design D10): type, parent and the parents' closure ───────
+
+    [Fact]
+    public async Task Reads_ShouldCarryEachTenantsTypeAndParent_ClosedOverTheParents()
+    {
+        var h = await LicenseLedgerHarness.CreateAsync(_fixture, Sep1);
+        await h.TenantAsync("platform", LicenseLedgerHarness.Platform);
+        await h.TenantAsync("p1", LicenseLedgerHarness.Partner, parent: "platform");
+        await h.ExecAsync("UPDATE tenants SET name = 'Reseller One' WHERE tenant_id = 'p1'");
+        await h.TenantAsync("pc1", LicenseLedgerHarness.Customer, parent: "p1");
+        await h.TenantAsync("dc1", LicenseLedgerHarness.Customer, parent: "platform");
+        await h.Close.PrepareAsync("UTC", CancellationToken.None);
+        h.Clock.UtcNow = Sep1.AddHours(1);
+        await h.CreateAgentAsync("pc1", "a-pc1");
+        await h.CreateAgentAsync("dc1", "a-dc1");
+        h.Clock.UtcNow = Sep1.AddDays(1).AddMinutes(-9 * 60 + 5);
+        await h.Close.CloseAsync(TimeZoneInfo.Utc, h.Clock.UtcNow, CancellationToken.None);
+
+        var peaks = await Reader(h).ReadPeaksAsync(September1, September30, "UTC", CancellationToken.None);
+        var export = await Reader(h).ReadExportAsync(September1, September30, "UTC", CancellationToken.None);
+
+        peaks.Daily.Select(d => d.TenantId).OfType<string>().Should().BeEquivalentTo(["pc1", "dc1"]);
+        foreach (var tenants in new[] { peaks.Tenants, export.Tenants })
+        {
+            tenants["pc1"].Should().Be(new LicensedAgentTenantRef("pc1", "Customer", "p1"));
+            tenants["dc1"].Should().Be(new LicensedAgentTenantRef("dc1", "Customer", "platform"));
+            tenants["p1"].Should().Be(new LicensedAgentTenantRef("Reseller One", "Partner", "platform"), "a row's parent is read too");
+            tenants["platform"].Should().Be(new LicensedAgentTenantRef("platform", "Platform", null), "and the parent's parent");
+        }
     }
 }

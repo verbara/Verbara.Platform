@@ -1,0 +1,9 @@
+{
+  "_comment": "Golden wire shape for the dunning refusal on a Partner's Customer (partner-channel-pilot-fixes, owner answer 2026-10-11 to design open question 2; capability partner-channel-tenancy). HTTP 409, application/json, `error` = dunning-partner-customer. Body convention (Platform ErrorResponse, read by Web's ApiError, Web ADR-0013): `error` carries ONLY a kebab-case machine code, never prose and never a separate `code` field; the extra fields are typed members of a sealed record whose first property is Error (precedent: ConversationStartRefusal), registered in ApiJsonContext. It answers the three host dunning routes GET /api/v1/management/tenants/{id}/dunning, POST /api/v1/management/tenants/{id}/dunning/pause and POST /api/v1/management/tenants/{id}/dunning/resume when tenant {id} is a Customer whose parent tenant is a Partner: the Partner bills that Customer outside Verbara, so Verbara never runs dunning on it. The refusal comes before any dunning record is read or written, and whether or not such a record exists. tenantId is the refused Customer; partnerTenantId is its parent Partner. A direct Customer (parent: the Platform tenant) is unaffected, and a tenant that does not exist still answers 404. The background dunning sweep applies the same rule without an HTTP answer: it skips these Customers, so it never opens a record, changes a payment status or moves their tenant status (Warning, Degraded, Suspended, PendingDeletion). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "status": 409,
+  "body": {
+    "error": "dunning-partner-customer",
+    "tenantId": "pc1",
+    "partnerTenantId": "p1"
+  }
+}
