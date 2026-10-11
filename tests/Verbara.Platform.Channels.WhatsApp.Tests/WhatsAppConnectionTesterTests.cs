@@ -119,7 +119,7 @@ public class WhatsAppConnectionTesterTests
     }
 
     [Fact]
-    public void AddWhatsApp_ShouldExposeConnectionTester_ForWhatsApp()
+    public void AddWhatsApp_ShouldRegisterConnectionTester_WhenWhatsAppIsAdded()
     {
         using var provider = Provider(Substitute.For<ITenantChannelConfigStore>(), new RecordingGraphHandler());
 
