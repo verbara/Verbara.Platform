@@ -374,6 +374,23 @@ internal sealed class MetaSendResponse
     public MetaApiError? Error { get; set; }
 }
 
+// ── Phone number lookup (connection test) ─────────────────────────────────────
+
+internal sealed class MetaPhoneNumberResponse
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("verified_name")]
+    public string? VerifiedName { get; set; }
+
+    [JsonPropertyName("display_phone_number")]
+    public string? DisplayPhoneNumber { get; set; }
+
+    [JsonPropertyName("error")]
+    public MetaApiError? Error { get; set; }
+}
+
 internal sealed class MetaResponseContact
 {
     [JsonPropertyName("input")]

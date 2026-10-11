@@ -19,11 +19,12 @@ public sealed class StartupMigratorsRegistrarTests
     [
         "OidcClientSecretEncryptionMigrator",
         "UserMfaEncryptionMigrator",
+        "TenantChannelCredentialsEncryptionMigrator",
         "TenantLlmConfigSeedMigrator",
     ];
 
     [Fact]
-    public void AddPlatformStartupMigrators_ShouldRegisterTheThreeMigratorsInStartOrder_WhenConnectionStringPresent()
+    public void AddPlatformStartupMigrators_ShouldRegisterTheFourMigratorsInStartOrder_WhenConnectionStringPresent()
     {
         var services = new ServiceCollection();
 
