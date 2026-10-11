@@ -88,6 +88,16 @@
           "autoFillReady",
           "autonomousReady"
         ],
+        "ChannelConfigResponse": [
+          "channel",
+          "isActive",
+          "isConfigured",
+          "credentials"
+        ],
+        "ChannelCredentialStatus": [
+          "key",
+          "isSet"
+        ],
         "ChannelTestResponse": [
           "success",
           "message"
@@ -416,12 +426,6 @@
           "impersonationAutoTimeoutMinutes",
           "ipAllowlistEnabled",
           "updatedAt"
-        ],
-        "TenantChannelConfig": [
-          "tenantId",
-          "channel",
-          "credentials",
-          "isActive"
         ],
         "TenantLlmConfigResponse": [
           "providerType",

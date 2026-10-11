@@ -19,43 +19,42 @@ internal static class ChannelConfigEndpoints
         group.MapPost("/{channel}/test", TestChannelConfig);
     }
 
-    private static async Task<IResult> ListChannelConfigs(
+    /// <summary><c>400</c> code: a key outside the channel's declared credential schema.</summary>
+    internal const string UnknownCredentialKeyCode = "unknown-credential-key";
+
+    /// <summary><c>400</c> code: the route names no known channel.</summary>
+    internal const string InvalidChannelCode = "invalid-channel";
+
+    private static async Task<Ok<ChannelConfigResponse[]>> ListChannelConfigs(
         HttpContext context,
         [FromServices] ITenantChannelConfigStore store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var results = new List<object>();
+        var results = new List<ChannelConfigResponse>();
 
         foreach (var channelType in Enum.GetValues<ChannelType>())
-        {
-            var config = await store.GetAsync(tenantId, channelType, ct);
-            results.Add(config is not null
-                ? config
-                : new ChannelStatusDto(channelType.ToString(), false));
-        }
+            results.Add(ToResponse(channelType, await store.GetAsync(tenantId, channelType, ct)));
 
-        return Results.Ok(results);
+        return TypedResults.Ok(results.ToArray());
     }
 
-    private static async Task<IResult> GetChannelConfig(
+    private static async Task<Results<Ok<ChannelConfigResponse>, BadRequest<ErrorDetailResponse>>> GetChannelConfig(
         string channel,
         HttpContext context,
         [FromServices] ITenantChannelConfigStore store,
         CancellationToken ct)
     {
         if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out var channelType))
-            return Results.BadRequest($"Invalid channel type: {channel}");
+            return TypedResults.BadRequest(new ErrorDetailResponse(InvalidChannelCode, []));
 
         var tenantId = GetTenantId(context);
-        var config = await store.GetAsync(tenantId, channelType, ct);
-
-        return config is not null
-            ? Results.Ok(config)
-            : Results.Ok(new ChannelStatusDto(channelType.ToString(), false));
+        return TypedResults.Ok(ToResponse(channelType, await store.GetAsync(tenantId, channelType, ct)));
     }
 
-    private static async Task<Results<Ok<TenantChannelConfig>, BadRequest<string>>> UpdateChannelConfig(
+    // whatsapp-works-for-real D15: the request merges into what is stored (omitted or blank keeps, value
+    // replaces, null removes); the response and the audit record carry key names, never a value.
+    private static async Task<Results<Ok<ChannelConfigResponse>, BadRequest<ErrorDetailResponse>>> UpdateChannelConfig(
         string channel,
         HttpContext context,
         [FromBody] UpdateChannelConfigRequest body,
@@ -64,16 +63,21 @@ internal static class ChannelConfigEndpoints
         CancellationToken ct)
     {
         if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out var channelType))
-            return TypedResults.BadRequest($"Invalid channel type: {channel}");
+            return TypedResults.BadRequest(new ErrorDetailResponse(InvalidChannelCode, []));
+
+        var unknownKeys = ChannelCredentialMerge.UnknownKeys(channelType, body.Credentials);
+        if (unknownKeys.Count > 0)
+            return TypedResults.BadRequest(new ErrorDetailResponse(UnknownCredentialKeyCode, unknownKeys));
 
         var tenantId = GetTenantId(context);
         var before = await store.GetAsync(tenantId, channelType, ct);
+        var merge = ChannelCredentialMerge.Apply(before?.Credentials, body.Credentials);
         var config = new TenantChannelConfig
         {
             TenantId = tenantId,
             Channel = channelType,
             IsActive = body.IsActive,
-            Credentials = body.Credentials ?? new Dictionary<string, string>(),
+            Credentials = merge.Credentials,
         };
         await store.SaveAsync(config, ct);
         await audit.RecordAsync(
@@ -90,9 +94,31 @@ internal static class ChannelConfigEndpoints
             {
                 ["ip"] = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 ["endpoint"] = context.Request.Path.Value ?? "",
+                // Names only (D15): which keys were replaced or removed, never a value.
+                ["changed_keys"] = string.Join(',', merge.ChangedKeys),
             },
             ct: ct);
-        return TypedResults.Ok(config);
+        return TypedResults.Ok(ToResponse(channelType, config));
+    }
+
+    /// <summary>
+    /// The redacted view of a channel's configuration: every canonical key of a declared schema (isSet false
+    /// when absent or blank), or the stored keys of a channel without one — never a value.
+    /// </summary>
+    internal static ChannelConfigResponse ToResponse(ChannelType channel, TenantChannelConfig? config)
+    {
+        var stored = config?.Credentials;
+        var keys = ChannelCredentialSchemas.For(channel) is { } schema
+            ? schema.Keys.Select(k => k.Name)
+            : (stored?.Keys ?? []).Order(StringComparer.Ordinal);
+
+        var credentials = keys
+            .Select(key => new ChannelCredentialStatus(
+                key,
+                stored is not null && stored.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)))
+            .ToArray();
+
+        return new ChannelConfigResponse(channel.ToString(), config?.IsActive ?? false, config is not null, credentials);
     }
 
     private static Results<Ok<ChannelTestResponse>, BadRequest<string>> TestChannelConfig(string channel)
@@ -114,9 +140,27 @@ internal static class ChannelConfigEndpoints
 
 // ─── Request DTOs ─────────────────────────────────────────────────────────────
 
-internal sealed record UpdateChannelConfigRequest(bool IsActive, Dictionary<string, string>? Credentials);
+/// <summary>
+/// <c>PUT /admin/channels/{channel}</c>. <paramref name="Credentials"/> merges into what is stored: an omitted
+/// key or a blank value keeps the stored value, a value replaces it, <see langword="null"/> removes the key.
+/// </summary>
+internal sealed record UpdateChannelConfigRequest(bool IsActive, Dictionary<string, string?>? Credentials);
 
-internal sealed record ChannelStatusDto(string Channel, bool IsActive);
+// ─── Response DTOs (whatsapp-works-for-real D15: no credential value ever leaves the API) ──────────────────
+
+/// <summary>Whether one credential key holds a non-blank value. The value itself is never returned.</summary>
+internal sealed record ChannelCredentialStatus(string Key, bool IsSet);
+
+/// <summary>A tenant's configuration of one channel, credentials redacted to <c>{key, isSet}</c>.</summary>
+/// <param name="Channel">The channel name, e.g. <c>WhatsApp</c>.</param>
+/// <param name="IsActive">Whether the channel is active for the tenant (false when never configured).</param>
+/// <param name="IsConfigured">Whether a configuration row exists for the tenant.</param>
+/// <param name="Credentials">Every canonical key of a declared schema, or the stored keys otherwise.</param>
+internal sealed record ChannelConfigResponse(
+    string Channel,
+    bool IsActive,
+    bool IsConfigured,
+    IReadOnlyList<ChannelCredentialStatus> Credentials);
 internal sealed record ChannelTestResponse(bool Success, string Message);
 // ADR-0026 Phase A.2 — typed replacement for anonymous-type AuditChanges payload.
 internal sealed record ChannelChangeAudit(string Channel, bool IsActive);
