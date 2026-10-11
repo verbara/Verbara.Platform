@@ -3,7 +3,6 @@ using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
-using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 
 namespace Verbara.Platform.Switchboard;
@@ -11,31 +10,35 @@ namespace Verbara.Platform.Switchboard;
 /// <summary>
 /// Starts an outbound digital conversation in the calling agent's own name (agent-started-conversations,
 /// design D14). Every refusal is decided before the provider is reached; the provider send then happens
-/// <b>first</b>, and only a successful send persists anything: a new conversation is born
-/// <see cref="ConversationState.Active"/>, owned by the agent, committed through metering's
-/// <see cref="ILicensedAgentOwnershipWriter"/>, and its message is stored <see cref="MessageDeliveryStatus.Sent"/>
-/// with the provider's id. A failed send stores nothing — no conversation, message, capacity or ledger row.
+/// <b>first</b>, and only a successful send persists anything: the message is stored
+/// <see cref="MessageDeliveryStatus.Sent"/> with the provider's id, and a new conversation is born
+/// <see cref="ConversationState.Active"/>, owned by the agent, and saved through the conversation store.
+/// A failed send stores nothing — no conversation, message, capacity or ledger row.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>No licensed-agent ledger row.</b> An agent starting a conversation in its own name does not change the set of
+/// counted agents and is not an ownership move, so the start does not go through metering's ownership writer and
+/// appends nothing to <c>license_agent_events</c>; the <c>conversation.started</c> audit records it.
+/// </para>
+/// <para>
+/// <b>Concurrency.</b> Starts for the same tenant, contact and channel run one at a time in this process, and the
+/// agent's capacity is taken with an atomic try-reserve before the send, so a double submit cannot open two
+/// conversations or overrun the agent's capacity. Across replicas neither is serialised (a known limitation,
+/// recorded in design D14).
+/// </para>
+/// </remarks>
 internal sealed partial class OutboundConversationStarter : IOutboundConversationStarter
 {
-    /// <summary>
-    /// The existing ownership-change kind an own-name start is committed under. D14 adds no
-    /// <see cref="OwnershipChangeKind"/> and no ledger kind; of the three that exist, a takeover is the one
-    /// whose receiver is the actor's own agent, which is exactly an own-name start. Starting on behalf of
-    /// another agent is out of scope (it would be a reassign through <c>TransferToAgentAsync</c>).
-    /// </summary>
-    internal const OwnershipChangeKind OwnNameStartKind = OwnershipChangeKind.TakenOver;
-
     private readonly IConversationStore _conversations;
     private readonly IContactStore _contacts;
     private readonly IMessageStore _messages;
     private readonly IChannelRegistry _channels;
     private readonly IAgentCapacityService _capacity;
-    private readonly IWhatsAppSessionWindow _whatsAppWindow;
-    private readonly ILicensedAgentOwnershipWriter _ownershipWriter;
     private readonly IClock _clock;
     private readonly PlatformEventBus _eventBus;
     private readonly ILogger<OutboundConversationStarter> _logger;
+    private readonly KeyedGate<(TenantId, EntityId, ChannelType)> _gate = new();
 
     public OutboundConversationStarter(
         IConversationStore conversations,
@@ -43,8 +46,6 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         IMessageStore messages,
         IChannelRegistry channels,
         IAgentCapacityService capacity,
-        IWhatsAppSessionWindow whatsAppWindow,
-        ILicensedAgentOwnershipWriter ownershipWriter,
         IClock clock,
         PlatformEventBus eventBus,
         ILogger<OutboundConversationStarter> logger)
@@ -54,8 +55,6 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         _messages = messages;
         _channels = channels;
         _capacity = capacity;
-        _whatsAppWindow = whatsAppWindow;
-        _ownershipWriter = ownershipWriter;
         _clock = clock;
         _eventBus = eventBus;
         _logger = logger;
@@ -65,6 +64,13 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ActorUserId);
+
+        using (await _gate.EnterAsync((request.TenantId, request.ContactId, request.Channel), ct).ConfigureAwait(false))
+            return await StartGatedAsync(request, ct).ConfigureAwait(false);
+    }
+
+    private async Task<OutboundStartOutcome> StartGatedAsync(OutboundStartRequest request, CancellationToken ct)
+    {
         var tenantId = request.TenantId;
         var channel = request.Channel;
 
@@ -83,51 +89,104 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
             // Owned by another agent, a queue or a bot, or queued unowned: never taken over (DQ5).
             LogRefused(_logger, tenantId.Value, request.ContactId.Value, channel,
                 OutboundStartCodes.ConversationOpenElsewhere);
-            return OutboundStartOutcome.OpenElsewhere(open.ConversationId, open.Owner?.Kind);
+            return OutboundStartOutcome.NamingOpen(
+                OutboundStartCodes.ConversationOpenElsewhere, open.ConversationId, open.Owner?.Kind);
         }
 
-        if (open is not null)
-            EnsureSendable(open);
-        else if (!await _capacity.HasCapacityAsync(tenantId, request.AgentId, channel, ct).ConfigureAwait(false))
-            return Refuse(request, OutboundStartCodes.AgentAtCapacity);
+        if (open is not null && !IsSendable(open.State))
+        {
+            // The caller's own conversation, but wrapping up, snoozed or waiting: it must resume it first.
+            LogRefused(_logger, tenantId.Value, request.ContactId.Value, channel,
+                OutboundStartCodes.ConversationNotSendable);
+            return OutboundStartOutcome.NamingOpen(
+                OutboundStartCodes.ConversationNotSendable, open.ConversationId, ConversationOwnerKind.Agent);
+        }
 
-        var conversationId = open?.ConversationId ?? EntityId.New();
         if (channel == ChannelType.WhatsApp)
         {
-            // A brand-new conversation has no inbound history, so its window is closed: it needs a template.
-            var window = await _whatsAppWindow.DecideAsync(tenantId, conversationId, request.TemplateName, ct)
+            // Meta's customer-service window belongs to the user: any inbound message from this contact on WhatsApp
+            // in the last 24 hours, in any of its conversations with the tenant, opens it.
+            var lastInboundAt = await _conversations.FindLastInboundAtAsync(tenantId, request.ContactId, channel, ct)
                 .ConfigureAwait(false);
-            if (window.IsRefused)
+            if (WhatsAppSessionWindow.Decide(lastInboundAt, _clock.UtcNow, request.TemplateName).IsRefused)
                 return Refuse(request, OutboundStartCodes.WhatsAppTemplateRequired);
         }
 
-        // ── Send first: nothing is persisted unless the provider accepted the message ───────────────
-        var sent = await SendAsync(request, address, conversationId, ct).ConfigureAwait(false);
+        // A new conversation takes one unit of the agent's capacity before the send, atomically; it is given back
+        // if the start does not end with a stored conversation. A reuse adds no load.
+        var reserved = false;
+        if (open is null)
+        {
+            if (!await _capacity.TryReserveAsync(tenantId, request.AgentId, channel, ct).ConfigureAwait(false))
+                return Refuse(request, OutboundStartCodes.AgentAtCapacity);
+            reserved = true;
+        }
+
+        var conversationId = open?.ConversationId ?? EntityId.New();
+        SendResult? sent;
+        try
+        {
+            // ── Send first: nothing is persisted unless the provider accepted the message ───────────
+            sent = await SendAsync(request, address, conversationId, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Cancelled while the provider call was in flight: give the unit back and let the abort propagate.
+            await ReleaseIfReservedAsync(request, reserved).ConfigureAwait(false);
+            throw;
+        }
+
         if (sent is null)
+        {
+            await ReleaseIfReservedAsync(request, reserved).ConfigureAwait(false);
             return OutboundStartOutcome.Refused(OutboundStartCodes.ChannelSendFailed);
+        }
 
+        // ── The provider accepted the message: that cannot be undone, so persistence ignores the request's
+        // cancellation (a client abort must not cut it in half).
         var now = _clock.UtcNow;
-        var conversation = open ?? await CommitNewAsync(request, conversationId, now, ct).ConfigureAwait(false);
-
         var message = new Message
         {
             MessageId = EntityId.New(),
-            ConversationId = conversation.ConversationId,
+            ConversationId = conversationId,
             TenantId = tenantId,
             Direction = MessageDirection.Outbound,
             Channel = channel,
             SenderId = request.AgentId.Value,
-            Content = request.Content,
+            Content = StoredContent(request),
             DeliveryStatus = MessageDeliveryStatus.Sent,
             ExternalMessageId = sent.ExternalMessageId,
             CreatedAt = now,
             CreatedBy = request.ActorUserId,
         };
-        await _messages.SaveAsync(message, ct).ConfigureAwait(false);
+        var conversation = open ?? BornActive(request, conversationId, now);
+
+        try
+        {
+            // The message row first, right after the send: the provider's sent/delivered callback looks it up by
+            // provider id and can arrive at once (design D8). The conversation follows; a conversation therefore
+            // never exists without its first message.
+            await _messages.SaveAsync(message, CancellationToken.None).ConfigureAwait(false);
+            if (open is null)
+                await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            LogPersistFailedAfterSend(_logger, ex, tenantId.Value, conversationId.Value, channel, sent.ExternalMessageId);
+            await ReleaseIfReservedAsync(request, reserved).ConfigureAwait(false);
+            return OutboundStartOutcome.Refused(OutboundStartCodes.StartPersistFailed);
+        }
+
+        if (open is null)
+        {
+            _eventBus.Publish(new ConversationAssignedEvent(
+                tenantId.Value, conversationId.Value, request.AgentId.Value, "", "", ""));
+            _eventBus.Publish(new ConversationStateChangedEvent(
+                tenantId.Value, conversationId.Value, "", nameof(ConversationState.Active)));
+        }
 
         _eventBus.Publish(new ConversationMessageEvent(
-            tenantId.Value, conversation.ConversationId.Value, message.MessageId.Value,
-            "Outbound", channel.ToString()));
+            tenantId.Value, conversationId.Value, message.MessageId.Value, "Outbound", channel.ToString()));
 
         return OutboundStartOutcome.Started(conversation, message, reused: open is not null);
     }
@@ -154,57 +213,51 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         }
     }
 
-    // A new conversation, born Active and owned by the agent, reserves one unit of its capacity and is saved
-    // only through metering's ownership writer. Should the commit fail after the provider accepted the message,
-    // the reservation is released so the agent's load stays true, and the failure propagates.
-    private async Task<Conversation> CommitNewAsync(
-        OutboundStartRequest request, EntityId conversationId, DateTimeOffset now, CancellationToken ct)
+    private async Task ReleaseIfReservedAsync(OutboundStartRequest request, bool reserved)
     {
-        var conversation = new Conversation
-        {
-            ConversationId = conversationId,
-            TenantId = request.TenantId,
-            ContactId = request.ContactId,
-            Channel = request.Channel,
-            State = ConversationState.Active,
-            Owner = ConversationOwner.ForAgent(request.AgentId),
-            CreatedAt = now,
-            UpdatedAt = now,
-            CreatedBy = request.ActorUserId,
-            UpdatedBy = request.ActorUserId,
-        };
+        if (!reserved)
+            return;
 
-        await _capacity.ReserveAsync(request.TenantId, request.AgentId, request.Channel, ct).ConfigureAwait(false);
         try
         {
-            await _ownershipWriter.CommitOwnershipAsync(
-                conversation, new OwnershipChange(OwnNameStartKind, request.ActorUserId), ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogCommitFailedAfterSend(_logger, ex, request.TenantId.Value, conversationId.Value);
             await _capacity.ReleaseAsync(request.TenantId, request.AgentId, request.Channel, CancellationToken.None)
                 .ConfigureAwait(false);
-            throw;
         }
-
-        _eventBus.Publish(new ConversationAssignedEvent(
-            request.TenantId.Value, conversationId.Value, request.AgentId.Value, "", "", ""));
-        _eventBus.Publish(new ConversationStateChangedEvent(
-            request.TenantId.Value, conversationId.Value, "", nameof(ConversationState.Active)));
-        return conversation;
+        catch (Exception ex)
+        {
+            // Never mask the start's own outcome; the restart reconcile recounts the agent's load from conversations.
+            LogReleaseFailed(_logger, ex, request.TenantId.Value, request.AgentId.Value);
+        }
     }
+
+    private static Conversation BornActive(OutboundStartRequest request, EntityId conversationId, DateTimeOffset now) => new()
+    {
+        ConversationId = conversationId,
+        TenantId = request.TenantId,
+        ContactId = request.ContactId,
+        Channel = request.Channel,
+        State = ConversationState.Active,
+        Owner = ConversationOwner.ForAgent(request.AgentId),
+        CreatedAt = now,
+        UpdatedAt = now,
+        CreatedBy = request.ActorUserId,
+        UpdatedBy = request.ActorUserId,
+    };
+
+    // A template goes out instead of the free text (the connector sends only its name and language), so the stored
+    // message names the template: the transcript shows what the contact received.
+    private static MessageEnvelope StoredContent(OutboundStartRequest request) => request.TemplateName is { } template
+        ? new MessageEnvelope([new TextBlock(request.TemplateLanguage is { } language
+            ? $"[template {template} {language}]"
+            : $"[template {template}]")])
+        : request.Content;
 
     private static bool OwnedBy(Conversation conversation, EntityId agentId) =>
         conversation.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerId } && ownerId == agentId;
 
-    // The caller's own open conversation is reused only in a state a message can be sent in.
-    private static void EnsureSendable(Conversation conversation)
-    {
-        if (conversation.State is not (ConversationState.Active or ConversationState.OnHold or ConversationState.Consulting))
-            throw new InvalidOperationException(
-                $"Cannot send message in conversation state '{conversation.State}'.");
-    }
+    // The caller's own open conversation is reused only in a state a message can be sent in (as SendMessageAsync).
+    private static bool IsSendable(ConversationState state) =>
+        state is ConversationState.Active or ConversationState.OnHold or ConversationState.Consulting;
 
     private OutboundStartOutcome Refuse(OutboundStartRequest request, string code)
     {
@@ -225,6 +278,73 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
     private static partial void LogConnectorFault(ILogger logger, Exception exception, string tenantId, ChannelType channel);
 
     [LoggerMessage(Level = LogLevel.Error,
-        Message = "Agent start: the first message of conversation {ConversationId} (tenant {TenantId}) was sent, but the ownership commit failed; the conversation was not stored.")]
-    private static partial void LogCommitFailedAfterSend(ILogger logger, Exception exception, string tenantId, string conversationId);
+        Message = "Agent start: the first message of conversation {ConversationId} (tenant {TenantId}) reached the {Channel} provider as {ProviderMessageId}, but it could not be stored; reconcile by the provider id.")]
+    private static partial void LogPersistFailedAfterSend(
+        ILogger logger, Exception exception, string tenantId, string conversationId, ChannelType channel, string? providerMessageId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Agent start: releasing the capacity unit of agent {AgentId} (tenant {TenantId}) failed.")]
+    private static partial void LogReleaseFailed(ILogger logger, Exception exception, string tenantId, string agentId);
+
+    /// <summary>One async gate per key, removed when its last holder or waiter leaves.</summary>
+    private sealed class KeyedGate<TKey> where TKey : notnull
+    {
+        private readonly Dictionary<TKey, Entry> _entries = new();
+        private readonly Lock _lock = new();
+
+        public async Task<IDisposable> EnterAsync(TKey key, CancellationToken ct)
+        {
+            Entry entry;
+            lock (_lock)
+            {
+                if (!_entries.TryGetValue(key, out entry!))
+                    _entries[key] = entry = new Entry();
+                entry.Users++;
+            }
+
+            try
+            {
+                await entry.Semaphore.WaitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                Leave(key, entry, release: false);
+                throw;
+            }
+
+            return new Releaser(this, key, entry);
+        }
+
+        private void Leave(TKey key, Entry entry, bool release)
+        {
+            if (release)
+                entry.Semaphore.Release();
+            lock (_lock)
+            {
+                if (--entry.Users == 0)
+                {
+                    _entries.Remove(key);
+                    entry.Semaphore.Dispose();
+                }
+            }
+        }
+
+        private sealed class Entry
+        {
+            public SemaphoreSlim Semaphore { get; } = new(1, 1);
+
+            public int Users { get; set; }
+        }
+
+        private sealed class Releaser(KeyedGate<TKey> gate, TKey key, Entry entry) : IDisposable
+        {
+            private int _disposed;
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                    gate.Leave(key, entry, release: true);
+            }
+        }
+    }
 }

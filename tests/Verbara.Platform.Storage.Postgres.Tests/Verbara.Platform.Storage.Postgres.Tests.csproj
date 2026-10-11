@@ -4,6 +4,8 @@
     <ProjectReference Include="..\..\src\Verbara.Platform.Storage.Postgres\Verbara.Platform.Storage.Postgres.csproj" />
     <!-- The inbound pipeline races on these stores (InboundPipelineRaceTests). -->
     <ProjectReference Include="..\..\src\Verbara.Platform.Channels.Core\Verbara.Platform.Channels.Core.csproj" />
+    <!-- An agent-started conversation leaves the licensed-agent ledger untouched (AgentStartedConversationLedgerTests). -->
+    <ProjectReference Include="..\..\src\Verbara.Platform.Switchboard\Verbara.Platform.Switchboard.csproj" />
   </ItemGroup>
 
   <ItemGroup>

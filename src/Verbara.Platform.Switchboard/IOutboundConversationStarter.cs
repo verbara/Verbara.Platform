@@ -6,7 +6,8 @@ namespace Verbara.Platform.Switchboard;
 /// <summary>
 /// Starts an outbound digital conversation in the calling agent's own name (agent-started-conversations,
 /// design D14): the first message is sent before anything is persisted, and the conversation is born
-/// <see cref="ConversationState.Active"/> and owned by the agent.
+/// <see cref="ConversationState.Active"/> and owned by the agent. It is persisted through the conversation store and
+/// writes no licensed-agent ledger row.
 /// </summary>
 public interface IOutboundConversationStarter
 {
@@ -18,7 +19,7 @@ public interface IOutboundConversationStarter
 /// <param name="ContactId">The contact to write to.</param>
 /// <param name="Channel">The digital channel to start on.</param>
 /// <param name="AgentId">The calling agent's own Agent profile: the owner-to-be.</param>
-/// <param name="ActorUserId">The calling user, recorded as the actor of the ownership commit.</param>
+/// <param name="ActorUserId">The calling user, recorded as the creator of the conversation and its message.</param>
 /// <param name="Content">The initial message.</param>
 /// <param name="TemplateName">The provider template to send instead of free-form text, if any.</param>
 /// <param name="TemplateLanguage">The template's language code, if any.</param>
@@ -44,6 +45,12 @@ public static class OutboundStartCodes
     /// <summary>An open conversation with the contact is owned by someone else, or queued unowned (409).</summary>
     public const string ConversationOpenElsewhere = "conversation-open-elsewhere";
 
+    /// <summary>
+    /// The caller owns the contact's open conversation, but in a state no message can be sent in — wrap-up,
+    /// snoozed, waiting for the customer, resolved or escalated (409). It names that conversation; the agent resumes it.
+    /// </summary>
+    public const string ConversationNotSendable = "conversation-not-sendable";
+
     /// <summary>The calling agent has no capacity left on the channel (409).</summary>
     public const string AgentAtCapacity = "agent-at-capacity";
 
@@ -52,6 +59,13 @@ public static class OutboundStartCodes
 
     /// <summary>The provider rejected the first message; nothing was persisted (502).</summary>
     public const string ChannelSendFailed = "channel-send-failed";
+
+    /// <summary>
+    /// The provider accepted the first message, but storing it failed (500). The contact has received it; the
+    /// conversation does not exist and no capacity stays reserved. The provider message id is logged for
+    /// reconciliation.
+    /// </summary>
+    public const string StartPersistFailed = "start-persist-failed";
 }
 
 /// <summary>
@@ -88,13 +102,13 @@ public sealed record OutboundStartOutcome
     /// <summary>The refusal code (<see cref="OutboundStartCodes"/>); <c>null</c> on success.</summary>
     public string? RefusalCode { get; }
 
-    /// <summary>For <see cref="OutboundStartCodes.ConversationOpenElsewhere"/>: the open conversation's id.</summary>
+    /// <summary>For <see cref="OutboundStartCodes.ConversationOpenElsewhere"/> and <see cref="OutboundStartCodes.ConversationNotSendable"/>: the open conversation's id.</summary>
     public EntityId? OpenConversationId { get; }
 
-    /// <summary>For <see cref="OutboundStartCodes.ConversationOpenElsewhere"/>: its owner kind; <c>null</c> when queued unowned.</summary>
+    /// <summary>With <see cref="OpenConversationId"/>: the open conversation's owner kind; <c>null</c> when queued unowned.</summary>
     public ConversationOwnerKind? OpenOwnerKind { get; }
 
-    /// <summary>True when the start was refused and nothing was persisted.</summary>
+    /// <summary>True when the start did not produce a conversation (for <see cref="OutboundStartCodes.StartPersistFailed"/> the message was sent).</summary>
     public bool IsRefused => RefusalCode is not null;
 
     /// <summary>A started (or reused) conversation and its sent message.</summary>
@@ -112,7 +126,10 @@ public sealed record OutboundStartOutcome
         return new OutboundStartOutcome(null, null, false, code, null, null);
     }
 
-    /// <summary>A <see cref="OutboundStartCodes.ConversationOpenElsewhere"/> refusal naming the open conversation.</summary>
-    public static OutboundStartOutcome OpenElsewhere(EntityId conversationId, ConversationOwnerKind? ownerKind) =>
-        new(null, null, false, OutboundStartCodes.ConversationOpenElsewhere, conversationId, ownerKind);
+    /// <summary>A refusal (<paramref name="code"/>) that names the contact's open conversation and its owner kind.</summary>
+    public static OutboundStartOutcome NamingOpen(string code, EntityId conversationId, ConversationOwnerKind? ownerKind)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        return new(null, null, false, code, conversationId, ownerKind);
+    }
 }

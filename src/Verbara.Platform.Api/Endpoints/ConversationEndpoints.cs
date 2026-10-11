@@ -59,10 +59,11 @@ internal static class ConversationEndpoints
             .RequireRateLimiting("llm");
         group.MapPost("/{id}/hold", HoldConversation);
         group.MapPost("/{id}/unhold", UnholdConversation);
-        // agent-started-conversations (D14): the 403 (not-an-agent) and 502 (channel-send-failed) bodies are
-        // written as JSON results, which declare no response metadata of their own.
+        // agent-started-conversations (D14): the 403 (not-an-agent), 500 (start-persist-failed) and 502
+        // (channel-send-failed) bodies are written as JSON results, which declare no response metadata of their own.
         group.MapPost("/", CreateConversation)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ConversationStartRefusal>(StatusCodes.Status500InternalServerError)
             .Produces<ConversationStartRefusal>(StatusCodes.Status502BadGateway);
         // ADR-0034 — supervisor correction of an autonomously stamped disposition. Gated by the
         // dedicated `typification:correct-autonomous` permission (NOT AdminOnly — a supervisor is
@@ -898,9 +899,12 @@ internal static class ConversationEndpoints
         return screened;
     }
 
+    // The refusal code of a channel name that names no channel (D14): stable, with no echo of the request.
+    private const string UnknownChannel = "unknown-channel";
+
     // With an initial message the caller starts the conversation in its own name (agent-started-conversations,
     // design D14): the starter sends first, persists nothing on failure, and a success is born Active and owned by
-    // the caller's Agent profile. Without one, the 2.26 queued path stays — deprecated, removal planned.
+    // the caller's Agent profile. Without one, the 2.26 queued path stays — deprecated, removal planned for a later release.
     private static async Task<Results<Created<Conversation>, NotFound<ErrorResponse>,
         JsonHttpResult<ErrorResponse>, BadRequest<ConversationStartRefusal>, Conflict<ConversationStartRefusal>,
         JsonHttpResult<ConversationStartRefusal>>> CreateConversation(
@@ -915,8 +919,9 @@ internal static class ConversationEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        if (!Enum.TryParse<ChannelType>(body.Channel, ignoreCase: true, out var channelType))
-            return TypedResults.BadRequest(new ConversationStartRefusal($"Unknown channel: {body.Channel}"));
+        // A stable code, never the caller's input; Enum.TryParse also takes undefined numbers such as "99".
+        if (!Enum.TryParse<ChannelType>(body.Channel, ignoreCase: true, out var channelType) || !Enum.IsDefined(channelType))
+            return TypedResults.BadRequest(new ConversationStartRefusal(UnknownChannel));
 
         // An initial message is sent as the caller's Agent profile, so a caller without one cannot send it.
         ConversationActor? actor = null;
@@ -935,7 +940,7 @@ internal static class ConversationEndpoints
 
         if (actor is not { Agent: { } agent, UserId: { } actorUserId })
         {
-            // Deprecated (D14): the queued path without an initial message, kept until its planned removal.
+            // Deprecated (D14): the queued path without an initial message; removal planned for a later release.
             var queued = await conversationService.GetOrCreateForContactAsync(tenantId, contactId, channelType, ct);
             return TypedResults.Created($"/conversations/{queued.ConversationId.Value}", queued);
         }
@@ -968,7 +973,8 @@ internal static class ConversationEndpoints
     }
 
     // The status each start refusal carries (D14): 400 for a contact with no address, 502 when the provider
-    // rejected the first message, 409 for every other refusal decided before the send.
+    // rejected the first message, 500 when the sent message could not be stored, 409 for every other refusal
+    // decided before the send.
     private static Results<Created<Conversation>, NotFound<ErrorResponse>,
         JsonHttpResult<ErrorResponse>, BadRequest<ConversationStartRefusal>, Conflict<ConversationStartRefusal>,
         JsonHttpResult<ConversationStartRefusal>> StartRefusal(string code, OutboundStartOutcome outcome)
@@ -983,6 +989,8 @@ internal static class ConversationEndpoints
             OutboundStartCodes.ContactHasNoAddress => TypedResults.BadRequest(refusal),
             OutboundStartCodes.ChannelSendFailed => TypedResults.Json(
                 refusal, ApiJsonContext.Default.ConversationStartRefusal, statusCode: StatusCodes.Status502BadGateway),
+            OutboundStartCodes.StartPersistFailed => TypedResults.Json(
+                refusal, ApiJsonContext.Default.ConversationStartRefusal, statusCode: StatusCodes.Status500InternalServerError),
             _ => TypedResults.Conflict(refusal),
         };
     }
@@ -1270,8 +1278,8 @@ internal sealed record CreateConversationRequest(
     string? TemplateLanguage = null);
 
 /// <summary>
-/// A refused agent start (design D14): <c>error</c> is the stable code. For
-/// <c>conversation-open-elsewhere</c> it names the open conversation and its owner kind (<c>Agent</c>,
+/// A refused agent start (design D14): <c>error</c> is the stable code. For <c>conversation-open-elsewhere</c> and
+/// <c>conversation-not-sendable</c> it names the open conversation and its owner kind (<c>Agent</c>,
 /// <c>Queue</c>, <c>Bot</c>, <c>System</c>, or <c>None</c> when queued unowned).
 /// </summary>
 internal sealed record ConversationStartRefusal(string Error, string? ConversationId = null, string? OwnerKind = null);

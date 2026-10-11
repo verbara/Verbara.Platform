@@ -10,7 +10,7 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the conversation switchboard, the conversation service, the WhatsApp session window and the
-    /// agent-started conversation starter (design D14; its ownership writer comes from licensed-agent metering).
+    /// agent-started conversation starter (design D14).
     /// </summary>
     public static IServiceCollection AddSwitchboard(this IServiceCollection services)
     {

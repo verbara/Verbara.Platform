@@ -3,16 +3,16 @@ using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
-using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 
 namespace Verbara.Platform.Switchboard.Tests;
 
 /// <summary>
 /// agent-started-conversations (design D14): the agent starts a conversation only in its own name; the
-/// connector sends first and nothing is persisted on failure; a success is committed through metering's
-/// ownership writer, born <see cref="ConversationState.Active"/> and owned by the agent; an open
-/// conversation owned elsewhere is refused, one the caller owns is reused.
+/// connector sends first and nothing is persisted on failure; a success is saved through the conversation
+/// store (no licensed-agent ledger row), born <see cref="ConversationState.Active"/> and owned by the agent,
+/// with its Sent message stored right after the send; an open conversation owned elsewhere is refused, one the
+/// caller owns is reused when it can take a message and refused with a code when it cannot.
 /// </summary>
 public sealed class OutboundConversationStarterTests : IDisposable
 {
@@ -22,10 +22,8 @@ public sealed class OutboundConversationStarterTests : IDisposable
     private readonly IChannelRegistry _channels = Substitute.For<IChannelRegistry>();
     private readonly IChannelConnector _connector = Substitute.For<IChannelConnector>();
     private readonly IAgentCapacityService _capacity = Substitute.For<IAgentCapacityService>();
-    private readonly IWhatsAppSessionWindow _window = Substitute.For<IWhatsAppSessionWindow>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly PlatformEventBus _eventBus = new();
-    private readonly RecordingOwnershipWriter _ownership;
 
     private readonly TenantId _tenantId = new("tenant-1");
     private readonly EntityId _contactId = EntityId.From("contact-001");
@@ -36,16 +34,15 @@ public sealed class OutboundConversationStarterTests : IDisposable
 
     public OutboundConversationStarterTests()
     {
-        _ownership = new RecordingOwnershipWriter(_connector);
         _clock.UtcNow.Returns(_now);
         _channels.AvailableChannels.Returns([ChannelType.WhatsApp, ChannelType.WebChat]);
         _channels.GetConnector(Arg.Any<ChannelType>()).Returns(_connector);
         _connector.SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>())
             .Returns(new SendResult(true, "wamid.out-1", null, null));
-        _capacity.HasCapacityAsync(_tenantId, _agentId, Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+        _capacity.TryReserveAsync(_tenantId, _agentId, Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
             .Returns(true);
-        _window.DecideAsync(default, default, default, default)
-            .ReturnsForAnyArgs(new WhatsAppWindowDecision(WhatsAppSendMode.FreeForm, _now.AddHours(-1)));
+        _conversations.FindLastInboundAtAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns(_now.AddHours(-1));
 
         var contact = new Contact { ContactId = _contactId, TenantId = _tenantId, CreatedAt = _now };
         contact.AddAddress(new ChannelAddress(ChannelType.WhatsApp, Address));
@@ -55,7 +52,7 @@ public sealed class OutboundConversationStarterTests : IDisposable
     public void Dispose() => _eventBus.Dispose();
 
     private OutboundConversationStarter CreateSut() =>
-        new(_conversations, _contacts, _messages, _channels, _capacity, _window, _ownership, _clock, _eventBus,
+        new(_conversations, _contacts, _messages, _channels, _capacity, _clock, _eventBus,
             NullLogger<OutboundConversationStarter>.Instance);
 
     private OutboundStartRequest Request(string? templateName = null) =>
@@ -79,12 +76,14 @@ public sealed class OutboundConversationStarterTests : IDisposable
         return conversation;
     }
 
-    private async Task NothingPersistedAsync()
+    // Nothing is stored, and no capacity stays taken: a unit taken before the send was given back.
+    private async Task NothingPersistedAsync(bool unitTakenBeforeSend = false)
     {
         await _conversations.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
         await _messages.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
         await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
-        _ownership.Commits.Should().BeEmpty("nothing is committed through the ownership writer");
+        await _capacity.Received(unitTakenBeforeSend ? 1 : 0).ReleaseAsync(
+            _tenantId, _agentId, ChannelType.WhatsApp, CancellationToken.None);
     }
 
     // ─── all-or-nothing ───────────────────────────────────────────────────────
@@ -99,27 +98,25 @@ public sealed class OutboundConversationStarterTests : IDisposable
 
         outcome.RefusalCode.Should().Be(OutboundStartCodes.ChannelSendFailed);
         await _connector.Received(1).SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>());
-        await NothingPersistedAsync();
+        await NothingPersistedAsync(unitTakenBeforeSend: true);
     }
 
     [Fact]
-    public async Task StartAsync_ShouldCommitThroughOwnershipWriter_WhenSendSucceeds()
+    public async Task StartAsync_ShouldSaveBornActiveOwnedConversationThroughStore_WhenSendSucceeds()
     {
         var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
 
         outcome.IsRefused.Should().BeFalse();
-        var commit = _ownership.Commits.Should().ContainSingle("the conversation is committed by metering's writer").Subject;
-        commit.State.Should().Be(ConversationState.Active, "the conversation is born Active");
-        commit.Owner.Should().Be(ConversationOwner.ForAgent(_agentId), "it is born owned by the starting agent");
-        commit.Change.ActorUserId.Should().Be(ActorUserId, "the agent starts it in its own name");
-        // OwnershipChangeKind is deliberately not asserted here: D14 adds no new kind, and which existing
-        // kind (if any) an own-name start is recorded under is decided in task 7.3.
-        commit.ConnectorCalledBefore.Should().BeTrue("the connector sends first, the commit follows");
-        await _conversations.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
-        await _capacity.Received(1).ReserveAsync(_tenantId, _agentId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
+        await _conversations.Received(1).SaveAsync(
+            Arg.Is<Conversation>(c => c.State == ConversationState.Active
+                && c.Owner == ConversationOwner.ForAgent(_agentId)
+                && c.CreatedBy == ActorUserId),
+            CancellationToken.None);
+        await _capacity.Received(1).TryReserveAsync(_tenantId, _agentId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
+        await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
         await _messages.Received(1).SaveAsync(
             Arg.Is<Message>(m => m.DeliveryStatus == MessageDeliveryStatus.Sent && m.ExternalMessageId == "wamid.out-1"),
-            Arg.Any<CancellationToken>());
+            CancellationToken.None);
     }
 
     // ─── refusals ─────────────────────────────────────────────────────────────
@@ -153,16 +150,15 @@ public sealed class OutboundConversationStarterTests : IDisposable
         outcome.Message!.DeliveryStatus.Should().Be(MessageDeliveryStatus.Sent);
         await _connector.Received(1).SendAsync(
             Arg.Is<OutboundMessage>(m => m.ConversationId == open.ConversationId), Arg.Any<CancellationToken>());
-        await _conversations.DidNotReceive().SaveAsync(
-            Arg.Is<Conversation>(c => c.ConversationId != open.ConversationId), Arg.Any<CancellationToken>());
-        _ownership.Commits.Should().BeEmpty("the caller already owns it: ownership does not change");
+        await _conversations.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+        await _capacity.DidNotReceiveWithAnyArgs().TryReserveAsync(default, default, default, default);
     }
 
     [Fact]
     public async Task StartAsync_ShouldRequireTemplate_WhenWhatsAppWindowClosed()
     {
-        _window.DecideAsync(default, default, default, default)
-            .ReturnsForAnyArgs(new WhatsAppWindowDecision(WhatsAppSendMode.TemplateRequired, _now.AddHours(-30)));
+        _conversations.FindLastInboundAtAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns(_now.AddHours(-30));
 
         var outcome = await CreateSut().StartAsync(Request(templateName: null), CancellationToken.None);
 
@@ -174,7 +170,7 @@ public sealed class OutboundConversationStarterTests : IDisposable
     [Fact]
     public async Task StartAsync_ShouldRefuse_WhenAgentHasNoCapacity()
     {
-        _capacity.HasCapacityAsync(_tenantId, _agentId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+        _capacity.TryReserveAsync(_tenantId, _agentId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
             .Returns(false);
 
         var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
@@ -234,20 +230,58 @@ public sealed class OutboundConversationStarterTests : IDisposable
         var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
 
         outcome.RefusalCode.Should().Be(OutboundStartCodes.ChannelSendFailed);
-        await NothingPersistedAsync();
+        await NothingPersistedAsync(unitTakenBeforeSend: true);
     }
 
     [Fact]
-    public async Task StartAsync_ShouldReleaseCapacity_WhenOwnershipCommitFails()
+    public async Task StartAsync_ShouldReturnPersistFailedAndReleaseCapacity_WhenConversationSaveFailsAfterSend()
     {
-        _ownership.FailWith = new InvalidOperationException("ledger unavailable");
+        _conversations.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("conversations table unavailable"));
 
-        var act = () => CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+        var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("ledger unavailable");
-        await _capacity.Received(1).ReserveAsync(_tenantId, _agentId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
-        await _capacity.Received(1).ReleaseAsync(_tenantId, _agentId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
-        await _messages.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+        outcome.RefusalCode.Should().Be(OutboundStartCodes.StartPersistFailed);
+        await _capacity.Received(1).ReleaseAsync(_tenantId, _agentId, ChannelType.WhatsApp, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldReleaseCapacity_WhenCancelledDuringSend()
+    {
+        using var cts = new CancellationTokenSource();
+        _connector.SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>())
+            .Returns<SendResult>(_ =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            });
+
+        var act = () => CreateSut().StartAsync(Request(templateName: "hello_world"), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        await NothingPersistedAsync(unitTakenBeforeSend: true);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldReadWindowPerContact_WhenStartingOnWhatsApp()
+    {
+        _conversations.FindLastInboundAtAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns(_now.AddHours(-23));
+
+        var outcome = await CreateSut().StartAsync(Request(templateName: null), CancellationToken.None);
+
+        outcome.IsRefused.Should().BeFalse("the contact wrote within 24 hours, so free-form text may go out");
+        await _connector.Received(1).SendAsync(Arg.Is<OutboundMessage>(m => m.TemplateId == null), Arg.Any<CancellationToken>());
+        outcome.Message!.Content.Blocks.OfType<TextBlock>().Single().Text.Should().Be("Hello from your agent");
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldStoreTemplateTranscript_WhenTemplateNamed()
+    {
+        var outcome = await CreateSut().StartAsync(
+            Request(templateName: "hello_world") with { TemplateLanguage = "es_MX" }, CancellationToken.None);
+
+        outcome.Message!.Content.Blocks.OfType<TextBlock>().Single().Text.Should().Be("[template hello_world es_MX]");
     }
 
     [Fact]
@@ -262,33 +296,111 @@ public sealed class OutboundConversationStarterTests : IDisposable
             Arg.Any<CancellationToken>());
     }
 
-    [Fact]
-    public async Task StartAsync_ShouldCommitUnderExistingKind_WhenSendSucceeds()
-    {
-        await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+    // ─── fix round: persistence after a successful send ──────────────────────
 
-        var commit = _ownership.Commits.Should().ContainSingle().Subject;
-        commit.Change.Kind.Should().Be(OutboundConversationStarter.OwnNameStartKind);
-        // D14: no new ownership-change kind, so no new ledger kind either.
-        Enum.GetValues<OwnershipChangeKind>().Should().BeEquivalentTo(
-            [OwnershipChangeKind.TakenOver, OwnershipChangeKind.Transferred, OwnershipChangeKind.Reassigned]);
+    [Fact]
+    public async Task StartAsync_ShouldReturnPersistFailedAndReleaseCapacity_WhenMessageSaveFailsAfterSend()
+    {
+        _messages.SaveAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("messages table unavailable"));
+
+        var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        outcome.RefusalCode.Should().Be(OutboundStartCodes.StartPersistFailed);
+        await _conversations.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+        await _capacity.Received(1).ReleaseAsync(_tenantId, _agentId, ChannelType.WhatsApp, CancellationToken.None);
     }
 
-    /// <summary>Records each commit with the conversation's state and owner at commit time, and whether the connector had already been called.</summary>
-    private sealed class RecordingOwnershipWriter(IChannelConnector connector) : ILicensedAgentOwnershipWriter
+    [Fact]
+    public async Task StartAsync_ShouldPersistWithoutCancellation_WhenClientAbortsAfterProviderAccepted()
     {
-        public List<(EntityId Conversation, ConversationState State, ConversationOwner? Owner, OwnershipChange Change, bool ConnectorCalledBefore)> Commits { get; } = [];
+        using var cts = new CancellationTokenSource();
+        _connector.SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                cts.Cancel(); // the client goes away while the provider is accepting the message
+                return new SendResult(true, "wamid.out-1", null, null);
+            });
+        _messages.SaveAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.ArgAt<CancellationToken>(1).IsCancellationRequested
+                ? Task.FromCanceled(ci.ArgAt<CancellationToken>(1))
+                : Task.CompletedTask);
 
-        public Exception? FailWith { get; set; }
+        var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), cts.Token);
 
-        public Task CommitOwnershipAsync(Conversation conversation, OwnershipChange change, CancellationToken ct)
-        {
-            if (FailWith is not null)
-                return Task.FromException(FailWith);
+        outcome.IsRefused.Should().BeFalse("the provider side effect cannot be undone, so persistence completes");
+        outcome.Message!.ExternalMessageId.Should().Be("wamid.out-1");
+        await _conversations.Received(1).SaveAsync(Arg.Any<Conversation>(), CancellationToken.None);
+        await _capacity.DidNotReceiveWithAnyArgs().ReleaseAsync(default, default, default, default);
+    }
 
-            var sent = connector.ReceivedCalls().Any(c => c.GetMethodInfo().Name == nameof(IChannelConnector.SendAsync));
-            Commits.Add((conversation.ConversationId, conversation.State, conversation.Owner, change, sent));
-            return Task.CompletedTask;
-        }
+    [Fact]
+    public async Task StartAsync_ShouldSaveSentMessageRightAfterSend_WhenSendSucceeds()
+    {
+        var calls = new List<string>();
+        _connector.When(c => c.SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>())).Do(_ => calls.Add("send"));
+        _messages.When(m => m.SaveAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>())).Do(_ => calls.Add("message"));
+        _conversations.When(c => c.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())).Do(_ => calls.Add("conversation"));
+        _capacity.WhenForAnyArgs(c => c.TryReserveAsync(default, default, default, default)).Do(_ => calls.Add("reserve"));
+
+        await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        // Meta's sent/delivered callback can arrive as soon as the send returns (design D8): the row it looks for
+        // by provider id is the first write after the send.
+        calls.Should().ContainInOrder("send", "message", "conversation");
+        calls.IndexOf("message").Should().Be(calls.IndexOf("send") + 1);
+    }
+
+    [Theory]
+    [InlineData(ConversationState.WrapUp)]
+    [InlineData(ConversationState.Snoozed)]
+    [InlineData(ConversationState.WaitingForCustomer)]
+    public async Task StartAsync_ShouldRefuseNotSendable_WhenCallerOwnsConversationInState(ConversationState state)
+    {
+        var open = OpenConversation(ConversationOwner.ForAgent(_agentId), state);
+
+        var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        outcome.RefusalCode.Should().Be(OutboundStartCodes.ConversationNotSendable);
+        outcome.OpenConversationId.Should().Be(open.ConversationId);
+        outcome.OpenOwnerKind.Should().Be(ConversationOwnerKind.Agent);
+        await _connector.DidNotReceiveWithAnyArgs().SendAsync(default!, default);
+        await NothingPersistedAsync();
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldCreateOneConversation_WhenSameAgentStartsTwiceConcurrently()
+    {
+        var stored = new System.Collections.Concurrent.ConcurrentDictionary<EntityId, Conversation>();
+        void Store(Conversation c) => stored[c.ConversationId] = c;
+        _conversations.When(c => c.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())).Do(ci => Store(ci.Arg<Conversation>()));
+        _conversations.FindActiveByContactAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns(_ => stored.Values.FirstOrDefault());
+
+        var firstSendEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstSend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sends = 0;
+        _connector.SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>())
+            .Returns(async _ =>
+            {
+                if (Interlocked.Increment(ref sends) == 1)
+                {
+                    firstSendEntered.SetResult();
+                    await releaseFirstSend.Task;
+                }
+                return new SendResult(true, $"wamid.out-{sends}", null, null);
+            });
+
+        var sut = CreateSut();
+        var first = sut.StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+        await firstSendEntered.Task;
+        var second = sut.StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+        await Task.WhenAny(second, Task.Delay(300));
+        releaseFirstSend.SetResult();
+        var outcomes = await Task.WhenAll(first, second);
+
+        stored.Should().ContainSingle("a double submit must not open two conversations with the same contact");
+        outcomes.Select(o => o.Conversation!.ConversationId).Distinct().Should().ContainSingle();
+        outcomes.Count(o => o.Reused).Should().Be(1, "the second start finds the first one's conversation");
     }
 }
