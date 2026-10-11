@@ -652,6 +652,10 @@
           "error",
           "tenantId",
           "partnerTenantId"
+        ],
+        "PartnerGenerateInvoiceResponse": [
+          "invoice",
+          "revenue"
         ]
       }
     },

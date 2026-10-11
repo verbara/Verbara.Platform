@@ -19,6 +19,7 @@ internal static class ManagementBillingEndpoints
         var rc = app.MapGroup("/management/rate-cards").RequireAuthorization("PlatformAdminOnly");
         rc.MapGet("/", ListRateCards);
         rc.MapPost("/", CreateRateCard)
+            .Produces<RateCardDto>(StatusCodes.Status201Created)
             .Produces<CurrencyInvalidRefusal>(StatusCodes.Status400BadRequest);
         rc.MapPut("/{id}", UpdateRateCard);
         rc.MapDelete("/{id}", DeleteRateCard);

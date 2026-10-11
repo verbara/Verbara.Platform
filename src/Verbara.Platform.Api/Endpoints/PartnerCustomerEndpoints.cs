@@ -24,6 +24,7 @@ internal static class PartnerCustomerEndpoints
             .RequireAuthorization("partner:customer:view");
         group.MapPost("/customers", CreateCustomer)
             .RequireAuthorization("partner:customer:create")
+            .Produces<PartnerCustomerDto>(StatusCodes.Status201Created)
             .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
         group.MapGet("/customers/{customerId}", GetCustomer)
             .RequireAuthorization("partner:customer:view");
@@ -37,6 +38,7 @@ internal static class PartnerCustomerEndpoints
             .RequireAuthorization("partner:customer:manage");
         group.MapPut("/customers/{customerId}/settings", UpdateCustomerSettings)
             .RequireAuthorization("partner:customer:manage")
+            .Produces<TenantSettingsDto>(StatusCodes.Status200OK)
             .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
 
         return app;

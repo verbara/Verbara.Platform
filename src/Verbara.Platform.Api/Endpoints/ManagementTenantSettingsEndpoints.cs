@@ -29,6 +29,7 @@ internal static class ManagementTenantSettingsEndpoints
 
         group.MapGet("/", GetSettings);
         group.MapPut("/", UpdateSettings)
+            .Produces<TenantSettingsDto>(StatusCodes.Status200OK)
             .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
     }
 

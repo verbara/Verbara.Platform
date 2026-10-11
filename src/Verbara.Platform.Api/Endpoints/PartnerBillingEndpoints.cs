@@ -22,6 +22,7 @@ internal static class PartnerBillingEndpoints
             .RequireAuthorization("partner:billing:manage");
         group.MapPost("/rate-cards", CreateRateCard)
             .RequireAuthorization("partner:billing:manage")
+            .Produces<RateCardDto>(StatusCodes.Status201Created)
             .Produces<CurrencyInvalidRefusal>(StatusCodes.Status400BadRequest);
         group.MapPut("/rate-cards/{rateCardId}", UpdateRateCard)
             .RequireAuthorization("partner:billing:manage");
@@ -32,6 +33,7 @@ internal static class PartnerBillingEndpoints
             .RequireAuthorization("partner:billing:view");
         group.MapPost("/customers/{customerId}/invoices/generate", GenerateCustomerInvoice)
             .RequireAuthorization("partner:billing:manage")
+            .Produces<PartnerGenerateInvoiceResponse>(StatusCodes.Status201Created)
             .Produces<CurrencyInvalidRefusal>(StatusCodes.Status400BadRequest)
             .Produces<CurrencyMismatchRefusal>(StatusCodes.Status400BadRequest);
         group.MapGet("/customers/{customerId}/usage", GetCustomerUsage)
