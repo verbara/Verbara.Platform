@@ -151,6 +151,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   saved the invoice before it looked up the host tenant and the host's base rate card, so "Platform host
   tenant not found.", "No platform base rate card configured." and a failure to price the platform cost
   each answered 400 with the invoice already stored. Every refusal now comes before the first write.
+- OpenAPI documents the success response again on the seven routes that #367 gave refusal responses.
 
 ### Security
 

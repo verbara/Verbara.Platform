@@ -19,6 +19,7 @@ internal static class ManagementTenantEndpoints
         group.MapGet("/", ListTenants);
         group.MapGet("/{id}", GetTenant);
         group.MapPost("/", CreateTenant)
+            .Produces<MgmtTenantDto>(StatusCodes.Status201Created)
             .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
         group.MapPut("/{id}", UpdateTenant)
             .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
