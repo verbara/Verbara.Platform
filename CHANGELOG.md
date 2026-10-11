@@ -49,7 +49,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   collision). The signal of a missing permission is `[LIVE] Status refused: …` at Warning in the API's
   **start-up** log, because every state load sends `Status`. Platform's Compose `manager.conf` template
   already complies; the AMI user and its reasons are in the voice manual
-  (`docs/manuales/smb/06-canal-voz-sip.md`).
+  (`docs/manuales/smb/06-canal-voz-sip.md`). (#361)
 - **Helm: the Asterisk chart changed in a breaking way.** It now ships Platform's AMI user (the same
   `read`/`write` classes as the Compose template, no `eventfilter`) and its ARI user, and serves ARI on
   port 8088. It needs both passwords at install: pass `asterisk.ami.password` and
@@ -64,7 +64,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   queues and campaigns; wait until `asterisk -rx 'core show channels count'` shows 0 active channels;
   run `kubectl delete pod asterisk-0` (or `kubectl drain --disable-eviction`); uncordon. The pod stays
   `Pending` until its node is back, because its volumes use `local-path` storage. A pod that is not
-  Ready can always be evicted (`unhealthyPodEvictionPolicy: AlwaysAllow`).
+  Ready can always be evicted (`unhealthyPodEvictionPolicy: AlwaysAllow`). (#361)
 
 ### Added
 
@@ -243,18 +243,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   next version cut from `main`)**; per `Verbara.Sdk/ADR-0040` D3 the cascade cuts no version of its
   own. **No floor moved:** `dotnet restore` reported no `NU1605`/`NU1109`, and the per-project
   `project.assets.json` diff by package name moves only the Verbara packages; nothing entered or left
-  the graph.
+  the graph. (#361)
 - **The `OpenTelemetry.Exporter.Prometheus.AspNetCore` pin is removed.** Verbara.Sdk.OpenTelemetry
   `2.8.0` declares the exporter at `1.19.1-beta.1` itself (Sdk #388), so the exporter resolves to the
-  same version without Platform's pin; `GET /metrics` is unchanged and its test stays.
+  same version without Platform's pin; `GET /metrics` is unchanged and its test stays. (#361)
 - **`DeferredPrimaryAmiConnection` forwards `IAmiConnection.Subscribe(Func<ManagerEvent,
   CancellationToken, ValueTask>)`**, the member Sdk `2.8.0` added with a default body (Sdk #391).
   Without the forwarding, a handler subscribed through the wrapper got a token that is never
-  cancelled, so the primary connection's fast close never reached it.
+  cancelled, so the primary connection's fast close never reached it. (#361)
 - **Behaviour Platform takes on — the pool sweep (H142).** `AddVerbaraSessionsMultiServer()` now
   registers the reconciliation sweep for every server, on by default; Platform keeps the Sdk defaults
   (`ReconciliationInterval` 30 s, `DialingTimeout` 60 s). A call the sweep ends carries no hangup
-  cause, so it never triggers a callback-on-drop. Prerequisites and signal: see **Upgrading**.
+  cause, so it never triggers a callback-on-drop. Prerequisites and signal: see **Upgrading**. (#361)
 
 ---
 
