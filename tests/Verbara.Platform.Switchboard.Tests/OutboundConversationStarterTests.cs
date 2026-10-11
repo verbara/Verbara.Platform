@@ -184,13 +184,108 @@ public sealed class OutboundConversationStarterTests : IDisposable
         await NothingPersistedAsync();
     }
 
+    // ─── further refusals and faults (task 7.3) ───────────────────────────────
+
+    [Fact]
+    public async Task StartAsync_ShouldRefuseNoAddress_WhenContactHasNoAddressOnChannel()
+    {
+        var bare = new Contact { ContactId = _contactId, TenantId = _tenantId, CreatedAt = _now };
+        _contacts.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>()).Returns(bare);
+
+        var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        outcome.RefusalCode.Should().Be(OutboundStartCodes.ContactHasNoAddress);
+        await _connector.DidNotReceiveWithAnyArgs().SendAsync(default!, default);
+        await NothingPersistedAsync();
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldRefuseChannelNotAvailable_WhenNoConnectorRegistered()
+    {
+        _channels.AvailableChannels.Returns([ChannelType.WebChat]);
+
+        var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        outcome.RefusalCode.Should().Be(OutboundStartCodes.ChannelNotAvailable);
+        await _connector.DidNotReceiveWithAnyArgs().SendAsync(default!, default);
+        await NothingPersistedAsync();
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldRefuseOpenElsewhere_WhenQueuedUnowned()
+    {
+        var open = OpenConversation(owner: null, ConversationState.Queued);
+
+        var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        outcome.RefusalCode.Should().Be(OutboundStartCodes.ConversationOpenElsewhere);
+        outcome.OpenConversationId.Should().Be(open.ConversationId);
+        outcome.OpenOwnerKind.Should().BeNull("a queued conversation with no owner has no owner kind");
+        await _connector.DidNotReceiveWithAnyArgs().SendAsync(default!, default);
+        await NothingPersistedAsync();
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldPersistNothing_WhenConnectorThrows()
+    {
+        _connector.SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>())
+            .Returns<SendResult>(_ => throw new HttpRequestException("provider unreachable"));
+
+        var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        outcome.RefusalCode.Should().Be(OutboundStartCodes.ChannelSendFailed);
+        await NothingPersistedAsync();
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldReleaseCapacity_WhenOwnershipCommitFails()
+    {
+        _ownership.FailWith = new InvalidOperationException("ledger unavailable");
+
+        var act = () => CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("ledger unavailable");
+        await _capacity.Received(1).ReserveAsync(_tenantId, _agentId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
+        await _capacity.Received(1).ReleaseAsync(_tenantId, _agentId, ChannelType.WhatsApp, Arg.Any<CancellationToken>());
+        await _messages.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldPassTemplateNameAndLanguage_WhenTemplateNamed()
+    {
+        var request = Request(templateName: "hello_world") with { TemplateLanguage = "es_MX" };
+
+        await CreateSut().StartAsync(request, CancellationToken.None);
+
+        await _connector.Received(1).SendAsync(
+            Arg.Is<OutboundMessage>(m => m.TemplateId == "hello_world" && m.TemplateLanguage == "es_MX" && m.To.Address == Address),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldCommitUnderExistingKind_WhenSendSucceeds()
+    {
+        await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        var commit = _ownership.Commits.Should().ContainSingle().Subject;
+        commit.Change.Kind.Should().Be(OutboundConversationStarter.OwnNameStartKind);
+        // D14: no new ownership-change kind, so no new ledger kind either.
+        Enum.GetValues<OwnershipChangeKind>().Should().BeEquivalentTo(
+            [OwnershipChangeKind.TakenOver, OwnershipChangeKind.Transferred, OwnershipChangeKind.Reassigned]);
+    }
+
     /// <summary>Records each commit with the conversation's state and owner at commit time, and whether the connector had already been called.</summary>
     private sealed class RecordingOwnershipWriter(IChannelConnector connector) : ILicensedAgentOwnershipWriter
     {
         public List<(EntityId Conversation, ConversationState State, ConversationOwner? Owner, OwnershipChange Change, bool ConnectorCalledBefore)> Commits { get; } = [];
 
+        public Exception? FailWith { get; set; }
+
         public Task CommitOwnershipAsync(Conversation conversation, OwnershipChange change, CancellationToken ct)
         {
+            if (FailWith is not null)
+                return Task.FromException(FailWith);
+
             var sent = connector.ReceivedCalls().Any(c => c.GetMethodInfo().Name == nameof(IChannelConnector.SendAsync));
             Commits.Add((conversation.ConversationId, conversation.State, conversation.Owner, change, sent));
             return Task.CompletedTask;
