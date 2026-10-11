@@ -36,23 +36,18 @@ public sealed class SuccessResponseCaptureTests
     {
         var doc = await FetchOpenApiDocumentAsync();
 
-        var operationCount = 0;
-        var violators = new List<string>();
-        foreach (var (path, item) in doc["paths"]!.AsObject())
-        {
-            foreach (var method in HttpMethods)
-            {
-                if (item![method]?["responses"] is not JsonObject responses)
-                    continue;
+        var operations = doc["paths"]!.AsObject()
+            .SelectMany(p => HttpMethods.Select(m => (Key: $"{m.ToUpperInvariant()} {p.Key}", Responses: p.Value![m]?["responses"] as JsonObject)))
+            .Where(op => op.Responses is not null)
+            .Select(op => (op.Key, Codes: op.Responses!.Select(kvp => kvp.Key).ToList()))
+            .ToList();
 
-                operationCount++;
-                var codes = responses.Select(kvp => kvp.Key).ToList();
-                if (codes.Exists(c => c.StartsWith('4')) && !codes.Exists(c => c.StartsWith('2')))
-                    violators.Add($"{method.ToUpperInvariant()} {path} [{string.Join(", ", codes)}]");
-            }
-        }
+        operations.Should().HaveCountGreaterThan(100, "the guard must measure a real document, not an empty one");
 
-        operationCount.Should().BeGreaterThan(100, "the guard must measure a real document, not an empty one");
+        var violators = operations
+            .Where(op => op.Codes.Exists(c => c.StartsWith('4')) && !op.Codes.Exists(c => c.StartsWith('2')))
+            .Select(op => $"{op.Key} [{string.Join(", ", op.Codes)}]")
+            .ToList();
 
         var unexpected = violators.Where(v => !PreExistingViolators.Contains(OperationKey(v))).ToList();
         unexpected.Should().BeEmpty(
