@@ -33,8 +33,11 @@ public static class DigitalChannelsExtensions
         services.AddWebChat();
 
         // Every WhatsApp credential is per tenant (TenantChannelConfig, keys in WhatsAppCredentialKeys):
-        // no process-wide option is bound, so a tenant without its own AppSecret is ignored (fail-closed).
-        services.AddWhatsApp(static _ => { });
+        // no process-wide credential exists, so a tenant without its own AppSecret is ignored (fail-closed).
+        // The one process-wide value is the Graph API base address (DQ13), read explicitly — no reflection
+        // options binding — and validated here, so a bad value fails registration instead of the first send.
+        var whatsAppBaseUrl = WhatsAppBaseUrl.Resolve(configuration[WhatsAppBaseUrl.ConfigurationKey]);
+        services.AddWhatsApp(o => o.BaseUrl = whatsAppBaseUrl);
 
         // What a verified webhook delivery does once stored: idempotent side effects, isolated per message.
         services.AddScoped<WebhookInboundProcessor>();
