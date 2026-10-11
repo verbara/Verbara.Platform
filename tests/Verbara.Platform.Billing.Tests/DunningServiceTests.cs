@@ -1,3 +1,4 @@
+using NSubstitute.ReturnsExtensions;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
@@ -276,7 +277,7 @@ public class DunningServiceTests
 
         var invoice = MakeIssuedInvoice("pc1", FixedNow.AddDays(-3));
         invoiceStore.ListByStatusAsync(InvoiceStatus.Issued, Arg.Any<CancellationToken>()).Returns([invoice]);
-        dunningStore.GetByInvoiceAsync(invoice.InvoiceId.Value, Arg.Any<CancellationToken>()).Returns((DunningRecord?)null);
+        dunningStore.GetByInvoiceAsync(invoice.InvoiceId.Value, Arg.Any<CancellationToken>()).ReturnsNull();
         dunningStore.ListActiveAsync(Arg.Any<CancellationToken>()).Returns([]);
 
         var (svc, _) = Build(invoiceStore, dunningStore, tenantStore, clock);

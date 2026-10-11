@@ -30,7 +30,7 @@ public sealed class RateCardSettlementCurrencyTests : IClassFixture<PartnerApiFa
         name,
         currency,
         effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1),
-        effectiveTo = (DateTimeOffset?)null,
+        effectiveTo = default(DateTimeOffset?),
         isDefault = false,
         rates = new[] { new { usageType = "VoiceInbound", unitPrice = 0.01m, includedQuantity = 0m } },
     };

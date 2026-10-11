@@ -1,4 +1,5 @@
 using NSubstitute;
+using NSubstitute.ReturnsExtensions;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
 
@@ -81,7 +82,7 @@ public sealed class PartnerHierarchyAndPlanResolutionTests
     {
         var store = Substitute.For<ITenantStore>();
 #pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
-        store.GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((Tenant?)null);
+        store.GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).ReturnsNull();
         foreach (var tenant in tenants)
             store.GetAsync(tenant.TenantId, Arg.Any<CancellationToken>()).Returns(tenant);
 #pragma warning restore CA2012

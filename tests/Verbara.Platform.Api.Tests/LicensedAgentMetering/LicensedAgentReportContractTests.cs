@@ -153,10 +153,10 @@ public sealed class LicensedAgentReportContractTests
 
         // The tenant map as the reader reports it: a tenant with a null type is a row that no longer exists.
         var tenants = new Dictionary<string, LicensedAgentTenantRef>(StringComparer.Ordinal);
-        foreach (var tenant in fixture["tenants"]!.AsArray())
+        foreach (var tenant in fixture["tenants"]!.AsArray().Where(t => Text(t!["tenantType"]) is not null))
         {
-            if (Text(tenant!["tenantType"]) is { } type)
-                tenants[Text(tenant["tenantId"])!] = new LicensedAgentTenantRef(Text(tenant["tenantId"])!, type, Text(tenant["parentTenantId"]));
+            tenants[Text(tenant!["tenantId"])!] = new LicensedAgentTenantRef(
+                Text(tenant["tenantId"])!, Text(tenant["tenantType"])!, Text(tenant["parentTenantId"]));
         }
 
         events.Reverse();
