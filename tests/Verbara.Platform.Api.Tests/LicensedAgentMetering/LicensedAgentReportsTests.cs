@@ -71,11 +71,13 @@ public sealed class LicensedAgentReportsTests
     };
 
     private static LicensedAgentPeaksResponse Peaks(IEnumerable<LicenseAgentDaily> rows, LicensedAgentLicenseDto? license = null,
-        IReadOnlyDictionary<string, string>? names = null) =>
+        IReadOnlyDictionary<string, LicensedAgentTenantRef>? tenants = null) =>
         LicensedAgentReports.BuildPeaks(
             new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30),
-            new LicensedAgentPeaksData("UTC", rows.ToList(), names ?? new Dictionary<string, string>(), []),
+            new LicensedAgentPeaksData("UTC", rows.ToList(), tenants ?? new Dictionary<string, LicensedAgentTenantRef>(), []),
             license ?? Undeclared);
+
+    private static LicensedAgentTenantRef Ref(string name, string type, string? parent) => new(name, type, parent);
 
     [Fact]
     public void BuildPeaks_ShouldReportTheLatestRevisionOfEachDay()
@@ -100,7 +102,9 @@ public sealed class LicensedAgentReportsTests
             Daily(null, new DateOnly(2026, 9, 2), 20), Daily(null, new DateOnly(2026, 9, 5), 7),
         ]);
 
-        response.Deployment.Should().Be(new LicensedAgentDeploymentPeakDto(20, new DateOnly(2026, 9, 2), false));
+        response.Deployment.PeakLicensedAgents.Should().Be(20);
+        response.Deployment.PeakDay.Should().Be(new DateOnly(2026, 9, 2));
+        response.Deployment.OverBand.Should().BeFalse();
         response.Days.Select(d => d.Day.Day).Should().Equal(2, 3, 5, 9);
     }
 
@@ -122,7 +126,10 @@ public sealed class LicensedAgentReportsTests
     {
         var response = Peaks([], new LicensedAgentLicenseDto("lic", "Owner", "Developer", 5, true));
 
-        response.Deployment.Should().Be(new LicensedAgentDeploymentPeakDto(0, null, false));
+        response.Deployment.PeakLicensedAgents.Should().Be(0);
+        response.Deployment.PeakDay.Should().BeNull();
+        response.Deployment.OverBand.Should().BeFalse();
+        response.Deployment.PartnerSubtotals.Should().BeEmpty();
         response.Days.Should().BeEmpty();
     }
 
@@ -142,9 +149,10 @@ public sealed class LicensedAgentReportsTests
         var d = new DateOnly(2026, 9, 4);
         var response = Peaks(
             [Daily(null, d, 3), Daily("c1", d, 2), Daily("gone", d, 1)],
-            names: new Dictionary<string, string> { ["c1"] = "Acme Support" });
+            tenants: new Dictionary<string, LicensedAgentTenantRef> { ["c1"] = Ref("Acme Support", "Customer", "platform") });
 
         response.Days.Single().Tenants.Select(t => t.TenantName).Should().Equal("Acme Support", "gone");
+        response.Days.Single().Tenants.Select(t => t.ParentTenantId).Should().Equal("platform", null);
     }
 
     [Fact]
@@ -173,7 +181,8 @@ public sealed class LicensedAgentReportsTests
             new LicensedAgentExportData("UTC",
                 [Event(null, 2), Event("c2", 1), Event("c1", 2), Event(null, 1), Event("c1", 1)],
                 [],
-                [new LicenseAgentChainHead(null, 2, "h", null), new LicenseAgentChainHead("c2", 1, "h", null), new LicenseAgentChainHead("c1", 2, "h", null)]),
+                [new LicenseAgentChainHead(null, 2, "h", null), new LicenseAgentChainHead("c2", 1, "h", null), new LicenseAgentChainHead("c1", 2, "h", null)],
+                new Dictionary<string, LicensedAgentTenantRef>()),
             Undeclared,
             DateTimeOffset.UnixEpoch);
 
@@ -181,5 +190,82 @@ public sealed class LicensedAgentReportsTests
         export.ChainHeads.Select(h => h.TenantId).Should().Equal("c1", "c2", null);
         export.HashScheme.Should().Be("lac1");
         export.SchemaVersion.Should().Be(1);
+    }
+
+    // ─── partner-channel-pilot-fixes P5 (licensed-agent-reporting, design D8/D9) ──────
+
+    private static readonly Dictionary<string, LicensedAgentTenantRef> Hierarchy = new(StringComparer.Ordinal)
+    {
+        ["platform"] = Ref("Verbara", "Platform", null),
+        ["p1"] = Ref("Reseller One", "Partner", "platform"),
+        ["pc1"] = Ref("Partner Customer 1", "Customer", "p1"),
+        ["pc2"] = Ref("Partner Customer 2", "Customer", "p1"),
+        ["dc1"] = Ref("Direct Customer", "Customer", "platform"),
+    };
+
+    [Fact]
+    public void BuildPeaks_ShouldSubtotalPartnersOnPeakDay_NotPerTenantPeaks()
+    {
+        var d1 = new DateOnly(2026, 9, 1);
+        var d2 = new DateOnly(2026, 9, 2);
+        var response = Peaks(
+            [
+                Daily(null, d1, 42), Daily("pc1", d1, 10), Daily("pc2", d1, 2), Daily("dc1", d1, 30),
+                Daily(null, d2, 47), Daily("pc1", d2, 3), Daily("pc2", d2, 9), Daily("dc1", d2, 35),
+            ],
+            tenants: Hierarchy);
+
+        response.Deployment.PeakDay.Should().Be(d2);
+        response.Deployment.PartnerSubtotals.Should().Equal(new LicensedAgentPartnerSubtotalDto("p1", "Reseller One", 12));
+        response.Days[^1].Tenants.Single(t => t.TenantId == "dc1").ParentTenantId.Should().Be("platform",
+            "a direct Customer names the Platform tenant and contributes to no subtotal");
+    }
+
+    [Fact]
+    public void BuildPeaks_ShouldReturnEmptyPartnerSubtotals_WhenNoDayClosed()
+    {
+        Peaks([Daily("pc1", new DateOnly(2026, 9, 1), 4)], tenants: Hierarchy).Deployment.PartnerSubtotals.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildPeaks_ShouldReturnEmptyPartnerSubtotals_WhenOnlyDirectCustomersHaveRowsOnThePeakDay()
+    {
+        var d = new DateOnly(2026, 9, 3);
+        Peaks([Daily(null, d, 5), Daily("dc1", d, 5)], tenants: Hierarchy).Deployment.PartnerSubtotals.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildPeaks_ShouldKeepEveryRowHash_WhenParentTenantIdAdded()
+    {
+        var d = new DateOnly(2026, 9, 4);
+        var rows = new[] { Daily(null, d, 13), Daily("pc1", d, 3), Daily("dc1", d, 10) };
+
+        var without = Peaks(rows);
+        var with = Peaks(rows, tenants: Hierarchy);
+
+        with.Days.Select(x => x.DeploymentRowHash).Should().Equal(without.Days.Select(x => x.DeploymentRowHash));
+        with.Days.SelectMany(x => x.Tenants).Select(t => (t.TenantId, t.RowHash))
+            .Should().Equal(without.Days.SelectMany(x => x.Tenants).Select(t => (t.TenantId, t.RowHash)));
+        with.Days.Single().Tenants.Select(t => t.ParentTenantId).Should().Equal("platform", "p1");
+    }
+
+    [Fact]
+    public void BuildExport_ShouldCloseTenantMapOverParents()
+    {
+        var export = LicensedAgentReports.BuildExport(
+            new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30),
+            new LicensedAgentExportData("UTC", [], [],
+                [new LicenseAgentChainHead("pc1", 1, "h", null), new LicenseAgentChainHead("dc1", 1, "h", null),
+                 new LicenseAgentChainHead("gone", 1, "h", null), new LicenseAgentChainHead(null, 1, "h", null)],
+                Hierarchy),
+            Undeclared,
+            DateTimeOffset.UnixEpoch);
+
+        export.Tenants.Should().Equal(
+            new LicensedAgentExportTenantDto("dc1", "Customer", "platform"),
+            new LicensedAgentExportTenantDto("gone", null, null),
+            new LicensedAgentExportTenantDto("p1", "Partner", "platform"),
+            new LicensedAgentExportTenantDto("pc1", "Customer", "p1"),
+            new LicensedAgentExportTenantDto("platform", "Platform", null));
     }
 }

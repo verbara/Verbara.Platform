@@ -1,0 +1,18 @@
+{
+  "_comment": "Golden wire shapes for the settlement-currency refusals (partner-channel-pilot-fixes, owner decision 6; capability rate-card-settlement-currency). Both are HTTP 400, application/json. Body convention (Platform ErrorResponse, read by Web's ApiError, Web ADR-0013): `error` carries ONLY a kebab-case machine code, never prose and never a separate `code` field; the extra fields are typed members of a sealed record whose first property is Error (precedent: ConversationStartRefusal), registered in ApiJsonContext. Nullable fields are always written, never omitted. (1) invalidCurrency (error currency-invalid) answers a rate-card write whose `currency` is not an active ISO 4217 alphabetic code after trimming and upper-casing: POST /api/v1/management/rate-cards, PUT /api/v1/management/rate-cards/{id}, POST /api/v1/partner/rate-cards and PUT /api/v1/partner/rate-cards/{rateCardId}. Nothing is saved. The same body answers POST /api/v1/partner/customers/{customerId}/invoices/generate when the Partner card or the host base card holds a stored currency that is not ISO 4217 (a legacy row); `currency` is the offending value as received or stored (string|null). A valid code is stored and echoed in its canonical upper-case form (`usd` is stored as `USD`). (2) currencyMismatch (error currency-mismatch) answers POST /api/v1/partner/customers/{customerId}/invoices/generate when the Partner's active card currency differs from the host's active base card currency; partnerCurrency and hostCurrency are both canonical codes. There is no FX: one settlement currency per deployment, and the Partner bills locally outside Verbara. Both refusals happen BEFORE any invoice or partner-revenue row is written. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "invalidCurrency": {
+    "status": 400,
+    "body": {
+      "error": "currency-invalid",
+      "currency": "banana"
+    }
+  },
+  "currencyMismatch": {
+    "status": 400,
+    "body": {
+      "error": "currency-mismatch",
+      "partnerCurrency": "PEN",
+      "hostCurrency": "USD"
+    }
+  }
+}

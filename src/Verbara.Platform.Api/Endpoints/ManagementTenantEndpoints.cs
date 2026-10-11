@@ -18,7 +18,8 @@ internal static class ManagementTenantEndpoints
 
         group.MapGet("/", ListTenants);
         group.MapGet("/{id}", GetTenant);
-        group.MapPost("/", CreateTenant);
+        group.MapPost("/", CreateTenant)
+            .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
         group.MapPut("/{id}", UpdateTenant);
         group.MapPost("/{id}/suspend", SuspendTenant);
         group.MapPost("/{id}/activate", ActivateTenant);
@@ -130,7 +131,23 @@ internal static class ManagementTenantEndpoints
         if (body.Template is not null && !TenantProvisioningTemplates.ValidTemplateNames.Contains(body.Template))
             return Results.BadRequest(new ErrorResponse($"Invalid template '{body.Template}'. Valid: support, sales, blended."));
 
-        var metadata = body.Metadata ?? new Dictionary<string, string>();
+        // Plan at birth (design D15): no metadata.Plan inherits the parent's plan; an unknown name is a 400; a plan
+        // above the parent's is a 409 plan-exceeds-parent — all before the upsert.
+        var metadata = body.Metadata is null
+            ? new Dictionary<string, string>()
+            : new Dictionary<string, string>(body.Metadata);
+        var resolution = TenantPlanResolution.Resolve(parent, metadata.GetValueOrDefault("Plan"));
+        switch (resolution.Kind)
+        {
+            case TenantPlanResolutionKind.UnknownName:
+                return Results.BadRequest(new ErrorResponse(
+                    $"Unknown plan '{metadata["Plan"]}' in metadata. Valid: Starter, Pro, Enterprise."));
+            case TenantPlanResolutionKind.AboveParent:
+                return Results.Conflict(PlanAboveParentRefusal.For(
+                    resolution.Plan.ToString(), resolution.ParentPlan.ToString(), parent.TenantId));
+        }
+
+        metadata["Plan"] = resolution.Plan.ToString();
         if (body.Template is not null)
             metadata["OnboardingTemplate"] = body.Template;
 

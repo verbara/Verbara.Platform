@@ -1,3 +1,4 @@
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
@@ -27,7 +28,8 @@ internal static class ManagementTenantSettingsEndpoints
             .RequireAuthorization("PlatformAdminOnly");
 
         group.MapGet("/", GetSettings);
-        group.MapPut("/", UpdateSettings);
+        group.MapPut("/", UpdateSettings)
+            .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
     }
 
     private static async Task<Results<Ok<TenantSettingsDto>, NotFound>> GetSettings(

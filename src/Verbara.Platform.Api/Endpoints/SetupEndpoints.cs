@@ -115,8 +115,15 @@ internal static class SetupEndpoints
         // sequence transactional remains a possible follow-up.
         // Spec: docs/specs/2026-05-30-setup-multitenant-platform-customer.md
 
-        // 1. Create host tenant (upsert — a retry over a half-written install adopts it)
+        // 1. Create host tenant (upsert — a retry over a half-written install adopts it). The host is born on
+        //    Enterprise (partner-channel-pilot-fixes, design D6); a repair re-POST keeps any other metadata the
+        //    existing host row already holds and merges the plan into it.
         var hostTenantId = HostTenantId;
+        var existingHost = await tenantStore.GetAsync(hostTenantId, ct);
+        var hostMetadata = existingHost?.Metadata is { } held
+            ? new Dictionary<string, string>(held)
+            : new Dictionary<string, string>();
+        hostMetadata["Plan"] = nameof(TenantPlan.Enterprise);
         var hostTenant = new Tenant
         {
             TenantId = hostTenantId,
@@ -124,6 +131,7 @@ internal static class SetupEndpoints
             Status = TenantStatus.Active,
             Type = TenantType.Platform,
             ParentTenantId = null,
+            Metadata = hostMetadata,
             CreatedAt = clock.UtcNow,
             UpdatedAt = clock.UtcNow,
         };
@@ -213,7 +221,9 @@ internal static class SetupEndpoints
         // 5. Generate JWT for the new platform admin
         var (accessToken, _) = jwtTokenService.GenerateAccessToken(user);
 
-        // 6. Create the operational Customer tenant (Type=Customer, parent=platform)
+        // 6. Create the operational Customer tenant (Type=Customer, parent=platform), born on the host's plan
+        //    (design D15: a tenant created without a plan inherits its parent's).
+        var customerPlan = TenantPlanResolution.Resolve(hostTenant, requested: null).Plan;
         var customerTenant = new Tenant
         {
             TenantId = customerTenantIdNormalized,
@@ -226,6 +236,7 @@ internal static class SetupEndpoints
                 MaxConcurrentChannels = 100,
                 MaxActiveCampaigns = 10,
             },
+            Metadata = new Dictionary<string, string> { ["Plan"] = customerPlan.ToString() },
             CreatedAt = clock.UtcNow,
             UpdatedAt = clock.UtcNow,
         };

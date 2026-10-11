@@ -3,6 +3,7 @@ using Npgsql;
 using NpgsqlTypes;
 using Verbara.Platform.Queues.Licensing;
 using Verbara.Sdk.Data.Npgsql;
+using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Storage.Postgres.Licensing;
 
@@ -55,21 +56,10 @@ internal sealed class PostgresLicensedAgentReportReader : ILicensedAgentReportRe
                 daily.Add(LicenseAgentRows.MapDaily(reader));
         }
 
-        var tenantIds = daily.Select(d => d.TenantId).OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
-        var names = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (tenantIds.Length > 0)
-        {
-            await using var cmd = new NpgsqlCommand(
-                "SELECT tenant_id, name FROM tenants WHERE tenant_id = ANY(@Ids)", conn, tx);
-            cmd.Parameters.Add(new NpgsqlParameter("Ids", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = tenantIds });
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-                names[reader.GetString("tenant_id")] = reader.GetString("name");
-        }
-
+        var tenants = await TenantsAsync(conn, tx, daily.Select(d => d.TenantId), ct).ConfigureAwait(false);
         var heads = await HeadsAsync(conn, tx, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
-        return new LicensedAgentPeaksData(zone, daily, names, heads);
+        return new LicensedAgentPeaksData(zone, daily, tenants, heads);
     }
 
     public async Task<LicensedAgentExportData> ReadExportAsync(
@@ -122,8 +112,11 @@ internal sealed class PostgresLicensedAgentReportReader : ILicensedAgentReportRe
                 r => daily.Add(LicenseAgentRows.MapDaily(r)), ct).ConfigureAwait(false);
         }
 
+        var tenants = await TenantsAsync(
+            conn, tx, events.Select(e => e.TenantId).Concat(daily.Select(d => d.TenantId)).Concat(heads.Select(h => h.TenantId)), ct)
+            .ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
-        return new LicensedAgentExportData(zoneId, events, daily, heads);
+        return new LicensedAgentExportData(zoneId, events, daily, heads, tenants);
     }
 
     private const string EventColumns =
@@ -148,6 +141,36 @@ internal sealed class PostgresLicensedAgentReportReader : ILicensedAgentReportRe
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
             map(reader);
+    }
+
+    // partner-channel-pilot-fixes (design D10): the named tenants and every parent above them (the hierarchy is at
+    // most three deep), with type and parent, read inside the report's snapshot. tenants.type is the TenantType value.
+    private const string TenantClosure =
+        "WITH RECURSIVE t AS (" +
+        "SELECT tenant_id, name, type, parent_tenant_id FROM tenants WHERE tenant_id = ANY(@Ids) " +
+        "UNION SELECT p.tenant_id, p.name, p.type, p.parent_tenant_id FROM tenants p JOIN t ON p.tenant_id = t.parent_tenant_id" +
+        ") SELECT tenant_id, name, type, parent_tenant_id FROM t";
+
+    private static async Task<Dictionary<string, LicensedAgentTenantRef>> TenantsAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, IEnumerable<string?> tenantIds, CancellationToken ct)
+    {
+        var tenants = new Dictionary<string, LicensedAgentTenantRef>(StringComparer.Ordinal);
+        var ids = tenantIds.OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
+        if (ids.Length == 0)
+            return tenants;
+
+        await using var cmd = new NpgsqlCommand(TenantClosure, conn, tx);
+        cmd.Parameters.Add(new NpgsqlParameter("Ids", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = ids });
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            tenants[reader.GetString("tenant_id")] = new LicensedAgentTenantRef(
+                reader.GetString("name"),
+                ((TenantType)reader.GetInt32("type")).ToString(),
+                reader.GetStringOrNull("parent_tenant_id"));
+        }
+
+        return tenants;
     }
 
     private static async Task<NpgsqlTransaction> BeginSnapshotAsync(NpgsqlConnection conn, CancellationToken ct)

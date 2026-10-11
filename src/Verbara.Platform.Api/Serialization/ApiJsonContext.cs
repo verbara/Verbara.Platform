@@ -409,6 +409,11 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ComplianceSummaryResponse))]
 // Shared response DTOs
 [JsonSerializable(typeof(ErrorResponse))]
+// partner-channel-pilot-fixes (design D4) — typed refusals: rate-card currency, plan ceiling, dunning on a Partner's Customer.
+[JsonSerializable(typeof(CurrencyInvalidRefusal))]
+[JsonSerializable(typeof(CurrencyMismatchRefusal))]
+[JsonSerializable(typeof(PlanAboveParentRefusal))]
+[JsonSerializable(typeof(DunningPartnerCustomerRefusal))]
 [JsonSerializable(typeof(TenantTypeMismatchProblem))]  // ADR-0027 — operational tenant-type gate response
 [JsonSerializable(typeof(ErrorDetailResponse))]
 [JsonSerializable(typeof(MessageResponse))]

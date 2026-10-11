@@ -73,8 +73,9 @@ internal static class PartnerSettingsEndpoints
         if (callerTenantId is null)
             return Results.Forbid();
 
-        // Partners can only update Operational and Auth settings — strip everything else
-        var sanitized = body with { Plan = null, Quotas = null, RateLimitTier = null, AddOns = null };
+        // Partners can only update Operational (minus the host-only nodeAffinity) and Auth settings — strip everything else
+        var sanitized = TenantSettingsEndpoints.StripHostOnlyOperational(
+            body with { Plan = null, Quotas = null, RateLimitTier = null, AddOns = null });
 
         var actorName = context.User.Identity?.Name ?? "unknown";
         var error = await TenantSettingsEndpoints.ApplyUpdates(

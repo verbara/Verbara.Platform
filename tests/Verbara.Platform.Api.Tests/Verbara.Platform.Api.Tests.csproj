@@ -41,6 +41,9 @@
     <!-- licensed-agent-metering slice 3: the frozen wire shapes of the peaks report and the export, copied
          verbatim from the change's cross-repo contract (impact.yaml fixtures) for the contract tests. -->
     <None Include="LicensedAgentMetering/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- partner-channel-pilot-fixes: the frozen refusal bodies (rate-card currency, plan ceiling, dunning on a
+         Partner's Customer), copied verbatim from the change's cross-repo contract fixtures. -->
+    <None Include="PartnerChannel/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

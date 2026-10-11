@@ -558,7 +558,8 @@
           "license",
           "events",
           "daily",
-          "chainHeads"
+          "chainHeads",
+          "tenants"
         ],
         "LicensedAgentLicenseDto": [
           "licenseId",
@@ -570,7 +571,13 @@
         "LicensedAgentDeploymentPeakDto": [
           "peakLicensedAgents",
           "peakDay",
-          "overBand"
+          "overBand",
+          "partnerSubtotals"
+        ],
+        "LicensedAgentPartnerSubtotalDto": [
+          "partnerTenantId",
+          "partnerTenantName",
+          "licensedAgents"
         ],
         "LicensedAgentDayDto": [
           "day",
@@ -581,6 +588,7 @@
         "LicensedAgentTenantDayDto": [
           "tenantId",
           "tenantName",
+          "parentTenantId",
           "licensedAgents",
           "revision",
           "closedAt",
@@ -619,6 +627,31 @@
           "licenseId",
           "prevHash",
           "rowHash"
+        ],
+        "LicensedAgentExportTenantDto": [
+          "tenantId",
+          "tenantType",
+          "parentTenantId"
+        ],
+        "CurrencyInvalidRefusal": [
+          "error",
+          "currency"
+        ],
+        "CurrencyMismatchRefusal": [
+          "error",
+          "partnerCurrency",
+          "hostCurrency"
+        ],
+        "PlanAboveParentRefusal": [
+          "error",
+          "requestedPlan",
+          "parentPlan",
+          "parentTenantId"
+        ],
+        "DunningPartnerCustomerRefusal": [
+          "error",
+          "tenantId",
+          "partnerTenantId"
         ]
       }
     },

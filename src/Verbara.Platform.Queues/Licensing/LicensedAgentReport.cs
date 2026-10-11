@@ -4,25 +4,38 @@ namespace Verbara.Platform.Queues.Licensing;
 public sealed record LicenseAgentChainHead(string? TenantId, long HeadSequence, string HeadHash, string? LicenseId);
 
 /// <summary>
+/// A tenant as the reports see it when they are read (partner-channel-pilot-fixes, design D10): its name, its
+/// <see cref="Type"/> as a tenant-type name (<c>Platform</c>, <c>Partner</c> or <c>Customer</c>) and its parent. A
+/// tenant whose row no longer exists has no entry at all.
+/// </summary>
+public sealed record LicensedAgentTenantRef(string Name, string Type, string? ParentTenantId)
+{
+    /// <summary>The tenant-type name of a Partner.</summary>
+    public const string PartnerType = "Partner";
+}
+
+/// <summary>
 /// What the peaks report reads in one consistent snapshot (licensed-agent-reporting): the day zone, every
 /// daily row of the range (the reader may return only the latest revision of each chain and day, or all of
-/// them), the names of the tenants those rows name, and every chain head.
+/// them), the tenants those rows name with every parent above them (<see cref="Tenants"/>), and every chain head.
 /// </summary>
 public sealed record LicensedAgentPeaksData(
     string DayZone,
     IReadOnlyList<LicenseAgentDaily> Daily,
-    IReadOnlyDictionary<string, string> TenantNames,
+    IReadOnlyDictionary<string, LicensedAgentTenantRef> Tenants,
     IReadOnlyList<LicenseAgentChainHead> ChainHeads);
 
 /// <summary>
 /// What the export reads in one consistent snapshot: the day zone, each chain's rows selected by
-/// <see cref="LicensedAgentExportSpan"/> (events and daily rows, every revision), and every chain head.
+/// <see cref="LicensedAgentExportSpan"/> (events and daily rows, every revision), every chain head, and the
+/// tenants those rows and heads name with every parent above them (<see cref="Tenants"/>, read in the same snapshot).
 /// </summary>
 public sealed record LicensedAgentExportData(
     string DayZone,
     IReadOnlyList<LicenseAgentEvent> Events,
     IReadOnlyList<LicenseAgentDaily> Daily,
-    IReadOnlyList<LicenseAgentChainHead> ChainHeads);
+    IReadOnlyList<LicenseAgentChainHead> ChainHeads,
+    IReadOnlyDictionary<string, LicensedAgentTenantRef> Tenants);
 
 /// <summary>
 /// The read side of the licensed-agent ledger behind <c>GET /management/licensing/agents</c> and its export

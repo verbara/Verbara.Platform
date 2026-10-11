@@ -231,8 +231,8 @@ internal static class TenantSettingsEndpoints
         if (tenantId is null)
             return Results.Unauthorized();
 
-        // AdminOnly cannot write quotas, rateLimitTier, plan, or addOns — strip them
-        var sanitized = body with { Quotas = null, RateLimitTier = null, Plan = null, AddOns = null };
+        // AdminOnly cannot write quotas, rateLimitTier, plan, addOns or the host-only nodeAffinity — strip them
+        var sanitized = StripHostOnlyOperational(body with { Quotas = null, RateLimitTier = null, Plan = null, AddOns = null });
 
         var actorName = context.User.Identity?.Name ?? "unknown";
         var error = await ApplyUpdates(tenantId, sanitized, tenantStore, authConfigStore, quotaStore, retentionStore,
@@ -374,6 +374,29 @@ internal static class TenantSettingsEndpoints
             Branding: brandingDto);
     }
 
+    /// <summary>
+    /// The 409 body when <paramref name="requestedPlan"/> is above the plan of <paramref name="tenantId"/>'s parent
+    /// (partner-channel-tenancy); null when the tenant, its parent or the conflict does not exist.
+    /// </summary>
+    internal static async Task<PlanAboveParentRefusal?> PlanAboveParentAsync(
+        string tenantId, TenantPlan requestedPlan, ITenantStore tenantStore, CancellationToken ct)
+    {
+        var tenant = await tenantStore.GetAsync(tenantId, ct);
+        if (tenant?.ParentTenantId is not { } parentId)
+            return null;
+        var parent = await tenantStore.GetAsync(parentId, ct);
+        if (parent is null || requestedPlan <= parent.GetPlan())
+            return null;
+        return PlanAboveParentRefusal.For(requestedPlan.ToString(), parent.GetPlan().ToString(), parent.TenantId);
+    }
+
+    /// <summary>
+    /// The settings a non-host caller sends with the host-only operational knobs removed (design D7):
+    /// <c>NodeAffinity</c> is placement, which only the host writes. Null means "leave unchanged" in ApplyUpdates.
+    /// </summary>
+    internal static UpdateTenantSettingsRequest StripHostOnlyOperational(UpdateTenantSettingsRequest body) =>
+        body.Operational is null ? body : body with { Operational = body.Operational with { NodeAffinity = null } };
+
     internal static async Task<IResult?> ApplyUpdates(
         string tenantId,
         UpdateTenantSettingsRequest body,
@@ -389,6 +412,14 @@ internal static class TenantSettingsEndpoints
         IServiceProvider? sp = null,
         string actorName = "unknown")
     {
+        // partner-channel-pilot-fixes (design D5): the plan ceiling is checked before ANY write of the request —
+        // a plan above the parent's is a conflict (409 plan-exceeds-parent), and no other field is saved.
+        if (body.Plan is { } requestedPlan
+            && await PlanAboveParentAsync(tenantId, requestedPlan, tenantStore, ct) is { } refusal)
+        {
+            return Results.Conflict(refusal);
+        }
+
         if (body.Operational is not null || body.RateLimitTier is not null || body.Plan is not null)
         {
             var tenant = await tenantStore.GetAsync(tenantId, ct);
@@ -404,14 +435,7 @@ internal static class TenantSettingsEndpoints
 
                 if (body.Plan is { } newPlan)
                 {
-                    // Hierarchy ceiling: child cannot exceed parent plan
-                    if (tenant.ParentTenantId is not null)
-                    {
-                        var parent = await tenantStore.GetAsync(tenant.ParentTenantId, ct);
-                        if (parent is not null && parent.GetPlan() < newPlan)
-                            return null; // Silently skip — validation should be done at endpoint level
-                    }
-
+                    // The hierarchy ceiling was enforced above, before any write.
                     newMetadata["Plan"] = newPlan.ToString();
 
                     // Derive tier from plan if no manual override

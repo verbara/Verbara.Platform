@@ -67,7 +67,10 @@ public sealed class LicensedAgentReportContractTests
     {
         var fixture = Fixture("licensed-agent-peaks.v1.json");
         var rows = new List<LicenseAgentDaily>();
-        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        var tenants = new Dictionary<string, LicensedAgentTenantRef>(StringComparer.Ordinal);
+        // The Partners the fixture subtotals, as the reader reports them (partner-channel-pilot-fixes, design D10).
+        foreach (var partner in fixture["deployment"]!["partnerSubtotals"]!.AsArray())
+            tenants[Text(partner!["partnerTenantId"])!] = new LicensedAgentTenantRef(Text(partner["partnerTenantName"])!, "Partner", "platform");
         foreach (var day in fixture["days"]!.AsArray())
         {
             var d = Day(day!["day"]);
@@ -81,14 +84,15 @@ public sealed class LicensedAgentReportContractTests
                 // A superseded revision the report must not show.
                 if (revision > 0)
                     rows.Add(DailyRow(Text(tenant["tenantId"]), d, revision - 1, agents - 1, Instant(tenant["closedAt"]).AddHours(-9), "lac1:superseded"));
-                names[Text(tenant["tenantId"])!] = Text(tenant["tenantName"])!;
+                tenants[Text(tenant["tenantId"])!] = new LicensedAgentTenantRef(
+                    Text(tenant["tenantName"])!, "Customer", Text(tenant["parentTenantId"]));
             }
         }
 
         rows.Reverse(); // the mapping must not depend on the order the store returns rows in
         var response = LicensedAgentReports.BuildPeaks(
             Day(fixture["from"]), Day(fixture["to"]),
-            new LicensedAgentPeaksData(Text(fixture["dayZone"])!, rows, names, HeadsOf(fixture["chainHeads"]!)),
+            new LicensedAgentPeaksData(Text(fixture["dayZone"])!, rows, tenants, HeadsOf(fixture["chainHeads"]!)),
             LicenseOf(fixture["license"]!));
 
         AssertMatches(fixture, Serialize(response, ApiJsonContext.Default.LicensedAgentPeaksResponse), "$");
@@ -98,6 +102,24 @@ public sealed class LicensedAgentReportContractTests
     public void Export_ShouldMatchTheFrozenFixture_FieldForField()
     {
         var fixture = Fixture("licensed-agent-export.v1.json");
+        AssertMatches(fixture, Serialize(BuildExportFrom(fixture), ApiJsonContext.Default.LicensedAgentExportResponse), "$");
+    }
+
+    [Fact]
+    public void BuildExport_ShouldLeaveRowsAndHeadsUnchanged_WhenTenantMapAdded()
+    {
+        // partner-channel-pilot-fixes (design D9, verbara-meta/ADR-0020): tenants[] sits outside every hashed row. The
+        // export with the map removed is the pre-change fixture exactly: the same rows, prevHash/rowHash and heads.
+        var fixture = Fixture("licensed-agent-export.v1.json");
+        var json = Serialize(BuildExportFrom(fixture), ApiJsonContext.Default.LicensedAgentExportResponse).AsObject();
+        json["tenants"]!.AsArray().Should().NotBeEmpty();
+        json.Remove("tenants");
+
+        AssertMatches(Fixture("licensed-agent-export.before-tenant-map.json"), json, "$");
+    }
+
+    private static LicensedAgentExportResponse BuildExportFrom(JsonObject fixture)
+    {
         var events = fixture["events"]!.AsArray().Select(e => new LicenseAgentEvent
         {
             TenantId = Text(e!["tenantId"]),
@@ -129,15 +151,21 @@ public sealed class LicensedAgentReportContractTests
             RowHash = Text(d["rowHash"])!,
         }).ToList();
 
+        // The tenant map as the reader reports it: a tenant with a null type is a row that no longer exists.
+        var tenants = new Dictionary<string, LicensedAgentTenantRef>(StringComparer.Ordinal);
+        foreach (var tenant in fixture["tenants"]!.AsArray())
+        {
+            if (Text(tenant!["tenantType"]) is { } type)
+                tenants[Text(tenant["tenantId"])!] = new LicensedAgentTenantRef(Text(tenant["tenantId"])!, type, Text(tenant["parentTenantId"]));
+        }
+
         events.Reverse();
         daily.Reverse();
-        var response = LicensedAgentReports.BuildExport(
+        return LicensedAgentReports.BuildExport(
             Day(fixture["from"]), Day(fixture["to"]),
-            new LicensedAgentExportData(Text(fixture["dayZone"])!, events, daily, HeadsOf(fixture["chainHeads"]!)),
+            new LicensedAgentExportData(Text(fixture["dayZone"])!, events, daily, HeadsOf(fixture["chainHeads"]!), tenants),
             LicenseOf(fixture["license"]!),
             Instant(fixture["generatedAt"]));
-
-        AssertMatches(fixture, Serialize(response, ApiJsonContext.Default.LicensedAgentExportResponse), "$");
     }
 
     [Fact]
@@ -145,7 +173,7 @@ public sealed class LicensedAgentReportContractTests
     {
         var response = LicensedAgentReports.BuildPeaks(
             new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31),
-            new LicensedAgentPeaksData("UTC", [], new Dictionary<string, string>(), []),
+            new LicensedAgentPeaksData("UTC", [], new Dictionary<string, LicensedAgentTenantRef>(), []),
             new LicensedAgentLicenseDto(null, null, "None", null, true));
 
         var json = Serialize(response, ApiJsonContext.Default.LicensedAgentPeaksResponse);
@@ -155,6 +183,7 @@ public sealed class LicensedAgentReportContractTests
         deployment["peakDay"].Should().BeNull();
         deployment["peakLicensedAgents"]!.GetValue<int>().Should().Be(0);
         deployment["overBand"]!.GetValue<bool>().Should().BeFalse();
+        deployment["partnerSubtotals"]!.AsArray().Should().BeEmpty("no closed day means no peak day to subtotal");
         json["days"]!.AsArray().Should().BeEmpty();
         var license = json["license"]!.AsObject();
         license.Select(kv => kv.Key).Should().Equal("licenseId", "licensee", "tier", "maxAgents", "maxAgentsAdvisory");

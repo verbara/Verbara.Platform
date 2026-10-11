@@ -238,4 +238,61 @@ public sealed class SetupEndpointTests : IClassFixture<PlatformApiFactory>
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
+
+    // ─── partner-channel-pilot-fixes P3 / D6 / D15: plans at birth ───────────────────
+
+    [Fact]
+    public async Task Setup_ShouldCreateHostOnEnterprise_WhenPlatformIsInitialized()
+    {
+        using var factory = new PlatformApiFactory();
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/setup", ValidBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var host = await factory.Services.GetRequiredService<ITenantStore>().GetAsync("platform", default);
+        host!.Metadata.Should().NotBeNull().And.ContainKey("Plan");
+        host.GetPlan().Should().Be(TenantPlan.Enterprise, "setup creates the host on Enterprise (decision 9)");
+    }
+
+    [Fact]
+    public async Task Setup_ShouldKeepHostMetadata_WhenRepairRePostRuns()
+    {
+        using var factory = new PlatformApiFactory();
+        var tenantStore = factory.Services.GetRequiredService<ITenantStore>();
+        await tenantStore.UpsertAsync(
+            new Tenant
+            {
+                TenantId = "platform",
+                Name = "Verbara",
+                Status = TenantStatus.Active,
+                Type = TenantType.Platform,
+                ParentTenantId = null,
+                Metadata = new Dictionary<string, string> { ["SupportRegion"] = "latam" },
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            },
+            default);
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/setup", ValidBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var host = await tenantStore.GetAsync("platform", default);
+        host!.Metadata.Should().NotBeNull();
+        host.Metadata!.Should().Contain("SupportRegion", "latam", "a repair re-POST keeps the metadata the host already holds");
+        host.GetPlan().Should().Be(TenantPlan.Enterprise);
+    }
+
+    [Fact]
+    public async Task Setup_ShouldCreateCustomerOnHostPlan_WhenPlatformIsInitialized()
+    {
+        using var factory = new PlatformApiFactory();
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/setup", ValidBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var customer = await factory.Services.GetRequiredService<ITenantStore>().GetAsync("acme", default);
+        customer!.Metadata.Should().NotBeNull().And.ContainKey("Plan", "the setup Customer is born on the host's plan, not on the Starter fallback");
+        customer.GetPlan().Should().Be(TenantPlan.Enterprise);
+    }
 }

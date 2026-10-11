@@ -129,7 +129,8 @@ internal static class LicensedAgentReports
                     .OrderBy(d => d.TenantId, StringComparer.Ordinal)
                     .Select(d => new LicensedAgentTenantDayDto(
                         d.TenantId!,
-                        data.TenantNames.TryGetValue(d.TenantId!, out var name) ? name : d.TenantId!,
+                        data.Tenants.TryGetValue(d.TenantId!, out var tenant) ? tenant.Name : d.TenantId!,
+                        tenant?.ParentTenantId,
                         d.LicensedAgents,
                         d.Revision,
                         LicenseAgentChain.FormatInstant(d.ClosedAt),
@@ -147,9 +148,53 @@ internal static class LicensedAgentReports
             to,
             data.DayZone,
             license,
-            new LicensedAgentDeploymentPeakDto(peakAgents, peak?.Day, IsOverBand(license.MaxAgents, peakAgents)),
+            new LicensedAgentDeploymentPeakDto(
+                peakAgents, peak?.Day, IsOverBand(license.MaxAgents, peakAgents), PartnerSubtotals(peak, data.Tenants)),
             days,
             Heads(data.ChainHeads));
+    }
+
+    /// <summary>
+    /// partner-channel-pilot-fixes (design D8): on the deployment's peak day only — the day that sets the resale
+    /// share — one entry per tenant that is a Partner when the report is read and the parent of at least one tenant
+    /// row that day, summing those rows. Never a sum of each tenant's own peak. Direct Customers get no entry.
+    /// </summary>
+    private static List<LicensedAgentPartnerSubtotalDto> PartnerSubtotals(
+        LicensedAgentDayDto? peak, IReadOnlyDictionary<string, LicensedAgentTenantRef> tenants)
+    {
+        if (peak is null)
+            return [];
+
+        return peak.Tenants
+            .Where(t => t.ParentTenantId is { } parent
+                && tenants.TryGetValue(parent, out var p) && p.Type == LicensedAgentTenantRef.PartnerType)
+            .GroupBy(t => t.ParentTenantId!, StringComparer.Ordinal)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new LicensedAgentPartnerSubtotalDto(g.Key, tenants[g.Key].Name, g.Sum(t => t.LicensedAgents)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// partner-channel-pilot-fixes (design D9): every tenant the export's rows and heads name plus every parent above
+    /// them, ordered by id (ordinal), outside every hashed row. A tenant whose row no longer exists has a null type
+    /// and a null parent.
+    /// </summary>
+    private static List<LicensedAgentExportTenantDto> TenantMap(
+        IEnumerable<string?> tenantIds, IReadOnlyDictionary<string, LicensedAgentTenantRef> tenants)
+    {
+        var members = new SortedSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<string>(tenantIds.OfType<string>());
+        while (pending.TryDequeue(out var tenantId))
+        {
+            if (members.Add(tenantId) && tenants.TryGetValue(tenantId, out var tenant) && tenant.ParentTenantId is { } parent)
+                pending.Enqueue(parent);
+        }
+
+        return members
+            .Select(id => tenants.TryGetValue(id, out var tenant)
+                ? new LicensedAgentExportTenantDto(id, tenant.Type, tenant.ParentTenantId)
+                : new LicensedAgentExportTenantDto(id, null, null))
+            .ToList();
     }
 
     public static LicensedAgentExportResponse BuildExport(
@@ -204,7 +249,10 @@ internal static class LicensedAgentReports
             license,
             events,
             daily,
-            Heads(data.ChainHeads));
+            Heads(data.ChainHeads),
+            TenantMap(
+                data.Events.Select(e => e.TenantId).Concat(data.Daily.Select(d => d.TenantId)).Concat(data.ChainHeads.Select(h => h.TenantId)),
+                data.Tenants));
     }
 
     private static readonly Comparer<string?> ChainOrder = Comparer<string?>.Create(LicensedAgentExportSpan.CompareChains);
@@ -233,11 +281,19 @@ internal sealed record LicensedAgentLicenseDto(
 internal sealed record LicensedAgentDeploymentPeakDto(
     int PeakLicensedAgents,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateOnly? PeakDay,
-    bool OverBand);
+    bool OverBand,
+    IReadOnlyList<LicensedAgentPartnerSubtotalDto> PartnerSubtotals);
+
+/// <summary>partner-channel-pilot-fixes (design D8): one Partner's share of the deployment's peak day.</summary>
+internal sealed record LicensedAgentPartnerSubtotalDto(
+    string PartnerTenantId,
+    string PartnerTenantName,
+    int LicensedAgents);
 
 internal sealed record LicensedAgentTenantDayDto(
     string TenantId,
     string TenantName,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ParentTenantId,
     int LicensedAgents,
     int Revision,
     string ClosedAt,
@@ -303,4 +359,15 @@ internal sealed record LicensedAgentExportResponse(
     LicensedAgentLicenseDto License,
     IReadOnlyList<LicensedAgentExportEventDto> Events,
     IReadOnlyList<LicensedAgentExportDailyDto> Daily,
-    IReadOnlyList<LicensedAgentChainHeadDto> ChainHeads);
+    IReadOnlyList<LicensedAgentChainHeadDto> ChainHeads,
+    IReadOnlyList<LicensedAgentExportTenantDto> Tenants);
+
+/// <summary>
+/// partner-channel-pilot-fixes (design D9): the export's tenant map, a snapshot as of <c>generatedAt</c> outside
+/// every hashed row. <see cref="TenantType"/> is <c>Platform</c>, <c>Partner</c> or <c>Customer</c>, or null (as is
+/// <see cref="ParentTenantId"/>) when the tenant row no longer exists.
+/// </summary>
+internal sealed record LicensedAgentExportTenantDto(
+    string TenantId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? TenantType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ParentTenantId);

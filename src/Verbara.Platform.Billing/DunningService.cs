@@ -90,6 +90,20 @@ public sealed partial class DunningService : BackgroundService
 
         var now = clock.UtcNow;
 
+        // partner-channel-pilot-fixes (design D16): Verbara never runs dunning on a Partner's Customer — the Partner
+        // bills it outside Verbara. One predicate read per distinct tenant per cycle, cached for the cycle.
+        var partnerCustomers = new Dictionary<string, bool>(StringComparer.Ordinal);
+        async ValueTask<bool> IsPartnerCustomerAsync(string tenantId)
+        {
+            if (partnerCustomers.TryGetValue(tenantId, out var cached))
+                return cached;
+            var skip = await PartnerHierarchy.IsPartnerCustomerAsync(tenantStore, tenantId, ct);
+            partnerCustomers[tenantId] = skip;
+            if (skip)
+                LogPartnerCustomerSkipped(_logger, tenantId);
+            return skip;
+        }
+
         // Phase 1: Detect new overdue invoices
         var issuedInvoices = await invoiceStore.ListByStatusAsync(InvoiceStatus.Issued, ct);
         foreach (var invoice in issuedInvoices)
@@ -103,6 +117,10 @@ public sealed partial class DunningService : BackgroundService
 
             try
             {
+                // Skip before the invoice is marked Overdue, the record is opened or the tenant moves to Warning.
+                if (await IsPartnerCustomerAsync(invoice.TenantId.Value))
+                    continue;
+
                 var record = new DunningRecord
                 {
                     DunningId = EntityId.New().Value,
@@ -132,6 +150,11 @@ public sealed partial class DunningService : BackgroundService
 
             try
             {
+                // Skip before any stage change: no record upsert, no tenant status, no invoice payment status and no
+                // suspension handler for a Customer the Partner bills (a record opened before this rule stays as is).
+                if (await IsPartnerCustomerAsync(record.TenantId))
+                    continue;
+
                 var days = (now - record.StartedAt).TotalDays;
                 TenantStatus? newStage = null;
                 PaymentStatus? newPayment = null;
@@ -192,6 +215,9 @@ public sealed partial class DunningService : BackgroundService
             }
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Dunning skipped for tenant {TenantId}: a Partner's Customer, billed by the Partner outside Verbara")]
+    private static partial void LogPartnerCustomerSkipped(ILogger logger, string tenantId);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Dunning cycle failed")]
     private static partial void LogDunningCycleFailed(ILogger logger, Exception ex);

@@ -23,7 +23,8 @@ internal static class PartnerCustomerEndpoints
         group.MapGet("/customers", ListCustomers)
             .RequireAuthorization("partner:customer:view");
         group.MapPost("/customers", CreateCustomer)
-            .RequireAuthorization("partner:customer:create");
+            .RequireAuthorization("partner:customer:create")
+            .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
         group.MapGet("/customers/{customerId}", GetCustomer)
             .RequireAuthorization("partner:customer:view");
         group.MapPut("/customers/{customerId}", UpdateCustomer)
@@ -35,7 +36,8 @@ internal static class PartnerCustomerEndpoints
         group.MapGet("/customers/{customerId}/settings", GetCustomerSettings)
             .RequireAuthorization("partner:customer:manage");
         group.MapPut("/customers/{customerId}/settings", UpdateCustomerSettings)
-            .RequireAuthorization("partner:customer:manage");
+            .RequireAuthorization("partner:customer:manage")
+            .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
 
         return app;
     }
@@ -93,19 +95,19 @@ internal static class PartnerCustomerEndpoints
         if (existing is not null)
             return Results.Conflict(new ErrorResponse($"Tenant '{body.TenantId}' already exists."));
 
-        // Resolve plan — enforce hierarchy ceiling (customer cannot exceed partner plan)
-        var partnerPlan = partner.GetPlan();
-        TenantPlan customerPlan;
-        if (body.Plan is not null && Enum.TryParse<TenantPlan>(body.Plan, ignoreCase: true, out var requestedPlan))
+        // Resolve plan (design D6/D15): no plan inherits the Partner's plan; an unknown name is a 400; a plan above
+        // the Partner's is a 409 plan-exceeds-parent — all before anything is written.
+        var resolution = TenantPlanResolution.Resolve(partner, body.Plan);
+        switch (resolution.Kind)
         {
-            if (requestedPlan > partnerPlan)
-                return Results.BadRequest(new ErrorResponse($"Customer plan '{requestedPlan}' exceeds partner plan '{partnerPlan}'."));
-            customerPlan = requestedPlan;
+            case TenantPlanResolutionKind.UnknownName:
+                return Results.BadRequest(new ErrorResponse($"Unknown plan '{body.Plan}'. Valid: Starter, Pro, Enterprise."));
+            case TenantPlanResolutionKind.AboveParent:
+                return Results.Conflict(PlanAboveParentRefusal.For(
+                    resolution.Plan.ToString(), resolution.ParentPlan.ToString(), partner.TenantId));
         }
-        else
-        {
-            customerPlan = TenantPlan.Starter;
-        }
+
+        var customerPlan = resolution.Plan;
 
         // Validate template if provided
         if (body.Template is not null && !TenantProvisioningTemplates.ValidTemplateNames.Contains(body.Template))
@@ -375,16 +377,9 @@ internal static class PartnerCustomerEndpoints
         if (customer is null || customer.ParentTenantId != callerTenantId)
             return Results.NotFound();
 
-        // Partner cannot write quotas or RateLimitTier for customers
-        var sanitized = body with { Quotas = null, RateLimitTier = null };
-
-        // Enforce plan hierarchy ceiling on plan changes
-        if (sanitized.Plan is { } requestedPlan)
-        {
-            var partner = await tenantStore.GetAsync(callerTenantId, ct);
-            if (partner is not null && requestedPlan > partner.GetPlan())
-                return Results.BadRequest(new ErrorResponse($"Customer plan '{requestedPlan}' exceeds partner plan '{partner.GetPlan()}'."));
-        }
+        // Partner cannot write quotas, RateLimitTier or the host-only nodeAffinity for customers. The plan ceiling
+        // (409 plan-exceeds-parent, before any write) is enforced once, inside ApplyUpdates.
+        var sanitized = TenantSettingsEndpoints.StripHostOnlyOperational(body with { Quotas = null, RateLimitTier = null });
 
         var actorName = context.User.Identity?.Name ?? "unknown";
         var error = await TenantSettingsEndpoints.ApplyUpdates(customerId, sanitized, tenantStore, authConfigStore,
