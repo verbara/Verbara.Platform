@@ -271,6 +271,64 @@ public sealed class ManagementTenantEndpointTests : IClassFixture<PlatformAdminA
     }
 
     [Fact]
+    public async Task UpdateTenant_ShouldReturn409PlanExceedsParent_WhenMetadataPlanAboveParent()
+    {
+        await using var factory = await EnterpriseHostAsync();
+        await PartnerChannelTestKit.SeedTenantAsync(factory.Services, "p1", TenantType.Partner,
+            PlatformAdminApiFactory.HostTenantId, TenantPlan.Pro);
+        await PartnerChannelTestKit.SeedTenantAsync(factory.Services, "pc1", TenantType.Customer, "p1", TenantPlan.Pro);
+
+        var response = await factory.CreatePlatformAdminClient().PutAsJsonAsync("/api/management/tenants/pc1", new
+        {
+            name = "Renamed",
+            metadata = new Dictionary<string, string> { ["Plan"] = "Enterprise" },
+        });
+
+        var body = await PartnerChannelTestKit.AssertRefusalAsync(response, HttpStatusCode.Conflict,
+            PartnerChannelTestKit.FixtureBody("plan-above-parent-409.json"), "plan-exceeds-parent");
+        body["requestedPlan"]!.GetValue<string>().Should().Be("Enterprise");
+        body["parentPlan"]!.GetValue<string>().Should().Be("Pro");
+        body["parentTenantId"]!.GetValue<string>().Should().Be("p1");
+        var stored = await PartnerChannelTestKit.GetTenantAsync(factory.Services, "pc1");
+        stored!.GetPlan().Should().Be(TenantPlan.Pro, "the refused plan is not stored");
+        stored!.Name.Should().Be("pc1", "nothing of the refused request is written");
+    }
+
+    [Fact]
+    public async Task UpdateTenant_ShouldReturn400_WhenMetadataPlanUnknown()
+    {
+        await using var factory = await EnterpriseHostAsync();
+        await PartnerChannelTestKit.SeedTenantAsync(factory.Services, "p1", TenantType.Partner,
+            PlatformAdminApiFactory.HostTenantId, TenantPlan.Pro);
+        await PartnerChannelTestKit.SeedTenantAsync(factory.Services, "pc1", TenantType.Customer, "p1", TenantPlan.Pro);
+
+        var response = await factory.CreatePlatformAdminClient().PutAsJsonAsync("/api/management/tenants/pc1", new
+        {
+            metadata = new Dictionary<string, string> { ["Plan"] = "Gold" },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await PartnerChannelTestKit.GetTenantAsync(factory.Services, "pc1"))!.Metadata!["Plan"].Should().Be("Pro");
+    }
+
+    [Fact]
+    public async Task UpdateTenant_ShouldStorePlan_WhenMetadataPlanAtOrBelowParent()
+    {
+        await using var factory = await EnterpriseHostAsync();
+        await PartnerChannelTestKit.SeedTenantAsync(factory.Services, "p1", TenantType.Partner,
+            PlatformAdminApiFactory.HostTenantId, TenantPlan.Pro);
+        await PartnerChannelTestKit.SeedTenantAsync(factory.Services, "pc1", TenantType.Customer, "p1", TenantPlan.Starter);
+
+        var response = await factory.CreatePlatformAdminClient().PutAsJsonAsync("/api/management/tenants/pc1", new
+        {
+            metadata = new Dictionary<string, string> { ["Plan"] = "Pro" },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await PartnerChannelTestKit.GetTenantAsync(factory.Services, "pc1"))!.GetPlan().Should().Be(TenantPlan.Pro);
+    }
+
+    [Fact]
     public async Task CreateTenant_ShouldReturn400_WhenPartnerParentIsPartner()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];

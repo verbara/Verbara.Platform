@@ -108,7 +108,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PUT /partner/customers/{customerId}/settings` and `POST /partner/customers` answered 400 before, and
   `PUT /management/tenants/{id}/settings` answered 200 and saved nothing (not even the request's other
   fields). `POST /management/tenants` with a `metadata.Plan` above the parent's plan now answers the same
-  409 and creates no tenant (it used to store the plan unchecked).
+  409 and creates no tenant (it used to store the plan unchecked). `PUT /management/tenants/{id}` with a
+  `metadata.Plan` above the parent's plan answers the same 409 and saves nothing (it answered 200 and
+  stored the plan unchecked), and a `metadata.Plan` that is not `Starter`, `Pro` or `Enterprise` answers
+  400 there.
 - **Tenants are born with a plan.** `/api/setup` creates the host tenant on `Enterprise`, keeping any
   metadata a repaired host row already holds, and its Customer on the host's plan. A tenant created
   without a plan inherits its parent's plan on every creation path: `POST /partner/customers` with no

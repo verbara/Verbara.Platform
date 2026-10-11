@@ -78,9 +78,13 @@ public sealed class RateCardSettlementCurrencyTests : IClassFixture<PartnerApiFa
     }
 
     [Theory]
-    [InlineData("partner")]
-    [InlineData("management")]
-    public async Task UpdateRateCard_ShouldReturn400CurrencyInvalid_WhenCurrencyIsNotIso4217(string path)
+    [InlineData("partner", "banana")]
+    [InlineData("partner", "")]
+    [InlineData("partner", "XYZ123")]
+    [InlineData("management", "banana")]
+    [InlineData("management", "")]
+    [InlineData("management", "XYZ123")]
+    public async Task UpdateRateCard_ShouldReturn400CurrencyInvalid_WhenCurrencyIsNotIso4217(string path, string currency)
     {
         HttpClient client;
         string collection;
@@ -106,10 +110,10 @@ public sealed class RateCardSettlementCurrencyTests : IClassFixture<PartnerApiFa
         created.StatusCode.Should().Be(HttpStatusCode.Created);
         var id = await RateCardIdAsync(created);
 
-        var response = await client.PutAsJsonAsync($"{collection}/{id}{query}", CardBody("banana", "After Update"));
+        var response = await client.PutAsJsonAsync($"{collection}/{id}{query}", CardBody(currency, "After Update"));
 
         var body = await PartnerChannelTestKit.AssertRefusalAsync(response, HttpStatusCode.BadRequest, InvalidBody, "currency-invalid");
-        body["currency"]!.GetValue<string>().Should().Be("banana");
+        body["currency"]!.GetValue<string>().Should().Be(currency);
         var stored = await store.GetByIdAsync(owner, EntityId.From(id), CancellationToken.None);
         stored!.Name.Should().Be("Before Update", "the stored card is unchanged");
         stored.Currency.Should().Be("USD");
@@ -217,11 +221,28 @@ public sealed class RateCardSettlementCurrencyTests : IClassFixture<PartnerApiFa
         _ = factory.Server;
         await SeedCardAsync(factory, PartnerApiFactory.HostTenantId, "USD", 0.05m);
         await SeedCardAsync(factory, PartnerApiFactory.PartnerTenantId, "usd", 0.20m);
+        using (var scope = factory.Services.CreateScope())
+        {
+            // Scenario "The same currency produces a margin in that currency": 1,000 minutes priced at 0.20 by the
+            // Partner card and 0.05 by the host base card.
+            await scope.ServiceProvider.GetRequiredService<IUsageRecordStore>().SaveAsync(new UsageRecord
+            {
+                RecordId = EntityId.New(),
+                TenantId = new TenantId(PartnerApiFactory.CustomerTenantId),
+                UsageType = UsageType.VoiceInbound,
+                Quantity = 1000m,
+                Unit = UsageUnit.Minutes,
+                RecordedAt = DateTimeOffset.UtcNow.AddHours(-1),
+            }, CancellationToken.None);
+        }
 
         var response = await GenerateAsync(factory);
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
-        (await factory.RevenueStore.ListAsync(new TenantId(PartnerApiFactory.PartnerTenantId), null, null, CancellationToken.None))
-            .Should().ContainSingle("the invoice and its revenue record are written once nothing refuses");
+        var record = (await factory.RevenueStore.ListAsync(new TenantId(PartnerApiFactory.PartnerTenantId), null, null, CancellationToken.None))
+            .Should().ContainSingle("the invoice and its revenue record are written once nothing refuses").Subject;
+        record.GrossAmount.Should().Be(200m);
+        record.PlatformCost.Should().Be(50m);
+        record.PartnerMargin.Should().Be(150m);
     }
 }

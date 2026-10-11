@@ -253,6 +253,24 @@ public sealed class PartnerCustomerEndpointsTests : IClassFixture<PartnerApiFact
     }
 
     [Fact]
+    public async Task UpdateCustomerSettings_ShouldAcceptPlan_WhenPlanAtPartnerPlan()
+    {
+        await using var factory = new PartnerApiFactory();
+        var client = factory.CreatePartnerClient();
+        await PartnerChannelTestKit.SeedTenantAsync(factory.Services, PartnerApiFactory.PartnerTenantId,
+            TenantType.Partner, PartnerApiFactory.HostTenantId, TenantPlan.Pro);
+        await PartnerChannelTestKit.SeedTenantAsync(factory.Services, PartnerApiFactory.CustomerTenantId,
+            TenantType.Customer, PartnerApiFactory.PartnerTenantId, TenantPlan.Starter);
+        var settingsUrl = $"/api/v1/partner/customers/{PartnerApiFactory.CustomerTenantId}/settings";
+
+        var response = await client.PutAsJsonAsync(settingsUrl, new { plan = "Pro" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var after = JsonNode.Parse(await client.GetStringAsync(settingsUrl))!;
+        after["plan"]!.GetValue<string>().Should().Be("Pro", "a plan at the Partner's plan is accepted");
+    }
+
+    [Fact]
     public async Task UpdateCustomerSettings_ShouldIgnoreNodeAffinity_WhenCallerIsPartner()
     {
         var customerId = "affinity-" + Guid.NewGuid().ToString("N")[..8];
