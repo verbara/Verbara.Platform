@@ -9,6 +9,40 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.28.0] - 2026-10-11
+
+Minor release with two trains: **WhatsApp slice 2** (channel credentials redacted, merged and encrypted at
+rest with a real connection test, #364; one contact and one conversation per WebChat visitor, #365; agents
+start outbound conversations send-first with no licensed-agent ledger row, #366) and the **Partner-channel
+pilot fixes** (one settlement currency, tenants born with a plan, `plan-exceeds-parent`, host-only
+`nodeAffinity`, no dunning on a Partner's Customers, a Partner-aware licensed-agent report; #367, #369). It
+pairs with console **v3.23.0-web**. Read **Upgrading** before the first start: migration `021` and a
+one-time channel-credential encryption run at start-up, and the second one makes the upgrade forward-only.
+Measured in the lab on the candidate builds (verbara-lab #20).
+
+### Upgrading
+
+- **The upgrade is forward-only once the API has started.** A one-time start-up migration encrypts every
+  stored channel secret with the deployment's DataProtection keyring (log line EventId `4301`). An API
+  image below 2.28.0 cannot read them afterwards: WhatsApp inbound and outbound stop until each tenant's
+  channel credentials are entered again. Back up the database and keep the DataProtection keyring before
+  upgrading; see **Security** below and `docs/operations/backup-disaster-recovery.md` §1.6. (#364)
+- **Use console v3.23.0-web.** `/admin/channels` no longer returns credential values, and
+  `POST /conversations` refuses starts with stable codes. Older consoles show empty channel forms that
+  look unconfigured, and their routing-based e2e helpers fail against this release. (#364, #365, #366)
+- **Migration `021` gives every host tenant a plan.** A host without a plan becomes `Enterprise`; a plan
+  already set is never changed. Automation that creates tenants with a plan above the parent's now gets
+  `409 plan-exceeds-parent` and nothing is saved (see **Changed**). (#367)
+- **`WhatsApp:BaseUrl`, when set, must be an absolute `https` URL** (plain `http` only for a loopback host).
+  An invalid value stops the API at start-up with an error that names the key. Leave it unset for
+  Meta's Graph API. (#364)
+- **Tenants created without a plan inherit the parent's plan.** Under an Enterprise host this means
+  Enterprise, whose default auth configuration requires MFA enrolment for Admin and Supervisor: the first
+  admin login of such a tenant answers `401 {mfaEnrollmentRequired: true}` until the admin enrols (on
+  v2.27.0 these tenants were Starter and logged in without MFA). (#367)
+- **WebChat replies need a single API replica.** WebChat sessions and sockets live in the API process; with
+  more than one replica a reply reaches the visitor only from the replica holding the socket. (#365)
+
 ### Added
 
 - **WhatsApp connection test.** `POST /admin/channels/whatsapp/test` now asks Meta's Graph API for the
@@ -17,16 +51,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `provider-unreachable` after a network error or a 15-second timeout. A tenant without an `AccessToken`
   or `PhoneNumberId` gets `channel-not-configured`, and no request is sent. Other channels answer
   `not-testable` and never report success. Before this release the endpoint answered "Connection test
-  passed" for every channel without calling anything.
+  passed" for every channel without calling anything. (#364)
 - **`WhatsApp:BaseUrl`** sets the Graph API base address used for sends and connection tests. The default
   is still `https://graph.facebook.com`. The value must be an absolute `https` URL without a query, a
   fragment or user information. Plain `http` is accepted only for a loopback host (`localhost`,
   `127.0.0.0/8`, `::1`), because the tenant's token is sent to this address. An invalid value stops the API
-  at start-up with an error that names the key.
+  at start-up with an error that names the key. (#364)
 - **The WebChat session response names the visitor.** `POST /api/v1/webchat/sessions` now returns, next
   to `sessionId` and `wsUrl`, the session's `visitorAddress` (`webchat-…`), the `contactId` carrying it
   and that contact's `conversationId`. The change is additive: existing fields keep their names and
-  meaning.
+  meaning. (#365)
 - **Agents can start a WhatsApp or WebChat conversation with a contact.** `POST /conversations` with an
   `initialMessage` now starts the conversation in the calling agent's own name: it is created `Active`
   and owned by that agent, the message is stored `Sent` with the provider's id, and the start is audited
@@ -36,7 +70,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optional `templateName` and `templateLanguage` fields (`templateLanguage` defaults to `en_US`;
   templates with parameters are not supported yet). A template start stores `[template <name>
   <language>]` as the message text, since that is what the contact received. If the caller already owns
-  an open conversation with that contact on that channel, the message goes out on it instead.
+  an open conversation with that contact on that channel, the message goes out on it instead. (#366)
 - **Refused starts carry stable codes.** Nothing is sent before these checks pass. The body is a
   `ConversationStartRefusal` with `error` set to one of: `unknown-channel` (400),
   `contact-has-no-address` (400), `channel-not-available` (409), `conversation-open-elsewhere` (409,
@@ -44,7 +78,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `conversation-not-sendable` (409, the caller's own open conversation is in wrap-up, snoozed or another
   state that takes no message; with its `conversationId` and `ownerKind`), `agent-at-capacity` (409) or
   `whatsapp-template-required` (409). If the provider accepted the message but storing it failed, the
-  API answers `500` with `start-persist-failed`; the provider message id is logged for reconciliation.
+  API answers `500` with `start-persist-failed`; the provider message id is logged for reconciliation. (#366)
 - **The licensed-agent report tells a Partner's Customers from direct Customers.**
   `GET /management/licensing/agents` adds `parentTenantId` to each `days[].tenants[]` row and
   `deployment.partnerSubtotals[]` (`partnerTenantId`, `partnerTenantName`, `licensedAgents`): one entry per
@@ -63,13 +97,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ApiVersion` and `defaultQueueId` (the default queue that inbound routing reads), followed by any stored
   key outside that list, such as the `ApiToken` and `PhoneNumber` that consoles before v3.22.0-web saved.
   A client that read values from these responses now gets key names only. Console v3.22.0-web shows them
-  as "set" badges.
+  as "set" badges. (#364)
 - **`PUT /admin/channels/{channel}` merges with the stored credentials.** A key you leave out, or send
   blank, keeps its stored value; a value replaces it; `null` removes the key, including a stored key
   outside the channel's list. Saving a form with an empty secret field therefore keeps the secret.
   WhatsApp refuses a value for a key outside its list with `400 unknown-credential-key` and stores
   nothing. An unknown channel name now answers `400` with the JSON code `invalid-channel` instead of a
-  text message.
+  text message. (#364)
 - The `channel.configured` audit record lists the names of the changed keys in `changed_keys`, never a
   value.
 - **WebChat replies are delivered reliably only when the API runs as a single replica.** WebChat
@@ -77,24 +111,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   delivered inside the agent's own request, so it reaches the visitor only when that request lands on
   the replica holding the visitor's socket; on any other replica it fails with `SESSION_NOT_CONNECTED`
   and is stored as failed, exactly as for a visitor who has left. Sticky sessions do not help: they pin
-  the agent's requests by the agent's affinity, not the visitor's.
+  the agent's requests by the agent's affinity, not the visitor's. (#365)
 - **Two console end-to-end specs fail against this release** (v3.21.0-web, and v3.22.0-web, which ships
   the same helper). `conversation-refusals` and `monitor-takeover-and-contact-search` use the e2e
   `conversation-routing` helper, which gives its own contact the WebChat session id as an address and
   relies on the visitor's message being resolved by that session id. Messages are now attributed to the
   session's visitor address (see Fixed), so the helper's conversation is never routed and the specs time
   out. The product is not affected. The next console release migrates the helper to the `contactId` and
-  `conversationId` the session response now returns.
+  `conversationId` the session response now returns. (#365)
 - **A failed first message no longer leaves an empty conversation behind.** The provider send now
   happens before anything is saved. If the provider rejects the message, the API answers `502` with
   `channel-send-failed`, and no conversation, message or capacity reservation is stored. In 2.27.0 such
-  a start answered `400` and left a queued conversation with no owner.
+  a start answered `400` and left a queued conversation with no owner. (#366)
 - **`POST /conversations` without `initialMessage` is deprecated.** It still returns the contact's
   open conversation, or creates a queued one with no owner, as in 2.26. Its removal is planned for a
-  later release; start conversations with an `initialMessage` instead.
+  later release; start conversations with an `initialMessage` instead. (#366)
 - **An unknown `channel` on `POST /conversations` answers `400` with `error: "unknown-channel"`.** The
   body no longer repeats the request's value (2.27.0 answered `Unknown channel: <value>`), and an
-  undefined number such as `"99"` is now refused the same way.
+  undefined number such as `"99"` is now refused the same way. (#366)
 - **Rate-card currencies must be ISO 4217.** The four rate-card writes (`POST`/`PUT /management/rate-cards`
   and `POST`/`PUT /partner/rate-cards`) accept only an active ISO 4217 code, trimmed and stored upper case
   (` usd ` is stored as `USD`). Anything else (`banana`, `""`, `XYZ`) answers 400 with
@@ -174,7 +208,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to its session (a reload, a network blip, a second tab) receives replies again, and closing one tab no
   longer cuts the other. A reply is stored as sent only when a visitor socket took it: when the visitor
   has left or has not connected the socket yet, it is stored as failed with `SESSION_NOT_CONNECTED`; no
-  error reaches the agent.
+  error reaches the agent. (#365)
 - **A refused Partner invoice no longer leaves an invoice behind.** `POST /partner/customers/{customerId}/invoices/generate`
   saved the invoice before it looked up the host tenant and the host's base rate card, so "Platform host
   tenant not found.", "No platform base rate card configured." and a failure to price the platform cost
@@ -184,16 +218,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Security
 
 - **`PUT /admin/channels/{channel}` no longer echoes secrets.** It returned the whole stored
-  configuration, including the WhatsApp `AppSecret` and `AccessToken` (residual from 2.27.0).
+  configuration, including the WhatsApp `AppSecret` and `AccessToken` (residual from 2.27.0). (#364)
 - **Channel secrets are encrypted at rest.** On PostgreSQL storage, secret credential values (WhatsApp
   `AccessToken`, `AppSecret` and `WebhookVerifyToken`, any WhatsApp key outside its declared list such
   as the legacy `ApiToken`, and every key of a channel without a declared key list) are encrypted with
   the deployment's DataProtection keyring before they are written. A one-time start-up migration
   encrypts the values already stored. It never blocks start-up and is safe to run again. As with MFA
-  secrets, losing the keyring makes these values unreadable, and tenants must enter them again.
+  secrets, losing the keyring makes these values unreadable, and tenants must enter them again. (#364)
 - **The connection test never returns the tenant's token.** Meta's error message and the verified name
   are relayed with every occurrence of the `AccessToken` replaced by `[redacted]`, cut to 300 characters,
-  and a Graph response body over 64 KiB is not read.
+  and a Graph response body over 64 KiB is not read. (#364)
 - **Operators: this upgrade is forward-only once the start-up migration has run.** Do not roll the API
   image back below 2.28.0 after it. An older image reads the encrypted values as if they were the
   credentials themselves: it checks WhatsApp webhook signatures against ciphertext and ignores all
@@ -201,7 +235,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every channel's `defaultQueueId`. The signal that the migration ran is the log line with EventId
   `4301` ("Channel credential encryption migration completed: …"). If you must roll back, re-enter
   every tenant's channel credentials through `PUT /admin/channels/{channel}` on the older image; there is
-  no unwrap script. See `docs/operations/backup-disaster-recovery.md` §1.6.
+  no unwrap script. See `docs/operations/backup-disaster-recovery.md` §1.6. (#364)
+
+### Known issues
+
+- A Partner's Customer invoice cannot be marked paid via `POST /management/invoices/{id}/pay`: the route
+  finds an invoice only through its dunning record, and no dunning runs on a Partner's Customers
+  (Verbara.Platform#372).
+- An agent cannot close a chat conversation in a deployment without the AdvancedTypification licence:
+  closing goes through wrap-up, which is reached only by typification (pre-existing, measured on 2.27.0 too).
 
 ## [2.27.0] - 2026-10-10
 
