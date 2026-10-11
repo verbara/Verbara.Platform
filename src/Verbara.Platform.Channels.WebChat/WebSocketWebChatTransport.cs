@@ -41,11 +41,8 @@ public sealed class WebSocketWebChatTransport : IWebChatTransport
             removed = [.. list];
         }
 
-        foreach (var connection in removed)
-        {
-            if (connection.Socket.State == WebSocketState.Open)
-                await connection.Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Session ended", ct).ConfigureAwait(false);
-        }
+        foreach (var connection in removed.Where(c => c.Socket.State == WebSocketState.Open))
+            await connection.Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Session ended", ct).ConfigureAwait(false);
     }
 
     /// <summary>Called by the WebSocket endpoint when a visitor socket attaches to a session.</summary>

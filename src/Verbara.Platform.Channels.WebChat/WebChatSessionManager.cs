@@ -135,16 +135,13 @@ public sealed class WebChatSessionManager
     public Task<int> CleanupExpiredAsync(IClock clock)
     {
         var removed = 0;
-        foreach (var key in _sessions.Keys)
+        foreach (var (key, session) in _sessions.Where(e => e.Value.AttachedSockets == 0 && IsExpired(e.Value, clock)))
         {
-            if (_sessions.TryGetValue(key, out var session) && session.AttachedSockets == 0 && IsExpired(session, clock))
+            if (_sessions.TryRemove(new KeyValuePair<string, WebChatSession>(key, session)))
             {
-                if (_sessions.TryRemove(key, out _))
-                {
-                    // Drop the visitor index entry only while it still names this session.
-                    _byVisitorAddress.TryRemove(new KeyValuePair<string, WebChatSession>(session.CustomerAddress.Address, session));
-                    removed++;
-                }
+                // Drop the visitor index entry only while it still names this session.
+                _byVisitorAddress.TryRemove(new KeyValuePair<string, WebChatSession>(session.CustomerAddress.Address, session));
+                removed++;
             }
         }
 
