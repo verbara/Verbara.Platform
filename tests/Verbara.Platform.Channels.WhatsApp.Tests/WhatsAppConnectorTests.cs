@@ -104,6 +104,31 @@ public class WhatsAppConnectorTests
         sentBody.Should().Contain("\"name\":\"promo_template\"");
     }
 
+    [Fact]
+    public async Task SendAsync_ShouldSendTemplateLanguage_WhenLanguageProvided()
+    {
+        var (connector, handler) = CreateConnector();
+
+        var result = await connector.SendAsync(
+            TextMessage("15550000005", "Hola", templateId: "promo_template") with { TemplateLanguage = "es_MX" },
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var sentBody = await handler.LastRequestBody!.ReadAsStringAsync();
+        sentBody.Should().Contain("\"language\":{\"code\":\"es_MX\"}");
+    }
+
+    [Fact]
+    public async Task SendAsync_ShouldDefaultTemplateLanguage_WhenLanguageOmitted()
+    {
+        var (connector, handler) = CreateConnector();
+
+        await connector.SendAsync(TextMessage("15550000006", "Hi", templateId: "promo_template"), CancellationToken.None);
+
+        var sentBody = await handler.LastRequestBody!.ReadAsStringAsync();
+        sentBody.Should().Contain("\"language\":{\"code\":\"en_US\"}");
+    }
+
     // ── API error response ────────────────────────────────────────────────────
 
     [Fact]

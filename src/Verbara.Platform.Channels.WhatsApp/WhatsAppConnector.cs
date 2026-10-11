@@ -82,7 +82,7 @@ public sealed class WhatsAppConnector : IChannelConnector
         if (message.TemplateId is not null)
         {
             Log.SendingTemplate(_logger, message.TemplateId, to);
-            request = BuildTemplateRequest(to, message.TemplateId);
+            request = BuildTemplateRequest(to, message.TemplateId, message.TemplateLanguage);
         }
         else
         {
@@ -104,13 +104,17 @@ public sealed class WhatsAppConnector : IChannelConnector
             ? value
             : null;
 
-    private static MetaSendRequest BuildTemplateRequest(string to, string templateName)
+    private static MetaSendRequest BuildTemplateRequest(string to, string templateName, string? languageCode)
     {
+        var template = new MetaSendTemplate { Name = templateName };
+        if (!string.IsNullOrWhiteSpace(languageCode))
+            template.Language = new MetaTemplateLanguage { Code = languageCode };
+
         return new MetaSendRequest
         {
             To = to,
             Type = "template",
-            Template = new MetaSendTemplate { Name = templateName },
+            Template = template,
         };
     }
 
