@@ -65,4 +65,26 @@ public class WebChatMessageAdapterTests
             result.From.Address.Should().Be(sessionId);
         }
     }
+
+    [Fact]
+    public void ToInboundMessage_ShouldUseVisitorAddress_NotSessionId()
+    {
+        // whatsapp-works-for-real D16: the session id is a transport handle; the contact address of a
+        // WebChat visitor is the webchat-<guid> visitor address the session was created with.
+        var session = new WebChatSession
+        {
+            SessionId = "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            ConversationId = EntityId.From("conv-visitor-1"),
+            TenantId = new TenantId("t-visitor"),
+            CustomerAddress = new ChannelAddress(ChannelType.WebChat, "webchat-7c9e6679f2a54d0b8e1a3b5c7d9f1e2a"),
+            CreatedAt = DateTimeOffset.UtcNow,
+            LastActivityAt = DateTimeOffset.UtcNow,
+        };
+
+        var result = WebChatMessageAdapter.ToInboundMessage(session, MakeEnvelope(), "ext-id", DateTimeOffset.UtcNow);
+
+        result.From.Channel.Should().Be(ChannelType.WebChat);
+        result.From.Address.Should().Be(session.CustomerAddress.Address);
+        result.From.Address.Should().NotBe(session.SessionId);
+    }
 }
