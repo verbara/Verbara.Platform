@@ -38,9 +38,9 @@ El canal WebChat permite que un visitante anónimo del sitio web del cliente ini
    Agente la ve aparecer en /agent → Aceptar → responde → el visitante recibe
 ```
 
-> 💡 Cada sesión es **un contacto y una conversación**: al crearla, Verbara crea el contacto anónimo con la dirección `webchat-…` (`visitorAddress`) y su conversación, y todos los mensajes del visitante caen en esa conversación. La respuesta del agente se entrega por la dirección del visitante al WebSocket de la sesión.
+> 💡 Cada sesión es **un contacto y una conversación**: al crearla, Verbara crea el contacto anónimo con la dirección `webchat-…` (`visitorAddress`) y su conversación, y todos los mensajes del visitante caen en esa conversación mientras siga abierta; si se cerró, el siguiente mensaje abre una conversación nueva del mismo contacto y entra a la cola. La respuesta del agente se entrega por la dirección del visitante al WebSocket de la sesión (también si el visitante recargó la página o tiene dos pestañas abiertas), y sólo queda como enviada si un WebSocket la recibió.
 >
-> ⚠️ **Una sola réplica entrega las respuestas.** Las sesiones y los WebSockets viven en el proceso del API: la respuesta del agente sólo llega al visitante si la procesa la réplica que tiene su WebSocket. En otra réplica queda guardada como fallida (`SESSION_NOT_CONNECTED`), igual que si el visitante se hubiera ido. Si corrés más de una réplica del API, fijá el tráfico WebChat de una sesión y las respuestas del agente a una réplica (sticky sessions).
+> ⚠️ **Las respuestas del agente sólo se entregan de forma fiable con una única réplica del API.** Las sesiones y los WebSockets viven en el proceso del API, y la respuesta se entrega dentro de la propia petición del agente: sólo llega al visitante si esa petición cae en la réplica que tiene su WebSocket. En otra réplica queda guardada como fallida (`SESSION_NOT_CONNECTED`), igual que si el visitante se hubiera ido. Las sticky sessions no lo resuelven, porque fijan las peticiones del agente por la afinidad del agente, no la del visitante.
 
 > 💡 El SDK (`verbara-webchat.js`) sólo pinta la burbuja y carga el iframe. Las llamadas al API las hace el **iframe** (`/webchat/embed/`), aislado del sitio del cliente. El operador no necesita saber esto para embeber, pero explica por qué sólo hay un `<script>` y ningún `<div>` que montar.
 

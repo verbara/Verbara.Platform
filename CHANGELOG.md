@@ -18,12 +18,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **WebChat replies reach the visitor only from the replica holding the visitor's socket.** WebChat
-  sessions and sockets live in the API process, and there is no cross-replica routing yet. A reply
-  processed by another replica fails with `SESSION_NOT_CONNECTED` and is stored as failed, exactly as
-  for a visitor who has left. If you run more than one API replica, pin a session's WebChat traffic and
-  the agent's replies to one replica (sticky sessions), or accept that replies sent elsewhere are
-  recorded as failed.
+- **WebChat replies are delivered reliably only when the API runs as a single replica.** WebChat
+  sessions and sockets live in the API process, and there is no cross-replica routing yet. The reply is
+  delivered inside the agent's own request, so it reaches the visitor only when that request lands on
+  the replica holding the visitor's socket; on any other replica it fails with `SESSION_NOT_CONNECTED`
+  and is stored as failed, exactly as for a visitor who has left. Sticky sessions do not help: they pin
+  the agent's requests by the agent's affinity, not the visitor's.
 - **Two console end-to-end specs fail against this release** (v3.21.0-web, and v3.22.0-web, which ships
   the same helper). `conversation-refusals` and `monitor-takeover-and-contact-search` use the e2e
   `conversation-routing` helper, which gives its own contact the WebChat session id as an address and
@@ -39,9 +39,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a second conversation apart from the ones the session had opened: the tenant held two of each per
   visitor, the session's own conversation stayed empty, and a reply sent in it was stored as failed
   because no session was known by the visitor's address. Every visitor message, over the WebSocket or the
-  REST message route, now goes into the conversation the session was created with; sessions are found by
-  visitor address, and the reply is delivered on the visitor's socket. When the visitor has left, the
-  reply is stored as failed with `SESSION_NOT_CONNECTED`; no error reaches the agent.
+  REST message route, now goes into the conversation the session was created with while that
+  conversation is open; once it has ended, the visitor's next message opens a new conversation for the
+  same contact, and that conversation is routed to a queue (before, it stayed unassigned). Sessions are
+  found by visitor address, and the reply is delivered on the visitor's socket. A socket that re-attaches
+  to its session (a reload, a network blip, a second tab) receives replies again, and closing one tab no
+  longer cuts the other. A reply is stored as sent only when a visitor socket took it: when the visitor
+  has left or has not connected the socket yet, it is stored as failed with `SESSION_NOT_CONNECTED`; no
+  error reaches the agent.
 
 ## [2.27.0] - 2026-10-10
 
