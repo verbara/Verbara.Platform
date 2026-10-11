@@ -16,15 +16,21 @@ public static class ChannelCredentialMerge
     public sealed record Result(IReadOnlyDictionary<string, string> Credentials, IReadOnlyList<string> ChangedKeys);
 
     /// <summary>
-    /// The keys of <paramref name="requested"/> that <paramref name="channel"/>'s declared schema does not
-    /// contain, in ordinal order; always empty for a channel without a declared schema.
+    /// The keys of <paramref name="requested"/> that carry a value although <paramref name="channel"/>'s
+    /// declared schema does not contain them, in ordinal order; always empty for a channel without a declared
+    /// schema. A <see langword="null"/> entry is never unknown: it removes the key, so an administrator can
+    /// delete a stored legacy key that is outside the schema (e.g. the pre-Web #393 <c>ApiToken</c>).
     /// </summary>
     public static IReadOnlyList<string> UnknownKeys(ChannelType channel, IReadOnlyDictionary<string, string?>? requested)
     {
         if (requested is null || ChannelCredentialSchemas.For(channel) is not { } schema)
             return [];
 
-        return requested.Keys.Where(k => !schema.Contains(k)).Order(StringComparer.Ordinal).ToList();
+        return requested
+            .Where(kv => kv.Value is not null && !schema.Contains(kv.Key))
+            .Select(kv => kv.Key)
+            .Order(StringComparer.Ordinal)
+            .ToList();
     }
 
     /// <summary>Applies <paramref name="requested"/> to <paramref name="stored"/> (either may be null).</summary>

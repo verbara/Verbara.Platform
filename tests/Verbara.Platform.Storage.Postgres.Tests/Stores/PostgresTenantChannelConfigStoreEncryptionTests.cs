@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Core;
@@ -75,7 +76,7 @@ public sealed class PostgresTenantChannelConfigStoreEncryptionTests
     }
 
     [Fact]
-    public async Task Migrator_ShouldWrapLegacyPlaintext_Once()
+    public async Task Migrator_ShouldWrapLegacyPlaintextOnce_WhenRunTwice()
     {
         var secrets = Secrets();
         await _fixture.WriteRawAsync(_tenantId, WhatsApp, Json(secrets));
@@ -97,6 +98,72 @@ public sealed class PostgresTenantChannelConfigStoreEncryptionTests
         migrator.LastRun.ScannedRows.Should().Be(1);
         (await _fixture.ReadRawCredentialsAsync(_tenantId, WhatsApp)).Should().Be(
             afterFirst, "a wrapped row is never rewritten (a re-wrap would change the ciphertext)");
+    }
+
+    [Fact]
+    public async Task Migrator_ShouldWrapLegacyApiToken_WhenKeyIsOutsideWhatsAppSchema()
+    {
+        // Before Web #393 every console save of WhatsApp wrote the Meta token as ApiToken.
+        var legacyToken = $"EAAlegacy{Guid.NewGuid():N}";
+        var legacy = new Dictionary<string, string> { ["ApiToken"] = legacyToken, ["PhoneNumber"] = "+15550001111" };
+        await _fixture.WriteRawAsync(_tenantId, WhatsApp, Json(legacy));
+        var migrator = NewMigrator();
+
+        await migrator.StartAsync(CancellationToken.None);
+
+        migrator.LastRun.RewrittenRows.Should().Be(1);
+        (await _fixture.ReadRawCredentialsAsync(_tenantId, WhatsApp)).Should().NotContain(
+            legacyToken, "a key outside the schema may hold a real secret and is wrapped like one");
+        (await _sut.GetAsync(new TenantId(_tenantId), ChannelType.WhatsApp, CancellationToken.None))!
+            .Credentials.Should().Equal(legacy);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldProtectLegacyKey_WhenKeyIsOutsideWhatsAppSchema()
+    {
+        var legacyToken = $"EAAlegacy{Guid.NewGuid():N}";
+
+        await _sut.SaveAsync(
+            Config(ChannelType.WhatsApp, new Dictionary<string, string> { ["ApiToken"] = legacyToken }), CancellationToken.None);
+
+        (await _fixture.ReadRawCredentialsAsync(_tenantId, WhatsApp)).Should().NotContain(legacyToken);
+    }
+
+    [Fact]
+    public async Task Migrator_ShouldWrapOnlyPlaintextValues_WhenRowIsMixed()
+    {
+        var secrets = Secrets();
+        var protector = _fixture.DataProtection.CreateProtector(PostgresTenantChannelConfigStore.CredentialsProtectorPurpose);
+        var wrappedAppSecret = protector.Protect(secrets["AppSecret"]);
+        var mixed = new Dictionary<string, string>(secrets) { ["AppSecret"] = wrappedAppSecret };
+        await _fixture.WriteRawAsync(_tenantId, WhatsApp, Json(mixed));
+        var migrator = NewMigrator();
+
+        await migrator.StartAsync(CancellationToken.None);
+
+        migrator.LastRun.RewrittenRows.Should().Be(1);
+        var raw = await _fixture.ReadRawCredentialsAsync(_tenantId, WhatsApp);
+        var stored = JsonSerializer.Deserialize(raw!, PostgresJson.Ctx.IReadOnlyDictionaryStringString)!;
+        stored["AppSecret"].Should().Be(wrappedAppSecret, "an already wrapped value is carried through byte for byte");
+        stored["AccessToken"].Should().NotBe(secrets["AccessToken"]);
+        protector.Unprotect(stored["AccessToken"]).Should().Be(
+            secrets["AccessToken"], "a plaintext value is wrapped exactly once");
+        (await _sut.GetAsync(new TenantId(_tenantId), ChannelType.WhatsApp, CancellationToken.None))!
+            .Credentials.Should().Equal(secrets);
+    }
+
+    [Fact]
+    public async Task Migrator_ShouldRewriteNothing_WhenKeyRingRotatedAfterWrite()
+    {
+        await _sut.SaveAsync(Config(ChannelType.WhatsApp, Secrets()), CancellationToken.None);
+        var before = await _fixture.ReadRawCredentialsAsync(_tenantId, WhatsApp);
+        _fixture.RotateKey();
+        var migrator = NewMigrator();
+
+        await migrator.StartAsync(CancellationToken.None);
+
+        migrator.LastRun.RewrittenRows.Should().Be(0, "a value under an older key still unprotects and is not re-wrapped");
+        (await _fixture.ReadRawCredentialsAsync(_tenantId, WhatsApp)).Should().Be(before);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using NpgsqlTypes;
@@ -16,6 +17,7 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 public sealed class TenantChannelConfigEncryptionFixture : IAsyncLifetime
 {
     private IContainer? _container;
+    private IKeyManager _keyManager = null!;
 
     public string ConnectionString =>
         $"Host={_container!.Hostname};Port={_container.GetMappedPublicPort(5432)};" +
@@ -42,7 +44,9 @@ public sealed class TenantChannelConfigEncryptionFixture : IAsyncLifetime
 
         var services = new ServiceCollection();
         services.AddDataProtection().SetApplicationName("Verbara.Platform.Storage.Postgres.Tests");
-        DataProtection = services.BuildServiceProvider().GetRequiredService<IDataProtectionProvider>();
+        var provider = services.BuildServiceProvider();
+        DataProtection = provider.GetRequiredService<IDataProtectionProvider>();
+        _keyManager = provider.GetRequiredService<IKeyManager>();
 
         await EnsureSchemaAsync();
     }
@@ -51,6 +55,16 @@ public sealed class TenantChannelConfigEncryptionFixture : IAsyncLifetime
     {
         if (DataSource is not null) await DataSource.DisposeAsync();
         if (_container is not null) await _container.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Creates a new default key that is active immediately; the older keys stay in the ring, as after a
+    /// scheduled key rotation.
+    /// </summary>
+    public void RotateKey()
+    {
+        var now = DateTimeOffset.UtcNow;
+        _keyManager.CreateNewKey(activationDate: now.AddSeconds(-1), expirationDate: now.AddDays(90));
     }
 
     /// <summary>(Re)creates the table; idempotent so the missing-table test can hand it back.</summary>

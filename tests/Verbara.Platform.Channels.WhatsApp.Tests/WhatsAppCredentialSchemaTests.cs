@@ -5,7 +5,7 @@ namespace Verbara.Platform.Channels.WhatsApp.Tests;
 
 /// <summary>
 /// The declared WhatsApp credential schema lives in Channels.Core (the storage layer wraps its secret keys
-/// without referencing this module); this pins its key names to <see cref="WhatsAppCredentialKeys"/>.
+/// without referencing this module); this pins its Meta key names to <see cref="WhatsAppCredentialKeys"/>.
 /// </summary>
 public class WhatsAppCredentialSchemaTests
 {
@@ -17,6 +17,9 @@ public class WhatsAppCredentialSchemaTests
             .Where(f => f.IsLiteral)
             .Select(f => (string)f.GetRawConstantValue()!);
 
-        ChannelCredentialSchemas.WhatsApp.Keys.Select(k => k.Name).Should().BeEquivalentTo(constants);
+        // defaultQueueId is the routing key every channel shares, not a Meta credential.
+        ChannelCredentialSchemas.WhatsApp.Keys.Select(k => k.Name)
+            .Where(name => name != ChannelCredentialSchemas.DefaultQueueIdKey)
+            .Should().BeEquivalentTo(constants);
     }
 }

@@ -103,14 +103,16 @@ internal static class ChannelConfigEndpoints
 
     /// <summary>
     /// The redacted view of a channel's configuration: every canonical key of a declared schema (isSet false
-    /// when absent or blank), or the stored keys of a channel without one — never a value.
+    /// when absent or blank) followed by any stored key outside it, so a legacy key can be seen and removed;
+    /// or the stored keys of a channel without a schema — never a value.
     /// </summary>
     internal static ChannelConfigResponse ToResponse(ChannelType channel, TenantChannelConfig? config)
     {
         var stored = config?.Credentials;
+        var storedKeys = (stored?.Keys ?? []).Order(StringComparer.Ordinal);
         var keys = ChannelCredentialSchemas.For(channel) is { } schema
-            ? schema.Keys.Select(k => k.Name)
-            : (stored?.Keys ?? []).Order(StringComparer.Ordinal);
+            ? schema.Keys.Select(k => k.Name).Concat(storedKeys.Where(k => !schema.Contains(k)))
+            : storedKeys;
 
         var credentials = keys
             .Select(key => new ChannelCredentialStatus(
@@ -170,7 +172,7 @@ internal sealed record ChannelCredentialStatus(string Key, bool IsSet);
 /// <param name="Channel">The channel name, e.g. <c>WhatsApp</c>.</param>
 /// <param name="IsActive">Whether the channel is active for the tenant (false when never configured).</param>
 /// <param name="IsConfigured">Whether a configuration row exists for the tenant.</param>
-/// <param name="Credentials">Every canonical key of a declared schema, or the stored keys otherwise.</param>
+/// <param name="Credentials">Every canonical key of a declared schema then any stored key outside it, or the stored keys otherwise.</param>
 internal sealed record ChannelConfigResponse(
     string Channel,
     bool IsActive,

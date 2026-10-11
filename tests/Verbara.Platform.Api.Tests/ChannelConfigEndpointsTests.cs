@@ -152,7 +152,7 @@ public sealed class ChannelConfigEndpointsTests : IClassFixture<AuthenticatedPla
     }
 
     [Fact]
-    public async Task ListChannels_ShouldNotContainCredentialValues()
+    public async Task ListChannels_ShouldNotContainCredentialValues_WhenSecretsStored()
     {
         var secrets = await SeedWhatsAppAsync(wabaId: $"waba-{Guid.NewGuid():N}");
 
@@ -162,6 +162,50 @@ public sealed class ChannelConfigEndpointsTests : IClassFixture<AuthenticatedPla
         response.StatusCode.Should().Be(HttpStatusCode.OK, body);
         foreach (var value in secrets.AllValues)
             body.Should().NotContain(value, "the channel list carries no credential value");
+    }
+
+    [Fact]
+    public async Task PutChannel_ShouldStoreDefaultQueueId_WhenWhatsAppRoutingKeySent()
+    {
+        await SeedWhatsAppAsync();
+        var queueId = $"q-{Guid.NewGuid():N}";
+
+        var response = await PutAsync(new JsonObject { [ChannelCredentialSchemas.DefaultQueueIdKey] = queueId });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        (await LoadAsync()).Credentials[ChannelCredentialSchemas.DefaultQueueIdKey].Should().Be(
+            queueId, "inbound routing reads the WhatsApp default queue from the stored credentials");
+        IsSetByKey(body)[ChannelCredentialSchemas.DefaultQueueIdKey].Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetChannel_ShouldListLegacyKey_WhenStoredOutsideSchema()
+    {
+        var legacyToken = await SeedLegacyWhatsAppAsync();
+
+        var response = await _client.GetAsync(Route);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        IsSetByKey(body).Should().ContainKey("ApiToken").WhoseValue.Should().BeTrue(
+            "a stored key outside the schema is shown so the administrator can remove it");
+        body.Should().NotContain(legacyToken);
+    }
+
+    [Fact]
+    public async Task PutChannel_ShouldRemoveLegacyKey_WhenValueIsNull()
+    {
+        await SeedLegacyWhatsAppAsync();
+
+        var response = await PutAsync(new JsonObject { ["ApiToken"] = null, ["PhoneNumber"] = null });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        var stored = await LoadAsync();
+        stored.Credentials.Should().NotContainKey("ApiToken", "a null removes a legacy key outside the schema");
+        stored.Credentials.Should().NotContainKey("PhoneNumber");
+        stored.Credentials.Should().ContainKey(WhatsAppCredentialKeys.AppSecret);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -202,6 +246,29 @@ public sealed class ChannelConfigEndpointsTests : IClassFixture<AuthenticatedPla
             },
             CancellationToken.None);
         return secrets;
+    }
+
+    /// <summary>A row as the console saved it before Web #393: the Meta token under ApiToken.</summary>
+    private async Task<string> SeedLegacyWhatsAppAsync()
+    {
+        var secrets = NewSecrets();
+        var legacyToken = $"EAAlegacy{Guid.NewGuid():N}";
+        using var scope = _factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<ITenantChannelConfigStore>().SaveAsync(
+            new TenantChannelConfig
+            {
+                TenantId = Tenant,
+                Channel = ChannelType.WhatsApp,
+                IsActive = true,
+                Credentials = new Dictionary<string, string>
+                {
+                    ["ApiToken"] = legacyToken,
+                    ["PhoneNumber"] = "+15550001111",
+                    [WhatsAppCredentialKeys.AppSecret] = secrets.AppSecret,
+                },
+            },
+            CancellationToken.None);
+        return legacyToken;
     }
 
     private async Task<TenantChannelConfig> LoadAsync()

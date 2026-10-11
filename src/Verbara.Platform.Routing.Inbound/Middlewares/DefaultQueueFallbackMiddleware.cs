@@ -20,7 +20,7 @@ namespace Verbara.Platform.Routing.Inbound.Middlewares;
 public sealed class DefaultQueueFallbackMiddleware : InboundRoutingMiddlewareBase
 {
     /// <summary>The <see cref="TenantChannelConfig.Credentials"/> key holding an explicit default queue id.</summary>
-    public const string DefaultQueueCredentialKey = "defaultQueueId";
+    public const string DefaultQueueCredentialKey = ChannelCredentialSchemas.DefaultQueueIdKey;
 
     private readonly ITenantChannelConfigStore _channelConfigStore;
     private readonly IQueueStore _queueStore;

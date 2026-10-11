@@ -117,6 +117,37 @@ public class ChannelCredentialMergeTests
         ChannelCredentialSchemas.IsSecret(ChannelType.WhatsApp, key).Should().Be(secret);
     }
 
+    [Theory]
+    [InlineData("ApiToken")]
+    [InlineData("PhoneNumber")]
+    public void IsSecret_ShouldTreatKeyAsSecret_WhenKeyIsOutsideWhatsAppSchema(string legacyKey)
+    {
+        // Before Web #393 the console saved the Meta token as ApiToken: a key outside the schema may hold a
+        // real secret, so it is wrapped at rest like one.
+        ChannelCredentialSchemas.IsSecret(ChannelType.WhatsApp, legacyKey).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsSecret_ShouldBeFalse_WhenKeyIsWhatsAppDefaultQueueId()
+    {
+        ChannelCredentialSchemas.WhatsApp.Contains(ChannelCredentialSchemas.DefaultQueueIdKey).Should().BeTrue(
+            "inbound routing reads defaultQueueId from every channel's credentials, WhatsApp included");
+        ChannelCredentialSchemas.IsSecret(ChannelType.WhatsApp, ChannelCredentialSchemas.DefaultQueueIdKey).Should().BeFalse();
+    }
+
+    [Fact]
+    public void UnknownKeys_ShouldIgnoreKey_WhenValueIsNull()
+    {
+        // A null removes a key, so it may name a stored legacy key that is outside the schema.
+        var unknown = ChannelCredentialMerge.UnknownKeys(ChannelType.WhatsApp, new Dictionary<string, string?>
+        {
+            ["ApiToken"] = null,
+            ["PhoneNumber"] = "x",
+        });
+
+        unknown.Should().Equal("PhoneNumber");
+    }
+
     [Fact]
     public void IsSecret_ShouldTreatEveryKeyAsSecret_WhenChannelHasNoSchema()
     {
