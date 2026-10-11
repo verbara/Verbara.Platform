@@ -47,9 +47,10 @@ jobs:
     name: Build, push, and sign ${{ matrix.name }} image
     runs-on: ubuntu-24.04
     outputs:
-      # Consumed by the `github-release` job. Every matrix leg computes this from
-      # the same tag annotation, so the last-writer-wins semantics of matrix job
-      # outputs are harmless here — all four legs write the identical value.
+      # Consumed by the `github-release` and `smoke` jobs. Every matrix leg
+      # computes this from the same tag annotation, so the last-writer-wins
+      # semantics of matrix job outputs are harmless here — all four legs write
+      # the identical value.
       retro_skip: ${{ steps.retro.outputs.skip }}
     strategy:
       fail-fast: false
@@ -311,38 +312,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Post-release FUNCTIONAL smoke (openspec/changes/released-image-smoke).
-  # verbara-verify-image.sh / the "Verify cosign signature" step above prove
-  # PROVENANCE only. This job is the next gate: it boots the just-released
-  # api image (re-resolved by tag straight from ghcr.io — no matrix-output
-  # plumbing needed since `release` is a matrix job) and runs ONE real
-  # end-to-end journey against Postgres via docker/verbara-smoke-released.sh.
-  #
-  # `needs: release` waits for ALL 4 matrix legs (api/realtime/renderer/mail)
-  # to finish, even though the smoke journey only exercises the api image —
-  # a release isn't "done" until every image in the matrix has pushed, and a
-  # smoke run against a half-published release would be misleading.
-  #
-  # REPORT-ONLY (continue-on-error: true), not gating: this is a new,
-  # walking-skeleton-scope infra stage (LOW architectural risk per
-  # proposal.md — "blast radius of a flaky new stage small"). Images are
-  # already pushed+signed to ghcr.io by the time this job runs (the `release`
-  # job doesn't wait on it, and nothing else in this workflow depends on
-  # `smoke` either) — there is no later step this failure could protect, so
-  # gating would only turn a still-earning-trust stage into workflow-red
-  # noise on the release commit without stopping anything. Promote to
-  # gating (drop continue-on-error, and/or make another step `needs: smoke`)
-  # once it has a track record.
-  #
-  # FOLLOW-UP (Verbara.Sdk.Pro/ADR-0017, tasks.md 3.2): the smoke journey now
-  # additionally asserts the community-boot readiness contract (dialer-engine
-  # Degraded with the `dialer license blocked:` prefix). This leg STAYS
-  # report-only for now — the sharpened assertion first runs against a release
-  # image that PREDATES the 2.13.0-pro fix (it would return the old Unhealthy
-  # 503 shape), so gating it here would red the current release for a fix the
-  # released image does not yet carry. Graduate to gating only AFTER the
-  # sharpened community leg has run green TWICE CONSECUTIVELY against images
-  # that carry the fix (design D5). Deferred to a post-merge follow-up change.
+  # GitHub Release object. Until this job landed (#207, 2026-07-28),
   # `release.yml` built and cosign-signed the images but never created the Release
   # object, so every version reopened the gap — `v2.18.0` shipped tagged + signed
   # but release-less and was backfilled by hand on 2026-07-12 after an
@@ -468,12 +438,51 @@ jobs:
             --title "$TAG" \
             --notes-file "$NOTES_FILE"
 
+  # Post-release FUNCTIONAL smoke (openspec/changes/archive/2026-07-05-released-image-smoke).
+  # verbara-verify-image.sh / the "Verify cosign signature" step above prove
+  # PROVENANCE only. This job is the next gate: it boots the just-released
+  # api image (re-resolved by tag straight from ghcr.io — no matrix-output
+  # plumbing needed since `release` is a matrix job) and runs ONE real
+  # end-to-end journey against Postgres via docker/verbara-smoke-released.sh.
+  #
+  # `needs: release` waits for ALL 4 matrix legs (api/realtime/renderer/mail)
+  # to finish, even though the smoke journey only exercises the api image —
+  # a release isn't "done" until every image in the matrix has pushed, and a
+  # smoke run against a half-published release would be misleading.
+  #
+  # GATING (no continue-on-error) — promoted by promote-community-smoke-to-gating,
+  # discharging Verbara.Sdk.Pro/ADR-0017 follow-up task 3.2. It was report-only
+  # until then, and report-only hid a real defect: the smoke concluded `failure`
+  # on v2.20.0, v2.21.0 and v2.21.1 (the permanently-503 community boot that
+  # Verbara.Sdk.Pro/ADR-0017 fixed) while all three workflow runs said `success`.
+  # The pre-condition — the sharpened community-boot assertion green TWICE
+  # CONSECUTIVELY against images carrying the fix — held from v2.21.2 on.
+  #
+  # The whole journey gates, not one assertion: there is no separable
+  # "community leg" — one step runs one script, and every exit path of it
+  # (journey failed / setup error / readiness timeout) reds the run.
+  #
+  # What a red smoke MEANS: "this released image set is functionally
+  # unverified". What it does NOT do: un-publish or un-sign anything — the
+  # push and the cosign signature already completed inside the `release` job.
+  # Nothing declares `needs: smoke`, on purpose: making `github-release` wait on
+  # it would turn any smoke setup error or timeout into a tag pushed, signed and
+  # RELEASE-LESS again (the v2.18.0 incident the `github-release` job exists to
+  # prevent) — a silent absence is worse than a loud red. The value of gating
+  # is the durable `failure` conclusion bound to the tag; re-run the job in
+  # place once the cause is understood. The one irreversible downstream act a
+  # red smoke must stop is human: registering the release's digests in
+  # verbara-website — see the stop condition in
+  # docs/operations/2026-05-10-update-authorized-digests-after-release.md.
+  #
+  # A retroactive tag (ADR-0024) builds, pushes and signs nothing, so the smoke
+  # is skipped on it exactly like `github-release` — otherwise a gating smoke
+  # would red a run whose contract is to be a clean no-op.
   smoke:
-    name: Post-release functional smoke (report-only)
+    name: Post-release functional smoke
     needs: release
-    if: always() && needs.release.result == 'success'
+    if: always() && needs.release.result == 'success' && needs.release.outputs.retro_skip != 'true'
     runs-on: ubuntu-24.04
-    continue-on-error: true
     permissions:
       contents: read
       packages: read

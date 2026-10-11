@@ -132,6 +132,34 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   PendingDeletion. Paying an invoice (`POST /management/invoices/{invoiceId}/pay`) still ends dunning.
   Direct Customers are unaffected.
 
+### Changed — CI
+
+- **The post-release smoke now fails the Release run** (decision_ref Verbara.Sdk.Pro/ADR-0017). The
+  `smoke` job in `release.yml` no longer has `continue-on-error`, and it is renamed from `Post-release
+  functional smoke (report-only)` to `Post-release functional smoke`. While it was report-only it
+  concluded `failure` on `v2.20.0`, `v2.21.0` and `v2.21.1` (the permanently-503 community boot that
+  Verbara.Sdk.Pro/ADR-0017 fixed), and all three Release runs still said `success`. Across the 14
+  releases it has run on (`v2.17.0` to `v2.27.0`) it failed only on those three, all the same real
+  defect, and it has been green on all eight since the fix (`v2.21.2` to `v2.27.0`). A red smoke
+  means "this image set is functionally unverified". It does not un-publish or un-sign anything, because
+  the images are pushed and signed before it starts, and no job waits on it: making `github-release`
+  wait would bring back tags that are pushed and signed but have no Release object (the `v2.18.0`
+  gap). The smoke now skips retroactive tags, as `github-release` already does, so a retroactive tag
+  still ends cleanly. Operators: do not register a release's digests in `authorized-digests.json`
+  while its smoke is red; the stop condition is in
+  `docs/operations/2026-05-10-update-authorized-digests-after-release.md`. This applies from the first
+  tag cut after it merges, because `release.yml` runs from the tagged ref.
+- **`Live-DB Tests (Postgres)` is a required check** (decision_ref verbara-meta/ADR-0023). The lane has
+  been gating since the Testcontainers readiness fix; it is now also in the `main-protection` ruleset's
+  required status checks, so a red lane blocks the merge instead of only showing on the PR. It got
+  there in two steps, each on step-level evidence: gating after green runs on the fix's own PR and on
+  an unrelated one, then required after it stayed green on the merge queue a month later. This closes
+  task 2.2 of the archived change `2026-07-05-live-postgres-ci-lane`. The ruleset is repository
+  configuration, so the diff shows only the comments in `ci.yml`. On a docs-only PR the lane is
+  skipped and the skip satisfies the check; on a Dependabot PR the job still reports, with its two
+  test steps skipped. Neither is a regression. A
+  transient red is fixed by re-running the job, not by removing the requirement.
+
 ### Fixed
 
 - **A WebChat visitor is one contact and one conversation, and agent replies in it reach the visitor.**
