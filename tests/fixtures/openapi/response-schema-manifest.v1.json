@@ -797,7 +797,10 @@
         ],
         "CreateSessionResponse": [
           "sessionId",
-          "wsUrl"
+          "wsUrl",
+          "visitorAddress",
+          "contactId",
+          "conversationId"
         ],
         "KeywordRuleDto": [
           "ruleId",

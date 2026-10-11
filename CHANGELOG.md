@@ -23,6 +23,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fragment or user information. Plain `http` is accepted only for a loopback host (`localhost`,
   `127.0.0.0/8`, `::1`), because the tenant's token is sent to this address. An invalid value stops the API
   at start-up with an error that names the key.
+- **The WebChat session response names the visitor.** `POST /api/v1/webchat/sessions` now returns, next
+  to `sessionId` and `wsUrl`, the session's `visitorAddress` (`webchat-…`), the `contactId` carrying it
+  and that contact's `conversationId`. The change is additive: existing fields keep their names and
+  meaning.
 
 ### Changed
 
@@ -42,6 +46,35 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   text message.
 - The `channel.configured` audit record lists the names of the changed keys in `changed_keys`, never a
   value.
+- **WebChat replies are delivered reliably only when the API runs as a single replica.** WebChat
+  sessions and sockets live in the API process, and there is no cross-replica routing yet. The reply is
+  delivered inside the agent's own request, so it reaches the visitor only when that request lands on
+  the replica holding the visitor's socket; on any other replica it fails with `SESSION_NOT_CONNECTED`
+  and is stored as failed, exactly as for a visitor who has left. Sticky sessions do not help: they pin
+  the agent's requests by the agent's affinity, not the visitor's.
+- **Two console end-to-end specs fail against this release** (v3.21.0-web, and v3.22.0-web, which ships
+  the same helper). `conversation-refusals` and `monitor-takeover-and-contact-search` use the e2e
+  `conversation-routing` helper, which gives its own contact the WebChat session id as an address and
+  relies on the visitor's message being resolved by that session id. Messages are now attributed to the
+  session's visitor address (see Fixed), so the helper's conversation is never routed and the specs time
+  out. The product is not affected. The next console release migrates the helper to the `contactId` and
+  `conversationId` the session response now returns.
+
+### Fixed
+
+- **A WebChat visitor is one contact and one conversation, and agent replies in it reach the visitor.**
+  Before, the visitor's first message was attributed to the session id, so it created a second contact
+  and a second conversation apart from the ones the session had opened: the tenant held two of each per
+  visitor, the session's own conversation stayed empty, and a reply sent in it was stored as failed
+  because no session was known by the visitor's address. Every visitor message, over the WebSocket or the
+  REST message route, now goes into the conversation the session was created with while that
+  conversation is open; once it has ended, the visitor's next message opens a new conversation for the
+  same contact, and that conversation is routed to a queue (before, it stayed unassigned). Sessions are
+  found by visitor address, and the reply is delivered on the visitor's socket. A socket that re-attaches
+  to its session (a reload, a network blip, a second tab) receives replies again, and closing one tab no
+  longer cuts the other. A reply is stored as sent only when a visitor socket took it: when the visitor
+  has left or has not connected the socket yet, it is stored as failed with `SESSION_NOT_CONNECTED`; no
+  error reaches the agent.
 
 ### Security
 
