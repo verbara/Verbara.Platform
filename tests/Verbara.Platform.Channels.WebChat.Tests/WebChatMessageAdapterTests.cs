@@ -79,7 +79,7 @@ public class WebChatMessageAdapterTests
     }
 
     [Fact]
-    public void ToInboundMessage_ShouldUseVisitorAddress_NotSessionId()
+    public void ToInboundMessage_ShouldUseVisitorAddress_WhenSessionIdDiffers()
     {
         // whatsapp-works-for-real D16: the session id is a transport handle; the contact address of a
         // WebChat visitor is the webchat-<guid> visitor address the session was created with.
