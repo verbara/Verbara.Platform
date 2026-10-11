@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
@@ -15,9 +14,12 @@ using Microsoft.Extensions.Options;
 namespace Verbara.Platform.Channels.WhatsApp;
 
 /// <summary>
-/// Sends outbound WhatsApp messages via the Meta Business API.
-/// Enforces the 24-hour session window: if more than 24 hours have elapsed
-/// since the last inbound message, a template message is sent instead.
+/// Sends outbound WhatsApp messages via the Meta Business API on behalf of the message's tenant.
+/// The access token and phone number id are read from the tenant's WhatsApp channel configuration
+/// at send time (there is no process-wide credential); a missing key fails the send with
+/// <see cref="ChannelNotConfiguredErrorCode"/> before any request reaches Meta. A template is sent
+/// only when <see cref="OutboundMessage.TemplateId"/> is set — whether the 24-hour customer-service
+/// window requires one is decided by the caller from stored messages, not here.
 /// </summary>
 public sealed class WhatsAppConnector : IChannelConnector
 {
@@ -27,54 +29,68 @@ public sealed class WhatsAppConnector : IChannelConnector
     /// </summary>
     public const string ResiliencePolicyKey = "channel.whatsapp";
 
+    /// <summary>Name of the <see cref="IHttpClientFactory"/> client the connector sends through.</summary>
+    public const string HttpClientName = nameof(WhatsAppConnector);
+
+    /// <summary><see cref="SendResult.ErrorCode"/> when the tenant lacks an active config, token or number.</summary>
+    public const string ChannelNotConfiguredErrorCode = "channel-not-configured";
+
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ITenantChannelConfigStore _configStore;
     private readonly WhatsAppOptions _options;
-    private readonly HttpClient _httpClient;
     private readonly ILogger<WhatsAppConnector> _logger;
     private readonly ResiliencePolicy _policy;
-
-    // Tracks last inbound message time per recipient phone number (E.164)
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _lastCustomerMessage = new();
 
     public ChannelType Channel => ChannelType.WhatsApp;
 
     public WhatsAppConnector(
-        HttpClient httpClient,
+        IHttpClientFactory httpClientFactory,
+        ITenantChannelConfigStore configStore,
         IOptions<WhatsAppOptions> options,
         ILogger<WhatsAppConnector> logger,
         [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
+        _configStore = configStore;
         _options = options.Value;
         _logger = logger;
         _policy = policy ?? ResiliencePolicy.NoOp;
-
-        _httpClient.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _options.AccessToken);
     }
-
-    /// <summary>Records the time of the last inbound customer message for a phone number.</summary>
-    public void RecordCustomerMessage(string phoneNumber) =>
-        _lastCustomerMessage[phoneNumber] = DateTimeOffset.UtcNow;
 
     public async Task<SendResult> SendAsync(OutboundMessage message, CancellationToken ct)
     {
+        var config = await _configStore.GetAsync(message.TenantId, ChannelType.WhatsApp, ct).ConfigureAwait(false);
+        var credentials = config is { IsActive: true } ? config.Credentials : null;
+        var accessToken = Credential(credentials, WhatsAppCredentialKeys.AccessToken);
+        var phoneNumberId = Credential(credentials, WhatsAppCredentialKeys.PhoneNumberId);
+
+        if (accessToken is null || phoneNumberId is null)
+        {
+            var missing = credentials is null ? "active configuration"
+                : accessToken is null ? WhatsAppCredentialKeys.AccessToken
+                : WhatsAppCredentialKeys.PhoneNumberId;
+            Log.ChannelNotConfigured(_logger, message.TenantId.Value, missing);
+            return new SendResult(
+                false, null, ChannelNotConfiguredErrorCode,
+                $"WhatsApp is not configured for this tenant (missing {missing}).");
+        }
+
+        var apiVersion = Credential(credentials, WhatsAppCredentialKeys.ApiVersion) ?? _options.ApiVersion;
         var to = message.To.Address;
-        var isOutsideWindow = IsOutsideSessionWindow(to);
 
         MetaSendRequest request;
-
-        if (isOutsideWindow || message.TemplateId is not null)
+        if (message.TemplateId is not null)
         {
-            var templateId = message.TemplateId ?? "default_template";
-            Log.SendingTemplate(_logger, templateId, to, isOutsideWindow);
-            request = BuildTemplateRequest(to, templateId);
+            Log.SendingTemplate(_logger, message.TemplateId, to);
+            request = BuildTemplateRequest(to, message.TemplateId);
         }
         else
         {
             request = BuildContentRequest(to, message.Content);
         }
 
-        return await SendRequestAsync(request, ct).ConfigureAwait(false);
+        var url = $"{_options.BaseUrl}/{apiVersion}/{phoneNumberId}/messages";
+        return await SendRequestAsync(request, url, accessToken, ct).ConfigureAwait(false);
     }
 
     public Task<MessageDeliveryStatus?> GetStatusAsync(string externalMessageId, CancellationToken ct)
@@ -83,13 +99,10 @@ public sealed class WhatsAppConnector : IChannelConnector
         return Task.FromResult<MessageDeliveryStatus?>(null);
     }
 
-    private bool IsOutsideSessionWindow(string phoneNumber)
-    {
-        if (!_lastCustomerMessage.TryGetValue(phoneNumber, out var lastTime))
-            return true;
-
-        return DateTimeOffset.UtcNow - lastTime > TimeSpan.FromHours(24);
-    }
+    private static string? Credential(IReadOnlyDictionary<string, string>? credentials, string key) =>
+        credentials is not null && credentials.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
 
     private static MetaSendRequest BuildTemplateRequest(string to, string templateName)
     {
@@ -188,10 +201,9 @@ public sealed class WhatsAppConnector : IChannelConnector
         };
     }
 
-    private async Task<SendResult> SendRequestAsync(MetaSendRequest request, CancellationToken ct)
+    private async Task<SendResult> SendRequestAsync(
+        MetaSendRequest request, string url, string accessToken, CancellationToken ct)
     {
-        var url = $"{_options.BaseUrl}/{_options.ApiVersion}/{_options.PhoneNumberId}/messages";
-
         var json = JsonSerializer.Serialize(request, WhatsAppJsonContext.Default.MetaSendRequest);
 
         HttpResponseMessage response;
@@ -201,9 +213,12 @@ public sealed class WhatsAppConnector : IChannelConnector
                 ResiliencePolicyKey,
                 async innerCt =>
                 {
-                    // StringContent must be rebuilt per attempt — Content is consumed on send.
+                    // The request (and its content) must be rebuilt per attempt — it is consumed on send.
                     using var content = new StringContent(json, Encoding.UTF8, "application/json");
-                    return await _httpClient.PostAsync(url, content, innerCt).ConfigureAwait(false);
+                    using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+                    httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                    var client = _httpClientFactory.CreateClient(HttpClientName);
+                    return await client.SendAsync(httpRequest, innerCt).ConfigureAwait(false);
                 },
                 ct).ConfigureAwait(false);
         }
@@ -213,11 +228,20 @@ public sealed class WhatsAppConnector : IChannelConnector
             return new SendResult(false, null, "HTTP_ERROR", ex.Message);
         }
 
-        var responseBody = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
+        // The connector owns the provider response on every path: read what it needs, then release it.
+        string responseBody;
+        int statusCode;
+        bool succeeded;
+        using (response)
         {
-            Log.ApiError(_logger, (int)response.StatusCode, responseBody);
+            responseBody = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            statusCode = (int)response.StatusCode;
+            succeeded = response.IsSuccessStatusCode;
+        }
+
+        if (!succeeded)
+        {
+            Log.ApiError(_logger, statusCode, responseBody);
 
             MetaSendResponse? errorResponse = null;
             try
@@ -228,7 +252,7 @@ public sealed class WhatsAppConnector : IChannelConnector
             catch (JsonException) { /* ignore */ }
 
             var errorCode = errorResponse?.Error?.Code.ToString(CultureInfo.InvariantCulture) ??
-                            ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture);
+                            statusCode.ToString(CultureInfo.InvariantCulture);
             var errorMessage = errorResponse?.Error?.Message ?? responseBody;
 
             return new SendResult(false, null, errorCode, errorMessage);

@@ -4,6 +4,7 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using NSubstitute;
+using NSubstitute.ReturnsExtensions;
 
 namespace Verbara.Platform.Channels.Core.Tests.Pipeline;
 
@@ -24,6 +25,8 @@ public class InboundMessagePipelineTests
         _contactResolver = Substitute.For<IContactIdentityResolver>();
         _conversationStore = Substitute.For<IConversationStore>();
         _lifecycleService = Substitute.For<IConversationLifecycleService>();
+        _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<Message>());
 
         _pipeline = new InboundMessagePipeline(
             _messageStore,
@@ -190,8 +193,9 @@ public class InboundMessagePipelineTests
             Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
         await _lifecycleService.DidNotReceive().CreateAsync(
             Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
-        // SaveAsync must not be called again
+        // Nothing must be persisted again
         await _messageStore.DidNotReceive().SaveAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>());
+        await _messageStore.DidNotReceive().InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>());
     }
 
     // -------------------------------------------------------------------------
@@ -214,7 +218,7 @@ public class InboundMessagePipelineTests
 
         await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
 
-        await _messageStore.Received(1).SaveAsync(
+        await _messageStore.Received(1).InsertInboundIfAbsentAsync(
             Arg.Is<Message>(m => m != null &&
                 m.Direction == MessageDirection.Inbound &&
                 m.DeliveryStatus == MessageDeliveryStatus.Delivered &&
@@ -427,6 +431,118 @@ public class InboundMessagePipelineTests
         result.PersistedMessage.TenantId.Should().Be(TenantId);
         result.PersistedMessage.ExternalMessageId.Should().Be(inbound.ExternalMessageId);
 
-        await _messageStore.Received(1).SaveAsync(result.PersistedMessage, Arg.Any<CancellationToken>());
+        await _messageStore.Received(1).InsertInboundIfAbsentAsync(result.PersistedMessage, Arg.Any<CancellationToken>());
+        result.IsDuplicate.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Pipeline_ShouldReportStoredMessage_WhenConcurrentIdenticalDeliveryWonTheInsert()
+    {
+        // Both deliveries passed DeduplicateStep before either inserted; the store keeps the first one.
+        var inbound = MakeMessage("race-ext");
+        var contact = MakeContact();
+        var conversation = MakeConversation(contact.ContactId);
+        var winner = new Message
+        {
+            MessageId = EntityId.New(),
+            ConversationId = EntityId.New(),
+            TenantId = TenantId,
+            Direction = MessageDirection.Inbound,
+            Channel = Channel,
+            Content = new MessageEnvelope([]),
+            DeliveryStatus = MessageDeliveryStatus.Delivered,
+            ExternalMessageId = "race-ext",
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        _messageStore.FindByExternalIdAsync(TenantId, "race-ext", Arg.Any<CancellationToken>()).ReturnsNull();
+        _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>()).Returns(winner);
+        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
+            .Returns(conversation);
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        result.MessageId.Should().Be(winner.MessageId);
+        result.ConversationId.Should().Be(winner.ConversationId);
+        result.IsNewConversation.Should().BeFalse();
+        result.IsDuplicate.Should().BeTrue("the caller must not repeat the winning delivery's side effects");
+        await _messageStore.DidNotReceive().SaveAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>());
+        await _conversationStore.DidNotReceiveWithAnyArgs().DeleteIfNoMessagesAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task Pipeline_ShouldDiscardConversationItOpened_WhenConcurrentIdenticalDeliveryWonTheInsert()
+    {
+        var inbound = MakeMessage("race-new");
+        var contact = MakeContact();
+        var opened = MakeConversation(contact.ContactId, isNew: true);
+        var winner = new Message
+        {
+            MessageId = EntityId.New(),
+            ConversationId = EntityId.New(),
+            TenantId = TenantId,
+            Direction = MessageDirection.Inbound,
+            Channel = Channel,
+            Content = new MessageEnvelope([]),
+            DeliveryStatus = MessageDeliveryStatus.Delivered,
+            ExternalMessageId = "race-new",
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        _messageStore.FindByExternalIdAsync(TenantId, "race-new", Arg.Any<CancellationToken>()).ReturnsNull();
+        _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>()).Returns(winner);
+        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
+            .ReturnsNull();
+        _lifecycleService.CreateAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>()).Returns(opened);
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        result.IsDuplicate.Should().BeTrue();
+        result.IsNewConversation.Should().BeFalse();
+        result.ConversationId.Should().Be(winner.ConversationId);
+        await _conversationStore.Received(1).DeleteIfNoMessagesAsync(TenantId, opened.ConversationId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShouldFlagDuplicate_WhenExternalIdIsAlreadyStored()
+    {
+        var inbound = MakeMessage("replayed-ext");
+        var contact = MakeContact();
+        var stored = new Message
+        {
+            MessageId = EntityId.New(),
+            ConversationId = EntityId.New(),
+            TenantId = TenantId,
+            Direction = MessageDirection.Inbound,
+            Channel = Channel,
+            Content = new MessageEnvelope([]),
+            DeliveryStatus = MessageDeliveryStatus.Delivered,
+            ExternalMessageId = "replayed-ext",
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        _messageStore.FindByExternalIdAsync(TenantId, "replayed-ext", Arg.Any<CancellationToken>()).Returns(stored);
+        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        result.IsDuplicate.Should().BeTrue();
+        result.MessageId.Should().Be(stored.MessageId);
+        result.ConversationId.Should().Be(stored.ConversationId);
+        await _messageStore.DidNotReceiveWithAnyArgs().InsertInboundIfAbsentAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShouldNotFlagDuplicate_WhenMessageIsNew()
+    {
+        var inbound = MakeMessage("fresh-ext");
+        var contact = MakeContact();
+        _messageStore.FindByExternalIdAsync(TenantId, "fresh-ext", Arg.Any<CancellationToken>()).ReturnsNull();
+        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
+            .Returns(MakeConversation(contact.ContactId));
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        result.IsDuplicate.Should().BeFalse();
     }
 }

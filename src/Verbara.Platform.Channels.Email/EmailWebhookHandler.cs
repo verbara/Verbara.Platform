@@ -58,7 +58,7 @@ public sealed class EmailWebhookHandler : IWebhookHandler
         var from = new ChannelAddress(ChannelType.Email, parsed.From);
 
         var inbound = new InboundMessage(from, envelope, parsed.MessageId, parsed.ReceivedAt);
-        return new WebhookResult(WebhookResultType.NewMessage, inbound, null);
+        return new WebhookResult(WebhookResultType.NewMessage, [inbound], []);
     }
 
     private static List<MessageBlock> BuildBlocks(ParsedEmail parsed)
@@ -97,5 +97,5 @@ public sealed class EmailWebhookHandler : IWebhookHandler
     }
 
     private static WebhookResult Ignored() =>
-        new(WebhookResultType.Ignored, null, null);
+        WebhookResult.Ignored;
 }

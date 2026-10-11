@@ -20,32 +20,67 @@ internal sealed class PostgresMessageStore : IMessageStore
         var contentJson = JsonSerializer.Serialize(message.Content, ConversationsJsonContext.Default.MessageEnvelope);
 
         await _dataSource.ExecuteAsync(
-            "INSERT INTO messages (message_id, conversation_id, tenant_id, direction, channel, sender_id, content, " +
-            "delivery_status, external_message_id, created_at, delivered_at, read_at, updated_at, created_by, updated_by) " +
-            "VALUES (@MessageId, @ConversationId, @TenantId, @Direction, @Channel, @SenderId, @Content::jsonb, " +
-            "@DeliveryStatus, @ExternalMessageId, @CreatedAt, @DeliveredAt, @ReadAt, @UpdatedAt, @CreatedBy, @UpdatedBy) " +
+            InsertSql +
             "ON CONFLICT (tenant_id, message_id) DO UPDATE SET " +
             "  delivery_status = EXCLUDED.delivery_status, delivered_at = EXCLUDED.delivered_at, " +
             "  read_at = EXCLUDED.read_at, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
-            p =>
-            {
-                p.Add(new NpgsqlParameter("MessageId",         message.MessageId.Value));
-                p.Add(new NpgsqlParameter("ConversationId",    message.ConversationId.Value));
-                p.Add(new NpgsqlParameter("TenantId",          message.TenantId.Value));
-                p.Add(new NpgsqlParameter("Direction",         (int)message.Direction));
-                p.Add(new NpgsqlParameter("Channel",           (int)message.Channel));
-                p.Add(new NpgsqlParameter("SenderId", NpgsqlDbType.Text) { Value = (object?)message.SenderId ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("Content",           contentJson));
-                p.Add(new NpgsqlParameter("DeliveryStatus",    (int)message.DeliveryStatus));
-                p.Add(new NpgsqlParameter("ExternalMessageId", NpgsqlDbType.Text) { Value = (object?)message.ExternalMessageId ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("CreatedAt",         message.CreatedAt));
-                p.Add(new NpgsqlParameter("DeliveredAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.DeliveredAt ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("ReadAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.ReadAt ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.UpdatedAt ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)message.CreatedBy ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)message.UpdatedBy ?? DBNull.Value });
-            },
+            p => BindInsert(p, message, contentJson),
             ct);
+    }
+
+    private const string Columns =
+        "message_id, conversation_id, tenant_id, direction, channel, sender_id, content, " +
+        "delivery_status, external_message_id, created_at, delivered_at, read_at, updated_at, created_by, updated_by";
+
+    private const string InsertSql =
+        "INSERT INTO messages (" + Columns + ") " +
+        "VALUES (@MessageId, @ConversationId, @TenantId, @Direction, @Channel, @SenderId, @Content::jsonb, " +
+        "@DeliveryStatus, @ExternalMessageId, @CreatedAt, @DeliveredAt, @ReadAt, @UpdatedAt, @CreatedBy, @UpdatedBy) ";
+
+    private static void BindInsert(NpgsqlParameterCollection p, Message message, string contentJson)
+    {
+        p.Add(new NpgsqlParameter("MessageId",         message.MessageId.Value));
+        p.Add(new NpgsqlParameter("ConversationId",    message.ConversationId.Value));
+        p.Add(new NpgsqlParameter("TenantId",          message.TenantId.Value));
+        p.Add(new NpgsqlParameter("Direction",         (int)message.Direction));
+        p.Add(new NpgsqlParameter("Channel",           (int)message.Channel));
+        p.Add(new NpgsqlParameter("SenderId", NpgsqlDbType.Text) { Value = (object?)message.SenderId ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("Content",           contentJson));
+        p.Add(new NpgsqlParameter("DeliveryStatus",    (int)message.DeliveryStatus));
+        p.Add(new NpgsqlParameter("ExternalMessageId", NpgsqlDbType.Text) { Value = (object?)message.ExternalMessageId ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("CreatedAt",         message.CreatedAt));
+        p.Add(new NpgsqlParameter("DeliveredAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.DeliveredAt ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("ReadAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.ReadAt ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = (object?)message.UpdatedAt ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("CreatedBy", NpgsqlDbType.Text) { Value = (object?)message.CreatedBy ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)message.UpdatedBy ?? DBNull.Value });
+    }
+
+    public async Task<Message> InsertInboundIfAbsentAsync(Message message, CancellationToken ct)
+    {
+        if (message.ExternalMessageId is null)
+        {
+            await SaveAsync(message, ct);
+            return message;
+        }
+
+        var contentJson = JsonSerializer.Serialize(message.Content, ConversationsJsonContext.Default.MessageEnvelope);
+
+        // Targets the partial unique index of migration 020 (the WHERE clause is what lets Postgres infer it).
+        // A concurrent or replayed identical delivery inserts nothing and returns no row; the stored one is
+        // then re-read — under READ COMMITTED the conflicting row is committed by the time DO NOTHING fires.
+        var inserted = await _dataSource.QueryFirstOrDefaultAsync(
+            InsertSql +
+            "ON CONFLICT (tenant_id, external_message_id) WHERE external_message_id IS NOT NULL DO NOTHING " +
+            "RETURNING " + Columns,
+            p => BindInsert(p, message, contentJson),
+            MessageRow.Map, ct);
+        if (inserted is not null)
+            return inserted.ToMessage();
+
+        return await FindByExternalIdAsync(message.TenantId, message.ExternalMessageId, ct)
+            ?? throw new InvalidOperationException(
+                $"Message with provider id '{message.ExternalMessageId}' conflicted on insert but could not be re-read.");
     }
 
     public async Task<Message?> GetByIdAsync(TenantId tenantId, EntityId messageId, CancellationToken ct)
@@ -78,6 +113,17 @@ internal sealed class PostgresMessageStore : IMessageStore
         return rows.Select(r => r.ToMessage()).ToList();
     }
 
+    // SQL mirror of MessageDeliveryStatusRules.CanAdvance (design D9): Pending < Sent < Delivered < Read,
+    // Failed terminal and reachable only from Pending/Sent. The enum values are compile-time constants.
+    private static readonly string StoredRankSql =
+        $"CASE delivery_status WHEN {(int)MessageDeliveryStatus.Pending} THEN 0 WHEN {(int)MessageDeliveryStatus.Sent} THEN 1 " +
+        $"WHEN {(int)MessageDeliveryStatus.Delivered} THEN 2 WHEN {(int)MessageDeliveryStatus.Read} THEN 3 ELSE -1 END";
+
+    private static readonly string CanAdvanceSql =
+        $"delivery_status <> {(int)MessageDeliveryStatus.Failed} AND (" +
+        $"  (@Status = {(int)MessageDeliveryStatus.Failed} AND delivery_status IN ({(int)MessageDeliveryStatus.Pending}, {(int)MessageDeliveryStatus.Sent})) " +
+        $"  OR (@Status <> {(int)MessageDeliveryStatus.Failed} AND @NewRank > " + StoredRankSql + "))";
+
     public async Task UpdateDeliveryStatusAsync(
         TenantId tenantId, EntityId messageId, MessageDeliveryStatus status, DateTimeOffset? timestamp, CancellationToken ct)
     {
@@ -85,17 +131,52 @@ internal sealed class PostgresMessageStore : IMessageStore
             "UPDATE messages SET delivery_status = @Status, " +
             "  delivered_at = CASE WHEN @Status = @DeliveredInt THEN @Timestamp ELSE delivered_at END, " +
             "  read_at = CASE WHEN @Status = @ReadInt THEN @Timestamp ELSE read_at END " +
-            "WHERE tenant_id = @TenantId AND message_id = @MessageId",
+            "WHERE tenant_id = @TenantId AND message_id = @MessageId AND " + CanAdvanceSql,
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId",     tenantId.Value));
                 p.Add(new NpgsqlParameter("MessageId",    messageId.Value));
                 p.Add(new NpgsqlParameter("Status",       (int)status));
+                p.Add(new NpgsqlParameter("NewRank",      MessageDeliveryStatusRules.Rank(status)));
                 p.Add(new NpgsqlParameter("DeliveredInt", (int)MessageDeliveryStatus.Delivered));
                 p.Add(new NpgsqlParameter("ReadInt",      (int)MessageDeliveryStatus.Read));
                 p.Add(new NpgsqlParameter("Timestamp", NpgsqlDbType.TimestampTz) { Value = (object?)timestamp ?? DBNull.Value });
             },
             ct);
+    }
+
+    public async Task MarkSentAsync(TenantId tenantId, EntityId messageId, string? externalMessageId, CancellationToken ct)
+    {
+        // One statement: the provider id and Sent become visible together (design D8), so a status webhook
+        // posted right after the provider's response correlates. A status already past Pending is kept.
+        await _dataSource.ExecuteAsync(
+            "UPDATE messages SET external_message_id = COALESCE(@ExternalMessageId, external_message_id), " +
+            $"  delivery_status = CASE WHEN delivery_status = {(int)MessageDeliveryStatus.Pending} " +
+            $"    THEN {(int)MessageDeliveryStatus.Sent} ELSE delivery_status END " +
+            "WHERE tenant_id = @TenantId AND message_id = @MessageId",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId",  tenantId.Value));
+                p.Add(new NpgsqlParameter("MessageId", messageId.Value));
+                p.Add(new NpgsqlParameter("ExternalMessageId", NpgsqlDbType.Text) { Value = (object?)externalMessageId ?? DBNull.Value });
+            },
+            ct);
+    }
+
+    public async Task<Message?> FindLastInboundAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
+    {
+        var row = await _dataSource.QueryFirstOrDefaultAsync(
+            "SELECT " + Columns + " FROM messages " +
+            "WHERE tenant_id = @TenantId AND conversation_id = @ConversationId AND direction = @Inbound " +
+            "ORDER BY created_at DESC, message_id DESC LIMIT 1",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId",       tenantId.Value));
+                p.Add(new NpgsqlParameter("ConversationId", conversationId.Value));
+                p.Add(new NpgsqlParameter("Inbound", NpgsqlDbType.Integer) { Value = (int)MessageDirection.Inbound });
+            },
+            MessageRow.Map, ct);
+        return row?.ToMessage();
     }
 
     public async Task<Message?> FindByExternalIdAsync(TenantId tenantId, string externalMessageId, CancellationToken ct)

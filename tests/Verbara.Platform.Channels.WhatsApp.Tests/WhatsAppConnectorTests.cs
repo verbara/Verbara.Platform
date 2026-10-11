@@ -1,12 +1,12 @@
 using System.Net;
 using System.Text;
-using System.Text.Json;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Channels.WhatsApp;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace Verbara.Platform.Channels.WhatsApp.Tests;
 
@@ -15,19 +15,8 @@ public class WhatsAppConnectorTests
     private const string PhoneNumberId = "123456789";
     private const string AccessToken = "EAAtest";
 
-    private static WhatsAppOptions DefaultOptions() => new()
-    {
-        PhoneNumberId = PhoneNumberId,
-        AccessToken = AccessToken,
-        WebhookVerifyToken = "token",
-        AppSecret = "secret",
-        ApiVersion = "v21.0",
-        BaseUrl = "https://graph.facebook.com",
-    };
-
     private static (WhatsAppConnector connector, FakeHttpMessageHandler handler) CreateConnector(
-        HttpResponseMessage? response = null,
-        WhatsAppOptions? options = null)
+        HttpResponseMessage? response = null)
     {
         var fakeHandler = new FakeHttpMessageHandler(
             response ?? new HttpResponseMessage(HttpStatusCode.OK)
@@ -41,10 +30,30 @@ public class WhatsAppConnectorTests
                     """, Encoding.UTF8, "application/json"),
             });
 
-        var httpClient = new HttpClient(fakeHandler);
+        var factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient(WhatsAppConnector.HttpClientName).Returns(_ => new HttpClient(fakeHandler, disposeHandler: false));
+
+        var configStore = Substitute.For<ITenantChannelConfigStore>();
+        configStore.GetAsync(Arg.Any<TenantId>(), ChannelType.WhatsApp, Arg.Any<CancellationToken>())
+            .Returns(new TenantChannelConfig
+            {
+                TenantId = new TenantId("tenant-a"),
+                Channel = ChannelType.WhatsApp,
+                Credentials = new Dictionary<string, string>
+                {
+                    [WhatsAppCredentialKeys.AccessToken] = AccessToken,
+                    [WhatsAppCredentialKeys.PhoneNumberId] = PhoneNumberId,
+                },
+            });
+
         var connector = new WhatsAppConnector(
-            httpClient,
-            Options.Create(options ?? DefaultOptions()),
+            factory,
+            configStore,
+            Options.Create(new WhatsAppOptions
+            {
+                ApiVersion = "v21.0",
+                BaseUrl = "https://graph.facebook.com",
+            }),
             NullLogger<WhatsAppConnector>.Instance);
 
         return (connector, fakeHandler);
@@ -58,15 +67,12 @@ public class WhatsAppConnectorTests
             EntityId.From("conv-1"),
             templateId);
 
-    // ── Send text (within window) ─────────────────────────────────────────────
+    // ── Send text (no template requested) ─────────────────────────────────────
 
     [Fact]
-    public async Task SendAsync_ShouldSendTextMessage_WhenWithinSessionWindow()
+    public async Task SendAsync_ShouldSendTextMessage_WhenNoTemplateRequested()
     {
         var (connector, handler) = CreateConnector();
-
-        // Record a recent inbound so we are within the 24h window
-        connector.RecordCustomerMessage("15550000002");
 
         var result = await connector.SendAsync(
             TextMessage("15550000002", "Hi there!"),
@@ -81,36 +87,12 @@ public class WhatsAppConnectorTests
         sentBody.Should().NotContain("\"type\":\"template\"");
     }
 
-    // ── Send with template (outside 24h window) ───────────────────────────────
-
-    [Fact]
-    public async Task SendAsync_ShouldSendTemplate_WhenOutsideSessionWindow()
-    {
-        var (connector, handler) = CreateConnector();
-        // No RecordCustomerMessage → outside window
-
-        var result = await connector.SendAsync(
-            new OutboundMessage(
-                new ChannelAddress(ChannelType.WhatsApp, "15550000003"),
-                new MessageEnvelope([new TextBlock("Hello!")]),
-                new TenantId("tenant-a"),
-                EntityId.From("conv-2"),
-                TemplateId: "hello_world"),
-            CancellationToken.None);
-
-        result.Success.Should().BeTrue();
-
-        var sentBody = await handler.LastRequestBody!.ReadAsStringAsync();
-        sentBody.Should().Contain("\"type\":\"template\"");
-        sentBody.Should().Contain("\"name\":\"hello_world\"");
-    }
+    // ── Send with template (only when requested) ──────────────────────────────
 
     [Fact]
     public async Task SendAsync_ShouldUseTemplate_WhenExplicitTemplateIdProvided()
     {
         var (connector, handler) = CreateConnector();
-        // Even if within window, explicit template must be used
-        connector.RecordCustomerMessage("15550000004");
 
         var result = await connector.SendAsync(
             TextMessage("15550000004", "Hello!", templateId: "promo_template"),
@@ -142,7 +124,6 @@ public class WhatsAppConnectorTests
         };
 
         var (connector, _) = CreateConnector(errorResponse);
-        connector.RecordCustomerMessage("15550000005");
 
         var result = await connector.SendAsync(
             TextMessage("15550000005", "Hello"),
@@ -159,7 +140,6 @@ public class WhatsAppConnectorTests
     public async Task SendAsync_ShouldPostToCorrectUrl()
     {
         var (connector, handler) = CreateConnector();
-        connector.RecordCustomerMessage("15550000006");
 
         await connector.SendAsync(TextMessage("15550000006", "test"), CancellationToken.None);
 

@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Verbara.Platform.Storage.Postgres\Verbara.Platform.Storage.Postgres.csproj" />
+    <!-- The inbound pipeline races on these stores (InboundPipelineRaceTests). -->
+    <ProjectReference Include="..\..\src\Verbara.Platform.Channels.Core\Verbara.Platform.Channels.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

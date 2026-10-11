@@ -41,6 +41,14 @@ public interface IConversationStore
     /// <summary>Deletes all conversations for a contact and returns the count deleted (GDPR purge).</summary>
     Task<int> DeleteByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);
 
+    /// <summary>
+    /// Deletes the conversation only while no message belongs to it, and returns whether it was deleted. The
+    /// inbound pipeline calls it for a conversation it has just created when its message insert lost the race
+    /// to an identical delivery: that conversation never received a message, and left behind it would be routed
+    /// as a queued, owner-less conversation. A conversation another delivery has already put a message in is kept.
+    /// </summary>
+    Task<bool> DeleteIfNoMessagesAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct);
+
     /// <summary>Deletes conversations older than cutoff and returns the count deleted (retention policy).</summary>
     Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct);
 

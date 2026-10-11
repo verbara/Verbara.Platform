@@ -49,21 +49,22 @@ internal sealed partial class ErrorHandlingMiddleware
             _ => (StatusCodes.Status500InternalServerError, "Internal Server Error"),
         };
 
+        var traceId = Activity.Current?.Id ?? context.TraceIdentifier;
+
         if (status == StatusCodes.Status500InternalServerError)
-            LogUnhandledException(_logger, exception);
+            LogUnhandledException(_logger, traceId, exception);
         else
-            LogRequestError(_logger, title, exception);
+            LogRequestError(_logger, title, traceId, exception);
 
         var problem = new ProblemDetails
         {
             Status = status,
             Title = title,
-            // 4xx: the mapped types carry a caller-facing message. 5xx: never echo the message.
-            Detail = status >= StatusCodes.Status500InternalServerError ? ServerErrorDetail : exception.Message,
+            Detail = DetailFor(exception, status, title),
             Instance = context.Request.Path,
         };
 
-        problem.Extensions["traceId"] = Activity.Current?.Id ?? context.TraceIdentifier;
+        problem.Extensions["traceId"] = traceId;
 
         context.Response.StatusCode = status;
         context.Response.ContentType = "application/problem+json";
@@ -72,9 +73,23 @@ internal sealed partial class ErrorHandlingMiddleware
             JsonSerializer.Serialize(problem, ApiJsonContext.Default.ProblemDetails));
     }
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception")]
-    private static partial void LogUnhandledException(ILogger logger, Exception exception);
+    /// <summary>
+    /// The caller-facing detail. Only a <see cref="PlatformException"/> carries a message written for the
+    /// caller (its code is the title). Every other exception's message — an
+    /// <see cref="InvalidOperationException"/>, <see cref="ArgumentException"/> or
+    /// <see cref="KeyNotFoundException"/> thrown anywhere below the endpoint can name tables, ids or
+    /// internal state — goes to the log, correlated by <c>traceId</c>, and the caller gets the title.
+    /// </summary>
+    internal static string DetailFor(Exception exception, int status, string title) => exception switch
+    {
+        PlatformException => exception.Message,
+        _ when status >= StatusCodes.Status500InternalServerError => ServerErrorDetail,
+        _ => title,
+    };
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Request error: {Title}")]
-    private static partial void LogRequestError(ILogger logger, string title, Exception exception);
+    [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception (traceId {TraceId})")]
+    private static partial void LogUnhandledException(ILogger logger, string traceId, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Request error: {Title} (traceId {TraceId})")]
+    private static partial void LogRequestError(ILogger logger, string title, string traceId, Exception exception);
 }

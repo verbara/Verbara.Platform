@@ -49,10 +49,10 @@ public class RecordEqualityTests
     [Fact]
     public void WebhookResult_ShouldHaveCorrectType_WhenIgnored()
     {
-        var result = new WebhookResult(WebhookResultType.Ignored, null, null);
+        var result = WebhookResult.Ignored;
 
         result.Type.Should().Be(WebhookResultType.Ignored);
-        result.Message.Should().BeNull();
-        result.StatusUpdate.Should().BeNull();
+        result.Messages.Should().BeEmpty();
+        result.StatusUpdates.Should().BeEmpty();
     }
 }

@@ -59,9 +59,9 @@ public class RcsWebhookHandlerTests
         var result = await handler.HandleAsync(body, headers, TestTenant, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.StatusUpdate);
-        result.StatusUpdate.Should().NotBeNull();
-        result.StatusUpdate!.ExternalMessageId.Should().Be("msg-delivered");
-        result.StatusUpdate.NewStatus.Should().Be(Conversations.MessageDeliveryStatus.Delivered);
+        result.StatusUpdates.Should().ContainSingle();
+        result.StatusUpdates[0].ExternalMessageId.Should().Be("msg-delivered");
+        result.StatusUpdates[0].NewStatus.Should().Be(Conversations.MessageDeliveryStatus.Delivered);
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public class RcsWebhookHandlerTests
         var result = await handler.HandleAsync(body, headers, TestTenant, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.StatusUpdate);
-        result.StatusUpdate!.NewStatus.Should().Be(Conversations.MessageDeliveryStatus.Delivered);
+        result.StatusUpdates[0].NewStatus.Should().Be(Conversations.MessageDeliveryStatus.Delivered);
     }
 
     [Fact]

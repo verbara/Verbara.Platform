@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>WhatsApp channel connector for Verbara.Platform — Meta Business API, HMAC webhooks, 24h session window</Description>
+    <Description>WhatsApp channel connector for Verbara.Platform — Meta Business API, per-tenant credentials, HMAC webhooks</Description>
   </PropertyGroup>
 
   <ItemGroup>

@@ -10,7 +10,7 @@ namespace Verbara.Platform.Api.Services;
 
 /// <summary>
 /// Assigns a WebChat conversation to a queue on the FIRST inbound message of a session,
-/// mirroring the webhook inbound path (<c>WebhookEndpoints.cs:104-108</c>). WebChat
+/// mirroring the webhook inbound path (<see cref="WebhookInboundProcessor"/>). WebChat
 /// conversations are pre-created (owner-less, in <see cref="ConversationState.Queued"/>) at
 /// session open, and the inbound pipeline only persists messages — it never routes/assigns —
 /// so <c>QueueDistributionWorker</c> (which skips owner-less conversations) never offers them

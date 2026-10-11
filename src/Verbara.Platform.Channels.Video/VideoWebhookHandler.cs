@@ -61,5 +61,5 @@ public sealed class VideoWebhookHandler : IWebhookHandler
     }
 
     private static WebhookResult Ignored() =>
-        new(WebhookResultType.Ignored, null, null);
+        WebhookResult.Ignored;
 }

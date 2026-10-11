@@ -9,6 +9,9 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class PartnerBillingEndpoints
 {
+    private const string InvoiceNotGenerated =
+        "The invoice could not be generated for this period.";
+
     public static RouteGroupBuilder MapPartnerBillingEndpoints(this RouteGroupBuilder app)
     {
         var group = app.MapGroup("/partner")
@@ -197,7 +200,8 @@ internal static class PartnerBillingEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new ErrorResponse(ex.Message));
+            RejectedRequestLog.Write(context, "partner-invoice-generation", ex);
+            return Results.BadRequest(new ErrorResponse(InvoiceNotGenerated));
         }
 
         // 4. Save the invoice
@@ -221,7 +225,8 @@ internal static class PartnerBillingEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new ErrorResponse(ex.Message));
+            RejectedRequestLog.Write(context, "partner-invoice-generation", ex);
+            return Results.BadRequest(new ErrorResponse(InvoiceNotGenerated));
         }
 
         // 7 & 8. Create and save PartnerRevenueRecord

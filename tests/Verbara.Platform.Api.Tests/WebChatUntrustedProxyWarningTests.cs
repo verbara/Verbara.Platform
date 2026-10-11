@@ -53,7 +53,7 @@ public sealed class WebChatUntrustedProxyWarningTests
     public void UntrustedProxyWarning_ShouldLogOneWarningNamingTheSetting_WhenManyRequestsComeFromAPrivatePeer()
     {
         var logger = new RecordingLogger();
-        var warning = new WebChatRateLimitPolicy.UntrustedProxyWarning(logger, trustedProxiesConfigured: false);
+        var warning = new WebChatRateLimitPolicy.WebChatUntrustedProxyWarning(logger, trustedProxiesConfigured: false);
 
         warning.Observe(IPAddress.Parse("203.0.113.7"));
         logger.Entries.Should().BeEmpty("a public peer is a real client address");
@@ -69,7 +69,7 @@ public sealed class WebChatUntrustedProxyWarningTests
     public void UntrustedProxyWarning_ShouldLogNothing_WhenAProxyIsTrusted()
     {
         var logger = new RecordingLogger();
-        var warning = new WebChatRateLimitPolicy.UntrustedProxyWarning(logger, trustedProxiesConfigured: true);
+        var warning = new WebChatRateLimitPolicy.WebChatUntrustedProxyWarning(logger, trustedProxiesConfigured: true);
 
         warning.Observe(IPAddress.Parse("10.0.0.1"));
 

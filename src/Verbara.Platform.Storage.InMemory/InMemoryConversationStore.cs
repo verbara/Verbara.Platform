@@ -7,6 +7,12 @@ namespace Verbara.Platform.Storage.InMemory;
 internal sealed class InMemoryConversationStore : IConversationStore
 {
     private readonly ConcurrentDictionary<(TenantId, EntityId), Conversation> _items = new();
+    private readonly InMemoryMessageStore? _messages;
+
+    /// <param name="messages">
+    /// The message store <see cref="DeleteIfNoMessagesAsync"/> consults; a store built without one cannot answer it.
+    /// </param>
+    public InMemoryConversationStore(InMemoryMessageStore? messages = null) => _messages = messages;
 
     public Task<Conversation?> GetByIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
     {
@@ -105,6 +111,14 @@ internal sealed class InMemoryConversationStore : IConversationStore
             _items.TryRemove(key, out _);
 
         return Task.FromResult(toDelete.Count);
+    }
+
+    public Task<bool> DeleteIfNoMessagesAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
+    {
+        var messages = _messages ?? throw new InvalidOperationException(
+            "This conversation store was built without a message store, so it cannot tell whether a conversation is empty.");
+        return Task.FromResult(messages.RemoveConversationIfEmpty(
+            tenantId, conversationId, () => _items.TryRemove((tenantId, conversationId), out _)));
     }
 
     public Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)

@@ -7,7 +7,10 @@ namespace Verbara.Platform.Channels.Core.Tests;
 
 public class ChannelRegistryTests
 {
-    private static ChannelRegistry CreateRegistry() => new();
+    private static ChannelRegistry CreateRegistry(
+        IEnumerable<IWebhookHandler>? handlers = null,
+        IEnumerable<IChannelConnector>? connectors = null) =>
+        new(handlers ?? [], connectors ?? []);
 
     private static IChannelConnector MakeConnector(ChannelType channel)
     {
@@ -31,9 +34,8 @@ public class ChannelRegistryTests
     [Fact]
     public void GetConnector_ShouldReturnRegisteredConnector_WhenChannelIsRegistered()
     {
-        var registry = CreateRegistry();
         var connector = MakeConnector(ChannelType.WhatsApp);
-        registry.RegisterConnector(connector);
+        var registry = CreateRegistry(connectors: [connector]);
 
         var result = registry.GetConnector(ChannelType.WhatsApp);
 
@@ -54,9 +56,8 @@ public class ChannelRegistryTests
     [Fact]
     public void GetHandler_ShouldReturnRegisteredHandler_WhenChannelIsRegistered()
     {
-        var registry = CreateRegistry();
         var handler = MakeHandler(ChannelType.WhatsApp);
-        registry.RegisterHandler(handler);
+        var registry = CreateRegistry(handlers: [handler]);
 
         var result = registry.GetHandler(ChannelType.WhatsApp);
 
@@ -100,9 +101,7 @@ public class ChannelRegistryTests
     [Fact]
     public void AvailableChannels_ShouldListAllRegisteredConnectorChannels()
     {
-        var registry = CreateRegistry();
-        registry.RegisterConnector(MakeConnector(ChannelType.WhatsApp));
-        registry.RegisterConnector(MakeConnector(ChannelType.Sms));
+        var registry = CreateRegistry(connectors: [MakeConnector(ChannelType.WhatsApp), MakeConnector(ChannelType.Sms)]);
 
         registry.AvailableChannels.Should().BeEquivalentTo([ChannelType.WhatsApp, ChannelType.Sms]);
     }
@@ -116,17 +115,32 @@ public class ChannelRegistryTests
     }
 
     [Fact]
-    public void RegisterConnector_ShouldReplaceExisting_WhenSameChannelRegisteredTwice()
+    public void GetConnector_ShouldThrow_WhenSameChannelRegisteredTwice()
     {
-        var registry = CreateRegistry();
-        var first = MakeConnector(ChannelType.WhatsApp);
-        var second = MakeConnector(ChannelType.WhatsApp);
-        registry.RegisterConnector(first);
-        registry.RegisterConnector(second);
+        var registry = CreateRegistry(connectors: [MakeConnector(ChannelType.WhatsApp), MakeConnector(ChannelType.WhatsApp)]);
 
-        var result = registry.GetConnector(ChannelType.WhatsApp);
+        var act = () => registry.GetConnector(ChannelType.WhatsApp);
 
-        result.Should().BeSameAs(second);
-        registry.AvailableChannels.Should().HaveCount(1);
+        act.Should().Throw<InvalidOperationException>().WithMessage("*More than one connector*WhatsApp*");
+    }
+
+    [Fact]
+    public void GetHandler_ShouldThrow_WhenSameChannelRegisteredTwice()
+    {
+        var registry = CreateRegistry(handlers: [MakeHandler(ChannelType.WhatsApp), MakeHandler(ChannelType.WhatsApp)]);
+
+        var act = () => registry.GetHandler(ChannelType.WhatsApp);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*More than one webhook handler*WhatsApp*");
+    }
+
+    [Fact]
+    public void TryGetHandler_ShouldReturnFalse_WhenChannelIsNotRegistered()
+    {
+        var registry = CreateRegistry(handlers: [MakeHandler(ChannelType.WhatsApp)]);
+
+        registry.TryGetHandler(ChannelType.Sms, out var handler).Should().BeFalse();
+        handler.Should().BeNull();
+        registry.WebhookChannels.Should().Equal(ChannelType.WhatsApp);
     }
 }

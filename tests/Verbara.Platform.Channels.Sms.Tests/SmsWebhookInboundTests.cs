@@ -37,10 +37,10 @@ public class SmsWebhookInboundTests
         var result = await handler.HandleAsync(body, new Dictionary<string, string>(), Tenant, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        result.Message.Should().NotBeNull();
-        result.Message!.From.Address.Should().Be("+15551234567");
-        result.Message.ExternalMessageId.Should().Be("SM123");
-        result.Message.Content.Blocks.Should().ContainSingle();
+        result.Messages.Should().ContainSingle();
+        result.Messages[0].From.Address.Should().Be("+15551234567");
+        result.Messages[0].ExternalMessageId.Should().Be("SM123");
+        result.Messages[0].Content.Blocks.Should().ContainSingle();
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public class SmsWebhookInboundTests
         var result = await handler.HandleAsync(body, new Dictionary<string, string>(), Tenant, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.NewMessage);
-        result.Message!.Content.Blocks.Should().HaveCount(2); // text + file
+        result.Messages[0].Content.Blocks.Should().HaveCount(2); // text + file
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class SmsWebhookInboundTests
         var result = await handler.HandleAsync(body, new Dictionary<string, string>(), Tenant, CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.StatusUpdate);
-        result.StatusUpdate.Should().NotBeNull();
+        result.StatusUpdates.Should().ContainSingle();
     }
 
     [Fact]

@@ -33,8 +33,11 @@ public sealed class MessagePersistenceStep : IPipelineStep
             DeliveredAt = context.InboundMessage.Timestamp,
         };
 
-        await _messageStore.SaveAsync(message, ct);
-        context.PersistedMessage = message;
+        // Duplicate-safe (design D10): a concurrent identical delivery that passed DeduplicateStep at the same
+        // time inserts nothing; the store hands back the message the first delivery stored.
+        var stored = await _messageStore.InsertInboundIfAbsentAsync(message, ct);
+        context.PersistedMessage = stored;
+        context.IsDuplicate = stored.MessageId != message.MessageId;
 
         return context;
     }

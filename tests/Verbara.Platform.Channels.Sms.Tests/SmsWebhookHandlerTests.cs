@@ -42,9 +42,9 @@ public class SmsWebhookHandlerTests
             ReadOnlyMemory<byte>.Empty, headers, new TenantId(TestTenant), CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.StatusUpdate);
-        result.StatusUpdate.Should().NotBeNull();
-        result.StatusUpdate!.ExternalMessageId.Should().Be(TestMessageId);
-        result.StatusUpdate.NewStatus.Should().Be(MessageDeliveryStatus.Delivered);
+        result.StatusUpdates.Should().ContainSingle();
+        result.StatusUpdates[0].ExternalMessageId.Should().Be(TestMessageId);
+        result.StatusUpdates[0].NewStatus.Should().Be(MessageDeliveryStatus.Delivered);
     }
 
     [Fact]
@@ -110,6 +110,6 @@ public class SmsWebhookHandlerTests
             ReadOnlyMemory<byte>.Empty, headers, new TenantId(TestTenant), CancellationToken.None);
 
         result.Type.Should().Be(WebhookResultType.StatusUpdate);
-        result.StatusUpdate!.NewStatus.Should().Be(MessageDeliveryStatus.Sent);
+        result.StatusUpdates[0].NewStatus.Should().Be(MessageDeliveryStatus.Sent);
     }
 }

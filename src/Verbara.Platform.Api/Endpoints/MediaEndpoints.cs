@@ -51,7 +51,9 @@ internal static class MediaEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new ErrorResponse(ex.Message));
+            RejectedRequestLog.Write(context, "media-upload", ex);
+            return Results.BadRequest(new ErrorResponse(
+                "The file was rejected: its content type is not allowed or it is larger than the upload limit."));
         }
     }
 

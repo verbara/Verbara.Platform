@@ -269,6 +269,21 @@ internal sealed class PostgresConversationStore : IConversationStore
             ct);
     }
 
+    public async Task<bool> DeleteIfNoMessagesAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
+    {
+        // One statement: the emptiness check and the delete see the same snapshot.
+        var deleted = await _dataSource.ExecuteAsync(
+            "DELETE FROM conversations WHERE tenant_id = @TenantId AND conversation_id = @ConversationId " +
+            "AND NOT EXISTS (SELECT 1 FROM messages WHERE tenant_id = @TenantId AND conversation_id = @ConversationId)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
+                p.Add(new NpgsqlParameter("ConversationId", conversationId.Value));
+            },
+            ct);
+        return deleted > 0;
+    }
+
     public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
         return await _dataSource.ExecuteAsync(

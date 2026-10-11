@@ -45,46 +45,20 @@ public sealed class WebhookEndpointTests : IClassFixture<PlatformApiFactory>
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
-    [Fact]
-    public async Task Get_WhatsAppVerification_ShouldReturnChallenge_WhenModeIsSubscribe()
+    // The GET handshake no longer echoes hub.challenge for any token (whatsapp-works-for-real D5): the
+    // per-tenant WhatsApp check lives in WhatsAppWebhookTests; a Meta channel the host does not register
+    // (Messenger, Instagram — DQ1) refuses the handshake outright.
+
+    [Theory]
+    [InlineData("messenger")]
+    [InlineData("instagram")]
+    public async Task GetVerification_ShouldReturn403_WhenChannelIsNotRegistered(string channel)
     {
         var response = await _client.GetAsync(
-            "/api/webhooks/tenant123/whatsapp?hub.mode=subscribe&hub.verify_token=mytoken&hub.challenge=ABCDEF");
+            $"/api/webhooks/tenant123/{channel}?hub.mode=subscribe&hub.verify_token=tok&hub.challenge=XYZ");
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("ABCDEF");
-    }
-
-    [Fact]
-    public async Task Get_WhatsAppVerification_ShouldReturn400_WhenModeIsNotSubscribe()
-    {
-        var response = await _client.GetAsync(
-            "/api/webhooks/tenant123/whatsapp?hub.mode=other&hub.verify_token=mytoken");
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-    }
-
-    [Fact]
-    public async Task Get_MessengerVerification_ShouldReturnChallenge_WhenModeIsSubscribe()
-    {
-        var response = await _client.GetAsync(
-            "/api/webhooks/tenant123/messenger?hub.mode=subscribe&hub.verify_token=tok&hub.challenge=XYZ");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("XYZ");
-    }
-
-    [Fact]
-    public async Task Get_InstagramVerification_ShouldReturnChallenge_WhenModeIsSubscribe()
-    {
-        var response = await _client.GetAsync(
-            "/api/webhooks/tenant123/instagram?hub.mode=subscribe&hub.verify_token=tok&hub.challenge=INSTA");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("INSTA");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("XYZ");
     }
 
     [Fact]

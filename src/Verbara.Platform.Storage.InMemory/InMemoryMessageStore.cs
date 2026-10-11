@@ -9,6 +9,22 @@ internal sealed class InMemoryMessageStore : IMessageStore
 {
     private readonly ConcurrentDictionary<(TenantId, EntityId), Message> _items = new();
 
+    // Serialises the check-then-write paths (provider-id uniqueness, monotonic status, the Sent stamp).
+    private readonly Lock _writeLock = new();
+
+    /// <summary>
+    /// Runs <paramref name="removeConversation"/> only while no message belongs to the conversation, holding the
+    /// lock an inbound insert takes, so a message cannot land between the check and the removal.
+    /// </summary>
+    internal bool RemoveConversationIfEmpty(TenantId tenantId, EntityId conversationId, Func<bool> removeConversation)
+    {
+        lock (_writeLock)
+        {
+            var hasMessages = _items.Values.Any(m => m.TenantId == tenantId && m.ConversationId == conversationId);
+            return !hasMessages && removeConversation();
+        }
+    }
+
     public Task SaveAsync(Message message, CancellationToken ct)
     {
         _items[(message.TenantId, message.MessageId)] = message;
@@ -35,16 +51,21 @@ internal sealed class InMemoryMessageStore : IMessageStore
 
     public Task UpdateDeliveryStatusAsync(TenantId tenantId, EntityId messageId, MessageDeliveryStatus status, DateTimeOffset? timestamp, CancellationToken ct)
     {
-        if (_items.TryGetValue((tenantId, messageId), out var message))
+        lock (_writeLock)
         {
-            message.DeliveryStatus = status;
-
-            if (timestamp.HasValue)
+            // Monotonic (design D9): a replayed or late callback never moves a message backwards or out of Failed.
+            if (_items.TryGetValue((tenantId, messageId), out var message)
+                && MessageDeliveryStatusRules.CanAdvance(message.DeliveryStatus, status))
             {
-                if (status == MessageDeliveryStatus.Delivered)
-                    message.DeliveredAt = timestamp;
-                else if (status == MessageDeliveryStatus.Read)
-                    message.ReadAt = timestamp;
+                message.DeliveryStatus = status;
+
+                if (timestamp.HasValue)
+                {
+                    if (status == MessageDeliveryStatus.Delivered)
+                        message.DeliveredAt = timestamp;
+                    else if (status == MessageDeliveryStatus.Read)
+                        message.ReadAt = timestamp;
+                }
             }
         }
 
@@ -59,6 +80,71 @@ internal sealed class InMemoryMessageStore : IMessageStore
 
         return Task.FromResult(result);
     }
+
+    public Task MarkSentAsync(TenantId tenantId, EntityId messageId, string? externalMessageId, CancellationToken ct)
+    {
+        lock (_writeLock)
+        {
+            if (_items.TryGetValue((tenantId, messageId), out var message))
+            {
+                // ExternalMessageId is init-only: swap in a copy carrying the provider id and (from Pending) Sent,
+                // in one dictionary write — the in-memory analogue of the single UPDATE in Postgres.
+                _items[(tenantId, messageId)] = CopyWith(
+                    message,
+                    externalMessageId ?? message.ExternalMessageId,
+                    message.DeliveryStatus == MessageDeliveryStatus.Pending ? MessageDeliveryStatus.Sent : message.DeliveryStatus);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<Message> InsertInboundIfAbsentAsync(Message message, CancellationToken ct)
+    {
+        lock (_writeLock)
+        {
+            if (message.ExternalMessageId is not null)
+            {
+                var existing = _items.Values.FirstOrDefault(m =>
+                    m.TenantId == message.TenantId && m.ExternalMessageId == message.ExternalMessageId);
+                if (existing is not null)
+                    return Task.FromResult(existing);
+            }
+
+            _items[(message.TenantId, message.MessageId)] = message;
+            return Task.FromResult(message);
+        }
+    }
+
+    public Task<Message?> FindLastInboundAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
+    {
+        var result = _items.Values
+            .Where(m => m.TenantId == tenantId && m.ConversationId == conversationId && m.Direction == MessageDirection.Inbound)
+            .OrderByDescending(m => m.CreatedAt)
+            .ThenByDescending(m => m.MessageId.Value, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+        return Task.FromResult(result);
+    }
+
+    private static Message CopyWith(Message m, string? externalMessageId, MessageDeliveryStatus status) => new()
+    {
+        MessageId = m.MessageId,
+        ConversationId = m.ConversationId,
+        TenantId = m.TenantId,
+        Direction = m.Direction,
+        Channel = m.Channel,
+        SenderId = m.SenderId,
+        Content = m.Content,
+        DeliveryStatus = status,
+        ExternalMessageId = externalMessageId,
+        CreatedAt = m.CreatedAt,
+        DeliveredAt = m.DeliveredAt,
+        ReadAt = m.ReadAt,
+        UpdatedAt = m.UpdatedAt,
+        CreatedBy = m.CreatedBy,
+        UpdatedBy = m.UpdatedBy,
+    };
 
     public Task<IReadOnlyList<Message>> GetByConversationIdsAsync(TenantId tenantId, IReadOnlyList<EntityId> conversationIds, CancellationToken ct)
     {
