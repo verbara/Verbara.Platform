@@ -222,6 +222,10 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 **Why:** Capacity warning. Either app-side connection leak (suspect: hand-rolled `NpgsqlConnection` outside DI scope) or genuine load growth.
 
 **First response:**
+- Find which pool: the alert sums every pool, so group the same ratio by the pool-name label,
+  `sum by (db_client_connection_pool_name) (db_client_connection_count{db_client_connection_state="used"}) / sum by (db_client_connection_pool_name) (db_client_connection_max)`.
+  Each Api pool carries a fixed name (`core`, `dialer`, `cluster`, `realtime`, `analytics`, `analytics-live`; a role
+  whose connection string equals the core one shares `core`). Add `instance` to the `by` clause to split by replica.
 - Compare against historical baseline (last week same time).
 - Check Npgsql `MaxPoolSize` setting in connection string vs Postgres `max_connections`.
 - Search code for `new NpgsqlConnection(` outside the standard `IDbConnectionFactory` to find leaks.

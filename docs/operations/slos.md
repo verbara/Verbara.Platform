@@ -140,9 +140,9 @@ v1.13.x patch — JWT-001 in `docs/roadmap.md`).
 
 | Metric | Target (v1 provisional) | Source meter / instrument |
 |---|---|---|
-| Connection pool utilization | < 80% | Npgsql `db.client.connections.usage` |
+| Connection pool utilization | < 80% | Npgsql `db.client.connection.count{db.client.connection.state=used}` / `db.client.connection.max` |
 | Postgres health check | `Healthy` | `BackgroundServiceHealthCheck` + `PostgresHealthCheck` |
-| Slow query rate (>500 ms) | < 1% of total | Npgsql `db.client.commands.duration` p99 |
+| Slow query rate (>500 ms) | < 1% of total | Npgsql `db.client.operation.duration` p99 |
 | Retention purge duration | < 30 min per nightly run | `Verbara.Sdk.Pro.Storage.Common.Retention` · `retention.duration_ms` |
 | Retention rows purged (sanity) | matches dry-run prediction ±10% | `retention.purged` vs `retention.dry_run.would_purge` |
 

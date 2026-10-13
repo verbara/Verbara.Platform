@@ -236,12 +236,17 @@ groups:
     rules:
 
       - alert: PgConnectionPoolHigh
-        # Source: Npgsql · db.client.connections.usage{state=used}
+        # Source: Npgsql 10, meter "Npgsql" · db.client.connection.count
+        # {db.client.connection.state=used} over db.client.connection.max, a
+        # separate instrument (there is no state="max" value). Each series
+        # carries db.client.connection.pool.name, the fixed name of its pool
+        # (core, dialer, cluster, …); the ratio sums every pool on every
+        # replica. Prometheus names: dots → underscores, {connection} dropped.
         expr: |
           (
-            sum(db_client_connections_usage{state="used"})
+            sum(db_client_connection_count{db_client_connection_state="used"})
             /
-            sum(db_client_connections_usage{state="max"})
+            sum(db_client_connection_max)
           ) > 0.8
         for: 30m
         labels:
@@ -253,12 +258,15 @@ groups:
           runbook_url: "alerts-runbook.md#pgconnectionpoolhigh"
 
       - alert: SlowQueriesHigh
-        # Source: Npgsql · db.client.commands.duration histogram
+        # Source: Npgsql 10, meter "Npgsql" · db.client.operation.duration
+        # histogram, unit s → *_seconds_bucket / *_seconds_count. The le="0.5"
+        # bucket exists because 0.5 s is one of Npgsql's advised boundaries
+        # (0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10).
         expr: |
           (
-            sum(rate(db_client_commands_duration_bucket{le="0.5"}[5m]))
+            sum(rate(db_client_operation_duration_seconds_bucket{le="0.5"}[5m]))
             /
-            sum(rate(db_client_commands_duration_count[5m]))
+            sum(rate(db_client_operation_duration_seconds_count[5m]))
           ) < 0.99
         for: 30m
         labels:

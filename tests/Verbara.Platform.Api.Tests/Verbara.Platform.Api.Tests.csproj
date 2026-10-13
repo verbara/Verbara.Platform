@@ -35,6 +35,9 @@
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <!-- ComposedDataSourceNamesTests boots the real Api Program against a Testcontainers Postgres: the
+         host runs the Platform migrations and the cluster-lock schema at startup. -->
+    <PackageReference Include="Testcontainers" />
   </ItemGroup>
 
   <ItemGroup>

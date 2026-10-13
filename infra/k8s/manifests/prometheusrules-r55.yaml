@@ -191,11 +191,14 @@ spec:
       rules:
 
         - alert: PgConnectionPoolHigh
+          # Source: Npgsql 10, meter "Npgsql" · db.client.connection.count{state=used}
+          # over db.client.connection.max, every pool and replica (see
+          # docs/operations/alerts.yml).
           expr: |
             (
-              sum(db_client_connections_usage{state="used"})
+              sum(db_client_connection_count{db_client_connection_state="used"})
               /
-              sum(db_client_connections_usage{state="max"})
+              sum(db_client_connection_max)
             ) > 0.8
           for: 30m
           labels:
@@ -207,11 +210,13 @@ spec:
             runbook_url: "alerts-runbook.md#pgconnectionpoolhigh"
 
         - alert: SlowQueriesHigh
+          # Source: Npgsql 10, meter "Npgsql" · db.client.operation.duration
+          # histogram in seconds; le="0.5" is one of Npgsql's advised boundaries.
           expr: |
             (
-              sum(rate(db_client_commands_duration_bucket{le="0.5"}[5m]))
+              sum(rate(db_client_operation_duration_seconds_bucket{le="0.5"}[5m]))
               /
-              sum(rate(db_client_commands_duration_count[5m]))
+              sum(rate(db_client_operation_duration_seconds_count[5m]))
             ) < 0.99
           for: 30m
           labels:

@@ -287,7 +287,7 @@ var coreConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
 NpgsqlDataSource? sharedCoreDataSource = null;
 if (!string.IsNullOrEmpty(coreConnectionString))
 {
-    sharedCoreDataSource = new NpgsqlDataSourceBuilder(coreConnectionString).Build();
+    sharedCoreDataSource = NamedDataSource.Build(coreConnectionString, "core");
     builder.Services.AddPostgresStorage(sharedCoreDataSource);
 
     // Apply Platform SQL migrations eagerly (before Pro EnsureSchemaAsync which references Platform tables)
@@ -314,10 +314,10 @@ builder.Services.AddPlatformStartupMigrators(coreConnectionString);
 
 // ADR-0015 Phase 2 helper — return the shared core DataSource when the supplied
 // connection string matches the core (most common deployment shape) so all Pro
-// packages share one pool; otherwise build a dedicated DataSource for the
-// distinct connection string (still a single instance per distinct conn string,
-// not per package).
-NpgsqlDataSource? ResolveDataSource(string? candidateConnectionString)
+// packages share one pool (named "core"); otherwise build a dedicated DataSource
+// named by the caller, so its /metrics pool label is that fixed name and never the
+// connection string (measure-api-multi-replica-baseline D2).
+NpgsqlDataSource? ResolveDataSource(string? candidateConnectionString, string name)
 {
     if (string.IsNullOrEmpty(candidateConnectionString))
     {
@@ -327,7 +327,7 @@ NpgsqlDataSource? ResolveDataSource(string? candidateConnectionString)
     {
         return sharedCoreDataSource;
     }
-    return new NpgsqlDataSourceBuilder(candidateConnectionString).Build();
+    return NamedDataSource.Build(candidateConnectionString, name);
 }
 
 // ─── AHH Phase 1: Auth Hot-Path Caching ─────────────────────────────────────
@@ -431,6 +431,7 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     // ADR-0026 Phase B — realtime.reconciliation.* (queue_memberships → Asterisk Realtime drift).
     .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)
     .AddDigitalChannelMeters() // channels.delivery_status.unknown_id, whatsapp.webhook.rejected
+    .AddCapacityMeters() // Npgsql pool + operation instruments, auth.write.* (measure-api-multi-replica-baseline D1)
     .WithPrometheusExporter());
 
 // ─── Pro Hardening — Resilience + LicenseGuard + Retention ──────────────────
@@ -755,7 +756,7 @@ else
     // DataProtection joins the host pool instead of opening its own. Pool
     // defaults were applied to coreConnectionString upstream via
     // ConnectionStringDefaults.ApplyPoolDefaults.
-    var dataProtectionDataSource = ResolveDataSource(coreConnectionString)
+    var dataProtectionDataSource = ResolveDataSource(coreConnectionString, "dataprotection")
         ?? throw new InvalidOperationException(
             "ResolveDataSource returned null for the DataProtection connection string — " +
             "this should be unreachable given the non-empty check above.");
@@ -1050,7 +1051,7 @@ var dialerConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres")) ?? "";
 if (!string.IsNullOrEmpty(dialerConnectionString))
 {
-    builder.Services.UsePostgresDialerStorage(ResolveDataSource(dialerConnectionString)!);
+    builder.Services.UsePostgresDialerStorage(ResolveDataSource(dialerConnectionString, "dialer")!);
     builder.Services.AddProDialer(o => { });
     builder.Services.AddDialerRetentionTargets();
     builder.Services.AddHostedService<CampaignMetricsPoller>();
@@ -1100,7 +1101,7 @@ var clusterConn = ConnectionStringDefaults.ApplyPoolDefaults(
         ?? builder.Configuration.GetConnectionString("Postgres"));
 if (!string.IsNullOrEmpty(clusterConn))
 {
-    var clusterDataSource = ResolveDataSource(clusterConn)!;
+    var clusterDataSource = ResolveDataSource(clusterConn, "cluster")!;
     builder.Services.UsePostgresClusterTransport(clusterDataSource);
 
     // ─── Phase 2.2 voice inbound — per-resource leader election ──────────────────
@@ -1300,7 +1301,7 @@ var realtimeConn = ConnectionStringDefaults.ApplyPoolDefaults(
         ?? builder.Configuration.GetConnectionString("Analytics")
         ?? builder.Configuration.GetConnectionString("Postgres")) ?? "";
 if (!string.IsNullOrEmpty(realtimeConn))
-    builder.Services.UsePostgresRealtimeStorage(ResolveDataSource(realtimeConn)!);
+    builder.Services.UsePostgresRealtimeStorage(ResolveDataSource(realtimeConn, "realtime")!);
 builder.Services.AddHostedService<RealtimeStateBridge>();
 
 // ADR-0026 Phase B — convergent reconciler for queue_memberships → Asterisk
@@ -1327,7 +1328,7 @@ var analyticsConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Analytics")) ?? dialerConnectionString;
 if (!string.IsNullOrEmpty(analyticsConnectionString))
 {
-    var analyticsDataSource = ResolveDataSource(analyticsConnectionString)!;
+    var analyticsDataSource = ResolveDataSource(analyticsConnectionString, "analytics")!;
     builder.Services.UsePostgresEventStore(analyticsDataSource);
     builder.Services.AddProCallAnalyticsPostgres(analyticsDataSource);
     builder.Services.UsePostgresAnalyticsStore(analyticsDataSource);
@@ -1362,7 +1363,7 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     var liveAnalyticsDataSource = string.Equals(
         liveAnalyticsConnectionString, analyticsConnectionString, StringComparison.Ordinal)
             ? analyticsDataSource
-            : ResolveDataSource(liveAnalyticsConnectionString)!;
+            : ResolveDataSource(liveAnalyticsConnectionString, "analytics-live")!;
     builder.Services.UsePostgresProAnalyticsLive(liveAnalyticsDataSource);
 
     // AgentAssist Postgres query stores (read-only endpoints for supervisor dashboard).
