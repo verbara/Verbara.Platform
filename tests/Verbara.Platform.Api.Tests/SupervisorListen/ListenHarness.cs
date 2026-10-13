@@ -55,6 +55,22 @@ internal sealed class ListenHarness
 
     public SupervisorListenAudit AuditWriter() => new(Audit, NullLogger<SupervisorListenAudit>.Instance);
 
+    /// <summary>Makes the audit substitute behave like a real store: a write given a cancelled token throws.</summary>
+    public void AuditHonoursCancellation() =>
+        Audit.RecordAsync(default!, default!, default!, default!, default!, default!)
+            .ReturnsForAnyArgs(ci => ci.ArgAt<CancellationToken>(12) is { IsCancellationRequested: true } token
+                ? Task.FromCanceled(token)
+                : Task.CompletedTask);
+
+    /// <summary>
+    /// How many audit writes of <paramref name="action"/> landed: calls whose token is cancelled (now) are not counted,
+    /// because a real store throws on them and nothing is written.
+    /// </summary>
+    public int AuditCount(string action) =>
+        Audit.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IAuditService.RecordAsync)
+            && c.GetArguments() is { Length: 13 } args && Equals(args[2], action)
+            && args[12] is CancellationToken { IsCancellationRequested: false });
+
     public SupervisorListenService Service() => new(
         Conversations, Profiles, CallLegs, Executor, Routes, Tenants, Leader, Clock, Trunk, Registry, AuditWriter(),
         LegControl, NullLogger<SupervisorListenService>.Instance);
@@ -134,9 +150,13 @@ internal sealed class ListenHarness
         public OriginateResult Result { get; set; } = new(true, "act-1", null);
         public Exception? Throw { get; set; }
 
+        /// <summary>Runs inside the send, after the action is recorded (e.g. to cancel the request mid-originate).</summary>
+        public Action<CancellationToken>? During { get; set; }
+
         protected override ValueTask<OriginateResult> ExecuteCoreAsync(OriginateAction action, string nodeId, CancellationToken ct)
         {
             Actions.Add(action);
+            During?.Invoke(ct);
             if (Throw is not null)
                 throw Throw;
             return ValueTask.FromResult(Result);

@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Verbara.Platform.Core;
 
 namespace Verbara.Platform.Api.Services.SupervisorListen;
@@ -37,11 +38,39 @@ internal sealed class ActiveListen
     /// <summary>The supervisor leg's channel name once its <c>Newchannel</c> is seen; stop needs it for <c>Hangup</c>.</summary>
     public string? ChannelName { get; internal set; }
 
+    /// <summary>
+    /// Set when Asterisk accepted the originate while the listen was still live (<see cref="SupervisorListenRegistry.TryAccept"/>).
+    /// Only an accepted listen is audited: its acceptance writes <c>listen_started</c>, its end <c>listen_stopped</c>.
+    /// </summary>
+    public bool Accepted { get; internal set; }
+
+    /// <summary>Why the listen ended (<c>stopped</c>, <c>not-answered</c>, <c>call-ended</c>); null while live.</summary>
+    public string? EndReason { get; internal set; }
+
+    /// <summary>When the listen ended; null while live.</summary>
+    public DateTimeOffset? EndedAt { get; internal set; }
+
+    /// <summary>The caller who stopped the listen; null for a natural end (the system).</summary>
+    public ClaimsPrincipal? EndedBy { get; internal set; }
+
     public string State => ListeningSince is null ? ListenVocabulary.Dialing : ListenVocabulary.Listening;
 
     /// <summary>Whole seconds of audio, from <see cref="ListeningSince"/> to <paramref name="endedAt"/>; 0 when it never connected.</summary>
     public int ListenedSeconds(DateTimeOffset endedAt) =>
         ListeningSince is { } since && endedAt > since ? (int)(endedAt - since).TotalSeconds : 0;
+}
+
+/// <summary>The outcome of <see cref="SupervisorListenRegistry.TryAccept"/>.</summary>
+internal enum ListenAcceptance
+{
+    /// <summary>The listen is live and now accepted: the acceptor audits <c>listen_started</c>; its ender audits the stop.</summary>
+    Live,
+
+    /// <summary>
+    /// The listen ended (a stop, its leg's hangup or the sweep) before its originate was accepted, so nobody audited the
+    /// end: the acceptor audits <c>listen_started</c> and then <c>listen_stopped</c> with the recorded end.
+    /// </summary>
+    EndedFirst,
 }
 
 /// <summary>
@@ -90,16 +119,45 @@ internal sealed class SupervisorListenRegistry
             return _byId.GetValueOrDefault(listenId);
     }
 
-    /// <summary>Removes the listen and returns it — to exactly one caller; later calls get <see langword="null"/>.</summary>
-    public ActiveListen? TryEnd(string listenId, DateTimeOffset? at = null)
+    /// <summary>
+    /// Removes the listen and returns it — to exactly one caller; later calls get <see langword="null"/>. The end is
+    /// recorded on the listen: <paramref name="reason"/>, or for a natural end (<see langword="null"/>)
+    /// <c>not-answered</c> before ChanSpy started and <c>call-ended</c> after; <paramref name="endedBy"/> is the
+    /// stopping caller, null for the system. The caller that ends an <see cref="ActiveListen.Accepted"/> listen owes
+    /// its <c>listen_stopped</c>; an unaccepted one is left to <see cref="TryAccept"/>.
+    /// </summary>
+    public ActiveListen? TryEnd(string listenId, DateTimeOffset? at = null, string? reason = null, ClaimsPrincipal? endedBy = null)
     {
         lock (_gate)
         {
             if (!_byId.Remove(listenId, out var listen))
                 return null;
             _bySupervisor.Remove((listen.TenantId.Value, listen.SupervisorUserId.Value));
-            _ended[listenId] = (listen, at ?? listen.StartedAt);
+            var endedAt = at ?? listen.StartedAt;
+            listen.EndedAt = endedAt;
+            listen.EndReason = reason ?? (listen.ListeningSince is null ? ListenVocabulary.NotAnswered : ListenVocabulary.CallEnded);
+            listen.EndedBy = endedBy;
+            _ended[listenId] = (listen, endedAt);
             return listen;
+        }
+    }
+
+    /// <summary>
+    /// Marks the listen accepted (Asterisk took its originate). Atomic with <see cref="TryEnd"/>, so exactly one party
+    /// audits each listen's end: <see cref="ListenAcceptance.Live"/> when it is still live (its ender audits the stop),
+    /// <see cref="ListenAcceptance.EndedFirst"/> when it already ended unaudited (the acceptor audits the stop too).
+    /// </summary>
+    public ListenAcceptance TryAccept(ActiveListen listen)
+    {
+        lock (_gate)
+        {
+            if (_byId.TryGetValue(listen.ListenId, out var live) && ReferenceEquals(live, listen))
+            {
+                listen.Accepted = true;
+                return ListenAcceptance.Live;
+            }
+
+            return ListenAcceptance.EndedFirst;
         }
     }
 

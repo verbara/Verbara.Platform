@@ -103,6 +103,10 @@ internal sealed partial class SupervisorListenService
         if (!_leader.IsLeader)
             return SupervisorListenResult.Refused(SupervisorListenRefusal.NotLeader, conversationId);
 
+        // A blank id (e.g. a route segment of whitespace) names no conversation; EntityId.From would throw on it.
+        if (!EntityId.IsValid(conversationId))
+            return SupervisorListenResult.Refused(SupervisorListenRefusal.ConversationNotFound, conversationId);
+
         // A conversation of another tenant is never read: the lookup is tenant-scoped, so it answers as an unknown one.
         var conversation = await _conversations.GetByIdAsync(tenantId, EntityId.From(conversationId), ct).ConfigureAwait(false);
         if (conversation is null || conversation.TenantId != tenantId)
@@ -129,16 +133,46 @@ internal sealed partial class SupervisorListenService
         if (!_registry.TryAdd(listen, out var existing))
             return SupervisorListenResult.Refused(SupervisorListenRefusal.AlreadyListening, existing!.ConversationId, existing.ListenId);
 
-        var refusal = await BuildAndOriginateAsync(listen, profile, agentLeg, ct).ConfigureAwait(false);
-        if (refusal is not null)
+        // From here the slot is held: every way out — a refusal, a failed send, the request's cancellation — releases
+        // it, and once the originate may have reached Asterisk, arms the leg's hangup (finding: nothing left behind).
+        var sent = false;
+        var accepted = false;
+        try
         {
-            _registry.TryEnd(listen.ListenId, _clock.UtcNow);
-            return SupervisorListenResult.Refused(refusal, conversationId);
+            var (action, refusal) = await BuildOriginateAsync(listen, profile, agentLeg, ct).ConfigureAwait(false);
+            if (refusal is not null)
+                return SupervisorListenResult.Refused(refusal, conversationId);
+
+            sent = true;
+            accepted = await SendOriginateAsync(listen, action!, ct).ConfigureAwait(false);
+            if (!accepted)
+                return SupervisorListenResult.Refused(SupervisorListenRefusal.OriginateFailed, conversationId);
+        }
+        finally
+        {
+            if (!accepted)
+                await AbandonAsync(listen, sent).ConfigureAwait(false);
         }
 
+        // Accepted: the listen exists in Asterisk, so its audit no longer depends on the request (no token past here).
         LogListenStarted(listen.ListenId, conversationId, destination, tenantId.Value);
-        await _audit.StartedAsync(listen, caller, ct).ConfigureAwait(false);
+        var acceptance = _registry.TryAccept(listen);
+        await _audit.StartedAsync(listen, caller).ConfigureAwait(false);
+        if (acceptance == ListenAcceptance.EndedFirst)
+            await _audit.StoppedAsync(listen).ConfigureAwait(false);
         return new SupervisorListenResult(ToDto(listen), null);
+    }
+
+    /// <summary>
+    /// Releases the slot of a listen that was not accepted. When the originate was sent — it may have reached Asterisk
+    /// even though the send failed, timed out or was cancelled — the leg's hangup is armed by its <c>ChannelId</c>
+    /// (= the listen id), so a late leg is hung up the moment it appears. Such a listen is never audited.
+    /// </summary>
+    private async Task AbandonAsync(ActiveListen listen, bool sent)
+    {
+        _registry.TryEnd(listen.ListenId, _clock.UtcNow);
+        if (sent)
+            await _legControl.HangupAsync(listen, CancellationToken.None).ConfigureAwait(false);
     }
 
     public SupervisorListenResult GetCurrent(TenantId tenantId, EntityId supervisorUserId)
@@ -158,15 +192,18 @@ internal sealed partial class SupervisorListenService
         if (!_leader.IsLeader)
             return new(null, SupervisorListenRefusal.For(SupervisorListenRefusal.NotLeader, conversationId));
 
+        var stoppedAt = _clock.UtcNow;
         var listen = _registry.GetBySupervisor(tenantId, supervisorUserId);
         if (listen is null || !string.Equals(listen.ConversationId, conversationId, StringComparison.Ordinal)
-            || _registry.TryEnd(listen.ListenId, _clock.UtcNow) is null)
+            || _registry.TryEnd(listen.ListenId, stoppedAt, ListenVocabulary.Stopped, caller) is null)
             return new(null, SupervisorListenRefusal.For(SupervisorListenRefusal.ListenNotFound, conversationId));
 
-        var stoppedAt = _clock.UtcNow;
-        await _legControl.HangupAsync(listen, ct).ConfigureAwait(false);
+        // The listen has ended: its hangup and its audit no longer depend on the request (no token past here). A listen
+        // whose originate is still in flight is audited by its start once Asterisk accepts it (never stop before start).
+        await _legControl.HangupAsync(listen, CancellationToken.None).ConfigureAwait(false);
         LogListenStopped(listen.ListenId, conversationId, tenantId.Value);
-        await _audit.StoppedAsync(listen, ListenVocabulary.Stopped, stoppedAt, caller, ct).ConfigureAwait(false);
+        if (listen.Accepted)
+            await _audit.StoppedAsync(listen).ConfigureAwait(false);
         return new(new SupervisorListenStoppedDto(listen.ListenId, listen.ConversationId, stoppedAt, ListenVocabulary.Stopped), null);
     }
 
@@ -180,8 +217,8 @@ internal sealed partial class SupervisorListenService
         return AgentLegResolver.Resolve(tenantId.Value, conversation.Owner, _legs.GetParticipants(conversation.VoiceLinkedId));
     }
 
-    /// <summary>Builds the destination's originate and sends it; returns a refusal code, or null when it was accepted.</summary>
-    private async Task<string?> BuildAndOriginateAsync(
+    /// <summary>Builds the destination's originate; or a refusal code when the destination cannot be dialed.</summary>
+    private async Task<(OriginateAction? Action, string? Refusal)> BuildOriginateAsync(
         ActiveListen listen, SupervisorListenProfile? profile, string agentLeg, CancellationToken ct)
     {
         var action = new OriginateAction
@@ -197,17 +234,17 @@ internal sealed partial class SupervisorListenService
         if (listen.Destination == ListenVocabulary.Endpoint)
         {
             if (profile is null || !profile.HasCredentials)
-                return SupervisorListenRefusal.NoSupervisorEndpoint;
+                return (null, SupervisorListenRefusal.NoSupervisorEndpoint);
             action.Channel = $"PJSIP/{EndpointId(listen.TenantId, listen.SupervisorUserId)}";
             action.CallerId = $"\"{SupervisorListenEndpointDto.CallerName}\" <{listen.ConversationId}>";
         }
         else
         {
             if (string.IsNullOrEmpty(profile?.PhoneNumber))
-                return SupervisorListenRefusal.NoListenPhone;
+                return (null, SupervisorListenRefusal.NoListenPhone);
             var trunk = await ResolveTrunkAsync(listen.TenantId, profile.PhoneNumber, ct).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(trunk))
-                return SupervisorListenRefusal.NoTrunk;
+                return (null, SupervisorListenRefusal.NoTrunk);
 
             // Lab 0.3(g): on Asterisk 22 an Originate of PJSIP/{trunk}/{number} fails; PJSIP/{number}@{trunk} works.
             action.Channel = $"PJSIP/{profile.PhoneNumber}@{trunk}";
@@ -218,7 +255,15 @@ internal sealed partial class SupervisorListenService
 
         // The agent's leg, by uniqueid (ChanSpy option u). No VERBARA_OUTBOUND_ID: the bridge never tracks this leg.
         action.SetVariable(SpyTargetVariable, agentLeg);
+        return (action, null);
+    }
 
+    /// <summary>
+    /// Sends the originate; true when Asterisk accepted it. A send that throws (a timeout, a dropped connection) is a
+    /// refusal; the request's cancellation propagates. Either way the caller releases the slot and arms the hangup.
+    /// </summary>
+    private async Task<bool> SendOriginateAsync(ActiveListen listen, OriginateAction action, CancellationToken ct)
+    {
         _legControl.EnsureObserving();
         OriginateResult result;
         try
@@ -228,13 +273,13 @@ internal sealed partial class SupervisorListenService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogOriginateFailed(listen.ListenId, ex.Message);
-            return SupervisorListenRefusal.OriginateFailed;
+            return false;
         }
 
         if (result.Success)
-            return null;
+            return true;
         LogOriginateFailed(listen.ListenId, result.ErrorMessage ?? "originate refused");
-        return SupervisorListenRefusal.OriginateFailed;
+        return false;
     }
 
     /// <summary>The trunk exactly as click-to-dial resolves it: the optional outbound route, then the default trunk.</summary>

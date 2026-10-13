@@ -47,6 +47,22 @@ public sealed class SupervisorListenServiceTests
         _h.Executor.Actions.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    [InlineData("")]
+    public async Task Start_ShouldRefuseConversationNotFound_WhenTheIdIsBlank(string id)
+    {
+        await _h.SeedEndpointAsync();
+
+        var result = await _h.Service().StartAsync(H.Caller(), H.TenantId, H.Supervisor, id, "endpoint", CancellationToken.None);
+
+        result.Refusal!.Error.Should().Be(SupervisorListenRefusal.ConversationNotFound, "a blank id names no conversation");
+        result.Refusal.ConversationId.Should().Be(id);
+        _h.Executor.Actions.Should().BeEmpty();
+        _h.Registry.GetBySupervisor(H.TenantId, H.Supervisor).Should().BeNull();
+    }
+
     [Fact]
     public async Task Start_ShouldRefuseConversationNotFound_WhenTheCallBelongsToAnotherTenant()
     {

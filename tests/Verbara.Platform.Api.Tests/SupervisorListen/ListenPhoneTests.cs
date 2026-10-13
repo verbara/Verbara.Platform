@@ -65,6 +65,10 @@ public sealed class ListenPhoneTests : IClassFixture<AuthenticatedPlatformApiFac
     [InlineData("+1234567890123456")]
     [InlineData("+57 300 123 4567")]
     [InlineData("+12345")]
+    [InlineData("+5٧٣٠٠١٢٣٤٥٦٧")]   // Arabic-Indic digits after an ASCII country digit
+    [InlineData("+5７３００１２３４５６７")]   // fullwidth digits
+    [InlineData("+5७३००१२३४५६७")]   // Devanagari digits
+    [InlineData("+57300123456٧")]   // one non-ASCII digit at the end
     public async Task Put_ShouldRefuseANonE164Number_EchoingIt_AndStoreNothing(string value)
     {
         var userId = _factory.SeedActiveUser();

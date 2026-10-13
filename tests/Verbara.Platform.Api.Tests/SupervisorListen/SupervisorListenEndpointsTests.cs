@@ -154,4 +154,16 @@ public sealed class SupervisorListenVoiceEndpointsTests : IClassFixture<Supervis
 
         events.Should().BeEmpty("a listen publishes nothing: no hub, SSE or event-bus event reaches the agent");
     }
+
+    [Fact]
+    public async Task Start_ShouldAnswerConversationNotFound_WhenTheIdIsWhitespace()
+    {
+        using var client = _factory.CreateSupervisorClient();
+
+        var start = await client.PostAsJsonAsync("/api/v1/supervisor/conversations/%20/listen", new { destination = "endpoint" });
+
+        ((int)start.StatusCode).Should().Be(404, await start.Content.ReadAsStringAsync());
+        JsonNode.Parse(await start.Content.ReadAsStringAsync())!["error"]!.GetValue<string>()
+            .Should().Be(SupervisorListenRefusal.ConversationNotFound);
+    }
 }

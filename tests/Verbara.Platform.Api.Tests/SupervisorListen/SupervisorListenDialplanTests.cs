@@ -97,6 +97,26 @@ public sealed partial class SupervisorListenDialplanTests
         }
     }
 
+    /// <summary>
+    /// Fail closed: <c>ChanSpy()</c> with an empty target spies on every channel, so each extension's first priority
+    /// jumps past the spy to a hangup when <c>SPY_TARGET</c> is empty — before the phone leg is even prompted.
+    /// </summary>
+    [Theory]
+    [InlineData("endpoint")]
+    [InlineData("phone")]
+    public void EveryExtension_ShouldHangUpBeforeChanSpy_WhenTheSpyTargetIsEmpty(string exten)
+    {
+        var lines = Extension(ContextLines(Context), exten);
+
+        lines.Should().NotBeEmpty();
+        lines[0].Should().StartWith($"exten => {exten},1,GotoIf($[\"${{SPY_TARGET}}\" = \"\"]?nospy)",
+            "the first priority tests the target before anything else runs");
+        var target = lines.FindIndex(l => l.Contains("(nospy),", StringComparison.Ordinal));
+        target.Should().BeGreaterThan(0, "the guard jumps to a labelled priority");
+        lines[target].Should().EndWith("(nospy),Hangup()", "an empty target hangs up and never reaches the spy");
+        lines.Count(l => l.Contains("(nospy)", StringComparison.Ordinal)).Should().Be(1, "one jump target");
+    }
+
     [Fact]
     public void PhoneExtension_ShouldReachChanSpyOnlyAfterTheConfirmationDigitIsOne()
     {
@@ -106,7 +126,7 @@ public sealed partial class SupervisorListenDialplanTests
         var gate = phone.FindIndex(l => l.Contains("GotoIf($[\"${LISTEN_CONFIRM}\" = \"1\"]?spy)", StringComparison.Ordinal));
         var spy = phone.FindIndex(l => l.Contains("ChanSpy(", StringComparison.Ordinal));
 
-        read.Should().Be(0, "the phone leg first reads one confirmation digit");
+        read.Should().Be(1, "after the empty-target guard, the phone leg reads one confirmation digit");
         gate.Should().BeGreaterThan(read, "then branches to the spy only on 1");
         spy.Should().BeGreaterThan(gate);
         phone[gate + 1].Should().Contain("Hangup()", "any other answer, or none, hangs up before the spy");

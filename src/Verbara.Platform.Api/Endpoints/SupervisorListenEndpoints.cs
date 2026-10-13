@@ -165,7 +165,9 @@ internal static partial class SupervisorListenEndpoints
 
     // ─── Admin listen phone ───────────────────────────────────────────────────
 
-    [GeneratedRegex(@"^\+[1-9]\d{6,14}$")]
+    // ASCII digits only: \d also matches every Unicode decimal digit (Arabic-Indic, fullwidth, Devanagari…), which no
+    // trunk dials. Strict E.164: a leading '+', no leading zero, 7 to 15 digits in all.
+    [GeneratedRegex(@"^\+[1-9][0-9]{6,14}$", RegexOptions.CultureInvariant)]
     private static partial Regex E164();
 
     private static async Task<Results<Ok<ListenPhoneDto>, NotFound>> GetListenPhone(

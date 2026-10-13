@@ -15,7 +15,10 @@ namespace Verbara.Platform.Api.Services.SupervisorListen;
 ///   <c>call-ended</c> after — a listen a stop already ended is not audited again.</item>
 /// </list>
 /// A sweep ends a <c>dialing</c> listen older than the originate timeout plus 10 s as <c>not-answered</c> (a lost
-/// <c>Hangup</c>, or a phone that never confirmed). Natural ends are audited with the system as actor.
+/// <c>Hangup</c>, or a phone that never confirmed). Natural ends are audited with the system as actor, and only for an
+/// accepted listen: the end of one whose originate is still in flight is audited by the service when Asterisk accepts
+/// it, and one whose originate failed is never audited (its late leg is hung up through the pending hangup the service
+/// arms).
 /// <para>
 /// It subscribes on first use only (the defer-external-seams rule): a host with no AMI boots, and nothing here runs at
 /// host start. AOT-clean: events are matched on the string-keyed <see cref="ManagerEvent.RawFields"/>, as
@@ -115,9 +118,10 @@ internal sealed partial class SupervisorListenObserver : ISupervisorListenLegCon
             var now = _clock.UtcNow;
             if (_registry.TryEnd(id, now) is { } ended)
             {
-                var reason = ended.ListeningSince is null ? ListenVocabulary.NotAnswered : ListenVocabulary.CallEnded;
-                LogListenEnded(ended.ListenId, reason);
-                await _audit.StoppedAsync(ended, reason, now, caller: null, CancellationToken.None).ConfigureAwait(false);
+                LogListenEnded(ended.ListenId, ended.EndReason!);
+                // An unaccepted listen (its originate still in flight, or failed) is audited by its acceptor, if any.
+                if (ended.Accepted)
+                    await _audit.StoppedAsync(ended).ConfigureAwait(false);
             }
         }
     }
@@ -130,12 +134,13 @@ internal sealed partial class SupervisorListenObserver : ISupervisorListenLegCon
             var now = _clock.UtcNow;
             foreach (var stale in _registry.StaleDialing(now - DialingGrace))
             {
-                if (_registry.TryEnd(stale.ListenId, now) is not { } ended)
+                if (_registry.TryEnd(stale.ListenId, now, ListenVocabulary.NotAnswered) is not { } ended)
                     continue;
                 LogListenEnded(ended.ListenId, ListenVocabulary.NotAnswered);
                 if (ended.ChannelName is { } channel)
                     await SendHangupAsync(ended.ListenId, channel).ConfigureAwait(false);
-                await _audit.StoppedAsync(ended, ListenVocabulary.NotAnswered, now, caller: null, CancellationToken.None).ConfigureAwait(false);
+                if (ended.Accepted)
+                    await _audit.StoppedAsync(ended).ConfigureAwait(false);
             }
 
             _registry.Prune(now - TombstoneAge);
