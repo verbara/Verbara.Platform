@@ -25,10 +25,8 @@ public sealed partial class SupervisorListenDialplanTests
         var lines = File.ReadAllLines(Path.Join(RepoRoot(), "docker", "asterisk-config", "extensions.conf"));
         var result = new List<string>();
         var inside = false;
-        foreach (var line in lines.Select(raw => raw.Split(';', 2)[0].Trim()))
+        foreach (var line in lines.Select(raw => raw.Split(';', 2)[0].Trim()).Where(line => line.Length > 0))
         {
-            if (line.Length == 0)
-                continue;
             if (line.StartsWith('['))
             {
                 inside = string.Equals(line, $"[{name}]", StringComparison.Ordinal);
