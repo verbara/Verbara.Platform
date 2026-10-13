@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using DotNet.Testcontainers.Builders;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
@@ -17,7 +20,7 @@ namespace Verbara.Platform.Api.Tests.Observability;
 /// <remarks>
 /// The sign-in case runs on <see cref="PlatformApiFactory"/>: its <c>IUserStore</c> is the real in-memory
 /// store, which finds a user by email, while <see cref="UnifiedPlatformApiFactory"/> stubs the store with
-/// a substitute that cannot.
+/// a substitute that cannot. The Postgres case boots its own factory on a Testcontainers Postgres.
 /// </remarks>
 public sealed class PrometheusScrapingEndpointTests
     : IClassFixture<UnifiedPlatformApiFactory>, IClassFixture<PlatformApiFactory>
@@ -89,5 +92,55 @@ public sealed class PrometheusScrapingEndpointTests
         (await response.Content.ReadAsStringAsync()).Should().Contain(
             "auth_write_enqueued_total",
             "a successful sign-in enqueues its deferred writes, and the write-queue meter is exported");
+    }
+
+    // measure-api-multi-replica-baseline (owner decision 2026-10-13): /metrics is unauthenticated, so no
+    // Postgres series may carry the server's host or port. Npgsql 10 tags db.client.operation.duration with
+    // server.address/server.port whatever the pool's name; the view only acts inside the OpenTelemetry SDK,
+    // so only a scrape shows it. Booted on a real Postgres: the in-memory factories open no pool.
+    [Fact]
+    public async Task GetMetrics_ShouldCarryNoPostgresServerAddressOrPort_WhenDatabaseWasQueried()
+    {
+        await using var postgres = new ContainerBuilder("postgres:16-alpine")
+            .WithEnvironment("POSTGRES_PASSWORD", "postgres")
+            .WithEnvironment("POSTGRES_DB", "postgres")
+            .WithPortBinding(5432, true)
+            // `-h 127.0.0.1` probes over TCP: the image's entrypoint first runs a socket-only temporary
+            // server, so a socket probe greens before 5432 accepts connections.
+            .WithWaitStrategy(Wait.ForUnixContainer()
+                .UntilCommandIsCompleted("pg_isready", "-U", "postgres", "-h", "127.0.0.1"))
+            .Build();
+        await postgres.StartAsync();
+        var connectionString = $"Host={postgres.Hostname};Port={postgres.GetMappedPublicPort(5432)};" +
+            "Database=postgres;Username=postgres;Password=postgres";
+        using var factory = new PlatformApiFactory().WithWebHostBuilder(builder =>
+            builder.UseSetting("ConnectionStrings:Postgres", connectionString));
+
+        await using (var command = factory.Services.GetRequiredService<NpgsqlDataSource>().CreateCommand("SELECT 1"))
+            await command.ExecuteScalarAsync();
+
+        using var client = factory.CreateClient();
+        using var response = await client.GetAsync("/metrics");
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var postgresSeries = body
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => line.StartsWith("db_client_", StringComparison.Ordinal))
+            .ToList();
+        postgresSeries.Should().Contain(
+            line => line.StartsWith("db_client_operation_duration_seconds_bucket{", StringComparison.Ordinal)
+                && line.Contains("db_client_connection_pool_name=\"core\"", StringComparison.Ordinal)
+                && line.Contains("db_system_name=\"postgresql\"", StringComparison.Ordinal)
+                && line.Contains("le=\"0.5\"", StringComparison.Ordinal),
+            "the slow-query rule reads this bucket, and the pool and database-system labels stay");
+        postgresSeries.Should().Contain(
+            line => line.StartsWith("db_client_connection_count{", StringComparison.Ordinal)
+                && line.Contains("db_client_connection_state=\"used\"", StringComparison.Ordinal),
+            "the pool-utilization rule selects the used state, which stays");
+        postgresSeries.Should().NotContain(
+            line => line.Contains("server_address=", StringComparison.Ordinal)
+                || line.Contains("server_port=", StringComparison.Ordinal),
+            "the unauthenticated scrape must not carry the Postgres host or port");
     }
 }

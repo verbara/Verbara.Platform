@@ -25,10 +25,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exports the `Npgsql` meter: per connection pool, connections by state (`idle`, `used`), the pool's maximum
   size, requests waiting for a connection, connection timeouts, and database operation duration as a
   histogram, each series labelled with `db_client_connection_pool_name` (see **Fixed**). The duration
-  histogram also carries Npgsql's own `db_system_name`, `server_address` and `server_port` labels. The
-  waiting and timeout series appear only once a pool has first waited or timed out. The API also exports the
-  auth write-queue counters `auth_write_enqueued_total`, `auth_write_dropped_total`,
-  `auth_write_processed_total` and `auth_write_failed_total`.
+  histogram also carries `db_system_name`. Npgsql's `server_address` and `server_port` labels (the Postgres
+  host and port) are dropped, so the unauthenticated `/metrics` never shows them. The waiting and timeout
+  series appear only once a pool has first waited or timed out. The API also exports the auth write-queue
+  counters `auth_write_enqueued_total`, `auth_write_dropped_total`, `auth_write_processed_total` and
+  `auth_write_failed_total`.
 - **Supervisors can listen to a live voice call silently.** `POST /api/v1/supervisor/conversations/{id}/listen`
   with `{"destination":"endpoint"|"phone"}` rings the supervisor and connects them to the agent's leg of the
   call. The agent and the customer hear nothing, and nothing is sent to the agent's console.
