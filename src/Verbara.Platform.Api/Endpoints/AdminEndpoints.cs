@@ -36,6 +36,8 @@ internal static partial class AdminEndpoints
         neutralGroup.MapPut("/users/{id}", UpdateUser)
             .ProducesProblem(StatusCodes.Status412PreconditionFailed);
         neutralGroup.MapDelete("/users/{id}", DeleteUser);
+        // supervisor-silent-listen (design D8) — the user's listen phone, set by an administrator only.
+        neutralGroup.MapListenPhoneRoutes();
 
         // Queues — OPERATIONAL
         operationalGroup.MapGet("/queues", ListQueues);
@@ -304,6 +306,7 @@ internal static partial class AdminEndpoints
         [FromServices] ILicensedUserChangeWriter userWriter,
         [FromServices] SessionService sessions,
         [FromServices] IAuditService audit,
+        [FromServices] ISupervisorListenProfileStore listenProfiles,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
@@ -328,6 +331,10 @@ internal static partial class AdminEndpoints
 
         if (deleted)
         {
+            // supervisor-silent-listen (design D8): the listen profile (listen phone + listen endpoint credentials)
+            // goes with its user, which also takes the listen endpoint out of the desired state.
+            await listenProfiles.DeleteAsync(tenantId, EntityId.From(id), ct);
+
             var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["revoked_sessions"] = revokedSessions.ToString(System.Globalization.CultureInfo.InvariantCulture),

@@ -119,6 +119,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAiSuggestionStore, InMemoryAiSuggestionStore>();
         services.AddSingleton<ITenantLlmConfigStore, InMemoryTenantLlmConfigStore>();
         services.AddSingleton<ITenantAutonomousDispositionStore, InMemoryTenantAutonomousDispositionStore>();
+        // supervisor-silent-listen (design D12): registered unconditionally, like PlatformDesiredStateProvider.
+        services.AddSingleton<ISupervisorListenProfileStore, InMemorySupervisorListenProfileStore>();
 
         // Automation
         services.AddSingleton<ITimerStore, InMemoryTimerStore>();

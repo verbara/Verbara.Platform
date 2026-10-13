@@ -656,6 +656,10 @@
         "PartnerGenerateInvoiceResponse": [
           "invoice",
           "revenue"
+        ],
+        "ListenPhoneDto": [
+          "userId",
+          "phoneNumber"
         ]
       }
     },
@@ -675,7 +679,8 @@
         "SupervisorEndpoints.cs",
         "VoiceEndpoints.cs",
         "WebChatEndpoints.cs",
-        "TypificationEndpoints.cs (runtime /typify part)"
+        "TypificationEndpoints.cs (runtime /typify part)",
+        "SupervisorListenEndpoints.cs"
       ],
       "schemas": {
         "ActiveSessionDto": [
@@ -683,7 +688,8 @@
           "agentId",
           "queueName",
           "callerIdNum",
-          "connectedAt"
+          "connectedAt",
+          "conversationId"
         ],
         "AgentAssistConfigSnapshot": [
           "audioSocketPort",
@@ -990,6 +996,27 @@
         "VoiceTransferResponse": [
           "accepted",
           "error"
+        ],
+        "SupervisorListenEndpointDto": [
+          "endpointId",
+          "authorizationUsername",
+          "sipPassword",
+          "displayName",
+          "listenCallerName"
+        ],
+        "SupervisorListenDto": [
+          "listenId",
+          "conversationId",
+          "destination",
+          "state",
+          "startedAt",
+          "listeningSince"
+        ],
+        "SupervisorListenStoppedDto": [
+          "listenId",
+          "conversationId",
+          "stoppedAt",
+          "endReason"
         ]
       }
     },

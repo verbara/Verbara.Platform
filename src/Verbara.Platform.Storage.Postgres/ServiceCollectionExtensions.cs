@@ -207,6 +207,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAiSuggestionStore, PostgresAiSuggestionStore>();
         services.AddSingleton<ITenantLlmConfigStore, PostgresTenantLlmConfigStore>();
         services.AddSingleton<ITenantAutonomousDispositionStore, PostgresTenantAutonomousDispositionStore>();
+        // supervisor-silent-listen (design D12): registered unconditionally, like PlatformDesiredStateProvider.
+        services.AddSingleton<ISupervisorListenProfileStore, PostgresSupervisorListenProfileStore>();
 
         // Audit
         services.AddSingleton<IAuditStore, PostgresAuditStore>();

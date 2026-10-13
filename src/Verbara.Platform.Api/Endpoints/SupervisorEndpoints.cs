@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Text.Json.Serialization;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
@@ -42,31 +43,56 @@ internal static class SupervisorEndpoints
         // callback-stuck WrapUp voice conversation (the live call is gone, so it can't
         // be transferred to a queue).
         group.MapPost("/conversations/{id}/retry-callback", RetryCallback);
+
+        // supervisor-silent-listen (design D12, D13) — the silent AUDIO listen, keyed by conversation id; distinct
+        // from the Agent Assist transcript routes above, which are keyed by the Agent Assist session id.
+        group.MapSupervisorListenRoutes();
     }
 
     // ─── Handlers ─────────────────────────────────────────────────────────────
 
-    private static Ok<ActiveSessionDto[]> GetActiveSessions(
-        IServiceProvider services)
+    private static async Task<Ok<ActiveSessionDto[]>> GetActiveSessions(
+        HttpContext context,
+        [FromServices] IConversationStore conversations,
+        CancellationToken ct)
     {
-        var supervisor = services.GetService<AgentAssistSupervisor>();
+        var supervisor = context.RequestServices.GetService<AgentAssistSupervisor>();
         if (supervisor is null)
             return TypedResults.Ok(Array.Empty<ActiveSessionDto>());
 
-        var dtos = supervisor.ActiveSessions.Values
-            .Select(s =>
-            {
-                var cs = s.CallSession;
-                return new ActiveSessionDto(
-                    SessionId: s.SessionId,
-                    AgentId: cs?.AgentId,
-                    QueueName: cs?.QueueName,
-                    CallerIdNum: cs?.CallerIdNum,
-                    ConnectedAt: cs?.ConnectedAt);
-            })
-            .ToArray();
+        var sessions = supervisor.ActiveSessions.Values.Select(s => (s.SessionId, s.CallSession)).ToList();
+        return TypedResults.Ok(await ToActiveSessionsAsync(sessions, GetTenantId(context), conversations, ct));
+    }
 
-        return TypedResults.Ok(dtos);
+    /// <summary>
+    /// supervisor-silent-listen (boundary gap 1, design D13): the active-session items, each with the id of the tracked
+    /// voice conversation of its call in <paramref name="callerTenant"/> — resolved by the call's linked id, the same
+    /// lookup <c>AgentAssistBridge</c> runs — or null when none resolves there.
+    /// </summary>
+    internal static async Task<ActiveSessionDto[]> ToActiveSessionsAsync(
+        IReadOnlyList<(string SessionId, Verbara.Sdk.Sessions.CallSession? Call)> sessions,
+        TenantId callerTenant,
+        IConversationStore conversations,
+        CancellationToken ct)
+    {
+        var dtos = new ActiveSessionDto[sessions.Count];
+        for (var i = 0; i < sessions.Count; i++)
+        {
+            var (sessionId, cs) = sessions[i];
+            string? conversationId = null;
+            if (!string.IsNullOrEmpty(cs?.LinkedId))
+                conversationId = (await conversations.FindByVoiceLinkedIdAsync(callerTenant, cs.LinkedId, ct))?.ConversationId.Value;
+
+            dtos[i] = new ActiveSessionDto(
+                SessionId: sessionId,
+                AgentId: cs?.AgentId,
+                QueueName: cs?.QueueName,
+                CallerIdNum: cs?.CallerIdNum,
+                ConnectedAt: cs?.ConnectedAt,
+                ConversationId: conversationId);
+        }
+
+        return dtos;
     }
 
     private static IResult PostWhisper(
@@ -514,12 +540,15 @@ internal static class SupervisorListenStore
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
+// supervisor-silent-listen (fixtures/active-session.v1.json): every member is always written; conversationId is the
+// tracked voice conversation of the session's call in the caller's tenant, or null.
 internal sealed record ActiveSessionDto(
     string SessionId,
-    string? AgentId,
-    string? QueueName,
-    string? CallerIdNum,
-    DateTimeOffset? ConnectedAt);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? AgentId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? QueueName,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? CallerIdNum,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTimeOffset? ConnectedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ConversationId);
 
 internal sealed record WhisperRequest(string Text);
 

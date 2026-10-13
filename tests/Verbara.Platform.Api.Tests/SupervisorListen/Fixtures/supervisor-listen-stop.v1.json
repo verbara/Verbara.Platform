@@ -1,0 +1,10 @@
+{
+  "_comment": "NET-NEW wire shape (supervisor-silent-listen, design D6/D12). POST /api/v1/supervisor/conversations/{conversationId}/listen/stop (no request body) ends the CALLER's own active listen on that conversation: the supervisor's leg is hung up and the agent's call is untouched. 200 with this body; endReason is always `stopped` here (the other end reasons, `call-ended` and `not-answered`, appear only in the audit trail, design D10). 404 listen-not-found when the caller has no active listen on that conversation; the other refusals are in fixtures/supervisor-listen-refusals.json. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "status": 200,
+  "body": {
+    "listenId": "b3e1f0a9c8d74e6f9a1b2c3d4e5f6a7b",
+    "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+    "stoppedAt": "2026-10-12T15:09:41.002+00:00",
+    "endReason": "stopped"
+  }
+}
