@@ -9,6 +9,38 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Refused closes and typifications answer `409` with a stable code instead of `400`.**
+  `POST /conversations/{id}/close` and `POST /conversations/{id}/typify` answer `409` with
+  `{ "error": … }` set to `typification-required` (a close of an agent-held chat when a published
+  typification schema is bound to it: post `/typify` instead) or `conversation-not-closable` (the
+  conversation cannot close or wrap up from its state: `Queued`, `Offered`, `Snoozed`, `Escalated`, already
+  ended, a live voice call on `/close`, or a concurrent close, transfer or wrap-up that got there first).
+  Before, `/close` answered a generic `400` and `/typify` a `400` with a sentence. `/typify` still answers
+  `400 no typification schema bound` when no schema is bound, and its validation errors are unchanged.
+- **An agent is free for a new chat while in wrap-up.** A chat's capacity unit is released when it enters
+  wrap-up, through `/close` or `/typify`, so the agent can be offered the next chat while typifying the
+  last one, as voice already behaves. This applies to every tenant, licensed or not.
+- **Closes and wrap-ups now publish a conversation state-changed event, on every tenant.** Every
+  successful `POST /conversations/{id}/close` emits a state change to `Closed`, including closes from
+  wrap-up, waiting-for-customer and resolved, which emitted nothing before; an agent-held `/typify` emits the
+  change to `WrapUp`. Realtime consoles now see the close or the wrap-up as it happens.
+
+### Fixed
+
+- **An agent can close a chat when no typification schema is bound.** `POST /conversations/{id}/close`
+  on an `Active`, on-hold or consulting chat used to answer `400`, so a deployment without a published
+  schema (every deployment without Advanced Typification) left the agent no way to end the chat. The
+  close now wraps the chat up and closes it, and publishes both state changes. A supervisor closing
+  another agent's chat this way is audited with `typification=skipped-no-schema`. Live voice calls still
+  end through the call itself.
+- **Digital capacity is released at wrap-up, on every tenant.** Wrapping up a chat through
+  `/typify` did not release the agent's unit, so the agent's load kept counting the chat until a restart.
+  Wrap-up now releases it once, even when two closes race. A close or typify by an agent whose chat was
+  transferred away after the request was authorized answers `409 conversation-not-closable` and leaves the
+  new owner's chat and capacity alone.
+
 ## [2.28.0] - 2026-10-11
 
 Minor release with two trains: **WhatsApp slice 2** (channel credentials redacted, merged and encrypted at

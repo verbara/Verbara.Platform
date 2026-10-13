@@ -348,6 +348,59 @@ public sealed class TypifyEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task Typify_ShouldReleaseCapacityOnce_WhenOwnerTypifiesActiveChat()
+    {
+        // close-chat-without-typification-licence D2/D6: entering WrapUp releases the owner's digital
+        // capacity unit, exactly once, on every tenant (licensed included).
+        await SeedPublishedTenantSchemaAsync("Typify Release");
+        var conv = await SeedConversationAsync(ConversationState.Active, ChannelType.WebChat);
+        var ownerAgentId = EntityId.From(AuthenticatedPlatformApiFactory.TestUserId);
+        var capacity = _factory.Services.GetRequiredService<Verbara.Platform.Queues.Services.IAgentCapacityService>();
+        // Two chats held: a release that ran twice would show as 0, one that never ran as 2.
+        await capacity.ReserveAsync(s_tenantId, ownerAgentId, ChannelType.WebChat, CancellationToken.None);
+        await capacity.ReserveAsync(s_tenantId, ownerAgentId, ChannelType.WebChat, CancellationToken.None);
+
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string> { [RequiredFieldKey] = "released" },
+        });
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await capacity.GetCurrentLoadAsync(s_tenantId, ownerAgentId, ChannelType.WebChat, CancellationToken.None))
+            .Should().Be(1, "wrapping up one chat releases exactly its one unit");
+    }
+
+    [Fact]
+    public async Task Typify_ShouldReturn409NotClosable_WhenStateIsNotAgentHeld()
+    {
+        // A valid submission against a conversation that cannot enter WrapUp: the refusal is a stable
+        // 409 code (was a prose 400), and nothing is persisted.
+        await SeedPublishedTenantSchemaAsync("Typify Not Agent Held");
+        var conv = await SeedConversationAsync(ConversationState.Closed);
+
+        var body = JsonContent.Create(new
+        {
+            selectedNodePath = new[] { RootNodeId, LeafNodeId },
+            fieldValues = new Dictionary<string, string> { [RequiredFieldKey] = "too late" },
+        });
+        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
+
+        var text = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, text);
+        JsonNode.Parse(text)!["error"]!.GetValue<string>().Should().Be("conversation-not-closable");
+
+        using var scope = _factory.Services.CreateScope();
+        var stored = await scope.ServiceProvider.GetRequiredService<IConversationStore>()
+            .GetByIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None);
+        stored!.State.Should().Be(ConversationState.Closed);
+        (await scope.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>()
+            .GetByConversationIdAsync(s_tenantId, conv.ConversationId, CancellationToken.None))
+            .Should().BeNull();
+    }
+
+    [Fact]
     public async Task Typify_ShouldBridgeToDialer_WhenLeafHasDialerCodeAndOutboundMetadata()
     {
         await SeedPublishedTenantSchemaAsync("Typify Bridge");

@@ -85,6 +85,33 @@ public interface IConversationStore
         TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
+    /// State-and-owner compare-and-set that moves an agent-held conversation into
+    /// <see cref="ConversationState.WrapUp"/> (close-chat-without-typification-licence D3): transitions
+    /// <paramref name="conversationId"/> <b>only if</b> its state is one of
+    /// <see cref="ConversationStateMachine.FailoverWorkStates"/> (<c>Active</c>, <c>OnHold</c>,
+    /// <c>Consulting</c>) <b>and</b> it is still owned by the agent <paramref name="ownerAgentId"/>, stamping
+    /// <c>updated_at</c> = <paramref name="now"/>. The owner is kept. Returns <see langword="true"/> when this
+    /// caller won (and so is the one that must release the owner's capacity unit), <see langword="false"/>
+    /// when zero rows matched (missing, already left the agent-held states, or transferred to another owner).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The owner predicate matters because a transfer keeps <c>Active</c> and swaps the owner: a state-only
+    /// predicate would let the old owner's wrap-up win after a committed transfer, releasing that owner
+    /// twice and leaking the new owner's unit. Concurrent wrap-ups and closes therefore release once.
+    /// </para>
+    /// <para>
+    /// Known gap (design D12, Risk 2): the other ownership moves (transfer, requeue, return-to-bot, hold)
+    /// still save the whole row without a state predicate. One that loaded the row as agent-held
+    /// <b>before</b> this update commits can, after it, release the same owner again and/or write an
+    /// agent-held state back over <c>WrapUp</c>, which a later close can win a second time. Exactly-once is
+    /// not guaranteed against that interleaving until those moves become compare-and-set too.
+    /// </para>
+    /// </remarks>
+    Task<bool> TryCommitWrapUpAsync(
+        TenantId tenantId, EntityId conversationId, EntityId ownerAgentId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
     /// W4 — count of conversations the agent actively OWNS in engaged states
     /// (ConversationStateMachine.ActiveWorkStates). Excludes parked/pre-accept/terminal.
     /// Covers voice + digital. Used by the deferred-pause drain to decide when a

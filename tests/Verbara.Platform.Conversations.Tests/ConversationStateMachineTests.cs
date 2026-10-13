@@ -34,6 +34,9 @@ public class ConversationStateMachineTests
     [InlineData(ConversationState.Spam, ConversationState.Active)]
     [InlineData(ConversationState.Queued, ConversationState.WrapUp)]
     [InlineData(ConversationState.Active, ConversationState.Queued)]
+    // D1 (close-chat-without-typification-licence): /close walks Active → WrapUp → Closed; there is no
+    // direct edge, so the supervisor force-close, webhook and automation closes stay as narrow as they are.
+    [InlineData(ConversationState.Active, ConversationState.Closed)]
     public void CanTransition_ShouldReturnFalse_WhenInvalidTransition(
         ConversationState from, ConversationState to)
     {
