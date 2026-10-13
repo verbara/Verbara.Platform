@@ -431,6 +431,7 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     // ADR-0026 Phase B — realtime.reconciliation.* (queue_memberships → Asterisk Realtime drift).
     .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)
     .AddDigitalChannelMeters() // channels.delivery_status.unknown_id, whatsapp.webhook.rejected
+    .AddCapacityMeters() // Npgsql pool + operation instruments, auth.write.* (measure-api-multi-replica-baseline D1)
     .WithPrometheusExporter());
 
 // ─── Pro Hardening — Resilience + LicenseGuard + Retention ──────────────────

@@ -1,11 +1,9 @@
 using System.Net;
-#if MRB_PENDING
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
-#endif
 
 namespace Verbara.Platform.Api.Tests.Observability;
 
@@ -56,9 +54,8 @@ public sealed class PrometheusScrapingEndpointTests
         body.Should().Contain("http_server_request_duration_seconds");
     }
 
-#if MRB_PENDING
     // measure-api-multi-replica-baseline (D1): the auth write queue's meter must be enrolled, so a
-    // sign-in's deferred writes show on the scrape. Guarded until task 2.1 enrols it.
+    // sign-in's deferred writes show on the scrape.
     [Fact]
     public async Task GetMetrics_ShouldExportAuthWriteEnqueuedCounter_WhenUserSignsIn()
     {
@@ -93,5 +90,4 @@ public sealed class PrometheusScrapingEndpointTests
             "auth_write_enqueued_total",
             "a successful sign-in enqueues its deferred writes, and the write-queue meter is exported");
     }
-#endif
 }
