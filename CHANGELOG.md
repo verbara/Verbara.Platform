@@ -67,7 +67,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   listen start answers the same 409 refusal on a phone listen, after `no-trunk` and before `originate-failed`. The
   voice callback rescue logs the trunk id and does not originate. `VoiceDialResponse`, `VoiceTransferResponse` and
   every silent-listen refusal body gain `trunkId` (integer or null, always written). The OpenAPI document declares
-  the 409 of both voice routes, marks `correlationId` and `error` optional, and `trunkId` required and nullable. (#386)
+  the 409 of both voice routes, marks `correlationId` and `error` optional, and `trunkId` required and nullable, there
+  and on every silent-listen refusal. (#386)
 
 ### Changed
 
