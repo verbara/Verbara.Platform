@@ -132,10 +132,11 @@ internal sealed partial class SupervisorListenObserver : ISupervisorListenLegCon
         try
         {
             var now = _clock.UtcNow;
-            foreach (var stale in _registry.StaleDialing(now - DialingGrace))
+            var ends = _registry.StaleDialing(now - DialingGrace)
+                .Select(stale => _registry.TryEnd(stale.ListenId, now, ListenVocabulary.NotAnswered))
+                .OfType<ActiveListen>();
+            foreach (var ended in ends)
             {
-                if (_registry.TryEnd(stale.ListenId, now, ListenVocabulary.NotAnswered) is not { } ended)
-                    continue;
                 LogListenEnded(ended.ListenId, ListenVocabulary.NotAnswered);
                 if (ended.ChannelName is { } channel)
                     await SendHangupAsync(ended.ListenId, channel).ConfigureAwait(false);
@@ -145,7 +146,7 @@ internal sealed partial class SupervisorListenObserver : ISupervisorListenLegCon
 
             _registry.Prune(now - TombstoneAge);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogSweepFailed(ex.Message);
         }
@@ -157,7 +158,7 @@ internal sealed partial class SupervisorListenObserver : ISupervisorListenLegCon
         {
             await HandleAsync(evt).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogEventFailed(ex.Message);
         }

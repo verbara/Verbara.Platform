@@ -82,8 +82,8 @@ public sealed class ListenEndpointIsNotAnAgentTests
         var membership = new QueueMembershipService(queueStore, agentStore, new Verbara.Sdk.Pro.Routing.Skills.InMemorySkillCatalog(),
             memberships, NullLogger<QueueMembershipService>.Instance);
         var endpointProfiles = Substitute.For<EndpointProfileStoreBase>();
-        endpointProfiles.ListAsync(Tenant, Arg.Any<CancellationToken>())
-            .Returns((IReadOnlyList<Verbara.Sdk.Pro.Realtime.Models.EndpointProfile>)[new() { Id = 7, TenantId = Tenant, Name = "supervisor-listen" }]);
+        IReadOnlyList<Verbara.Sdk.Pro.Realtime.Models.EndpointProfile> listenProfiles = [new() { Id = 7, TenantId = Tenant, Name = "supervisor-listen" }];
+        endpointProfiles.ListAsync(Tenant, Arg.Any<CancellationToken>()).Returns(listenProfiles);
         var provider = new PlatformDesiredStateProvider(
             new ConfigurationBuilder().Build(), agentStore, queueStore, Substitute.For<TrunkStoreBase>(), membership,
             new FakeAgentAccountStatusLookup(), await ProvisionedProfilesAsync(), endpointProfiles);

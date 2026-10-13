@@ -90,7 +90,7 @@ public sealed class ListenPhoneTests : IClassFixture<AuthenticatedPlatformApiFac
         using var client = _factory.CreateAuthenticatedClient();
         await client.PutAsJsonAsync(Path(userId), new { phoneNumber = "+573001234567" });
 
-        var response = await client.PutAsJsonAsync(Path(userId), new { phoneNumber = (string?)null });
+        var response = await client.PutAsJsonAsync(Path(userId), new { phoneNumber = default(string) });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await Body(response);

@@ -25,9 +25,8 @@ public sealed partial class SupervisorListenDialplanTests
         var lines = File.ReadAllLines(Path.Join(RepoRoot(), "docker", "asterisk-config", "extensions.conf"));
         var result = new List<string>();
         var inside = false;
-        foreach (var raw in lines)
+        foreach (var line in lines.Select(raw => raw.Split(';', 2)[0].Trim()))
         {
-            var line = raw.Split(';', 2)[0].Trim();
             if (line.Length == 0)
                 continue;
             if (line.StartsWith('['))
@@ -90,9 +89,11 @@ public sealed partial class SupervisorListenDialplanTests
     [Fact]
     public void NoOptionString_ShouldReachWhisperBargeOrRecording()
     {
-        foreach (var line in ContextLines(Context).Where(l => l.Contains("ChanSpy(", StringComparison.Ordinal)))
+        var optionStrings = ContextLines(Context)
+            .Where(l => l.Contains("ChanSpy(", StringComparison.Ordinal))
+            .Select(l => ChanSpyCall().Match(l).Groups[2].Value);
+        foreach (var options in optionStrings)
         {
-            var options = ChanSpyCall().Match(line).Groups[2].Value;
             options.Should().NotContainAny(["w", "W", "B", "r"], "whisper, private whisper, barge and recording are out of scope");
         }
     }

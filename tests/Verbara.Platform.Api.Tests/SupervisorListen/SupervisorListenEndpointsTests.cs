@@ -55,8 +55,8 @@ public sealed class SupervisorListenEndpointsTests : IClassFixture<SupervisorLis
     {
         using var client = _factory.CreateSupervisorClient();
 
-        var response = await client.PostAsync($"/api/v1/supervisor/conversations/{ConversationId}/listen",
-            new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        var response = await client.PostAsync($"/api/v1/supervisor/conversations/{ConversationId}/listen", content);
 
         await AssertRefusalAsync(response, "invalidDestination", ConversationId);
     }

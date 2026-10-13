@@ -84,7 +84,7 @@ internal sealed partial class SupervisorListenAudit(IAuditService audit, ILogger
                 metadata: metadata,
                 ct: CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // No token of ours can cancel this write, so even an OperationCanceledException is the store's own failure
             // (a timeout): logged like any other, never thrown into the listen.

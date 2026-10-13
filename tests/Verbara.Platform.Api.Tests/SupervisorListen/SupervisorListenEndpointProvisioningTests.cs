@@ -49,7 +49,7 @@ public sealed partial class SupervisorListenEndpointProvisioningTests
                 DtlsAutoGenerateCert = true, DirectMedia = false, Context = "from-internal", QualifyFrequency = 25,
             });
         _endpointProfiles.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(_ => (IReadOnlyList<EndpointProfile>)[.. _createdProfiles]);
+            .Returns(IReadOnlyList<EndpointProfile> (_) => [.. _createdProfiles]);
         _endpointProfiles.CreateAsync(Arg.Any<EndpointProfile>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
