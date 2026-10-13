@@ -11,13 +11,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrading
 
-- **Migration `022` adds the `supervisor_listen_profiles` table.** It is additive; nothing else reads it.
+- **Migration `022` adds the `supervisor_listen_profiles` table.** It is additive; nothing else reads it. (#378)
 - **Silent listen needs the `[supervisor-listen]` dialplan context.** Platform's Asterisk image ships it in
   `docker/asterisk-config/extensions.conf`. A deployment that loads its own dialplan must add the context, or
   every listen ends as `not-answered`. Copy it as shipped, including its first priority, which hangs up when the
-  spy target is empty instead of spying on every channel.
+  spy target is empty instead of spying on every channel. (#378)
 - **A supervisor's listen endpoint is provisioned like an agent's.** Pro's realtime reconciler keeps it, and
-  removes it when its user stops being Active, only for the tenants listed in `Realtime:TenantIds`.
+  removes it when its user stops being Active, only for the tenants listed in `Realtime:TenantIds`. (#378)
 
 ### Added
 
@@ -36,7 +36,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it. A supervisor has at most one listen at a time. Refusals are stable codes in `error` (`not-leader` 503,
   `no-voice-call` 409, `already-listening` 409, `originate-failed` 502 and others). Every start and stop is
   audited as `supervision.listen_started` / `supervision.listen_stopped`. Listening never makes a supervisor a
-  licensed agent, and no licence feature gates it.
+  licensed agent, and no licence feature gates it. (#378)
   - **Endpoint destination:** `POST /api/v1/supervisor/listen-endpoint` provisions the caller's own
     receive-only SIP endpoint on first use and returns its credentials to that caller only. It is not an agent,
     it cannot place calls, and it keeps one registration (the latest one wins).
@@ -46,10 +46,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     audited as `user.listen_phone_set` with the last four digits). The listen dials only that number, over the
     tenant's outbound trunk, and no audio flows until the person who answers presses `1`.
 - **`contacts:conversation:monitor` is enforced** on every silent-listen route. A Supervisor whose role lacks it
-  gets `403 {"error":"not-permitted"}`. The seeded Supervisor and Manager templates already grant it.
+  gets `403 {"error":"not-permitted"}`. The seeded Supervisor and Manager templates already grant it. (#378)
 - **`GET /api/v1/supervisor/sessions/active` items carry `conversationId`**: the tracked voice conversation of
   the session's call in the caller's tenant, or `null`. Every field of an item is now always written, `null`
-  when unknown.
+  when unknown. (#378)
 
 ### Changed
 
