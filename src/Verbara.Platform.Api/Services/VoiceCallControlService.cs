@@ -1,10 +1,10 @@
+using Verbara.Platform.Api.Services.OutboundTrunk;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Live.Server;
 using Verbara.Sdk.Pro.Cluster.Leadership;
-using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -34,8 +34,11 @@ internal enum VoiceTransferKind
 /// </summary>
 internal sealed record VoiceTransferTarget(VoiceTransferKind Kind, string Value, string? Token = null);
 
-/// <summary>Result of a transfer attempt — <see cref="Error"/> is a stable machine code on failure.</summary>
-internal sealed record VoiceTransferOutcome(bool Accepted, string? Error);
+/// <summary>
+/// Result of a transfer attempt — <see cref="Error"/> is a stable machine code on failure; <see cref="TrunkId"/> names
+/// the resolved trunk on <c>trunk-not-dialable</c>.
+/// </summary>
+internal sealed record VoiceTransferOutcome(bool Accepted, string? Error, long? TrunkId = null);
 
 internal interface IVoiceCallControlService
 {
@@ -57,9 +60,13 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
     private const string TransferAgentContext = "transfer-agent";
     /// <summary>Channel variable the <c>[transfer-agent]</c> context dials.</summary>
     private const string TransferTargetVariable = "TRANSFER_TARGET";
-    /// <summary>Shared outbound context (3B.2d) — dials <c>PJSIP/${TRUNK}/${EXTEN}</c> with <c>${OUTBOUND_CALLERID}</c>.</summary>
+    /// <summary>
+    /// Shared outbound context (3B.2d) — dials <c>PJSIP/${TRUNK}/sip:${EXTEN}@${TRUNK_HOST}</c> with
+    /// <c>${OUTBOUND_CALLERID}</c> as caller-ID number and name.
+    /// </summary>
     private const string OutboundAgentContext = "outbound-agent";
     private const string TrunkVariable = "TRUNK";
+    private const string TrunkHostVariable = "TRUNK_HOST";
     private const string OutboundCallerIdVariable = "OUTBOUND_CALLERID";
     /// <summary>Fixed extension in both <c>[stasis-queue]</c> and <c>[transfer-agent]</c> (external uses the number).</summary>
     private const string FixedExten = "s";
@@ -80,10 +87,9 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
     private readonly IQueueStore _queues;
     private readonly IAgentStore _agents;
     private readonly VerbaraServerPool _serverPool;
-    private readonly OutboundRouteResolverBase? _routes;
+    private readonly DialableTrunkResolver _trunks;
     private readonly ITenantStore _tenants;
     private readonly IClusterLeader _leader;
-    private readonly string? _defaultTrunk;
     private readonly ILogger<VoiceCallControlService> _logger;
 
     public VoiceCallControlService(
@@ -91,20 +97,18 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
         IQueueStore queues,
         IAgentStore agents,
         VerbaraServerPool serverPool,
-        OutboundRouteResolverBase? routes,
+        DialableTrunkResolver trunks,
         ITenantStore tenants,
         [FromKeyedServices(VoiceLeaderResources.AmiOwner)] IClusterLeader leader,
-        string? defaultTrunk,
         ILogger<VoiceCallControlService> logger)
     {
         _conversations = conversations;
         _queues = queues;
         _agents = agents;
         _serverPool = serverPool;
-        _routes = routes;
+        _trunks = trunks;
         _tenants = tenants;
         _leader = leader;
-        _defaultTrunk = defaultTrunk;
         _logger = logger;
     }
 
@@ -128,7 +132,7 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
 
         // Resolve the destination, set the variable(s) the target context reads, then Redirect the
         // customer leg. Queue → [stasis-queue] (the inbound contract: QUEUE_NAME + exten s);
-        // Agent → [transfer-agent] (dials TRANSFER_TARGET); External → [outbound-agent] (TRUNK +
+        // Agent → [transfer-agent] (dials TRANSFER_TARGET); External → [outbound-agent] (TRUNK + TRUNK_HOST +
         // OUTBOUND_CALLERID, exten = the dialed number — shared with click-to-dial 3B.2d);
         // SurveyIvr → [survey-ivr] (SURVEY_ID + SURVEY_TOKEN — csat-completion voice CSAT handoff). AMI
         // sends are best-effort (mirrors RealtimeStateBridge): a stale channel just leaves the call as-is.
@@ -156,32 +160,25 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
             }
             case VoiceTransferKind.External:
             {
-                var number = NormalizeNumber(target.Value);
+                var number = DialNumber.Normalize(target.Value);
                 if (string.IsNullOrEmpty(number))
                     return new VoiceTransferOutcome(false, "invalid-number");
 
-                // Same route→trunk + tenant caller-ID resolution as click-to-dial (3B.2d.2): optional
-                // route resolver, falling back to the configured default trunk; caller ID from the tenant
-                // setting (empty → the dialplan clears CALLERID → the trunk default is presented).
-                string? trunk = null;
-                if (_routes is not null)
-                {
-                    try
-                    {
-                        trunk = (await _routes.ResolveAsync(tenantId.Value, number, campaignId: null, ct).ConfigureAwait(false))?.Name;
-                    }
-                    catch (Exception ex)
-                    {
-                        LogRouteFailed(number, ex.Message);
-                    }
-                }
-                trunk ??= _defaultTrunk;
-                if (string.IsNullOrWhiteSpace(trunk))
+                // Same trunk + tenant caller-ID resolution as click-to-dial (3B.2d.2), through the shared
+                // resolver; a trunk with no dialable host is refused before any SetVar or Redirect, so the
+                // customer stays bridged with the agent. Caller ID from the tenant setting (empty → the
+                // dialplan clears CALLERID → the trunk default is presented).
+                var resolution = await _trunks.ResolveAsync(tenantId, number, ct).ConfigureAwait(false);
+                if (resolution.Kind == DialableTrunkResolutionKind.NoTrunk)
                     return new VoiceTransferOutcome(false, "no-trunk");
+                if (resolution.Kind == DialableTrunkResolutionKind.NotDialable)
+                    return new VoiceTransferOutcome(false, "trunk-not-dialable", resolution.TrunkId);
+                var trunk = resolution.Target!;
 
                 var tenant = await _tenants.GetAsync(tenantId.Value, ct).ConfigureAwait(false);
                 var callerId = tenant?.Options.OutboundCallerId ?? "";
-                await SendVarAsync(server, channel, TrunkVariable, trunk!, ct).ConfigureAwait(false);
+                await SendVarAsync(server, channel, TrunkVariable, trunk.EndpointId, ct).ConfigureAwait(false);
+                await SendVarAsync(server, channel, TrunkHostVariable, trunk.Host, ct).ConfigureAwait(false);
                 await SendVarAsync(server, channel, OutboundCallerIdVariable, callerId, ct).ConfigureAwait(false);
                 context = OutboundAgentContext;
                 exten = number;
@@ -216,15 +213,8 @@ internal sealed partial class VoiceCallControlService : IVoiceCallControlService
         await server.Connection.SendActionAsync(
             new SetVarAction { Channel = channel, Variable = variable, Value = value }, ct).ConfigureAwait(false);
 
-    /// <summary>Keeps digits and a leading <c>+</c> only — strips spaces, dashes, and parentheses.</summary>
-    private static string NormalizeNumber(string raw) =>
-        new([.. raw.Where(c => char.IsDigit(c) || c == '+')]);
-
     [LoggerMessage(Level = LogLevel.Information,
         Message = "[VOICE-XFER] Conversation {ConversationId} blind-transferred to {Kind} {Target}")]
     private partial void LogTransfer(string conversationId, VoiceTransferKind kind, string target);
 
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "[VOICE-XFER] Outbound route resolve for external {Number} failed (falling back to default trunk): {Reason}")]
-    private partial void LogRouteFailed(string number, string reason);
 }

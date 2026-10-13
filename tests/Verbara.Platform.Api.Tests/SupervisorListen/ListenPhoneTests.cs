@@ -188,6 +188,7 @@ public sealed class ListenPhoneLicenceTests
         services.AddSingleton(h.Conversations);
         services.AddSingleton(h.Profiles);
         services.AddSingleton(h.Tenants);
+        services.AddSingleton<Verbara.Sdk.Pro.Dialer.Routing.TrunkStoreBase>(h.Trunks);
         services.AddSingleton(h.Audit);
         services.AddSingleton<IClock>(h.Clock);
         services.AddSingleton<IVoiceCallLegs>(h.CallLegs);

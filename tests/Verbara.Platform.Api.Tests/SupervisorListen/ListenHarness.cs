@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using Verbara.Platform.Api.Services.OutboundTrunk;
 using Verbara.Platform.Api.Services.SupervisorListen;
+using Verbara.Platform.Api.Tests.OutboundTrunk;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
@@ -9,21 +11,22 @@ using Verbara.Platform.Queues;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.Dialer.Execution;
-using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Sessions;
-using Trunk = Verbara.Sdk.Pro.Dialer.Models.Trunk;
 
 namespace Verbara.Platform.Api.Tests.SupervisorListen;
 
 /// <summary>
 /// supervisor-silent-listen: a <see cref="SupervisorListenService"/> wired to fakes — a recording originate executor,
-/// a stub leader, in-memory registry and profile store, a substitute conversation store, call legs and audit.
+/// a stub leader, in-memory registry and profile store, a substitute conversation store, call legs and audit, and the
+/// real <see cref="DialableTrunkResolver"/> over a fake route store and a fake trunk store.
 /// </summary>
 internal sealed class ListenHarness
 {
     public const string Tenant = "acme";
     public const string DefaultTrunk = "pstn-default";
+    public const long DefaultTrunkId = 7;
+    public const string DefaultHost = "198.51.100.7";
     public const string LinkedId = "1712345678.40";
     public const string AgentLegUniqueId = "1712345678.42";
     public static readonly TenantId TenantId = new(Tenant);
@@ -38,7 +41,8 @@ internal sealed class ListenHarness
     public ITenantStore Tenants { get; } = Substitute.For<ITenantStore>();
     public IAuditService Audit { get; } = Substitute.For<IAuditService>();
     public FakeLegControl LegControl { get; } = new();
-    public FakeRoutes? Routes { get; set; }
+    public FakeRouteStore? Routes { get; set; }
+    public FakeTrunkStore Trunks { get; } = new FakeTrunkStore().Add(Tenant, TrunkFakes.IpTrunk(DefaultTrunkId, DefaultTrunk, DefaultHost));
     public string? Trunk { get; set; } = DefaultTrunk;
     public MutableClock Clock { get; } = new(new DateTimeOffset(2026, 10, 12, 15, 4, 5, 123, TimeSpan.Zero));
     public SupervisorListenRegistry Registry { get; } = new();
@@ -71,8 +75,11 @@ internal sealed class ListenHarness
             && c.GetArguments() is { Length: 13 } args && Equals(args[2], action)
             && args[12] is CancellationToken { IsCancellationRequested: false });
 
+    /// <summary>The real trunk resolver over <see cref="Routes"/>, <see cref="Trunks"/> and the default <see cref="Trunk"/>.</summary>
+    public DialableTrunkResolver Resolver() => TrunkFakes.Resolver(Routes, Trunks, Trunk);
+
     public SupervisorListenService Service() => new(
-        Conversations, Profiles, CallLegs, Executor, Routes, Tenants, Leader, Clock, Trunk, Registry, AuditWriter(),
+        Conversations, Profiles, CallLegs, Executor, Resolver(), Tenants, Leader, Clock, Registry, AuditWriter(),
         LegControl, NullLogger<SupervisorListenService>.Instance);
 
     /// <summary>A live voice conversation owned by <see cref="Owner"/>, whose agent leg is live.</summary>
@@ -160,18 +167,6 @@ internal sealed class ListenHarness
             if (Throw is not null)
                 throw Throw;
             return ValueTask.FromResult(Result);
-        }
-    }
-
-    public sealed class FakeRoutes : OutboundRouteResolverBase
-    {
-        public Trunk? Trunk { get; set; }
-        public List<string> Asked { get; } = [];
-
-        public override ValueTask<Trunk?> ResolveAsync(string tenantId, string phoneNumber, long? campaignId, CancellationToken ct)
-        {
-            Asked.Add(phoneNumber);
-            return ValueTask.FromResult(Trunk);
         }
     }
 

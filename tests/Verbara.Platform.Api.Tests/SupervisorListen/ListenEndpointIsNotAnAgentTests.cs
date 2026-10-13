@@ -142,8 +142,9 @@ public sealed class ListenEndpointIsNotAnAgentTests
         conversations.GetByIdAsync(TenantId, conversation.ConversationId, Arg.Any<CancellationToken>()).Returns(conversation);
         await using var pool = new VerbaraServerPool(Substitute.For<Verbara.Sdk.Ami.Connection.IAmiConnectionFactory>(), NullLoggerFactory.Instance);
         pool.AddExistingServer("primary", new VerbaraServer(Substitute.For<Verbara.Sdk.IAmiConnection>(), NullLogger<VerbaraServer>.Instance));
-        var service = new VoiceCallControlService(conversations, Substitute.For<IQueueStore>(), new InMemoryAgentStore(), pool, null,
-            Substitute.For<ITenantStore>(), new AlwaysLeader(VoiceLeaderResources.AmiOwner), "pstn", NullLogger<VoiceCallControlService>.Instance);
+        var service = new VoiceCallControlService(conversations, Substitute.For<IQueueStore>(), new InMemoryAgentStore(), pool,
+            Verbara.Platform.Api.Tests.OutboundTrunk.TrunkFakes.Resolver(null, new Verbara.Platform.Api.Tests.OutboundTrunk.FakeTrunkStore(), "pstn"),
+            Substitute.For<ITenantStore>(), new AlwaysLeader(VoiceLeaderResources.AmiOwner), NullLogger<VoiceCallControlService>.Instance);
 
         var outcome = await service.BlindTransferAsync(TenantId, conversation.ConversationId,
             new VoiceTransferTarget(VoiceTransferKind.Agent, $"sup-{User}"), CancellationToken.None);

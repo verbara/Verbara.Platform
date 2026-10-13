@@ -1158,19 +1158,19 @@ if (!string.IsNullOrEmpty(clusterConn))
         {
             builder.Services.AddHostedService<Verbara.Platform.Api.Services.VoiceConversationBridge>();
             // Blind transfer (3B.2c queue/agent; 3B.2d external) — leader-gated AMI Redirect; request-driven.
-            // External transfer reuses the outbound route→trunk + tenant caller-ID resolution, so the route
-            // resolver is optional (GetService — only with the full dialer stack) + the default trunk config.
+            // External transfer, click-to-dial, the callback rescue and the phone listen share one trunk
+            // resolution (outbound-calls-reach-the-trunk): the tenant's route trunk, else DefaultTrunk by name.
+            builder.Services.AddDialableTrunkResolver(builder.Configuration);
             builder.Services.AddSingleton<Verbara.Platform.Api.Services.IVoiceCallControlService>(sp =>
                 new Verbara.Platform.Api.Services.VoiceCallControlService(
                     sp.GetRequiredService<Verbara.Platform.Conversations.IConversationStore>(),
                     sp.GetRequiredService<Verbara.Platform.Queues.IQueueStore>(),
                     sp.GetRequiredService<Verbara.Platform.Queues.IAgentStore>(),
                     sp.GetRequiredService<Verbara.Sdk.Live.Server.VerbaraServerPool>(),
-                    sp.GetService<Verbara.Sdk.Pro.Dialer.Routing.OutboundRouteResolverBase>(),
+                    sp.GetRequiredService<Verbara.Platform.Api.Services.OutboundTrunk.DialableTrunkResolver>(),
                     sp.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
                     sp.GetRequiredKeyedService<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
                         Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner),
-                    builder.Configuration["Asterisk:Outbound:DefaultTrunk"],
                     sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.VoiceCallControlService>>()));
             // Trunk connectivity test (P2): leader-gated AMI `pjsip show ...` diagnostic run server-side
             // (replaces the operator SSHing into Asterisk, manual §3.3). TrunkStoreBase resolves lazily —
@@ -1198,8 +1198,8 @@ if (!string.IsNullOrEmpty(clusterConn))
                     // (AgentOutboundDialService click-to-dial + the W5b CallbackOriginator) inherit
                     // spend-point enforcement — the two paths that had NO license check before.
                     sp.GetService<Verbara.Sdk.Pro.Licensing.ILicenseGuard>()));
-            // The outbound route + DNC resolvers register only with the full dialer Postgres storage, so
-            // they are optional here (GetService): a voice-only tenant fails DNC open + uses the default trunk.
+            // The DNC checker registers only with the full dialer Postgres storage, so it is optional here
+            // (GetService): a voice-only tenant fails DNC open.
             builder.Services.AddSingleton<Verbara.Platform.Api.Services.IAgentOutboundDialService>(sp =>
                 new Verbara.Platform.Api.Services.AgentOutboundDialService(
                     sp.GetRequiredService<Verbara.Platform.Conversations.IConversationStore>(),
@@ -1207,16 +1207,14 @@ if (!string.IsNullOrEmpty(clusterConn))
                     sp.GetRequiredService<Verbara.Platform.Queues.IAgentStore>(),
                     sp.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
                     sp.GetRequiredService<Verbara.Sdk.Pro.Dialer.Execution.OriginateExecutorBase>(),
-                    sp.GetService<Verbara.Sdk.Pro.Dialer.Routing.OutboundRouteResolverBase>(),
+                    sp.GetRequiredService<Verbara.Platform.Api.Services.OutboundTrunk.DialableTrunkResolver>(),
                     sp.GetService<Verbara.Sdk.Pro.Dialer.Compliance.DncCheckerBase>(),
                     sp.GetRequiredKeyedService<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
                         Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner),
                     sp.GetRequiredService<Verbara.Platform.Core.IClock>(),
-                    builder.Configuration["Asterisk:Outbound:DefaultTrunk"],
                     sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.AgentOutboundDialService>>()));
             // W5b voice caller-rescue: originates a callback to a dropped customer into their origin queue
-            // at the front (QUEUE_PRIO). Reuses the same originate executor + optional route resolver +
-            // default trunk as click-to-dial. NOT leader-gated here — the leader-gated CallbackRescueWorker
+            // at the front (QUEUE_PRIO). Reuses the same originate executor + trunk resolver as click-to-dial. NOT leader-gated here — the leader-gated CallbackRescueWorker
             // (task A6) holds the AMI-owner lease and invokes it.
             builder.Services.AddSingleton<Verbara.Platform.Api.Services.ICallbackOriginator>(sp =>
                 new Verbara.Platform.Api.Services.CallbackOriginator(
@@ -1225,9 +1223,8 @@ if (!string.IsNullOrEmpty(clusterConn))
                     sp.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
                     sp.GetRequiredService<Verbara.Platform.Conversations.Services.IContactIdentityResolver>(),
                     sp.GetRequiredService<Verbara.Sdk.Pro.Dialer.Execution.OriginateExecutorBase>(),
-                    sp.GetService<Verbara.Sdk.Pro.Dialer.Routing.OutboundRouteResolverBase>(),
+                    sp.GetRequiredService<Verbara.Platform.Api.Services.OutboundTrunk.DialableTrunkResolver>(),
                     sp.GetRequiredService<Verbara.Platform.Core.IClock>(),
-                    builder.Configuration["Asterisk:Outbound:DefaultTrunk"],
                     sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.CallbackOriginator>>()));
             // W5b — leader-gated voice callback-rescue worker. Registered ONLY on a voice-AMI pod
             // (its ICallbackOriginator dependency exists only here, and voice itself requires the

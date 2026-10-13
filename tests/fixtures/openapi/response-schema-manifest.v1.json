@@ -991,11 +991,13 @@
         "VoiceDialResponse": [
           "accepted",
           "correlationId",
-          "error"
+          "error",
+          "trunkId"
         ],
         "VoiceTransferResponse": [
           "accepted",
-          "error"
+          "error",
+          "trunkId"
         ],
         "SupervisorListenEndpointDto": [
           "endpointId",

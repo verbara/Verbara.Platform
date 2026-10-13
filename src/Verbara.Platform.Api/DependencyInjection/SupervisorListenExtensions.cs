@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Api.Services.OutboundTrunk;
 using Verbara.Platform.Api.Services.SupervisorListen;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
@@ -9,7 +10,6 @@ using Verbara.Platform.Queues;
 using Verbara.Sdk.Live.Server;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.Dialer.Execution;
-using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Sessions.Manager;
 
@@ -28,6 +28,7 @@ public static class SupervisorListenExtensions
     {
         ArgumentNullException.ThrowIfNull(configuration);
         services.AddSupervisorListenOriginateExecutor();
+        services.AddDialableTrunkResolver(configuration);
         services.TryAddSingleton<SupervisorListenRegistry>();
         services.TryAddSingleton(sp => new SupervisorListenAudit(
             sp.GetRequiredService<IAuditService>(), sp.GetRequiredService<ILogger<SupervisorListenAudit>>()));
@@ -44,11 +45,10 @@ public static class SupervisorListenExtensions
             sp.GetRequiredService<ISupervisorListenProfileStore>(),
             sp.GetRequiredService<IVoiceCallLegs>(),
             sp.GetRequiredKeyedService<OriginateExecutorBase>(SupervisorListenOriginateExecutor.ServiceKey),
-            sp.GetService<OutboundRouteResolverBase>(),
+            sp.GetRequiredService<DialableTrunkResolver>(),
             sp.GetRequiredService<ITenantStore>(),
             sp.GetRequiredKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner),
             sp.GetRequiredService<IClock>(),
-            configuration["Asterisk:Outbound:DefaultTrunk"],
             sp.GetRequiredService<SupervisorListenRegistry>(),
             sp.GetRequiredService<SupervisorListenAudit>(),
             sp.GetRequiredService<SupervisorListenObserver>(),

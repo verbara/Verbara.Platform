@@ -28,7 +28,7 @@ public sealed class SupervisorListenContractTests
     public void SupervisorListenRefusal_ShouldMatchEveryFrozenRefusal_FieldForField()
     {
         var entries = SupervisorListenTestKit.Refusals().ToList();
-        entries.Should().HaveCount(12, "the fixture freezes twelve refusal codes");
+        entries.Should().HaveCount(13, "the fixture freezes thirteen refusal codes");
 
         foreach (var (key, entry) in entries)
         {
@@ -36,7 +36,7 @@ public sealed class SupervisorListenContractTests
             var code = Text(body, "error")!;
 
             var json = Serialize(
-                SupervisorListenRefusal.For(code, Text(body, "conversationId"), Text(body, "listenId")),
+                SupervisorListenRefusal.For(code, Text(body, "conversationId"), Text(body, "listenId"), body["trunkId"]?.GetValue<long>()),
                 ApiJsonContext.Default.SupervisorListenRefusal);
 
             AssertSame(body, json);
@@ -63,6 +63,7 @@ public sealed class SupervisorListenContractTests
             SupervisorListenRefusal.NoSupervisorEndpoint,
             SupervisorListenRefusal.NoListenPhone,
             SupervisorListenRefusal.NoTrunk,
+            SupervisorListenRefusal.TrunkNotDialable,
             SupervisorListenRefusal.OriginateFailed,
             SupervisorListenRefusal.ListenNotFound,
         ]);
@@ -76,8 +77,10 @@ public sealed class SupervisorListenContractTests
 
         json.ContainsKey("conversationId").Should().BeTrue("a nullable field is always written, never omitted");
         json.ContainsKey("listenId").Should().BeTrue("a nullable field is always written, never omitted");
+        json.ContainsKey("trunkId").Should().BeTrue("a nullable field is always written, never omitted");
         json["conversationId"].Should().BeNull();
         json["listenId"].Should().BeNull();
+        json["trunkId"].Should().BeNull();
     }
 
     [Theory]
