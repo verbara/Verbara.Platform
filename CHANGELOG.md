@@ -19,6 +19,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A supervisor's listen endpoint is provisioned like an agent's.** Pro's realtime reconciler keeps it, and
   removes it when its user stops being Active, only for the tenants listed in `Realtime:TenantIds`. (#378)
 
+- **`Asterisk:Outbound:DefaultTrunk` must name a stored trunk.** The default trunk is now looked up by name among
+  the tenant's trunks created through `/admin/trunks`, and dialed through that trunk's Asterisk endpoint. A value
+  that names no stored trunk of the tenant (an endpoint id such as `t-1`, or a static `pjsip.conf` endpoint) now
+  refuses the call with `no-trunk`. Set it to the trunk's name. (#376)
+- **Deploy the API and the Asterisk image from the same release.** The `[outbound-agent]` dialplan context now
+  dials `PJSIP/${TRUNK}/sip:${EXTEN}@${TRUNK_HOST}` and needs the new `TRUNK_HOST` channel variable, which only this
+  API sets. A deployment that loads its own dialplan must copy the shipped context, both extensions included. (#376)
+
 ### Added
 
 - **`/metrics` shows how full each Postgres pool is and what the auth write queue does.** The API now
@@ -52,6 +60,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the session's call in the caller's tenant, or `null`. Every field of an item is now always written, `null`
   when unknown. (#378)
 
+- **A call over a trunk with no dialable host is refused before anyone's phone rings.** When the resolved trunk
+  has no registration URI and no `MatchHost` that names a single address (an auth-only trunk, or a `MatchHost`
+  range), `POST /api/v1/voice/dial` and `POST /api/v1/conversations/{id}/voice-transfer` answer 409 with
+  `error` = `trunk-not-dialable` and the trunk's numeric id in `trunkId`, and send nothing to Asterisk. The silent
+  listen start answers the same 409 refusal on a phone listen, after `no-trunk` and before `originate-failed`. The
+  voice callback rescue logs the trunk id and does not originate. `VoiceDialResponse`, `VoiceTransferResponse` and
+  every silent-listen refusal body gain `trunkId` (integer or null, always written). The OpenAPI document declares
+  the 409 of both voice routes, marks `correlationId` and `error` optional, and `trunkId` required and nullable. (#376)
+
 ### Changed
 
 - **Refused closes and typifications answer `409` with a stable code instead of `400`.**
@@ -78,6 +95,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The blackbox health probes still go to the service name.
 
 ### Fixed
+
+- **Outbound calls reach the trunk an administrator created.** Click-to-dial, the external blind transfer, the
+  voice callback rescue and the silent listen by phone now share one trunk resolution: the tenant's outbound
+  routes (not campaign-scoped, pattern a prefix of the number) are matched in ascending priority, then id; the
+  route's trunk is loaded from the tenant's stored trunks by its id; otherwise the default trunk is looked up by
+  name. The call is dialed as `PJSIP/t-{id}/sip:{number}@{host}`, where `t-{id}` is the trunk's Asterisk endpoint
+  and the host is its registration URI's host (and port), else its single-address `MatchHost`. Before, Platform
+  dialed the trunk's name, which names no Asterisk endpoint, and `PJSIP/${TRUNK}/${EXTEN}` never reached a
+  carrier. (#376)
+- **A number written with a leading `+` is dialed with its `+`.** `[outbound-agent]` matches `_+X.` next to
+  `_X.`, so an E.164 number no longer fails the Originate with "Extension does not exist." (which, repeated, opened
+  the originate circuit breaker for every caller). Every dialed number keeps its digits and a single leading `+`.
+  (#376)
+- **The carrier sees the tenant's outbound caller ID as the display name too.** `[outbound-agent]` sets
+  `CALLERID(name)` to the same value as `CALLERID(num)`, so neither the agent's name (click-to-dial) nor the
+  transferred caller's name (external transfer) reaches the called party. (#376)
 
 - **An agent can close a chat when no typification schema is bound.** `POST /conversations/{id}/close`
   on an `Active`, on-hold or consulting chat used to answer `400`, so a deployment without a published

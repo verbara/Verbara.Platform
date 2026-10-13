@@ -18,7 +18,8 @@ namespace Verbara.Platform.Api.OpenApi;
 /// <see cref="NumericSchemaTruthTransformer"/> strips the spurious .NET 10 numeric
 /// <c>string</c> union; <see cref="ComplianceSeverityEnumTransformer"/> narrows
 /// <c>ComplianceRuleSummaryDto.severity</c> to the <c>Info | Warning | Critical</c> enum;
-/// <see cref="NullableCredentialValuesTransformer"/> lets a channel credential value be <c>null</c>.
+/// <see cref="NullableCredentialValuesTransformer"/> lets a channel credential value be <c>null</c>;
+/// <see cref="VoiceResponseMembersTransformer"/> marks which voice dial and transfer members are always written.
 /// </summary>
 internal static class VerbaraOpenApiExtensions
 {
@@ -29,7 +30,8 @@ internal static class VerbaraOpenApiExtensions
             services.AddOpenApi(o => o
                 .AddSchemaTransformer<NumericSchemaTruthTransformer>()
                 .AddSchemaTransformer<ComplianceSeverityEnumTransformer>()
-                .AddSchemaTransformer<NullableCredentialValuesTransformer>());
+                .AddSchemaTransformer<NullableCredentialValuesTransformer>()
+                .AddSchemaTransformer<VoiceResponseMembersTransformer>());
         }
 
         return services;

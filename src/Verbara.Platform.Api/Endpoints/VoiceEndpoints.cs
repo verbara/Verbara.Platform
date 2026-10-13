@@ -3,6 +3,7 @@ using Verbara.Platform.Api.Services;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -16,15 +17,24 @@ namespace Verbara.Platform.Api.Endpoints;
 /// </summary>
 internal static class VoiceEndpoints
 {
+    /// <summary>outbound-calls-reach-the-trunk: the resolved trunk names no dialable host (409, with <c>trunkId</c>).</summary>
+    private const string TrunkNotDialable = "trunk-not-dialable";
+
     public static void MapVoiceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/conversations").RequireAuthorization("Authenticated").RequireOperationalTenant();
-        group.MapPost("/{id}/voice-transfer", BlindTransfer);
+        // outbound-calls-reach-the-trunk: 409 trunk-not-dialable is declared explicitly, so the 200 is too (an explicit
+        // Produces may suppress the inferred success response — SuccessResponseCaptureTests).
+        group.MapPost("/{id}/voice-transfer", BlindTransfer)
+            .Produces<VoiceTransferResponse>(StatusCodes.Status200OK)
+            .Produces<VoiceTransferResponse>(StatusCodes.Status409Conflict);
 
         // Outbound click-to-dial (3B.2d) — not conversation-scoped (the Conversation is created by the
         // dial), so it lives under /voice rather than /conversations/{id}.
         var voice = app.MapGroup("/voice").RequireAuthorization("Authenticated").RequireOperationalTenant();
-        voice.MapPost("/dial", Dial);
+        voice.MapPost("/dial", Dial)
+            .Produces<VoiceDialResponse>(StatusCodes.Status200OK)
+            .Produces<VoiceDialResponse>(StatusCodes.Status409Conflict);
     }
 
     private static async Task<Results<Ok<VoiceTransferResponse>, BadRequest<VoiceTransferResponse>, NotFound, JsonHttpResult<VoiceTransferResponse>>> BlindTransfer(
@@ -64,9 +74,17 @@ internal static class VoiceEndpoints
         var outcome = await callControl.BlindTransferAsync(
             tenantId, conversationId, new VoiceTransferTarget(kind, body.Target), ct);
 
-        return outcome.Accepted
-            ? TypedResults.Ok(new VoiceTransferResponse(true, null))
-            : TypedResults.BadRequest(new VoiceTransferResponse(false, outcome.Error));
+        if (outcome.Accepted)
+            return TypedResults.Ok(new VoiceTransferResponse(true, null));
+        if (outcome.Error == TrunkNotDialable)
+        {
+            return TypedResults.Json(
+                new VoiceTransferResponse(false, outcome.Error, outcome.TrunkId),
+                ApiJsonContext.Default.VoiceTransferResponse,
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        return TypedResults.BadRequest(new VoiceTransferResponse(false, outcome.Error));
     }
 
     private static async Task<Results<Ok<VoiceDialResponse>, BadRequest<VoiceDialResponse>, JsonHttpResult<VoiceDialResponse>>> Dial(
@@ -107,9 +125,17 @@ internal static class VoiceEndpoints
             return TypedResults.BadRequest(new VoiceDialResponse(false, null, "missing-number"));
 
         var outcome = await dialService.DialAsync(tenantId, agent.AgentId, number, contactId, ct);
-        return outcome.Accepted
-            ? TypedResults.Ok(new VoiceDialResponse(true, outcome.CorrelationId, null))
-            : TypedResults.BadRequest(new VoiceDialResponse(false, null, outcome.Error));
+        if (outcome.Accepted)
+            return TypedResults.Ok(new VoiceDialResponse(true, outcome.CorrelationId, null));
+        if (outcome.Error == TrunkNotDialable)
+        {
+            return TypedResults.Json(
+                new VoiceDialResponse(false, null, outcome.Error, outcome.TrunkId),
+                ApiJsonContext.Default.VoiceDialResponse,
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        return TypedResults.BadRequest(new VoiceDialResponse(false, null, outcome.Error));
     }
 
     private static TenantId GetTenantId(HttpContext context)
@@ -133,11 +159,24 @@ internal static class VoiceEndpoints
 /// <summary>Blind-transfer request: <c>Kind</c> = "queue"|"agent", <c>Target</c> = the queue/agent id.</summary>
 internal sealed record VoiceTransferRequest(string Kind, string Target);
 
-/// <summary><c>Error</c> is a stable machine code (e.g. "channel-unknown", "not-owner") on failure.</summary>
-internal sealed record VoiceTransferResponse(bool Accepted, string? Error);
+/// <summary>
+/// <c>Error</c> is a stable machine code (e.g. "channel-unknown", "not-owner") on failure. <c>TrunkId</c> is always
+/// written: the resolved trunk's id on 409 <c>trunk-not-dialable</c>, null otherwise.
+/// </summary>
+internal sealed record VoiceTransferResponse(
+    bool Accepted,
+    string? Error,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] long? TrunkId = null);
 
 /// <summary>Click-to-dial request (3B.2d): dial <c>ToNumber</c>, or resolve the number from <c>ContactId</c>.</summary>
 internal sealed record VoiceDialRequest(string? ToNumber, string? ContactId);
 
-/// <summary><c>CorrelationId</c> is the tracked outbound Conversation id on success; <c>Error</c> a stable code otherwise.</summary>
-internal sealed record VoiceDialResponse(bool Accepted, string? CorrelationId, string? Error);
+/// <summary>
+/// <c>CorrelationId</c> is the tracked outbound Conversation id on success; <c>Error</c> a stable code otherwise.
+/// <c>TrunkId</c> is always written: the resolved trunk's id on 409 <c>trunk-not-dialable</c>, null otherwise.
+/// </summary>
+internal sealed record VoiceDialResponse(
+    bool Accepted,
+    string? CorrelationId,
+    string? Error,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] long? TrunkId = null);

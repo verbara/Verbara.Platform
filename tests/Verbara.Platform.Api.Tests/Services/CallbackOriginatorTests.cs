@@ -1,5 +1,6 @@
 using System.Globalization;
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Api.Tests.OutboundTrunk;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
@@ -7,13 +8,12 @@ using Verbara.Platform.Queues;
 using Verbara.Sdk;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Pro.Dialer.Execution;
-using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.MultiTenant;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
-using Trunk = Verbara.Sdk.Pro.Dialer.Models.Trunk;
+using static Verbara.Platform.Api.Tests.OutboundTrunk.TrunkFakes;
 
 namespace Verbara.Platform.Api.Tests.Services;
 
@@ -28,6 +28,7 @@ public sealed class CallbackOriginatorTests
 {
     private const string Tenant = "t1";
     private const string DefaultTrunk = "pstn-default";
+    private const string DefaultHost = "198.51.100.7";
     private static readonly TenantId TenantId = new(Tenant);
 
     private readonly IConversationStore _conversations = Substitute.For<IConversationStore>();
@@ -36,6 +37,10 @@ public sealed class CallbackOriginatorTests
     private readonly IContactIdentityResolver _contacts = Substitute.For<IContactIdentityResolver>();
     private readonly FakeOriginateExecutor _executor = new();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly FakeTrunkStore _trunks = new FakeTrunkStore()
+        .Add(Tenant, IpTrunk(7, DefaultTrunk, DefaultHost))
+        .Add(Tenant, IpTrunk(1, "premium-sip"))
+        .Add(Tenant, AuthOnlyTrunk(4, "auth-only"));
 
     private readonly EntityId _queueId = EntityId.New();
     private readonly EntityId _rescuedFrom = EntityId.New();
@@ -57,10 +62,10 @@ public sealed class CallbackOriginatorTests
     }
 
     private CallbackOriginator CreateService(
-        OutboundRouteResolverBase? routes = null,
+        FakeRouteStore? routes = null,
         string? defaultTrunk = DefaultTrunk) =>
-        new(_conversations, _queues, _tenants, _contacts, _executor, routes, _clock,
-            defaultTrunk, NullLogger<CallbackOriginator>.Instance);
+        new(_conversations, _queues, _tenants, _contacts, _executor, Resolver(routes, _trunks, defaultTrunk), _clock,
+            NullLogger<CallbackOriginator>.Instance);
 
     private static IEnumerable<string> Vars(OriginateAction action) =>
         ((IHasExtraFields)action).GetExtraFields().Select(kv => kv.Value);
@@ -76,7 +81,7 @@ public sealed class CallbackOriginatorTests
         accepted.Should().BeTrue();
         var action = _executor.LastAction!;
         _executor.LastNode.Should().Be("primary");
-        action.Channel.Should().Be("PJSIP/pstn-default/+15551234567"); // dialed directly, normalized
+        action.Channel.Should().Be($"PJSIP/t-7/sip:+15551234567@{DefaultHost}"); // the default trunk by name, normalized
         action.Context.Should().Be("stasis-queue");
         action.Exten.Should().Be("s");
         action.IsAsync.Should().BeTrue();
@@ -187,11 +192,25 @@ public sealed class CallbackOriginatorTests
     [Fact]
     public async Task OriginateCallbackAsync_ShouldPreferResolvedRouteTrunk_OverDefault()
     {
-        var sut = CreateService(routes: new FakeRouteResolver { Trunk = new Trunk { Id = 1, Name = "premium-sip" } });
+        var sut = CreateService(routes: new FakeRouteStore().Add(Tenant, Route(1, "+1", trunkId: 1)));
 
-        await sut.OriginateCallbackAsync(TenantId, "+15551234567", _queueId, _rescuedFrom, 1, CancellationToken.None);
+        await sut.OriginateCallbackAsync(TenantId, "+1 (555) 123-4567", _queueId, _rescuedFrom, 1, CancellationToken.None);
 
-        _executor.LastAction!.Channel.Should().Be("PJSIP/premium-sip/+15551234567");
+        _executor.LastAction!.Channel.Should().Be("PJSIP/t-1/sip:+15551234567@203.0.113.10",
+            "the endpoint id and an explicit sip: URI to the trunk host, never the trunk name");
+    }
+
+    [Fact]
+    public async Task OriginateCallbackAsync_ShouldReturnFalseWithoutOriginating_WhenTheTrunkHasNoHost()
+    {
+        var sut = CreateService(routes: new FakeRouteStore().Add(Tenant, Route(1, "+1", trunkId: 4)));
+
+        var accepted = await sut.OriginateCallbackAsync(
+            TenantId, "+15551234567", _queueId, _rescuedFrom, 1, CancellationToken.None);
+
+        accepted.Should().BeFalse();
+        _executor.LastAction.Should().BeNull("a trunk with no dialable host is never originated");
+        await _conversations.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -222,14 +241,5 @@ public sealed class CallbackOriginatorTests
             LastNode = nodeId;
             return ValueTask.FromResult(Result);
         }
-    }
-
-    private sealed class FakeRouteResolver : OutboundRouteResolverBase
-    {
-        public Trunk? Trunk;
-
-        public override ValueTask<Trunk?> ResolveAsync(
-            string tenantId, string phoneNumber, long? campaignId, CancellationToken ct) =>
-            ValueTask.FromResult(Trunk);
     }
 }

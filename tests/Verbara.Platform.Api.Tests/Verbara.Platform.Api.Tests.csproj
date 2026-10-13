@@ -50,6 +50,9 @@
     <!-- supervisor-silent-listen: the frozen wire shapes of the silent-listen routes, the listen phone and the
          extended active-session list, copied verbatim from the change's cross-repo contract fixtures. -->
     <None Include="SupervisorListen/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- outbound-calls-reach-the-trunk: the frozen dial and voice-transfer bodies (200 and 409 trunk-not-dialable),
+         copied verbatim from the change's cross-repo contract fixtures. -->
+    <None Include="OutboundTrunk/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

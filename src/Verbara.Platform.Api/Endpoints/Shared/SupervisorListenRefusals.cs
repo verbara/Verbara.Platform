@@ -10,12 +10,14 @@ namespace Verbara.Platform.Api.Endpoints.Shared;
 /// <summary>
 /// A refusal of a silent-listen route (start, stop, current or listen-endpoint). <see cref="ConversationId"/> is the
 /// route's conversation id (null on the routes that have none), except <see cref="AlreadyListening"/>, where it and
-/// <see cref="ListenId"/> name the caller's existing listen.
+/// <see cref="ListenId"/> name the caller's existing listen. <see cref="TrunkId"/> is the resolved trunk's id on
+/// <see cref="TrunkNotDialable"/>, null on every other refusal.
 /// </summary>
 internal sealed record SupervisorListenRefusal(
     string Error,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ConversationId,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ListenId)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ListenId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] long? TrunkId = null)
 {
     /// <summary>403: the caller does not hold <c>contacts:conversation:monitor</c>.</summary>
     public const string NotPermitted = "not-permitted";
@@ -47,14 +49,17 @@ internal sealed record SupervisorListenRefusal(
     /// <summary>409: no outbound trunk resolves for the listen phone.</summary>
     public const string NoTrunk = "no-trunk";
 
+    /// <summary>409: the resolved trunk names no host a call could be sent to (<see cref="TrunkId"/> names it).</summary>
+    public const string TrunkNotDialable = "trunk-not-dialable";
+
     /// <summary>502: Asterisk refused or did not acknowledge the originate.</summary>
     public const string OriginateFailed = "originate-failed";
 
     /// <summary>404: the caller has no active listen (on that conversation, for stop).</summary>
     public const string ListenNotFound = "listen-not-found";
 
-    public static SupervisorListenRefusal For(string code, string? conversationId, string? listenId = null) =>
-        new(code, conversationId, listenId);
+    public static SupervisorListenRefusal For(string code, string? conversationId, string? listenId = null, long? trunkId = null) =>
+        new(code, conversationId, listenId, trunkId);
 
     /// <summary>The frozen HTTP status of <paramref name="code"/>.</summary>
     public static int StatusFor(string code) => code switch
@@ -63,7 +68,8 @@ internal sealed record SupervisorListenRefusal(
         InvalidDestination => StatusCodes.Status400BadRequest,
         VoiceUnavailable or NotLeader => StatusCodes.Status503ServiceUnavailable,
         ConversationNotFound or ListenNotFound => StatusCodes.Status404NotFound,
-        NoVoiceCall or AlreadyListening or NoSupervisorEndpoint or NoListenPhone or NoTrunk => StatusCodes.Status409Conflict,
+        NoVoiceCall or AlreadyListening or NoSupervisorEndpoint or NoListenPhone or NoTrunk or TrunkNotDialable
+            => StatusCodes.Status409Conflict,
         OriginateFailed => StatusCodes.Status502BadGateway,
         _ => throw new ArgumentOutOfRangeException(nameof(code), code, "Not a silent-listen refusal code."),
     };

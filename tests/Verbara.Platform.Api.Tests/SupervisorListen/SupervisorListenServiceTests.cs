@@ -1,6 +1,7 @@
 using NSubstitute;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services.SupervisorListen;
+using Verbara.Platform.Api.Tests.OutboundTrunk;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Execution;
@@ -169,6 +170,31 @@ public sealed class SupervisorListenServiceTests
     }
 
     [Fact]
+    public async Task Start_ShouldRefuseTrunkNotDialable_WithTheTrunkId_AndReleaseTheSlot_WhenTheTrunkHasNoHost()
+    {
+        var call = _h.SeedVoiceCall();
+        await _h.SeedPhoneAsync();
+        _h.Routes = new FakeRouteStore().Add(H.Tenant, TrunkFakes.Route(1, "+57", trunkId: 4));
+        _h.Trunks.Add(H.Tenant, TrunkFakes.AuthOnlyTrunk(4, "auth-only"));
+        var service = _h.Service();
+
+        var refusal = (await service.StartAsync(H.Caller(), H.TenantId, H.Supervisor, call.ConversationId.Value, "phone", CancellationToken.None)).Refusal!;
+
+        refusal.Error.Should().Be(SupervisorListenRefusal.TrunkNotDialable);
+        refusal.TrunkId.Should().Be(4);
+        refusal.ConversationId.Should().Be(call.ConversationId.Value);
+        refusal.ListenId.Should().BeNull();
+        SupervisorListenRefusal.StatusFor(refusal.Error).Should().Be(409);
+        _h.Executor.Actions.Should().BeEmpty("the supervisor's phone must not ring");
+        _h.Registry.GetBySupervisor(H.TenantId, H.Supervisor).Should().BeNull("no listen is registered");
+
+        _h.Trunks.Add(H.Tenant, TrunkFakes.IpTrunk(1, "co-mobile"));
+        _h.Routes.Add(H.Tenant, TrunkFakes.Route(0, "+57", trunkId: 1, priority: -1));
+        (await service.StartAsync(H.Caller(), H.TenantId, H.Supervisor, call.ConversationId.Value, "phone", CancellationToken.None))
+            .Listen.Should().NotBeNull("the slot was released, so the caller can start again");
+    }
+
+    [Fact]
     public async Task Start_ShouldRefuseOriginateFailed_AndReleaseTheSlot_WhenAsteriskRefuses()
     {
         var call = _h.SeedVoiceCall();
@@ -227,7 +253,8 @@ public sealed class SupervisorListenServiceTests
         var listen = (await StartAsync(call, "phone")).Listen!;
 
         var action = _h.Executor.Actions.Single();
-        action.Channel.Should().Be("PJSIP/+573001234567@pstn-default", "lab 0.3(g): PJSIP/{number}@{trunk}");
+        action.Channel.Should().Be($"PJSIP/t-{H.DefaultTrunkId}/sip:+573001234567@{H.DefaultHost}",
+            "the default trunk is looked up by name and dialed through its endpoint id and host, with the stored +");
         action.CallerId.Should().Be("+15558675309", "the tenant's outbound caller ID");
         action.Context.Should().Be("supervisor-listen");
         action.Exten.Should().Be("phone");
@@ -240,12 +267,14 @@ public sealed class SupervisorListenServiceTests
     {
         var call = _h.SeedVoiceCall();
         await _h.SeedPhoneAsync("+573001234567");
-        _h.Routes = new H.FakeRoutes { Trunk = new Verbara.Sdk.Pro.Dialer.Models.Trunk { Name = "co-mobile" } };
+        _h.Routes = new FakeRouteStore().Add(H.Tenant, TrunkFakes.Route(1, "+57", trunkId: 1));
+        _h.Trunks.Add(H.Tenant, TrunkFakes.IpTrunk(1, "co-mobile"));
 
         await StartAsync(call, "phone");
 
-        _h.Executor.Actions.Single().Channel.Should().Be("PJSIP/+573001234567@co-mobile");
-        _h.Routes.Asked.Should().Equal("+573001234567");
+        _h.Executor.Actions.Single().Channel.Should().Be("PJSIP/t-1/sip:+573001234567@203.0.113.10",
+            "the trunk's endpoint id and an explicit sip: URI to its host, never the trunk name");
+        _h.Routes.Asked.Should().Equal(H.Tenant);
     }
 
     // ─── Current, stop, silence and audit ───────────────────────────────────────

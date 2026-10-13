@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Api.Tests.OutboundTrunk;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
@@ -7,13 +8,12 @@ using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Ami.Connection;
 using Verbara.Sdk.Live.Server;
 using Verbara.Sdk.Pro.Cluster.Leadership;
-using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.MultiTenant;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
-using Trunk = Verbara.Sdk.Pro.Dialer.Models.Trunk;
+using static Verbara.Platform.Api.Tests.OutboundTrunk.TrunkFakes;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -28,12 +28,17 @@ public sealed class VoiceCallControlServiceTests : IDisposable
     private static readonly TenantId TenantId = new(Tenant);
 
     private const string DefaultTrunk = "pstn-default";
+    private const string DefaultHost = "198.51.100.7";
 
     private readonly IConversationStore _conversations = Substitute.For<IConversationStore>();
     private readonly IQueueStore _queues = Substitute.For<IQueueStore>();
     private readonly IAgentStore _agents = Substitute.For<IAgentStore>();
     private readonly ITenantStore _tenants = Substitute.For<ITenantStore>();
     private readonly IAmiConnection _ami = Substitute.For<IAmiConnection>();
+    private readonly FakeTrunkStore _trunks = new FakeTrunkStore()
+        .Add(Tenant, IpTrunk(7, DefaultTrunk, DefaultHost))
+        .Add(Tenant, IpTrunk(1, "premium-sip"))
+        .Add(Tenant, IpTrunk(5, "range", "203.0.113.0/24"));
     private readonly VerbaraServerPool _serverPool =
         new(Substitute.For<IAmiConnectionFactory>(), NullLoggerFactory.Instance);
 
@@ -42,7 +47,7 @@ public sealed class VoiceCallControlServiceTests : IDisposable
     private VoiceCallControlService CreateService(
         bool isLeader = true,
         bool withServer = true,
-        OutboundRouteResolverBase? routes = null,
+        FakeRouteStore? routes = null,
         string? defaultTrunk = DefaultTrunk)
     {
         if (withServer)
@@ -53,7 +58,7 @@ public sealed class VoiceCallControlServiceTests : IDisposable
         leader.IsLeader.Returns(isLeader);
         leader.Resource.Returns(VoiceLeaderResources.AmiOwner);
         return new VoiceCallControlService(
-            _conversations, _queues, _agents, _serverPool, routes, _tenants, leader, defaultTrunk,
+            _conversations, _queues, _agents, _serverPool, Resolver(routes, _trunks, defaultTrunk), _tenants, leader,
             NullLogger<VoiceCallControlService>.Instance);
     }
 
@@ -176,7 +181,10 @@ public sealed class VoiceCallControlServiceTests : IDisposable
 
         outcome.Accepted.Should().BeTrue();
         await _ami.Received().SendActionAsync(
-            Arg.Is<SetVarAction>(v => v != null && v.Channel == CustomerChannel && v.Variable == "TRUNK" && v.Value == "pstn-default"),
+            Arg.Is<SetVarAction>(v => v != null && v.Channel == CustomerChannel && v.Variable == "TRUNK" && v.Value == "t-7"),
+            Arg.Any<CancellationToken>());
+        await _ami.Received().SendActionAsync(
+            Arg.Is<SetVarAction>(v => v != null && v.Channel == CustomerChannel && v.Variable == "TRUNK_HOST" && v.Value == DefaultHost),
             Arg.Any<CancellationToken>());
         await _ami.Received().SendActionAsync(
             Arg.Is<SetVarAction>(v => v != null && v.Variable == "OUTBOUND_CALLERID" && v.Value == "+15558675309"),
@@ -192,14 +200,17 @@ public sealed class VoiceCallControlServiceTests : IDisposable
     {
         var conv = VoiceConversation();
         _conversations.GetByIdAsync(TenantId, conv.ConversationId, Arg.Any<CancellationToken>()).Returns(conv);
-        var sut = CreateService(routes: new FakeRouteResolver { Trunk = new Trunk { Id = 1, Name = "premium-sip" } });
+        var sut = CreateService(routes: new FakeRouteStore().Add(Tenant, Route(1, "+1555", trunkId: 1)));
 
         var outcome = await sut.BlindTransferAsync(
             TenantId, conv.ConversationId, new VoiceTransferTarget(VoiceTransferKind.External, "+15559998888"), CancellationToken.None);
 
         outcome.Accepted.Should().BeTrue();
         await _ami.Received().SendActionAsync(
-            Arg.Is<SetVarAction>(v => v != null && v.Variable == "TRUNK" && v.Value == "premium-sip"),
+            Arg.Is<SetVarAction>(v => v != null && v.Channel == CustomerChannel && v.Variable == "TRUNK" && v.Value == "t-1"),
+            Arg.Any<CancellationToken>());
+        await _ami.Received().SendActionAsync(
+            Arg.Is<SetVarAction>(v => v != null && v.Channel == CustomerChannel && v.Variable == "TRUNK_HOST" && v.Value == "203.0.113.10"),
             Arg.Any<CancellationToken>());
     }
 
@@ -214,6 +225,22 @@ public sealed class VoiceCallControlServiceTests : IDisposable
             TenantId, conv.ConversationId, new VoiceTransferTarget(VoiceTransferKind.External, "+15559998888"), CancellationToken.None);
 
         outcome.Error.Should().Be("no-trunk");
+    }
+
+    [Fact]
+    public async Task BlindTransferAsync_ShouldRefuseTrunkNotDialable_WithoutAnyAmiAction_WhenTheMatchHostIsARange()
+    {
+        var conv = VoiceConversation();
+        _conversations.GetByIdAsync(TenantId, conv.ConversationId, Arg.Any<CancellationToken>()).Returns(conv);
+        var sut = CreateService(routes: new FakeRouteStore().Add(Tenant, Route(1, "+1555", trunkId: 5)));
+
+        var outcome = await sut.BlindTransferAsync(
+            TenantId, conv.ConversationId, new VoiceTransferTarget(VoiceTransferKind.External, "+15559998888"), CancellationToken.None);
+
+        outcome.Accepted.Should().BeFalse();
+        outcome.Error.Should().Be("trunk-not-dialable");
+        outcome.TrunkId.Should().Be(5);
+        _ami.ReceivedCalls().Should().BeEmpty("no SetVar or Redirect: the customer stays bridged with the agent");
     }
 
     // ─── csat-completion — survey-IVR handoff (Platform/ADR-0020) ─────────────────
@@ -271,14 +298,5 @@ public sealed class VoiceCallControlServiceTests : IDisposable
 
         outcome.Error.Should().Be("channel-unknown");
         await _ami.DidNotReceive().SendActionAsync(Arg.Any<RedirectAction>(), Arg.Any<CancellationToken>());
-    }
-
-    private sealed class FakeRouteResolver : OutboundRouteResolverBase
-    {
-        public Trunk? Trunk;
-
-        public override ValueTask<Trunk?> ResolveAsync(
-            string tenantId, string phoneNumber, long? campaignId, CancellationToken ct) =>
-            ValueTask.FromResult(Trunk);
     }
 }

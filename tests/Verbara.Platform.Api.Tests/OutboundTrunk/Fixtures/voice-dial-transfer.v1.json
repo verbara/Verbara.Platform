@@ -1,0 +1,38 @@
+{
+  "_comment": "Golden bodies for agent click-to-dial and blind voice transfer (outbound-calls-reach-the-trunk, design D4). Routes: dial = POST /api/v1/voice/dial; transfer = POST /api/v1/conversations/{id}/voice-transfer. `error` carries ONLY a kebab-case machine code. ApiJsonContext uses WhenWritingNull: accepted/correlationId/error keep it (a null one is OMITTED, as today), while trunkId opts out with JsonIgnoreCondition.Never. trunkId (JSON integer|null) is ALWAYS written: the resolved trunk's numeric id on trunk-not-dialable (409, refused before any leg rings and before any AMI action), null on every other answer. Every other status/code of the two routes is unchanged by this change. Every child change's delta spec must cite these codes and field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "dialAccepted": {
+    "status": 200,
+    "route": "dial",
+    "body": {
+      "accepted": true,
+      "correlationId": "7c2e9a10b4d34f6e8a1b2c3d4e5f6a7b",
+      "trunkId": null
+    }
+  },
+  "dialTrunkNotDialable": {
+    "status": 409,
+    "route": "dial",
+    "body": {
+      "accepted": false,
+      "error": "trunk-not-dialable",
+      "trunkId": 4
+    }
+  },
+  "transferAccepted": {
+    "status": 200,
+    "route": "transfer",
+    "body": {
+      "accepted": true,
+      "trunkId": null
+    }
+  },
+  "transferTrunkNotDialable": {
+    "status": 409,
+    "route": "transfer",
+    "body": {
+      "accepted": false,
+      "error": "trunk-not-dialable",
+      "trunkId": 5
+    }
+  }
+}

@@ -1,11 +1,11 @@
 using System.Globalization;
+using Verbara.Platform.Api.Services.OutboundTrunk;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Pro.Dialer.Execution;
-using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Api.Services;
@@ -25,7 +25,8 @@ internal interface ICallbackOriginator
 /// <summary>
 /// W5b voice caller-rescue originator. When an agent's voice leg dies mid-call the customer is dropped;
 /// rather than re-routing a dead leg, this dials a NEW outbound call DIRECTLY to the customer's number
-/// (<c>PJSIP/{trunk}/{number}</c>, unlike click-to-dial which rings the agent first) and drops the
+/// (<c>PJSIP/t-{id}/sip:{number}@{host}</c> through the shared <see cref="DialableTrunkResolver"/>, unlike
+/// click-to-dial which rings the agent first) and drops the
 /// answered customer back into their ORIGINAL queue at the FRONT, where the next live agent answers.
 ///
 /// <para>Reuses the inbound <c>[stasis-queue]</c> dialplan contract
@@ -60,9 +61,8 @@ internal sealed partial class CallbackOriginator : ICallbackOriginator
     private readonly ITenantStore _tenants;
     private readonly IContactIdentityResolver _contacts;
     private readonly OriginateExecutorBase _originate;
-    private readonly OutboundRouteResolverBase? _routes;
+    private readonly DialableTrunkResolver _trunks;
     private readonly IClock _clock;
-    private readonly string? _defaultTrunk;
     private readonly ILogger<CallbackOriginator> _logger;
 
     public CallbackOriginator(
@@ -71,9 +71,8 @@ internal sealed partial class CallbackOriginator : ICallbackOriginator
         ITenantStore tenants,
         IContactIdentityResolver contacts,
         OriginateExecutorBase originate,
-        OutboundRouteResolverBase? routes,
+        DialableTrunkResolver trunks,
         IClock clock,
-        string? defaultTrunk,
         ILogger<CallbackOriginator> logger)
     {
         _conversations = conversations;
@@ -81,16 +80,15 @@ internal sealed partial class CallbackOriginator : ICallbackOriginator
         _tenants = tenants;
         _contacts = contacts;
         _originate = originate;
-        _routes = routes;
+        _trunks = trunks;
         _clock = clock;
-        _defaultTrunk = defaultTrunk;
         _logger = logger;
     }
 
     public async Task<bool> OriginateCallbackAsync(
         TenantId tenantId, string number, EntityId originQueueId, EntityId rescuedFrom, int callbackAttempts, CancellationToken ct)
     {
-        var dialNumber = NormalizeNumber(number);
+        var dialNumber = DialNumber.Normalize(number);
         if (string.IsNullOrEmpty(dialNumber))
             return false;
 
@@ -104,24 +102,18 @@ internal sealed partial class CallbackOriginator : ICallbackOriginator
         }
         var asteriskQueue = $"{tenantId.Value}-{queue.Name}";
 
-        // Outbound route → trunk. Optional resolver (only the full dialer Postgres storage registers it);
-        // fall back to the configured default trunk. No trunk → cannot dial out.
-        string? trunk = null;
-        if (_routes is not null)
-        {
-            try
-            {
-                trunk = (await _routes.ResolveAsync(tenantId.Value, dialNumber, campaignId: null, ct).ConfigureAwait(false))?.Name;
-            }
-            catch (Exception ex)
-            {
-                LogRouteFailed(dialNumber, ex.Message);
-            }
-        }
-        trunk ??= _defaultTrunk;
-        if (string.IsNullOrWhiteSpace(trunk))
+        // The tenant's outbound route trunk, else the default trunk by name. No trunk, or a trunk with no
+        // dialable host → cannot dial out; the worker's not-accepted path takes over.
+        var resolution = await _trunks.ResolveAsync(tenantId, dialNumber, ct).ConfigureAwait(false);
+        if (resolution.Kind == DialableTrunkResolutionKind.NoTrunk)
         {
             LogNoTrunk(dialNumber, rescuedFrom.Value);
+            return false;
+        }
+
+        if (resolution.Kind == DialableTrunkResolutionKind.NotDialable)
+        {
+            LogTrunkNotDialable(resolution.TrunkId!.Value, rescuedFrom.Value);
             return false;
         }
 
@@ -136,7 +128,7 @@ internal sealed partial class CallbackOriginator : ICallbackOriginator
 
         var action = new OriginateAction
         {
-            Channel = $"PJSIP/{trunk}/{dialNumber}",
+            Channel = resolution.Target!.Channel(dialNumber),
             Context = StasisInboundConsumer.StasisQueueContext,
             Exten = StasisInboundConsumer.QueueEntryExtension,
             Priority = 1,
@@ -204,17 +196,9 @@ internal sealed partial class CallbackOriginator : ICallbackOriginator
         return contact.ContactId;
     }
 
-    /// <summary>Keeps digits and a leading <c>+</c> only — strips spaces, dashes, and parentheses.</summary>
-    private static string NormalizeNumber(string raw) =>
-        new([.. raw.Where(c => char.IsDigit(c) || c == '+')]);
-
     [LoggerMessage(EventId = 9150, Level = LogLevel.Warning,
         Message = "[VOICE-RESCUE] Origin queue {QueueId} not found for rescue of {RescuedFrom} — aborting callback")]
     private partial void LogQueueNotFound(string queueId, string rescuedFrom);
-
-    [LoggerMessage(EventId = 9151, Level = LogLevel.Warning,
-        Message = "[VOICE-RESCUE] Outbound route resolve for {Number} failed (falling back to default trunk): {Reason}")]
-    private partial void LogRouteFailed(string number, string reason);
 
     [LoggerMessage(EventId = 9152, Level = LogLevel.Warning,
         Message = "[VOICE-RESCUE] No trunk available to call back {Number} (rescue of {RescuedFrom}) — aborting")]
@@ -231,4 +215,8 @@ internal sealed partial class CallbackOriginator : ICallbackOriginator
     [LoggerMessage(EventId = 9155, Level = LogLevel.Information,
         Message = "[VOICE-RESCUE] Conversation {ConversationId}: calling back {Number} into queue {Queue} at front (rescue of {RescuedFrom})")]
     private partial void LogCallback(string conversationId, string number, string queue, string rescuedFrom);
+
+    [LoggerMessage(EventId = 9156, Level = LogLevel.Warning,
+        Message = "[VOICE-RESCUE] No dialable host on trunk {TrunkId} (rescue of {RescuedFrom}) — aborting callback")]
+    private partial void LogTrunkNotDialable(long trunkId, string rescuedFrom);
 }

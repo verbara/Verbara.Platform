@@ -53,7 +53,7 @@ public sealed class SupervisorListenObserverTests : IAsyncDisposable
     }
 
     private SupervisorListenService ServiceWithObserver() => new(
-        _h.Conversations, _h.Profiles, _h.CallLegs, _h.Executor, null, _h.Tenants, _h.Leader, _h.Clock, H.DefaultTrunk,
+        _h.Conversations, _h.Profiles, _h.CallLegs, _h.Executor, _h.Resolver(), _h.Tenants, _h.Leader, _h.Clock,
         _h.Registry, _h.AuditWriter(), _observer, NullLogger<SupervisorListenService>.Instance);
 
     private Task StoppedAudits(int times, string reason, string actorType) =>

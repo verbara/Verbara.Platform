@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Api.Tests.OutboundTrunk;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
@@ -8,19 +9,20 @@ using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.Dialer.Compliance;
 using Verbara.Sdk.Pro.Dialer.Execution;
-using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.MultiTenant;
+using Trunk = Verbara.Sdk.Pro.Dialer.Models.Trunk;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
-using Trunk = Verbara.Sdk.Pro.Dialer.Models.Trunk;
+using static Verbara.Platform.Api.Tests.OutboundTrunk.TrunkFakes;
 
 namespace Verbara.Platform.Api.Tests;
 
 /// <summary>
-/// 3B.2d agent click-to-dial. Verifies the leader gate, DNC compliance, route→trunk resolution
-/// (resolver + default-trunk fallback), the tenant outbound caller-ID, the exact OriginateAction
+/// 3B.2d agent click-to-dial. Verifies the leader gate, DNC compliance, route→trunk resolution through the
+/// real <see cref="Verbara.Platform.Api.Services.OutboundTrunk.DialableTrunkResolver"/> over a fake route store
+/// and trunk store (route trunk, else the default trunk by name), the tenant outbound caller-ID, the exact OriginateAction
 /// emitted (agent A-leg + [outbound-agent] + correlation/trunk/caller-id channel vars), and that the
 /// tracked outbound Conversation is created (direction=outbound, owner=agent) only on success.
 /// </summary>
@@ -28,6 +30,7 @@ public sealed class AgentOutboundDialServiceTests
 {
     private const string Tenant = "acme";
     private const string DefaultTrunk = "pstn-default";
+    private const string DefaultHost = "198.51.100.7";
     private static readonly TenantId TenantId = new(Tenant);
 
     private readonly IConversationStore _conversations = Substitute.For<IConversationStore>();
@@ -37,6 +40,10 @@ public sealed class AgentOutboundDialServiceTests
     private readonly FakeOriginateExecutor _executor = new();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly EntityId _agentId = EntityId.New();
+    private readonly FakeTrunkStore _trunks = new FakeTrunkStore()
+        .Add(Tenant, IpTrunk(7, DefaultTrunk, DefaultHost))
+        .Add(Tenant, new Trunk { Id = 1, Name = "premium-sip", MatchHost = RouteHost, IsActive = true })
+        .Add(Tenant, AuthOnlyTrunk(4, "auth-only"));
 
     public AgentOutboundDialServiceTests()
     {
@@ -54,7 +61,7 @@ public sealed class AgentOutboundDialServiceTests
 
     private AgentOutboundDialService CreateService(
         bool isLeader = true,
-        OutboundRouteResolverBase? routes = null,
+        FakeRouteStore? routes = null,
         DncCheckerBase? dnc = null,
         string? defaultTrunk = DefaultTrunk)
     {
@@ -62,8 +69,8 @@ public sealed class AgentOutboundDialServiceTests
         leader.IsLeader.Returns(isLeader);
         leader.Resource.Returns(VoiceLeaderResources.AmiOwner);
         return new AgentOutboundDialService(
-            _conversations, _contacts, _agents, _tenants, _executor, routes, dnc, leader, _clock,
-            defaultTrunk, NullLogger<AgentOutboundDialService>.Instance);
+            _conversations, _contacts, _agents, _tenants, _executor, Resolver(routes, _trunks, defaultTrunk), dnc, leader,
+            _clock, NullLogger<AgentOutboundDialService>.Instance);
     }
 
     private static IEnumerable<string> Vars(OriginateAction action) =>
@@ -121,7 +128,8 @@ public sealed class AgentOutboundDialServiceTests
         action.Exten.Should().Be("+15551234567"); // normalized
         action.IsAsync.Should().BeTrue();
         Vars(action).Should().Contain($"VERBARA_OUTBOUND_ID={outcome.CorrelationId}");
-        Vars(action).Should().Contain("TRUNK=pstn-default");
+        Vars(action).Should().Contain("TRUNK=t-7", "the default trunk is looked up by name and dialed through its endpoint id");
+        Vars(action).Should().Contain($"TRUNK_HOST={DefaultHost}");
         Vars(action).Should().Contain("OUTBOUND_CALLERID=+15558675309");
         Vars(action).Should().Contain("TENANT_ID=acme");
     }
@@ -129,12 +137,49 @@ public sealed class AgentOutboundDialServiceTests
     [Fact]
     public async Task DialAsync_ShouldPreferResolvedRouteTrunk_OverDefault()
     {
-        var sut = CreateService(routes: new FakeRouteResolver { Trunk = new Trunk { Id = 1, Name = "premium-sip" } });
+        var sut = CreateService(routes: new FakeRouteStore().Add(Tenant, Route(1, "+1", trunkId: 1)));
 
         var outcome = await sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
 
         outcome.Accepted.Should().BeTrue();
-        Vars(_executor.LastAction!).Should().Contain("TRUNK=premium-sip");
+        Vars(_executor.LastAction!).Should().Contain("TRUNK=t-1", "the trunk is dialed through its endpoint id, never its name");
+        Vars(_executor.LastAction!).Should().Contain("TRUNK_HOST=203.0.113.10", "the host comes from the tenant's stored trunk");
+    }
+
+    [Fact]
+    public async Task DialAsync_ShouldKeepTheLeadingPlusInTheExten_WhenTheNumberIsE164()
+    {
+        var sut = CreateService();
+
+        var outcome = await sut.DialAsync(TenantId, _agentId, "+573001234567", null, CancellationToken.None);
+
+        outcome.Accepted.Should().BeTrue();
+        _executor.LastAction!.Exten.Should().Be("+573001234567", "the dialplan matches _+X., so the + is dialed as typed");
+    }
+
+    [Fact]
+    public async Task DialAsync_ShouldRefuseTrunkNotDialable_WithoutOriginating_WhenTheTrunkHasNoHost()
+    {
+        var sut = CreateService(routes: new FakeRouteStore().Add(Tenant, Route(1, "+57", trunkId: 4)));
+
+        var outcome = await sut.DialAsync(TenantId, _agentId, "+573001234567", null, CancellationToken.None);
+
+        outcome.Accepted.Should().BeFalse();
+        outcome.Error.Should().Be("trunk-not-dialable");
+        outcome.TrunkId.Should().Be(4);
+        _executor.LastAction.Should().BeNull("the agent's softphone must not ring for a call that cannot reach the carrier");
+        await _conversations.DidNotReceive().SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DialAsync_ShouldReturnNoTrunk_WhenTheDefaultNamesNoStoredTrunk()
+    {
+        var sut = CreateService(defaultTrunk: "t-1");
+
+        var outcome = await sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
+
+        outcome.Error.Should().Be("no-trunk", "DefaultTrunk is a trunk name, never an endpoint id");
+        _executor.LastAction.Should().BeNull();
     }
 
     [Fact]
@@ -203,14 +248,5 @@ public sealed class AgentOutboundDialServiceTests
         public override ValueTask<bool> IsBlockedAsync(
             string tenantId, string phoneNumber, long? dncListId, bool checkGlobal, CancellationToken ct) =>
             Throw ? throw new InvalidOperationException("dnc store down") : ValueTask.FromResult(Blocked);
-    }
-
-    private sealed class FakeRouteResolver : OutboundRouteResolverBase
-    {
-        public Trunk? Trunk;
-
-        public override ValueTask<Trunk?> ResolveAsync(
-            string tenantId, string phoneNumber, long? campaignId, CancellationToken ct) =>
-            ValueTask.FromResult(Trunk);
     }
 }

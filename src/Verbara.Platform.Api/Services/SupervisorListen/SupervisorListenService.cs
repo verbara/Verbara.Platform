@@ -1,13 +1,13 @@
 using System.Security.Claims;
 using Verbara.Platform.Api.Endpoints;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Services.OutboundTrunk;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.Dialer.Execution;
-using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.MultiTenant;
 using OriginateResult = Verbara.Sdk.Pro.Dialer.Execution.OriginateResult;
 
@@ -16,8 +16,8 @@ namespace Verbara.Platform.Api.Services.SupervisorListen;
 /// <summary>A start or current answer: the listen, or a refusal.</summary>
 internal sealed record SupervisorListenResult(SupervisorListenDto? Listen, SupervisorListenRefusal? Refusal)
 {
-    public static SupervisorListenResult Refused(string code, string? conversationId, string? listenId = null) =>
-        new(null, SupervisorListenRefusal.For(code, conversationId, listenId));
+    public static SupervisorListenResult Refused(string code, string? conversationId, string? listenId = null, long? trunkId = null) =>
+        new(null, SupervisorListenRefusal.For(code, conversationId, listenId, trunkId));
 }
 
 /// <summary>A stop answer: the stopped listen, or a refusal.</summary>
@@ -37,7 +37,8 @@ internal sealed record SupervisorListenStopResult(SupervisorListenStoppedDto? St
 /// The route-level checks (<c>not-permitted</c>, <c>invalid-destination</c>, <c>voice-unavailable</c>) run in the
 /// handler before this service; the rest follow the fixture's precedence: <c>not-leader</c>,
 /// <c>conversation-not-found</c>, <c>no-voice-call</c>, <c>already-listening</c>,
-/// <c>no-supervisor-endpoint</c> | <c>no-listen-phone</c>, <c>no-trunk</c>, <c>originate-failed</c>.
+/// <c>no-supervisor-endpoint</c> | <c>no-listen-phone</c>, <c>no-trunk</c>, <c>trunk-not-dialable</c>,
+/// <c>originate-failed</c>.
 /// </para>
 /// </summary>
 internal sealed partial class SupervisorListenService
@@ -53,11 +54,10 @@ internal sealed partial class SupervisorListenService
     private readonly ISupervisorListenProfileStore _profiles;
     private readonly IVoiceCallLegs _legs;
     private readonly OriginateExecutorBase _originate;
-    private readonly OutboundRouteResolverBase? _routes;
+    private readonly DialableTrunkResolver _trunks;
     private readonly ITenantStore _tenants;
     private readonly IClusterLeader _leader;
     private readonly IClock _clock;
-    private readonly string? _defaultTrunk;
     private readonly SupervisorListenRegistry _registry;
     private readonly SupervisorListenAudit _audit;
     private readonly ISupervisorListenLegControl _legControl;
@@ -68,11 +68,10 @@ internal sealed partial class SupervisorListenService
         ISupervisorListenProfileStore profiles,
         IVoiceCallLegs legs,
         OriginateExecutorBase originate,
-        OutboundRouteResolverBase? routes,
+        DialableTrunkResolver trunks,
         ITenantStore tenants,
         IClusterLeader leader,
         IClock clock,
-        string? defaultTrunk,
         SupervisorListenRegistry registry,
         SupervisorListenAudit audit,
         ISupervisorListenLegControl legControl,
@@ -82,11 +81,10 @@ internal sealed partial class SupervisorListenService
         _profiles = profiles;
         _legs = legs;
         _originate = originate;
-        _routes = routes;
+        _trunks = trunks;
         _tenants = tenants;
         _leader = leader;
         _clock = clock;
-        _defaultTrunk = defaultTrunk;
         _registry = registry;
         _audit = audit;
         _legControl = legControl;
@@ -139,9 +137,9 @@ internal sealed partial class SupervisorListenService
         var accepted = false;
         try
         {
-            var (action, refusal) = await BuildOriginateAsync(listen, profile, agentLeg, ct).ConfigureAwait(false);
+            var (action, refusal, trunkId) = await BuildOriginateAsync(listen, profile, agentLeg, ct).ConfigureAwait(false);
             if (refusal is not null)
-                return SupervisorListenResult.Refused(refusal, conversationId);
+                return SupervisorListenResult.Refused(refusal, conversationId, trunkId: trunkId);
 
             sent = true;
             accepted = await SendOriginateAsync(listen, action!, ct).ConfigureAwait(false);
@@ -217,8 +215,11 @@ internal sealed partial class SupervisorListenService
         return AgentLegResolver.Resolve(tenantId.Value, conversation.Owner, _legs.GetParticipants(conversation.VoiceLinkedId));
     }
 
-    /// <summary>Builds the destination's originate; or a refusal code when the destination cannot be dialed.</summary>
-    private async Task<(OriginateAction? Action, string? Refusal)> BuildOriginateAsync(
+    /// <summary>
+    /// Builds the destination's originate; or a refusal code (and, for <c>trunk-not-dialable</c>, the trunk's id) when
+    /// the destination cannot be dialed.
+    /// </summary>
+    private async Task<(OriginateAction? Action, string? Refusal, long? TrunkId)> BuildOriginateAsync(
         ActiveListen listen, SupervisorListenProfile? profile, string agentLeg, CancellationToken ct)
     {
         var action = new OriginateAction
@@ -234,20 +235,23 @@ internal sealed partial class SupervisorListenService
         if (listen.Destination == ListenVocabulary.Endpoint)
         {
             if (profile is null || !profile.HasCredentials)
-                return (null, SupervisorListenRefusal.NoSupervisorEndpoint);
+                return (null, SupervisorListenRefusal.NoSupervisorEndpoint, null);
             action.Channel = $"PJSIP/{EndpointId(listen.TenantId, listen.SupervisorUserId)}";
             action.CallerId = $"\"{SupervisorListenEndpointDto.CallerName}\" <{listen.ConversationId}>";
         }
         else
         {
             if (string.IsNullOrEmpty(profile?.PhoneNumber))
-                return (null, SupervisorListenRefusal.NoListenPhone);
-            var trunk = await ResolveTrunkAsync(listen.TenantId, profile.PhoneNumber, ct).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(trunk))
-                return (null, SupervisorListenRefusal.NoTrunk);
+                return (null, SupervisorListenRefusal.NoListenPhone, null);
 
-            // Lab 0.3(g): on Asterisk 22 an Originate of PJSIP/{trunk}/{number} fails; PJSIP/{number}@{trunk} works.
-            action.Channel = $"PJSIP/{profile.PhoneNumber}@{trunk}";
+            // The trunk exactly as click-to-dial resolves it; the stored number is strict E.164 and keeps its +.
+            var resolution = await _trunks.ResolveAsync(listen.TenantId, profile.PhoneNumber, ct).ConfigureAwait(false);
+            if (resolution.Kind == DialableTrunkResolutionKind.NoTrunk)
+                return (null, SupervisorListenRefusal.NoTrunk, null);
+            if (resolution.Kind == DialableTrunkResolutionKind.NotDialable)
+                return (null, SupervisorListenRefusal.TrunkNotDialable, resolution.TrunkId);
+
+            action.Channel = resolution.Target!.Channel(profile.PhoneNumber);
             var tenant = await _tenants.GetAsync(listen.TenantId.Value, ct).ConfigureAwait(false);
             if (!string.IsNullOrEmpty(tenant?.Options.OutboundCallerId))
                 action.CallerId = tenant.Options.OutboundCallerId;
@@ -255,7 +259,7 @@ internal sealed partial class SupervisorListenService
 
         // The agent's leg, by uniqueid (ChanSpy option u). No VERBARA_OUTBOUND_ID: the bridge never tracks this leg.
         action.SetVariable(SpyTargetVariable, agentLeg);
-        return (action, null);
+        return (action, null, null);
     }
 
     /// <summary>
@@ -282,25 +286,6 @@ internal sealed partial class SupervisorListenService
         return false;
     }
 
-    /// <summary>The trunk exactly as click-to-dial resolves it: the optional outbound route, then the default trunk.</summary>
-    private async Task<string?> ResolveTrunkAsync(TenantId tenantId, string number, CancellationToken ct)
-    {
-        string? trunk = null;
-        if (_routes is not null)
-        {
-            try
-            {
-                trunk = (await _routes.ResolveAsync(tenantId.Value, number, campaignId: null, ct).ConfigureAwait(false))?.Name;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                LogRouteFailed(ex.Message);
-            }
-        }
-
-        return trunk ?? _defaultTrunk;
-    }
-
     private static SupervisorListenDto ToDto(ActiveListen listen) =>
         new(listen.ListenId, listen.ConversationId, listen.Destination, listen.State, listen.StartedAt, listen.ListeningSince);
 
@@ -314,8 +299,4 @@ internal sealed partial class SupervisorListenService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "[LISTEN] Originate for listen {ListenId} failed: {Reason}")]
     private partial void LogOriginateFailed(string listenId, string reason);
-
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "[LISTEN] Outbound route resolve for a phone listen failed (falling back to the default trunk): {Reason}")]
-    private partial void LogRouteFailed(string reason);
 }

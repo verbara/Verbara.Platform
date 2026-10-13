@@ -1,3 +1,4 @@
+using Verbara.Platform.Api.Services.OutboundTrunk;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
@@ -6,13 +7,15 @@ using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.Dialer.Compliance;
 using Verbara.Sdk.Pro.Dialer.Execution;
-using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Api.Services;
 
-/// <summary>Result of an agent click-to-dial — <see cref="CorrelationId"/> is the tracked outbound Conversation id.</summary>
-internal sealed record VoiceDialOutcome(bool Accepted, string? CorrelationId, string? Error);
+/// <summary>
+/// Result of an agent click-to-dial — <see cref="CorrelationId"/> is the tracked outbound Conversation id;
+/// <see cref="TrunkId"/> names the resolved trunk on <c>trunk-not-dialable</c>.
+/// </summary>
+internal sealed record VoiceDialOutcome(bool Accepted, string? CorrelationId, string? Error, long? TrunkId = null);
 
 internal interface IAgentOutboundDialService
 {
@@ -26,7 +29,9 @@ internal interface IAgentOutboundDialService
 /// <see cref="OriginateExecutorBase"/>) rather than the browser <c>SimpleUser.call</c>, which would
 /// bypass caller-ID, trunk selection, DNC, and call tracking. The Originate rings the AGENT's endpoint
 /// as the A-leg (so the softphone rings and the agent answers), then the <c>[outbound-agent]</c>
-/// dialplan dials the customer over the resolved trunk with the tenant outbound caller ID.
+/// dialplan dials the customer over the resolved trunk (<c>TRUNK</c> = its endpoint id <c>t-{id}</c>,
+/// <c>TRUNK_HOST</c> = its dial host, from the shared <see cref="DialableTrunkResolver"/>) with the tenant
+/// outbound caller ID. A trunk with no dialable host is refused (<c>trunk-not-dialable</c>) before any leg rings.
 ///
 /// <para>The originated call is correlated back to a tracked Conversation by stamping
 /// <c>VERBARA_OUTBOUND_ID = the pre-generated Conversation id</c> as a channel variable; the
@@ -36,8 +41,8 @@ internal interface IAgentOutboundDialService
 ///
 /// <para>Leader-gated through the same <c>voice:ami:owner:leader</c> lease as the bridge/transfer so the
 /// AMI side-effect is funneled through a single writer; on SMB single-host the only pod always holds it.
-/// DNC + route resolvers are OPTIONAL (only registered with the full dialer Postgres storage): a
-/// voice-only tenant has neither, so DNC fails open and the trunk falls back to the configured default.</para>
+/// The DNC checker is OPTIONAL (only registered with the full dialer Postgres storage): a voice-only tenant
+/// has none, so DNC fails open.</para>
 /// </summary>
 internal sealed partial class AgentOutboundDialService : IAgentOutboundDialService
 {
@@ -46,6 +51,7 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
     private const string AgentVariable = "AGENT_ID";
     private const string OutboundIdVariable = "VERBARA_OUTBOUND_ID";
     private const string TrunkVariable = "TRUNK";
+    private const string TrunkHostVariable = "TRUNK_HOST";
     private const string CallerIdVariable = "OUTBOUND_CALLERID";
     private const string PrimaryNode = "primary";
     private const long OriginateTimeoutMs = 30_000;
@@ -55,11 +61,10 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
     private readonly IAgentStore _agents;
     private readonly ITenantStore _tenants;
     private readonly OriginateExecutorBase _originate;
-    private readonly OutboundRouteResolverBase? _routes;
+    private readonly DialableTrunkResolver _trunks;
     private readonly DncCheckerBase? _dnc;
     private readonly IClusterLeader _leader;
     private readonly IClock _clock;
-    private readonly string? _defaultTrunk;
     private readonly ILogger<AgentOutboundDialService> _logger;
 
     public AgentOutboundDialService(
@@ -68,11 +73,10 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         IAgentStore agents,
         ITenantStore tenants,
         OriginateExecutorBase originate,
-        OutboundRouteResolverBase? routes,
+        DialableTrunkResolver trunks,
         DncCheckerBase? dnc,
         IClusterLeader leader,
         IClock clock,
-        string? defaultTrunk,
         ILogger<AgentOutboundDialService> logger)
     {
         _conversations = conversations;
@@ -80,11 +84,10 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         _agents = agents;
         _tenants = tenants;
         _originate = originate;
-        _routes = routes;
+        _trunks = trunks;
         _dnc = dnc;
         _leader = leader;
         _clock = clock;
-        _defaultTrunk = defaultTrunk;
         _logger = logger;
     }
 
@@ -95,7 +98,7 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         if (!_leader.IsLeader)
             return new VoiceDialOutcome(false, null, "not-leader");
 
-        var number = NormalizeNumber(toNumber);
+        var number = DialNumber.Normalize(toNumber);
         if (string.IsNullOrEmpty(number))
             return new VoiceDialOutcome(false, null, "invalid-number");
 
@@ -119,23 +122,14 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
             }
         }
 
-        // Outbound route → trunk. Optional resolver; fall back to the configured default trunk.
-        string? trunk = null;
-        if (_routes is not null)
-        {
-            try
-            {
-                var resolved = await _routes.ResolveAsync(tenantId.Value, number, campaignId: null, ct).ConfigureAwait(false);
-                trunk = resolved?.Name;
-            }
-            catch (Exception ex)
-            {
-                LogRouteFailed(number, ex.Message);
-            }
-        }
-        trunk ??= _defaultTrunk;
-        if (string.IsNullOrWhiteSpace(trunk))
+        // The tenant's outbound route trunk, else the default trunk by name; refused before any leg rings when
+        // the trunk names no host.
+        var resolution = await _trunks.ResolveAsync(tenantId, number, ct).ConfigureAwait(false);
+        if (resolution.Kind == DialableTrunkResolutionKind.NoTrunk)
             return new VoiceDialOutcome(false, null, "no-trunk");
+        if (resolution.Kind == DialableTrunkResolutionKind.NotDialable)
+            return new VoiceDialOutcome(false, null, "trunk-not-dialable", resolution.TrunkId);
+        var target = resolution.Target!;
 
         // Caller ID: the tenant outbound setting (3B.2d.1). Empty → the dialplan clears CALLERID and the
         // trunk's own default is presented.
@@ -167,7 +161,8 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         action.SetVariable(TenantVariable, tenantId.Value);
         action.SetVariable(AgentVariable, agentId.Value);
         action.SetVariable(OutboundIdVariable, conversationId.Value);
-        action.SetVariable(TrunkVariable, trunk!);
+        action.SetVariable(TrunkVariable, target.EndpointId);
+        action.SetVariable(TrunkHostVariable, target.Host);
         action.SetVariable(CallerIdVariable, callerId);
 
         OriginateResult result;
@@ -201,10 +196,6 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         return new VoiceDialOutcome(true, conversationId.Value, null);
     }
 
-    /// <summary>Keeps digits and a leading <c>+</c> only — strips spaces, dashes, and parentheses.</summary>
-    private static string NormalizeNumber(string raw) =>
-        new([.. raw.Where(c => char.IsDigit(c) || c == '+')]);
-
     [LoggerMessage(Level = LogLevel.Information,
         Message = "[VOICE-DIAL] Conversation {ConversationId}: agent {AgentId} dialing {Number}")]
     private partial void LogDial(string conversationId, string agentId, string number);
@@ -212,10 +203,6 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[VOICE-DIAL] DNC check for {Number} failed (failing open): {Reason}")]
     private partial void LogDncFailed(string number, string reason);
-
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "[VOICE-DIAL] Outbound route resolve for {Number} failed (falling back to default trunk): {Reason}")]
-    private partial void LogRouteFailed(string number, string reason);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[VOICE-DIAL] Originate for pending conversation {ConversationId} threw: {Reason}")]
