@@ -20,6 +20,11 @@
          hard-sets the switch off so the published host + `dotnet run` always behave like
          AOT.) -->
     <JsonSerializerIsReflectionEnabledByDefault Condition="'$(AOT_JSON_STRICT)' == 'true'">false</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- measure-api-multi-replica-baseline: the red tests of tasks 1.1, 1.2 and 1.4 compile only with
+         -p:MrbPending=true until the change's implementation lands and removes their guards. Appends to
+         DefineConstants; never pass -p:DefineConstants on the command line, which replaces the SDK's own
+         symbols. -->
+    <DefineConstants Condition="'$(MrbPending)'=='true'">$(DefineConstants);MRB_PENDING</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
